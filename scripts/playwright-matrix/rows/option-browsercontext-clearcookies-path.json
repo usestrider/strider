@@ -1,0 +1,12 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public option for this contract.",
+  "capabilities": [],
+  "id": "option-browsercontext-clearcookies-path",
+  "upstream": [
+    "method:BrowserContext.clearCookies"
+  ],
+  "option": "path",
+  "requirements": []
+}

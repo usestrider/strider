@@ -19,10 +19,9 @@ import * as Exit from "effect/Exit"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as ChildProcess from "effect/process/ChildProcess"
-import * as Schedule from "effect/Schedule"
 import * as Stream from "effect/Stream"
-import * as path from "node:path"
 import * as CdpWire from "../../src/internal/cdpWire.ts"
+import * as DevToolsActivePort from "../../src/internal/devToolsActivePort.ts"
 import * as ProtocolClient from "../../src/internal/protocolClient.ts"
 import { assertPinned, chromium } from "./browsers.ts"
 import { fixtures, record } from "./record.ts"
@@ -98,13 +97,9 @@ describe("Chromium over CDP", () => {
 
       it.effect("connects over a WebSocket", () =>
         Effect.gen(function*() {
-          const fs = yield* FileSystem.FileSystem
           const { userDataDir } = yield* launch("port")
           // Chromium writes the port and path it chose once it listens.
-          const active = yield* fs.readFileString(path.join(userDataDir, "DevToolsActivePort")).pipe(
-            Effect.retry({ schedule: Schedule.spaced("50 millis"), times: 100 })
-          )
-          const [port, browserPath] = active.split("\n")
+          const { port, browserPath } = yield* DevToolsActivePort.read(userDataDir, { timeout: "5 seconds" })
           const closed = yield* Deferred.make<Transport.ConnectionLost>()
           yield* Effect.scoped(Effect.gen(function*() {
             const transport = yield* Transport.webSocket(`ws://127.0.0.1:${port}${browserPath}`)

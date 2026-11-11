@@ -1,11 +1,11 @@
 ---
 title: Firefox
-description: Firefox over WebDriver BiDi, launching it, pages as windows, attaching through its one session, what Firefox can't do or does differently, other BiDi browsers, and the raw protocol.
+description: Running Strider on Firefox.
 order: 3
 ---
 
-A program that passes on Chromium can fail on Firefox, from a capability BiDi lacks or a behaviour Firefox has.
-Knowing which lets you run one program on both, and tell a bug in your program from a limit of the backend.
+Firefox can do less than Chromium, and does some things differently. Within those limits, a program written against
+`Browser` runs on it unchanged.
 
 ## Protocol and versions
 
@@ -39,9 +39,9 @@ const AdasFirefox = Firefox.layer({
   [`ProcessExited`](/docs/api/browser/Browser#ProcessExited) if Firefox exited.
 - On Firefox, a launch profile is the preferences it writes to the profile's `user.js`; its Chromium switches are
   ignored. `LaunchProfile.automation`, the default, writes: no first-run page,
-  updates or telemetry, the JSON viewer off, and popups opened as windows.
+  no updates, no telemetry, the JSON viewer off, and popups opened as windows.
 - `LaunchProfile.stock` sets nothing, for Firefox as a person's install shows it, with its first-run page, JSON
-  viewer and popups in tabs. [`LaunchProfile.concurrent`](/docs/tools/testing#concurrent-pages) also turns off
+  viewer, and popups in tabs. [`LaunchProfile.concurrent`](/docs/tools/testing#concurrent-pages) also turns off
   background timer throttling, for pages that run side by side.
 - A `userDataDir` of your own is never deleted. Its `user.js` keeps its own preferences; Strider's go in a block
   after them, replaced at each launch.
@@ -146,7 +146,9 @@ it. A drag between documents goes to the first one alone.
 
 **Video, not frames.** [`Capability.Video`](/docs/api/browser/Capability#Video) records a WebM file into the context's downloads
 directory; [`Capability.Screencast`](/docs/api/browser/Capability#Screencast) isn't available. A trace's
-[`screencast: "native"`](/docs/tools/recordings#traces) uses the video. To record one around a step, take the capability for that scope with `page.capability`:
+[`screencast: "native"`](/docs/tools/recordings#traces) uses the video. Firefox needs no
+[`VideoWriter`](/docs/tools/video#what-each-browser-needs), unlike Chromium. To record one around a step, take the
+capability for that scope with `page.capability`:
 
 ```ts
 import { Capability, Page } from "@usestrider/browser"

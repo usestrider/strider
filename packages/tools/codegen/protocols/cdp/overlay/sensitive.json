@@ -54,6 +54,12 @@
       "traits": {
         "sensitive": true
       }
+    },
+    {
+      "target": "WebAuthn#Credential:privateKey",
+      "traits": {
+        "sensitive": true
+      }
     }
   ]
 }

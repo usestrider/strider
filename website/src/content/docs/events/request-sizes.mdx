@@ -1,0 +1,71 @@
+---
+title: Request sizes
+description: How big a request and its response were.
+order: 5
+---
+
+Request sizes are the browser's own byte counts for a request and its response, with a compressed body's encoded,
+decoded, and transferred sizes counted separately. A count the browser didn't report is missing, never estimated.
+
+Create a context with `requestSizes: true`, then read a request with `NetworkRequest.sizes`:
+
+```ts
+import { Browser, NetworkRequest } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const inspect = Effect.fn("inspect")(function*() {
+  const context = yield* Browser.newContext({ requestSizes: true })
+  const page = yield* context.newPage
+  const sent = yield* NetworkRequest.next(page, { url: "https://example.com/" })
+  yield* page.goto("https://example.com")
+  const sizes = yield* NetworkRequest.sizes(page, yield* sent)
+  return {
+    requestHeaders: sizes.requestHeadersSize,
+    requestBody: sizes.requestBodySize,
+    responseHeaders: sizes.responseHeadersSize,
+    transferredBody: sizes.responseBodySize,
+    encodedEntity: sizes.responseBodyEncodedSize,
+    decodedEntity: sizes.responseBodyDecodedSize,
+    responseTotal: sizes.responseTransferSize
+  }
+})
+```
+
+The read returns an immutable snapshot immediately. It does not wait for completion or enable collection
+retroactively. Omitted or false configuration collects no size state. The setting is independent of
+[request timings](/docs/events/request-timings) and [body capture](/docs/events/network).
+
+Every field is an `Option<number>` in bytes. `None` means unavailable or ambiguous; zero is a known zero.
+Final body counts and response totals appear only after successful completion. A failure preserves earlier
+header evidence without inventing final totals. Missing values prove neither completion nor failure.
+
+| Field | Chromium | Firefox | Stock WebKit |
+| --- | --- | --- | --- |
+| `requestHeadersSize` | None | None | Native sent headers |
+| `requestBodySize` | None | None | Native sent body |
+| `responseHeadersSize` | None | Native received headers | Native received headers |
+| `responseBodySize` | None | HTTP/1.1 response total minus headers | Native received body, including transfer framing |
+| `responseBodyEncodedSize` | None | Native content-encoded entity size | None |
+| `responseBodyDecodedSize` | Native decoded chunks on completion | None | Native decoded entity size |
+| `responseTransferSize` | Native received response total | Native received response total | Native headers plus transferred body |
+
+The transferred body can include HTTP chunk framing; the encoded entity excludes that framing. Neither is
+the decoded body size. Firefox's decoded field remains unavailable because the browser reports zero for
+nonempty bodies. Chromium's encoded chunk counts do not reliably identify encoded entity length.
+
+Totals describe browser HTTP accounting, excluding the request and TCP/TLS overhead. Native header accounting
+can differ between protocols. Sums and differences use valid same-hop native counters; Firefox's body split
+is exposed only for HTTP/1.1, where that accounting has been established. No count is inferred from serialized
+headers, Content-Length, or decoded text.
+
+Redirect hops keep separate observations. Chromium and stock WebKit redirect totals are unavailable; Firefox
+can report completed redirect-hop counts. Chromium returns `None` for every size field when `loadingFinished`
+arrives before `responseReceivedExtraInfo`, which is common for images. Cache, revalidation, routed responses, and
+worker requests without a page-attributed collector can leave fields unavailable. Cache reuse can also omit a
+second request event altogether. Neither absent events nor response source labels establish zero transfer.
+
+Pass the original retained request and its page or context. Copies, decoded requests, eviction, foreign targets,
+and lost page, context, frame, worker, or connection owners refuse with `NetworkRequest.RequestError` /
+`RequestUnavailable`. A context without the opt-in refuses with `sizesNotEnabled`. The connection retains at most
+1000 hops; request history does not pin size observations. Save the returned `Sizes` snapshot if it must outlive
+its owners.

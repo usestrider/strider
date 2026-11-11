@@ -35,8 +35,8 @@ export interface Segment<S extends Schema.Constraint, A, E = never, R = never> {
  *
  * Use `Schema.Record(Schema.String, Schema.Never)` to reject all arguments; `Schema.Struct({})` is permissive.
  * String flags can use codecs such as `Schema.NumberFromString`; JSON files supply their parsed values.
- * Missing, invalid and unexpected arguments fail before the callback runs. The callback runs with
- * `CurrentSession`, a scope and the daemon's platform
+ * Missing, invalid, and unexpected arguments fail before the callback runs. The callback runs with
+ * `CurrentSession`, a scope, and the daemon's platform
  * services. A schema that needs services uses those same services when decoding.
  *
  * **Example** (Reading a page named by an argument)

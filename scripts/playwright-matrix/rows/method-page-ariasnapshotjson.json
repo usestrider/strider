@@ -1,0 +1,29 @@
+{
+  "id": "method-page-ariasnapshotjson",
+  "upstream": [
+    "method:Page.ariaSnapshotJSON"
+  ],
+  "status": "different",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "ReadonlyPage.snapshot",
+      "url": "/docs/api/browser/Page#ReadonlyPage.snapshot"
+    }
+  ],
+  "notes": "Snapshots return structured evidence and text; ARIA-only capture is explicit.",
+  "capabilities": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "locator-design",
+    "quote": "Snapshot text with refs: one rendering of a structured, evidence-tagged tree.",
+    "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
+  },
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

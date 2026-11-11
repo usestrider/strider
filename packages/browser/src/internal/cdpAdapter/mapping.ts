@@ -5,10 +5,14 @@
 import * as Option from "effect/Option"
 import type * as Fetch from "../../cdp/Fetch.ts"
 import type * as Network from "../../cdp/Network.ts"
+import type * as Page from "../../cdp/Page.ts"
 import type * as NetworkRequest from "../../NetworkRequest.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import type { TargetKind } from "./state.ts"
+
+// CDP carries the fragment separately, including its leading #; preserve its exact encoding.
+export const frameUrl = (frame: Page.Frame): string => frame.url + (frame.urlFragment ?? "")
 
 export const targetKind = (type: string): TargetKind =>
   type === "page" || type === "iframe" || type === "worker" || type === "service_worker" || type === "shared_worker"

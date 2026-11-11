@@ -78,7 +78,7 @@ export interface Reclaimed {
  * **Details**
  *
  * Identity is the browser WebSocket GUID and tab target, so page-target replacement does not lose the tab.
- * Firefox, stock WebKit and Chromium pipe connections without a WebSocket identity fail with Unsupported.
+ * Firefox, stock WebKit, and Chromium pipe connections without a WebSocket identity fail with Unsupported.
  * Leases and expiry are not provided; hosts must arrange them before enabling persistent contexts.
  *
  * **Gotchas**

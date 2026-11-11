@@ -1,0 +1,22 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public option for this contract.",
+  "capabilities": [],
+  "id": "option-page-routefromhar-updatecontent",
+  "upstream": [
+    "method:Page.routeFromHAR"
+  ],
+  "option": "updateContent",
+  "requirements": [],
+  "valueCoverage": [
+    {
+      "value": "attach",
+      "status": "missing"
+    },
+    {
+      "value": "embed",
+      "status": "missing"
+    }
+  ]
+}

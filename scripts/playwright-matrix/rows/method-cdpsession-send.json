@@ -1,0 +1,11 @@
+{
+  "id": "method-cdpsession-send",
+  "upstream": [
+    "method:CDPSession.send"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No L2 CDPSession object; the separate protocol layer exposes typed CDP commands.",
+  "capabilities": [],
+  "requirements": []
+}

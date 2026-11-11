@@ -38,7 +38,7 @@ import type * as WatchableApi from "./Watchable.ts"
 
 /**
  * A class of secret that an export can include on request: a URL's credentials, cookie values, `Authorization`
- * headers, text typed into a trace or the bodies requests sent.
+ * headers, text typed into a trace, or the bodies requests sent.
  *
  * @stability experimental
  * @category models
@@ -55,7 +55,7 @@ export type SecretClass = "credentials" | "cookies" | "authorizationHeaders" | "
  */
 export interface Options {
   /**
-   * Where bodies go: embedded in the HAR, attached beside it in a zip or left out. Required: never inferred from a
+   * Where bodies go: embedded in the HAR, attached beside it in a zip, or left out. Required: never inferred from a
    * file extension.
    */
   readonly content: "embed" | "attach" | "omit"
@@ -158,10 +158,10 @@ export interface Recording extends Declaration.Registration {
  * - From now on, each redirect hop of each request the target makes is an entry, with its response and, unless
  *   `content` is `"omit"`, the response body, read as the hop finishes.
  * - Timings come from Strider's clock, so they mean the same on every backend: `send` is 0, `wait` runs from the
- *   request to its response, `receive` from the response to the end, and `blocked`, `dns`, `connect` and `ssl`
+ *   request to its response, `receive` from the response to the end, and `blocked`, `dns`, `connect`, and `ssl`
  *   are -1.
  * - `exportHar` writes HAR 1.2, or with `content: "attach"` one zip holding `har.har` and the bodies it names.
- * - A URL's credentials, cookie values and the `Authorization` and `Proxy-Authorization` headers are `REDACTED`
+ * - A URL's credentials, cookie values, and the `Authorization` and `Proxy-Authorization` headers are `REDACTED`
  *   unless `include` names their class.
  * - The body each request sent is recorded whatever `content` says, and written as `postData` only when
  *   `include` names `"requestBodies"`. A text body is written as `text`, with a form's `params`; any other is
@@ -170,6 +170,15 @@ export interface Recording extends Declaration.Registration {
  * **Gotchas**
  *
  * - Bodies are collected for the target while it records, up to `NetworkResponse.BodyLimit`.
+ * - On WebKit, while response bodies are collected, navigation and reload wait for the responded, committed main
+ *   document to finish loading and for document body reads already started on the page to settle. Unresponded
+ *   or uncommitted loads and unfinished iframe loads do not delay dispatch. The wait is interruptible within the
+ *   existing navigation deadline, with no grace: a main document that streams indefinitely can consume that
+ *   deadline and make navigation or reload fail with `Deadline.Timeout`.
+ * - If preserving that body is unnecessary, close the scope owning response-body collection before navigating.
+ *   Stopping a recording with `remove` alone does not release its collection declaration; other active response
+ *   collections on the page can also keep the wait enabled. Navigation started by page scripts or input is
+ *   outside this coordination.
  * - `webSocketFrames` is `Unsupported` on WebDriver BiDi.
  * - Chromium keeps only the body a request's last hop sent, so an earlier hop's body that its event didn't carry,
  *   such as a file upload that a 307 redirected, is left out.
@@ -185,6 +194,22 @@ export interface Recording extends Declaration.Registration {
  *   yield* page.goto("https://shop.example.com/cart")
  *   yield* page.getByRole("button", { name: "Pay" }).click()
  *   return yield* har.exportHar("checkout.zip")
+ * })
+ * ```
+ *
+ * **Example** (Releasing body collection before leaving a streaming page)
+ *
+ * ```ts import.meta.vitest
+ * import { Har, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const recordThenLeave = Effect.fn("recordThenLeave")(function*(page: Page.Page) {
+ *   yield* Effect.scoped(Effect.gen(function*() {
+ *     yield* Har.record(page, { content: "embed" })
+ *     yield* page.goto("https://example.com/stream")
+ *   }))
+ *   // The collection scope has closed; the unfinished body need not be preserved.
+ *   yield* page.goto("https://example.com/next")
  * })
  * ```
  *
@@ -325,7 +350,7 @@ export class ReadFailed extends Schema.Error<ReadFailed>("@usestrider/browser/Ha
 }
 
 /**
- * Schema for the reasons recording, exporting or replaying a HAR can fail.
+ * Schema for the reasons recording, exporting, or replaying a HAR can fail.
  *
  * @stability experimental
  * @category schemas
@@ -341,7 +366,7 @@ export const HarErrorReason = Schema.Union([
 ])
 
 /**
- * The reasons recording, exporting or replaying a HAR can fail.
+ * The reasons recording, exporting, or replaying a HAR can fail.
  *
  * @stability experimental
  * @category models
@@ -352,7 +377,7 @@ export type HarErrorReason = typeof HarErrorReason.Type
 const HarErrorTypeId = "~@usestrider/browser/Har/HarError"
 
 /**
- * Error for a HAR that couldn't be recorded, exported or read for replay.
+ * Error for a HAR that couldn't be recorded, exported, or read for replay.
  *
  * **Example** (Logging a HAR that couldn't be written)
  *

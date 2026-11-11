@@ -24,6 +24,7 @@ import * as BrowserCdp from "../cdp/Browser.ts"
 import * as Target from "../cdp/Target.ts"
 import * as Protocol from "../protocol/Protocol.ts"
 import type * as Transport from "../protocol/Transport.ts"
+import * as VideoWriter from "../VideoWriter.ts"
 import type * as Adapter from "./adapter.ts"
 import * as Kit from "./adapterKit.ts"
 import * as BrowserClock from "./browserClock.ts"
@@ -32,6 +33,7 @@ import * as Claims from "./cdpAdapter/claims.ts"
 import * as Contexts from "./cdpAdapter/contexts.ts"
 import * as Declare from "./cdpAdapter/declare.ts"
 import * as Evaluation from "./cdpAdapter/evaluation.ts"
+import * as Geometry from "./cdpAdapter/geometry.ts"
 import * as Input from "./cdpAdapter/input.ts"
 import * as Navigation from "./cdpAdapter/navigation.ts"
 import * as Network from "./cdpAdapter/network.ts"
@@ -40,7 +42,9 @@ import * as Responses from "./cdpAdapter/responses.ts"
 import * as State from "./cdpAdapter/state.ts"
 import * as Storage from "./cdpAdapter/storage.ts"
 import * as Targets from "./cdpAdapter/targets.ts"
+import * as WebAuthn from "./cdpAdapter/webauthn.ts"
 import * as CdpWire from "./cdpWire.ts"
+import * as Declarations from "./declarations.ts"
 import * as Launch from "./launch.ts"
 import * as Operation from "./operation.ts"
 import * as ProtocolClient from "./protocolClient.ts"
@@ -54,7 +58,8 @@ import * as ProtocolClient from "./protocolClient.ts"
 export const capabilities = (
   info: Browser.Info,
   ownership: Adapter.ConnectOptions["ownership"],
-  headless: boolean
+  headless: boolean,
+  videoWriter = false
 ) => {
   const evidence = `CDP adapter static profile, ${info.product}`
   const entry = (
@@ -64,7 +69,30 @@ export const capabilities = (
   ): Browser.CapabilityEntry => ({ name, status, evidence, limitations: [...limitations] })
   return new Browser.CapabilitySet({
     entries: [
+      entry("network.sizes", "partial", [
+        "context opt-in; native counts only; ambiguous cache and redirect evidence unavailable"
+      ]),
+      entry("network.sizes.request", "unsupported", ["no proven native sent-byte counts"]),
+      entry("network.sizes.responseHeaders", "unsupported"),
+      entry("network.sizes.responseBody", "unsupported"),
+      entry("network.sizes.encoded", "unsupported"),
+      entry("network.sizes.decoded", "supported"),
+      entry("network.timing.redirect", "supported"),
+      entry("network.timing", "partial", [
+        "context-creation opt-in; bounded original-instance observations with live owners",
+        "missing native phases remain unavailable; TLS timing is not exposed",
+        "successful completion only; redirect end may be an observation bound"
+      ]),
+      entry("input.topLevelDesignMode", "supported"),
       entry("userContexts", "supported"),
+      entry("acceptInsecureCerts", "unsupported", ["CDP ignores certificate errors browser-wide, not per context"]),
+      entry("userContexts.proxy", "supported", [
+        "HTTP proxy endpoints for HTTP and HTTPS destinations; loopback stays direct"
+      ]),
+      entry("userContexts.proxy.credentials", "supported", [
+        "proxy challenges only; one credential submission per request"
+      ]),
+      entry("boundingBox.frameTransforms", "supported"),
       entry("isolatedWorlds", "supported"),
       entry("pauseOnStart.frames", "supported"),
       entry("pauseOnStart.workers", "supported"),
@@ -78,6 +106,7 @@ export const capabilities = (
           : ["Chromium pauses popups only browser-wide, so an attached browser's popups aren't paused"]
       ),
       entry("input.native", "supported"),
+      entry("webSocketRouting", "partial", ["explicit script consent; admission ceilings; main-world WebSocket only"]),
       entry("interception.request", "supported"),
       entry("interception.response", "supported"),
       entry("interception.auth", "supported"),
@@ -92,8 +121,32 @@ export const capabilities = (
       entry("navigation.traverse", "supported"),
       entry("frames.contentFrame", "supported"),
       entry("screenshot.format", "supported"),
+      entry("storageState.closedFileHistory", "unsupported", [
+        "file storage and file-top child partitions survive page closure; replacement refuses for the context lifetime"
+      ]),
+      entry("storageState.closedOpaqueHistory", "unsupported", [
+        "opaque partition reachability across surviving descendants and workers is not established; replacement conservatively refuses for the context lifetime"
+      ]),
       entry("storageState.partitioned", "supported"),
       entry("popups.opener", "supported"),
+      entry("network.responseBody.terminalRedirect", "supported"),
+      entry("network.requestBody.redirects", "partial", ["earlier hops require complete event-carried data"]),
+      entry("network.requestBody.absence", "supported", [
+        "native hasPostData reports body presence; empty fallback reports are refused"
+      ]),
+      entry("network.requestBody.empty", "partial", [
+        "requires complete event-carried bytes; empty fallback reports are refused"
+      ]),
+      entry("network.requestBody.multipart", "unsupported", [
+        "multipart file completeness cannot be established from the native report"
+      ]),
+      entry("network.requestBody.bytes", "partial", [
+        "requires scoped body collection; multipart fallback may omit files and is refused; empty fallback reports are refused; earlier hops require event-carried bytes"
+      ]),
+      entry("network.requestBody.text", "partial", [
+        "requires a complete collected body; multipart and empty fallback reports are refused"
+      ]),
+      entry("network.failure", "supported"),
       entry("network.headersSent", "supported"),
       entry("input.touch", "supported"),
       entry("close.runBeforeUnload", "supported"),
@@ -101,7 +154,9 @@ export const capabilities = (
       entry("downloads", "supported"),
       entry("downloads.progress", "supported"),
       entry("downloads.cancel", "supported"),
-      entry("screenshot", "supported"),
+      entry("screenshot", "supported", [
+        "clips inside the current viewport preserve its layout; offscreen and full-page captures can reflow content without the scrollbar"
+      ]),
       entry(
         "pdf",
         headless ? "supported" : "unknown",
@@ -142,6 +197,7 @@ export const capabilities = (
       entry("emulation.network.throttling", "supported"),
       entry("emulation.cpuSlowdown", "supported"),
       entry("emulation.javaScript", "supported", ["a document already loaded keeps running its scripts"]),
+      entry("emulation.extraHTTPHeaders", "supported"),
       entry("emulation.touch", "supported", ["touch event handlers appear at the next document"]),
       entry("emulation.focus", "supported"),
       entry("screenshot.cssScale", "supported"),
@@ -152,9 +208,16 @@ export const capabilities = (
       entry("snapshot.clickListeners", "unsupported", [
         "Strider doesn't read them yet: it would take a command per element"
       ]),
+      entry("capability.virtualAuthenticator", "supported", [
+        "Native Chromium WebAuthn, one scoped authenticator per page; credential copies keep separate counters"
+      ]),
       entry("capability.axTree", "supported"),
       entry("capability.screencast", "supported"),
-      entry("capability.video", "unsupported", ["Chromium streams frames, and writing a video file needs an encoder"])
+      entry(
+        "capability.video",
+        videoWriter ? "supported" : "unsupported",
+        videoWriter ? [] : ["Chromium video requires a VideoWriter service"]
+      )
     ]
   })
 }
@@ -173,12 +236,12 @@ Contexts.register(handlers)
 
 const fold = (state: State.State): ProtocolClient.Fold => ({
   events: handlers.events,
+  eventScopes: Network.eventScopes(state),
   apply: (session, method, params, received) =>
     Effect.suspend(() => {
-      handlers.apply(method, params, {
-        state,
-        target: session.key === undefined ? undefined : state.targets.get(session)
-      })
+      const target = session.key === undefined ? undefined : state.targets.get(session)
+      const event = target === undefined ? State.dispatchContext(state, undefined) : target.event
+      event.handlers.apply(method, params, event)
       for (const guard of state.captures) {
         const document = state.navigables.get(guard.page)?.document
         if (document !== undefined && document.id !== guard.document) guard.replaced(document.id, received)
@@ -188,6 +251,10 @@ const fold = (state: State.State): ProtocolClient.Fold => ({
   lost: (session) => Effect.sync(() => Targets.lost(state, session)),
   ended: (session, reason) =>
     Effect.suspend(() => {
+      if (session.key === undefined) {
+        for (const context of state.contexts.values()) context.proxy = undefined
+        for (const target of state.targets.values()) target.proxyAuth?.clear()
+      }
       Targets.ended(state, session, reason)
       return state.buffer.flush
     })
@@ -214,6 +281,7 @@ export const connect: (
       fold: (control) => {
         buffer.connect(control)
         state = State.make({
+          handlers,
           cleanupScope,
           connect: options,
           ids: Kit.makeIds(),
@@ -250,6 +318,12 @@ export const connect: (
       )
     }
     root = client.root
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        for (const context of state.contexts.values()) context.proxy = undefined
+        for (const target of state.targets.values()) target.proxyAuth?.clear()
+      })
+    )
     const failConnect = (error: Protocol.ProtocolError) =>
       Launch.fail(new Browser.ConnectionFailed({ stage: "handshake", hint: error.message }), "connect")
     const version = yield* BrowserCdp.getVersion().pipe(Protocol.on(root), Effect.catch(failConnect))
@@ -261,12 +335,11 @@ export const connect: (
       revision: version.protocolVersion
     })
     const contextIds = yield* Target.getBrowserContexts().pipe(Protocol.on(root), Effect.option)
-    const defaultEntry: State.ContextEntry = {
-      id: state.defaultContext,
-      browserContextId: Option.isSome(contextIds) ? contextIds.value.defaultBrowserContextId : undefined,
-      isDefault: true,
-      removing: false
-    }
+    const defaultEntry = new State.ContextEntry(
+      state.defaultContext,
+      Option.isSome(contextIds) ? contextIds.value.defaultBrowserContextId : undefined,
+      true
+    )
     state.contexts.set(state.defaultContext, defaultEntry)
     if (defaultEntry.browserContextId !== undefined) {
       state.contextsByCdp.set(defaultEntry.browserContextId, defaultEntry)
@@ -287,8 +360,9 @@ export const connect: (
     // Targets that existed before are attached by now; from here on, new pages were created
     yield* root.drainObserved
     state.attachedAtConnect = false
+    const writer = yield* Effect.serviceOption(VideoWriter.VideoWriter)
     const capabilitySet = yield* SubscriptionRef.make(
-      capabilities(info, options.ownership, version.userAgent.includes("HeadlessChrome"))
+      capabilities(info, options.ownership, version.userAgent.includes("HeadlessChrome"), Option.isSome(writer))
     )
 
     connected = true
@@ -306,6 +380,8 @@ export const connect: (
       removeUserContext: (id) => Contexts.removeUserContext(state, id),
       createPage: (id) => Contexts.createPage(state, id),
       closePage: (id, options) => Contexts.closePage(state, id, options),
+      viewportSize: (id) =>
+        Effect.map(State.pageOf(state, id), (page) => Declarations.viewportSize(state.registry, State.placement(page))),
       activatePage: (id) => Contexts.activatePage(state, id),
       navigate: (id, url, options) => Navigation.navigate(state, id, url, options),
       reload: (id, options) => Navigation.reload(state, id, options),
@@ -315,6 +391,8 @@ export const connect: (
       releaseHandles: (list) => Evaluation.releaseHandles(state, list),
       dispatchInput: (page, events) => Input.dispatchInput(state, page, events),
       contentFrame: (node) => Input.contentFrame(state, node),
+      releaseNodes: () => Effect.void,
+      geometry: (node, kind) => Geometry.read(state, node, kind),
       setInputFiles: (node, files) => Input.setInputFiles(state, node, files),
       resolve: (obligation, decision) => Obligations.resolve(state, obligation, decision),
       pausedRequestBody: (obligation) => Obligations.pausedRequestBody(state, obligation),
@@ -325,16 +403,18 @@ export const connect: (
       pdf: (page, options) => Capture.pdf(state, page, options),
       accessibilityTree: (page) => Capture.accessibilityTree(state, page),
       screencast: (page) => Capture.screencast(state, page),
-      video: () =>
-        Effect.fail(
-          Kit.unsupported("capability.video", "Chromium streams frames, and writing a video file needs an encoder")
-        ),
+      video: (page) => Capture.video(state, page, writer),
+      createAuthenticator: (page) => WebAuthn.create(state, page),
+      releaseAuthenticator: (ref) => WebAuthn.release(state, ref),
+      authenticatorCredentials: (ref) => WebAuthn.credentials(state, ref),
+      updateAuthenticator: (ref, update) => WebAuthn.update(state, ref, update),
       cookies: (context) => Storage.cookies(state, context),
       setCookies: (context, list) => Storage.setCookies(state, context, list),
       clearCookies: (context) => Storage.clearCookies(state, context),
       grantPermissions: (context, origin, permissions) => Storage.grantPermissions(state, context, origin, permissions),
       resetPermissions: (context) => Storage.resetPermissions(state, context),
       responseBody: (hop) => Network.responseBody(state, hop),
+      captureRequestBody: (request, limit) => Network.captureRequestBody(state, request, limit),
       requestBody: (hop) => Network.requestBody(state, hop),
       downloadPath: (download) => Contexts.downloadPath(state, download),
       cancelDownload: (download) => Contexts.cancelDownload(state, download)

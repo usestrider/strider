@@ -1,0 +1,32 @@
+{
+  "id": "method-locator-fill",
+  "upstream": [
+    "method:Locator.fill"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "Locator.fill",
+      "url": "/docs/api/browser/Locator#Locator.fill"
+    }
+  ],
+  "notes": "Use a locator for the element; actions check actionability. Raw ElementHandle identity is not preserved.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [
+    {
+      "capability": "input.native",
+      "alternatives": [
+        "input.webdriver"
+      ],
+      "file": "packages/browser/src/internal/webkitAdapter.ts",
+      "quote": "dispatchInput: refuse(\"input.native\", \"stock WebKit's inspector protocol has no Input domain\")"
+    }
+  ]
+}

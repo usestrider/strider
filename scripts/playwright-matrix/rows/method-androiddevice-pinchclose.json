@@ -1,0 +1,11 @@
+{
+  "id": "method-androiddevice-pinchclose",
+  "upstream": [
+    "method:AndroidDevice.pinchClose"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No Android device or Android WebView automation API.",
+  "capabilities": [],
+  "requirements": []
+}

@@ -1,0 +1,25 @@
+{
+  "id": "method-locator-framelocator",
+  "upstream": [
+    "method:Locator.frameLocator"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.frame",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.frame"
+    }
+  ],
+  "notes": "Enter an iframe through its locator.",
+  "capabilities": [
+    "frames.contentFrame"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

@@ -1,0 +1,17 @@
+{
+  "id": "property-playwright-firefox",
+  "upstream": [
+    "property:Playwright.firefox"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "firefox/Firefox",
+      "symbol": "layer",
+      "url": "/docs/api/browser/firefox/Firefox#layer"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": []
+}

@@ -10,7 +10,9 @@
     "./packages/scenarios/benchmark/**/*.ts",
     "./packages/scenarios/upstream/sources.json",
     "./packages/browser/test/integration/browsers.json",
-    "./packages/tools/*/test/**/*.ts"
+    "./packages/tools/*/test/**/*.ts",
+    "./packages/tools/docs/src/matrix-evidence.ts",
+    "./scripts/integration-budget.ts"
   ],
   "exclude": ["**/node_modules/**", "**/dist/**"],
   "compilerOptions": {

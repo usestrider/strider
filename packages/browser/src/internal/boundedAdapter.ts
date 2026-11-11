@@ -15,6 +15,7 @@
  * Outside an operation, as in the model's own fibers and finalizers, a call is the adapter's, under
  * `CommandTimeout`.
  */
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
@@ -34,7 +35,13 @@ type Method = {
 }[keyof Connection]
 
 /** The methods that are cleanup. */
-type Release = "removeUserContext" | "closePage" | "releaseHandles" | "resetPermissions"
+type Release =
+  | "releaseNodes"
+  | "releaseAuthenticator"
+  | "removeUserContext"
+  | "closePage"
+  | "releaseHandles"
+  | "resetPermissions"
 
 /** What a call does to the browser, and what a `Timeout`'s hint calls it. */
 type Kind =
@@ -52,6 +59,7 @@ const methods: { readonly [K in Method]: K extends Release ? typeof release : Ki
   removeUserContext: release,
   createPage: { _tag: "Create", what: "creating the page" },
   closePage: release,
+  viewportSize: read("the configured viewport"),
   activatePage: write("bringing the page forward"),
   navigate: write("the navigation"),
   reload: write("the reload"),
@@ -60,8 +68,10 @@ const methods: { readonly [K in Method]: K extends Release ? typeof release : Ki
   // A call into the page is a write only as its caller knows: the caller marks one that may change the page
   evaluate: read("the call into the page"),
   releaseHandles: release,
+  releaseNodes: release,
   dispatchInput: write("the input"),
   contentFrame: read("the iframe's frame"),
+  geometry: read("the element's geometry"),
   resolve: write("the decision"),
   declare: write("the declaration"),
   screenshot: read("the screenshot"),
@@ -69,12 +79,17 @@ const methods: { readonly [K in Method]: K extends Release ? typeof release : Ki
   accessibilityTree: read("the accessibility tree"),
   screencast: write("starting the screencast"),
   video: write("starting the video"),
+  createAuthenticator: { _tag: "Create", what: "creating the virtual authenticator" },
+  releaseAuthenticator: release,
+  authenticatorCredentials: read("the virtual authenticator credentials"),
+  updateAuthenticator: write("updating the virtual authenticator"),
   cookies: read("the cookie read"),
   setCookies: write("setting the cookies"),
   clearCookies: write("clearing the cookies"),
   grantPermissions: write("the grant"),
   resetPermissions: release,
   responseBody: read("the response body"),
+  captureRequestBody: read("the request body"),
   requestBody: read("the request body"),
   pausedRequestBody: read("the paused request's body"),
   pausedResponseBody: read("the paused response's body"),
@@ -85,6 +100,7 @@ const methods: { readonly [K in Method]: K extends Release ? typeof release : Ki
 
 /** How what a creation made is closed, when the operation stopped waiting for it. */
 const closes = {
+  createAuthenticator: (adapter: Connection, ref: Adapter.Authenticator) => adapter.releaseAuthenticator(ref),
   createPage: (adapter: Connection, page: Target.NavigableId) => adapter.closePage(page, { runBeforeUnload: false }),
   createUserContext: (adapter: Connection, context: UserContext.Id) => adapter.removeUserContext(context)
 }
@@ -132,11 +148,20 @@ const creating = <A, E, R>(
   Effect.gen(function*() {
     record.markSent()
     const fiber = yield* Effect.forkDetach(call)
-    return yield* record.bound(Fiber.join(fiber), hint(kind)).pipe(
+    return yield* record.bound(Operation.answered(record, Fiber.join(fiber)), () => {
+      record.noteCleanup({ _tag: "Pending" })
+      return hint(kind)()
+    }).pipe(
       Effect.onExit((exit) =>
         Exit.isSuccess(exit)
           ? Effect.void
-          : Fiber.join(fiber).pipe(Effect.flatMap(close), Effect.ignore, Effect.forkDetach, Effect.asVoid)
+          : Effect.sync(() => {
+            if (Cause.hasInterrupts(exit.cause)) record.noteCleanup({ _tag: "Pending" })
+          }).pipe(
+            Effect.andThen(
+              Fiber.join(fiber).pipe(Effect.flatMap(close), Effect.ignore, Effect.forkDetach, Effect.asVoid)
+            )
+          )
       )
     )
   })
@@ -148,7 +173,9 @@ export const make = (adapter: Connection): Bounded => {
     const kind = methods[name]
     if (kind._tag === "Release") continue
     const method = adapter[name] as (...args: Array<unknown>) => Effect.Effect<unknown, unknown, unknown>
-    const close = name === "createPage" || name === "createUserContext" ? closes[name] : undefined
+    const close = name === "createPage" || name === "createUserContext" || name === "createAuthenticator"
+      ? closes[name]
+      : undefined
     bounded[name] = (...args: Array<unknown>) =>
       Effect.flatMap(Operation.current, (current) => {
         const call = Effect.suspend(() => method(...args))
@@ -157,7 +184,11 @@ export const make = (adapter: Connection): Bounded => {
         // The operation's deadline is its commands'; one that passes it is the operation's Timeout
         const unbounded = call.pipe(
           Effect.provideService(ProtocolClient.CommandDeadline, Option.some(record.budget.at)),
-          Effect.mapError((error) => noReply(error) ? record.timeout(hint(kind)()) : error)
+          Effect.mapError((error) => {
+            if (!noReply(error)) return error
+            if (kind._tag === "Create") record.noteCleanup({ _tag: "Pending" })
+            return record.timeout(hint(kind)())
+          })
         )
         switch (kind._tag) {
           case "Read":
@@ -165,7 +196,7 @@ export const make = (adapter: Connection): Bounded => {
           case "Write":
             return Effect.suspend(() => {
               record.markSent()
-              return record.bound(unbounded, hint(kind))
+              return record.bound(Operation.answered(record, unbounded), hint(kind))
             })
           case "Create":
             return creating(record, kind, unbounded, (made) => close!(adapter, made as never))
@@ -181,7 +212,7 @@ export const make = (adapter: Connection): Bounded => {
         const record = current.value
         if (kind._tag === "Write") record.markSent()
         return record.bound(
-          call.pipe(
+          (kind._tag === "Write" ? Operation.answered(record, call) : call).pipe(
             Effect.provideService(ProtocolClient.CommandDeadline, Option.some(record.budget.at)),
             Effect.mapError((error) => noReply(error) ? record.timeout(hint(kind)()) : error)
           ),

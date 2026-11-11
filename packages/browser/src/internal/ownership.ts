@@ -57,6 +57,12 @@ export interface Ownership {
    * its pages', under the default budget.
    */
   readonly remove: (context: Model.ContextEntry) => Effect.Effect<void>
+  /**
+   * Says that `scope` removes the context when it closes, if `removes` still says so then, and so the pages it
+   * releases in that context needn't be closed one by one: the removal ends them, and the browser closes them
+   * with it. A page `scope` doesn't own, or released by another scope, is closed as ever.
+   */
+  readonly removedWith: (context: Model.ContextEntry, scope: Scope.Scope, removes: () => boolean) => void
 }
 
 /** How a wait's warnings name its target and what the browser was asked to do to it. */
@@ -93,11 +99,11 @@ const refused = (exit: Exit.Exit<void, Adapter.AdapterError>): Option.Option<str
     : Option.some(failure.error.message)
 }
 
-/** Pages' ids, as a sentence lists them: `N1`, `N1 and N2`, `N1, N2 and N3`. */
+/** Pages' ids, as a sentence lists them: `N1`, `N1 and N2`, `N1, N2, and N3`. */
 const listed = (pages: ReadonlyArray<Model.PageEntry>): string =>
-  pages.length === 1
-    ? pages[0]!.id
-    : `${pages.slice(0, -1).map((page) => page.id).join(", ")} and ${pages.at(-1)!.id}`
+  pages.length < 3
+    ? pages.map((page) => page.id).join(" and ")
+    : `${pages.slice(0, -1).map((page) => page.id).join(", ")}, and ${pages.at(-1)!.id}`
 
 /**
  * Sends `command` in a fiber of `scope`, which runs to its own end, and waits for `ended` under the default budget
@@ -146,9 +152,26 @@ const awaitEnd = Effect.fnUntraced(function*(
 
 export const make = Effect.fnUntraced(function*() {
   const modelScope = yield* Effect.scope
+  const skipped = new WeakMap<Model.ContextEntry, Set<Model.PageEntry>>()
+  const removers = new WeakMap<Model.ContextEntry, { readonly scope: Scope.Scope; readonly removes: () => boolean }>()
+  /** Closes a page and waits for its end, under the default budget. */
+  const closing = (adapter: Adapter.AdapterConnection, page: Model.PageEntry) =>
+    awaitEnd(modelScope, adapter.closePage(page.id, { runBeforeUnload: false }), page.closed, {
+      target: `Page ${page.id}`,
+      annotation: ["browser.page.id", page.id],
+      doing: "is still closing",
+      wait: "release",
+      what: "page",
+      command: "close",
+      undone: "wasn't closed",
+      remaining: () => "the page hasn't ended"
+    })
   const connected = yield* Deferred.make<Adapter.AdapterConnection>()
   let handoffClaims: BoundedAdapter.Bounded["claims"]
   const ownership: Ownership = {
+    removedWith: (context, scope, removes) => {
+      removers.set(context, { scope, removes })
+    },
     connected,
     attach: (adapter, claims = BoundedAdapter.make(adapter).claims) =>
       Effect.sync(() => {
@@ -169,16 +192,15 @@ export const make = Effect.fnUntraced(function*() {
         if (handoffClaims !== undefined && Option.exists(state.owner, Handoff.leavesOpen)) {
           return yield* Handoff.dismiss(page, handoffClaims)
         }
-        yield* awaitEnd(modelScope, adapter.closePage(page.id, { runBeforeUnload: false }), page.closed, {
-          target: `Page ${page.id}`,
-          annotation: ["browser.page.id", page.id],
-          doing: "is still closing",
-          wait: "release",
-          what: "page",
-          command: "close",
-          undone: "wasn't closed",
-          remaining: () => "the page hasn't ended"
-        })
+        // Its context is removed when this same scope closes, right after: that closes the page with it
+        const remover = removers.get(page.contextEntry)
+        if (by !== undefined && remover !== undefined && remover.scope === by && remover.removes()) {
+          const pending = skipped.get(page.contextEntry) ?? new Set()
+          pending.add(page)
+          skipped.set(page.contextEntry, pending)
+          return
+        }
+        yield* closing(adapter, page)
       },
       // Cleanup: its budget is its own, never the deadline of the operation whose scope it finalizes
       Operation.detached
@@ -205,6 +227,13 @@ export const make = Effect.fnUntraced(function*() {
               : `its pages ${listed(open)} haven't ended`
           }
         })
+        // The removal didn't end the context: its pages, left for it to close, are closed one by one as ever
+        if (Option.isNone(yield* Deferred.poll(context.closed))) {
+          for (const page of skipped.get(context) ?? []) {
+            if ((yield* page.state.get).status._tag !== "Closed") yield* closing(adapter, page)
+          }
+        }
+        skipped.delete(context)
       },
       // Cleanup, as a release is
       Operation.detached

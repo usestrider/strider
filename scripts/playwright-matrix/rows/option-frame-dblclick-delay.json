@@ -1,0 +1,12 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "No press-to-release delay option for this action. Sequential typing delay is a different capability.",
+  "capabilities": [],
+  "id": "option-frame-dblclick-delay",
+  "upstream": [
+    "method:Frame.dblclick"
+  ],
+  "option": "delay",
+  "requirements": []
+}

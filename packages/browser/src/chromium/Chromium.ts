@@ -1,5 +1,5 @@
 /**
- * The Chromium backend: Chromium, Chrome and Edge, over the Chrome DevTools Protocol.
+ * The Chromium backend: Chromium, Chrome, and Edge, over the Chrome DevTools Protocol.
  *
  * A launch runs the executable you name, and nothing is looked up or downloaded; `strider browsers` lists the
  * browsers it can find. A protocol failure's `BackendFailure` carries the CDP error as its `cause`: the
@@ -28,7 +28,7 @@ import * as Protocol from "../protocol/Protocol.ts"
 import type * as Url from "../Url.ts"
 
 /**
- * Launches the Chromium, Chrome or Edge executable at `executablePath` and provides it as `Browser`.
+ * Launches the Chromium, Chrome, or Edge executable at `executablePath` and provides it as `Browser`.
  *
  * **Details**
  *
@@ -99,7 +99,7 @@ export const layer = (
   )
 
 /**
- * Launches Chromium, Chrome or Edge as `layer` does, with options read from configuration, such as the
+ * Launches Chromium, Chrome, or Edge as `layer` does, with options read from configuration, such as the
  * executable path from each machine's environment.
  *
  * **Example** (Reading the executable's path from the environment)
@@ -135,7 +135,7 @@ export const layerConfig = (
 > => LaunchOptions.fromConfig(options, layer)
 
 /**
- * Connects to a running Chromium, Chrome or Edge at `endpoint` and provides it as `Browser`.
+ * Connects to a running Chromium, Chrome, or Edge at `endpoint` and provides it as `Browser`.
  *
  * **Details**
  *

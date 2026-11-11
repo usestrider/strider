@@ -1,0 +1,28 @@
+{
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toHaveCSS",
+      "url": "/docs/api/browser/Expect#toHaveCSS"
+    }
+  ],
+  "notes": "Read computed styles from the before or after pseudo-element with the pseudo option.",
+  "capabilities": [],
+  "id": "option-locatorassertions-tohavecss-pseudo",
+  "upstream": [
+    "method:LocatorAssertions.toHaveCSS"
+  ],
+  "option": "pseudo",
+  "requirements": [],
+  "valueCoverage": [
+    {
+      "value": "after",
+      "status": "has"
+    },
+    {
+      "value": "before",
+      "status": "has"
+    }
+  ]
+}

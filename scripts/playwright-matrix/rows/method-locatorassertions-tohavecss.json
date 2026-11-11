@@ -1,0 +1,23 @@
+{
+  "id": "method-locatorassertions-tohavecss",
+  "upstream": [
+    "method:LocatorAssertions.toHaveCSS"
+  ],
+  "status": "different",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toHaveCSS",
+      "url": "/docs/api/browser/Expect#toHaveCSS"
+    }
+  ],
+  "notes": "Exact computed CSS strings or RegExp, including flags and before/after pseudo-elements. Negate with { not: true }; use Deadline.within for timeouts. Missing and multiple matches retry until exactly one matches, including under negation; Playwright rejects multiple matches immediately. Failure evidence retains the computed string or match count.",
+  "capabilities": [],
+  "requirements": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "retrying-css-assertion-cardinality",
+    "quote": "CSS expectations retry missing and multiple matches until exactly one element matches, even under negation.",
+    "revision": "bf60009b7a9f64b3bbf65bfb722c28c405e7d4f8"
+  }
+}

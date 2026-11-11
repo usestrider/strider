@@ -1,19 +1,19 @@
 ---
 title: Snapshots
-description: A page's accessibility tree with refs to act through, the controls a snapshot infers, the tree alone, and what changed between two snapshots.
+description: How a model reads a page and points at an element.
 order: 1
 ---
 
-A selector a model guesses can match nothing, or the wrong element. A snapshot gives it the page as text, with
-refs that act on the nodes it saw.
+A snapshot is a page's accessibility tree as text, with a ref on each node, so a model can name the element it
+means rather than guess a selector.
 
 ## Acting through refs
 
 Use a snapshot when a model, not your code, picks the element: it reads `text`,
 [as the CLI prints it](/docs/agents/cli#commands), and answers with a ref. A ref acts on exactly the node the model
 saw, or fails, so in your own code prefer a [locator](/docs/pages/locators), which finds its element again after a
-re-render. A snapshot is a page's accessibility tree as data, with a ref for each
-node that can be acted on:
+re-render. `page.snapshot` returns the tree as data, with its `text` for the model and `ref` to turn the model's
+answer into a locator:
 
 ```ts
 import { Page, Snapshot } from "@usestrider/browser"
@@ -51,7 +51,7 @@ const clickWhatTheModelPicks = Effect.fn("clickWhatTheModelPicks")(
 ## Inferred controls
 
 By default a snapshot also infers what the accessibility tree misses: interactivity from `cursor: pointer`,
-`tabindex`, `contenteditable`, `onclick` or password inputs, and names from text, `title`, `placeholder`, `alt` or a nearby label.
+`tabindex`, `contenteditable`, `onclick`, or password inputs, and names from text, `title`, `placeholder`, `alt`, or a nearby label.
 Each inference is tagged, as in `- clickable "Save" [ref=e7] [inferred: cursorPointer]`, so you can list the
 controls a screen reader can't reach:
 
@@ -71,7 +71,7 @@ const unreachableControls = Effect.fn("unreachableControls")(
 ```
 
 A password input without an explicit ARIA role appears as `editable [ref=e1] [inferred: password]`.
-Its label, title or placeholder stays its accessible name; without one it stays unnamed, without nearby-label
+Its label, title, or placeholder stays its accessible name; without one it stays unnamed, without nearby-label
 inference. Its value is excluded, including when another element references it for a name. Disabled and
 read-only password inputs keep the designation; explicit ARIA roles are preserved.
 

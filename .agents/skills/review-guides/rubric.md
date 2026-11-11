@@ -22,32 +22,36 @@ The audit's `split?` flags are candidates only: "Requests and responses" joins t
 A split proposal gives: each new page's title, its description (the deck under the title), its directory and
 `order`, the sections that move to it, what stays behind, and the links to the moved sections that must change.
 
-## Orient: why before how
+## Orient: what it is before how
 
-- **A page** opens, before its first section, with up to two sentences: what goes wrong without the page's concept,
-  and what it gets the reader. The description says what the page covers; it isn't the orientation. If the
-  description already says why, the opening doesn't repeat it.
-- **A section** that introduces a concept says, before its first code, what it's for and what it gets the reader,
-  in terms of what fails without it, and when to use it rather than its neighbor. A section that varies the one
-  before needs only a bridge: "File choosers work the same way."
+- **A page** opens, before its first section, with a sentence or two that say what its subject is and does. The
+  description is a one-sentence subtitle, not a list of the sections; the opening doesn't repeat it.
+- **A section** that introduces a concept says, before its first code, what it does and when to use it rather than
+  its neighbor. A section that varies the one before needs only a bridge: "File choosers work the same way."
 - **A term** is explained where it first appears, or linked to where it was.
 
-Orientation is not narrative. Up to two plain sentences a concept; no history, no scene-setting, no "imagine",
-no rhetorical questions, no praise ("powerful", "seamless"). State the benefit as what happens: "so a download that
-starts before the click returns isn't missed", not "making downloads easy".
+Orientation is plain explanation, written as you'd explain the thing to a colleague, in up to two sentences a
+concept. Name a problem only when the concept exists to solve it, and say it as a fact, not a setup. No template
+("Without X, … so X …"), no history, no scene-setting, no "imagine", no rhetorical questions, and no praise
+("powerful", "seamless"). State a benefit as what happens: "so a download that starts before the click returns
+isn't missed", not "making downloads easy".
 
 Before:
 
-> ## Subscribe, act, collect
->
-> Subscribe first, then act:
+> Pages that share cookies and storage leak state from one task or test into the next. A context has its own, so
+> pages in different contexts share nothing, and its settings hold for every page in it.
 
 After:
 
+> A context is a fresh browser profile: its own cookies, storage, cache, and permissions. Give each task or test its
+> own, and nothing one leaves behind reaches the next.
+
+A problem the concept exists to solve stays, as a fact:
+
 > ## Subscribe, act, collect
 >
-> An action's effects, such as a popup or a download, can arrive before the action returns. A wait subscribes when
-> you create it, so subscribe before acting and nothing the action causes is missed:
+> A popup or a download can arrive before the action that caused it returns. A wait subscribes when you create it,
+> so subscribe before acting and nothing the action causes is missed:
 
 ## Example: show what's named
 

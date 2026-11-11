@@ -1,0 +1,17 @@
+{
+  "id": "method-pageassertions-tohavetitle",
+  "upstream": [
+    "method:PageAssertions.toHaveTitle"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toHaveTitle",
+      "url": "/docs/api/browser/Expect#toHaveTitle"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": []
+}

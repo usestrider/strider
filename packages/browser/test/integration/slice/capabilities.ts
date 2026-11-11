@@ -27,3 +27,10 @@ export const nativeFileModificationTime: Readonly<Record<string, "disk" | "creat
   WebKit: "creation",
   "Chromium attached": "disk"
 }
+
+/** Whether adding a response intercept can reach a request that already passed its request stage. */
+export const responseRouteInFlight: Readonly<Record<"Chromium" | "Firefox" | "WebKit", boolean>> = {
+  Chromium: false,
+  Firefox: true,
+  WebKit: true
+}

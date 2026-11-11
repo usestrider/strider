@@ -1,13 +1,23 @@
-# The documentation site, deployed to Cloudflare from main (website/alchemy.run.ts): in the Nix environment's
-# default shell, as the checks run. Its settings, the Cloudflare token and account among them, are in
-# website/deploy.sops.env, which the SOPS_AGE_KEY secret, the deploy's own age key, decrypts (.sops.yaml). The secret
-# belongs to the docs-deploy environment, which only main can use, so no other branch's workflow can read it.
+# The documentation site, deployed to Cloudflare (website/alchemy.run.ts) once a release has published, from the
+# commit it released, so the guides and the reference describe what's on npm. On demand it deploys the latest release,
+# a release tag, or a docs/* branch cut from one: a docs hotfix for a past release, with nothing unreleased in it. In
+# the Nix environment's default shell, as the checks run. Its settings, the Cloudflare token and account among them,
+# are in website/deploy.sops.env, which the SOPS_AGE_KEY secret, the deploy's own age key, decrypts (.sops.yaml). The
+# secret belongs to the docs-deploy environment, which only main can use, so the workflow always runs from main and
+# only checks out what it deploys.
 name: Docs
 
 on:
-  push:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
+    inputs:
+      ref:
+        description: "A release tag (@usestrider/browser@0.5.0) or a docs/* branch; empty deploys the latest release"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -19,6 +29,8 @@ concurrency:
 
 jobs:
   deploy:
+    # A release that failed published nothing new, so there's nothing new to describe
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
     environment: docs-deploy
     timeout-minutes: 20
@@ -27,6 +39,31 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The released commit, not main's tip, which may already describe what isn't released
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+      # On demand: the latest release by default, never main's tip. A docs/* branch runs its own code with the deploy
+      # key, so only the maintainer may deploy one.
+      - name: Choose what to deploy
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          REQUESTED: ${{ inputs.ref }}
+          ACTOR: ${{ github.triggering_actor }}
+        run: |
+          set -euo pipefail
+          case "$REQUESTED" in
+            "") ref=$(git tag --list '@usestrider/browser@*' --sort=-v:refname | head -n 1)
+                [ -n "$ref" ] || { echo "::error::No release tag to deploy"; exit 1; } ;;
+            @usestrider/browser@*) ref="refs/tags/$REQUESTED" ;;
+            docs/*)
+              [ "$ACTOR" = "jpowersdev" ] || { echo "::error::Only the maintainer deploys a docs/* branch"; exit 1; }
+              git fetch --no-tags origin "refs/heads/$REQUESTED"
+              ref=FETCH_HEAD ;;
+            *) echo "::error::ref must be a release tag (@usestrider/browser@x.y.z) or a docs/* branch"; exit 1 ;;
+          esac
+          git checkout --detach "$ref"
+          echo "Deploying $(git rev-parse --short HEAD) (${REQUESTED:-latest release})"
       - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # 31.11.3
       # Fails the run, before the install, if the settings don't decrypt or the token isn't in them
       - name: Check for the token

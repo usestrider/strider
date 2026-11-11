@@ -4,7 +4,7 @@
  * Every module has one error, and what went wrong is its `reason`. Reasons that belong to one module are declared
  * there, such as `Locator.StrictViolation` or `PageNavigation.NavigationFailed`. The ones here are shared: a bad
  * argument, missing access, a capability the backend lacks, a protocol failure, the two ways an evaluated
- * function can fail and a dialog that blocks the page. Match them with `Effect.catchReason`; each carries a
+ * function can fail, and a dialog that blocks the page. Match them with `Effect.catchReason`; each carries a
  * one-line `hint`, which its `message` includes.
  *
  * @stability unstable

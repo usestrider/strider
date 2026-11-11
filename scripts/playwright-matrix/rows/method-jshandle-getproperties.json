@@ -1,0 +1,17 @@
+{
+  "id": "method-jshandle-getproperties",
+  "upstream": [
+    "method:JSHandle.getProperties"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "JSHandle exposes evaluate, evaluateHandle, read and release. It has no dedicated ElementHandle cast or property-handle enumeration/lookup operation.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/JSHandle.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

@@ -17,9 +17,9 @@ import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Stream from "effect/Stream"
-import { readFile } from "node:fs/promises"
 import { createServer } from "node:http"
 import * as ChromiumLauncher from "../../../src/internal/chromiumLauncher.ts"
+import * as DevToolsActivePort from "../../../src/internal/devToolsActivePort.ts"
 import { assertPinned, chromium } from "../browsers.ts"
 
 const serve = Effect.acquireRelease(
@@ -84,8 +84,7 @@ describe("Chromium reconnect identity probes", () => {
             const driver = yield* CdpConnection.make(transport)
             const version = yield* Browser.getVersion().pipe(Protocol.on(driver.browser))
             assertPinned("Chromium", version.product.split("/")[1]!, chromium.version)
-            const [port] = (yield* Effect.promise(() => readFile(`${launched.userDataDir}/DevToolsActivePort`, "utf8")))
-              .split("\n")
+            const { port } = yield* DevToolsActivePort.read(launched.userDataDir)
             const endpoint = () =>
               Effect.promise(async () => {
                 const response = await fetch(`http://127.0.0.1:${port}/json/version`)

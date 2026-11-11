@@ -1,0 +1,17 @@
+{
+  "id": "property-pageassertions-not",
+  "upstream": [
+    "property:PageAssertions.not"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "that",
+      "url": "/docs/api/browser/Expect#that"
+    }
+  ],
+  "notes": "Use a negated condition; specific inverse matchers include toBeHidden and toBeDisabled.",
+  "capabilities": [],
+  "requirements": []
+}

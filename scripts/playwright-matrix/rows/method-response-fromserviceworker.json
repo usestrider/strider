@@ -1,0 +1,25 @@
+{
+  "id": "method-response-fromserviceworker",
+  "upstream": [
+    "method:Response.fromServiceWorker"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "NetworkResponse",
+      "symbol": "ServedBy",
+      "url": "/docs/api/browser/NetworkResponse#ServedBy"
+    }
+  ],
+  "notes": "Firefox cannot distinguish cache from service worker.",
+  "capabilities": [
+    "network.servedBy"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/NetworkResponse.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

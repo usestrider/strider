@@ -1,5 +1,5 @@
 /**
- * Dialogs, file choosers and paused requests that a default policy decided, because no handler or route did.
+ * Dialogs, file choosers, and paused requests that a default policy decided, because no handler or route did.
  *
  * Each such decision is reported, never made silently, so a test can check that none happened and an agent can see
  * why a dialog disappeared.
@@ -21,7 +21,7 @@ import type * as Target from "./Target.ts"
 import type * as UserContext from "./UserContext.ts"
 
 /**
- * Schema for what was decided: a dialog, a file chooser or a paused request.
+ * Schema for what was decided: a dialog, a file chooser, or a paused request.
  *
  * @stability unstable
  * @category schemas
@@ -37,7 +37,7 @@ export const Subject = Schema.Union([
 ])
 
 /**
- * What was decided: a dialog, a file chooser or a paused request.
+ * What was decided: a dialog, a file chooser, or a paused request.
  *
  * @stability unstable
  * @category models
@@ -74,11 +74,11 @@ export const Policy = Schema.Union([
 export type Policy = typeof Policy.Type
 
 /**
- * One dialog, file chooser or paused request that a default policy decided.
+ * One dialog, file chooser, or paused request that a default policy decided.
  *
  * **Details**
  *
- * `decision` is what was done, such as `"dismiss"`, `"cancel"` or `"continue"`; `policy` is what chose it.
+ * `decision` is what was done, such as `"dismiss"`, `"cancel"`, or `"continue"`; `policy` is what chose it.
  *
  * @stability unstable
  * @category models
@@ -100,7 +100,7 @@ export class AutoResolution extends Schema.Class<AutoResolution>("@usestrider/br
  */
 export interface Filter {
   /**
-   * Match decisions about these kinds of subject: `"Dialog"`, `"FileChooser"` or `"PausedRequest"`.
+   * Match decisions about these kinds of subject: `"Dialog"`, `"FileChooser"`, or `"PausedRequest"`.
    *
    * @default any kind
    */

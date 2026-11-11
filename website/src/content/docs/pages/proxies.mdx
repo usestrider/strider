@@ -1,0 +1,97 @@
+---
+title: Proxies
+description: Giving each context its own proxy.
+order: 6
+---
+
+A context's `proxy` option routes its HTTP and HTTPS requests through an HTTP proxy you choose, in place of the
+browser's launch or system settings.
+
+## Routing a context
+
+Set `proxy` when creating the context or its first page. Omit it to keep the browser's existing settings:
+
+```ts
+import { Browser } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const visit = Effect.fn("visit")(function*() {
+  const page = yield* Browser.newPage({
+    proxy: { server: "http://proxy.example.com:8080" }
+  })
+  yield* page.goto("https://shop.example.com")
+}, Effect.scoped)
+```
+
+The endpoint may also be `proxy.example.com:8080`; an omitted port is 80. It takes no username, password, path,
+query, or fragment. HTTP destinations use the proxy directly; HTTPS destinations use CONNECT and retain normal
+certificate verification. HTTPS proxy endpoints and SOCKS fail with `Unsupported`.
+
+Each context has its own proxy settings. Its pages and connections close with its scope. Chromium and Firefox
+apply settings per context; launched WebKit applies them to that context's browser process. An already-running
+WebKit process cannot be reconfigured.
+
+## Direct connections
+
+Put hostnames or IP addresses in `bypass` to reach them directly. Its default is an empty list:
+
+```ts
+import { Browser } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const staging = Effect.fn("staging")(function*() {
+  const context = yield* Browser.newContext({
+    proxy: {
+      server: "proxy.example.com:8080",
+      bypass: ["staging.example.com", "192.0.2.10"]
+    }
+  })
+  const page = yield* context.newPage
+  yield* page.goto("https://staging.example.com")
+}, Effect.scoped)
+```
+
+Entries contain no URL scheme, port, wildcard, or CIDR range. Matching uses the browser's native host rules,
+which may also exclude subdomains. `localhost`, `127.0.0.1`, and `::1` always stay direct, so browser control
+connections also avoid the proxy.
+
+## Proxy credentials
+
+Proxy credentials answer the proxy's challenge; a website's login still uses its own
+[authentication route](/docs/events/routes). Stock WebKit refuses proxy credentials with `Unsupported`.
+
+```ts
+import { Browser, Route } from "@usestrider/browser"
+import { Config, Effect } from "effect"
+
+const signedIn = Effect.fn("signedIn")(function*() {
+  const proxyPassword = yield* Config.Redacted("PROXY_PASSWORD")
+  const websitePassword = yield* Config.Redacted("WEBSITE_PASSWORD")
+  const page = yield* Browser.newPage({
+    proxy: {
+      server: "http://proxy.example.com:8080",
+      credentials: { username: "automation", password: proxyPassword }
+    }
+  })
+  yield* page.route(
+    "https://app.example.com/**",
+    () => Route.provideCredentials({ username: "reader", password: websitePassword }),
+    {
+      phase: "auth"
+    }
+  )
+  yield* page.goto("https://app.example.com")
+}, Effect.scoped)
+```
+
+Passwords are `Redacted` values and stay out of logs and trace exports. Credentials default to absent; configured
+credentials are submitted once per request and a second proxy challenge is canceled, so wrong passwords do not
+cause an endless loop. Basic authentication is covered by the browser tests.
+
+Firefox credentials require a freshly launched browser. Firefox shares cached proxy credentials across contexts,
+so a successfully created context binds its endpoint's credential pair, including no credentials, for the browser
+connection's life. Conflicting pending creations also fail with `Unsupported`. A confirmed rejection before creation
+or a confirmed unused setup rollback releases that creation's reservation. A timeout or uncertain removal keeps it,
+because the context may exist or have used the cache. Closing a successfully created context keeps its binding. Use separate
+proxy endpoints or browser launches when credentials differ. Attaching to Firefox refuses configured proxy
+credentials because its existing cache is outside the program's ownership.

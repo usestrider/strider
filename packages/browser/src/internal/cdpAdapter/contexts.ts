@@ -5,6 +5,7 @@
  */
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as BrowserCdp from "../../cdp/Browser.ts"
 import * as Page from "../../cdp/Page.ts"
@@ -16,10 +17,11 @@ import type * as UserContext from "../../UserContext.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as Urls from "../urls.ts"
-import { applyDownloads } from "./declare.ts"
+import { applyDownloads, restoreContext } from "./declare.ts"
 import { whileSwapping } from "./navigation.ts"
 import {
-  type ContextEntry,
+  ContextEntry,
+  contextLock,
   contextOf,
   downloadDirectory,
   type DownloadEntry,
@@ -108,10 +110,22 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
         : {})
     }).pipe(Protocol.on(state.root()))
   )
-  const entry: ContextEntry = { id: state.ids.userContext(), browserContextId, isDefault: false, removing: false }
+  const entry = new ContextEntry(state.ids.userContext(), browserContextId, false)
+  if (options.focusEmulated) entry.focusEmulated = true
+  if (options.requestSizes) entry.requestSizes = new Map()
+  if (options.requestTiming) entry.requestTiming = new Map()
+  entry.proxy = Option.getOrUndefined(options.proxy)
   state.contexts.set(entry.id, entry)
   state.contextsByCdp.set(browserContextId, entry)
-  yield* state.buffer.run(() => state.buffer.emit({ _tag: "UserContextAdded", context: entry.id, isDefault: false }))
+  yield* state.buffer.run(() =>
+    state.buffer.emit({
+      _tag: "UserContextAdded",
+      context: entry.id,
+      isDefault: false,
+      ...(options.requestTiming ? { requestTiming: true } : {}),
+      ...(options.requestSizes ? { requestSizes: true } : {})
+    })
+  )
   yield* Kit.protocol(applyDownloads(state, entry))
   return entry.id
 })
@@ -123,34 +137,56 @@ export const removeUserContext = Effect.fnUntraced(function*(state: State, id: U
       Kit.unsupported("removeDefaultContext", "The default context exists for the whole connection")
     )
   }
-  // A removal under way reports the context's end
-  if (context.removing) return
-  context.removing = true
-  const inContext = [...state.pages.values()].filter((page) => page.context === context)
   const browserContextId = context.browserContextId
-  yield* Kit.protocol(
-    Target.disposeBrowserContext({ browserContextId: browserContextId as BrowserCdp.BrowserContextID }).pipe(
-      Protocol.on(state.root())
-    )
-  ).pipe(Effect.tapError(() => Effect.sync(() => context.removing = false)))
-  // Chromium may answer before its pages' sessions end. The context ends after they have, which L1 waits for under
-  // a budget of its own (`Model.remove`); they end with the connection at the latest
-  state.buffer.start(Effect.gen(function*() {
-    yield* Effect.forEach(inContext, (page) => page.target.session.ended, { discard: true })
-    state.contexts.delete(id)
-    state.contextsByCdp.delete(browserContextId)
-    yield* state.buffer.run(() => state.buffer.emit({ _tag: "UserContextRemoved", context: id }))
+  const removal = contextLock(context).withPermits(1)(Effect.gen(function*() {
+    // A successful disposal is final even while page-session shutdown is still pending.
+    if (context.disposed) return
+    context.removing = true
+    const inContext = [...state.pages.values()].filter((page) => page.context === context)
+    yield* Kit.protocol(
+      Target.disposeBrowserContext({ browserContextId: browserContextId as BrowserCdp.BrowserContextID }).pipe(
+        Protocol.on(state.root())
+      )
+    ).pipe(Effect.onExit((exit) =>
+      Effect.sync(() => {
+        if (Exit.isFailure(exit)) context.removing = false
+      })
+    ))
+    context.disposed = true
+    context.requestSizes?.clear()
+    // Chromium may answer before its pages' sessions end. The context ends after they have, which L1 waits for under
+    // a budget of its own (`Model.remove`); they end with the connection at the latest
+    state.buffer.start(Effect.gen(function*() {
+      yield* Effect.forEach(inContext, (page) => page.target.session.ended, { discard: true })
+      context.proxy = undefined
+      state.contexts.delete(id)
+      state.contextsByCdp.delete(browserContextId)
+      yield* state.buffer.run(() => state.buffer.emit({ _tag: "UserContextRemoved", context: id }))
+    }))
   }))
+  // A removal the browser refused leaves the context in place: what its declarations' releases left alone because
+  // this removal was to follow is applied again: its download behavior (no declaration in force says "default"),
+  // its interception and its file chooser dialog
+  yield* removal.pipe(
+    Effect.onError(() =>
+      // Independent resets: one that fails doesn't skip the others
+      Effect.all([applyDownloads(state, context).pipe(Effect.ignore), restoreContext(state, context)], {
+        discard: true
+      })
+    )
+  )
 })
 
 export const createPage = Effect.fnUntraced(function*(state: State, id: UserContext.Id) {
   const context = yield* contextOf(state, id)
+  // Where focus is emulated for the context's life, every page reports it, so a tab behind another still renders.
+  // A declaration that can be released or overridden later doesn't last as long as the tab, so it doesn't decide.
   const { targetId } = yield* Kit.protocol(
     Target.createTarget({
       url: "about:blank",
-      // A window of its own, so a page opened after it doesn't put it in the background, where headless Chromium
-      // renders nothing
-      newWindow: true,
+      // Otherwise a window of its own, so a page opened after it doesn't put it in the background, where headless
+      // Chromium renders nothing
+      ...(context.focusEmulated ? {} : { newWindow: true }),
       ...(context.isDefault || context.browserContextId === undefined
         ? {}
         : { browserContextId: context.browserContextId as BrowserCdp.BrowserContextID })

@@ -20,17 +20,26 @@ import type * as MonotonicInstant from "./MonotonicInstant.ts"
 import type * as Pixels from "./Pixels.ts"
 import * as Reason from "./Reason.ts"
 import type * as Target from "./Target.ts"
+import type * as WebAuthn from "./WebAuthn.ts"
 
 const TypeId = "~@usestrider/browser/Capability"
 
 /**
  * A feature that only some backends have, whose handle has type `H`.
  *
+ * **Details**
+ *
+ * The access parameter defaults to `"inspect"`. A `"control"` capability needs a page you control.
+ *
  * @stability unstable
  * @category models
  * @since 0.1.0
  */
-export interface Capability<out H> {
+export interface Capability<out H, out Access extends "inspect" | "control" = "inspect"> {
+  /**
+   * The access needed to acquire this capability.
+   */
+  readonly access: Access
   readonly [TypeId]: () => H
   readonly name: string
 }
@@ -42,9 +51,10 @@ export interface Capability<out H> {
  * @category guards
  * @since 0.1.0
  */
-export const isCapability = (u: unknown): u is Capability<unknown> => Predicate.hasProperty(u, TypeId)
+export const isCapability = (u: unknown): u is Capability<unknown> | Capability<unknown, "control"> =>
+  Predicate.hasProperty(u, TypeId)
 
-const make = <H>(name: string): Capability<H> => ({ [TypeId]: () => undefined as H, name })
+const make = <H>(name: string): Capability<H> => ({ [TypeId]: () => undefined as H, name, access: "inspect" })
 
 /**
  * One node of the browser's own accessibility tree, unprocessed.
@@ -140,7 +150,7 @@ export interface ScreencastControl {
  */
 export interface VideoRecording {
   /**
-   * The file, once the capability's scope has closed and the browser has written it.
+   * The finished file when recording ends. A writer failure fails this effect with `BackendFailure`.
    */
   readonly file: Effect.Effect<FilePath.Local, CapabilityError | Target.TargetGone | Deadline.Timeout>
 }
@@ -164,6 +174,9 @@ export const AxTree: Capability<AxTreeReader> = make("AxTree")
  * that deadline before the screencast starts, and a metrics error fails acquisition. The browser may
  * hold this read while it processes a navigation. It does not wait for the page to load. Another
  * navigation or a detach can still intervene before start; the read does not guarantee that the page stays active.
+ * Chromium shares the stream with other screencasts and video recordings. Each frame is acknowledged after
+ * all consumers take it or release their scopes. Close the scope when you stop reading, so other consumers
+ * can continue. Joining an idle active stream first receives its latest image.
  *
  * @stability unstable
  * @category constants
@@ -172,17 +185,24 @@ export const AxTree: Capability<AxTreeReader> = make("AxTree")
 export const Screencast: Capability<ScreencastControl> = make("Screencast")
 
 /**
- * A video file of the page, recorded by Firefox.
+ * A WebM video file of the page.
  *
  * **Details**
  *
- * Firefox writes a WebM file while the capability's scope lives, into the directory the page's context
- * downloads to. So the file is removed with the context's temporary downloads, unless
- * `UserContext.Options.downloads` names a directory of yours.
+ * Firefox writes the file itself; Chromium uses a `VideoWriter` provided to its browser layer. Both write into
+ * the context's downloads directory until recording ends. Temporary downloads are removed with
+ * the context; set `UserContext.Options.downloads` to keep the file in a directory of yours.
+ * WebKit requires explicit layer video options and a writer, and writes into the directory those options name.
+ * Its initial PNG is immediate; subsequent captures wait the configured interval after completion. PNG polling
+ * can miss short states and adds work to the page. Video does not enable WebKit downloads or native screencasts.
+ * Chromium and opted-in WebKit keep each source frame's time, showing it until the next frame or recording end.
+ * Viewport changes are scaled and padded to the initial size. Closing its scope or ending its page/session closes input and waits up to five seconds on the
+ * browser clock for a started writer. A recording that receives no image fails promptly with `BackendFailure`.
  *
  * **Gotchas**
  *
- * It fails with `Unsupported` on Chromium, which streams frames (`Screencast`) instead, and on WebKit. It fails on
+ * It fails with `Unsupported` on Chromium without a `VideoWriter`, or WebKit without both a writer and explicit
+ * polled-video options. It fails on
  * Firefox too when Strider didn't launch it, or when the page's context denies downloads, because the file would
  * be out of reach.
  *
@@ -207,6 +227,42 @@ export const Screencast: Capability<ScreencastControl> = make("Screencast")
  * @since 0.1.0
  */
 export const Video: Capability<VideoRecording> = make("Video")
+
+/**
+ * A native Chromium virtual authenticator on this page, removed when the caller's scope closes.
+ *
+ * **Details**
+ *
+ * Requires control access. Acquisition creates a CTAP2 authenticator with internal transport, resident keys
+ * and user verification supported, verification successful, automatic user presence enabled, and UI disabled.
+ * These are fixed defaults. Only one acquisition may live on a page; overlap fails with `CapabilityError`.
+ * Credentials survive navigation. Another page or popup needs an explicit copy; copies keep separate counters.
+ * Firefox and WebKit fail with `Unsupported`.
+ *
+ * **Example** (Enabling native passkey registration)
+ *
+ * ```ts import.meta.vitest
+ * import { Capability, Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const registerPasskey = Effect.fn("registerPasskey")(function*(page: Page.Page) {
+ *   const authenticator = yield* page.capability(Capability.VirtualAuthenticator)
+ *   yield* page.getByRole("button", { name: "Create passkey" }).click()
+ *   yield* page.getByText("Passkey created").pipe(Expect.toBeVisible)
+ *   return yield* authenticator.credentials
+ * })
+ * ```
+ *
+ * @see WebAuthn.VirtualAuthenticator
+ * @stability unstable
+ * @category capabilities
+ * @since 0.1.0
+ */
+export const VirtualAuthenticator: Capability<WebAuthn.VirtualAuthenticator, "control"> = {
+  [TypeId]: () => undefined as unknown as WebAuthn.VirtualAuthenticator,
+  name: "VirtualAuthenticator",
+  access: "control"
+}
 
 /**
  * Schema for the reasons acquiring or using a capability can fail.

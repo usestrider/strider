@@ -4,7 +4,7 @@
 //   examples        type-check every JSDoc example against the package, and every guide's TypeScript block
 //   format          format every guide's TypeScript and JSON blocks, and every JSDoc example, with dprint, at the
 //                   site's column width; with --check, write nothing and fail if one isn't formatted
-//   index           write each public package's INDEX.md
+//   index           write each public package's INDEX.md (--package browser|vitest for build/prepack)
 //   api-reference   write each public package's API reference dataset to .data/api-reference/<package>/, what
 //                   TypeScript reads in every example and guide block to .data/api-reference/code.json, and each
 //                   backend's capabilities to .data/api-reference/capabilities.json
@@ -15,7 +15,9 @@ import { spawnSync } from "node:child_process"
 import * as path from "node:path"
 
 const [command, ...args] = process.argv.slice(2)
-const root = process.cwd()
+const root = command === "index" && args.includes("--package")
+  ? path.resolve(import.meta.dirname, "../../../..")
+  : process.cwd()
 // The public packages: @usestrider/browser and @usestrider/vitest
 const packages = ["browser", "vitest"].map((name) => ({ name, dir: path.join(root, "packages", name) }))
 // The documentation site's guides, whose code is checked and read with the examples'
@@ -38,9 +40,15 @@ switch (command) {
       { check: args.includes("--check") }
     )
     break
-  case "index":
-    for (const pkg of packages) (await import("./index.mjs")).index(pkg.dir)
+  case "index": {
+    const name = args.includes("--package") ? args[args.indexOf("--package") + 1] : undefined
+    if (args.includes("--package") && !packages.some((pkg) => pkg.name === name)) {
+      throw new Error("index --package expects browser or vitest")
+    }
+    const { index } = await import("./index.mjs")
+    for (const pkg of packages.filter((pkg) => name === undefined || pkg.name === name)) index(pkg.dir)
     break
+  }
   case "api-reference": {
     const out = path.join(root, ".data/api-reference")
     for (const pkg of packages) {

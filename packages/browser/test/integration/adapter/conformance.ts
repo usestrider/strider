@@ -336,21 +336,70 @@ export const conformance = (backend: Backend) =>
             assert.strictEqual(fromWorker.response.servedBy, precise ? "serviceWorker" : "cacheOrServiceWorker")
           }), timeout)
 
+        it.effect(
+          "reports a replaced document's realm removed before or after the document ends, as each backend does",
+          () =>
+            Effect.gen(function*() {
+              const world = yield* setup(backend)
+              const { page } = yield* newPage(world)
+              yield* goto(world, page, `${world.site.origin}/frames`)
+              const frames = yield* Effect.all([
+                world.facts.next((fact): fact is Extract<Adapter.Fact, { _tag: "FrameAdded" }> =>
+                  fact._tag === "FrameAdded" && fact.parent === page
+                ),
+                world.facts.next((fact): fact is Extract<Adapter.Fact, { _tag: "FrameAdded" }> =>
+                  fact._tag === "FrameAdded" && fact.parent === page &&
+                  world.facts.all("FrameAdded").filter((other) =>
+                      other.parent === page
+                    ).indexOf(fact) === 1
+                )
+              ])
+              for (const frame of frames) {
+                yield* world.facts.when("DocumentCommitted", (fact) =>
+                  fact.navigable === frame.frame && fact.url.endsWith("/child"))
+              }
+              const navigables = [
+                page,
+                ...frames.map((frame) =>
+                  frame.frame
+                )
+              ]
+              const realms = yield* Effect.forEach(navigables, (navigable) => mainRealm(world, navigable))
+              // A cross-document navigation replaces the page's document and ends its frames' documents with it.
+              yield* goto(world, page, `${world.site.origin}/hello`)
+              const replacement = world.facts.all("DocumentCommitted").filter((fact) => fact.navigable === page).at(-1)!
+              const ends = yield* Effect.forEach(navigables, (navigable, index): Effect.Effect<Adapter.Fact> =>
+                index === 0
+                  ? Effect.succeed(replacement)
+                  : world.facts.when("NavigableRemoved", (fact) => fact.navigable === navigable))
+              const removals = yield* Effect.forEach(realms, (realm) =>
+                world.facts.when("RealmRemoved", (fact) => fact.realm === realm))
+              // Whether the model still holds the document when its realm is reported gone: a call in the realm
+              // that fails there sees a live document.
+              const gap = removals.map((removal, index) =>
+                world.facts.facts.indexOf(removal) < world.facts.facts.indexOf(ends[index]!)
+              )
+              assert.deepStrictEqual(
+                gap,
+                world.adapter.info.protocol === "webkit" ? [false, true, true] : [true, true, true]
+              )
+            }),
+          timeout
+        )
+
         it.effect("follows a redirect as hops of one request", () =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
             const { page } = yield* newPage(world)
             const { outcome } = yield* goto(world, page, `${world.site.origin}/redirect`)
             assert(outcome._tag === "Committed")
-            const committed = yield* world.facts.when("DocumentCommitted", (fact) =>
-              fact.document === outcome.document)
+            const committed = yield* world.facts.when("DocumentCommitted", (fact) => fact.document === outcome.document)
             assert.strictEqual(committed.url, `${world.site.origin}/landed`)
             const hop = Option.getOrThrow(outcome.response)
             assert.match(hop, /\.1$/, "the second hop")
             const first = yield* world.facts.when(
               "ResponseReceived",
-              (fact) =>
-                fact.response.hop === hop.replace(/\.1$/, ".0")
+              (fact) => fact.response.hop === hop.replace(/\.1$/, ".0")
             )
             assert.strictEqual(first.response.status, 302)
             // The first hop's id is still the adapter's: asked for its body, it says it was a redirect (Q39)
@@ -1169,6 +1218,105 @@ export const conformance = (backend: Backend) =>
             }
           }), timeout)
 
+        for (const scrolled of [false, true]) {
+          it.effect(`keeps wrapped text layout in viewport clips (${scrolled ? "scrolled" : "initial"})`, () =>
+            Effect.gen(function*() {
+              const world = yield* setup(backend)
+              const { page } = yield* newPage(world)
+              yield* goto(world, page, `${world.site.origin}/hello`)
+              const clip = (yield* evaluate(
+                world,
+                page,
+                `() => {
+                document.documentElement.style.cssText = 'overflow-y:scroll';
+                document.body.style.cssText = 'margin:0;padding:40px 50px;height:3000px;box-sizing:border-box;background:white';
+                document.body.innerHTML = '<div id="wrapped" style="font:20px/24px monospace;height:120px;overflow:hidden;margin-top:${
+                  scrolled ? 700 : 0
+                }px">' + 'Wrapped text keeps the same line breaks beside a visible scrollbar. '.repeat(40) + '</div>';
+                window.scrollTo(0, ${scrolled ? 700 : 0});
+                const r = document.querySelector('#wrapped').getBoundingClientRect();
+                return { x:r.x+scrollX, y:r.y+scrollY, width:r.width, height:r.height, scrollX, scrollY };
+              }`
+              )) as { x: number; y: number; width: number; height: number; scrollX: number; scrollY: number }
+              const { scrollX, scrollY, ...region } = clip
+              const options = {
+                format: "png" as const,
+                quality: Option.none(),
+                fullPage: false,
+                scale: "device" as const,
+                omitBackground: false
+              }
+              const viewport = yield* world.adapter.screenshot(page, { ...options, clip: Option.none() })
+              const clipped = yield* world.adapter.screenshot(page, { ...options, clip: Option.some(region) })
+              const difference = yield* evaluate(
+                world,
+                page,
+                `async () => {
+                const load = async (data) => { const image = new Image(); image.src = 'data:image/png;base64,' + data; await image.decode(); return image; };
+                const viewport = await load('${Buffer.from(viewport).toString("base64")}');
+                const clipped = await load('${Buffer.from(clipped).toString("base64")}');
+                const canvas = document.createElement('canvas'); canvas.width = ${clip.width}; canvas.height = ${clip.height};
+                const ctx = canvas.getContext('2d'); ctx.drawImage(viewport, -${clip.x - scrollX}, -${
+                  clip.y - scrollY
+                });
+                const expected = ctx.getImageData(0,0,canvas.width,canvas.height).data;
+                ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(clipped,0,0);
+                const actual = ctx.getImageData(0,0,canvas.width,canvas.height).data;
+                let different = 0; for(let i=0;i<actual.length;i++) if(actual[i]!==expected[i]) different++;
+                return { different, width:clipped.width, height:clipped.height };
+              }`
+              )
+              assert.deepStrictEqual(difference, { different: 0, width: clip.width, height: clip.height })
+            }), timeout)
+        }
+
+        it.effect("captures distinct partly and wholly offscreen markers", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            const { page } = yield* newPage(world)
+            yield* goto(world, page, `${world.site.origin}/hello`)
+            const height = (yield* evaluate(
+              world,
+              page,
+              `() => {
+              document.body.style.cssText = 'margin:0;height:3000px;background:rgb(0,128,0)';
+              return innerHeight;
+            }`
+            )) as number
+            for (const y of [height - 60, height + 40]) {
+              yield* evaluate(
+                world,
+                page,
+                `() => {
+                document.body.innerHTML = '<div style="position:absolute;left:50px;top:${y}px;width:100px;height:60px;background:red"></div><div style="position:absolute;left:50px;top:${
+                  y + 60
+                }px;width:100px;height:60px;background:blue"></div>';
+              }`
+              )
+              const png = yield* world.adapter.screenshot(page, {
+                format: "png",
+                quality: Option.none(),
+                fullPage: false,
+                scale: "device",
+                omitBackground: false,
+                clip: Option.some({ x: 50, y, width: 100, height: 120 })
+              })
+              const pixels = yield* evaluate(
+                world,
+                page,
+                `async () => {
+                const image = new Image(); image.src = 'data:image/png;base64,${
+                  Buffer.from(png).toString("base64")
+                }'; await image.decode();
+                const canvas = document.createElement('canvas'); canvas.width=100; canvas.height=120;
+                const ctx=canvas.getContext('2d'); ctx.drawImage(image,0,0);
+                return [image.width,image.height, ...ctx.getImageData(50,30,1,1).data, ...ctx.getImageData(50,90,1,1).data];
+              }`
+              )
+              assert.deepStrictEqual(pixels, [100, 120, 255, 0, 0, 255, 0, 0, 255, 255])
+            }
+          }), timeout)
+
         it.effect("captures screenshots and PDFs, and reads response bodies", () =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
@@ -1262,7 +1410,8 @@ export const conformance = (backend: Backend) =>
             yield* declared
             yield* goto(world, page, `${world.site.origin}/form`)
             yield* evaluate(world, page, "() => document.querySelector('#f').click()", true)
-            const opened = yield* world.facts.when("ObligationOpened", (fact) => fact.subject._tag === "FileChooser")
+            const opened = yield* world.facts.when("ObligationOpened", (fact) =>
+              fact.subject._tag === "FileChooser")
             assert(opened.subject._tag === "FileChooser")
             assert.isTrue(opened.subject.multiple)
             yield* world.adapter.resolve(opened.obligation, { _tag: "SetFiles", files: [import.meta.filename] })
@@ -1276,7 +1425,9 @@ export const conformance = (backend: Backend) =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
             const { context, page } = yield* newPage(world)
-            const directory = (yield* Effect.promise(() => import("node:os"))).tmpdir() +
+            const directory = (yield* Effect.promise(() =>
+              import("node:os")
+            )).tmpdir() +
               `/strider-downloads-${process.pid}`
             const declared = world.adapter.declare({ _tag: "UserContext", context }, {
               _tag: "Downloads",

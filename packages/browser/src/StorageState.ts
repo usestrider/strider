@@ -1,5 +1,5 @@
 /**
- * A context's saved storage: cookies, `localStorage` and IndexedDB, for each origin and partition.
+ * A context's saved storage: cookies, `localStorage`, and IndexedDB, for each origin and partition.
  *
  * Export a signed-in context's state with `context.exportStorageState`, save it with the `Json` codec, and start
  * new contexts from it with `UserContext.Options.storageState`. It carries secrets: values are `Redacted` in
@@ -35,7 +35,7 @@ export const IndexedDbDatabase = Schema.Struct({
     })),
     /**
      * Each record's key and value in Strider's JSON-safe encoding, which keeps a `Date`, `RegExp`, `Map`,
-     * `Set`, `ArrayBuffer`, typed array, `bigint`, `undefined` and the numbers JSON can't write.
+     * `Set`, `ArrayBuffer`, typed array, `bigint`, `undefined`, and the numbers JSON can't write.
      */
     records: Schema.Array(Schema.Struct({
       key: Schema.Unknown,
@@ -116,12 +116,12 @@ export class StorageState extends Schema.Class<StorageState>("@usestrider/browse
 export const Json = Schema.fromJsonString(Schema.toCodecJson(StorageState))
 
 /**
- * Reason for a storage state the new context can't apply in full, such as partitioned cookies on a backend that
+ * Reason for a storage state the context can't apply in full, such as partitioned cookies on a backend that
  * can't set them.
  *
  * **Details**
  *
- * The context isn't created, so nothing is applied.
+ * Creation refuses before making a context; replacement refuses before changing the existing context's storage.
  *
  * **Example** (Starting signed out when the state doesn't apply)
  *
@@ -156,5 +156,49 @@ export class Incompatible extends Schema.Error<Incompatible>("@usestrider/browse
 }) {
   override get message(): string {
     return `Can't apply ${this.partitions.length} partitions (${this.hint})`
+  }
+}
+
+/**
+ * Reason for a failed storage replacement whose changes may already have begun.
+ *
+ * **Details**
+ *
+ * Cookies and origin storage may already have changed; this reason does not confirm that any change occurred.
+ * No rollback is attempted; pending IndexedDB deletions
+ * may complete later when open connections close. Stop writers and release storage handles before retrying.
+ * Deadlines remain `Deadline.Timeout`, and interruption remains interruption; both can also leave partial changes.
+ *
+ * **Example** (Reporting a partially applied login)
+ *
+ * ```ts import.meta.vitest
+ * import { StorageState, UserContext } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const replace = Effect.fn("replace")(
+ *   function*(context: UserContext.UserContext, state: StorageState.StorageState) {
+ *     yield* context.setStorageState(state).pipe(
+ *       Effect.catchReason(
+ *         "UserContextError",
+ *         "PartiallyApplied",
+ *         (reason) => Effect.logWarning(reason.hint)
+ *       )
+ *     )
+ *   }
+ * )
+ * ```
+ *
+ * @stability unstable
+ * @category reasons
+ * @since 0.1.0
+ */
+export class PartiallyApplied
+  extends Schema.Error<PartiallyApplied>("@usestrider/browser/StorageState/PartiallyApplied")({
+    _tag: Schema.tag("PartiallyApplied"),
+    hint: Schema.String
+  })
+{
+  override get message(): string {
+    return `Storage replacement may be partial; pending database deletions may complete later (${this.hint})`
   }
 }

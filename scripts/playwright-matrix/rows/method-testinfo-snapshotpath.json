@@ -1,0 +1,11 @@
+{
+  "id": "method-testinfo-snapshotpath",
+  "upstream": [
+    "method:TestInfo.snapshotPath"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No Strider Playwright Test runner/reporter integration for this member. The Vitest integration does not implement this contract.",
+  "capabilities": [],
+  "requirements": []
+}

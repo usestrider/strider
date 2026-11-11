@@ -1,0 +1,17 @@
+{
+  "id": "method-locatorassertions-tobeeditable",
+  "upstream": [
+    "method:LocatorAssertions.toBeEditable"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toBeEditable",
+      "url": "/docs/api/browser/Expect#toBeEditable"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": []
+}

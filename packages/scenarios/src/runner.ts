@@ -1,3 +1,4 @@
+import { remote, remoteSamples } from "./benchmarks/remote.ts"
 import { stats } from "./measure.ts"
 import type { Measurements, Outcome } from "./report.ts"
 import type { Scenario } from "./scenarios.ts"
@@ -18,33 +19,61 @@ type Result = Measurements["scenarios"][number]
 export const runScenarios = async (
   chosen: ReadonlyArray<Scenario>,
   runs: number,
-  runners: (scenario: Scenario) => Record<"strider" | "playwright", () => Promise<string>>,
-  log: (line: string) => void
+  runners: (scenario: Scenario) => {
+    readonly strider: () => Promise<string>
+    readonly playwright?: (() => Promise<string>) | undefined
+  },
+  log: (line: string) => void,
+  onAttempt: (scenario: string, sample: Result["samples"][number]) => void = () => {}
 ): Promise<Array<Result>> => {
   const results: Array<Result> = []
   for (const scenario of chosen) {
     log(`scenario ${scenario.name}`)
     const run = runners(scenario)
+    // A scenario without a Playwright twin runs Strider's program alone
+    const libraries = run.playwright === undefined
+      ? (["strider"] as const)
+      : (["strider", "playwright"] as const)
     const outcome = {
       strider: await outcomeOf(run.strider, scenario.expected),
-      playwright: await outcomeOf(run.playwright, scenario.expected)
+      playwright: run.playwright === undefined ? undefined : await outcomeOf(run.playwright, scenario.expected)
     }
-    for (const library of ["strider", "playwright"] as const) {
+    for (const library of libraries) {
       const result = outcome[library]
-      if (result._tag === "Failed") {
+      if (result?._tag === "Failed") {
         log(`${scenario.name}, ${library}, initial outcome: failed: ${result.error}`)
       }
     }
     const times = { strider: [] as Array<number>, playwright: [] as Array<number> }
     const attempts = { strider: 0, playwright: 0 }
     const failures: Array<Result["failures"][number]> = []
-    for (let i = 0; i < runs; i++) {
-      const order = i % 2 === 0 ? (["strider", "playwright"] as const) : (["playwright", "strider"] as const)
+    const samples: Array<Result["samples"][number]> = []
+    if (remote) {
+      if (run.playwright === undefined) throw new Error(`No Playwright twin for ${scenario.name}`)
+      await remoteSamples(scenario.name, async (library, repetition) => {
+        const started = performance.now()
+        const result = await outcomeOf(run[library]!, scenario.expected)
+        const ms = performance.now() - started
+        const sample = { library, repetition, ms, outcome: result }
+        samples.push(sample)
+        onAttempt(scenario.name, sample)
+        attempts[library]++
+        if (result._tag === "Failed") throw new Error(result.error)
+        times[library].push(ms)
+        return ms
+      })
+    }
+    for (let i = 0; !remote && i < runs; i++) {
+      const order = i % 2 === 0 ? libraries : [...libraries].reverse()
       for (const library of order) {
         attempts[library]++
         const started = performance.now()
-        const result = await outcomeOf(run[library], scenario.expected)
-        if (result._tag === "Read") times[library].push(performance.now() - started)
+        const result = await outcomeOf(run[library]!, scenario.expected)
+        const ms = performance.now() - started
+        const sample = { library, repetition: i + 1, ms, outcome: result }
+        samples.push(sample)
+        onAttempt(scenario.name, sample)
+        if (result._tag === "Read") times[library].push(ms)
         else {
           failures.push({ library, repetition: i + 1, error: result.error })
           log(`${scenario.name}, ${library}, timed repetition ${i + 1}: failed: ${result.error}`)
@@ -56,6 +85,7 @@ export const runScenarios = async (
       outcome,
       attempts,
       failures,
+      samples,
       times: { strider: stats(times.strider), playwright: stats(times.playwright) }
     })
   }
@@ -67,7 +97,7 @@ export const publish = (results: ReadonlyArray<Result>, write: () => void): numb
   write()
   return results.some((result) =>
       result.failures.length > 0 || result.outcome.strider._tag === "Failed" ||
-      result.outcome.playwright._tag === "Failed"
+      result.outcome.playwright?._tag === "Failed"
     )
     ? 1
     : 0

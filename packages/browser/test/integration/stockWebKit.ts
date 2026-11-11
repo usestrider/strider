@@ -48,23 +48,39 @@ const environment = (dir: string, display: string, inspector: Record<string, str
  * The MiniBrowser showing `urls`, a tab each, and its inspector server's endpoint, `http://127.0.0.1:port`, once
  * its list names them all. The process is returned too, for a test that ends it.
  */
-export const startMiniBrowser = Effect.fnUntraced(function*(...urls: ReadonlyArray<string>) {
+export const startMiniBrowser = (...urls: ReadonlyArray<string>) => startMiniBrowserOnPort(undefined, ...urls)
+
+/** The inspector helper with a selected port, for occupied-port regressions. */
+export const startMiniBrowserOnPort = Effect.fnUntraced(function*(
+  selectedPort: number | undefined,
+  ...urls: ReadonlyArray<string>
+) {
   const fs = yield* FileSystem.FileSystem
   const dir = yield* fs.makeTempDirectoryScoped({ prefix: "strider-webkitgtk-" })
   const display = yield* startXvfb(dir)
-  const port = yield* freePort
+  const port = selectedPort ?? (yield* freePort)
   const endpoint = `http://127.0.0.1:${port}`
   // Scripts may open windows, so a test can have the browser open a page after the layer attached
   const args = [`--profile-dir=${dir}/profile`, "--javascript-can-open-windows-automatically=true", ...urls]
   const browser = yield* Launch.spawn(webkitgtk.executable, args, dir, {
     env: environment(dir, display, { WEBKIT_INSPECTOR_HTTP_SERVER: `127.0.0.1:${port}` })
   })
-  for (let attempt = 0; attempt < 100; attempt++) {
-    const listed = yield* Effect.promise(() => fetch(`${endpoint}/`).then((response) => response.text(), () => ""))
-    if (WebKitStockTransport.pagesOf(listed).length >= urls.length) return { endpoint, process: browser.handle }
-    yield* Effect.sleep("100 millis")
-  }
-  return yield* Effect.die(new Error(`The MiniBrowser's inspector at ${endpoint} listed no page`))
+  const bindFailure = Effect.gen(function*() {
+    const line = yield* browser.stderrLine(/Failed to start remote inspector HTTP server .*address already in use/i)
+    // Ending stderr without a bind error says nothing about HTTP discovery.
+    if (Option.isNone(line)) return yield* Effect.never
+    return yield* Effect.die(new Error(`The MiniBrowser's inspector port ${port}: address already in use`))
+  })
+  const discovery = Effect.gen(function*() {
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const listed = yield* Effect.promise(() => fetch(`${endpoint}/`).then((response) => response.text(), () => ""))
+      if (WebKitStockTransport.pagesOf(listed).length >= urls.length) return { endpoint, process: browser.handle }
+      yield* Effect.sleep("100 millis")
+    }
+    return yield* Effect.die(new Error(`The MiniBrowser's inspector at ${endpoint} listed no page`))
+  })
+  // The race interrupts its loser, removing the stderr waiter on success or interruption.
+  return yield* Effect.raceFirst(discovery, bindFailure)
 })
 
 /**
