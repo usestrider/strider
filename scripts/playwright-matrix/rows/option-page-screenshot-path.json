@@ -1,0 +1,18 @@
+{
+  "id": "option-page-screenshot-path",
+  "upstream": [
+    "method:Page.screenshot"
+  ],
+  "option": "path",
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "ReadonlyPage.screenshot",
+      "url": "/docs/api/browser/Page#ReadonlyPage.screenshot"
+    }
+  ],
+  "notes": "Returns bytes; write them with Effect FileSystem.",
+  "capabilities": [],
+  "requirements": []
+}

@@ -1,0 +1,35 @@
+{
+  "id": "method-browsercontext-setgeolocation",
+  "upstream": [
+    "method:BrowserContext.setGeolocation"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "UserContext",
+      "symbol": "UserContext.emulate",
+      "url": "/docs/api/browser/UserContext#UserContext.emulate"
+    }
+  ],
+  "notes": "Emulation lasts for the caller scope.",
+  "capabilities": [
+    "emulation.geolocation"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/UserContext.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [],
+  "gaps": [
+    "method-browsercontext-setgeolocation-value-unavailable-position"
+  ],
+  "valueCoverage": [
+    {
+      "value": "unavailable position",
+      "status": "missing",
+      "gap": "method-browsercontext-setgeolocation-value-unavailable-position"
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public option for this contract.",
+  "capabilities": [],
+  "id": "option-browsercontext-routefromhar-notfound",
+  "upstream": [
+    "method:BrowserContext.routeFromHAR"
+  ],
+  "option": "notFound",
+  "requirements": [],
+  "valueCoverage": [
+    {
+      "value": "abort",
+      "status": "missing"
+    },
+    {
+      "value": "fallback",
+      "status": "missing"
+    }
+  ]
+}

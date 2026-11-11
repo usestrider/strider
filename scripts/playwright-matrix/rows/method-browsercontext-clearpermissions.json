@@ -1,0 +1,25 @@
+{
+  "id": "method-browsercontext-clearpermissions",
+  "upstream": [
+    "method:BrowserContext.clearPermissions"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "UserContext",
+      "symbol": "UserContext.grant",
+      "url": "/docs/api/browser/UserContext#UserContext.grant"
+    }
+  ],
+  "notes": "Permission grants last for the caller scope; release restores prompt.",
+  "capabilities": [
+    "permissions"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/UserContext.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

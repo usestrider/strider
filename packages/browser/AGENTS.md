@@ -1,12 +1,12 @@
 # Using @usestrider/browser
 
-Instructions for agents writing code that uses Strider. `INDEX.md` in this package lists every declaration and member.
+Instructions for agents writing code that uses Strider. `INDEX.md` in this package lists every declaration and member. In a source checkout, run `pnpm index` first; the generated file is ignored.
 The design and its reasons are in the repository: https://github.com/usestrider/strider.
 
 Strider is pre-release, and the API can still change before 1.0. Launching,
 `Browser.newPage`, navigation, the queries, frames (`page.frame`, `locator.frame`, `page.frames`), every locator
 action (`click`, `dblclick`, `tap`, `hover`, `check`, `uncheck`, `focus`, `clear`, `fill`, `press`,
-`pressSequentially`, `selectOption`, `setInputFiles`, `dragTo`, `scrollIntoView`), the one-shot reads,
+`pressSequentially`, `dispatchEvent`, `selectOption`, `setInputFiles`, `dragTo`, `scrollIntoView`), the one-shot reads,
 `page.keyboard` and `page.mouse`, every `Expect` matcher, `Condition`, `Deadline`, evaluation (`page.evaluate`,
 `evaluateInMainWorld`, `evaluateHandle`, `JSHandle`, `Locator.evaluate`), snapshots with refs and `AriaPattern`,
 `screenshot`, `pdf` and `readHtml`, cookies, `localStorage` and `sessionStorage`, storage state with IndexedDB
@@ -81,8 +81,8 @@ waiting for a popup, a download or a file chooser, and most emulation; attached,
 - **Reads are strict.** `readText`, `readValue` and the other reads need exactly one match and never wait: none is
   `NoMatch`, several `StrictViolation`. To wait for a value, expect it: `field.pipe(Expect.toHaveValue("Ada"))`.
 - **Held input is scoped.** `yield* page.keyboard.hold("Shift")` inside `Effect.scoped`; the scope releases it.
-- **A popup's opener on Chromium renders nothing while the popup is in front,** so actions on it time out: call
-  `page.activate` on it first, or make the context with `newContext({ focus: "emulated" })` when many pages act
+- **A popup's opener on Chromium renders nothing while the popup is in front,** so rendering and stability waits
+  can time out: call `page.activate` on it first, or make the context with `newContext({ focus: "emulated" })` when many pages act
   at once. Firefox opens every page, popups too, as a window, which keeps rendering; WebKit renders them all.
 - **A route has one phase.** `page.route(pattern, handler)` sees requests before they are sent; pass
   `{ phase: "response" }` or `{ phase: "auth" }` for the others. Return a `Route` decision valid for it
@@ -103,7 +103,9 @@ waiting for a popup, a download or a file chooser, and most emulation; attached,
   `har.exportHar("run.har")`; `Trace.record(page, { screenshots: "perAction" })` and `exportTrace("trace.zip")`
   write a trace trace.playwright.dev opens; `domSnapshots: true` with `network: true` adds DOM snapshots before and
   after each action, which the viewer renders. Exports are redacted unless `include` names a class of secret;
-  requests' bodies are left out unless it names `"requestBodies"`. A request event's `headers` can lack `Cookie`:
+  requests' bodies are left out unless it names `"requestBodies"`. Trace exports also include available caller locations
+  and local source files, read at export time and copied unchanged under every diagnostics preset; unreadable files
+  are omitted. A request event's `headers` can lack `Cookie`:
   `NetworkRequest.headersSent(page, request)` gives the headers as sent.
 - **Drive a browser from a shell with `strider`.** `strider start --name s --chromium <path>`, then
   `strider -s s page new --name shop <url>`, `strider -s s -p shop snapshot`, `strider -s s -p shop click e9`; every

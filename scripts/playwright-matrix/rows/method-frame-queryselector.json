@@ -1,0 +1,28 @@
+{
+  "id": "method-frame-queryselector",
+  "upstream": [
+    "method:Frame.querySelector"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "Locator.locator",
+      "url": "/docs/api/browser/Locator#Locator.locator"
+    },
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.all",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.all"
+    }
+  ],
+  "notes": "Use a scoped CSS locator, then all for multiple matches. Results are lazy locators, not fixed ElementHandles; selection re-resolves on use and all reads the current count without waiting.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

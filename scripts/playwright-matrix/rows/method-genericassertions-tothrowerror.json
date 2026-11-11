@@ -1,0 +1,11 @@
+{
+  "id": "method-genericassertions-tothrowerror",
+  "upstream": [
+    "method:GenericAssertions.toThrowError"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "Generic value assertions belong to the chosen test framework; Strider does not export this matcher.",
+  "capabilities": [],
+  "requirements": []
+}

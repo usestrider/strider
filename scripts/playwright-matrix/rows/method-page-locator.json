@@ -1,0 +1,33 @@
+{
+  "id": "method-page-locator",
+  "upstream": [
+    "method:Page.locator"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "Locator.locator",
+      "url": "/docs/api/browser/Locator#Locator.locator"
+    }
+  ],
+  "notes": "Queries produce lazy locators; CSS selectors only. See selector differences below.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [],
+  "gaps": [
+    "method-page-locator-value-xpath-and-playwright-selector-dsl"
+  ],
+  "valueCoverage": [
+    {
+      "value": "XPath and Playwright selector DSL",
+      "status": "missing",
+      "gap": "method-page-locator-value-xpath-and-playwright-selector-dsl"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "id": "method-locator-getbytestid-value-regexp-test-id",
+  "upstream": [
+    "method:Locator.getByTestId"
+  ],
+  "parent": "method-locator-getbytestid",
+  "value": "RegExp test id",
+  "status": "missing",
+  "api": [],
+  "notes": "Strider getByTestId takes a string, not a RegExp.",
+  "capabilities": [],
+  "requirements": []
+}

@@ -1,0 +1,23 @@
+{
+  "id": "method-clock-setsystemtime",
+  "upstream": [
+    "method:Clock.setSystemTime"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "PageClock",
+      "symbol": "PageClock.setTime",
+      "url": "/docs/api/browser/PageClock#PageClock.setTime"
+    }
+  ],
+  "notes": "Clock modes are explicit; adjust fires every due timer and setTime jumps to an absolute instant.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/PageClock.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

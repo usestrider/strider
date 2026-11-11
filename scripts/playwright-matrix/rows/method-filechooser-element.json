@@ -1,0 +1,17 @@
+{
+  "id": "method-filechooser-element",
+  "upstream": [
+    "method:FileChooser.element"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "FileChooser values carry selection decisions and multiplicity, not an originating Page or input ElementHandle.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/FileChooser.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

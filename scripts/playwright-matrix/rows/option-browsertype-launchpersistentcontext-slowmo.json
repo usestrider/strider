@@ -1,0 +1,12 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public option for this contract.",
+  "capabilities": [],
+  "id": "option-browsertype-launchpersistentcontext-slowmo",
+  "upstream": [
+    "method:BrowserType.launchPersistentContext"
+  ],
+  "option": "slowMo",
+  "requirements": []
+}

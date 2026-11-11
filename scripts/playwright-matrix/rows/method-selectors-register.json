@@ -1,0 +1,11 @@
+{
+  "id": "method-selectors-register",
+  "upstream": [
+    "method:Selectors.register"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No custom selector-engine registry or global test-id-attribute setting.",
+  "capabilities": [],
+  "requirements": []
+}

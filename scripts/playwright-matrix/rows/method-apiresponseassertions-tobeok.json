@@ -1,0 +1,11 @@
+{
+  "id": "method-apiresponseassertions-tobeok",
+  "upstream": [
+    "method:APIResponseAssertions.toBeOK"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No API testing response matchers; Effect/Vitest assertions can check separate HTTP clients.",
+  "capabilities": [],
+  "requirements": []
+}

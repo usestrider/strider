@@ -1,0 +1,11 @@
+{
+  "id": "method-genericassertions-tocontain-2",
+  "upstream": [
+    "method:GenericAssertions.toContain#2"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "Generic value assertions belong to the chosen test framework; Strider does not export this matcher.",
+  "capabilities": [],
+  "requirements": []
+}

@@ -1,0 +1,27 @@
+{
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "ActionOptions",
+      "url": "/docs/api/browser/Locator#ActionOptions"
+    }
+  ],
+  "notes": "Use the corresponding locator action option; source position is position and target position is targetPosition.",
+  "capabilities": [],
+  "id": "option-frame-check-trial",
+  "upstream": [
+    "method:Frame.check"
+  ],
+  "option": "trial",
+  "requirements": [
+    {
+      "capability": "input.native",
+      "alternatives": [
+        "input.webdriver"
+      ],
+      "file": "packages/browser/src/internal/webkitAdapter.ts",
+      "quote": "dispatchInput: refuse(\"input.native\", \"stock WebKit's inspector protocol has no Input domain\")"
+    }
+  ]
+}

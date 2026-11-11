@@ -1,0 +1,25 @@
+{
+  "id": "method-filechooser-ismultiple",
+  "upstream": [
+    "method:FileChooser.isMultiple"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "FileChooser",
+      "symbol": "FileChooser",
+      "url": "/docs/api/browser/FileChooser#FileChooser"
+    }
+  ],
+  "notes": "Handle the chooser with a decision.",
+  "capabilities": [
+    "fileChooser"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/FileChooser.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

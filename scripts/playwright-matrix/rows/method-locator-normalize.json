@@ -1,0 +1,17 @@
+{
+  "id": "method-locator-normalize",
+  "upstream": [
+    "method:Locator.normalize"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

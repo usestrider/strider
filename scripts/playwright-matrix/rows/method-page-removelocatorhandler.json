@@ -1,0 +1,17 @@
+{
+  "id": "method-page-removelocatorhandler",
+  "upstream": [
+    "method:Page.removeLocatorHandler"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding Page operation/event. Generic main-world evaluation is available, but does not implement this named contract and its waiting/lifetime guarantees.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

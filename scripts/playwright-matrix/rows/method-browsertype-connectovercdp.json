@@ -1,0 +1,49 @@
+{
+  "id": "method-browsertype-connectovercdp",
+  "upstream": [
+    "method:BrowserType.connectOverCDP"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "chromium/Chromium",
+      "symbol": "layerConnect",
+      "url": "/docs/api/browser/chromium/Chromium#layerConnect"
+    }
+  ],
+  "notes": "Launch with an explicit executable path; connectOverCDP is Chromium only.",
+  "capabilities": [],
+  "browserOverrides": {
+    "firefox.launched": {
+      "status": "missing",
+      "limitations": [
+        "connectOverCDP is Chromium-only; use the native backend connection layer instead."
+      ]
+    },
+    "firefox.attached": {
+      "status": "missing",
+      "limitations": [
+        "connectOverCDP is Chromium-only; use the native backend connection layer instead."
+      ]
+    },
+    "webkit.launched": {
+      "status": "missing",
+      "limitations": [
+        "connectOverCDP is Chromium-only; use the native backend connection layer instead."
+      ]
+    },
+    "webkit.attached": {
+      "status": "missing",
+      "limitations": [
+        "connectOverCDP is Chromium-only; use the native backend connection layer instead."
+      ]
+    }
+  },
+  "audit": {
+    "sources": [
+      "packages/browser/src/Browser.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

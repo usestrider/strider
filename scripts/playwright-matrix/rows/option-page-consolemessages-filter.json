@@ -1,0 +1,22 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public option for this contract.",
+  "capabilities": [],
+  "id": "option-page-consolemessages-filter",
+  "upstream": [
+    "method:Page.consoleMessages"
+  ],
+  "option": "filter",
+  "requirements": [],
+  "valueCoverage": [
+    {
+      "value": "all",
+      "status": "missing"
+    },
+    {
+      "value": "since-navigation",
+      "status": "missing"
+    }
+  ]
+}

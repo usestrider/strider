@@ -1,0 +1,38 @@
+{
+  "id": "method-request-timing",
+  "upstream": [
+    "method:Request.timing"
+  ],
+  "status": "different",
+  "api": [
+    {
+      "module": "NetworkRequest",
+      "symbol": "timing",
+      "url": "/docs/api/browser/NetworkRequest#timing"
+    },
+    {
+      "module": "NetworkRequest",
+      "symbol": "Timing",
+      "url": "/docs/api/browser/NetworkRequest#Timing"
+    }
+  ],
+  "notes": "Context-creation requestTiming opt-in; immediate immutable snapshot with Option epoch-millisecond origin and Option millisecond offsets. Original retained instance and live owners required. Successful-only responseEnd; backend header boundaries differ. Missing origins/phases, TLS and uncollected worker timings stay unavailable; stock WebKit redirects lack native origins. No terminal wait or retroactive collection.",
+  "capabilities": [
+    "network.timing"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/NetworkRequest.ts",
+      "packages/browser/src/internal/requestTiming.ts",
+      "packages/browser/test/integration/slice/requestTiming.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "pay-for-what-you-use",
+    "quote": "Optional browser features do work only when requested, within the owning context or operation.",
+    "revision": "b394e41022892dc667e61f1693cda15eb4440668"
+  }
+}

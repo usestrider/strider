@@ -1,0 +1,23 @@
+{
+  "id": "event-page-response",
+  "upstream": [
+    "event:Page.response"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "NetworkResponse",
+      "symbol": "stream",
+      "url": "/docs/api/browser/NetworkResponse#stream"
+    }
+  ],
+  "notes": "Subscribe before the triggering action. Events are scoped streams and next-event effects.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

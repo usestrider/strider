@@ -1,0 +1,38 @@
+{
+  "id": "method-locator-blur",
+  "upstream": [
+    "method:Locator.blur"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "Locator.blur",
+      "url": "/docs/api/browser/Locator#Locator.blur"
+    }
+  ],
+  "notes": "Removes focus from exactly one match through the page engine without keyboard or pointer input. Hidden, disabled and inert targets are accepted by default; an unfocused target is unchanged. Native focus events are preserved. In the tested stock WebKitGTK MiniBrowser case, document.hasFocus() was false and the native call fired focusout without blur. Focused WebKit window behavior was not tested. Stock WebKit shares the page world; Chromium and Firefox use an isolated world.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts",
+      "packages/browser/test/integration/slice/interaction.ts"
+    ],
+    "scope": "Native element blur, strict matching, ownership, deadlines and browser-native event controls inspected and tested in the interaction slice."
+  },
+  "requirements": [],
+  "browserOverrides": {
+    "webkit.launched": {
+      "status": "has",
+      "limitations": [
+        "Native focus events are preserved. In the tested stock WebKitGTK MiniBrowser case, document.hasFocus() was false and the native call fired focusout without blur. Focused WebKit window behavior was not tested."
+      ]
+    },
+    "webkit.attached": {
+      "status": "has",
+      "limitations": [
+        "Native focus events are preserved. In the tested stock WebKitGTK MiniBrowser case, document.hasFocus() was false and the native call fired focusout without blur. Focused WebKit window behavior was not tested."
+      ]
+    }
+  }
+}

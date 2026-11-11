@@ -1,0 +1,11 @@
+{
+  "id": "method-androiddevice-model",
+  "upstream": [
+    "method:AndroidDevice.model"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No Android device or Android WebView automation API.",
+  "capabilities": [],
+  "requirements": []
+}

@@ -1,0 +1,17 @@
+{
+  "id": "method-route-fetch",
+  "upstream": [
+    "method:Route.fetch"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No Route.fetch request client; no built-in APIRequestContext equivalent.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Route.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

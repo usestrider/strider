@@ -484,7 +484,11 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                 descendantRssIncludesSharedPages: true
               })
             })).pipe(Deadline.withDefaultBudget("300 seconds"))
-          }), 400_000)
+          }), {
+          timeout: 400_000,
+          // Linux opts in through the heavy/full commands; macOS keeps its complete existing selection.
+          tags: process.platform === "linux" ? ["heavy"] : []
+        })
       }
 
       it.effect("cancels failed chooser preparation and allows the next chooser", () =>
@@ -680,7 +684,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
 
       it.effect("records the page to a video file where the browser writes one", () =>
         Effect.gen(function*() {
-          const { info } = yield* Browser.Browser
+          const videoSupported = yield* supports("capability.video")
           const url = yield* fixture(`<p id="t"></p><script>setInterval(() => t.textContent = Date.now(), 50)</script>`)
           const recorded = yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
@@ -691,7 +695,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               return recording
             })).pipe(Effect.exit)
           }))
-          if (info.protocol !== "bidi") {
+          if (!videoSupported) {
             const error = yield* Effect.flip(recorded)
             assert(Capability.isCapabilityError(error), String(error))
             assert.deepInclude(error.reason, { _tag: "Unsupported", capability: "capability.video" })
@@ -703,10 +707,9 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           assert.match(file, /\.webm$/)
         }), timeout)
 
-      it.effect("writes a WebM file Firefox's page records, while its context lives", () =>
+      it.effect("writes a WebM file while its context lives", () =>
         Effect.gen(function*() {
-          const { info } = yield* Browser.Browser
-          if (info.protocol !== "bidi") return
+          if (!(yield* supports("capability.video"))) return
           const url = yield* fixture(`<p id="t"></p><script>setInterval(() => t.textContent = Date.now(), 50)</script>`)
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()

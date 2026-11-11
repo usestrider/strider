@@ -49,7 +49,7 @@ export const detect = Effect.fnUntraced(
     const discovery = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Discovery))(chunks + decoder.decode())
       .pipe(
         Effect.mapError(() =>
-          failure("Malformed Chromium discovery: expected Browser, Protocol-Version and webSocketDebuggerUrl")
+          failure("Malformed Chromium discovery: expected Browser, Protocol-Version, and webSocketDebuggerUrl")
         )
       )
     const socket = URL.parse(discovery.webSocketDebuggerUrl)

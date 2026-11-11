@@ -1,0 +1,11 @@
+{
+  "id": "method-androidinput-type",
+  "upstream": [
+    "method:AndroidInput.type"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No Android device or Android WebView automation API.",
+  "capabilities": [],
+  "requirements": []
+}

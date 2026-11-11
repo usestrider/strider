@@ -1,0 +1,23 @@
+{
+  "id": "method-locatorassertions-tohaverole",
+  "upstream": [
+    "method:LocatorAssertions.toHaveRole"
+  ],
+  "status": "different",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toHaveRole",
+      "url": "/docs/api/browser/Expect#toHaveRole"
+    }
+  ],
+  "notes": "Exact computed role matching; missing and multiple matches retry until the deadline with typed ExpectationFailed evidence, while Playwright rejects multiple matches immediately. Plain div/span elements retain the shared HTML-AAM generic role; Playwright reports no role. ARIA presentation conflict exceptions also apply to inherited roles on the child, and required-child inheritance stops when parent presentation is cancelled; the pinned Playwright ancestor walk can retain presentation in those cases. Table captions inherit presentation as required by ARIA. Tabindex conflicts use HTML integer parsing: leading ASCII whitespace, optional sign and digits, ignoring trailing text. Thus 2abc counts as focusable and leading non-ASCII whitespace does not; pinned Playwright uses JavaScript number conversion and differs.",
+  "capabilities": [],
+  "requirements": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "shared-dom-roles",
+    "quote": "Role assertions, role locators, and snapshots use one DOM role computation, retaining HTML-AAM `generic` roles for plain elements such as `div`.",
+    "revision": "b453ed06b279413d1f432f6acbd873178b38980d"
+  }
+}

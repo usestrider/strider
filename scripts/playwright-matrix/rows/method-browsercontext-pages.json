@@ -1,0 +1,23 @@
+{
+  "id": "method-browsercontext-pages",
+  "upstream": [
+    "method:BrowserContext.pages"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "UserContext",
+      "symbol": "UserContext.pages",
+      "url": "/docs/api/browser/UserContext#UserContext.pages"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/UserContext.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

@@ -1,0 +1,11 @@
+{
+  "id": "method-genericassertions-tobecloseto",
+  "upstream": [
+    "method:GenericAssertions.toBeCloseTo"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "Generic value assertions belong to the chosen test framework; Strider does not export this matcher.",
+  "capabilities": [],
+  "requirements": []
+}

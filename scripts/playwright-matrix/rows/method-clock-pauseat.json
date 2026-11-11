@@ -1,0 +1,17 @@
+{
+  "id": "method-clock-pauseat",
+  "upstream": [
+    "method:Clock.pauseAt"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No scheduled pause-at-time method; controlled mode starts paused.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/PageClock.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

@@ -1,0 +1,26 @@
+{
+  "id": "option-browser-newpage-extrahttpheaders",
+  "upstream": [
+    "method:Browser.newPage"
+  ],
+  "option": "extraHTTPHeaders",
+  "status": "has",
+  "api": [
+    {
+      "module": "Emulation",
+      "symbol": "Emulation",
+      "url": "/docs/api/browser/Emulation#Emulation"
+    }
+  ],
+  "notes": "Set emulation.extraHTTPHeaders in context/page creation options; applies before the first page loads. Later page registrations merge over context headers.",
+  "capabilities": [
+    "emulation.extraHTTPHeaders"
+  ],
+  "requirements": [
+    {
+      "capability": "userContexts",
+      "file": "packages/browser/src/internal/webkitAdapter.ts",
+      "quote": "createUserContext: refuse(\"userContexts\", noPages)"
+    }
+  ]
+}

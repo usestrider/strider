@@ -1,0 +1,23 @@
+{
+  "id": "method-page-waitforrequest",
+  "upstream": [
+    "method:Page.waitForRequest"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "NetworkRequest",
+      "symbol": "next",
+      "url": "/docs/api/browser/NetworkRequest#next"
+    }
+  ],
+  "notes": "Subscribe before the triggering action. Events are scoped streams and next-event effects.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

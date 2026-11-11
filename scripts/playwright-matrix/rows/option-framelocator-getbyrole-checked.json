@@ -1,0 +1,28 @@
+{
+  "id": "option-framelocator-getbyrole-checked",
+  "upstream": [
+    "method:FrameLocator.getByRole"
+  ],
+  "option": "checked",
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "RoleOptions",
+      "url": "/docs/api/browser/Locator#RoleOptions"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": [],
+  "gaps": [
+    "option-framelocator-getbyrole-checked-value-mixed"
+  ],
+  "valueCoverage": [
+    {
+      "value": "mixed",
+      "status": "missing",
+      "gap": "option-framelocator-getbyrole-checked-value-mixed"
+    }
+  ]
+}

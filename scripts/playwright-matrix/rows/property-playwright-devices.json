@@ -1,0 +1,11 @@
+{
+  "id": "property-playwright-devices",
+  "upstream": [
+    "property:Playwright.devices"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public Strider capability for this member.",
+  "capabilities": [],
+  "requirements": []
+}

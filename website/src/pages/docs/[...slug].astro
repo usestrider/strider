@@ -3,6 +3,7 @@ import { getCollection, render } from "astro:content"
 import Aside from "../../components/Aside.astro"
 import BrowserLimits from "../../components/BrowserLimits.astro"
 import Capabilities from "../../components/Capabilities.astro"
+import GuideTable from "../../components/GuideTable.astro"
 import GuideNav from "../../components/GuideNav.astro"
 import Rail from "../../components/Rail.astro"
 import { guideRoute, placeOf } from "../../features/docs/navigation.ts"
@@ -40,6 +41,6 @@ const edit = editUrl(guide.filePath)
   <h1 class="mt-2 font-display text-[3rem] leading-tight font-normal">{guide.data.title}</h1>
   <p class="deck mt-3 mb-10 text-[1.3rem] leading-snug">{guide.data.description}</p>
   <article class="prose">
-    <Content components={{ Aside, BrowserLimits, Capabilities }} />
+    <Content components={{ Aside, BrowserLimits, Capabilities, table: GuideTable }} />
   </article>
 </DocShell>

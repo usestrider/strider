@@ -19,9 +19,14 @@ import { events } from "./events.ts"
 import { interaction } from "./interaction.ts"
 import { modules } from "./modules.ts"
 import { recordings } from "./recordings.ts"
+import { requestBodies } from "./requestBodies.ts"
+import { requestSizes } from "./requestSizes.ts"
+import { requestTiming } from "./requestTiming.ts"
 import { slice } from "./slice.ts"
+import { storageReplacement } from "./storageReplacement.ts"
 import { tooling } from "./tooling.ts"
 import { toolkit } from "./toolkit.ts"
+import { webauthn } from "./webauthn.ts"
 
 // The X server comes up before the browser, and goes after it
 const display = Layer.effectDiscard(useXvfb()).pipe(Layer.provide(NodeServices.layer))
@@ -46,3 +51,11 @@ recordings(name, backend)
 toolkit(name, backend)
 deadlines(name, backend)
 attaching(name, backend, Option.none())
+
+webauthn("WebKit", backend)
+
+requestBodies("WebKit", backend)
+requestTiming("WebKit", backend)
+
+storageReplacement("WebKit", backend)
+requestSizes("WebKit", backend)

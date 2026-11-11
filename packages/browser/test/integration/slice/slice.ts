@@ -11,6 +11,7 @@ import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import { site } from "../adapter/harness.ts"
+import * as SharedContext from "./sharedContext.ts"
 
 const timeout = 60_000
 
@@ -47,7 +48,8 @@ export const slice = (
   pinned: (info: Browser.Info) => void
 ) =>
   describe(`${name} slice`, () => {
-    layer(backend, { excludeTestServices: true, timeout })((it) => {
+    layer(SharedContext.layer(backend), { excludeTestServices: true, timeout })((suite) => {
+      const it = SharedContext.guard(suite)
       it.effect("launches the pinned browser", () =>
         Effect.gen(function*() {
           const browser = yield* Browser.Browser
@@ -58,7 +60,7 @@ export const slice = (
         Effect.gen(function*() {
           const url = yield* fixture(shop)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const navigation = yield* page.goto(url)
             assert.strictEqual(navigation._tag, "Committed")
             assert(navigation._tag === "Committed" && Option.isSome(navigation.response))
@@ -75,7 +77,7 @@ export const slice = (
             counter("disabled", "setTimeout(() => document.getElementById('b').disabled = false, 400)")
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url, { waitUntil: "load" })
             yield* page.getByRole("button", { name: "Press" }).click()
             yield* page.getByText("clicked 1", { exact: true }).pipe(Expect.toBeVisible)
@@ -86,7 +88,7 @@ export const slice = (
         Effect.gen(function*() {
           const url = yield* fixture(`<div style="height: 4000px"></div>${counter("")}`)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             yield* page.locator("#b").click({ trial: true })
             yield* page.getByText("not clicked", { exact: true }).pipe(Expect.toBeVisible)
@@ -103,7 +105,7 @@ export const slice = (
             }<div class="toast" style="position: absolute; inset: 0; background: white">Saved</div></div>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const error = yield* page.locator("#b").click().pipe(Deadline.within("1500 millis"), Effect.flip)
             assert(Deadline.isTimeout(error), String(error))
@@ -127,7 +129,7 @@ export const slice = (
         Effect.gen(function*() {
           const url = yield* fixture(`<button>Buy</button><button style="display: none">Buy</button>`)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const error = yield* page.getByRole("button", { name: "Buy", includeHidden: true }).click().pipe(
               Deadline.within("20 seconds"),
@@ -145,7 +147,7 @@ export const slice = (
         Effect.gen(function*() {
           const served = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const failed = yield* page.goto("http://127.0.0.1:1/").pipe(Effect.flip)
             assert(failed._tag === "PageError", String(failed))
             assert.strictEqual(failed.reason._tag, "NavigationFailed")
@@ -157,11 +159,62 @@ export const slice = (
           }))
         }), timeout)
 
+      it.effect("retries attachment transitions and refuses a closed page", () =>
+        Effect.gen(function*() {
+          const url = yield* fixture(
+            `<button onclick="setTimeout(() => document.querySelector('#slot').innerHTML='<i></i>', 100)">Attach</button>
+<button onclick="setTimeout(() => document.querySelector('#slot').innerHTML='', 100)">Detach</button><button onclick="document.querySelector('#slot').innerHTML='<i></i><i></i>'">Multiple</button><div id="slot"></div>`
+          )
+          const scope = yield* Scope.make()
+          const page = yield* SharedContext.newPage.pipe(Scope.provide(scope))
+          yield* Effect.gen(function*() {
+            yield* page.goto(url)
+            yield* page.getByRole("button", { name: "Attach", exact: true }).click()
+            yield* page.locator("i").pipe(Expect.toBeAttached)
+            yield* page.getByRole("button", { name: "Multiple", exact: true }).click()
+            yield* page.getByRole("button", { name: "Attach", exact: true }).click()
+            yield* page.locator("i").pipe(Expect.toBeAttached)
+            yield* page.getByRole("button", { name: "Detach", exact: true }).click()
+            yield* page.locator("i").pipe(Expect.toBeDetached)
+          }).pipe(Effect.ensuring(Scope.close(scope, Exit.void)))
+          const error = yield* page.locator("i").pipe(Expect.toBeDetached, Effect.flip)
+          assert.strictEqual(error._tag, "TargetGone")
+        }), timeout)
+
+      it.effect("checks attachment independently of visibility and reports missing or multiple matches", () =>
+        Effect.gen(function*() {
+          const url = yield* fixture(`<div id="hidden" style="display:none"></div><i></i><i></i><div id="host"></div>
+<script>document.querySelector("#host").attachShadow({mode:"open"}).innerHTML="<b id=shadow></b>"</script>`)
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(url)
+            yield* page.locator("#hidden").pipe(Expect.toBeAttached)
+            yield* page.locator("#shadow").pipe(Expect.toBeAttached)
+            yield* page.locator("#absent").pipe(Expect.toBeDetached)
+            for (
+              const [selector, matcher, matches] of [
+                ["#absent", Expect.toBeAttached, 0],
+                ["i", Expect.toBeAttached, 2],
+                ["i", Expect.toBeDetached, 2],
+                ["#hidden", Expect.toBeDetached, 1]
+              ] as const
+            ) {
+              const error = yield* page.locator(selector).pipe(matcher, Deadline.within("300 millis"), Effect.flip)
+              assert(Expect.isExpectationFailed(error), String(error))
+              assert.strictEqual(error.subject, `page.locator("${selector}")`)
+              for (const entry of error.history) {
+                assert.deepStrictEqual(entry.value, { matches })
+              }
+              assert.deepStrictEqual(error.last, Option.fromUndefinedOr(error.history.at(-1)))
+            }
+          }))
+        }), timeout)
+
       it.effect("fails an expectation that never holds, with what it saw", () =>
         Effect.gen(function*() {
           const url = yield* fixture(`<p>1 item</p><p>2 items</p>`)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const error = yield* page.getByText("item").pipe(
               Expect.toBeVisible,
@@ -170,11 +223,92 @@ export const slice = (
             )
             assert(Expect.isExpectationFailed(error), String(error))
             assert.strictEqual(error.subject, `page.getByText("item")`)
-            assert.deepStrictEqual(error.history.map((each) => each.value), [{ matches: 2, visible: 2 }])
-            // One round waited in the page, checking again on each frame, for the whole deadline
+            for (const entry of error.history) {
+              assert.deepStrictEqual(entry.value, { matches: 2, visible: 2 })
+            }
+            assert.deepStrictEqual(error.last, Option.fromUndefinedOr(error.history.at(-1)))
             assert.isAtLeast(error.checks.count, 1)
-            assert.include(error.checks.triggeredBy, "change")
             yield* page.getByText("3 items").pipe(Expect.toBeHidden)
+          }))
+        }), timeout)
+
+      it.effect("checks viewport ratios, clipping and negation without requiring visibility", () =>
+        Effect.gen(function*() {
+          const url = yield* fixture(`<style>body{margin:0}.box{width:100px;height:100px}</style>
+<div style="width:50px;overflow:hidden"><div id="half" class="box" style="opacity:0"></div></div>
+<div id="outside" class="box" style="position:absolute;top:100000px"></div>
+<div id="hidden" class="box" style="display:none"></div>
+<div id="edge" class="box" style="position:fixed;top:0;left:-100px"></div>`)
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(url)
+            yield* page.locator("#half").pipe(Expect.toBeInViewport())
+            yield* Expect.toBeInViewport(page.locator("#half"), { ratio: 0.5 })
+            yield* page.locator("#half").pipe(Expect.toBeInViewport({ ratio: 0.5000000005 }))
+            yield* page.locator("#half").pipe(Expect.toBeInViewport({ ratio: 0.6, inViewport: false }))
+            yield* page.locator("#outside").pipe(Expect.toBeInViewport({ inViewport: false }))
+            yield* page.locator("#hidden").pipe(Expect.toBeInViewport({ inViewport: false }))
+            yield* page.locator("#edge").pipe(Expect.toBeInViewport({ inViewport: false }))
+            yield* page.locator("#missing").pipe(Expect.toBeInViewport({ inViewport: false }))
+          }))
+        }), timeout)
+
+      it.effect("reports viewport ratio and match cardinality as typed expectation evidence", () =>
+        Effect.gen(function*() {
+          const url = yield* fixture(`<div class="box" style="width:100px;height:100px"></div><div class="box"></div>`)
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(url)
+            for (
+              const [selector, options, observed] of [
+                ["#missing", {}, { matches: 0 }],
+                [".box", {}, { matches: 2 }],
+                [".box", { inViewport: false }, { matches: 2 }],
+                [".box:first-child", { inViewport: false }, { matches: 1, ratio: 1 }]
+              ] as const
+            ) {
+              const error = yield* page.locator(selector).pipe(
+                Expect.toBeInViewport(options),
+                Deadline.within("300 millis"),
+                Effect.flip
+              )
+              assert(Expect.isExpectationFailed(error), String(error))
+              assert.isTrue(error.history.some((entry) =>
+                JSON.stringify(entry.value) === JSON.stringify(observed)
+              ))
+            }
+          }))
+        }), timeout)
+
+      it.effect("retries viewport observation after replacing a match", () =>
+        Effect.gen(function*() {
+          const url = yield* fixture(
+            `<div id="target" style="position:absolute;top:100000px;width:100px;height:100px"></div>
+<button style="position:fixed" onclick="document.querySelector('#target').outerHTML='<div id=target style=width:100px;height:100px></div>'">Replace</button>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(url)
+            yield* Effect.all([
+              page.locator("#target").pipe(Expect.toBeInViewport({ ratio: 1 })),
+              page.getByRole("button").click()
+            ], { concurrency: "unbounded" })
+          }))
+        }), timeout)
+
+      it.effect("retries viewport observation after scrolling without a DOM mutation", () =>
+        Effect.gen(function*() {
+          const url = yield* fixture(
+            `<div id="target" style="position:absolute;top:2000px;width:100px;height:100px"></div>
+<button style="position:fixed" onclick="window.scrollTo(0,2000)">Scroll</button>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(url)
+            yield* Effect.all([
+              page.locator("#target").pipe(Expect.toBeInViewport({ ratio: 1 })),
+              page.getByRole("button").click()
+            ], { concurrency: "unbounded" })
           }))
         }), timeout)
 
@@ -190,5 +324,19 @@ export const slice = (
           assert.strictEqual((yield* context.closed)._tag, "UserContextRemoved")
           assert.strictEqual((yield* page.status)._tag, "Closed")
         }), timeout)
+
+      it.effect("opens pages in a context one after another, each closed before the next", () =>
+        Effect.scoped(
+          Effect.gen(function*() {
+            const url = yield* fixture(`<p id="out">ready</p>`)
+            const context = yield* Browser.newContext()
+            for (let index = 0; index < 3; index++) {
+              const page = yield* context.newPage
+              yield* page.goto(url)
+              assert.strictEqual(yield* page.locator("#out").readText, "ready")
+              yield* page.close()
+            }
+          }).pipe(Deadline.within("20 seconds"))
+        ), timeout)
     })
   })

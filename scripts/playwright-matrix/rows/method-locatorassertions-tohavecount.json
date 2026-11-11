@@ -1,0 +1,17 @@
+{
+  "id": "method-locatorassertions-tohavecount",
+  "upstream": [
+    "method:LocatorAssertions.toHaveCount"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toHaveCount",
+      "url": "/docs/api/browser/Expect#toHaveCount"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": []
+}

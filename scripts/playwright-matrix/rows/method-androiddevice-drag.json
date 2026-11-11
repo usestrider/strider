@@ -1,0 +1,11 @@
+{
+  "id": "method-androiddevice-drag",
+  "upstream": [
+    "method:AndroidDevice.drag"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No Android device or Android WebView automation API.",
+  "capabilities": [],
+  "requirements": []
+}

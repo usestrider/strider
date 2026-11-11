@@ -23,28 +23,38 @@ and stock WebKit, and every member the API declares is built. One declared befor
   - `scenarios/`: the acceptance scenarios from API.md, type-checked as ordinary code.
   - `typetest/`: Tstyche tests of access rules, requirement channels and what crosses by value.
   - `test/`: runtime tests with `@effect/vitest`, which run anywhere (`pnpm test --run`), except
-    `test/integration/`: the browser integration tests, which run only in the Nix environment that fixes the
-    machine they see. `pnpm test:integration` enters it (`flake.nix`, `devShells.integration`, Linux) with nothing
+    `test/integration/`: the browser integration tests. The Linux suites run in the Nix environment that fixes
+    the machine they see. `pnpm test:integration` enters it (`flake.nix`, `devShells.integration`, Linux) with nothing
     of the host's environment, and runs them: the pinned browsers (`test/integration/browsers.json`: Chromium
     155.0.8059.79, Firefox 158.0 and WebKitGTK 2.54.1's MiniBrowser for stock WebKit), fixed fonts, UTC, `C.UTF-8`, an empty home that is deleted after, no sound card, and no
-    display: the MiniBrowser, which needs one, gets an Xvfb of its own (`test/integration/stockWebKit.ts`). Run anywhere else, they fail and
-    say so; a browser of another version fails them too. Extra arguments go to Vitest
+    display: the MiniBrowser, which needs one, gets an Xvfb of its own (`test/integration/stockWebKit.ts`). The Linux
+    entry point rejects other environments; a browser of another version fails the tests too. Extra arguments go to Vitest
     (`pnpm test:integration packages/browser/test/integration/StockWebKitLaunched.test.ts`).
+    `STRIDER_INTEGRATION_JOB=chromium` (or `firefox`, `webkit`, `other`) runs the files of one of CI's Linux jobs
+    (`vitest.integration.config.ts`).
+    On Apple Silicon macOS, `pnpm test:integration:macos --no-file-parallelism` downloads the separately pinned
+    Chrome for Testing and Firefox builds in `test/integration/browsers.macos.json`, verifies their SHA-256 hashes,
+    and runs their adapter and slice suites with exact version checks. Install Homebrew `openssl@3` first.
+    WebKitGTK, Xvfb, Linux host settings and the other integration suites remain Linux-only. macOS traffic
+    recording is refused; its fonts and display come from the host, not Nix. Its first CI run is pending.
+    `scripts/integration-macos.md` describes the entry point and its CI job.
     `test/integration/adapter/` is the adapter conformance suite, written once and run against each backend, with
     the engine's tests; `test/integration/slice/` runs the public API through each backend's layer. WebKit's are
     stock WebKit's, the MiniBrowser launched. Where a case depends on what a backend can do, it reads the backend's
     capability table rather than its name (`slice/capabilities.ts`), checking the refusal where it can't. With
     `STRIDER_RECORD` naming an absolute directory, the integration tests record each browser's traffic for the
-    drift test (`test/integration/record.ts`): `pnpm test:integration --no-file-parallelism`, into
+    drift test (`test/integration/record.ts`): `pnpm test:integration:full --no-file-parallelism`, into
     `test/fixtures/traffic/`, when a browser rolls.
-  - `INDEX.md`: every declaration and member, generated.
+  - `INDEX.md`: every declaration and member, generated and ignored. Run `pnpm index` in a source checkout;
+    reference, package builds and prepack recreate it, and published packages include it.
   - `THIRD_PARTY_NOTICES.md`: the notices of what its generated code comes from, published with it. The published
     packages, like the repository, are under the MIT license (`LICENSE`), which `pnpm pack` copies into each.
 - `packages/cli`: published as `@usestrider/cli`, the `strider` command to install globally: a small launcher that runs
   `@usestrider/browser`'s command on Node, or on Bun where there's no Node. It exists to list that package and
   `@effect/platform-node` as real dependencies, so a global install links them.
-- `packages/scenarios`: private, never published: Strider and Playwright side by side on the integration
-  environment's Chromium. `pnpm scenarios` writes its `RESULTS.md`; `pnpm scenarios --record` visits
+- `packages/scenarios`: private, never published: a comparison harness: paired Strider and Playwright
+  scenarios on the integration environment's Chromium or Firefox. `pnpm scenarios` prints a run's report, and
+  `pnpm scenarios:report` regenerates `RESULTS.md` from preserved measurements; `pnpm scenarios --record` visits
   the public demo sites once, live, into `.data/scenarios/`. Playwright (`playwright-core`) is this package's
   dependency alone: never import it elsewhere.
   `test/upstream/` ports selected public Playwright suites using pinned fixtures and notices in `upstream/`.
@@ -71,8 +81,7 @@ and stock WebKit, and every member the API declares is built. One declared befor
   `packages/browser/src/internal/keyboardLayouts.ts`. Each `source/` keeps its license beside it; a new source
   whose output is published adds its notice to `packages/browser/THIRD_PARTY_NOTICES.md`, and a roll updates it.
 - `.github/workflows/`: CI. `checks.yml` runs `pnpm all`, `pnpm build` and `pnpm pack-check` on every pull
-  request and every push to `main`, in the Nix environment's default shell; `integration.yml` runs the integration tests nightly when
-  `main` has changed, and on demand, keeping the log of a failed run; `docs.yml` deploys the site from `main`; `release.yml`, run by hand, publishes to npm
+  request and every push to `main`, in the Nix environment's default shell; `integration.yml` runs the integration tests every night, and on demand for any branch, one run per branch at a time: a Linux job per browser and one for the other files, and one on macOS (optional on demand), keeping the log of a failed run; `docs.yml` deploys the site once a release publishes, from the commit it released, and on demand the latest release, a release tag or a `docs/*` branch (a docs hotfix: branch from the release tag, fix the guide there and on `main`, and the maintainer dispatches `docs.yml` with that branch as `ref`); `release.yml`, run by hand, publishes to npm
   the versions on `main` that npm doesn't have yet; `delete-merged-branches.yml` deletes a branch three days after its pull request merges.
 - `website/`: the documentation site, built as effect.website is: Astro, MDX, Expressive Code, remark and Tailwind, in
   the design `website/README.md` describes. Guides are MDX in `website/src/content/docs/`, and their TypeScript is
@@ -88,27 +97,70 @@ and stock WebKit, and every member the API declares is built. One declared befor
 
 Use the narrowest check that covers the change:
 
-| Change                                | Run                                                                                                                                      |
-| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| Source, scenarios or configuration    | `pnpm check`, `pnpm lint-fix`                                                                                                            |
-| A new, renamed or removed module      | `pnpm codegen`, then `pnpm check`                                                                                                        |
-| Protocol corrections or annotations   | `pnpm codegen:protocol`, then `pnpm check` and `pnpm test --run packages/browser/test/Drift.test.ts`                                     |
-| Keyboard layouts                      | `pnpm codegen:keyboards`, then `pnpm test --run packages/browser/test/Keys.test.ts`                                                      |
-| Runtime behavior                      | `pnpm test --run <file>`                                                                                                                 |
-| The protocol client or transports     | `pnpm test --run packages/browser/test/CdpConnection.test.ts packages/browser/test/ProtocolClient.test.ts`, then `pnpm test:integration` |
-| A backend adapter or launcher         | `pnpm test:integration`                                                                                                                  |
-| The model, engine, locators or pages  | `pnpm test:integration packages/browser/test/integration/adapter packages/browser/test/integration/slice`                                |
-| The `strider` command                 | `pnpm test --run packages/browser/test/Browsers.test.ts`, `pnpm test:integration packages/browser/test/integration/Cli.test.ts`          |
-| Access rules or other type behavior   | `pnpm test-types`                                                                                                                        |
-| JSDoc text, categories or links       | `pnpm jsdocs`                                                                                                                            |
-| JSDoc examples                        | `pnpm lint-fix`, which formats them, then `pnpm jsdocs` and `pnpm examples`                                                              |
-| A guide's code                        | `pnpm lint-fix`, which formats its blocks, then `pnpm examples`, then `pnpm api-reference` to link it                                    |
-| The website or the reference's tools  | `pnpm reference`, then `pnpm website:check` and `pnpm website:build`                                                                     |
-| The packages' exports, files or peers | `pnpm build`, then `pnpm pack-check`                                                                                                     |
-| The root `README.md`                  | `pnpm readme`, which writes the README npm shows from it                                                                                 |
-| Before a commit that touches `src/`   | `pnpm all`, and `pnpm test:integration` if it touches what drives a browser                                                              |
+| Change                                                                            | Run                                                                                                                                      |
+| --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Source, scenarios or configuration                                                | `pnpm check`, `pnpm lint-fix`                                                                                                            |
+| A new, renamed or removed module                                                  | `pnpm codegen`, then `pnpm check`                                                                                                        |
+| Protocol corrections or annotations                                               | `pnpm codegen:protocol`, then `pnpm check` and `pnpm test --run packages/browser/test/Drift.test.ts`                                     |
+| Keyboard layouts                                                                  | `pnpm codegen:keyboards`, then `pnpm test --run packages/browser/test/Keys.test.ts`                                                      |
+| Runtime behavior                                                                  | `pnpm test --run <file>`                                                                                                                 |
+| The protocol client or transports                                                 | `pnpm test --run packages/browser/test/CdpConnection.test.ts packages/browser/test/ProtocolClient.test.ts`, then `pnpm test:integration` |
+| A backend adapter or launcher                                                     | `pnpm test:integration`                                                                                                                  |
+| The model, engine, locators or pages                                              | `pnpm test:integration packages/browser/test/integration/adapter packages/browser/test/integration/slice`                                |
+| The `strider` command                                                             | `pnpm test --run packages/browser/test/Browsers.test.ts`, `pnpm test:integration packages/browser/test/integration/Cli.test.ts`          |
+| Uploads or file transfer (including `setInputFiles` and the upload transfer path) | `pnpm test:integration:heavy`, in addition to the ordinary relevant checks                                                               |
+| Access rules or other type behavior                                               | `pnpm test-types`                                                                                                                        |
+| JSDoc text, categories or links                                                   | `pnpm jsdocs`                                                                                                                            |
+| JSDoc examples                                                                    | `pnpm lint-fix`, which formats them, then `pnpm jsdocs` and `pnpm examples`                                                              |
+| A guide's code                                                                    | `pnpm lint-fix`, which formats its blocks, then `pnpm examples`, then `pnpm api-reference` to link it                                    |
+| The website or the reference's tools                                              | `pnpm reference`, then `pnpm website:check` and `pnpm website:build`                                                                     |
+| The packages' exports, files or peers                                             | `pnpm build`, then `pnpm pack-check`                                                                                                     |
+| The root `README.md`                                                              | `pnpm readme`, which writes the README npm shows from it                                                                                 |
+| Before a commit that touches `src/`                                               | `pnpm all`, and `pnpm test:integration` if it touches what drives a browser                                                              |
+
+Linux commands are serial: `pnpm test:integration` excludes the twelve large local-file upload cases;
+`pnpm test:integration:heavy` opts into all twelve (32/256/600 MiB on four backends), and
+`pnpm test:integration:full` runs the complete suite in one invocation. Nightly and dispatched Linux CI use the
+full command for each of the four `STRIDER_INTEGRATION_JOB` selections; unset the variable for a local full-suite
+run. Files run serially within each job and in local runs. macOS keeps its full selection. Timing directories identify
+both command group and job (`all` locally), and snapshots record both, so combined artifacts do not overwrite.
+The full report also splits measured case time/counts by group, while shared hooks/startup remain in the complete
+run totals. Moving cases out of the default command does not reduce the full nightly cost.
+
+Keep integration tests cheap: share setup only where cases do not need isolated contexts, keep a fresh scoped page
+and explicit cleanup, and add cases for distinct behavior rather than needless combinations. Preserve assertions,
+deadlines and normal failure tracing when measuring changes. The Linux reporter in
+`packages/browser/test/integration/timingReporter.ts` prints the slowest files and cases and writes
+`.data/integration-timings/<group>/<job>/timings.json` plus incremental `events.ndjson`; hosted Linux runs retain these with
+`integration.log` for 14 days on success and failure. JSON is a snapshot after each completed file and at run end;
+if the process is killed, it stays marked `running`, and the event log retains later collected/case results.
+Files that fail collection or are never collected have null case totals and execution durations; observed case
+counts may be incomplete. File errors and failed-file counts stay visible even when a failed shared fixture makes
+Vitest mark its cases skipped. Case outcomes are preserved; pending cases and null durations are not passes or
+zero-cost tests.
+Reporter wall time excludes install, Nix/pnpm startup and the browser-lock queue. Compare it with summed file
+execution and the complete hosted job duration. The agreed operating goals for the four-job Linux workflow are
+**1200 seconds per complete Linux job** and **3300 seconds aggregate file execution**, including heavy coverage.
+These replace the earlier 1500-second serial goal; there is no hard gate until runner variation is known.
+The post-matrix Linux budget summary reports actual GitHub start-to-completion elapsed time for each job
+(including setup, tests and upload, excluding pre-start queueing), and sums file execution from all four full/job
+snapshots separately. It labels missing, partial, failed or mismatched evidence without an under-goal conclusion.
+`scripts/integration-budget.ts` writes the report to the workflow job summary on every nightly/dispatched run.
+Moving work between jobs must not conceal aggregate growth; preserve all coverage.
 
 Never run bare `pnpm test`: it starts watch mode. Report any check you couldn't run.
+
+Run the full integration suite on CI, not on a shared machine: push the branch and dispatch it with
+`gh workflow run integration.yml --ref <branch>` (add `-f macos=false` when nothing macOS-specific changed), then follow
+it with `gh run watch`. Each branch runs on its own, so branches validate side by side, and the Linux jobs take about
+twenty minutes. On a machine others use, run only what a change needs locally: `pnpm all`, and the integration files or
+cases it touches. The full suite's timing and five-second deadlines make two suites on one machine fail each other.
+
+An integration case costs a page, and on stock WebKit a context costs a browser process, so the suites grow by
+rules, not combinations. Write a case for each rule the code has, run on every backend, and a cross-product of
+variants only where the browsers handle them differently. What the code decides in one place, such as a selector or a
+set of roles, is one rule: sample it, don't enumerate it. A suite whose cases keep nothing in their context opens its
+pages in one, which checks after each case that it still holds nothing (`slice/sharedContext.ts`).
 
 Failed integration tests name their traces in `.data/integration-failures/`; CI retains them alongside
 `integration.log` for 14 days. Capture details, bounds and limitations are documented at the top of
@@ -167,8 +219,8 @@ time: "The files a page downloads", not "Downloads a page starts". Words of the 
 fold, latched or navigable, become what they mean, unless they are the API's names.
 
 A guide teaches one concept a page, and a section a reader would look for in the sidebar is a page of its own.
-Before its first code, a concept gets up to two plain sentences: what goes wrong without it and what it gets the
-reader, with no history or scene-setting. Whatever the prose names that a reader would type is shown in a block on
+Before its first code, a concept gets a sentence or two that say what it is and does, as you'd explain it to a
+colleague: a problem only when the concept exists to solve it, and no template, history, or scene-setting. Whatever the prose names that a reader would type is shown in a block on
 the page, or linked to where it's shown. Every page follows the conventions in `website/README.md`, "Style", so
 the guide reads as one. The `review-guides` skill checks all four.
 
@@ -184,9 +236,22 @@ Playwright and other prior art are evidence of what works, not a template.
 `docs/decisions.md` holds decisions, not the work behind them. Add to it only when a change settles something a
 later change could reasonably reopen: a principle, an architectural choice, or a default that trades one behavior
 for another. An entry is a short paragraph: the decision, why, and what was rejected. When a decision is refined,
-edit its entry instead of adding another. Measurements, traces, benchmark tables, browser builds, test evidence and
-the history of an investigation go in the pull request, which the entry can cite by number (#83). A bug
+edit its entry instead of adding another. Measurements, benchmark tables, browser builds and test evidence go in
+the pull request, which the entry can cite by number (#83); the history of an investigation stays in its issue. A bug
 fix, a test, or a change that follows an existing decision needs no entry.
+
+## Pull requests
+
+A pull request's title and description are public, for a contributor reading the change, not for its review. The
+description opens with a sentence or two on what changes and for whom, then three sections: **Changes** (what the
+code did before and does now, with the files, and for a fix the cause), **Tests** (the tests added or changed, the
+checks run and their result, any test skipped or loosened and why, and for a performance change the figures before and
+after), and **Changeset** (the bump and its text, and whether anything breaks). Nothing else: no questions or
+decisions for the maintainer, no review rounds or who reviewed what, no account of the investigation, no first person,
+and nothing of the tools or agents that produced it, such as a private tracker's keys, an agent's name or role, local
+paths or machine names. Cite GitHub issues by number (#51). What's for the maintainer goes to them directly, in
+conversation or on the private board, before the pull request is opened or updated. Commit messages follow the same
+rule, and so do branch names: name a branch for the change.
 
 ## Issues
 
@@ -209,3 +274,9 @@ can't open the board, so a comment explains the behavior itself.
 A test that fails only in full runs is an issue too: trace it from the protocol's messages and fix the cause, never
 with a retry or a delay. Reproducing it under load (many processes beside busy loops) makes the machine unusable,
 so ask the maintainer first.
+
+Performance comparisons run through `.github/workflows/benchmarks.yml`, never on the shared desktop.
+Dispatch from the driver branch with `base`, `head`, `workload` (`bench` or `scenarios`), `only`, `browser`
+(currently `chromium`) and `runs` (a multiple of four from 4 to 1000), then follow `gh run watch`. See `packages/scenarios/BENCHMARKS.md` for
+paired ratios, confidence intervals, recording requirements and retained failure evidence. Hosted main-against-main
+variance must be measured before interpreting small differences. Local non-browser harness tests remain appropriate.

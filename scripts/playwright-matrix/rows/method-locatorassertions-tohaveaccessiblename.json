@@ -1,0 +1,17 @@
+{
+  "id": "method-locatorassertions-tohaveaccessiblename",
+  "upstream": [
+    "method:LocatorAssertions.toHaveAccessibleName"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toHaveAccessibleName",
+      "url": "/docs/api/browser/Expect#toHaveAccessibleName"
+    }
+  ],
+  "notes": "Retries exactly one match. Strings normalize whitespace; ignoreCase overrides regex flags. Hidden elements have empty names; hidden referenced labels contribute. Failures retain observed names or match counts.",
+  "capabilities": [],
+  "requirements": []
+}

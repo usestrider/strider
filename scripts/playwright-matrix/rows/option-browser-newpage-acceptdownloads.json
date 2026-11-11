@@ -1,0 +1,26 @@
+{
+  "id": "option-browser-newpage-acceptdownloads",
+  "upstream": [
+    "method:Browser.newPage"
+  ],
+  "option": "acceptDownloads",
+  "status": "has",
+  "api": [
+    {
+      "module": "UserContext",
+      "symbol": "Options",
+      "url": "/docs/api/browser/UserContext#Options"
+    }
+  ],
+  "notes": "downloads is temporary, deny, or an explicit directory.",
+  "capabilities": [
+    "downloads"
+  ],
+  "requirements": [
+    {
+      "capability": "userContexts",
+      "file": "packages/browser/src/internal/webkitAdapter.ts",
+      "quote": "createPage: refuse(\"userContexts\", noPages)"
+    }
+  ]
+}

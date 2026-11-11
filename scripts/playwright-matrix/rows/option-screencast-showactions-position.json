@@ -1,0 +1,38 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "capabilities": [],
+  "id": "option-screencast-showactions-position",
+  "upstream": [
+    "method:Screencast.showActions"
+  ],
+  "option": "position",
+  "requirements": [],
+  "valueCoverage": [
+    {
+      "value": "bottom",
+      "status": "missing"
+    },
+    {
+      "value": "bottom-left",
+      "status": "missing"
+    },
+    {
+      "value": "bottom-right",
+      "status": "missing"
+    },
+    {
+      "value": "top",
+      "status": "missing"
+    },
+    {
+      "value": "top-left",
+      "status": "missing"
+    },
+    {
+      "value": "top-right",
+      "status": "missing"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public option for this contract.",
+  "capabilities": [],
+  "id": "option-page-route-times",
+  "upstream": [
+    "method:Page.route"
+  ],
+  "option": "times",
+  "requirements": []
+}

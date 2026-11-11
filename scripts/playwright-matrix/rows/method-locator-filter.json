@@ -1,0 +1,23 @@
+{
+  "id": "method-locator-filter",
+  "upstream": [
+    "method:Locator.filter"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.filter",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.filter"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}
