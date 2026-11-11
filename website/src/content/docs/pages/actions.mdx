@@ -63,8 +63,8 @@ If a label covers its control, targeting the control times out because the label
 Target the label's text instead, as `getByText("Accept terms").check()` above does; Strider clicks that
 text and checks the associated control's state. When a state change is needed, both the selected text
 and the associated control must be enabled, including native disabled, disabled fieldsets and ARIA-disabled
-state. A disabled control waits until the deadline without sending input. Already-correct state succeeds
-without input. Trial actions check the same readiness; the enabled check can be skipped explicitly:
+state. A disabled control waits until the deadline without sending input. Trial actions check the same
+readiness; the enabled check can be skipped explicitly:
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -74,6 +74,9 @@ const accept = Effect.fn("accept")(function*(page: Page.Page) {
   yield* page.getByText("Accept terms").check({ checks: { enabled: false } })
 })
 ```
+
+With Enabled skipped, input reaches the selected label text. If a state change was needed and the
+checkbox stays natively disabled, it remains unchanged and the action fails with `StateUnchanged`.
 
 The click stays on the text you selected, and a box already in the right state gets no input. If the text
 sits inside something interactive of its own, such as a link or a button, the action fails with
