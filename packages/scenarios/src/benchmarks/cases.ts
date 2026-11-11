@@ -143,6 +143,21 @@ export const cases: ReadonlyArray<Case> = [
   },
   ...snapshots,
   {
+    name: "click-scroll-layout",
+    description:
+      "Click a reachable button inside an overflowing scroller with default actionability, then read its counter",
+    fixture: "/benchmark-scroll-layout",
+    strider: Effect.fnUntraced(function*(page) {
+      yield* page.getByRole("button", { name: "Increment" }).click()
+      return yield* page.locator("#count").readText
+    }),
+    playwright: async (page) => {
+      await page.getByRole("button", { name: "Increment" }).click()
+      return page.locator("#count").textContent()
+    },
+    verify: equals("1")
+  },
+  {
     name: "click",
     description: "Click a button with default actionability, then read its counter",
     strider: Effect.fnUntraced(function*(page) {
