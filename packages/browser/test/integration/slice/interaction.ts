@@ -2217,6 +2217,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                       // An explicit label point keeps its nested span from becoming the hit target.
                       const options = target === "label" ? { position: { x: 2, y: 2 } } : {}
                       const error = yield* (checked ? selected.check(options) : selected.uncheck(options)).pipe(
+                        Deadline.within("200 millis"),
                         Effect.match({ onFailure: (error) => error, onSuccess: () => undefined })
                       )
                       const events = yield* page.locator("#events").readText
@@ -2241,7 +2242,9 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                         assert.strictEqual(actual, initial)
                         // A disabled state source must block the checked gesture before page handlers see it.
                         assert.strictEqual(events, "")
-                        assert.isDefined(error)
+                        assert(Deadline.isTimeout(error), String(error))
+                        assert(error.history.some((entry) => (entry.value as { _tag: string })._tag === "Disabled"))
+                        assert.strictEqual(error.diagnostics.dispatch._tag, "NotSent")
                       } else {
                         assert.isUndefined(error)
                         assert.strictEqual(actual, checked)
@@ -2255,6 +2258,40 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             }
           }
         }
+      }
+
+      for (const mode of ["fieldset", "legend", "aria", "target", "own", "override", "trial", "click"] as const) {
+        it.effect(`associated control enabled semantics ${mode}`, () =>
+          Effect.gen(function*() {
+            const control = `<input id="box" type="checkbox" ${mode === "aria" ? 'aria-disabled="true"' : ""} ${["own", "override", "trial", "click"].includes(mode) ? "disabled" : ""}>`
+            const { url } = yield* fixture(() =>
+              `${mode === "fieldset" || mode === "legend" ? `<fieldset disabled>${mode === "legend" ? "<legend>" : ""}${control}${mode === "legend" ? "</legend>" : ""}</fieldset>` : control}
+              <label for="box"><span id="go" ${mode === "target" ? 'aria-disabled="true"' : ""} ${mode === "own" ? 'role="checkbox" aria-checked="false" onclick="this.setAttribute('aria-checked', 'true')"' : ""}>Toggle</span></label>
+              <output id="out"></output><script>document.addEventListener("pointerdown", () => out.textContent = "sent", true)</script>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const go = page.locator("#go")
+              const error = yield* (mode === "click" ? go.click() : go.check({
+                checks: mode === "override" ? { enabled: false } : {},
+                trial: mode === "trial"
+              })).pipe(Deadline.within("300 millis"), Effect.match({
+                onFailure: (error) => error, onSuccess: () => undefined
+              }))
+              if (["fieldset", "aria", "target", "trial"].includes(mode)) {
+                assert(Deadline.isTimeout(error), String(error))
+                assert(error.history.some((entry) => (entry.value as { _tag: string })._tag === "Disabled"))
+                assert.strictEqual(error.diagnostics.dispatch._tag, "NotSent")
+                assert.strictEqual(yield* page.locator("#out").readText, "")
+              } else {
+                assert.strictEqual(yield* page.locator("#out").readText, "sent")
+                if (mode === "override") {
+                  assert(error !== undefined && "reason" in error && error.reason._tag === "StateUnchanged")
+                } else assert.isUndefined(error)
+              }
+            }))
+          }), timeout)
       }
 
       // State belongs to the control; pointer input still belongs to the label.
