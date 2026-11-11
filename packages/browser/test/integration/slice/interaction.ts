@@ -563,6 +563,74 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }), timeout)
       }
 
+      for (const mode of ["visible control", "explicit scroll control", "automatic scroll"] as const) {
+        it.effect(`clicks a wholly hidden nested-scroller link: ${mode}`, () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<!doctype html><style>body{margin:0}#s{position:absolute;left:20px;top:100px;width:240px;height:60px;overflow:auto}#go{display:block;width:100px;height:24px;margin-top:${
+                mode === "visible control" ? 0 : 120
+              }px}#tail{height:160px}</style><div id="s"><a id="go" href="#go">Click me</a><div id="tail"></div></div><output id="out"></output><script>document.querySelector('#go').addEventListener('click',e=>{e.preventDefault();document.querySelector('#out').textContent=String(e.isTrusted)})</script>`
+            )
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const geometry = () =>
+              page.evaluateInMainWorld(() => {
+                const target = document.querySelector("#go")!
+                const scroller = document.querySelector("#s")!
+                const r = target.getBoundingClientRect()
+                const s = scroller.getBoundingClientRect()
+                return {
+                  left: r.left,
+                  right: r.right,
+                  top: r.top,
+                  bottom: r.bottom,
+                  scrollerTop: s.top + scroller.clientTop,
+                  scrollerBottom: s.top + scroller.clientTop + scroller.clientHeight,
+                  viewportWidth: innerWidth,
+                  viewportHeight: innerHeight,
+                  scrollTop: scroller.scrollTop,
+                  hit: document.elementFromPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2)?.tagName
+                }
+              })
+            const before = yield* geometry()
+            assert.isAbove(before.left, 0)
+            assert.isBelow(before.right, before.viewportWidth)
+            assert.isAbove(before.top, 0)
+            assert.isBelow(before.bottom, before.viewportHeight)
+            assert.strictEqual(before.scrollTop, 0)
+            if (mode === "visible control") {
+              assert.isAtLeast(before.top, before.scrollerTop)
+              assert.isAtMost(before.bottom, before.scrollerBottom)
+              assert.strictEqual(before.hit, "A")
+            } else {
+              assert.isAtLeast(before.top, before.scrollerBottom)
+              // The hit is the document background, with no overlay in this fixture.
+              assert.strictEqual(before.hit, "HTML")
+            }
+            const target = page.locator("#go")
+            if (mode === "explicit scroll control") {
+              yield* target.scrollIntoView().pipe(Deadline.within("1 second"))
+              const after = yield* geometry()
+              assert.isAbove(after.scrollTop, 0)
+              assert.isAtLeast(after.top, after.scrollerTop)
+              assert.isAtMost(after.bottom, after.scrollerBottom)
+              assert.strictEqual(after.hit, "A")
+            }
+            const error = yield* target.click().pipe(
+              Deadline.within("1 second"),
+              Effect.match({ onFailure: (error) => error, onSuccess: () => undefined })
+            )
+            if (error !== undefined) {
+              assert(Deadline.isTimeout(error), String(error))
+              assert(error.history.some((entry) => (entry.value as { _tag: string })._tag === "Covered"))
+              assert.deepStrictEqual(yield* geometry(), before)
+              assert.strictEqual(yield* page.locator("#out").readText, "")
+              return yield* Effect.fail(error)
+            }
+            assert.strictEqual(yield* page.locator("#out").readText, "true")
+          })), timeout)
+      }
+
       it.effect("clicks a wrapped link whose first line a scrolling ancestor clips", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
