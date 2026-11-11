@@ -2216,10 +2216,17 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                       const selected = page.locator(`#${target}`)
                       // An explicit label point keeps its nested span from becoming the hit target.
                       const options = target === "label" ? { position: { x: 2, y: 2 } } : {}
-                      const error = yield* (checked ? selected.check(options) : selected.uncheck(options)).pipe(
-                        Deadline.within("2 seconds"),
-                        Effect.match({ onFailure: (error) => error, onSuccess: () => undefined })
-                      )
+                      // Prepare the utility world and pointer geometry before timing disabled readiness.
+                      // Trial click deliberately ignores Enabled here and never sends input.
+                      yield* selected.click({ ...options, trial: true, checks: { enabled: false } })
+                      assert.strictEqual(yield* page.locator("#box").isChecked, initial)
+                      assert.strictEqual(yield* page.locator("#events").readText, "")
+                      const action = checked ? selected.check(options) : selected.uncheck(options)
+                      const error = yield* (mode === "disabled-change"
+                        ? action.pipe(Deadline.within("200 millis"))
+                        : action).pipe(
+                          Effect.match({ onFailure: (error) => error, onSuccess: () => undefined })
+                        )
                       const events = yield* page.locator("#events").readText
                       const actual = yield* page.locator("#box").isChecked
                       console.log(
@@ -2285,17 +2292,19 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               const page = yield* Browser.newPage()
               yield* page.goto(url)
               const go = page.locator("#go")
-              const error = yield* (mode === "click" ? go.click() : go.check({
+              // A completed trial establishes the engine and selected target's pointer readiness.
+              yield* go.click({ trial: true, checks: { enabled: false } })
+              assert.strictEqual(yield* page.locator("#box").isChecked, false)
+              assert.strictEqual(yield* page.locator("#out").readText, "")
+              const blocked = ["fieldset", "aria", "target", "trial"].includes(mode)
+              const action = mode === "click" ? go.click() : go.check({
                 checks: mode === "override" ? { enabled: false } : {},
                 trial: mode === "trial"
-              })).pipe(
-                Deadline.within("2 seconds"),
-                Effect.match({
-                  onFailure: (error) => error,
-                  onSuccess: () => undefined
-                })
+              })
+              const error = yield* (blocked ? action.pipe(Deadline.within("300 millis")) : action).pipe(
+                Effect.match({ onFailure: (error) => error, onSuccess: () => undefined })
               )
-              if (["fieldset", "aria", "target", "trial"].includes(mode)) {
+              if (blocked) {
                 assert(Deadline.isTimeout(error), String(error))
                 assert(error.history.some((entry) => (entry.value as { _tag: string })._tag === "Disabled"))
                 assert.strictEqual(error.diagnostics.dispatch._tag, "NotSent")
@@ -2324,6 +2333,9 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               const page = yield* Browser.newPage()
               yield* page.goto(url)
               const go = page.locator("#go")
+              yield* go.click({ trial: true, checks: { enabled: false } })
+              assert.strictEqual(yield* page.locator("#box").isChecked, false)
+              assert.strictEqual(yield* page.locator("#out").readText, "")
               assert(go instanceof LocatorImpl)
               const input = go.owner.page.input
               const original = input.withPermit
