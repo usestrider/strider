@@ -700,6 +700,34 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         )
       }
 
+      it.effect(
+        "clicks a link in a frame wholly clipped by a parent-document scroller",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<!doctype html><style>body{margin:0}#s{position:absolute;left:20px;top:100px;width:240px;height:60px;overflow:auto}iframe{display:block;margin-top:120px;width:200px;height:40px;border:0}#tail{height:300px}</style><div id="s"><iframe srcdoc='<style>body{margin:0}</style><a id="go" href="#">Go</a><output id="out"></output><script>go.onclick=e=>{e.preventDefault();out.textContent=String(e.isTrusted)}</script>'></iframe><div id="tail"></div></div>`
+            )
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            // The frame lies inside the document viewport but wholly below the scroller's client area.
+            const geometry = yield* page.evaluateInMainWorld(() => {
+              const frame = document.querySelector("iframe")!.getBoundingClientRect()
+              const scroller = document.getElementById("s")!.getBoundingClientRect()
+              return { frameTop: frame.top, frameBottom: frame.bottom, scrollerBottom: scroller.bottom }
+            })
+            assert.isAtLeast(geometry.frameTop, geometry.scrollerBottom)
+            assert.isBelow(geometry.frameBottom, 600)
+            const frame = page.frame(page.locator("iframe"))
+            const error = yield* frame.locator("#go").click().pipe(
+              Deadline.within("1 second"),
+              Effect.match({ onFailure: (error) => error, onSuccess: () => undefined })
+            )
+            assert.strictEqual(error, undefined, String(error))
+            assert.strictEqual(yield* frame.locator("#out").readText, "true")
+          })),
+        timeout
+      )
+
       it.effect("clicks a wrapped link whose first line a scrolling ancestor clips", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
