@@ -3,12 +3,12 @@
  *
  * `Url.Url` checks what it holds, so a string becomes one here and nowhere by a cast.
  */
-import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Url from "../Url.ts"
+import * as Spans from "./spans.ts"
 
 /**
  * A URL a browser reported, as a `Url.Url`.
@@ -16,7 +16,7 @@ import * as Url from "../Url.ts"
  * A browser names a document it hasn't navigated by `about:blank` or, before its first commit, by an empty string,
  * which some Chromium builds write as `":"` for a popup's first frame (#207). The model treats them as one
  * placeholder, and so does this: `""` and `":"` are `about:blank`. Other strings that are not absolute URLs also
- * become `about:blank`, with a warning and a `browser.url.malformed` event on the current span, when present.
+ * become `about:blank`, with a warning and a `browser.url.malformed` event on its own short-lived span unless tracing is suppressed.
  * Both diagnostics carry the original string as `browser.url.reported`.
  */
 export const reported = (url: string): Url.Url => {
@@ -28,8 +28,7 @@ export const reported = (url: string): Url.Url => {
   const diagnostic = Effect.gen(function*() {
     const attributes = { "browser.url.reported": url }
     yield* Effect.logWarning("Malformed browser-reported URL; using about:blank").pipe(Effect.annotateLogs(attributes))
-    const span = yield* Effect.option(Effect.currentSpan)
-    if (Option.isSome(span)) span.value.event("browser.url.malformed", yield* Clock.currentTimeNanos, attributes)
+    yield* Spans.event("browser.url.malformed", attributes)
   })
   const fiber = Fiber.getCurrent()
   if (fiber === undefined) Effect.runSync(diagnostic)

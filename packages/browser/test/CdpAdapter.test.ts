@@ -1488,77 +1488,79 @@ const replacementEvent = (loaderId = "replacement") => ({
   }
 })
 
-for (const parent of [true, false]) {
-  it.effect(`falls back for an unparseable frame URL without losing the connection (parent span: ${parent})`, () => {
+for (const mode of ["live", "absent", "ended", "effect-disabled", "browser-disabled"] as const) {
+  it.effect(`records malformed URL diagnostics on live, completed spans (setup: ${mode})`, () => {
     const warnings: Array<Record<string, unknown>> = []
     const logger = Logger.make((entry) => {
       if (entry.logLevel === "Warn") warnings.push(Logger.formatStructured.log(entry).annotations)
     })
     const spans: Array<Tracer.NativeSpan> = []
+    const late: Array<string> = []
     const tracer = Tracer.make({
       span(options) {
         const span = new Tracer.NativeSpan(options)
+        const event = span.event.bind(span)
+        span.event = (name, time, attributes) => {
+          if (span.status._tag === "Ended") late.push(name)
+          event(name, time, attributes)
+        }
         spans.push(span)
         return span
       }
     })
+    const enabled = mode !== "effect-disabled" && mode !== "browser-disabled"
     const test = withProtocolScheduler((drain) =>
       Effect.gen(function*() {
-        const h = yield* sentHeaders()
+        // The worker inherits connection-time services, including a setup span which may end before an event.
+        const h = yield* (mode === "absent" || mode === "live" || mode === "browser-disabled"
+          ? sentHeaders()
+          : (mode === "effect-disabled" ? sentHeaders().pipe(Effect.withTracerEnabled(false)) : sentHeaders()).pipe(
+            Effect.withSpan("connecting")
+          ))
         const page = yield* h.page.control
         const event = replacementEvent()
         yield* h.browser.receive({ ...event, params: { frame: { ...event.params.frame, url: "nope" } } })
         yield* drain
         yield* page.activate
         assert.strictEqual(h.commands.at(-1)?.method, "Page.bringToFront")
-        const documents = h.facts.filter((fact) => fact._tag === "DocumentCommitted")
-        assert.strictEqual(documents.at(-1)?.url, "about:blank")
-        const warning = warnings.find((entry) => entry["browser.url.reported"] === "nope")
-        assert.isDefined(warning)
-        assert.strictEqual(warning?.["test.ingestion"], "captured")
-        const events = spans.flatMap((span) => span.events).filter(([name]) => name === "browser.url.malformed")
-        assert.strictEqual(events.length, parent ? 2 : 0)
-        for (const event of events) assert.strictEqual(event[2]?.["browser.url.reported"], "nope")
+        assert.strictEqual(h.facts.filter((fact) => fact._tag === "DocumentCommitted").at(-1)?.url, "about:blank")
+        const malformedWarnings = warnings.filter((entry) => entry["browser.url.reported"] === "nope")
+        assert.strictEqual(malformedWarnings.length, 2)
+        for (const warning of malformedWarnings) assert.strictEqual(warning["test.ingestion"], "captured")
+        assert.deepStrictEqual(late, [])
+        const diagnostics = spans.filter((span) => span.name === "diagnostic:browser.url.malformed")
+        assert.strictEqual(diagnostics.length, enabled ? 2 : 0)
+        for (const span of diagnostics) {
+          assert.strictEqual(span.status._tag, "Ended")
+          assert.strictEqual(span.attributes.get("browser.url.reported"), "nope")
+          assert.strictEqual(span.events.length, 1)
+          assert.strictEqual(span.events[0]?.[0], "browser.url.malformed")
+          assert.strictEqual(span.events[0]?.[2]?.["browser.url.reported"], "nope")
+        }
+        // Suppression must never redirect an event to the setup span (live or ended).
+        for (const span of spans.filter((span) => !diagnostics.includes(span))) {
+          assert.isFalse(span.events.some(([name]) => name === "browser.url.malformed"))
+        }
       })
     )
-    return (parent ? test.pipe(Effect.withSpan("ingestion")) : test).pipe(
+    let program = mode === "live" || mode === "browser-disabled" ? test.pipe(Effect.withSpan("connecting")) : test
+    if (mode === "browser-disabled") {
+      program = program.pipe(
+        Effect.provideService(Browser.TracerDisabledWhen, (operation) => operation.name === "browser.url.malformed")
+      )
+    }
+    return program.pipe(
       Effect.withTracer(tracer),
+      Effect.provideService(
+        Browser.SpanNameGenerator,
+        (operation) => operation.name === "browser.url.malformed" ? `diagnostic:${operation.name}` : operation.name
+      ),
       Effect.annotateLogs({ "test.ingestion": "captured" }),
       Effect.provideService(Logger.CurrentLoggers, new Set([logger])),
       onTestClock
     )
   })
 }
-
-it.effect("does not record a malformed URL's span event on a span that has already ended", () => {
-  // The ingestion worker keeps the context it was forked in, so a span around connecting is its parent for the
-  // connection's lifetime, though it ends as soon as connecting does. An event added to an ended span is dropped by
-  // OpenTelemetry's SDK, so the diagnostic would be lost.
-  const late: Array<string> = []
-  const tracer = Tracer.make({
-    span(options) {
-      const span = new Tracer.NativeSpan(options)
-      const event = span.event.bind(span)
-      span.event = (name, startTime, attributes) => {
-        if (span.status._tag === "Ended") late.push(`${name} on ended span ${span.name}`)
-        event(name, startTime, attributes)
-      }
-      return span
-    }
-  })
-  return withProtocolScheduler((drain) =>
-    Effect.gen(function*() {
-      const h = yield* sentHeaders().pipe(Effect.withSpan("connecting"))
-      const page = yield* h.page.control
-      const event = replacementEvent()
-      yield* h.browser.receive({ ...event, params: { frame: { ...event.params.frame, url: "nope" } } })
-      yield* drain
-      yield* page.activate
-      assert.strictEqual(h.facts.filter((fact) => fact._tag === "DocumentCommitted").at(-1)?.url, "about:blank")
-      assert.deepStrictEqual(late, [])
-    })
-  ).pipe(Effect.withTracer(tracer), onTestClock)
-})
 
 const replyCapture = (browser: Effect.Success<typeof makeBrowser>, command: Sent) =>
   browser.receive({ id: command.id, sessionId: command.sessionId, result: { data: "AA==" } })
