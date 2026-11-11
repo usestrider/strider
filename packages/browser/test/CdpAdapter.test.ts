@@ -8,6 +8,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
+import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
 import * as Scheduler from "effect/Scheduler"
@@ -15,6 +16,7 @@ import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import { TestClock } from "effect/testing"
+import * as Tracer from "effect/Tracer"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as BrowserImpl from "../src/internal/browser.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
@@ -1486,21 +1488,47 @@ const replacementEvent = (loaderId = "replacement") => ({
   }
 })
 
-it.effect("falls back for an unparseable frame URL without losing the connection", () =>
-  withProtocolScheduler((drain) =>
-    Effect.gen(function*() {
-      const h = yield* sentHeaders()
-      const page = yield* h.page.control
-      const event = replacementEvent()
-      yield* h.browser.receive({ ...event, params: { frame: { ...event.params.frame, url: "nope" } } })
-      yield* drain
-      // A public operation must still reach the browser after the malformed event was folded.
-      yield* page.activate
-      assert.strictEqual(h.commands.at(-1)?.method, "Page.bringToFront")
-      const documents = h.facts.filter((fact) => fact._tag === "DocumentCommitted")
-      assert.strictEqual(documents.at(-1)?.url, "about:blank")
+for (const parent of [true, false]) {
+  it.effect(`falls back for an unparseable frame URL without losing the connection (parent span: ${parent})`, () => {
+    const warnings: Array<Record<string, unknown>> = []
+    const logger = Logger.make((entry) => {
+      if (entry.logLevel === "Warn") warnings.push(Logger.formatStructured.log(entry).annotations)
     })
-  ).pipe(onTestClock))
+    const spans: Array<Tracer.NativeSpan> = []
+    const tracer = Tracer.make({
+      span(options) {
+        const span = new Tracer.NativeSpan(options)
+        spans.push(span)
+        return span
+      }
+    })
+    const test = withProtocolScheduler((drain) =>
+      Effect.gen(function*() {
+        const h = yield* sentHeaders()
+        const page = yield* h.page.control
+        const event = replacementEvent()
+        yield* h.browser.receive({ ...event, params: { frame: { ...event.params.frame, url: "nope" } } })
+        yield* drain
+        yield* page.activate
+        assert.strictEqual(h.commands.at(-1)?.method, "Page.bringToFront")
+        const documents = h.facts.filter((fact) => fact._tag === "DocumentCommitted")
+        assert.strictEqual(documents.at(-1)?.url, "about:blank")
+        const warning = warnings.find((entry) => entry["browser.url.reported"] === "nope")
+        assert.isDefined(warning)
+        assert.strictEqual(warning?.["test.ingestion"], "captured")
+        const events = spans.flatMap((span) => span.events).filter(([name]) => name === "browser.url.malformed")
+        assert.strictEqual(events.length, parent ? 2 : 0)
+        for (const event of events) assert.strictEqual(event[2]?.["browser.url.reported"], "nope")
+      })
+    )
+    return (parent ? test.pipe(Effect.withSpan("ingestion")) : test).pipe(
+      Effect.withTracer(tracer),
+      Effect.annotateLogs({ "test.ingestion": "captured" }),
+      Effect.provideService(Logger.CurrentLoggers, new Set([logger])),
+      onTestClock
+    )
+  })
+}
 
 const replyCapture = (browser: Effect.Success<typeof makeBrowser>, command: Sent) =>
   browser.receive({ id: command.id, sessionId: command.sessionId, result: { data: "AA==" } })
