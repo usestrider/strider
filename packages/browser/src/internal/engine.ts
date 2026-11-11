@@ -3700,8 +3700,8 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
             cancelObservation = helpers.sampleViewport(
               session.request.steps,
               expectation,
-              (result) => {
-                session.observed = result.observed
+              (result, provisional) => {
+                if (!provisional || session.observed === null) session.observed = result.observed
                 passed = result.passed
               },
               (error) => finish(true, error),
