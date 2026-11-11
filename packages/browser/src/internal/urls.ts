@@ -7,7 +7,9 @@ import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
+import * as Diagnostics from "../Diagnostics.ts"
 import * as Url from "../Url.ts"
+import * as Redaction from "./redaction.ts"
 import * as Spans from "./spans.ts"
 
 /**
@@ -17,7 +19,8 @@ import * as Spans from "./spans.ts"
  * which some Chromium builds write as `":"` for a popup's first frame (#207). The model treats them as one
  * placeholder, and so does this: `""` and `":"` are `about:blank`. Other strings that are not absolute URLs also
  * become `about:blank`, with a warning and a `browser.url.malformed` event on its own short-lived span unless tracing is suppressed.
- * Both diagnostics carry the original string as `browser.url.reported`.
+ * Both diagnostics carry `browser.url.reported`: `REDACTED` under the default strict preset, or the exact string
+ * under local. The span naming and suppression settings see `browser.url.malformed` as a browser target.
  */
 export const reported = (url: string): Url.Url => {
   if (url === "" || url === ":") return blank
@@ -26,7 +29,7 @@ export const reported = (url: string): Url.Url => {
   // Event folds are synchronous inside the ingestion fiber. Keep its logger, annotations and parent span;
   // a fresh default runtime would silently send these diagnostics somewhere else.
   const diagnostic = Effect.gen(function*() {
-    const attributes = { "browser.url.reported": url }
+    const attributes = { "browser.url.reported": Redaction.url(url, yield* Diagnostics.CurrentPreset) }
     yield* Effect.logWarning("Malformed browser-reported URL; using about:blank").pipe(Effect.annotateLogs(attributes))
     yield* Spans.event("browser.url.malformed", attributes)
   })

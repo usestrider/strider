@@ -1524,7 +1524,7 @@ for (const mode of ["live", "absent", "ended", "effect-disabled", "browser-disab
         yield* page.activate
         assert.strictEqual(h.commands.at(-1)?.method, "Page.bringToFront")
         assert.strictEqual(h.facts.filter((fact) => fact._tag === "DocumentCommitted").at(-1)?.url, "about:blank")
-        const malformedWarnings = warnings.filter((entry) => entry["browser.url.reported"] === "nope")
+        const malformedWarnings = warnings.filter((entry) => entry["browser.url.reported"] === "REDACTED")
         assert.strictEqual(malformedWarnings.length, 2)
         for (const warning of malformedWarnings) assert.strictEqual(warning["test.ingestion"], "captured")
         assert.deepStrictEqual(late, [])
@@ -1532,10 +1532,10 @@ for (const mode of ["live", "absent", "ended", "effect-disabled", "browser-disab
         assert.strictEqual(diagnostics.length, enabled ? 2 : 0)
         for (const span of diagnostics) {
           assert.strictEqual(span.status._tag, "Ended")
-          assert.strictEqual(span.attributes.get("browser.url.reported"), "nope")
+          assert.strictEqual(span.attributes.get("browser.url.reported"), "REDACTED")
           assert.strictEqual(span.events.length, 1)
           assert.strictEqual(span.events[0]?.[0], "browser.url.malformed")
-          assert.strictEqual(span.events[0]?.[2]?.["browser.url.reported"], "nope")
+          assert.strictEqual(span.events[0]?.[2]?.["browser.url.reported"], "REDACTED")
         }
         // Suppression must never redirect an event to the setup span (live or ended).
         for (const span of spans.filter((span) => !diagnostics.includes(span))) {

@@ -41,6 +41,36 @@ const traced = Effect.scoped(Effect.gen(function*() {
 })).pipe(Effect.provide(Tracing))
 ```
 
+
+A browser-reported URL that cannot be parsed becomes `about:blank` and emits a warning and a
+`browser.url.malformed` event on its own short-lived span. It uses the logger, tracer and settings captured when the
+connection opens, so it remains available after a setup span ends. The warning annotation, span attribute and event
+carry `browser.url.reported`: `REDACTED` under the default strict diagnostics preset, or the exact browser string
+under local.
+
+The span naming and suppression settings also receive this diagnostic name with a Browser target.
+`browser.operation` holds the original operation or diagnostic name even when the span is renamed.
+Suppressing this span leaves its warning visible. Apply these settings around the program that builds the browser layer:
+
+```ts
+import { Browser, Diagnostics } from "@usestrider/browser"
+import { Effect } from "effect"
+
+declare const run: Effect.Effect<void>
+
+const diagnostics = run.pipe(
+  Effect.provideService(Diagnostics.CurrentPreset, "local"),
+  Effect.provideService(
+    Browser.SpanNameGenerator,
+    (operation) => `shop ${operation.name}`
+  ),
+  Effect.provideService(
+    Browser.TracerDisabledWhen,
+    (operation) => operation.name === "browser.url.malformed"
+  )
+)
+```
+
 ## Traces
 
 `Trace.record` records a page or context for Playwright's trace viewer. Open the file at

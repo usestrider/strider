@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect"
 import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
 import * as Tracer from "effect/Tracer"
+import * as Diagnostics from "../src/Diagnostics.ts"
 import * as Urls from "../src/internal/urls.ts"
 
 describe("Urls.reported", () => {
@@ -38,31 +39,40 @@ it.effect("keeps optional URL parsing and valid placeholders silent", () =>
     assert.deepStrictEqual(warnings, [])
   }))
 
-it.effect("shows a malformed URL's diagnostics only as the default diagnostics preset allows", () =>
-  Effect.gen(function*() {
-    // The default preset, "strict", governs how much of a URL Strider shows in its spans and logs; a string it
-    // can't parse is shown as REDACTED there, so a credential or token in it doesn't reach a tracer or log.
-    const shown: Array<unknown> = []
-    const spans: Array<Tracer.NativeSpan> = []
-    const tracer = Tracer.make({
-      span(options) {
-        const span = new Tracer.NativeSpan(options)
-        spans.push(span)
-        return span
-      }
-    })
-    yield* Effect.sync(() => Urls.reported("https//user:pa55word@example.com/?token=s3cret")).pipe(
-      Effect.withTracer(tracer),
-      Effect.provideService(
-        Logger.CurrentLoggers,
-        new Set([Logger.make((entry) => shown.push(Logger.formatStructured.log(entry)))])
-      )
-    )
-    for (const span of spans) {
-      shown.push([...span.attributes], span.events.map(([name, , attributes]) => [name, attributes]))
-    }
-    assert.isAbove(shown.length, 1)
-    const text = JSON.stringify(shown)
-    assert.notInclude(text, "s3cret")
-    assert.notInclude(text, "pa55word")
-  }))
+for (const preset of ["default", "local"] as const) {
+  it.effect(`shows each malformed URL diagnostic as the ${preset} preset allows`, () =>
+    Effect.gen(function*() {
+      const original = "https//user:pa55word@example.com/?token=s3cret"
+      const expected = preset === "default" ? "REDACTED" : original
+      const warnings: Array<ReturnType<typeof Logger.formatStructured.log>> = []
+      const spans: Array<Tracer.NativeSpan> = []
+      const tracer = Tracer.make({
+        span(options) {
+          const span = new Tracer.NativeSpan(options)
+          spans.push(span)
+          return span
+        }
+      })
+      const report = Effect.sync(() => assert.strictEqual(Urls.reported(original), "about:blank"))
+      yield* (preset === "local" ? report.pipe(Effect.provideService(Diagnostics.CurrentPreset, "local")) : report)
+        .pipe(
+          Effect.withTracer(tracer),
+          Effect.provideService(
+            Logger.CurrentLoggers,
+            new Set([Logger.make((entry) => {
+              if (entry.logLevel === "Warn") warnings.push(Logger.formatStructured.log(entry))
+            })])
+          )
+        )
+      assert.strictEqual(warnings.length, 1)
+      assert.strictEqual(warnings[0]?.annotations["browser.url.reported"], expected)
+      assert.strictEqual(spans.length, 1)
+      const span = spans[0]!
+      assert.strictEqual(span.status._tag, "Ended")
+      assert.strictEqual(span.attributes.get("browser.operation"), "browser.url.malformed")
+      assert.strictEqual(span.attributes.get("browser.url.reported"), expected)
+      assert.strictEqual(span.events.length, 1)
+      assert.strictEqual(span.events[0]?.[0], "browser.url.malformed")
+      assert.strictEqual(span.events[0]?.[2]?.["browser.url.reported"], expected)
+    }))
+}
