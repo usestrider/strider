@@ -307,6 +307,40 @@ export const engine = (backend: Backend) =>
             assert.deepStrictEqual(result.terminal.response.observed, { matches: 0 })
             assert.strictEqual(result.resumed._tag, "Done")
           }), timeout)
+        it.effect("cooperative viewport keeps its last ratio while another observation is pending", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(
+              backend,
+              "<div id=\"target\">Target</div>",
+              `() => {
+              (${controlledCooperativeClock})()
+              let observations = 0
+              globalThis.IntersectionObserver = class {
+                constructor(callback) { this.callback = callback }
+                observe() {
+                  if (++observations === 1) queueMicrotask(() => this.callback([{ intersectionRatio: 0 }]))
+                }
+                disconnect() {}
+              }
+            }`
+            )
+            const result = yield* cooperativeExercise(
+              call,
+              `
+              const first = await command({ command: "start", budget: 50, request: {
+                op: "expect", steps: [{ _tag: "Css", selector: "#target" }],
+                expectation: { _tag: "Viewport", ratio: 0, inViewport: true }, cap: 50
+              } })
+              const next = await command({ command: "resume", token: first.token, left: 50, decision: "continue" })
+              const pending = command({ command: "resume", token: next.token, left: 50, decision: "continue" })
+              globalThis.engineTestAdvance(50)
+              await pending
+              return JSON.stringify(await command({ command: "finish" }))
+            `
+            )
+            assert.strictEqual(result._tag, "Done")
+            assert.deepStrictEqual(result.response.observed, { matches: 1, ratio: 0 })
+          }), timeout)
         it.effect("cooperative viewport accepts a target whose geometry keeps changing", () =>
           Effect.gen(function*() {
             const { call } = yield* open(
