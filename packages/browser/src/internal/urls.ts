@@ -10,11 +10,12 @@ import * as Url from "../Url.ts"
 /**
  * A URL a browser reported, as a `Url.Url`.
  *
- * A browser names a document it hasn't navigated by `about:blank` or, before its first commit, by an empty string;
- * the model treats the two as one placeholder, and so does this: `""` is `about:blank`. A string that is neither an
- * empty one nor an absolute URL is a defect in the adapter that reported it, and throws.
+ * A browser names a document it hasn't navigated by `about:blank` or, before its first commit, by an empty string,
+ * which some Chromium builds write as `":"` for a popup's first frame (#207). The model treats them as one
+ * placeholder, and so does this: `""` and `":"` are `about:blank`. Any other string that isn't an absolute URL is a
+ * defect in the adapter that reported it, and throws.
  */
-export const reported = (url: string): Url.Url => Url.Url.make(url === "" ? "about:blank" : url)
+export const reported = (url: string): Url.Url => Url.Url.make(url === "" || url === ":" ? "about:blank" : url)
 
 /**
  * A URL a browser reported where a URL is optional, such as a stack frame's script: `None` for one that isn't a URL,
