@@ -1565,6 +1565,35 @@ export function engine(render: (root: SnapNode) => string) {
 
   const inViewport = (element: Element): boolean => visibleFragment(element) !== null
 
+  /** Let layout determine clipping, including containing blocks and overflow escapes; never infer it from hit tests. */
+  const clippedByScroller = (element: Element, timeout: number): Promise<boolean> | null => {
+    let scroller = false
+    for (let ancestor = composedParent(element); ancestor !== null; ancestor = composedParent(ancestor)) {
+      const style = getComputedStyle(ancestor)
+      if (
+        (/^(auto|scroll|hidden)$/.test(style.overflowX) && ancestor.scrollWidth > ancestor.clientWidth) ||
+        (/^(auto|scroll|hidden)$/.test(style.overflowY) && ancestor.scrollHeight > ancestor.clientHeight)
+      ) {
+        scroller = true
+        break
+      }
+    }
+    if (!scroller) return null
+    return new Promise((resume) => {
+      const observer = new IntersectionObserver(([entry]) => {
+        if (entry === undefined) return
+        clearTimer(timer)
+        observer.disconnect()
+        resume(entry.intersectionRect.width <= 0 || entry.intersectionRect.height <= 0)
+      })
+      const timer = setTimer(() => {
+        observer.disconnect()
+        resume(false)
+      }, Math.max(0, timeout))
+      observer.observe(element)
+    })
+  }
+
   /** Oversized unions can have their centre in a gap between fragments; align an edge in that case. */
   const scrollToFragments = (element: Element, inherited?: Clip) => {
     const rect = element.getBoundingClientRect()
@@ -1808,7 +1837,7 @@ export function engine(render: (root: SnapNode) => string) {
         }
       }
       const checks = request.checks
-      const evidence = previous
+      let evidence = previous
       previous = null
       let reason: NotReady | null = null
       if (element === undefined) reason = { _tag: "NoMatch" }
@@ -1816,13 +1845,25 @@ export function engine(render: (root: SnapNode) => string) {
       else if (checks.enabled && !enabled(element)) reason = { _tag: "Disabled" }
       else if (checks.editable && readOnly(element)) reason = { _tag: "ReadOnly" }
       else if (checks.notInert && inertReason(element) !== null) reason = inertReason(element)
-      else if (checks.inViewport && visibleFragment(element, request.clip) === null) {
-        reason = { _tag: "OutsideViewport" }
-        if (!scrolled) {
-          scrollToFragments(element, request.clip)
-          scrolled = true
+      if (reason === null && element !== undefined && checks.inViewport) {
+        let outside = visibleFragment(element, request.clip) === null
+        if (!outside) {
+          const clipping = clippedByScroller(element, end - now())
+          if (clipping !== null) {
+            outside = await clipping
+            // Native observation crosses a rendering update; a prior stability token no longer applies.
+            evidence = null
+          }
         }
-      } else if (checks.stable > 0) {
+        if (outside) {
+          reason = { _tag: "OutsideViewport" }
+          if (!scrolled) {
+            scrollToFragments(element, request.clip)
+            scrolled = true
+          }
+        }
+      }
+      if (reason === null && element !== undefined && checks.stable > 0) {
         const rect = element.getBoundingClientRect()
         rects.push(rect)
         if (rects.length > checks.stable + 1) rects.shift()
