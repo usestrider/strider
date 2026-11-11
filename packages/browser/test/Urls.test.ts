@@ -58,7 +58,9 @@ it.effect("shows a malformed URL's diagnostics only as the default diagnostics p
         new Set([Logger.make((entry) => shown.push(Logger.formatStructured.log(entry)))])
       )
     )
-    for (const span of spans) shown.push([...span.attributes], span.events)
+    for (const span of spans) {
+      shown.push([...span.attributes], span.events.map(([name, , attributes]) => [name, attributes]))
+    }
     assert.isAbove(shown.length, 1)
     const text = JSON.stringify(shown)
     assert.notInclude(text, "s3cret")
