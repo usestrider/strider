@@ -286,6 +286,8 @@ export type Request =
    */
   | {
     readonly op: "frame"
+    /** Milliseconds available for native clipping observation; omitted for reads that never scroll. */
+    readonly cap?: number
     readonly steps: ReadonlyArray<Step>
     readonly scroll: boolean
     readonly clip?: Clip
@@ -1565,32 +1567,61 @@ export function engine(render: (root: SnapNode) => string) {
 
   const inViewport = (element: Element): boolean => visibleFragment(element) !== null
 
-  /** Let layout determine clipping, including containing blocks and overflow escapes; never infer it from hit tests. */
-  const clippedByScroller = (element: Element, timeout: number): Promise<boolean> | null => {
-    let scroller = false
+  /** Paint-stack membership ignores overlays without mistaking their coverage for clipping. */
+  const exposedFragment = (element: Element, clip?: Clip): boolean => {
+    for (const rect of fragments(element, clip)) {
+      const x = fragmentCenter(rect.left, rect.right)
+      const y = fragmentCenter(rect.top, rect.bottom)
+      const roots: Array<Document | ShadowRoot> = [document]
+      const seen = new Set<Document | ShadowRoot>()
+      while (roots.length > 0) {
+        const root = roots.pop()!
+        if (seen.has(root)) continue
+        seen.add(root)
+        for (const hit of root.elementsFromPoint(x, y)) {
+          if (composedContains(element, hit)) return true
+          if (hit.shadowRoot !== null) roots.push(hit.shadowRoot)
+        }
+      }
+    }
+    return false
+  }
+
+  /** Compare native intersections with only scrollport clipping expanded; other clipping stays in force. */
+  const clippedByScroller = (element: Element, timeout: number, clip?: Clip): Promise<boolean | null> | null => {
+    let margin = 0
     for (let ancestor = composedParent(element); ancestor !== null; ancestor = composedParent(ancestor)) {
       const style = getComputedStyle(ancestor)
       if (
         (/^(auto|scroll|hidden)$/.test(style.overflowX) && ancestor.scrollWidth > ancestor.clientWidth) ||
         (/^(auto|scroll|hidden)$/.test(style.overflowY) && ancestor.scrollHeight > ancestor.clientHeight)
       ) {
-        scroller = true
-        break
+        const rect = ancestor.getBoundingClientRect()
+        margin += ancestor.scrollWidth + ancestor.scrollHeight + Math.abs(rect.left) + Math.abs(rect.top) +
+          rect.width + rect.height
       }
     }
-    if (!scroller) return null
+    if (margin === 0 || exposedFragment(element, clip)) return null
     return new Promise((resume) => {
-      const observer = new IntersectionObserver(([entry]) => {
-        if (entry === undefined) return
+      const observers: Array<IntersectionObserver> = []
+      const values: Array<boolean | undefined> = []
+      const finish = (value: boolean | null) => {
         clearTimer(timer)
-        observer.disconnect()
-        resume(entry.intersectionRect.width <= 0 || entry.intersectionRect.height <= 0)
-      })
-      const timer = setTimer(() => {
-        observer.disconnect()
-        resume(false)
-      }, Math.max(0, timeout))
-      observer.observe(element)
+        for (const observer of observers) observer.disconnect()
+        resume(value)
+      }
+      const timer = setTimer(() => finish(null), Math.max(0, timeout))
+      for (const expanded of [false, true]) {
+        const observer = new IntersectionObserver(([entry]) => {
+          if (entry === undefined) return
+          const present = entry.intersectionRect.width > 0 && entry.intersectionRect.height > 0
+          values[expanded ? 1 : 0] = present
+          if (values[0] === true || values[1] === false) finish(false)
+          else if (values[0] === false && values[1] === true) finish(true)
+        }, { scrollMargin: expanded ? `${margin}px` : "0px" })
+        observers.push(observer)
+        observer.observe(element)
+      }
     })
   }
 
@@ -1811,6 +1842,20 @@ export function engine(render: (root: SnapNode) => string) {
         tracked = element ?? null
         rects = []
       }
+      let clipped = false
+      if (element !== undefined && request.checks.inViewport && visibleFragment(element, request.clip) !== null) {
+        const observation = clippedByScroller(element, end - now(), request.clip)
+        if (observation !== null) {
+          const result = await observation
+          previous = null
+          if (result === null || now() >= end) continue
+          clearTreeCaches()
+          const current = resolve(request.steps)
+          // An observation belongs to one node; a replacement must start its own complete check.
+          if (current.length !== 1 || current[0] !== element) continue
+          clipped = result
+        }
+      }
       // What no waiting mends fails at once
       if (element !== undefined) {
         if (request.checks.editable && !editableKind(element)) {
@@ -1837,7 +1882,7 @@ export function engine(render: (root: SnapNode) => string) {
         }
       }
       const checks = request.checks
-      let evidence = previous
+      const evidence = previous
       previous = null
       let reason: NotReady | null = null
       if (element === undefined) reason = { _tag: "NoMatch" }
@@ -1846,15 +1891,7 @@ export function engine(render: (root: SnapNode) => string) {
       else if (checks.editable && readOnly(element)) reason = { _tag: "ReadOnly" }
       else if (checks.notInert && inertReason(element) !== null) reason = inertReason(element)
       if (reason === null && element !== undefined && checks.inViewport) {
-        let outside = visibleFragment(element, request.clip) === null
-        if (!outside) {
-          const clipping = clippedByScroller(element, end - now())
-          if (clipping !== null) {
-            outside = await clipping
-            // Native observation crosses a rendering update; a prior stability token no longer applies.
-            evidence = null
-          }
-        }
+        const outside = visibleFragment(element, request.clip) === null || clipped
         if (outside) {
           reason = { _tag: "OutsideViewport" }
           if (!scrolled) {
@@ -2667,15 +2704,28 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   /** An iframe's content box origin, scrolled into view when asked, and what the pointer would hit at a point. */
-  const frame = (request: Extract<Request, { op: "frame" }>): Response => {
+  const frame = async (request: Extract<Request, { op: "frame" }>): Promise<Response> => {
     const found = resolve(request.steps)
     if (found.length > 1) return strict(found)
     const iframe = found[0]
     if (iframe === undefined) return { _tag: "NoMatch" }
     let scrolled = false
-    if (request.scroll && visibleFragment(iframe, request.clip) === null) {
-      scrollToFragments(iframe, request.clip)
-      scrolled = true
+    if (request.scroll) {
+      let outside = visibleFragment(iframe, request.clip) === null
+      if (!outside) {
+        const observation = clippedByScroller(iframe, request.cap ?? 1000, request.clip)
+        if (observation !== null) {
+          const result = await observation
+          clearTreeCaches()
+          const current = resolve(request.steps)
+          if (result === null || current.length !== 1 || current[0] !== iframe) return { _tag: "NoMatch" }
+          outside = result
+        }
+      }
+      if (outside) {
+        scrollToFragments(iframe, request.clip)
+        scrolled = true
+      }
     }
     const rect = iframe.getBoundingClientRect()
     const style = getComputedStyle(iframe)
@@ -2774,7 +2824,7 @@ export function engine(render: (root: SnapNode) => string) {
         case "title":
           return JSON.stringify({ _tag: "Title", title: document.title } satisfies Response)
         case "frame":
-          return JSON.stringify(frame(request))
+          return JSON.stringify(await frame(request))
         case "snapshot":
           return JSON.stringify(snapshot(request))
         case "explain":

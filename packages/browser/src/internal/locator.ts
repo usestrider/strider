@@ -1197,6 +1197,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
           op: "frame",
           steps: hop.steps,
           scroll: checks.inViewport,
+          cap: Runtime.roundCap((yield* Operation.record).left()),
           point: checks.receivesPointer ? at : null
         }, id)
         if (Option.isNone(answer) || answer.value._tag !== "Frame") {

@@ -752,7 +752,8 @@ export interface ReadonlyLocator
  * **Details**
  *
  * With `inViewport` enabled, an action scrolls when no viewport fragment remains or an ancestor scroller
- * wholly clips the target. Overlay coverage alone does not scroll. Disabling `receivesPointer` preserves
+ * wholly clips the target, including scrollers in parent documents. Non-scrollable clipping and overlay
+ * coverage alone do not scroll. Disabling `receivesPointer` preserves
  * this scrolling; disabling `inViewport` prevents it. Explicit positions remain padding-box offsets.
  *
  * Each action documents which checks it runs. An override is recorded in the action's span. `stable` waits for

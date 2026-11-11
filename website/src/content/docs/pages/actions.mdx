@@ -86,7 +86,7 @@ An action needs its element reachable; visible means a person can see it. Action
 
 An action's `visible` check requires CSS visibility, content visibility and a nonempty box. Pointer actions require their action point to receive the pointer, so a covering element blocks them. Non-pointer actions accept transparency without a pointer hit test: `fill` and `clear` require enabled, editable and not inert; `focus`, `press` and `pressSequentially` require not inert; `selectOption` requires enabled; `scrollIntoView` requires stability. `setInputFiles` runs no readiness checks.
 
-With the viewport check enabled, actions also scroll targets wholly clipped by a scrollable container. An overlay covering a target does not trigger scrolling. Turning off the pointer check keeps this scrolling; turning off the viewport check disables it.
+With the viewport check enabled, actions also scroll targets wholly clipped by a scrollable container. This includes containers around a frame in its parent page. An overlay or clipping by a container that cannot scroll does not trigger scrolling. Turning off the pointer check keeps this scrolling; turning off the viewport check disables it.
 
 - "Stable": stopped moving. "In the viewport": scrolled there. "Receives the pointer": nothing covers the point.
   "Not inert": not under an `inert` attribute, nor outside an open modal dialog.
