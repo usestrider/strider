@@ -1,6 +1,6 @@
 /** Storage export must keep typed deadlines, and its cleanup diagnostics must recognize older wrapped deadlines. */
 import { assert, it } from "@effect/vitest"
-import { Page, Reason, Target, Url, UserContext } from "@usestrider/browser"
+import { Deadline, Page, Reason, Target, Url, UserContext } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as SubscriptionRef from "effect/SubscriptionRef"
@@ -12,15 +12,14 @@ import { readStorage } from "./integration/slice/sharedContext.ts"
 const operation = "UserContext.exportStorageState"
 const contextId = "context" as UserContext.Id
 
-for (const step of ["cookies", "realm"] as const) {
+for (const step of ["cookies", "realm", "evaluate", "evaluation timer"] as const) {
   it.effect(`preserves the original exportStorageState deadline from ${step}`, () =>
     Effect.gen(function*() {
-      const record = yield* Operation.record
-      const timeout = record.timeout(Option.some(
-        `The browser didn't answer ${
-          step === "cookies" ? "the cookie read" : "the document's realm"
-        } before the deadline`
-      ))
+      let timeout: unknown
+      const fail = Effect.flatMap(Operation.record, (record) => {
+        timeout = record.timeout(Option.some("The browser didn't answer before the deadline"))
+        return Effect.fail(timeout)
+      })
       const capabilities = yield* SubscriptionRef.make({ entries: [] })
       // Only the adapter call under test fails; the origin is an ordinary live document.
       const document = "document" as Target.DocumentId
@@ -29,8 +28,9 @@ for (const step of ["cookies", "realm"] as const) {
         model: {
           adapter: {
             capabilities,
-            cookies: () => step === "cookies" ? Effect.fail(timeout) : Effect.succeed([]),
-            realm: () => Effect.fail(timeout)
+            cookies: () => step === "cookies" ? fail : Effect.succeed([]),
+            realm: () => step === "realm" ? fail : Effect.succeed("realm"),
+            evaluate: () => step === "evaluation timer" ? Effect.never : fail
           },
           pages: {
             get: Effect.succeed([{
@@ -46,8 +46,16 @@ for (const step of ["cookies", "realm"] as const) {
           document: () => Option.some({ state: { get: Effect.succeed({ url: "https://example.com/" }) } })
         }
       } as unknown as Runtime.Runtime
-      const error = yield* Storage.exportState(runtime, contextId).pipe(Effect.flip)
-      assert.strictEqual(error as unknown, timeout)
+      const error = yield* Storage.exportState(runtime, contextId).pipe(
+        Deadline.within("20 millis"),
+        Effect.flip
+      )
+      if (step === "evaluation timer") {
+        assert.isTrue(Deadline.isTimeout(error))
+        assert.strictEqual((error as Deadline.Timeout).operation, operation)
+      } else {
+        assert.strictEqual(error as unknown, timeout)
+      }
     }).pipe(Operation.named(operation)))
 }
 
