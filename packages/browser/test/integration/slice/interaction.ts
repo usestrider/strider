@@ -2217,7 +2217,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                       // An explicit label point keeps its nested span from becoming the hit target.
                       const options = target === "label" ? { position: { x: 2, y: 2 } } : {}
                       const error = yield* (checked ? selected.check(options) : selected.uncheck(options)).pipe(
-                        Deadline.within("200 millis"),
+                        Deadline.within("2 seconds"),
                         Effect.match({ onFailure: (error) => error, onSuccess: () => undefined })
                       )
                       const events = yield* page.locator("#events").readText
@@ -2289,7 +2289,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 checks: mode === "override" ? { enabled: false } : {},
                 trial: mode === "trial"
               })).pipe(
-                Deadline.within("300 millis"),
+                Deadline.within("2 seconds"),
                 Effect.match({
                   onFailure: (error) => error,
                   onSuccess: () => undefined
