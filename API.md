@@ -294,7 +294,7 @@ interface UserContext extends ObservedUserContext {     // two levels only: read
   readonly workers: Watchable.Watchable<ReadonlyArray<BrowserWorker.BrowserWorker>>
   readonly cookies: CookieJar.CookieJar                 // a sub-handle bound to the context (Storage, below)
   readonly setStorageState: (state: StorageState.StorageState) => Effect<void, UserContextError | TargetGone | Deadline.Timeout>
-  readonly exportStorageState: Effect<StorageState.StorageState, UserContextError | TargetGone>   // values Redacted in memory
+  readonly exportStorageState: Effect<StorageState.StorageState, UserContextError | TargetGone | Timeout>   // values Redacted in memory
   readonly clock: PageClock.PageClock                   // context-wide timeline (opt-in)
   route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, NoInfer<P>>, options: Route.Options<P> & { readonly phase: P }): Effect<Route.Registration, Route.RouteError | TargetGone | Timeout, Scope | R>
   route<E, R>(pattern: Url.Pattern | string, handler: Route.Handler<E, R>, options?: Route.Options | undefined): Effect<Route.Registration, Route.RouteError | TargetGone | Timeout, Scope | R>

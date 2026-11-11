@@ -9,7 +9,7 @@
  * fails, naming what it left, and the next case gets a new context, so one case's leftovers don't fail the rest.
  */
 import { assert, type Vitest } from "@effect/vitest"
-import { Browser, Deadline, type Page, type StorageState, type UserContext } from "@usestrider/browser"
+import { Browser, Deadline, type Page, type StorageState, UserContext } from "@usestrider/browser"
 import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as Duration from "effect/Duration"
@@ -164,7 +164,13 @@ const probeDeadlineDuration = Duration.seconds(2)
 /** Whether a failed storage read is the page not answering before its deadline, rather than any other failure. */
 export const isStalledRead = (error: unknown): boolean =>
   Deadline.isTimeout(error) ||
-  (error instanceof Error && error.message.includes("The page didn't answer before the deadline"))
+  (error instanceof Error && error.message.includes("The page didn't answer before the deadline")) ||
+  (error instanceof UserContext.UserContextError &&
+    error.operation === "UserContext.exportStorageState" &&
+    error.reason._tag === "BackendFailure" &&
+    error.reason.kind === "Rejected" &&
+    error.reason.method === "UserContext.exportStorageState" &&
+    error.reason.hint === "UserContext.exportStorageState timed out while resolving")
 
 /**
  * Runs one probe and records how it ended and how long it took; never fails. The probe is an operation under its own

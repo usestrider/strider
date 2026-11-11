@@ -64,7 +64,10 @@
  * `pointer-dispatch`. Firefox and WebKit have no capture.
  *
  * The shared-context suites (`slice/sharedContext.ts`) read the context's storage from each page as it closes, with a
- * 5 second deadline. Only when that read isn't answered in time, on any backend, `stalled-read-probe` entries record,
+ * 5 second deadline. Typed Deadline.Timeout errors and the older wrapped export timeout
+ * (Rejected with the exact hint `UserContext.exportStorageState timed out while resolving`) trigger the probes;
+ * unrelated rejections do not. This includes cookie reads as well as page evaluation, and does not establish
+ * which browser subsystem stalled. When the read isn't answered in time, on any backend, the entries record,
  * on the `shared-context` connection, up to three further steps. Each has a budget of 2 seconds of its own, whatever
  * deadline encloses the read, and is also raced against that long on the browser clock: (1) whether the same page
  * still answers `1 + 1`; (2) whether a new page in the same context, on the stalled page's origin, opens, navigates
