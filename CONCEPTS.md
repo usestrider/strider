@@ -595,8 +595,8 @@ including a trial under the input permit, can restart without applying anything 
 permit. Invalidation discards resolved elements, stability evidence and coordinates; cancellation, deadline,
 completion and page departure dispose session resources. Viewport checks share the ordinary native intersection
 sampler, but a cooperative session owns each individual pending observation and rendering wait. A failed or
-invalidated sample yields to the host before retrying; a target whose bounds changed during its asynchronous
-observation is sampled again after that yield. Each observation is published to the session before timeout
+invalidated sample yields to the host before retrying; a target that gains or loses its rendered box during an asynchronous
+observation is sampled again after that yield. Moving an existing box does not require stable geometry. Each observation is published to the session before timeout
 construction, including a synchronous missing-match result. Expiry retains only a serialized timeout answer for
 single-use delivery: at most 64 answers, one MiB of estimated UTF-16 string storage (including ownership keys),
 and 30 seconds. Oldest answers are evicted first; oversized answers are not retained. A shared retention timer

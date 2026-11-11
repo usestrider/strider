@@ -473,8 +473,7 @@ export function renderText(root: SnapNode): string {
 
 /** The engine. Self-contained: its source is evaluated in the page, with `renderText`'s. */
 export function engine(render: (root: SnapNode) => string) {
-  // ── Time ──────────────────────────────────────────────────────────────────────────────────────────────
-
+  // Time
   // The page's own timers and frames, never a page clock's (`clock.ts`): where the engine shares the page's world,
   // a clock installed first leaves the real ones under this symbol, and one installed later finds these taken
   const realTimers = (globalThis as any)[Symbol.for("@usestrider/browser/clock/real")] as
@@ -489,10 +488,10 @@ export function engine(render: (root: SnapNode) => string) {
   const setTimer = realTimers?.setTimeout ?? globalThis.setTimeout.bind(globalThis)
   const clearTimer = realTimers?.clearTimeout ?? globalThis.clearTimeout.bind(globalThis)
   const onFrame = realTimers?.requestAnimationFrame ?? globalThis.requestAnimationFrame.bind(globalThis)
+  const cancelFrame = realTimers?.cancelAnimationFrame ?? globalThis.cancelAnimationFrame.bind(globalThis)
   const now = realTimers?.now ?? performance.now.bind(performance)
 
-  // ── The tree ──────────────────────────────────────────────────────────────────────────────────────────
-
+  // The tree
   const SKIPPED = new Set(["script", "style", "noscript", "template"])
 
   /** Every element under `root`, in tree order, with each open shadow root's elements after its host. */
@@ -551,8 +550,7 @@ export function engine(render: (root: SnapNode) => string) {
     return false
   }
 
-  // ── Text ──────────────────────────────────────────────────────────────────────────────────────────────
-
+  // Text
   const collapse = (text: string): string => text.replace(/\s+/g, " ").trim()
 
   const buttonLikeInput = (element: Element): element is HTMLInputElement =>
@@ -581,8 +579,7 @@ export function engine(render: (root: SnapNode) => string) {
     return matcher.exact ? text === expected : text.toLowerCase().includes(expected.toLowerCase())
   }
 
-  // ── Roles ─────────────────────────────────────────────────────────────────────────────────────────────
-
+  // Roles
   const KNOWN_ROLES = new Set([
     "alert",
     "alertdialog",
@@ -998,8 +995,7 @@ export function engine(render: (root: SnapNode) => string) {
     return role
   }
 
-  // ── Hidden, visible ───────────────────────────────────────────────────────────────────────────────────
-
+  // Hidden, visible
   /** Excluded from the accessibility tree: `aria-hidden`, `display: none`, `visibility: hidden`. */
   const hiddenFromAccessibility = (element: Element): boolean => {
     for (let current: Element | null = element; current !== null; current = composedParent(current)) {
@@ -1022,8 +1018,7 @@ export function engine(render: (root: SnapNode) => string) {
 
   const visible = (element: Element): boolean => rendered(element, true)
 
-  // ── Accessible names (accname 1.2) ────────────────────────────────────────────────────────────────────
-
+  // Accessible names (accname 1.2)
   interface NameContext {
     readonly visited: Set<Element>
     /** Inside an `aria-labelledby` traversal, which includes hidden referenced nodes. */
@@ -1214,8 +1209,7 @@ export function engine(render: (root: SnapNode) => string) {
     return name
   }
 
-  // ── Queries ───────────────────────────────────────────────────────────────────────────────────────────
-
+  // Queries
   interface InvalidSelector {
     readonly invalidSelector: true
     readonly kind?: "role" | undefined
@@ -1232,8 +1226,7 @@ export function engine(render: (root: SnapNode) => string) {
   const isStale = (error: unknown): error is StaleMarker =>
     typeof error === "object" && error !== null && "staleRef" in error
 
-  // ── Refs ──────────────────────────────────────────────────────────────────────────────────────────────
-
+  // Refs
   /** This engine's ref table: a ref names one node while the document lives, and this number names the table. */
   const generation = Math.floor(Math.random() * 2 ** 31)
   let refCount = 0
@@ -1443,8 +1436,7 @@ export function engine(render: (root: SnapNode) => string) {
     return current.filter((scope): scope is Element => scope instanceof Element)
   }
 
-  // ── Actionability ─────────────────────────────────────────────────────────────────────────────────────
-
+  // Actionability
   /** A short description of an element for errors: `button#buy.primary "Add to cart"`. */
   const describe = (element: Element): string => {
     let out = element.localName
@@ -1852,8 +1844,7 @@ export function engine(render: (root: SnapNode) => string) {
       ? `label ${JSON.stringify(choice.label)}`
       : `index ${choice.index}`
 
-  // ── The guard on the first trusted event ──
-
+  // The guard on the first trusted event
   /** The gesture's events a guard watches, on the window, capturing. */
   const GUARDED = [
     "pointerdown",
@@ -2004,8 +1995,7 @@ export function engine(render: (root: SnapNode) => string) {
     return { _tag: "FillGuard" as const, blocked: current.blocked, unsafe: false, accepted: false }
   }
 
-  // ── Actions ──
-
+  // Actions
   let stabilitySequence = 0
   let stability: {
     readonly token: string
@@ -2336,8 +2326,7 @@ export function engine(render: (root: SnapNode) => string) {
     }
   }
 
-  // ── Reads ──
-
+  // Reads
   const read = (request: Extract<Request, { op: "read" }>): Response => {
     const found = resolve(request.steps)
     if (found.length > 1) return strict(found)
@@ -2383,8 +2372,7 @@ export function engine(render: (root: SnapNode) => string) {
     }
   }
 
-  // ── Expectations, waiting in the page ──
-
+  // Expectations, waiting in the page
   const expected = (matcher: TextMatcher, text: string): boolean =>
     matcher._tag === "RegExp" ? new RegExp(matcher.source, matcher.flags).test(text) : text === collapse(matcher.value)
 
@@ -2557,14 +2545,13 @@ export function engine(render: (root: SnapNode) => string) {
   // Allocated only while a viewport expectation owns observations in this document.
   let viewportRounds: Map<string, () => void> | undefined
 
-  // One observation only. The caller owns retry scheduling and publishes provisional evidence
-  // synchronously, before its deadline can construct a terminal response.
+  // One native sample; its caller owns retries, cancellation and provisional evidence.
   const sampleViewport = (
     steps: ReadonlyArray<Step>,
     expectation: Extract<Expectation, { _tag: "Viewport" }>,
     publish: (result: { passed: boolean; observed: unknown }, provisional?: boolean) => void,
     complete: (error?: unknown) => void,
-    requireUnchangedBounds = false
+    requireUnchangedRendering = false
   ): () => void => {
     let active = true
     let observer: IntersectionObserver | undefined
@@ -2573,7 +2560,7 @@ export function engine(render: (root: SnapNode) => string) {
       active = false
       observer?.disconnect()
       if (frame !== undefined) {
-        ;(realTimers?.cancelAnimationFrame ?? globalThis.cancelAnimationFrame.bind(globalThis))(frame)
+        cancelFrame(frame)
       }
     }
     const finish = (error?: unknown) => {
@@ -2590,18 +2577,16 @@ export function engine(render: (root: SnapNode) => string) {
       } else {
         publish({ passed: false, observed: { matches: 1 } }, true)
         const element = found[0]!
-        const bounds = requireUnchangedBounds ? element.getBoundingClientRect() : undefined
+        const rendered = requireUnchangedRendering ? element.getClientRects().length > 0 : undefined
         observer = new IntersectionObserver((entries) => {
           if (!active) return
           clearTreeCaches()
           try {
             const current = resolve(steps)
-            const currentBounds = bounds === undefined ? undefined : element.getBoundingClientRect()
+            // A new box needs a host check; moving an existing box needs no stability gate.
             if (
               current.length === 1 && current[0] === element &&
-              (bounds === undefined || currentBounds !== undefined &&
-                  bounds.x === currentBounds.x && bounds.y === currentBounds.y &&
-                  bounds.width === currentBounds.width && bounds.height === currentBounds.height)
+              (rendered === undefined || rendered === (element.getClientRects().length > 0))
             ) {
               const ratio = entries[0]!.intersectionRatio
               const intersects = ratio > 0 && ratio > expectation.ratio - 1e-9
@@ -2637,7 +2622,7 @@ export function engine(render: (root: SnapNode) => string) {
         done = true
         cancelObservation?.()
         if (frame !== undefined) {
-          ;(realTimers?.cancelAnimationFrame ?? globalThis.cancelAnimationFrame.bind(globalThis))(frame)
+          cancelFrame(frame)
         }
         clearTimer(timer)
         if (request.token !== undefined) {
@@ -2714,8 +2699,7 @@ export function engine(render: (root: SnapNode) => string) {
     })
   }
 
-  // ── Snapshots ─────────────────────────────────────────────────────────────────────────────────────────
-
+  // Snapshots
   const INTERACTIVE = new Set([
     "button",
     "checkbox",
@@ -3357,7 +3341,7 @@ export function engine(render: (root: SnapNode) => string) {
     setTimer,
     clearTimer,
     onFrame,
-    cancelFrame: realTimers?.cancelAnimationFrame ?? globalThis.cancelAnimationFrame.bind(globalThis)
+    cancelFrame
   })
   return { run, element, cooperativeHelpers }
 }
