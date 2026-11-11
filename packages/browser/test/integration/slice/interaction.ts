@@ -2310,6 +2310,80 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }), timeout)
       }
 
+      for (const change of ["disabled", "association", "enabled"] as const) {
+        it.effect(`associated control enabled dynamic ${change}`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="box" type="checkbox" ${
+                change === "enabled" ? "disabled" : ""
+              }><input id="other" type="checkbox" disabled>
+              <label id="label" for="box"><span id="go">Toggle</span></label>
+              <output id="out"></output><script>document.addEventListener("pointerdown", () => out.textContent = "sent", true)</script>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const go = page.locator("#go")
+              assert(go instanceof LocatorImpl)
+              const input = go.owner.page.input
+              const original = input.withPermit
+              const waiting = yield* Deferred.make<void>()
+              const adapter = go.owner.runtime.model.adapter
+              const evaluate = adapter.evaluate
+              if (change === "enabled") {
+                yield* Effect.acquireRelease(
+                  Effect.sync(() => {
+                    const observed: typeof evaluate = (realm, call) =>
+                      evaluate(realm, call).pipe(Effect.tap(() => {
+                        const argument = call.arguments[0]
+                        return call.functionDeclaration === Engine.run && argument?._tag === "Value" &&
+                            argument.value.type === "string" && JSON.parse(argument.value.value).op === "act"
+                          ? Deferred.succeed(waiting, undefined)
+                          : Effect.void
+                      }))
+                    Object.assign(adapter, { evaluate: observed })
+                  }),
+                  () =>
+                    Effect.sync(() => {
+                      Object.assign(adapter, { evaluate })
+                    })
+                )
+              }
+              yield* Effect.acquireRelease(
+                Effect.sync(() => {
+                  input.withPermit = (effect) => Effect.andThen(Deferred.succeed(waiting, undefined), original(effect))
+                }),
+                () =>
+                  Effect.sync(() => {
+                    input.withPermit = original
+                  })
+              )
+              const running = yield* original(Effect.gen(function*() {
+                const fiber = yield* go.check().pipe(Deadline.within("2 seconds"), Effect.forkScoped)
+                yield* Deferred.await(waiting)
+                yield* page.evaluateInMainWorld((change: string) => {
+                  if (change === "association") (document.getElementById("label") as HTMLLabelElement).htmlFor = "other"
+                  else (document.getElementById("box") as HTMLInputElement).disabled = change === "disabled"
+                }, change)
+                return fiber
+              }))
+              const error = yield* Fiber.join(running).pipe(Effect.match({
+                onFailure: (error) => error,
+                onSuccess: () => undefined
+              }))
+              if (change === "enabled") {
+                assert.isUndefined(error)
+                assert.strictEqual(yield* page.locator("#box").isChecked, true)
+              } else {
+                assert(Deadline.isTimeout(error), String(error))
+                assert(error.history.some((entry) => (entry.value as { _tag: string })._tag === "Disabled"))
+                assert.strictEqual(error.diagnostics.dispatch._tag, "NotSent")
+                assert.strictEqual(yield* page.locator("#out").readText, "")
+              }
+            }))
+          }), timeout)
+      }
+
       // State belongs to the control; pointer input still belongs to the label.
       for (const association of ["explicit", "wrapping"] as const) {
         for (const checked of [true, false]) {
