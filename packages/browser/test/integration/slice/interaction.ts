@@ -113,6 +113,68 @@ const observeChecks = Effect.fnUntraced(function*(locator: LocatorImpl, notifyFo
   return rounds
 })
 
+/** Observe a checked action's real page reply, without making browser latency part of the assertion. */
+const checkedReadiness = Effect.fnUntraced(function*(locator: Locator.Locator, applying = false) {
+  assert(locator instanceof LocatorImpl)
+  const adapter = locator.owner.runtime.model.adapter
+  const original = adapter.evaluate
+  const observed = yield* Deferred.make<{ response: Engine.Response; record: InternalOperation.Record }>()
+  const evaluate: typeof original = (realm, call) =>
+    original(realm, call).pipe(Effect.tap((result) =>
+      Effect.gen(function*() {
+        const argument = call.arguments[0]
+        if (
+          call.functionDeclaration !== Engine.run || argument?._tag !== "Value" || argument.value.type !== "string"
+        ) return
+        const request = JSON.parse(argument.value.value) as Engine.Request
+        if (request.op !== "act" || (applying && !request.apply)) return
+        assert(result._tag === "Value" && result.value.type === "string")
+        const response = JSON.parse(result.value.value) as Engine.Response
+        // Transient non-readiness remains the running action's concern. Ready/Final are negative controls:
+        // an unfixed action must fail this assertion rather than wait forever for Disabled.
+        if (response._tag === "NotReady" && !response.history.some((reason) => reason._tag === "Disabled")) return
+        yield* Deferred.succeed(observed, { response, record: yield* InternalOperation.record })
+      })
+    ))
+  yield* Effect.acquireRelease(
+    Effect.sync(() => Object.assign(adapter, { evaluate })),
+    () =>
+      Effect.sync(() => {
+        Object.assign(adapter, { evaluate: original })
+      })
+  )
+  return Deferred.await(observed)
+})
+
+const awaitDisabled = Effect.fnUntraced(function*<E>(
+  running: Fiber.Fiber<void, E>,
+  observation: Effect.Effect<{ response: Engine.Response; record: InternalOperation.Record }>
+) {
+  const { response, record } = yield* observation.pipe(Effect.raceFirst(
+    Fiber.await(running).pipe(
+      Effect.flatMap((exit) =>
+        Effect.die(new Error(`Checked action finished before Disabled was observed: ${JSON.stringify(exit)}`))
+      )
+    )
+  ))
+  assert(response._tag === "NotReady", JSON.stringify(response))
+  assert.strictEqual(response.reason._tag, "Disabled")
+  assert(response.history.some((reason) => reason._tag === "Disabled"))
+  assert.strictEqual(record.diagnostics().dispatch._tag, "NotSent")
+  return record
+})
+
+const observesDisabled = Effect.fnUntraced(function*<E, R>(
+  locator: Locator.Locator,
+  action: Effect.Effect<void, E, R>
+) {
+  const observation = yield* checkedReadiness(locator)
+  const running = yield* action.pipe(Effect.forkScoped)
+  const record = yield* awaitDisabled(running, observation)
+  yield* Fiber.interrupt(running)
+  assert.strictEqual(record.diagnostics().dispatch._tag, "NotSent")
+})
+
 export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} interaction`, () => {
     layer(SharedContext.layer(backend), { excludeTestServices: true, timeout })((suite) => {
@@ -4253,17 +4315,15 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                       const selected = page.locator(`#${target}`)
                       // An explicit label point keeps its nested span from becoming the hit target.
                       const options = target === "label" ? { position: { x: 2, y: 2 } } : {}
-                      // Prepare the utility world and pointer geometry before timing disabled readiness.
+                      // Prepare the utility world and pointer geometry before observing disabled readiness.
                       // Trial click deliberately ignores Enabled here and never sends input.
                       yield* selected.click({ ...options, trial: true, checks: { enabled: false } })
                       assert.strictEqual(yield* page.locator("#box").isChecked, initial)
                       assert.strictEqual(yield* page.locator("#events").readText, "")
                       const action = checked ? selected.check(options) : selected.uncheck(options)
-                      const error = yield* (mode === "disabled-change"
-                        ? action.pipe(Deadline.within("200 millis"))
-                        : action).pipe(
-                          Effect.match({ onFailure: (error) => error, onSuccess: () => undefined })
-                        )
+                      const error = mode === "disabled-change"
+                        ? yield* observesDisabled(selected, action).pipe(Effect.as(undefined))
+                        : yield* action.pipe(Effect.match({ onFailure: (error) => error, onSuccess: () => undefined }))
                       const events = yield* page.locator("#events").readText
                       const actual = yield* page.locator("#box").isChecked
                       console.log(
@@ -4286,9 +4346,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                         assert.strictEqual(actual, initial)
                         // A disabled state source must block the checked gesture before page handlers see it.
                         assert.strictEqual(events, "")
-                        assert(Deadline.isTimeout(error), String(error))
-                        assert(error.history.some((entry) => (entry.value as { _tag: string })._tag === "Disabled"))
-                        assert.strictEqual(error.diagnostics.dispatch._tag, "NotSent")
+                        assert.isUndefined(error)
                       } else {
                         assert.isUndefined(error)
                         assert.strictEqual(actual, checked)
@@ -4338,13 +4396,11 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 checks: mode === "override" ? { enabled: false } : {},
                 trial: mode === "trial"
               })
-              const error = yield* (blocked ? action.pipe(Deadline.within("300 millis")) : action).pipe(
-                Effect.match({ onFailure: (error) => error, onSuccess: () => undefined })
-              )
+              const error = blocked
+                ? yield* observesDisabled(go, action).pipe(Effect.as(undefined))
+                : yield* action.pipe(Effect.match({ onFailure: (error) => error, onSuccess: () => undefined }))
               if (blocked) {
-                assert(Deadline.isTimeout(error), String(error))
-                assert(error.history.some((entry) => (entry.value as { _tag: string })._tag === "Disabled"))
-                assert.strictEqual(error.diagnostics.dispatch._tag, "NotSent")
+                assert.isUndefined(error)
                 assert.strictEqual(yield* page.locator("#out").readText, "")
               } else {
                 assert.strictEqual(yield* page.locator("#out").readText, "sent")
@@ -4377,27 +4433,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               const input = go.owner.page.input
               const original = input.withPermit
               const waiting = yield* Deferred.make<void>()
-              const adapter = go.owner.runtime.model.adapter
-              const evaluate = adapter.evaluate
-              if (change === "enabled") {
-                yield* Effect.acquireRelease(
-                  Effect.sync(() => {
-                    const observed: typeof evaluate = (realm, call) =>
-                      evaluate(realm, call).pipe(Effect.tap(() => {
-                        const argument = call.arguments[0]
-                        return call.functionDeclaration === Engine.run && argument?._tag === "Value" &&
-                            argument.value.type === "string" && JSON.parse(argument.value.value).op === "act"
-                          ? Deferred.succeed(waiting, undefined)
-                          : Effect.void
-                      }))
-                    Object.assign(adapter, { evaluate: observed })
-                  }),
-                  () =>
-                    Effect.sync(() => {
-                      Object.assign(adapter, { evaluate })
-                    })
-                )
-              }
+              const observation = yield* checkedReadiness(go, change !== "enabled")
               yield* Effect.acquireRelease(
                 Effect.sync(() => {
                   input.withPermit = (effect) => Effect.andThen(Deferred.succeed(waiting, undefined), original(effect))
@@ -4408,26 +4444,28 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   })
               )
               const running = yield* original(Effect.gen(function*() {
-                const fiber = yield* go.check().pipe(Deadline.within("2 seconds"), Effect.forkScoped)
-                yield* Deferred.await(waiting)
+                const fiber = yield* go.check().pipe(Effect.forkScoped)
+                if (change === "enabled") yield* awaitDisabled(fiber, observation)
+                else yield* Deferred.await(waiting)
+                assert.strictEqual(yield* page.locator("#out").readText, "")
+                assert.strictEqual(yield* page.locator("#box").isChecked, false)
                 yield* page.evaluateInMainWorld((change: string) => {
                   if (change === "association") (document.getElementById("label") as HTMLLabelElement).htmlFor = "other"
                   else (document.getElementById("box") as HTMLInputElement).disabled = change === "disabled"
                 }, change)
                 return fiber
               }))
-              const error = yield* Fiber.join(running).pipe(Effect.match({
-                onFailure: (error) => error,
-                onSuccess: () => undefined
-              }))
               if (change === "enabled") {
-                assert.isUndefined(error)
+                yield* Fiber.join(running)
                 assert.strictEqual(yield* page.locator("#box").isChecked, true)
+                assert.strictEqual(yield* page.locator("#out").readText, "sent")
               } else {
-                assert(Deadline.isTimeout(error), String(error))
-                assert(error.history.some((entry) => (entry.value as { _tag: string })._tag === "Disabled"))
-                assert.strictEqual(error.diagnostics.dispatch._tag, "NotSent")
+                const record = yield* awaitDisabled(running, observation)
+                yield* Fiber.interrupt(running)
+                assert.strictEqual(record.diagnostics().dispatch._tag, "NotSent")
                 assert.strictEqual(yield* page.locator("#out").readText, "")
+                assert.strictEqual(yield* page.locator("#box").isChecked, false)
+                assert.strictEqual(yield* page.locator("#other").isChecked, false)
               }
             }))
           }), timeout)
