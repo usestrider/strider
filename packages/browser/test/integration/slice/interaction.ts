@@ -700,6 +700,59 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         )
       }
 
+      for (const clipping of ["overflow:clip", "contain:paint"] as const) {
+        it.effect(`does not scroll unrelated scrollers for ${clipping}`, () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<!doctype html><style>body{margin:0}#s{position:absolute;left:20px;top:100px;width:240px;height:150px;overflow:auto}#clip{margin-top:80px;width:200px;height:40px;${clipping}}#go{display:block;margin-top:120px;width:100px;height:24px}#tail{height:600px}</style><div id="s"><div id="clip"><a id="go" href="#">Go</a></div><div id="tail"></div></div><output id="out"></output><script>go.onclick=e=>{e.preventDefault();out.textContent=String(e.isTrusted)}</script>`
+            )
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const before = yield* page.evaluateInMainWorld(() => document.getElementById("s")!.scrollTop)
+            const error = yield* page.locator("#go").click().pipe(
+              Deadline.within("1 second"),
+              Effect.match({ onFailure: (error) => error, onSuccess: () => undefined })
+            )
+            assert(Deadline.isTimeout(error), String(error))
+            assert.strictEqual(yield* page.evaluateInMainWorld(() => document.getElementById("s")!.scrollTop), before)
+            assert.strictEqual(yield* page.locator("#out").readText, "")
+          })), timeout)
+      }
+
+      for (const viewport of [true, false]) {
+        it.effect(
+          `routes parent scroller checks across origins with inViewport=${viewport}`,
+          () =>
+            Effect.scoped(Effect.gen(function*() {
+              const { origin, crossSite } = yield* site
+              const leaf =
+                `<style>body{margin:0}</style><a id="go" href="#">Go</a><output id="out"></output><script>go.onclick=e=>{e.preventDefault();out.textContent=String(e.isTrusted)}</script>`
+              const html =
+                `<style>body{margin:0}#s{position:absolute;left:20px;top:100px;width:240px;height:60px;overflow:auto}iframe{display:block;margin-top:120px;width:200px;height:40px;border:0}#tail{height:300px}</style><div id="s"><iframe src="${
+                  fixtureUrl(crossSite, leaf)
+                }"></iframe><div id="tail"></div></div>`
+              const page = yield* Browser.newPage()
+              yield* page.goto(fixtureUrl(origin, html))
+              const frame = page.frame(page.locator("iframe"))
+              const error = yield* frame.locator("#go").click({ checks: { inViewport: viewport } }).pipe(
+                Deadline.within("1 second"),
+                Effect.match({ onFailure: (error) => error, onSuccess: () => undefined })
+              )
+              const scroll = yield* page.evaluateInMainWorld(() => document.getElementById("s")!.scrollTop)
+              if (viewport) {
+                assert.strictEqual(error, undefined, String(error))
+                assert.isAbove(scroll, 0)
+                assert.strictEqual(yield* frame.locator("#out").readText, "true")
+              } else {
+                assert(Deadline.isTimeout(error), String(error))
+                assert.strictEqual(scroll, 0)
+                assert.strictEqual(yield* frame.locator("#out").readText, "")
+              }
+            })),
+          timeout
+        )
+      }
+
       it.effect(
         "clicks a link in a frame wholly clipped by a parent-document scroller",
         () =>

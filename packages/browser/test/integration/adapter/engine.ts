@@ -153,6 +153,58 @@ export const engine = (backend: Backend) =>
   describe(`${backend.name} engine`, () => {
     layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
       (it) => {
+        it.effect("reuses same-frame stability inside a reachable scrolling layout", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(
+              backend,
+              `<div style="height:100px;overflow:auto"><button id="go">Go</button><div style="height:600px"></div></div>`,
+              countFrames()
+            )
+            const result = yield* revalidate(call, "")
+            assert.strictEqual(result.response._tag, "Ready")
+            assert.strictEqual(result.frames, 0)
+          }), timeout)
+
+        for (const mutation of ["disable", "replace"] as const) {
+          it.effect(`rechecks readiness after clipping observation: ${mutation}`, () =>
+            Effect.gen(function*() {
+              const { send } = yield* open(
+                backend,
+                `<style>#s{height:40px;overflow:auto}#go{margin-top:120px}#tail{height:300px}</style><div id="s"><button id="go">Go</button><div id="tail"></div></div>`,
+                `() => {
+                  const Native = IntersectionObserver
+                  let changed = false
+                  globalThis.IntersectionObserver = class extends Native {
+                    constructor(callback, options) {
+                      super((entries, observer) => {
+                        if (!changed) {
+                          changed = true
+                          const go = document.getElementById("go")
+                          ${
+                  mutation === "disable"
+                    ? "go.disabled = true"
+                    : `go.outerHTML = '<button id="go" disabled>Replacement</button>'`
+                }
+                          document.getElementById("s").scrollTop = 120
+                        }
+                        callback(entries.map(entry => ({ target: entry.target, intersectionRect: { width: 20, height: 20 } })), observer)
+                      }, options)
+                    }
+                  }
+                }`
+              )
+              const response = yield* send({
+                ...point(0),
+                checks: { ...all, stable: 0, receivesPointer: false },
+                action: { _tag: "Focus" },
+                apply: true,
+                cap: 200
+              })
+              assert.strictEqual(response._tag, "NotReady", JSON.stringify(response))
+              if (response._tag === "NotReady") assert(response.history.some((reason) => reason._tag === "Disabled"))
+            }), timeout)
+        }
+
         it.effect("collects field metadata only for masking snapshots and clears it across mode switches", () =>
           Effect.gen(function*() {
             const { call, send } = yield* open(
