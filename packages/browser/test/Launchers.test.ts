@@ -135,6 +135,62 @@ describe("DevToolsActivePort", () => {
           assert.isAtLeast(reads, 2)
         }))
     }
+    const old = "09222\n/devtools/browser/8d0f3c2e-5b7a-4c1d-9e6f-0a1b2c3d4e5f"
+    for (const exited of [false, true]) {
+      it.effect(`rejects unchanged endpoint identity when ${exited ? "the child exits" : "the wait expires"}`, () =>
+        Effect.gen(function*() {
+          const fs = yield* FileSystem.FileSystem
+          let reads = 0
+          const exit = yield* DevToolsActivePort.read("/profile", {
+            previous: DevToolsActivePort.parse(old),
+            timeout: "120 millis",
+            until: () => Effect.succeed(exited)
+          }).pipe(
+            Effect.provideService(FileSystem.FileSystem, {
+              ...fs,
+              readFileString: () =>
+                Effect.sync(() => {
+                  reads++
+                  return old.slice(1).toUpperCase().replace("/DEVTOOLS/BROWSER/", "/devtools/browser/") + "\n"
+                })
+            }),
+            Effect.exit
+          )
+          assert.isTrue(Exit.isFailure(exit))
+          if (exited) assert.strictEqual(reads, 1)
+          else assert.isAtLeast(reads, 2)
+        }))
+    }
+    it.effect("accepts the same port with a new browser UUID", () =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const current = "9222\n/devtools/browser/22222222-2222-4222-8222-222222222222"
+        const endpoint = yield* DevToolsActivePort.read("/profile", { previous: DevToolsActivePort.parse(old) }).pipe(
+          Effect.provideService(FileSystem.FileSystem, { ...fs, readFileString: () => Effect.succeed(current) })
+        )
+        assert.deepStrictEqual(endpoint, DevToolsActivePort.parse(current))
+      }))
+    it.effect("snapshots missing and partial files without an endpoint and preserves read errors", () =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        assert.isUndefined(yield* DevToolsActivePort.snapshot("/missing-strider-profile"))
+        assert.isUndefined(
+          yield* DevToolsActivePort.snapshot("/profile").pipe(
+            Effect.provideService(FileSystem.FileSystem, { ...fs, readFileString: () => Effect.succeed("9222\n") })
+          )
+        )
+        const error = PlatformError.systemError({
+          _tag: "PermissionDenied",
+          module: "FileSystem",
+          method: "readFileString",
+          pathOrDescriptor: "/profile/DevToolsActivePort"
+        })
+        const failure = yield* DevToolsActivePort.snapshot("/profile").pipe(
+          Effect.provideService(FileSystem.FileSystem, { ...fs, readFileString: () => Effect.fail(error) }),
+          Effect.flip
+        )
+        assert.strictEqual(failure, error)
+      }))
     it.effect("stops retrying when the process exits", () =>
       Effect.gen(function*() {
         const fs = yield* FileSystem.FileSystem
@@ -240,6 +296,44 @@ describe("Chromium launcher", () => {
         assert.strictEqual(yield* fs.readFileString(`${directory}/caller-owned`), "keep")
         assert.deepStrictEqual(premature, [], "must wait for this child to publish before connecting")
         assert.deepStrictEqual(connections, [`ws://127.0.0.1:41002${current.split("\n")[1]}`])
+      }))
+    it.effect("refuses snapshot read errors before spawning or connecting", () =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        let spawned = false
+        let connected = false
+        const error = PlatformError.systemError({
+          _tag: "PermissionDenied",
+          module: "FileSystem",
+          method: "readFileString",
+          pathOrDescriptor: "/profile/DevToolsActivePort"
+        })
+        const failure = yield* ChromiumLauncher.launchWithPort({
+          executablePath: "/fake/chromium",
+          userDataDir: "/profile"
+        }).pipe(
+          Effect.provideService(FileSystem.FileSystem, {
+            ...fs,
+            exists: () => Effect.succeed(true),
+            readFileString: () => Effect.fail(error)
+          }),
+          Effect.provideService(
+            ChildProcessSpawner.ChildProcessSpawner,
+            ChildProcessSpawner.make(() => {
+              spawned = true
+              return Effect.die("must not spawn")
+            })
+          ),
+          Effect.provideService(Socket.WebSocketConstructor, () => {
+            connected = true
+            throw new Error("must not connect")
+          }),
+          Effect.scoped,
+          Effect.flip
+        )
+        assert.strictEqual(failure.reason._tag, "ConnectionFailed")
+        assert.isFalse(spawned)
+        assert.isFalse(connected)
       }))
     const withStderr = (
       stderr: ChildProcessSpawner.ChildProcessHandle["stderr"],
