@@ -704,11 +704,17 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         it.effect(`does not scroll unrelated scrollers for ${clipping}`, () =>
           Effect.scoped(Effect.gen(function*() {
             const { url } = yield* fixture(() =>
-              `<!doctype html><style>body{margin:0}#s{position:absolute;left:20px;top:100px;width:240px;height:150px;overflow:auto}#clip{margin-top:80px;width:200px;height:40px;${clipping}}#go{display:block;margin-top:120px;width:100px;height:24px}#tail{height:600px}</style><div id="s"><div id="clip"><a id="go" href="#">Go</a></div><div id="tail"></div></div><output id="out"></output><script>go.onclick=e=>{e.preventDefault();out.textContent=String(e.isTrusted)}</script>`
+              `<!doctype html><style>body{margin:0}#s{position:absolute;left:20px;top:100px;width:240px;height:150px;overflow:auto}#clip{display:flow-root;margin-top:80px;width:200px;height:40px;${clipping}}#go{display:block;margin-top:120px;width:100px;height:24px}#tail{height:600px}</style><div id="s"><div id="clip"><a id="go" href="#">Go</a></div><div id="tail"></div></div><output id="out"></output><script>go.onclick=e=>{e.preventDefault();out.textContent=String(e.isTrusted)}</script>`
             )
             const page = yield* Browser.newPage()
             yield* page.goto(url)
             const before = yield* page.evaluateInMainWorld(() => document.getElementById("s")!.scrollTop)
+            const clipped = yield* page.evaluateInMainWorld(() => {
+              const target = document.getElementById("go")!.getBoundingClientRect()
+              const clip = document.getElementById("clip")!.getBoundingClientRect()
+              return target.top >= clip.bottom
+            })
+            assert.strictEqual(clipped, true)
             const error = yield* page.locator("#go").click().pipe(
               Deadline.within("1 second"),
               Effect.match({ onFailure: (error) => error, onSuccess: () => undefined })
