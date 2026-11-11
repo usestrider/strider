@@ -205,7 +205,11 @@ export const validateCount = Effect.fnUntraced(
   }
 )
 
-/** Transfer chunks in the upload scope, returning the final assignment to run before that scope closes. */
+/**
+ * Prepare a scoped upload and return its final assignment. All-Bytes selections totaling at most 64 KiB
+ * encode complete files for one assignment call in the engine utility world. Other selections transfer
+ * acknowledged chunks into an isolated-world collector before assignment; stock WebKit uses the page world.
+ */
 export const prepareMade = Effect.fnUntraced(
   function*(runtime: Runtime.Runtime, node: Adapter.NodeBinding, files: ReadonlyArray<TransferFile>, options: {
     readonly dispatch: Operation.Record
@@ -213,7 +217,7 @@ export const prepareMade = Effect.fnUntraced(
     readonly at: MonotonicInstant.MonotonicInstant
     readonly id: Diagnostics.OperationId
   }) {
-    // Files in memory that fit one chunk go in a single call, in the world the engine already made
+    // All-Bytes selections totaling at most 64 KiB, including empty ones, reuse the engine utility world.
     const single = files.every((file): file is Made => file._tag === "Bytes") &&
       files.reduce((total, file) => total + file.data.length, 0) <= chunkSize
     const realm = yield* Evaluation.documentRealm(
