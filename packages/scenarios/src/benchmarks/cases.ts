@@ -166,7 +166,80 @@ const unusedPages = (mode: "never" | "other" | "removed"): Case => {
   }
 }
 
+// Native intersection control: playwright-core has no assertion package. Its locator evaluation
+// retains the normal protocol/tracing path and bounds the native observer by the usual case timeout.
+const waitForViewport = (element: Element) =>
+  new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      observer.disconnect()
+      reject(new Error("Viewport intersection did not become positive"))
+    }, 30_000)
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0]!.intersectionRatio <= 0) return
+      observer.disconnect()
+      clearTimeout(timer)
+      resolve()
+    })
+    observer.observe(element)
+  })
+
+const moveIntoViewport = () => {
+  const target = document.querySelector<HTMLElement>("#viewport-target")!
+  target.style.position = "fixed"
+  target.style.top = "2000px"
+  target.style.left = "0px"
+  target.style.width = "100px"
+  target.style.height = "100px"
+  setTimeout(() => {
+    target.style.top = "0px"
+  }, 100)
+}
+
+export const viewportCases: ReadonlyArray<Case> = [
+  ...[false, true].map((retry): Case => ({
+    name: retry ? "viewport-retry" : "viewport-ready",
+    description: retry
+      ? "Warm-engine viewport assertion after arming a 100ms offscreen-to-onscreen transition; timer setup and wait included"
+      : "Warm-engine viewport assertion on an intersecting heading; setup excluded",
+    prepareStrider: (page) => page.getByRole("heading").readText,
+    preparePlaywright: (page) => page.getByRole("heading").textContent(),
+    strider: Effect.fnUntraced(function*(page) {
+      if (retry) yield* page.evaluateInMainWorld(moveIntoViewport)
+      yield* page.locator(retry ? "#viewport-target" : "h1").pipe(Expect.toBeInViewport())
+    }),
+    playwright: async (page) => {
+      if (retry) await page.evaluate(moveIntoViewport)
+      await page.locator(retry ? "#viewport-target" : "h1").evaluate(waitForViewport)
+    },
+    fixture: retry ? "/benchmark-viewport" : "/benchmark",
+    verify: equals(undefined)
+  })),
+  {
+    name: "cold-locator-read",
+    description:
+      "First locator read in a fresh document, including engine installation; page/navigation setup excluded",
+    strider: (page) => page.getByRole("heading").readText,
+    playwright: (page) => page.getByRole("heading").textContent(),
+    verify: equals("Benchmark")
+  }
+]
+
+export const viewportMeasurementNames = [
+  "viewport-ready",
+  "viewport-retry",
+  "cold-locator-read"
+]
+export const handlerMeasurementNames = [
+  ...viewportMeasurementNames,
+  "unused-handlers-never",
+  "unused-handlers-other",
+  "unused-handlers-removed",
+  "click",
+  "visible"
+]
+
 export const cases: ReadonlyArray<Case> = [
+  ...viewportCases,
   unusedPages("never"),
   unusedPages("other"),
   unusedPages("removed"),

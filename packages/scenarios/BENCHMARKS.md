@@ -850,3 +850,37 @@ The `navigate-title-locator` case retains the original `navigate` load/title wor
 `Shop` heading through each library's role locator. It verifies both results as `Shop`. This combined timer
 checks whether a cheaper title read merely defers initialization to the next locator. Setup, verification and
 cleanup remain outside timing, as for `navigate`.
+
+### Viewport and locator-handler default-path controls
+
+`viewport-ready` warms the locator engine with a heading read outside timing, then runs a real
+`Expect.toBeInViewport()` assertion on that intersecting heading. `viewport-retry` uses the same warmup,
+then arms a 100 ms transition moving a fixed 100 × 100 target from `top: 2000px` to `top: 0px` and asserts
+positive intersection. Timer setup and the intentional delay are included; preparation and cleanup are not.
+As with delayed visibility, the timer is not an observer-readiness barrier: a sufficiently delayed host may
+begin checking after the transition. This measures a delayed viewport condition, not a guaranteed retry count.
+No handler is registered, no deadline is shortened, and normal operation tracing remains enabled.
+
+The Playwright control uses its ordinary locator evaluation with a native `IntersectionObserver`, resolving
+only for a strictly positive ratio, disconnecting on success or its 30-second timeout. `playwright-core` does
+not supply Playwright Test's assertion package, so this is a native intersection control, not its `expect`
+implementation. The paired head/base Strider comparison uses the same real Strider assertion on both refs.
+
+`cold-locator-read` measures the first heading read in each fresh document, including lazy engine installation.
+It performs no locator preparation. Page/context creation and initial navigation remain outside timing on
+both sides; it isolates installation from browser launch rather than claiming cold-machine startup coverage.
+
+`--only viewport-install` selects these three cases. `--only handler-default-path` adds the never-registered,
+other-page/context-active and removed-handler controls, plus `click` and `visible` (eight cases total).
+The paired driver overlays the same case definitions, fixture server and runner on both refs, and retains their
+source hashes. Use exact refs and 200 pairs for both an identical-code control and the changed-code comparison;
+run them sequentially through `benchmarks.yml` and retain every interval, including slowdown signals.
+
+For correctness-only local validation, without collecting benchmark timings:
+
+```sh
+clutch lock browser -- nix develop .#integration --ignore-environment --keep TERM --command node packages/scenarios/benchmark/validate-viewport.ts
+```
+
+This runs each of the three case bodies once for each library, checks the pinned Chromium version, and verifies
+its output. It does not call the measurement runner or write performance samples.
