@@ -2263,10 +2263,22 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
       for (const mode of ["fieldset", "legend", "aria", "target", "own", "override", "trial", "click"] as const) {
         it.effect(`associated control enabled semantics ${mode}`, () =>
           Effect.gen(function*() {
-            const control = `<input id="box" type="checkbox" ${mode === "aria" ? 'aria-disabled="true"' : ""} ${["own", "override", "trial", "click"].includes(mode) ? "disabled" : ""}>`
+            const control = `<input id="box" type="checkbox" ${mode === "aria" ? "aria-disabled=\"true\"" : ""} ${
+              ["own", "override", "trial", "click"].includes(mode) ? "disabled" : ""
+            }>`
             const { url } = yield* fixture(() =>
-              `${mode === "fieldset" || mode === "legend" ? `<fieldset disabled>${mode === "legend" ? "<legend>" : ""}${control}${mode === "legend" ? "</legend>" : ""}</fieldset>` : control}
-              <label for="box"><span id="go" ${mode === "target" ? 'aria-disabled="true"' : ""} ${mode === "own" ? 'role="checkbox" aria-checked="false" onclick="this.setAttribute('aria-checked', 'true')"' : ""}>Toggle</span></label>
+              `${
+                mode === "fieldset" || mode === "legend"
+                  ? `<fieldset disabled>${mode === "legend" ? "<legend>" : ""}${control}${
+                    mode === "legend" ? "</legend>" : ""
+                  }</fieldset>`
+                  : control
+              }
+              <label for="box"><span id="go" ${mode === "target" ? "aria-disabled=\"true\"" : ""} ${
+                mode === "own"
+                  ? `role="checkbox" aria-checked="false" onclick="this.setAttribute('aria-checked', 'true')"`
+                  : ""
+              }>Toggle</span></label>
               <output id="out"></output><script>document.addEventListener("pointerdown", () => out.textContent = "sent", true)</script>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
@@ -2276,9 +2288,13 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               const error = yield* (mode === "click" ? go.click() : go.check({
                 checks: mode === "override" ? { enabled: false } : {},
                 trial: mode === "trial"
-              })).pipe(Deadline.within("300 millis"), Effect.match({
-                onFailure: (error) => error, onSuccess: () => undefined
-              }))
+              })).pipe(
+                Deadline.within("300 millis"),
+                Effect.match({
+                  onFailure: (error) => error,
+                  onSuccess: () => undefined
+                })
+              )
               if (["fieldset", "aria", "target", "trial"].includes(mode)) {
                 assert(Deadline.isTimeout(error), String(error))
                 assert(error.history.some((entry) => (entry.value as { _tag: string })._tag === "Disabled"))
