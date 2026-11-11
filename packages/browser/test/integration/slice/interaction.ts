@@ -2183,6 +2183,80 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
+      for (const association of ["explicit", "wrapping"] as const) {
+        for (const target of ["label", "span"] as const) {
+          for (const checked of [true, false]) {
+            for (const mode of ["disabled-change", "disabled-correct", "enabled-change"] as const) {
+              it.effect(
+                `associated control enabled check ${association} ${target} ${checked ? "check" : "uncheck"} ${mode}`,
+                () =>
+                  Effect.gen(function*() {
+                    const initial = mode === "disabled-correct" ? checked : !checked
+                    const input = `<input id="box" type="checkbox" ${initial ? "checked" : ""} ${
+                      mode === "enabled-change" ? "" : "disabled"
+                    }>`
+                    const { url } = yield* fixture(() =>
+                      `${
+                        association === "explicit" ? input : ""
+                      }<label id="label" style="display:inline-block;padding:12px" ${
+                        association === "explicit" ? "for=\"box\"" : ""
+                      }>${
+                        association === "wrapping" ? input : ""
+                      }<span id="span">Toggle</span></label><p id="events"></p><script>
+                      const events = [];
+                      for (const type of ["pointerdown", "pointerup", "click"]) document.addEventListener(type, e => {
+                        events.push({ type, target: e.target.id, trusted: e.isTrusted });
+                        document.getElementById("events").textContent = JSON.stringify(events);
+                      }, true);
+                      </script>`
+                    )
+                    yield* Effect.scoped(Effect.gen(function*() {
+                      const page = yield* Browser.newPage()
+                      yield* page.goto(url)
+                      const selected = page.locator(`#${target}`)
+                      // An explicit label point keeps its nested span from becoming the hit target.
+                      const options = target === "label" ? { position: { x: 2, y: 2 } } : {}
+                      const error = yield* (checked ? selected.check(options) : selected.uncheck(options)).pipe(
+                        Effect.match({ onFailure: (error) => error, onSuccess: () => undefined })
+                      )
+                      const events = yield* page.locator("#events").readText
+                      const actual = yield* page.locator("#box").isChecked
+                      console.log(
+                        "associated-control-evidence",
+                        JSON.stringify({
+                          association,
+                          target,
+                          checked,
+                          mode,
+                          actual,
+                          events,
+                          error: error === undefined ? null : {
+                            tag: error._tag,
+                            reason: "reason" in error ? error.reason : undefined,
+                            diagnostics: error.diagnostics
+                          }
+                        })
+                      )
+                      if (mode === "disabled-change") {
+                        assert.strictEqual(actual, initial)
+                        // A disabled state source must block the checked gesture before page handlers see it.
+                        assert.strictEqual(events, "")
+                        assert.isDefined(error)
+                      } else {
+                        assert.isUndefined(error)
+                        assert.strictEqual(actual, checked)
+                        if (mode === "disabled-correct") assert.strictEqual(events, "")
+                        else assert.include(events, "\"type\":\"pointerdown\"")
+                      }
+                    }))
+                  }),
+                timeout
+              )
+            }
+          }
+        }
+      }
+
       // State belongs to the control; pointer input still belongs to the label.
       for (const association of ["explicit", "wrapping"] as const) {
         for (const checked of [true, false]) {
