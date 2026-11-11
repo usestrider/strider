@@ -966,7 +966,11 @@ observability contract require a minor release under the release policy, includi
 Check and uncheck prefer the selected element's own checked state. When it has none, a directly selected label
 or an ordinary descendant's nearest DOM label supplies the associated control. Pointer input and relative positions
 remain on the selected element; already-correct state sends nothing, and post-click verification uses the same
-checked-state lookup. Public isChecked and checked expectations continue to read only the selected element.
+checked-state lookup. When input is needed, Enabled applies to both the selected target and its current
+checked-state source, resolved on every readiness pass including under the input permit. This uses the existing
+native, fieldset and ARIA predicate and honors the explicit enabled-check override. Reject checking only the
+pointer target: a label can receive trusted input while its disabled control cannot change state.
+Public isChecked and checked expectations continue to read only the selected element.
 
 Association follows only DOM parents, without crossing a shadow root. It uses the label's control, never the
 ancestor label's own ARIA state. A selected element inside a shadow root cannot borrow an outside label.

@@ -1027,7 +1027,8 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       yield* this.pointer(
         operation,
         options,
-        (state, point) => Input.click(state, point, "left", 1, options?.modifiers ?? [])
+        (state, point) => Input.click(state, point, "left", 1, options?.modifiers ?? []),
+        { checked: true }
       )
       if (options?.trial === true) return
       const after = yield* read
@@ -1099,6 +1100,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     ) => ReadonlyArray<Adapter.InputEvent>,
     extra: {
       readonly guard?: boolean
+      readonly checked?: boolean
       readonly target?: Effect.Effect<Option.Option<{ readonly x: number; readonly y: number }>, unknown>
       /** For an HTML drag: send the gesture, or say it was done another way. */
       readonly draggable?: (
@@ -1116,7 +1118,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       operation,
       options,
       pointerChecks,
-      { _tag: "Point", position, guard },
+      { _tag: "Point", position, guard, checked: extra.checked },
       (ready, io, record) =>
         Effect.gen({ self: this }, function*() {
           const state = owner.page.inputState

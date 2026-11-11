@@ -120,6 +120,7 @@ export type Action =
     readonly _tag: "Point"
     readonly position: { readonly x: number; readonly y: number } | null
     readonly guard: boolean
+    readonly checked?: boolean | undefined
   }
   | { readonly _tag: "Focus" }
   | { readonly _tag: "Scroll" }
@@ -1492,9 +1493,8 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   /** Association stays in the DOM; slots can add refusals without choosing another label. */
-  const checkedForAction = (element: Element): boolean | null => {
-    const own = checkedOf(element)
-    if (own !== null) return own
+  const checkedSource = (element: Element): Element | null => {
+    if (checkedOf(element) !== null) return element
     let label: Element | null = element
     while (label !== null && !(label instanceof HTMLLabelElement)) label = label.parentElement
     if (label === null || label.control === null) return null
@@ -1512,7 +1512,12 @@ export function engine(render: (root: SnapNode) => string) {
     ) {
       if (interactiveLabelDescendant(ancestor)) return null
     }
-    return checkedOf(label.control)
+    return checkedOf(label.control) === null ? null : label.control
+  }
+
+  const checkedForAction = (element: Element): boolean | null => {
+    const source = checkedSource(element)
+    return source === null ? null : checkedOf(source)
   }
 
   /** The element with focus, through open shadow roots. */
@@ -1787,7 +1792,10 @@ export function engine(render: (root: SnapNode) => string) {
         if (request.checks.editable && !editableKind(element)) {
           return { _tag: "Final", final: { _tag: "NotEditable", element: describe(element) } }
         }
-        if (action._tag === "Checked" && checkedOf(element) === null) {
+        if (
+          (action._tag === "Checked" && checkedOf(element) === null) ||
+          (action._tag === "Point" && action.checked === true && checkedSource(element) === null)
+        ) {
           return {
             _tag: "Final",
             final: {
@@ -1813,7 +1821,12 @@ export function engine(render: (root: SnapNode) => string) {
       let reason: NotReady | null = null
       if (element === undefined) reason = { _tag: "NoMatch" }
       else if (checks.visible && !rendered(element, false)) reason = { _tag: "NotVisible" }
-      else if (checks.enabled && !enabled(element)) reason = { _tag: "Disabled" }
+      else if (
+        checks.enabled && (
+          !enabled(element) || (action._tag === "Point" && action.checked === true &&
+            !enabled(checkedSource(element) ?? element))
+        )
+      ) reason = { _tag: "Disabled" }
       else if (checks.editable && readOnly(element)) reason = { _tag: "ReadOnly" }
       else if (checks.notInert && inertReason(element) !== null) reason = inertReason(element)
       else if (checks.inViewport && visibleFragment(element, request.clip) === null) {
