@@ -1,5 +1,11 @@
 # @usestrider/browser
 
+## 0.8.4
+
+### Fixed
+
+- On Chromium builds that report a popup's first frame with the URL `":"`, opening a popup or following a `target="_blank"` link no longer ends the connection to the browser (#290).
+
 ## 0.8.3
 
 ### Performance
