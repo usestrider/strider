@@ -1486,6 +1486,22 @@ const replacementEvent = (loaderId = "replacement") => ({
   }
 })
 
+it.effect("falls back for an unparseable frame URL without losing the connection", () =>
+  withProtocolScheduler((drain) =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders()
+      const page = yield* h.page.control
+      const event = replacementEvent()
+      yield* h.browser.receive({ ...event, params: { frame: { ...event.params.frame, url: "nope" } } })
+      yield* drain
+      // A public operation must still reach the browser after the malformed event was folded.
+      yield* page.activate
+      assert.strictEqual(h.commands.at(-1)?.method, "Page.bringToFront")
+      const documents = h.facts.filter((fact) => fact._tag === "DocumentCommitted")
+      assert.strictEqual(documents.at(-1)?.url, "about:blank")
+    })
+  ).pipe(onTestClock))
+
 const replyCapture = (browser: Effect.Success<typeof makeBrowser>, command: Sent) =>
   browser.receive({ id: command.id, sessionId: command.sessionId, result: { data: "AA==" } })
 
