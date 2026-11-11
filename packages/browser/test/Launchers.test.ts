@@ -44,6 +44,72 @@ const onPlatform = (platform: NodeJS.Platform) => <A, E, R>(effect: Effect.Effec
 
 describe("Chromium launcher", () => {
   layer(NodeServices.layer, { excludeTestServices: true })((it) => {
+    it.effect("does not connect to a complete endpoint left by a previous Chromium child", () =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const directory = yield* fs.makeTempDirectoryScoped({ prefix: "strider-stale-port-" })
+        const executablePath = `${directory}/chromium`
+        const active = `${directory}/DevToolsActivePort`
+        const previous = "41001\n/devtools/browser/11111111-1111-4111-8111-111111111111"
+        const current = "41002\n/devtools/browser/22222222-2222-4222-8222-222222222222"
+        yield* fs.writeFileString(executablePath, "")
+        yield* fs.chmod(executablePath, 0o755)
+        yield* fs.writeFileString(active, previous)
+        yield* fs.writeFileString(`${directory}/caller-owned`, "keep")
+        let spawned = false
+        let published = false
+        let reads = 0
+        const connections: Array<string> = []
+        const premature: Array<string> = []
+        const spawner = ChildProcessSpawner.make(() =>
+          Effect.sync(() => {
+            spawned = true
+            return ChildProcessSpawner.makeHandle({
+              pid: ChildProcessSpawner.ProcessId(1),
+              exitCode: Effect.never,
+              isRunning: Effect.succeed(true),
+              kill: () => Effect.void,
+              stdin: Sink.drain,
+              stdout: Stream.empty,
+              stderr: Stream.never,
+              all: Stream.never,
+              getInputFd: () => Sink.drain,
+              getOutputFd: () => Stream.empty,
+              unref: Effect.succeed(Effect.void)
+            })
+          })
+        )
+        const publishing: FileSystem.FileSystem = {
+          ...fs,
+          readFileString: Effect.fnUntraced(function*(path, options) {
+            if (path === active && spawned && !published && reads++ > 0) {
+              yield* fs.writeFileString(active, current)
+              published = true
+            }
+            const result = yield* fs.readFileString(path, options).pipe(Effect.exit)
+            if (path === active && spawned && !published && result._tag === "Failure") {
+              yield* fs.writeFileString(active, current)
+              published = true
+            }
+            return yield* result
+          })
+        }
+        yield* ChromiumLauncher.launchWithPort({ executablePath, userDataDir: directory, timeout: "1 second" }).pipe(
+          Effect.scoped,
+          Effect.provideService(FileSystem.FileSystem, publishing),
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.provideService(Socket.WebSocketConstructor, (url) => {
+            connections.push(String(url))
+            if (!published) premature.push(String(url))
+            throw new Error("stop at the connection boundary")
+          }),
+          Effect.flip
+        )
+        assert.strictEqual(yield* fs.readFileString(`${directory}/caller-owned`), "keep")
+        assert.deepStrictEqual(premature, [], "must wait for this child to publish before connecting")
+        assert.deepStrictEqual(connections, [`ws://127.0.0.1:41002${current.split("\n")[1]}`])
+      }))
+
     it.effect("fails with ExecutableNotFound for a path where nothing is, pointing to strider browsers", () =>
       Effect.gen(function*() {
         const error = yield* ChromiumLauncher.launch({ executablePath: "/nowhere/chrome" }).pipe(Effect.flip)
