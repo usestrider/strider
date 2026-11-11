@@ -631,6 +631,75 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           })), timeout)
       }
 
+      for (
+        const mode of [
+          "horizontal",
+          "multiple",
+          "pointer disabled",
+          "viewport disabled",
+          "explicit",
+          "overlay",
+          "escape"
+        ] as const
+      ) {
+        it.effect(
+          `scrolls ancestor clipping independently of coverage: ${mode}`,
+          () =>
+            Effect.scoped(Effect.gen(function*() {
+              const hidden = mode !== "overlay" && mode !== "escape"
+              const { url } = yield* fixture(() =>
+                `<!doctype html><style>body{margin:0}#s{position:absolute;left:20px;top:100px;width:240px;height:60px;overflow:auto}#inner{width:${
+                  mode === "multiple" ? 400 : 240
+                }px;height:${
+                  mode === "multiple" ? 80 : 260
+                }px;overflow:auto}#go{display:block;width:100px;height:24px;margin-top:${
+                  hidden && mode !== "horizontal" ? 120 : 0
+                }px;margin-left:${mode === "horizontal" ? 300 : 0}px;${
+                  mode === "escape" ? "position:fixed;left:300px;top:100px" : ""
+                }}#tail{width:600px;height:300px}</style><div id="s"><div id="inner"><a id="go" href="#">Go</a><div id="tail"></div></div></div>${
+                  mode === "overlay" ? "<div style=\"position:fixed;inset:0;background:white\"></div>" : ""
+                }<output id="out"></output><script>go.onclick=e=>{e.preventDefault();out.textContent=JSON.stringify({trusted:e.isTrusted,x:e.offsetX,y:e.offsetY})}</script>`
+              )
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const scrolls = () =>
+                page.evaluateInMainWorld(() =>
+                  ["s", "inner"].map((id) => {
+                    const el = document.getElementById(id)!
+                    return { x: el.scrollLeft, y: el.scrollTop }
+                  })
+                )
+              const before = yield* scrolls()
+              const error = yield* page.locator("#go").click({
+                checks: { inViewport: mode !== "viewport disabled", receivesPointer: mode !== "pointer disabled" },
+                position: mode === "explicit" ? { x: 7, y: 9 } : undefined
+              }).pipe(
+                Deadline.within("1 second"),
+                Effect.match({ onFailure: (error) => error, onSuccess: () => undefined })
+              )
+              if (mode === "viewport disabled" || mode === "overlay") {
+                assert(Deadline.isTimeout(error), String(error))
+                assert.deepStrictEqual(yield* scrolls(), before)
+                assert.strictEqual(yield* page.locator("#out").readText, "")
+              } else {
+                assert.strictEqual(error, undefined, String(error))
+                const click = JSON.parse(yield* page.locator("#out").readText)
+                assert.strictEqual(click.trusted, true)
+                const after = yield* scrolls()
+                if (mode === "escape") assert.deepStrictEqual(after, before)
+                else assert.notDeepEqual(after, before)
+                if (mode === "horizontal") assert.isAbove(after[1]!.x, 0)
+                if (mode === "multiple") {
+                  assert.isAbove(after[0]!.y, 0)
+                  assert.isAbove(after[1]!.y, 0)
+                }
+                if (mode === "explicit") assert.deepStrictEqual({ x: click.x, y: click.y }, { x: 7, y: 9 })
+              }
+            })),
+          timeout
+        )
+      }
+
       it.effect("clicks a wrapped link whose first line a scrolling ancestor clips", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
