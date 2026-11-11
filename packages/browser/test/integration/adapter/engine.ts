@@ -307,6 +307,42 @@ export const engine = (backend: Backend) =>
             assert.deepStrictEqual(result.terminal.response.observed, { matches: 0 })
             assert.strictEqual(result.resumed._tag, "Done")
           }), timeout)
+        it.effect("cooperative viewport accepts a target whose geometry keeps changing", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(
+              backend,
+              "<div id=\"moving\" style=\"width:100px;height:100px\">Moving</div>",
+              `() => {
+                const Observer = globalThis.IntersectionObserver
+                let offset = 0
+                globalThis.IntersectionObserver = class extends Observer {
+                  constructor(callback, options) {
+                    super((entries, observer) => {
+                      document.querySelector('#moving').style.transform = 'translateX(' + ++offset + 'px)'
+                      callback(entries, observer)
+                    }, options)
+                  }
+                }
+              }`
+            )
+            const result = yield* cooperativeExercise(
+              call,
+              `
+              let reply = await command({ command: "start", budget: 2000, request: {
+                op: "expect", steps: [{ _tag: "Css", selector: "#moving" }],
+                expectation: { _tag: "Viewport", ratio: 0, inViewport: true }, cap: 2000
+              } })
+              let checks = 0
+              while (reply._tag === "Check" && checks++ < 8) {
+                reply = await command({ command: "resume", token: reply.token, left: 2000, decision: "continue" })
+              }
+              await command({ command: "cancel" })
+              return JSON.stringify(reply)
+            `
+            )
+            assert.strictEqual(result._tag, "Done")
+            assert.isTrue(result.response.passed)
+          }), timeout)
         it.effect("cooperative viewport yields before checking an overlay arriving during a round", () =>
           Effect.gen(function*() {
             const { call } = yield* open(
