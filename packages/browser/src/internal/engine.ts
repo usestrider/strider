@@ -2557,23 +2557,85 @@ export function engine(render: (root: SnapNode) => string) {
   // Allocated only while a viewport expectation owns observations in this document.
   let viewportRounds: Map<string, () => void> | undefined
 
+  // One observation only. The caller owns retry scheduling and publishes provisional evidence
+  // synchronously, before its deadline can construct a terminal response.
+  const sampleViewport = (
+    steps: ReadonlyArray<Step>,
+    expectation: Extract<Expectation, { _tag: "Viewport" }>,
+    publish: (result: { passed: boolean; observed: unknown }, provisional?: boolean) => void,
+    complete: (error?: unknown) => void,
+    requireUnchangedBounds = false
+  ): () => void => {
+    let active = true
+    let observer: IntersectionObserver | undefined
+    let frame: number | undefined
+    const cancel = () => {
+      active = false
+      observer?.disconnect()
+      if (frame !== undefined) {
+        ;(realTimers?.cancelAnimationFrame ?? globalThis.cancelAnimationFrame.bind(globalThis))(frame)
+      }
+    }
+    const finish = (error?: unknown) => {
+      if (!active) return
+      cancel()
+      complete(error)
+    }
+    clearTreeCaches()
+    try {
+      const found = resolve(steps)
+      if (found.length !== 1) {
+        publish({ passed: found.length === 0 && !expectation.inViewport, observed: { matches: found.length } })
+        finish()
+      } else {
+        publish({ passed: false, observed: { matches: 1 } }, true)
+        const element = found[0]!
+        const bounds = requireUnchangedBounds ? element.getBoundingClientRect() : undefined
+        observer = new IntersectionObserver((entries) => {
+          if (!active) return
+          clearTreeCaches()
+          try {
+            const current = resolve(steps)
+            const currentBounds = bounds === undefined ? undefined : element.getBoundingClientRect()
+            if (
+              current.length === 1 && current[0] === element &&
+              (bounds === undefined || currentBounds !== undefined &&
+                  bounds.x === currentBounds.x && bounds.y === currentBounds.y &&
+                  bounds.width === currentBounds.width && bounds.height === currentBounds.height)
+            ) {
+              const ratio = entries[0]!.intersectionRatio
+              const intersects = ratio > 0 && ratio > expectation.ratio - 1e-9
+              publish({ passed: intersects === expectation.inViewport, observed: { matches: 1, ratio } })
+            }
+            finish()
+          } catch (error) {
+            finish(error)
+          }
+        })
+        observer.observe(element)
+        // Firefox needs a rendering opportunity to deliver intersection observations.
+        frame = onFrame(() => {})
+      }
+    } catch (error) {
+      finish(error)
+    }
+    return cancel
+  }
+
   const expectViewport = (request: Extract<Request, { op: "expect" }>): Promise<Response> =>
     new Promise((resume, reject) => {
       const expectation = request.expectation
       if (expectation._tag !== "Viewport") return
       let done = false
-      let observer: IntersectionObserver | undefined
+      let cancelObservation: (() => void) | undefined
       let frame: number | undefined
-      const next = (callback: () => void) => {
-        frame = onFrame(callback)
-      }
       let last: { passed: boolean; observed: unknown } = { passed: false, observed: null }
       let changed = false
       let samples = 0
       const finish = (error?: unknown) => {
         if (done) return
         done = true
-        observer?.disconnect()
+        cancelObservation?.()
         if (frame !== undefined) {
           ;(realTimers?.cancelAnimationFrame ?? globalThis.cancelAnimationFrame.bind(globalThis))(frame)
         }
@@ -2588,53 +2650,17 @@ export function engine(render: (root: SnapNode) => string) {
       const sample = () => {
         if (done) return
         changed = samples++ > 0
-        observer?.disconnect()
-        clearTreeCaches()
-        let found: ReadonlyArray<Element>
-        try {
-          found = resolve(request.steps)
-        } catch (error) {
-          finish(error)
-          return
-        }
-        if (found.length !== 1) {
-          last = {
-            passed: found.length === 0 && !expectation.inViewport,
-            observed: { matches: found.length }
-          }
-          if (last.passed) finish()
-          else next(sample)
-          return
-        }
-        if (last.observed === null) last = { passed: false, observed: { matches: 1 } }
-        const element = found[0]!
-        observer = new IntersectionObserver((entries) => {
-          if (done) return
-          observer?.disconnect()
-          // Re-resolve after the asynchronous observation: a detached or replaced match is not evidence.
-          clearTreeCaches()
-          try {
-            const current = resolve(request.steps)
-            if (current.length !== 1 || current[0] !== element) {
-              next(sample)
-              return
-            }
-          } catch (error) {
-            finish(error)
-            return
-          }
-          const ratio = entries[0]!.intersectionRatio
-          const intersects = ratio > 0 && ratio > expectation.ratio - 1e-9
-          last = { passed: intersects === expectation.inViewport, observed: { matches: 1, ratio } }
-          if (last.passed) finish()
+        cancelObservation = sampleViewport(request.steps, expectation, (result, provisional) => {
+          // Keep the previous complete observation while a new native observation is pending.
+          if (!provisional || last.observed === null) last = result
+        }, (error) => {
+          if (error !== undefined) finish(error)
+          else if (last.passed) finish()
           else {
-            changed = true
-            next(sample)
+            if (last.observed !== null && typeof last.observed === "object" && "ratio" in last.observed) changed = true
+            frame = onFrame(sample)
           }
         })
-        observer.observe(element)
-        // Firefox needs a rendering opportunity to deliver intersection observations.
-        next(() => {})
       }
       const timer = setTimer(finish, Math.max(0, request.cap))
       if (request.token !== undefined) (viewportRounds ??= new Map()).set(request.token, finish)
@@ -3323,7 +3349,7 @@ export function engine(render: (root: SnapNode) => string) {
     actionTimeout,
     actionFrameTimeout,
     evaluate,
-    expectViewport,
+    sampleViewport,
     matchesValue: classMatches,
     clearTreeCaches,
     failureResponse,
@@ -3674,17 +3700,40 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
         helpers.clearTreeCaches()
         const expectation = session.request.expectation
         if (expectation._tag === "Viewport") {
-          // The ordinary expectation's own observer round, kept short so the host rechecks its triggers between rounds.
-          const response = await helpers.expectViewport({
-            op: "expect",
-            steps: session.request.steps,
-            expectation,
-            cap: Math.max(0, Math.min(100, session.end - now()))
+          let passed = false
+          const ready = await new Promise<boolean>((resume, reject) => {
+            let cancelObservation: (() => void) | undefined
+            let done = false
+            const finish = (ready: boolean, error?: unknown) => {
+              if (done) return
+              done = true
+              cancelObservation?.()
+              session.stopWaiting = undefined
+              if (error !== undefined) reject(error)
+              else resume(ready)
+            }
+            session.stopWaiting = () => finish(false)
+            cancelObservation = helpers.sampleViewport(
+              session.request.steps,
+              expectation,
+              (result) => {
+                session.observed = result.observed
+                passed = result.passed
+              },
+              (error) => finish(true, error),
+              true
+            )
           })
-          if (response._tag === "Expected" && response.passed) {
-            return finished(session, { ...response, changed: session.changed || response.changed })
+          if (!ready || session.disposed) return stopped(session)
+          if (passed) {
+            return finished(session, {
+              _tag: "Expected",
+              passed: true,
+              observed: session.observed,
+              changed: session.changed
+            })
           }
-          if (response._tag === "Expected") session.observed = response.observed
+          if (!(await wait(session, false))) return stopped(session)
           session.changed = true
           return check(session)
         }

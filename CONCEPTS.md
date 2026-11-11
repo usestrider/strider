@@ -593,7 +593,11 @@ before resuming. The host probes triggers through their own frame routes while t
 the target's document chain before resuming. These probes are not an atomic snapshot across frames. A final check,
 including a trial under the input permit, can restart without applying anything so the caller can release the
 permit. Invalidation discards resolved elements, stability evidence and coordinates; cancellation, deadline,
-completion and page departure dispose session resources. Expiry retains only a serialized timeout answer for
+completion and page departure dispose session resources. Viewport checks share the ordinary native intersection
+sampler, but a cooperative session owns each individual pending observation and rendering wait. A failed or
+invalidated sample yields to the host before retrying; a target whose bounds changed during its asynchronous
+observation is sampled again after that yield. Each observation is published to the session before timeout
+construction, including a synchronous missing-match result. Expiry retains only a serialized timeout answer for
 single-use delivery: at most 64 answers, one MiB of estimated UTF-16 string storage (including ownership keys),
 and 30 seconds. Oldest answers are evicted first; oversized answers are not retained. A shared retention timer
 and departure listener remain only while this bounded cache holds answers. Consumption, cancellation, departure
