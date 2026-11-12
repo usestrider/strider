@@ -63,6 +63,16 @@ happened: a fully acknowledged gesture doesn't show the application acted on it.
 (`UserContext.Options.focus` is `"system"`), because every page would then report focus and visibility it doesn't
 have. The library doesn't bring a page to the front before acting, because that changes which page is in front
 without the caller asking. A page that can't render says so (`NoRenderingOpportunity`) and names the two remedies.
+The default has a cost on Chromium: it opens each page it creates in a window of its own, so a page in the
+background still renders, and creating and closing windows is slower than tabs. The twenty-page scenario (one
+context, twenty pages created, navigated and clicked, then closed) takes about 1.5 times Playwright's time on the
+default path, mostly for this (the measurements are in `packages/scenarios/BENCHMARKS.md`). That stays: the alternative, tabs with emulated
+focus by default as Playwright does, changes what every page sees of focus and visibility without being asked.
+`focus: "emulated"` opens the pages the library creates as tabs on Chromium, so a suite that doesn't depend on focus
+takes the fast path by asking for it; the context holds focus emulation for its whole life, which is what keeps a tab
+behind another rendering, and a page-level setting can't turn it off there. Popups follow Chromium's own placement.
+Rejected: tabs and emulated focus by default; choosing tabs from a focus declaration that can be released later;
+closing a context's pages concurrently, which saved nothing.
 
 **Nothing of the library's runs in a page's world unless the caller declared it, or the browser leaves no other way.**
 "Never a wrapper in the page." A page can see a wrapper, for example that `alert` isn't the browser's, and a script
@@ -579,7 +589,9 @@ hold the loopback LISTEN socket inode; after connecting, it must still hold the 
 any inspector write. The stock inspector binds exclusively, so retaining the same listener across connection
 establishment excludes a different server accepting that connection. A wrapper must exec MiniBrowser, not merely
 fork it. We do not search descendants or fall back when the proof is unavailable. Refusal explains why and directs
-the caller to attach to an externally managed inspector HTTP endpoint. A procfs read failure, including permission
+the caller to attach to an externally managed inspector HTTP endpoint. The descriptors are read only once the
+namespace's table shows a listener on the port, because the first read of a live child's descriptors after it was spawned was
+seen denied, and never on later reads. If no listener appears on the selected port, the TCP table remains readable, and no child exit is observed before the deadline, launch ends as a handshake timeout without reading descriptors. A procfs read failure, including permission
 errors, can precede the child exit event, so it stops ownership attempts and closes any rejected connection before
 waiting for the actual event within the remaining launch deadline. No later collision report restarts ownership
 attempts. If no exit is observed, `ConnectionFailed` retains the original access error and uses `stage: "refused"`.

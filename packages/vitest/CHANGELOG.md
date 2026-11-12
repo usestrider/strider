@@ -1,5 +1,12 @@
 # @usestrider/vitest
 
+## 0.2.2
+
+### Changed
+
+- Documentation comments and messages use the serial comma (#277).
+- Updated dependencies: `@usestrider/browser@0.8.3`.
+
 ## 0.2.1
 
 ### Patch Changes

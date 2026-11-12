@@ -729,6 +729,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
             proxy,
             acceptInsecureCerts: options?.acceptInsecureCerts ?? false,
             reclaimable,
+            focusEmulated: options?.focus === "emulated",
             requestTiming: options?.requestTiming,
             requestSizes: options?.requestSizes
           })).pipe(
@@ -764,9 +765,12 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         keyboardLayout: options?.keyboardLayout ?? settings.keyboardLayout
       })
       const scope: Adapter.DeclarationScope = { _tag: "UserContext", context: created }
+      // Set by the first finalizer to run, ahead of the declarations released below it: the context is removed
+      // when this scope closes unless it is handed off or not yet committed (the release above)
+      let retiring = false
       // Where file choosers aren't reported, as on stock WebKit, the browser cancels them itself
       if (!adopt && reports("fileChooser")) {
-        yield* adapter.declare(scope, { _tag: "FileChooser" }).pipe(Effect.catch(failed))
+        yield* adapter.declare(scope, { _tag: "FileChooser", retiring: () => retiring }).pipe(Effect.catch(failed))
       }
       if (credentials !== undefined) {
         yield* model.route(entry, {
@@ -786,18 +790,20 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
                 : { _tag: "CancelAuth" }
             })
         })
-        yield* adapter.declare(scope, { _tag: "Intercept", patterns: ["*"], phases: ["auth"] }).pipe(
+        yield* adapter.declare(scope, {
+          _tag: "Intercept",
+          patterns: ["*"],
+          phases: ["auth"],
+          retiring: () => retiring
+        }).pipe(
           Effect.catch(failed)
         )
       }
       // A challenge no route answers gets the server's response, never the browser's prompt, which nothing answers
       // headless, wherever the backend can pause one (QUIRKS.md, Q95 and Q252)
       if (!adopt && reports("network.challenges")) {
-        yield* adapter.declare(scope, { _tag: "Challenges" }).pipe(Effect.catch(failed))
+        yield* adapter.declare(scope, { _tag: "Challenges", retiring: () => retiring }).pipe(Effect.catch(failed))
       }
-      // Set by the first finalizer to run, ahead of the declarations released below it: the context is removed
-      // when this scope closes unless it is handed off or not yet committed (the release above)
-      let retiring = false
       if (asked === "deny") {
         yield* adapter.declare(scope, { _tag: "Downloads", behavior: { _tag: "Deny" }, retiring: () => retiring }).pipe(
           Effect.catch(failed)

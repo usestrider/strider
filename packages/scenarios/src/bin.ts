@@ -1,6 +1,6 @@
 /**
- * `pnpm scenarios`: Strider and Playwright side by side on the integration environment's Chromium, printing
- * a single-run report. `pnpm scenarios:report` regenerates the combined `packages/scenarios/RESULTS.md`.
+ * `pnpm scenarios`: the comparison harness, which runs each scenario with Strider and with Playwright on the
+ * integration environment's Chromium or Firefox, printing a single-run report. `pnpm scenarios:report` regenerates the combined `packages/scenarios/RESULTS.md`.
  *
  *   pnpm scenarios                 every scenario and measurement, 10 timed runs each
  *   pnpm scenarios --runs 3        fewer runs
@@ -11,13 +11,12 @@
  * What leaves this machine: `--record` visits the public demo sites and uploads the recordings to the private bucket;
  * `--upload` only uploads the existing ones; an ordinary run fetches the pinned recordings from the bucket when
  * credentials are set. Nothing else does: the demo sites are replayed from their recordings, in `.data/scenarios/`,
- * and a run without them skips their scenarios, saying why. A Strider program visits its site as
- * a reader would, and the runner answers its requests from the recording (`replay.ts`); a Playwright twin routes
- * its own.
+ * and a run without them skips their scenarios, saying why. Each program that visits a public site routes its own
+ * context to the recording, Strider with `Route.fromHar` and Playwright with `routeFromHAR`.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
-import { Browser, Expect, Route, VideoWriter } from "@usestrider/browser"
+import { Browser, Expect, Route } from "@usestrider/browser"
 import { Chromium } from "@usestrider/browser/chromium"
 import { Firefox } from "@usestrider/browser/firefox"
 import * as Effect from "effect/Effect"
@@ -31,11 +30,10 @@ import * as path from "node:path"
 import { chromium, firefox as playwrightFirefox } from "playwright-core"
 import { browserArgs, descendants, rendererCpu, type Stats, stats } from "./measure.ts"
 import * as Recordings from "./recordings.ts"
-import { recordingProblems, replaying } from "./replay.ts"
 import { type Measurements, writeRunReport } from "./report.ts"
 import { publish, runScenarios } from "./runner.ts"
 import { type Files, recordings, scenarios, type StriderNeeds } from "./scenarios.ts"
-import { selectScenarios } from "./selection.ts"
+import { selectScenarios, supportedOn } from "./selection.ts"
 import { start } from "./site.ts"
 
 const argv = process.argv.slice(2)
@@ -86,7 +84,6 @@ const files: Files = {
   recording: (name) => path.join(recordingsDirectory, `${name}.har`)
 }
 
-const ffmpeg = fs.realpathSync(process.env["STRIDER_FFMPEG"]!)
 if (output !== undefined) {
   if (!path.isAbsolute(output) || output === root || output.startsWith(`${root}/`)) {
     throw new Error("--output must be absolute and outside the worktree")
@@ -119,7 +116,7 @@ if (output !== undefined) {
       2
     )
   )
-  for (const file of ["bin.ts", "runner.ts", "report.ts", "scenarios.ts", "site.ts", "replay.ts", "measure.ts"]) {
+  for (const file of ["bin.ts", "runner.ts", "report.ts", "scenarios.ts", "site.ts", "recordings.ts", "measure.ts"]) {
     fs.copyFileSync(path.join(import.meta.dirname, file), path.join(output, file))
   }
   for (const file of ["flake.nix", "flake.lock", "pnpm-lock.yaml"]) {
@@ -129,10 +126,7 @@ if (output !== undefined) {
 const selectedLayer = engine === "firefox"
   ? Firefox.layer({ executablePath }).pipe(Layer.provide(NodeSocket.layerWebSocketConstructor))
   : Chromium.layer({ executablePath })
-const layer = selectedLayer.pipe(
-  Layer.provide(VideoWriter.layerFfmpeg({ path: ffmpeg })),
-  Layer.provideMerge(NodeServices.layer)
-)
+const layer = selectedLayer.pipe(Layer.provideMerge(NodeServices.layer))
 const browserPids = () =>
   new Set(
     descendants().filter((proc) =>
@@ -209,14 +203,14 @@ if (argv.includes("--record")) {
 
 const unsupported: Array<string> = engine === "firefox"
   ? [
-    "video and video-firefox: no equivalent Playwright video twin; Chromium screencast and Firefox native capture perform different work",
-    "Q82 renderer CPU, Q103 Fetch interception, and automation tells: Chromium-only diagnostics"
+    "Q82 renderer CPU, Q103 Fetch interception, and automation tells: Chromium-only diagnostics",
+    ...scenarios.flatMap((scenario) =>
+      scenario.chromiumOnly === undefined ? [] : [`${scenario.name}: excluded from Firefox, ${scenario.chromiumOnly}`]
+    )
   ]
   : []
 const paired = process.env["STRIDER_PAIRED"] === "1"
-const selected = selectScenarios(scenarios, only, paired).filter((
-  scenario
-) => (engine === "chromium" || (scenario.playwright !== undefined && scenario.browser === undefined)))
+const selected = supportedOn(selectScenarios(scenarios, only, paired), engine)
 if (selected.length === 0) throw new Error("No supported scenarios selected")
 // Fetch what the manifest pins and the recordings directory lacks; the real-site scenarios whose recording can't be
 // had are skipped, and say why
@@ -238,10 +232,7 @@ for (const scenario of selected) {
   }
 }
 if (chosen.length === 0) throw new Error("Every selected scenario was skipped; see above")
-if (paired && chosen.some((scenario) => scenario.playwright === undefined)) {
-  throw new Error("Paired scenario comparisons require a Playwright twin for every selected case")
-}
-const problems = recordingProblems(chosen, files.recording)
+const problems = Recordings.recordingProblems(chosen, files.recording)
 if (output !== undefined) {
   fs.writeFileSync(path.join(output, "recording-validation.json"), JSON.stringify({ problems }, null, 2))
 }
@@ -341,33 +332,19 @@ if (engine === "firefox" && browser.version() !== playwrightPin.browserVersion) 
   await site.close()
   throw new Error(`Unexpected patched Firefox: ${browser.version()}`)
 }
-// A scenario that runs on Firefox, such as its video, gets the environment's Firefox, launched once it's needed
-let firefoxRuntime: ManagedRuntime.ManagedRuntime<Browser.Browser | NodeServices.NodeServices, unknown> | undefined
-const firefox = () =>
-  firefoxRuntime ??= ManagedRuntime.make(
-    Firefox.layer({ executablePath: process.env["STRIDER_FIREFOX"] ?? "" }).pipe(
-      Layer.provide(NodeSocket.layerWebSocketConstructor),
-      Layer.provideMerge(NodeServices.layer)
-    )
-  )
-const strider = <A>(effect: Effect.Effect<A, unknown, StriderNeeds>, on?: "firefox", recording?: string) =>
-  (on === "firefox" ? firefox() : runtime).runPromise(
-    Effect.scoped(recording === undefined ? effect : replaying(effect, files.recording(recording)))
-  )
+const strider = <A>(effect: Effect.Effect<A, unknown, StriderNeeds>) => runtime.runPromise(Effect.scoped(effect))
 
 // ── The scenarios ─────────────────────────────────────────────────────────────
 
-// A program writes its files beside it, as a reader's would, which here is into `.data/scenarios/`
+// A program writes its files relative to the working directory, which is `.data/scenarios/`
 process.chdir(recordingsDirectory)
 
 const results = await runScenarios(
   chosen,
   runs,
   (scenario) => ({
-    strider: () => strider(scenario.strider(origin), scenario.browser, scenario.recording),
-    playwright: scenario.playwright === undefined
-      ? undefined
-      : () => scenario.playwright!(browser, origin, files)
+    strider: () => strider(scenario.strider(origin, files)),
+    playwright: () => scenario.playwright(browser, origin, files)
   }),
   log,
   onAttempt
@@ -518,7 +495,6 @@ if (measured) {
 
 await browser.close()
 await runtime.dispose()
-await firefoxRuntime?.dispose()
 await site.close()
 fs.rmSync(temporary, { recursive: true, force: true })
 
@@ -573,7 +549,7 @@ const metadata = {
     : undefined,
   sourceCommit: commit,
   sourceHashes: Object.fromEntries(
-    ["bin.ts", "runner.ts", "report.ts", "scenarios.ts", "site.ts", "replay.ts", "measure.ts"].map((
+    ["bin.ts", "runner.ts", "report.ts", "scenarios.ts", "site.ts", "recordings.ts", "measure.ts"].map((
       file
     ) => [file, hash(path.join(import.meta.dirname, file))])
   ),

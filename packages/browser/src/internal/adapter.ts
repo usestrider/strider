@@ -574,23 +574,34 @@ export type Declaration =
     /** URL patterns, as `*` globs over the whole URL. */
     readonly patterns: ReadonlyArray<string>
     readonly phases: ReadonlyArray<"request" | "response" | "auth">
+    /** As on `Downloads`. */
+    readonly retiring?: (() => boolean) | undefined
   }
   | { readonly _tag: "Override"; readonly override: Override }
   | {
     readonly _tag: "Downloads"
     readonly behavior: { readonly _tag: "Allow"; readonly directory: string } | { readonly _tag: "Deny" }
     /**
-     * Whether the context is about to be removed when this declaration is released, which makes restoring the
-     * download behavior pointless: the context's removal follows. Absent, or false, the release restores it.
+     * Whether the context is about to be removed when this declaration is released, which makes undoing it
+     * pointless: the context's removal follows. Absent, or false, the release undoes it. A refused removal
+     * applies what the declarations in force say again.
      */
     readonly retiring?: (() => boolean) | undefined
   }
-  | { readonly _tag: "FileChooser" }
+  | {
+    readonly _tag: "FileChooser"
+    /** As on `Downloads`. */
+    readonly retiring?: (() => boolean) | undefined
+  }
   /**
    * Pauses the authentication challenges in scope that the backend can pause (`network.challenges`), as an `auth`
    * intercept pauses one, so the model answers a challenge no route answers, and the browser's prompt never opens.
    */
-  | { readonly _tag: "Challenges" }
+  | {
+    readonly _tag: "Challenges"
+    /** As on `Downloads`. */
+    readonly retiring?: (() => boolean) | undefined
+  }
   | {
     readonly _tag: "BodyCollection"
     /** Which bodies are kept: requests' (Q164), responses', or both. */
@@ -770,6 +781,11 @@ export interface UserContextOptions {
   readonly requestTiming?: boolean | undefined
   readonly requestSizes?: boolean | undefined
   readonly reclaimable?: boolean | undefined
+  /**
+   * Focus is emulated for the context's whole life, so the backend may place its pages where only emulated focus
+   * keeps them rendering.
+   */
+  readonly focusEmulated?: boolean | undefined
   readonly proxy: Option.Option<ProxyOptions>
   readonly acceptInsecureCerts: boolean
 }

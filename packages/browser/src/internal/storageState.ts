@@ -355,22 +355,18 @@ const contextError = (reason: UserContext.UserContextErrorReason, id: Diagnostic
   new UserContext.UserContextError({ operation, reason, diagnostics: Operation.diagnostics(id) })
 
 /** An evaluation's failure, as a context's. */
-const evaluationFailure = (operation: string, id: Diagnostics.OperationId) => (failure: Evaluation.Failure) =>
-  contextError(
-    failure._tag === "Gone"
-      ? new Reason.BackendFailure({ kind: "Rejected", method: operation, hint: failure.error.message })
-      : failure._tag === "Deadline"
-      ? new Reason.BackendFailure({
-        kind: "Rejected",
-        method: operation,
-        hint: "The page didn't answer before the deadline"
-      })
-      : failure.reason._tag === "Unsupported" || failure.reason._tag === "BackendFailure"
-      ? failure.reason
-      : new Reason.BackendFailure({ kind: "Rejected", method: operation, hint: failure.reason.message }),
-    id,
-    operation
-  )
+const evaluationFailure = (operation: string, record: Operation.Record) => (failure: Evaluation.Failure) =>
+  failure._tag === "Deadline"
+    ? failure.error ?? record.timeout(Option.some("The page didn't answer before the deadline"))
+    : contextError(
+      failure._tag === "Gone"
+        ? new Reason.BackendFailure({ kind: "Rejected", method: operation, hint: failure.error.message })
+        : failure.reason._tag === "Unsupported" || failure.reason._tag === "BackendFailure"
+        ? failure.reason
+        : new Reason.BackendFailure({ kind: "Rejected", method: operation, hint: failure.reason.message }),
+      record.id,
+      operation
+    )
 
 // ── Export ────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -433,12 +429,13 @@ const sourcesOf = Effect.fnUntraced(function*(
 export const exportState = (runtime: Runtime.Runtime, context: UserContext.Id, hosts?: ReadonlyArray<string>) =>
   Effect.gen(function*() {
     const operation = "UserContext.exportStorageState"
-    const { id } = yield* Operation.record
+    const record = yield* Operation.record
+    const { id } = record
     const budget = yield* Operation.budget
     const cookies = yield* runtime.model.adapter.cookies(context).pipe(
       Effect.mapError((error) => {
         const mapped = Operation.fromAdapter(error, id, runtime.backend)
-        return contextError(
+        return mapped._tag === "Timeout" ? mapped.error : contextError(
           mapped._tag === "Reason"
             ? mapped.reason
             : new Reason.BackendFailure({
@@ -475,7 +472,7 @@ export const exportState = (runtime: Runtime.Runtime, context: UserContext.Id, h
         Effect.map(Option.some),
         // A document that ended since it was listed has nothing to read: its origin is read elsewhere or not at all
         Effect.catchIf((failure) => failure._tag === "Gone", () => Effect.succeedNone),
-        Effect.mapError(evaluationFailure(operation, id))
+        Effect.mapError(evaluationFailure(operation, record))
       )
       if (Option.isNone(text)) continue
       const answer = yield* Schema.decodeUnknownEffect(ReadAnswer)(text.value).pipe(

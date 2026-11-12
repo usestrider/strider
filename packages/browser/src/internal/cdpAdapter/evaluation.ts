@@ -324,7 +324,11 @@ export const realm = Effect.fnUntraced(function*(state: State, id: L1Target.Docu
   )
   yield* frame.owner.session.drainObserved
   const created = state.realmsByContext.get(contextKey(frame.owner, executionContextId as number))
-  if (created === undefined) return yield* Effect.fail(replaced())
+  // The creation is addressed to the frame, not the document: a commit meanwhile makes the new realm the
+  // replacement's, which is not the realm asked for, and the requested document is gone.
+  if (created === undefined || !state.documents.has(id) || !document.realms.has(created)) {
+    return yield* Effect.fail(replaced())
+  }
   return created.id
 })
 

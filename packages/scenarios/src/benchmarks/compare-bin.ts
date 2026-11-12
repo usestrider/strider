@@ -5,6 +5,7 @@ import * as os from "node:os"
 import * as path from "node:path"
 import { parseArgs } from "node:util"
 import { comparisonDeadline, type Message, workerMessages } from "./lifecycle.ts"
+import { instrument, instrumentRunner } from "./many-pages-phases.ts"
 import { pairedInterval, rotation } from "./paired.ts"
 
 const { values } = parseArgs({
@@ -29,6 +30,9 @@ if (!["bench", "scenarios"].includes(values.workload)) {
 if (!values.base || !values.head || !values.output) {
   throw new Error("--base, --head and --output are required directories")
 }
+const manyPagesMode = values.workload === "scenarios" && values.only === "many-pages-diagnostic"
+const traceMode = values.workload === "scenarios" && values.only === "many-pages-trace"
+if (manyPagesMode || traceMode) values.only = "many-pages"
 const launchMode = values.workload === "bench" && values.only === "launch-diagnostic"
 const phaseMode = values.workload === "bench" && values.only === "phase-diagnostic"
 const roleMode = values.workload === "bench" && values.only === "role-engine-diagnostic"
@@ -42,6 +46,14 @@ const report = {
   status: "running",
   error: null as string | null,
   config: values,
+  diagnostic: manyPagesMode
+    ? {
+      kind: "many-pages-phases",
+      base: "uninstrumented",
+      head: "instrumented",
+      phaseOrder: "initial Strider, initial Playwright, then head samples in scheduler order"
+    }
+    : null,
   provenance: {} as Record<string, unknown>,
   environment: {
     node: process.version,
@@ -69,7 +81,7 @@ const deadline = comparisonDeadline((error) => {
 save()
 try {
   fs.mkdirSync(path.join(output, "driver/benchmarks"), { recursive: true })
-  for (const file of ["compare-bin.ts", "paired.ts", "lifecycle.ts"]) {
+  for (const file of ["compare-bin.ts", "paired.ts", "lifecycle.ts", "many-pages-phases.ts"]) {
     fs.copyFileSync(path.join(import.meta.dirname, file), path.join(output, "driver/benchmarks", file))
   }
   const roots = {
@@ -151,15 +163,29 @@ try {
             "report.ts",
             "scenarios.ts",
             "site.ts",
-            "replay.ts",
+            "recordings.ts",
             "selection.ts"
           ]
         for (const file of files) {
-          const bytes = fs.readFileSync(path.join(source, file))
+          let bytes = fs.readFileSync(path.join(source, file))
+          if (manyPagesMode && role === "head") {
+            if (file === "scenarios.ts") {
+              bytes = Buffer.from(
+                "import { phaseStart, phaseEnd } from \"./benchmarks/many-pages-phases.ts\"\n" +
+                  instrument(instrument(bytes.toString(), "strider"), "playwright")
+              )
+            }
+            if (file === "runner.ts") bytes = Buffer.from(instrumentRunner(bytes.toString()))
+          }
           fs.mkdirSync(path.dirname(path.join(target, file)), { recursive: true })
           fs.writeFileSync(path.join(target, file), bytes)
-          fs.mkdirSync(path.dirname(path.join(output, "driver", file)), { recursive: true })
-          fs.writeFileSync(path.join(output, "driver", file), bytes)
+          fs.mkdirSync(path.dirname(path.join(output, "driver", manyPagesMode ? role : "", file)), { recursive: true })
+          fs.writeFileSync(path.join(output, "driver", manyPagesMode ? role : "", file), bytes)
+        }
+        if (manyPagesMode && role === "head") {
+          const file = "benchmarks/many-pages-phases.ts"
+          fs.copyFileSync(path.join(source, file), path.join(target, file))
+          fs.copyFileSync(path.join(source, file), path.join(output, "driver/benchmarks/many-pages-phases.ts"))
         }
         const entry = values.workload === "bench" ? "benchmarks/bin.ts" : "bin.ts"
         const args = [
@@ -170,9 +196,29 @@ try {
         ]
         if (values.only) args.push("--only", values.only)
         const log = fs.openSync(path.join(output, role, "worker.log"), "w")
+        // Trace mode loads the existing session-profile loader, which records every protocol message with a host
+        // timestamp for each attempt. Trace output is written outside the timed region, so only these diagnostic
+        // repetitions carry its overhead.
+        const execArgv = [...process.execArgv]
+        const env: NodeJS.ProcessEnv = {
+          ...process.env,
+          STRIDER_PAIRED: "1",
+          STRIDER_PHASE_OUTPUT: path.join(output, role, "phases.ndjson")
+        }
+        if (traceMode) {
+          for (const file of ["session-profile-loader.mjs", "session-profile-config.ts", "session-profile-hooks.ts"]) {
+            const from = path.join(source, "../benchmark", file)
+            const to = path.join(root, "packages/scenarios/benchmark", file)
+            fs.mkdirSync(path.dirname(to), { recursive: true })
+            fs.copyFileSync(from, to)
+          }
+          execArgv.push("--import", path.join(root, "packages/scenarios/benchmark/session-profile-loader.mjs"))
+          env["STRIDER_SESSION_PROFILE"] = path.join(output, role, "protocol-trace.jsonl")
+        }
         const child = fork(path.join(target, entry), args, {
           cwd: root,
-          env: { ...process.env, STRIDER_PAIRED: "1" },
+          execArgv,
+          env,
           stdio: ["ignore", log, log, "ipc"]
         })
         fs.closeSync(log)
@@ -249,6 +295,11 @@ try {
       ? fs.readFileSync(path.join(output, "role-summary.md"), "utf8")
       : [
         `Comparison status: **${report.status}**`,
+        ...(manyPagesMode
+          ? [
+            "Diagnostic only: head is instrumented; base is the unchanged control. Both refs must be pinned identically. Ratios are instrumentation controls, not speedups."
+          ]
+          : []),
         "",
         ...(report.status === "complete" ?
           [

@@ -36,6 +36,63 @@ describe("Chromium adapter, CDP only", () => {
   layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
     (it) => {
       it.effect(
+        "refuses an already-running profile without attaching to its endpoint",
+        () =>
+          Effect.gen(function*() {
+            const fs = yield* FileSystem.FileSystem
+            const directory = yield* fs.makeTempDirectoryScoped({ prefix: "strider-locked-profile-" })
+            yield* fs.writeFileString(`${directory}/caller-owned`, "keep")
+            const { transport } = yield* ChromiumLauncher.launchWithPort({
+              executablePath: executable,
+              userDataDir: directory
+            })
+            const cdp = yield* CdpConnection.make(transport)
+            const previous = yield* fs.readFileString(`${directory}/DevToolsActivePort`)
+            const failure = yield* ChromiumLauncher.launchWithPort({
+              executablePath: executable,
+              userDataDir: directory,
+              timeout: "3 seconds"
+            }).pipe(Effect.scoped, Effect.flip)
+            assert.strictEqual(failure.reason._tag, "ProcessExited")
+            assert.strictEqual(yield* fs.readFileString(`${directory}/DevToolsActivePort`), previous)
+            assert.strictEqual(yield* fs.readFileString(`${directory}/caller-owned`), "keep")
+            const version = yield* BrowserCdp.getVersion().pipe(Protocol.on(cdp.browser))
+            assertPinned("Chromium", version.product.split("/")[1]!, chromium.version)
+          }),
+        timeout
+      )
+
+      it.effect(
+        "relaunches a caller-owned profile repeatedly over the debugging port",
+        () =>
+          Effect.gen(function*() {
+            const fs = yield* FileSystem.FileSystem
+            const directory = yield* fs.makeTempDirectoryScoped({ prefix: "strider-port-relaunch-" })
+            yield* fs.writeFileString(`${directory}/caller-owned`, "keep")
+            const failures: Array<unknown> = []
+            for (let round = 0; round < 10; round++) {
+              const result = yield* Effect.scoped(Effect.gen(function*() {
+                const { transport } = yield* ChromiumLauncher.launchWithPort({
+                  executablePath: executable,
+                  userDataDir: directory
+                })
+                const cdp = yield* CdpConnection.make(transport)
+                const version = yield* BrowserCdp.getVersion().pipe(Protocol.on(cdp.browser))
+                assertPinned("Chromium", version.product.split("/")[1]!, chromium.version)
+              })).pipe(Effect.exit)
+              assert.strictEqual(yield* fs.readFileString(`${directory}/caller-owned`), "keep")
+              if (result._tag === "Failure") {
+                failures.push(result.cause)
+                yield* Effect.log(`port relaunch round ${round}`, result.cause)
+              }
+            }
+            yield* Effect.log(`port relaunch failures: ${failures.length}/10; caller marker survived 10/10`)
+            assert.deepStrictEqual(failures, [])
+          }),
+        timeout
+      )
+
+      it.effect(
         "evaluates: a by-value argument keeps an own __proto__ key as data at every depth",
         () =>
           Effect.gen(function*() {

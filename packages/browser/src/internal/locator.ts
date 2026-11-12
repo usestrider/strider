@@ -354,10 +354,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
           ),
           (found) => found._tag === "Found" ? release(found.node) : Effect.void
         )
-      let found = yield* resolve()
-      // Creating a utility realm can straddle a child document commit. Resolve again only when the
-      // returned binding belongs to a different document; missing/strict results remain immediate.
-      while (found._tag === "Found" && found.node.document !== found.routed.document) found = yield* resolve()
+      const found = yield* resolve()
       if (found._tag === "Response") {
         if (found.response._tag === "NoMatch") return yield* noMatch()
         return yield* this.unmatched(operation, found.response, record.id)

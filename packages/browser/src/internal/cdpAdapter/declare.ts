@@ -1,6 +1,8 @@
 /**
  * Declarations on CDP: what the registry (`declarations.ts`) says each target gets, applied in its gate before
- * its scripts run and again to every target in scope when a registration comes or goes.
+ * its scripts run and again to every target in scope when a registration comes or goes. A context that is about
+ * to be removed skips the release of its own file chooser, challenge and credential declarations; if the removal
+ * is refused, `restoreContext` reconciles its targets with the declarations that remain.
  */
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -212,7 +214,8 @@ const applyOverride = (
       case "Touch":
         return Emulation.setTouchEmulationEnabled({ enabled: false }).pipe(on)
       case "FocusEmulation":
-        return Emulation.setFocusEmulationEnabled({ enabled: false }).pipe(on)
+        // A tab in a context that emulates focus for its life renders only with it
+        return Emulation.setFocusEmulationEnabled({ enabled: target.page?.context.focusEmulated === true }).pipe(on)
       case "CacheDisabled":
         return Network.setCacheDisabled({ cacheDisabled: false }).pipe(on)
     }
@@ -254,7 +257,9 @@ const applyOverride = (
         maxTouchPoints: override.maxTouchPoints
       }).pipe(on)
     case "FocusEmulation":
-      return Emulation.setFocusEmulationEnabled({ enabled: override.enabled }).pipe(on)
+      return Emulation.setFocusEmulationEnabled({
+        enabled: override.enabled || target.page?.context.focusEmulated === true
+      }).pipe(on)
     case "CacheDisabled":
       return Network.setCacheDisabled({ cacheDisabled: override.disabled }).pipe(on)
   }
@@ -350,6 +355,16 @@ const withOverrides = <A, E, R>(target: TargetEntry, effect: Effect.Effect<A, E,
   return lock.withPermits(1)(effect)
 }
 
+/**
+ * The kinds a new target is configured with: those declared for its page, and focus emulation where its context
+ * holds it for its life, even when no declaration of it remains.
+ */
+const kindsFor = (page: PageEntry, overrides: ReadonlyMap<Adapter.Override["_tag"], Adapter.Override>) => {
+  const kinds = [...overrides.keys()]
+  if (page.context.focusEmulated === true && !overrides.has("FocusEmulation")) kinds.push("FocusEmulation")
+  return kinds
+}
+
 /** What a new page or frame gets before its scripts run: the declarations in force for its page. */
 export const configureTarget = Effect.fnUntraced(
   function*(state: State, target: TargetEntry, page: PageEntry, setup?: Setup) {
@@ -360,8 +375,8 @@ export const configureTarget = Effect.fnUntraced(
           Effect.suspend(() => {
             const overrides = state.registry.overrides(placement(page))
             return Effect.forEach(
-              overrides,
-              ([kind]) => kind === "Viewport" ? Effect.void : applyOverride(state, target, kind, overrides),
+              kindsFor(page, overrides),
+              (kind) => kind === "Viewport" ? Effect.void : applyOverride(state, target, kind, overrides),
               {
                 discard: true
               }
@@ -381,8 +396,8 @@ export const configureTarget = Effect.fnUntraced(
           yield* (target.overrideLock ??= Semaphore.makeUnsafe(1)).takeScoped(1)
           const overrides = state.registry.overrides(placement(page))
           yield* Effect.forEach(
-            overrides,
-            ([kind]) => kind === "Viewport" ? Effect.void : applyOverride(state, target, kind, overrides, setup.send),
+            kindsFor(page, overrides),
+            (kind) => kind === "Viewport" ? Effect.void : applyOverride(state, target, kind, overrides, setup.send),
             {
               discard: true
             }
@@ -493,6 +508,27 @@ export const applyDownloads = (state: State, context: ContextEntry) =>
     }).pipe(Protocol.on(state.root()))
   }))
 
+/**
+ * What the declarations in force say, sent again to a context's targets, after a removal the browser refused left
+ * in place a context whose declarations' releases were skipped because it was to go. Each target's interception
+ * and file chooser are reset on their own: a reset that fails is logged and the others still run.
+ */
+export const restoreContext = (state: State, context: ContextEntry) =>
+  Effect.forEach(
+    targetsInScope(state, { _tag: "UserContext", context: context.id }),
+    (target) =>
+      // Each reset stands alone: one that fails is logged and leaves the others to run
+      Effect.all([
+        applyIntercepts(state, target, target.page!).pipe(releaseErrors),
+        target.kind === "page"
+          ? Page.setInterceptFileChooserDialog({
+            enabled: state.registry.fileChooser(placement(target.page!))
+          }).pipe(Protocol.on(target.session), releaseErrors)
+          : Effect.void
+      ], { discard: true }),
+    { concurrency: "unbounded", discard: true }
+  )
+
 const releaseErrors = <A>(effect: Effect.Effect<A, Protocol.ProtocolError | Deadline.Timeout>) =>
   effect.pipe(
     Effect.catchIf(
@@ -528,8 +564,8 @@ export const declare = Effect.fnUntraced(function*(
       const unconfirmed = yield* Cleanup.Unconfirmed
       // Registry removal is synchronous, before any caller stops waiting or prior settings are restored.
       state.registry.remove(id)
-      const release = declaration._tag === "Downloads" && declaration.retiring?.() === true
-        // The context is removed right after: restoring its download behavior would only add a round trip
+      const release = "retiring" in declaration && declaration.retiring?.() === true
+        // The context is removed right after: undoing the declaration would only add a round trip
         ? Effect.void
         : declaration._tag === "Downloads"
         ? Effect.forEach(
