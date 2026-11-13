@@ -5282,6 +5282,33 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
+      it.effect(
+        "keeps the first observation of an expectation whose round's reply comes after the deadline",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() => `<p id="css" style="color: rgb(12, 34, 56)">CSS</p>`)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              // The page stalls, as a loaded browser does, 150 ms into the expectation, for longer than its deadline
+              yield* page.evaluate(() => {
+                setTimeout(() => {
+                  const end = Date.now() + 2500
+                  while (Date.now() < end);
+                }, 150)
+              })
+              const error = yield* page.locator("#css").pipe(
+                Expect.toHaveCSS("color", "red"),
+                Deadline.within("1500 millis"),
+                Effect.flip
+              )
+              assert(Expect.isExpectationFailed(error), String(error))
+              assert.deepStrictEqual(error.history.map((entry) => entry.value), ["rgb(12, 34, 56)"])
+            }))
+          }),
+        timeout
+      )
+
       it.effect("retries computed CSS after an initial mismatch, including negation", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
