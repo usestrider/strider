@@ -1,0 +1,23 @@
+{
+  "id": "method-locator-getbytitle",
+  "upstream": [
+    "method:Locator.getByTitle"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "Locator.getByTitle",
+      "url": "/docs/api/browser/Locator#Locator.getByTitle"
+    }
+  ],
+  "notes": "Queries produce lazy locators; CSS selectors only. See selector differences below.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

@@ -4,7 +4,7 @@
  * Every module has one error, and what went wrong is its `reason`. Reasons that belong to one module are declared
  * there, such as `Locator.StrictViolation` or `PageNavigation.NavigationFailed`. The ones here are shared: a bad
  * argument, missing access, a capability the backend lacks, a protocol failure, the two ways an evaluated
- * function can fail and a dialog that blocks the page. Match them with `Effect.catchReason`; each carries a
+ * function can fail, and a dialog that blocks the page. Match them with `Effect.catchReason`; each carries a
  * one-line `hint`, which its `message` includes.
  *
  * @stability unstable
@@ -325,5 +325,50 @@ export class ViewportMismatch extends Schema.Error<ViewportMismatch>("@usestride
 }) {
   override get message(): string {
     return `Viewport ${this.requested.width}x${this.requested.height} was not confirmed; measured ${this.actual.width}x${this.actual.height} (${this.hint})`
+  }
+}
+
+/**
+ * Reason for a locator handler callback that failed while preparing an action or assertion.
+ *
+ * **Details**
+ *
+ * `error` preserves the original typed error, including its identity and custom fields, in this process.
+ * Serialized diagnostics are a projection and do not promise lossless transport of arbitrary callback values.
+ * Defects and interruption propagate as causes; step timeouts and ended targets retain their error types.
+ *
+ * **Example** (Recovering a handler's original error)
+ *
+ * ```ts import.meta.vitest
+ * import { Locator, Reason } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const submit = Effect.fn("submit")(function*(button: Locator.Locator) {
+ *   yield* button.click().pipe(
+ *     Effect.catchTag(
+ *       "LocatorError",
+ *       (error) =>
+ *         error.reason._tag === "LocatorHandlerFailed"
+ *           ? Effect.logWarning("handler failed", error.reason.error)
+ *           : Effect.fail(error)
+ *     )
+ *   )
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category reasons
+ * @since 0.1.0
+ */
+export class LocatorHandlerFailed extends Schema.Error<LocatorHandlerFailed>(
+  "@usestrider/browser/Reason/LocatorHandlerFailed"
+)({
+  _tag: Schema.tag("LocatorHandlerFailed"),
+  error: Schema.Unknown,
+  trigger: Schema.String,
+  hint: Schema.String
+}) {
+  override get message(): string {
+    return `Locator handler for ${this.trigger} failed (${this.hint})`
   }
 }

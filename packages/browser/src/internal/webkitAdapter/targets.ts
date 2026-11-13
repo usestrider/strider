@@ -31,6 +31,8 @@ import { mainRealmOf } from "./console.ts"
 import { configureTarget } from "./declare.ts"
 import {
   type Event,
+  eventContext,
+  eventOf,
   type FrameEntry,
   frameKey,
   loaderKey,
@@ -56,6 +58,7 @@ const pageProxyCreated = (state: State, params: Envelope.PageProxyCreatedParams)
   const launchedPopup = state.automation !== undefined && !state.attachedAtConnect && pending === 0
   if (launchedCreated) state.creating.set(params.browserContextId, pending - 1)
   const page: PageEntry = {
+    event: undefined as unknown as Event,
     id,
     pageProxyId: params.pageProxyId,
     session,
@@ -70,6 +73,7 @@ const pageProxyCreated = (state: State, params: Envelope.PageProxyCreatedParams)
     closing: undefined,
     ended: false
   }
+  page.event = eventContext(state, session, page, undefined, undefined)
   const main: FrameEntry = {
     frameId: "",
     id,
@@ -112,6 +116,7 @@ const targetCreated = (state: State, page: PageEntry, params: Target.TargetCreat
     return
   }
   const target: TargetEntry = {
+    event: undefined as unknown as Event,
     targetId: info.targetId,
     session,
     page,
@@ -120,6 +125,7 @@ const targetCreated = (state: State, page: PageEntry, params: Target.TargetCreat
     lastConsole: undefined,
     ended: false
   }
+  target.event = eventContext(state, session, page, target, undefined)
   state.targets.set(session, target)
   const first = page.target === undefined && page.provisional === undefined
   if (info.isProvisional === true) page.provisional = target
@@ -128,8 +134,13 @@ const targetCreated = (state: State, page: PageEntry, params: Target.TargetCreat
 }
 
 /** A session's end: a worker's, a target's, or a page proxy's, which ends its page. */
-export const ended = (state: State, session: ProtocolClient.Session, reason: Protocol.SessionEnded) => {
-  const worker = state.workers.get(session)
+export const ended = (state: State, session: ProtocolClient.Session, reason: Protocol.SessionEnded) =>
+  endedEvent(eventOf(state, session), reason)
+
+export const endedEvent = (
+  { state, session, worker, target, page: proxyPage }: Event,
+  reason: Protocol.SessionEnded
+) => {
   if (worker !== undefined) {
     state.workers.delete(session)
     if (worker.realm !== undefined) {
@@ -137,7 +148,6 @@ export const ended = (state: State, session: ProtocolClient.Session, reason: Pro
     }
     return
   }
-  const target = state.targets.get(session)
   if (target !== undefined) {
     target.ended = true
     for (const request of state.requests.values()) {
@@ -160,7 +170,7 @@ export const ended = (state: State, session: ProtocolClient.Session, reason: Pro
     // The page keeps its ended target, which says why it ended when the page proxy reports it
     return
   }
-  const page = [...state.pages.values()].find((page) => page.session === session)
+  const page = proxyPage?.session === session ? proxyPage : undefined
   if (page === undefined) return
   const why: L1Target.CloseReason = reason.why === "connectionLost"
     ? Kit.closed()
@@ -199,6 +209,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       )
       if (session === undefined) return
       const worker: WorkerEntry = {
+        event: undefined as unknown as Event,
         workerId: params.workerId,
         session,
         target,
@@ -206,6 +217,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         realm: undefined,
         lastConsole: undefined
       }
+      worker.event = eventContext(state, session, target.page, target, worker)
       const realm: RealmEntry = {
         id: state.ids.realm(),
         session,
@@ -384,8 +396,7 @@ const pageProxyGate = Effect.fnUntraced(function*(page: PageEntry) {
 })
 
 /** A target whose events were lost: its model is rebuilt from a fresh resource tree, as at initialization. */
-export const lost = (state: State, session: ProtocolClient.Session) => {
-  const target = state.targets.get(session)
+export const lostEvent = ({ state, session, target }: Event) => {
   state.control.sync(
     session,
     target !== undefined

@@ -1,0 +1,29 @@
+{
+  "id": "method-page-close",
+  "upstream": [
+    "method:Page.close"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "Page.close",
+      "url": "/docs/api/browser/Page#Page.close"
+    }
+  ],
+  "notes": "Explicit close, or close the page owning scope.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [
+    {
+      "capability": "userContexts",
+      "file": "packages/browser/src/internal/webkitAdapter.ts",
+      "quote": "closePage: refuse(\"userContexts\", noPages)"
+    }
+  ]
+}

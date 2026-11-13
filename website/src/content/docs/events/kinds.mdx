@@ -1,18 +1,18 @@
 ---
-title: Navigations, popups, dialogs and downloads
-description: The navigation an action causes, popups, handlers for dialogs and file choosers, and downloads and their files.
+title: Navigations, popups, dialogs, and downloads
+description: The events an action most often causes.
 order: 2
 ---
 
-A navigation can end on an error page, a popup is a page to act on, a dialog blocks its page until something
-decides it, and a download's file isn't whole when its event comes. Their modules add what each needs to the
-[`next`, `stream` and `history`](/docs/events/events#next-stream-and-history) every event module has.
+These four kinds of event have modules that add what each needs to the
+[`next`, `stream`, and `history`](/docs/events/events#next-stream-and-history) every event module has: a
+navigation's response, a popup's page, a handler for dialogs and file choosers, and a download's file.
 
 ## Navigations
 
-[`Expect.toHaveURL`](/docs/pages/expectations#the-matchers) says where the page is, not what got it there.
-`PageNavigation.next` gives the navigation the action caused, with its response, so an error page or a
-same-document change can be told apart:
+`PageNavigation.next` gives the navigation an action caused, with its response, so you can see whether it landed
+on an error page or only changed the current document.
+[`Expect.toHaveURL`](/docs/pages/expectations#the-matchers) says only where the page is, not what got it there:
 
 ```ts
 import { Page, PageNavigation } from "@usestrider/browser"
@@ -64,9 +64,8 @@ names no opener, so `Popup.next` fails there with `Unsupported`:
 
 ## Dialogs and file choosers
 
-A dialog blocks its page until it's decided, and the action that opened it doesn't return until then, so a wait
-collected after the action would come too late. Register a handler before it opens; the handler lasts until its
-scope closes:
+A handler decides each dialog as it opens, until its scope closes. Register it before the action, since a dialog
+blocks its page, and the action that opened it doesn't return until the dialog is decided:
 
 ```ts
 import { Dialog, Page } from "@usestrider/browser"
@@ -136,7 +135,7 @@ A chooser no handler answers is canceled, and reported as an `AutoResolution` to
 
 ## Downloads
 
-A download's event comes when it starts, before its file is complete. The handle, with its file, status and
+A download's event comes when it starts, before its file is complete. The handle, with its file, status, and
 suggested name, follows it to the end, so you save or read the file once it's whole:
 
 ```ts

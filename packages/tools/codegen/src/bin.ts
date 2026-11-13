@@ -20,9 +20,8 @@ import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { Argument, Command, Flag } from "effect/cli"
 import * as Console from "effect/Console"
-import * as Crypto from "effect/Crypto"
+import { Digest } from "effect/crypto"
 import * as Effect from "effect/Effect"
-import * as Hex from "effect/encoding/Hex"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as ChildProcess from "effect/process/ChildProcess"
@@ -170,14 +169,14 @@ const traceContract = Command.make(
     Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const crypto = yield* Crypto.Crypto
+      const digest = yield* Digest.Digest
       const contract = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(TraceContract))(
         yield* fs.readFileString(path.join(process.cwd(), "packages/tools/codegen/trace-contract.json"))
       )
       const changed: Array<string> = []
       for (const [file, expected] of Object.entries(contract.files)) {
         const bytes = yield* fs.readFile(path.join(checkout, file))
-        const actual = Hex.encode(yield* crypto.digest("SHA-256", bytes))
+        const actual = yield* digest.digestHex(Digest.sha256, bytes)
         if (actual !== expected) changed.push(file)
         yield* Console.log(`${file}: ${actual === expected ? "as read" : "changed"}`)
       }
@@ -193,4 +192,7 @@ const cli = Command.make("strider-codegen").pipe(
   Command.withSubcommands([model, generate, auditCommand, keyboards, traceContract])
 )
 
-Command.run(cli, { version: "0.0.0" }).pipe(Effect.provide(NodeServices.layer), NodeRuntime.runMain)
+Command.run(cli, { version: "0.0.0" }).pipe(
+  Effect.provide([NodeServices.layer, Digest.layerWebCrypto]),
+  NodeRuntime.runMain
+)

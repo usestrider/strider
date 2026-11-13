@@ -1,0 +1,12 @@
+{
+  "id": "option-page-goto-referer",
+  "upstream": [
+    "method:Page.goto"
+  ],
+  "option": "referer",
+  "status": "missing",
+  "api": [],
+  "notes": "No public per-navigation referer option.",
+  "capabilities": [],
+  "requirements": []
+}

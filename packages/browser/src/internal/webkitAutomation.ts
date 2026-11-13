@@ -160,9 +160,10 @@ export const inspectorListener = Effect.fnUntraced(function*(pid: number, port: 
           : []
       })
     )
-    // Read the descriptor directory even before a listener exists: permission failures are refusals, not readiness.
-    const descriptors = yield* fs.readDirectory(`/proc/${pid}/fd`)
+    // The first read of a live child's descriptors, just after it was spawned, was seen denied and never later, so
+    // they're read only once the table shows a listener on the port.
     if (inodes.size !== 1) return undefined
+    const descriptors = yield* fs.readDirectory(`/proc/${pid}/fd`)
     for (const fd of descriptors) {
       const target = yield* fs.readLink(`/proc/${pid}/fd/${fd}`).pipe(
         Effect.catchIf((error) => error.reason._tag === "NotFound", () => Effect.succeed(""))
@@ -476,6 +477,10 @@ const startProcess = Effect.fnUntraced(function*(
       yield* Deferred.succeed(firstList, pagesListed)
       return
     }
+    // The anchor is open for as long as the process runs, so a list without it isn't the process's pages: stock
+    // WebKit sends one with no targets at all as a context's page opens after another closed. Taken as the pages,
+    // it would end the new one, and the next list would announce it again after its target had already arrived
+    if (anchors.size > 0 && !pagesListed.some((listed) => anchors.has(listed.id))) return
     for (const target of pagesListed) {
       if (announced.has(target.id) || anchors.has(target.id) || initial.has(target.id)) continue
       if (holdNext !== undefined) {

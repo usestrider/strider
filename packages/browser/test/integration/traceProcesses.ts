@@ -2,6 +2,8 @@
 import { ChildProcess } from "node:child_process"
 import type { Readable, Writable } from "node:stream"
 import { connection } from "./failureTrace.ts"
+import { enabled as nativeEnabled, recordNative } from "./nativeCrash.ts"
+import { processCapture } from "./nativeInputProcess.ts"
 import { pipeObserver } from "./tracePipe.ts"
 import { stderrText } from "./traceStderr.ts"
 import { prepareChild } from "./traceTransfer.ts"
@@ -20,7 +22,13 @@ if (!prototype[patched]) {
     const trace = connection(`process:${options.file}`)
     prepareChild(options)
     const result = spawn.call(this, options)
+    const diagnostic = processCapture(options.args)
+    diagnostic?.processStarted(this.pid, options.args)
+    if (diagnostic !== undefined) this.once("close", () => diagnostic.stderrEnd(false))
     trace("process-start", { command: options.file, args: options.args, pid: this.pid })
+    if (nativeEnabled && options.args?.some((arg) => arg.startsWith("--remote-debugging-"))) {
+      recordNative("launches.ndjson", { command: options.file, args: options.args, browserPid: this.pid })
+    }
     // Observing emit leaves the existing pipe consumer in charge of flow and draining.
     if (this.stderr !== null) {
       trace("stderr-open", "Observing the existing stderr consumer")
@@ -30,9 +38,13 @@ if (!prototype[patched]) {
         if (event === "data") {
           const text = stderrText(values[0])
           observedBytes += Buffer.byteLength(text)
-          trace("stderr", text)
+          if (diagnostic === undefined) trace("stderr", text)
+          else diagnostic.stderrChunk(values[0])
         }
-        if (event === "end") trace("stderr-end", { observedBytes })
+        if (event === "end") {
+          diagnostic?.stderrEnd(true)
+          trace("stderr-end", { observedBytes, nativeDiagnostic: diagnostic?.directory })
+        }
         return emit.call(this, event, ...values)
       }
     } else trace("stderr-unavailable", "Process stdio configuration provides no readable stderr pipe")

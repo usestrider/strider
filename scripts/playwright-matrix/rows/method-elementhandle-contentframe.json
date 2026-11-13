@@ -1,0 +1,25 @@
+{
+  "id": "method-elementhandle-contentframe",
+  "upstream": [
+    "method:ElementHandle.contentFrame"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "ReadonlyPage.frame",
+      "url": "/docs/api/browser/Page#ReadonlyPage.frame"
+    }
+  ],
+  "notes": "Enter the iframe via a locator using page.frame(iframe). This re-resolves the iframe instead of retaining ElementHandle identity.",
+  "capabilities": [
+    "frames.contentFrame"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

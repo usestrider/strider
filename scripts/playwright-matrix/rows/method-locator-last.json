@@ -1,0 +1,23 @@
+{
+  "id": "method-locator-last",
+  "upstream": [
+    "method:Locator.last"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.last",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.last"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

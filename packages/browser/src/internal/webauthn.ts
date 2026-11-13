@@ -13,6 +13,8 @@ import type * as Adapter from "./adapter.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import * as Runtime from "./runtime.ts"
+const held = new WeakMap<Model.PageEntry, number>()
+export const isHeld = (page: Model.PageEntry): boolean => (held.get(page) ?? 0) > 0
 
 const invalid = (input: string, expected: string) =>
   new WebAuthn.WebAuthnError({
@@ -43,8 +45,30 @@ export const acquire = Effect.fnUntraced(
         : failure.error
     }
     let released = false
-    const ref = yield* Effect.acquireRelease(adapter.createAuthenticator(page.id), (ref) => release(ref)).pipe(
+    const ref = yield* Effect.acquireRelease(
+      Effect.suspend<
+        Adapter.Authenticator,
+        Adapter.AdapterError | Deadline.Timeout | Capability.CapabilityError,
+        never
+      >(() => {
+        if (page.contextEntry.storageReplacing === true) {
+          return Effect.fail(
+            new Capability.CapabilityError({
+              capability: "VirtualAuthenticator",
+              reason: new Reason.NotPermitted({ required: "control", hint: "Storage replacement is in progress" }),
+              diagnostics: Operation.diagnosticsNow()
+            })
+          )
+        }
+        held.set(page, (held.get(page) ?? 0) + 1)
+        return adapter.createAuthenticator(page.id).pipe(
+          Effect.onError(() => Effect.sync(() => held.set(page, (held.get(page) ?? 1) - 1)))
+        )
+      }),
+      (ref) => release(ref)
+    ).pipe(
       Effect.mapError((error) => {
+        if (error._tag === "CapabilityError") return error
         const failure = Operation.fromAdapter(error, Operation.idNow(), runtime.backend)
         return failure._tag === "Reason"
           ? new Capability.CapabilityError({
@@ -59,7 +83,11 @@ export const acquire = Effect.fnUntraced(
       return Effect.suspend(() => {
         if (released) return Effect.void
         released = true
-        return adapter.releaseAuthenticator(ref).pipe(Operation.detached, Effect.ignore)
+        return adapter.releaseAuthenticator(ref).pipe(
+          Operation.detached,
+          Effect.ensuring(Effect.sync(() => held.set(page, (held.get(page) ?? 1) - 1))),
+          Effect.ignore
+        )
       })
     }
     if (Option.isSome(grant)) yield* grant.value.onRelease(release(ref))

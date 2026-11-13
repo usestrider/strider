@@ -1,0 +1,11 @@
+{
+  "id": "method-websocketroute-url",
+  "upstream": [
+    "method:WebSocketRoute.url"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No public WebSocket interception, mocking or forwarding API.",
+  "capabilities": [],
+  "requirements": []
+}

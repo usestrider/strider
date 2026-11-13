@@ -1,0 +1,17 @@
+{
+  "id": "method-response-request",
+  "upstream": [
+    "method:Response.request"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "NetworkResponse is a response-event value; it does not provide this terminal/timing/security or related-object operation.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/NetworkResponse.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

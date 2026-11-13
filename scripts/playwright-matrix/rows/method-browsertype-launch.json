@@ -1,0 +1,33 @@
+{
+  "id": "method-browsertype-launch",
+  "upstream": [
+    "method:BrowserType.launch"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "chromium/Chromium",
+      "symbol": "layer",
+      "url": "/docs/api/browser/chromium/Chromium#layer"
+    },
+    {
+      "module": "firefox/Firefox",
+      "symbol": "layer",
+      "url": "/docs/api/browser/firefox/Firefox#layer"
+    },
+    {
+      "module": "webkit/WebKit",
+      "symbol": "layer",
+      "url": "/docs/api/browser/webkit/WebKit#layer"
+    }
+  ],
+  "notes": "Launch with an explicit executable path; the browser layer owns its process.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Browser.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

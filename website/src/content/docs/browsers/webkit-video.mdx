@@ -1,11 +1,11 @@
 ---
 title: WebKit video
-description: Enable PNG polling explicitly, choose its interval and output directory, and write a WebM file.
+description: Recording a WebKit page to a video file.
 order: 5
 ---
 
-Stock WebKit has no native screencast stream. Explicit PNG polling records a WebM file, at the cost of page work
-and missed states between captures.
+WebKit has no screencast stream, so Strider makes its video by polling: it takes a screenshot at an interval you
+set and writes each into a WebM file. Polling adds work to the page, and misses what happens between screenshots.
 
 ```ts
 import { NodeServices, NodeSocket } from "@effect/platform-node"
@@ -42,11 +42,11 @@ absolute output directory first; it must be writable. The writer installs nothin
 `"100 millis"` is an explicit starting point, not a default or a responsiveness guarantee. The first screenshot
 is immediate; later captures wait the interval after capture completes, and a slow writer can hold them back.
 The actual sampling period includes screenshot latency. The variable-rate output keeps each sample until the next, so it can
-miss animations, brief errors and other states between captures. There is no audio. Larger pages and shorter
+miss animations, brief errors, and other states between captures. There is no audio. Larger pages and shorter
 intervals can add more page work.
 
 The writer fits viewport changes into the initial output size, centring the image and padding with black. Navigation
-continues the recording. Closing its scope, page or context ends input; a started writer has up to five seconds
+continues the recording. Closing its scope, page, or context ends input; a started writer has up to five seconds
 on the browser clock to finish. Capture and writer failures fail `video.file`.
 
 Files remain in the caller's output directory after the context closes. This enables neither downloads nor

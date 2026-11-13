@@ -73,7 +73,7 @@ export type SourceLocation = typeof SourceLocation.Type
  *
  * **Details**
  *
- * `text` has the call's format specifiers, such as `%s`, `%d` and `%f`, applied as the Console Standard's formatter
+ * `text` has the call's format specifiers, such as `%s`, `%d`, and `%f`, applied as the Console Standard's formatter
  * applies them: Strider applies it to what Chromium and WebKit report, and Firefox applies its own, which writes
  * `%f` as printf does (`1.250000`). An object reads as its browser describes it, such as `Object`.
  *

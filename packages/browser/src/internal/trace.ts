@@ -171,15 +171,18 @@ const actions = new Set([
   "Locator.check",
   "Locator.uncheck",
   "Locator.focus",
+  "Locator.blur",
   "Locator.clear",
   "Locator.fill",
   "Locator.press",
   "Locator.pressSequentially",
   "Locator.selectOption",
+  "Locator.dispatchEvent",
   "Locator.setInputFiles",
   "Locator.dragTo",
   "Locator.scrollIntoView",
   "Page.goto",
+  "Page.setContent",
   "Page.reload",
   "Page.back",
   "Page.forward"
@@ -221,6 +224,7 @@ const expectationMessage = (error: Expect.ExpectationFailed, preset: Diagnostics
     condition = `to have the URL ${expected}`
   }
   const lines = [`Expected ${error.subject} ${condition}`]
+  if (error.handlerFailure !== undefined) lines.push(error.handlerFailure.message)
   if (Option.isSome(error.last)) lines.push(`Last observed: ${valueText(error.last.value.value)}`)
   if (error.history.length > 0) {
     lines.push("History:", ...error.history.map((entry) => `  ${valueText(entry.value)}`))

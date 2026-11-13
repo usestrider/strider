@@ -1,0 +1,26 @@
+{
+  "id": "method-tracing-stophar",
+  "upstream": [
+    "method:Tracing.stopHar"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Har",
+      "symbol": "Recording.exportHar",
+      "url": "/docs/api/browser/Har#Recording.exportHar"
+    }
+  ],
+  "notes": "Remove the HAR registration or end its scope, then exportHar to the chosen path; there is no imperative stopHar member.",
+  "capabilities": [],
+  "requirements": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Capability.ts",
+      "packages/browser/src/Trace.ts",
+      "packages/browser/src/Har.ts",
+      "packages/browser/src/Operation.ts"
+    ],
+    "scope": "Recording declarations inspected; independent scopes, completed files and operation groups are distinguished from chunks and overlays."
+  }
+}

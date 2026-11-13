@@ -19,6 +19,7 @@ import {
   Page,
   PageNavigation,
   Popup,
+  Reason,
   Target,
   Trace
 } from "@usestrider/browser"
@@ -194,7 +195,7 @@ describe("Spans", () => {
 describe("Browser.layerTest", () => {
   it("fails at once on a step it can't read, naming where", () => {
     assert.throws(() => Fake.parse("--resp(cart)--wat"), /"wat" at 14/)
-    assert.throws(() => Fake.parse("dialog(popup)"), /isn't alert, confirm, prompt or beforeunload/)
+    assert.throws(() => Fake.parse("dialog(popup)"), /isn't alert, confirm, prompt, or beforeunload/)
     assert.deepStrictEqual(Fake.parse(" - | ").map((step) => step._tag), ["Tick", "Close"])
   })
 
@@ -375,6 +376,51 @@ describe("Recordings", () => {
       assert.deepStrictEqual(failures[3], { name: "Error", message: "ordinary failure" })
     }).pipe(Effect.provide(NodeServices.layer)))
 
+  it.effect("projects locator handler failures into trace messages without serializing original callback data", () =>
+    Effect.gen(function*() {
+      const out = path.join(directory(), "handler-error.zip")
+      const original: { message: string; custom: string; self?: unknown } = {
+        message: "dismiss callback failed",
+        custom: "private-custom-payload"
+      }
+      original.self = original
+      const handlerFailure = new Reason.LocatorHandlerFailed({
+        error: original,
+        trigger: "#overlay",
+        hint: original.message
+      })
+      const error = new Expect.ExpectationFailed({
+        subject: "cart",
+        condition: "to be visible",
+        handlerFailure,
+        last: Option.none(),
+        history: [],
+        elapsed: Duration.millis(1),
+        checks: { count: 1, triggeredBy: ["initial"] },
+        nearest: Option.none(),
+        suggestions: [],
+        diagnostics: Operation.diagnostics("OP-handler" as Diagnostics.OperationId)
+      })
+      yield* Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const trace = yield* Trace.record(page)
+        const received = yield* Recorders.observe(
+          "Expect.toBeVisible",
+          { "browser.page.id": page.id },
+          false,
+          Effect.fail(error)
+        ).pipe(Effect.flip)
+        assert.strictEqual(received, error)
+        assert.strictEqual(error.handlerFailure!.error, original)
+        yield* trace.exportTrace(out)
+      })).pipe(Effect.provide(Browser.layerTest("")))
+      const content = (yield* unzip(out)).get("trace.trace")!
+      assert.include(content, "dismiss callback failed")
+      assert.include(content, "#overlay")
+      assert.notInclude(content, "private-custom-payload")
+      assert.strictEqual(original.self, original)
+    }).pipe(Effect.provide(NodeServices.layer)))
+
   it.effect("strips classified value evidence from exported expectation errors", () =>
     Effect.gen(function*() {
       const out = path.join(directory(), "value.zip")
@@ -414,6 +460,10 @@ describe("Recordings", () => {
 
   for (
     const [matcher, condition, observed, secrets] of [
+      ["toHaveValues", "to have the values [\"expected-password-secret\"]", ["typed-password-secret"], [
+        "expected-password-secret",
+        "typed-password-secret"
+      ]],
       ["toHaveValue", "to have the value \"expected-password-secret\"", "typed-password-secret", [
         "expected-password-secret",
         "typed-password-secret"
@@ -482,9 +532,11 @@ describe("Recordings", () => {
                   assert.notInclude(failures[0].message, "History:")
                 }
                 if (matcher !== "toHaveURL") {
-                  const hidden = matcher === "toHaveValue" || preset === "strict"
+                  const hidden = (matcher === "toHaveValue" || matcher === "toHaveValues") || preset === "strict"
                   const expectedCondition = hidden
-                    ? matcher === "toHaveValue" ? "to have the value REDACTED" : "to have the title REDACTED"
+                    ? (matcher === "toHaveValue" || matcher === "toHaveValues")
+                      ? "to have the value REDACTED"
+                      : "to have the title REDACTED"
                     : condition
                   const expectedValue = hidden ? "REDACTED" : observed
                   assert.strictEqual(
@@ -498,8 +550,9 @@ describe("Recordings", () => {
                   )
                 }
                 for (const secret of secrets) {
-                  if (matcher === "toHaveValue" || preset === "strict") assert.notInclude(content, secret)
-                  else if (delivered || condition.includes(secret)) assert.include(failures[0].message, secret)
+                  if ((matcher === "toHaveValue" || matcher === "toHaveValues") || preset === "strict") {
+                    assert.notInclude(content, secret)
+                  } else if (delivered || condition.includes(secret)) assert.include(failures[0].message, secret)
                   else assert.notInclude(content, secret)
                 }
               }

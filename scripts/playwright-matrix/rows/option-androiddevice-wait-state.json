@@ -1,0 +1,18 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "capabilities": [],
+  "id": "option-androiddevice-wait-state",
+  "upstream": [
+    "method:AndroidDevice.wait"
+  ],
+  "option": "state",
+  "requirements": [],
+  "valueCoverage": [
+    {
+      "value": "gone",
+      "status": "missing"
+    }
+  ]
+}

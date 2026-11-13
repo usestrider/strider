@@ -8,6 +8,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
+import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
 import * as Scheduler from "effect/Scheduler"
@@ -15,6 +16,7 @@ import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import { TestClock } from "effect/testing"
+import * as Tracer from "effect/Tracer"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as BrowserImpl from "../src/internal/browser.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
@@ -52,6 +54,165 @@ const withProtocolScheduler = Effect.fnUntraced(function*<A, E, R>(
       makeDispatcher: () => dispatcher
     })
   )
+})
+
+describe("CDP paused page initialization", () => {
+  for (const rejected of [false, true]) {
+    it.effect(`writes declarations before resume and handles the first request before renderer replies${rejected ? " when a declaration fails" : ""}`, () =>
+      Effect.gen(function*() {
+        const browser = yield* makeBrowser
+        const ready = yield* Deferred.make<void>()
+        const paused = yield* Deferred.make<void>()
+        const facts: Array<Adapter.Fact> = []
+        const commands: Array<Sent> = []
+        const held: Array<Sent> = []
+        let resumed = false
+        const reply = (command: Sent) =>
+          browser.receive({
+            id: command.id,
+            sessionId: command.sessionId,
+            ...(rejected && command.method === "Page.addScriptToEvaluateOnNewDocument" &&
+                command.params?.worldName === "isolated"
+              ? { error: { code: -32000, message: "script installation rejected" } }
+              : {
+                result: command.method === "Browser.getVersion"
+                  ? {
+                    protocolVersion: "1.3",
+                    product: "Chrome/155.0.8059.79",
+                    revision: "test",
+                    userAgent: "HeadlessChrome",
+                    jsVersion: "test"
+                  }
+                  : command.method === "Target.getBrowserContexts" ?
+                  { browserContextIds: [] }
+                  : command.method === "Page.getFrameTree" ?
+                  {
+                    frameTree: {
+                      frame: {
+                        id: "T1",
+                        loaderId: "initial",
+                        url: "about:blank",
+                        securityOrigin: "://",
+                        mimeType: "text/html"
+                      }
+                    }
+                  }
+                  : command.method === "Page.addScriptToEvaluateOnNewDocument" ?
+                  { identifier: `script-${command.id}` }
+                  : command.method === "Page.getLayoutMetrics"
+                  ? metrics
+                  : {}
+              })
+          })
+        yield* Effect.gen(function*() {
+          while (true) {
+            const command = yield* browser.next
+            commands.push(command)
+            if (!resumed && command.sessionId === "S1" && command.method !== "Runtime.runIfWaitingForDebugger") {
+              held.push(command)
+              continue
+            }
+            if (command.method === "Runtime.runIfWaitingForDebugger") {
+              yield* browser.receive({
+                sessionId: "S1",
+                method: "Fetch.requestPaused",
+                params: {
+                  requestId: "fetch-1",
+                  frameId: "T1",
+                  resourceType: "Document",
+                  request: {
+                    url: "https://target.test/",
+                    method: "GET",
+                    headers: {},
+                    initialPriority: "High",
+                    referrerPolicy: "strict-origin-when-cross-origin"
+                  }
+                }
+              })
+              // The browser cannot create the renderer to answer these commands until its route can run.
+              yield* Deferred.await(paused)
+              resumed = true
+              for (const pending of held.splice(0).reverse()) yield* reply(pending)
+            }
+            yield* reply(command)
+          }
+        }).pipe(Effect.forkScoped)
+        const adapter = yield* CdpAdapter.connect(browser.transport, {
+          ownership: "launched",
+          sink: Effect.fnUntraced(function*(fact) {
+            facts.push(fact)
+            if (fact._tag === "ObligationOpened") yield* Deferred.succeed(paused, undefined)
+            if (fact._tag === "PageReady" || fact._tag === "PageInitializationFailed") {
+              yield* Deferred.succeed(ready, undefined)
+            }
+          })
+        })
+        const context = { _tag: "UserContext", context: adapter.defaultContext } as const
+        const scripts = yield* Scope.make()
+        yield* Effect.addFinalizer(() => Scope.close(scripts, Exit.void))
+        for (const world of [{ _tag: "Main" }, { _tag: "Isolated", name: "isolated" }] as const) {
+          yield* adapter.declare(context, {
+            _tag: "InitScript",
+            source: "self.initialized = true",
+            world,
+            phase: "user",
+            workers: false,
+            timing: "beforeAuthorScript",
+            after: []
+          }).pipe(Scope.provide(scripts))
+        }
+        yield* adapter.declare(context, {
+          _tag: "Intercept",
+          patterns: ["https://target.test/**"],
+          phases: ["request"]
+        })
+        yield* adapter.declare(context, { _tag: "Override", override: { _tag: "Locale", locale: "fr-FR" } })
+        yield* adapter.declare(context, {
+          _tag: "Override",
+          override: {
+            _tag: "Viewport",
+            width: 400,
+            height: 300,
+            deviceScaleFactor: 1,
+            mobile: false
+          }
+        })
+        yield* browser.receive({
+          method: "Target.attachedToTarget",
+          params: {
+            sessionId: "S1",
+            targetInfo: { targetId: "T1", type: "page", title: "", url: "", attached: true },
+            waitingForDebugger: true
+          }
+        })
+        yield* Deferred.await(ready)
+        const sent = commands.filter((command) => command.sessionId === "S1").map((command) => command.method)
+        assert.strictEqual(sent.at(-1), "Runtime.runIfWaitingForDebugger")
+        assert.strictEqual(sent.filter((method) => method === "Runtime.runIfWaitingForDebugger").length, 1)
+        for (
+          const method of [
+            "Page.addScriptToEvaluateOnNewDocument",
+            "Fetch.enable",
+            "Emulation.setLocaleOverride",
+            "Emulation.setUserAgentOverride",
+            "Emulation.setDeviceMetricsOverride"
+          ]
+        ) {
+          assert.include(sent, method)
+        }
+        assert.isBelow(sent.indexOf("Page.getFrameTree"), sent.indexOf("Runtime.enable"))
+        assert.isBelow(sent.indexOf("Page.getLayoutMetrics"), sent.indexOf("Emulation.setDeviceMetricsOverride"))
+        assert.include(facts.map((fact) => fact._tag), rejected ? "PageInitializationFailed" : "PageReady")
+        const firstScript = commands.find((command) => command.method === "Page.addScriptToEvaluateOnNewDocument")!
+        yield* Scope.close(scripts, Exit.void).pipe(Effect.provideService(Cleanup.Confirm, true))
+        assert.isTrue(commands.some((command) =>
+          command.method === "Page.removeScriptToEvaluateOnNewDocument" &&
+          command.params?.identifier === `script-${firstScript.id}`
+        ))
+        // Tear down the connection before declarations release, so no renderer replies are needed by cleanup.
+        yield* browser.lose("test complete")
+      }).pipe(Effect.scoped))
+  }
 })
 
 describe("CDP combined locale and user-agent declarations", () => {
@@ -1327,6 +1488,80 @@ const replacementEvent = (loaderId = "replacement") => ({
   }
 })
 
+for (const mode of ["live", "absent", "ended", "effect-disabled", "browser-disabled"] as const) {
+  it.effect(`records malformed URL diagnostics on live, completed spans (setup: ${mode})`, () => {
+    const warnings: Array<Record<string, unknown>> = []
+    const logger = Logger.make((entry) => {
+      if (entry.logLevel === "Warn") warnings.push(Logger.formatStructured.log(entry).annotations)
+    })
+    const spans: Array<Tracer.NativeSpan> = []
+    const late: Array<string> = []
+    const tracer = Tracer.make({
+      span(options) {
+        const span = new Tracer.NativeSpan(options)
+        const event = span.event.bind(span)
+        span.event = (name, time, attributes) => {
+          if (span.status._tag === "Ended") late.push(name)
+          event(name, time, attributes)
+        }
+        spans.push(span)
+        return span
+      }
+    })
+    const enabled = mode !== "effect-disabled" && mode !== "browser-disabled"
+    const test = withProtocolScheduler((drain) =>
+      Effect.gen(function*() {
+        // The worker inherits connection-time services, including a setup span which may end before an event.
+        const h = yield* (mode === "absent" || mode === "live" || mode === "browser-disabled"
+          ? sentHeaders()
+          : (mode === "effect-disabled" ? sentHeaders().pipe(Effect.withTracerEnabled(false)) : sentHeaders()).pipe(
+            Effect.withSpan("connecting")
+          ))
+        const page = yield* h.page.control
+        const event = replacementEvent()
+        yield* h.browser.receive({ ...event, params: { frame: { ...event.params.frame, url: "nope" } } })
+        yield* drain
+        yield* page.activate
+        assert.strictEqual(h.commands.at(-1)?.method, "Page.bringToFront")
+        assert.strictEqual(h.facts.filter((fact) => fact._tag === "DocumentCommitted").at(-1)?.url, "about:blank")
+        const malformedWarnings = warnings.filter((entry) => entry["browser.url.reported"] === "REDACTED")
+        assert.strictEqual(malformedWarnings.length, 2)
+        for (const warning of malformedWarnings) assert.strictEqual(warning["test.ingestion"], "captured")
+        assert.deepStrictEqual(late, [])
+        const diagnostics = spans.filter((span) => span.name === "diagnostic:browser.url.malformed")
+        assert.strictEqual(diagnostics.length, enabled ? 2 : 0)
+        for (const span of diagnostics) {
+          assert.strictEqual(span.status._tag, "Ended")
+          assert.strictEqual(span.attributes.get("browser.url.reported"), "REDACTED")
+          assert.strictEqual(span.events.length, 1)
+          assert.strictEqual(span.events[0]?.[0], "browser.url.malformed")
+          assert.strictEqual(span.events[0]?.[2]?.["browser.url.reported"], "REDACTED")
+        }
+        // Suppression must never redirect an event to the setup span (live or ended).
+        for (const span of spans.filter((span) => !diagnostics.includes(span))) {
+          assert.isFalse(span.events.some(([name]) => name === "browser.url.malformed"))
+        }
+      })
+    )
+    let program = mode === "live" || mode === "browser-disabled" ? test.pipe(Effect.withSpan("connecting")) : test
+    if (mode === "browser-disabled") {
+      program = program.pipe(
+        Effect.provideService(Browser.TracerDisabledWhen, (operation) => operation.name === "browser.url.malformed")
+      )
+    }
+    return program.pipe(
+      Effect.withTracer(tracer),
+      Effect.provideService(
+        Browser.SpanNameGenerator,
+        (operation) => operation.name === "browser.url.malformed" ? `diagnostic:${operation.name}` : operation.name
+      ),
+      Effect.annotateLogs({ "test.ingestion": "captured" }),
+      Effect.provideService(Logger.CurrentLoggers, new Set([logger])),
+      onTestClock
+    )
+  })
+}
+
 const replyCapture = (browser: Effect.Success<typeof makeBrowser>, command: Sent) =>
   browser.receive({ id: command.id, sessionId: command.sessionId, result: { data: "AA==" } })
 
@@ -1339,9 +1574,9 @@ describe("Chromium capture document replacement", () => {
         const pending = yield* Effect.forkScoped(
           reader.screenshot(
             preparation === "layout"
-              ? { area: { _tag: "FullPage" } }
+              ? { area: "fullPage" }
               : preparation === "element"
-              ? { area: { _tag: "Element", locator: reader.locator("main") } }
+              ? { area: { element: reader.locator("main") } }
               : undefined
           ).pipe(Effect.flip)
         )
@@ -1613,6 +1848,65 @@ describe("Chromium empty screenshot errors", () => {
   }
 })
 
+describe("Chromium screenshot viewport containment", () => {
+  for (
+    const [name, clip, beyond] of [
+      ["scrolled viewport edges", { x: 10, y: 20, width: 800, height: 600 }, false],
+      ["fractional inset", { x: 10.25, y: 20.25, width: 799.5, height: 599.5 }, false],
+      ["fractional left overflow", { x: 9.75, y: 20, width: 100, height: 100 }, true],
+      ["fractional top overflow", { x: 10, y: 19.75, width: 100, height: 100 }, true],
+      ["fractional right overflow", { x: 10.25, y: 20, width: 800, height: 100 }, true],
+      ["fractional bottom overflow", { x: 10, y: 20.25, width: 100, height: 600 }, true]
+    ] as const
+  ) {
+    it.effect(name, () =>
+      Effect.gen(function*() {
+        const h = yield* sentHeaders()
+        const ready = h.facts.find((fact) => fact._tag === "PageReady")!
+        assert(ready._tag === "PageReady")
+        const pending = yield* Effect.forkScoped(h.connection.screenshot(ready.page, {
+          format: "png",
+          quality: Option.none(),
+          fullPage: false,
+          scale: "device",
+          omitBackground: false,
+          clip: Option.some(clip)
+        }))
+        const capture = yield* Queue.take(h.captures)
+        assert.strictEqual(capture.params?.captureBeyondViewport, beyond)
+        yield* replyCapture(h.browser, capture)
+        yield* Fiber.join(pending)
+      }).pipe(onTestClock))
+  }
+
+  for (
+    const [name, fullPage, scale, clip, beyond] of [
+      ["generated full-page clip", true, "device", { x: 0, y: 0, width: 900, height: 1800, scale: 1 }, true],
+      ["generated CSS-scale viewport clip", false, "css", { x: 10, y: 20, width: 800, height: 600, scale: 0.5 }, false]
+    ] as const
+  ) {
+    it.effect(name, () =>
+      Effect.gen(function*() {
+        const h = yield* sentHeaders()
+        const ready = h.facts.find((fact) => fact._tag === "PageReady")!
+        assert(ready._tag === "PageReady")
+        const pending = yield* Effect.forkScoped(h.connection.screenshot(ready.page, {
+          format: "png",
+          quality: Option.none(),
+          fullPage,
+          scale,
+          omitBackground: false,
+          clip: Option.none()
+        }))
+        const capture = yield* Queue.take(h.captures)
+        assert.deepStrictEqual(capture.params?.clip, clip)
+        assert.strictEqual(capture.params?.captureBeyondViewport, beyond)
+        yield* replyCapture(h.browser, capture)
+        yield* Fiber.join(pending)
+      }).pipe(onTestClock))
+  }
+})
+
 describe("Chromium screenshot renderer readiness", () => {
   it.effect("invalidates when replacement was received before a metrics error reply", () =>
     Effect.gen(function*() {
@@ -1659,7 +1953,7 @@ describe("Chromium screenshot renderer readiness", () => {
         const h = yield* sentHeaders(true)
         const page = yield* h.page.control
         const pending = yield* Effect.forkScoped(page.screenshot({
-          ...(sizing === "fullPage" || sizing === "fullPageCss" ? { area: { _tag: "FullPage" as const } } : {}),
+          ...(sizing === "fullPage" || sizing === "fullPageCss" ? { area: "fullPage" as const } : {}),
           scale: sizing === "css" || sizing === "fullPageCss" ? "css" : "device"
         }))
         const first = yield* Queue.take(h.screenshotWork)
@@ -2951,5 +3245,129 @@ describe("Chromium screencast renderer readiness", () => {
         assert.strictEqual(h.commands.filter((c) => c.method === "Page.startScreencast").length, 0)
         assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 0)
       }).pipe(onTestClock))
+  }
+})
+
+describe("CDP owned Chromium shutdown", () => {
+  for (
+    const mode of [
+      "order",
+      "no reply",
+      "disconnect before exit",
+      "hung child",
+      "signal exit",
+      "interrupted caller",
+      "expired deadline",
+      "failed handshake",
+      "attached"
+    ] as const
+  ) {
+    it.effect(mode, () =>
+      withProtocolScheduler((drain) =>
+        Effect.gen(function*() {
+          const browser = yield* makeBrowser
+          const exited = yield* Deferred.make<void, string>()
+          const closeSent = yield* Deferred.make<void>()
+          const scope = yield* Scope.make()
+          const commands: Array<string> = []
+          let fallback = false
+          yield* Scope.addFinalizer(
+            scope,
+            Effect.sync(() => {
+              fallback = true
+            })
+          )
+          yield* Effect.gen(function*() {
+            while (true) {
+              const command = yield* browser.next
+              commands.push(command.method)
+              if (command.method === "Browser.close") {
+                assert.strictEqual(fallback, false)
+                yield* Deferred.succeed(closeSent, undefined)
+                // Deliberately never reply: process exit, not a response, ends shutdown.
+                continue
+              }
+              if (mode === "failed handshake") {
+                yield* browser.receive({ id: command.id, error: { code: -1, message: "handshake rejected" } })
+                continue
+              }
+              const result = command.method === "Browser.getVersion"
+                ? {
+                  protocolVersion: "1.3",
+                  product: "Chrome/155",
+                  revision: "test",
+                  userAgent: "HeadlessChrome",
+                  jsVersion: "test"
+                }
+                : command.method === "Target.getBrowserContexts"
+                ? { browserContextIds: [] }
+                : {}
+              yield* browser.receive({ id: command.id, result })
+            }
+          }).pipe(Effect.forkScoped)
+          const options = {
+            ownership: mode === "attached" ? "attached" as const : "launched" as const,
+            sink: () => Effect.void,
+            exited: Deferred.await(exited)
+          }
+          const acquisition = yield* Effect.exit(
+            CdpAdapter.connect(browser.transport, options).pipe(Scope.provide(scope))
+          )
+          assert.strictEqual(Exit.isFailure(acquisition), mode === "failed handshake")
+          if (mode === "attached" || mode === "failed handshake") {
+            yield* Scope.close(scope, Exit.void)
+            assert.strictEqual(commands.includes("Browser.close"), false)
+            assert.strictEqual(fallback, true)
+            return
+          }
+          assert(Exit.isSuccess(acquisition))
+          let connectionLost = false
+          yield* acquisition.value.closed.pipe(
+            Effect.tap(() =>
+              Effect.sync(() => {
+                connectionLost = true
+              })
+            ),
+            Effect.forkScoped
+          )
+          const closing = yield* (mode === "interrupted caller"
+            ? Effect.gen(function*() {
+              yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))
+              return yield* Effect.never
+            }).pipe(Effect.scoped, Effect.forkChild)
+            : Scope.close(scope, Exit.void).pipe(
+              mode === "expired deadline" ? Deadline.within("0 millis") : (self) => self,
+              Effect.forkChild
+            ))
+          yield* drain
+          const interrupted = mode === "interrupted caller"
+            ? yield* Fiber.interrupt(closing).pipe(Effect.forkChild)
+            : undefined
+          // Drain all runnable protocol work without relying on a wall-clock delay.
+          yield* drain
+          assert.strictEqual(commands.includes("Browser.close"), true)
+          yield* Deferred.await(closeSent)
+          assert.strictEqual(connectionLost, false)
+          if (mode === "disconnect before exit") {
+            yield* browser.lose("closed before process exit")
+            yield* drain
+            assert.strictEqual(fallback, false)
+          }
+          if (mode === "hung child" || mode === "expired deadline") {
+            yield* TestClock.adjust("4999 millis")
+            assert.strictEqual(fallback, false)
+            yield* TestClock.adjust("1 millis")
+          } else if (mode === "signal exit") {
+            yield* Deferred.fail(exited, "SIGTERM")
+          } else {
+            yield* Deferred.succeed(exited, undefined)
+          }
+          if (interrupted !== undefined) yield* Fiber.join(interrupted)
+          else yield* Fiber.join(closing)
+          yield* drain
+          assert.strictEqual(connectionLost, true)
+          assert.strictEqual(fallback, true)
+        }).pipe(onTestClock)
+      ))
   }
 })

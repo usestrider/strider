@@ -6,7 +6,7 @@ import { versionLabel } from "../features/site.ts"
 import Mark from "./Mark.astro"
 
 interface Props {
-  readonly area?: "guides" | "scenarios" | "reference" | "changelog" | undefined
+  readonly area?: "guides" | "reference" | "changelog" | undefined
 }
 
 const { area } = Astro.props
@@ -18,7 +18,6 @@ const version = await versionLabel()
   <span class="hidden flex-1 md:block"></span>
   <nav class="flex flex-wrap items-center gap-x-6 gap-y-3 md:flex-nowrap">
     <a class="nav-link" href="/docs" aria-current={area === "guides" ? "page" : undefined}>Guide</a>
-    <a class="nav-link" href="/docs/scenarios" aria-current={area === "scenarios" ? "page" : undefined}>Scenarios</a>
     <a class="nav-link" href="/docs/api" aria-current={area === "reference" ? "page" : undefined}>API</a>
     <a class="nav-link" href="/changelog" aria-current={area === "changelog" ? "page" : undefined}>Changelog</a>
   </nav>

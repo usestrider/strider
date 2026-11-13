@@ -113,9 +113,9 @@ const namedPages = (steps: ReadonlyArray<Step>): ReadonlySet<string> => {
   return named
 }
 
-/** Names as a sentence lists them: `a`, `a and b`, `a, b and c`. */
+/** Names as a sentence lists them: `a`, `a and b`, `a, b, and c`. */
 const listed = (names: ReadonlyArray<string>) =>
-  names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`
+  names.length < 3 ? names.join(" and ") : `${names.slice(0, -1).join(", ")}, and ${names.at(-1)}`
 
 /** Where the session's browser came from, as the test's layer names it. */
 export type Browser =

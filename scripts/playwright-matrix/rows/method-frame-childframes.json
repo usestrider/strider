@@ -1,0 +1,28 @@
+{
+  "id": "method-frame-childframes",
+  "upstream": [
+    "method:Frame.childFrames"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "ObservedPage.frames",
+      "url": "/docs/api/browser/Page#ObservedPage.frames"
+    },
+    {
+      "module": "Page",
+      "symbol": "FrameTree",
+      "url": "/docs/api/browser/Page#FrameTree"
+    }
+  ],
+  "notes": "Read the page.frames Watchable tree and traverse its id/name/children fields. Parent links are found by traversal, not retained Frame objects; snapshot tree reads do not wait for a future frame.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

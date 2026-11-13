@@ -1,0 +1,25 @@
+{
+  "id": "method-filechooser-setfiles",
+  "upstream": [
+    "method:FileChooser.setFiles"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "FileChooser",
+      "symbol": "choose",
+      "url": "/docs/api/browser/FileChooser#choose"
+    }
+  ],
+  "notes": "Handle the chooser with a decision.",
+  "capabilities": [
+    "fileChooser"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/FileChooser.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

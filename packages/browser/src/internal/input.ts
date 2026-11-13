@@ -9,6 +9,7 @@
  * Callers hold the page's input permit while they build and send, so the state matches what was sent.
  */
 import * as Cause from "effect/Cause"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import type * as Keyboard from "../Keyboard.ts"
@@ -28,6 +29,11 @@ export interface State {
    * QUIRKS.md, Q84).
    */
   broken: Option.Option<Broken>
+  /**
+   * Adapter releases still in flight for gestures that failed: the next gesture waits for them, under its own
+   * deadline, before it sends the recorded release, which an adapter release that lands has already cleared.
+   */
+  cleanups: Array<Handover>
 }
 
 /** A release that failed: what it was, and its events. */
@@ -36,7 +42,13 @@ export interface Broken {
   readonly release: ReadonlyArray<Adapter.InputEvent>
 }
 
-export const make = (): State => ({ keys: [], buttons: new Set(), position: { x: 0, y: 0 }, broken: Option.none() })
+export const make = (): State => ({
+  keys: [],
+  buttons: new Set(),
+  position: { x: 0, y: 0 },
+  broken: Option.none(),
+  cleanups: []
+})
 
 /**
  * Before a gesture: on a page whose release failed, sends that release again, and forgets the failure if it gets
@@ -47,6 +59,14 @@ export const recover = <E>(
   dispatch: (events: ReadonlyArray<Adapter.InputEvent>) => Effect.Effect<void, E>
 ): Effect.Effect<Option.Option<string>> =>
   Effect.suspend(() => {
+    // Cleanups stay listed until they finish, so a waiter that is interrupted leaves the wait to the next gesture
+    const flying = state.cleanups.filter((handover) => !handover.finished)
+    return Effect.forEach(flying, (handover) => Deferred.await(handover.done), { discard: true }).pipe(
+      Effect.andThen(Effect.sync(() => {
+        state.cleanups = state.cleanups.filter((handover) => !handover.finished)
+      }))
+    )
+  }).pipe(Effect.andThen(Effect.suspend(() => {
     if (Option.isNone(state.broken)) return Effect.succeed(Option.none())
     const broken = state.broken.value
     return Effect.flatMap(Operation.current, (current) =>
@@ -68,7 +88,92 @@ export const recover = <E>(
         })),
         Effect.orElseSucceed(() => Option.some(broken.description))
       ))
+  })))
+
+export interface Handover {
+  settled: boolean
+  finished: boolean
+  readonly done: Deferred.Deferred<void>
+  readonly afterwards: Array<() => void>
+}
+
+const handovers = new WeakMap<ReadonlyArray<Adapter.InputEvent>, Handover>()
+
+/**
+ * An adapter that owes the release of what a gesture's events pressed, because the dispatch failed or was cut short,
+ * says so with the events array it was given, until it knows the outcome. Until `settled`, the release is
+ * uncertain: the caller's accounting records it, and `settled` clears that record. This way a release that
+ * finishes after the caller has accounted for the gesture is neither lost nor sent twice.
+ */
+export const handOver = (events: ReadonlyArray<Adapter.InputEvent>): void => {
+  handovers.set(events, { settled: false, finished: false, done: Deferred.makeUnsafe<void>(), afterwards: [] })
+}
+
+/** The adapter's release of a gesture handed over has ended, whether or not it settled it. */
+export const finished = (events: ReadonlyArray<Adapter.InputEvent>): void => {
+  const handover = handovers.get(events)
+  if (handover === undefined || handover.finished) return
+  handover.finished = true
+  // What it left unsettled is recorded before a waiter on it resumes
+  for (const record of handover.afterwards) record()
+  Deferred.doneUnsafe(handover.done, Effect.void)
+}
+
+/** The adapter's release of a gesture handed over was accepted by the browser. */
+export const settled = (events: ReadonlyArray<Adapter.InputEvent>): void => {
+  const handover = handovers.get(events)
+  if (handover !== undefined) handover.settled = true
+}
+
+/**
+ * After a gesture's dispatch failed: records the release of what it may have left pressed, the buttons and keys
+ * its events press that weren't already held, so the next gesture sends it first. `buttons` and `keys` stay as
+ * observed: this is protocol uncertainty, not input seen held. Keeps an earlier failure's release, which comes first.
+ */
+export const uncertain = (state: State, description: string, events: ReadonlyArray<Adapter.InputEvent>): void => {
+  const handover = handovers.get(events)
+  if (handover?.settled === true) return
+  // The adapter's own release is still in flight: the next gesture waits for it, and what it leaves unsettled is
+  // recorded when it ends, so a release that lands is never recorded, and one that fails is
+  if (handover !== undefined && !handover.finished) {
+    state.cleanups.push(handover)
+    handover.afterwards.push(() => {
+      if (!handover.settled) record(state, description, events)
+    })
+    return
+  }
+  record(state, description, events)
+}
+
+const record = (state: State, description: string, events: ReadonlyArray<Adapter.InputEvent>): void => {
+  const release: Array<Adapter.InputEvent> = []
+  const held: ReadonlySet<string> = state.buttons
+  const buttonsSeen = new Set<string>()
+  const keysSeen = new Set<string>()
+  for (const event of events) {
+    if (event._tag === "Mouse" && event.type === "down" && event.button !== "none") {
+      if (held.has(event.button) || buttonsSeen.has(event.button)) continue
+      buttonsSeen.add(event.button)
+      release.push({ ...event, type: "up", buttons: buttons(state) })
+    } else if (event._tag === "Key" && event.type === "down") {
+      if (state.keys.some((held) => held.code === event.code) || keysSeen.has(event.code)) continue
+      keysSeen.add(event.code)
+      const modifier = Keys.modifierOf(event.key)
+      release.push({
+        ...event,
+        type: "up",
+        text: Option.none(),
+        modifiers: modifier === undefined ? event.modifiers : { ...event.modifiers, [modifier.toLowerCase()]: false }
+      })
+    }
+  }
+  if (release.length === 0) return
+  const earlier = Option.isSome(state.broken) ? state.broken.value.release : []
+  state.broken = Option.some({
+    description: Option.isSome(state.broken) ? state.broken.value.description : description,
+    release: [...earlier, ...release.reverse()]
   })
+}
 
 const bits: Readonly<Record<Mouse.Button, number>> = { left: 1, right: 2, middle: 4 }
 

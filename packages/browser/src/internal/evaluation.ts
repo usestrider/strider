@@ -41,11 +41,13 @@ export type EvaluationReason =
   | Reason.BackendFailure
   | Reason.PromptBlocking
 
-/** Why an evaluation didn't produce a value. */
+/** Why an evaluation didn't produce a value. An adapter deadline retains its original timeout;
+ * a local evaluation timer has no adapter timeout, so the consuming operation supplies its own.
+ */
 export type Failure =
   | { readonly _tag: "Gone"; readonly error: Target.TargetGone }
   | { readonly _tag: "Reason"; readonly reason: EvaluationReason }
-  | { readonly _tag: "Deadline" }
+  | { readonly _tag: "Deadline"; readonly error?: Deadline.Timeout | undefined }
 
 /** An adapter's failure, as an evaluation's: a call the browser didn't answer before the deadline is `Deadline`. */
 const fromAdapter = (
@@ -54,7 +56,7 @@ const fromAdapter = (
   backend: string
 ): Failure => {
   const mapped = Operation.fromAdapter(error, id, backend)
-  return mapped._tag === "Timeout" ? { _tag: "Deadline" } : mapped
+  return mapped._tag === "Timeout" ? { _tag: "Deadline", error: mapped.error } : mapped
 }
 
 /** An exception's name and message, from the text the browser gives (`Uncaught TypeError: boom`). */
@@ -130,6 +132,7 @@ export const fromRemote = (value: Adapter.RemoteValue): Effect.Effect<unknown, F
   })
 
 export interface Call {
+  readonly releaseResult?: boolean | undefined
   /** The operation sending a write; absent for read-only queries. */
   readonly dispatch?: Operation.Record | undefined
   readonly realm: Target.RealmId
@@ -154,6 +157,7 @@ export const call = (runtime: Runtime.Runtime, options: Call): Effect.Effect<Ada
       arguments: options.arguments,
       awaitPromise: true,
       result: options.result,
+      ...(options.releaseResult === true ? { releaseResult: true } : {}),
       ...(options.group === undefined ? {} : { group: options.group }),
       userActivation: options.userActivation
     })

@@ -24,6 +24,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import { pipeArguments } from "effect/Pipeable"
+import * as Redacted from "effect/Redacted"
 import * as Scope from "effect/Scope"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as Browser from "../Browser.ts"
@@ -40,6 +41,7 @@ import * as StorageState from "../StorageState.ts"
 import * as Target from "../Target.ts"
 import * as Url from "../Url.ts"
 import * as UserContext from "../UserContext.ts"
+import * as WebSocketRoute from "../WebSocketRoute.ts"
 import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
 import * as BrowserService from "./browserService.ts"
@@ -65,6 +67,7 @@ import * as Runtime from "./runtime.ts"
 import * as Storage from "./storage.ts"
 import * as StorageStates from "./storageState.ts"
 import * as Watchable from "./watchable.ts"
+import * as WebSocketRoutes from "./webSocketRoutes.ts"
 import * as WorkerImpl from "./worker.ts"
 
 const BrowserTypeId = "~@usestrider/browser/Browser"
@@ -102,6 +105,7 @@ const objectMembers = (name: string, id: string) => ({
 interface ContextAccess {
   /** `None` for a context the connection created, controlled for its whole life. */
   readonly grant: Option.Option<Access.Grant>
+  readonly recovered?: boolean | undefined
   /** The handle of one of its pages, under this access. */
   readonly page: (entry: Model.PageEntry) => Page.Page
   /** `control`: the context itself, when it is controlled for life; otherwise a grant for the caller's scope. */
@@ -165,7 +169,9 @@ const makeContext = (
       yield* runtime.model.own(pageEntry.value, scope)
       return Option.getOrThrow(runtime.page(pageEntry.value))
     }).pipe(Operation.named("UserContext.newPage", { attributes: { "browser.context.id": entry.id } })),
-    cookies: Storage.cookieJar(runtime, entry.id),
+    cookies: Storage.cookieJar(runtime, entry.id, StorageStates.cookieRecorder(entry)),
+    setStorageState: (state) =>
+      StorageStates.replaceState(runtime, context, entry, state, { recovered: access.recovered }),
     exportStorageState: StorageStates.exportState(runtime, entry.id),
     clock: Clock.make({
       runtime,
@@ -195,6 +201,7 @@ const makeContext = (
         handler,
         (options?.phase ?? "request") as P
       )) as UserContext.UserContext["route"],
+    routeWebSocket: (pattern, handler, options) => WebSocketRoutes.register(runtime, entry, handler, pattern, options),
     addInitScript: (script, options) =>
       InitScripts.add({ runtime, scope: declared, operation: "UserContext.addInitScript" }, entry.id, script, options),
     emulate: (settings) => Emulation.emulate({ runtime, scope: declared, operation: "UserContext.emulate" }, settings),
@@ -312,6 +319,14 @@ const makeDeniedContext = (
       remove: () => cookie("CookieJar.remove"),
       clear: Effect.suspend(() => cookie("CookieJar.clear"))
     },
+    setStorageState: () =>
+      Effect.fail(
+        new UserContext.UserContextError({
+          operation: "UserContext.setStorageState",
+          reason: notPermitted("UserContext.setStorageState"),
+          diagnostics: Operation.diagnostics(id())
+        })
+      ),
     exportStorageState: Effect.suspend(() =>
       Effect.fail(
         new UserContext.UserContextError({
@@ -332,6 +347,13 @@ const makeDeniedContext = (
         new Route.RouteError({
           pattern: Url.Pattern.make(String(pattern)),
           reason: notPermitted("UserContext.route"),
+          diagnostics: Operation.diagnostics(id())
+        })
+      ),
+    routeWebSocket: () =>
+      Effect.fail(
+        new WebSocketRoute.WebSocketRouteError({
+          reason: notPermitted("UserContext.routeWebSocket"),
           diagnostics: Operation.diagnostics(id())
         })
       ),
@@ -525,6 +547,86 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
           )
         )
       }
+      if (options?.requestTiming && mode !== undefined && "context" in mode) {
+        return yield* Effect.fail(contextError(
+          operation,
+          new Reason.Unsupported({
+            capability: "network.timing",
+            backend: adapter.info.product,
+            hint: "Request timings must be enabled when creating a new context"
+          }),
+          id
+        ))
+      }
+      if (options?.requestSizes && mode !== undefined && "context" in mode) {
+        return yield* Effect.fail(contextError(
+          operation,
+          new Reason.Unsupported({
+            capability: "network.sizes",
+            backend: adapter.info.product,
+            hint: "Request sizes must be enabled when creating a new context"
+          }),
+          id
+        ))
+      }
+      if (options?.acceptInsecureCerts !== undefined && mode !== undefined && "context" in mode) {
+        return yield* Effect.fail(contextError(
+          operation,
+          new Reason.Unsupported({
+            capability: "acceptInsecureCerts",
+            backend: adapter.info.product,
+            hint: "Certificate acceptance can only be set when creating a context"
+          }),
+          id
+        ))
+      }
+      const credentials = options?.httpCredentials
+      if (
+        credentials !== undefined && (typeof credentials.username !== "string" ||
+          !Redacted.isRedacted(credentials.password) || typeof Redacted.value(credentials.password) !== "string")
+      ) {
+        return yield* Effect.fail(contextError(
+          operation,
+          new Reason.InvalidInput({
+            input: "httpCredentials",
+            expected: "a username and a Redacted string password",
+            hint: "Supply website credentials separately from proxy credentials"
+          }),
+          id
+        ))
+      }
+      let credentialOrigin: string | undefined
+      if (credentials?.origin !== undefined) {
+        const url = URL.parse(credentials.origin)
+        if (
+          url === null || !["http:", "https:"].includes(url.protocol) || url.username !== "" ||
+          url.password !== "" || url.pathname !== "/" || url.search !== "" || url.hash !== ""
+        ) {
+          return yield* Effect.fail(contextError(
+            operation,
+            new Reason.InvalidInput({
+              input: "httpCredentials.origin",
+              expected: "an HTTP(S) origin (scheme://host:port)",
+              hint: "Supply an origin without credentials, path, query, or fragment"
+            }),
+            id
+          ))
+        }
+        credentialOrigin = url.origin
+      }
+      if (mode !== undefined && "context" in mode && options?.storageStateTracking === true) {
+        return yield* Effect.fail(
+          contextError(
+            operation,
+            new Reason.InvalidInput({
+              input: "storageStateTracking",
+              expected: "false or omitted when reclaiming a context",
+              hint: "Tracking must be enabled when the context is first created"
+            }),
+            id
+          )
+        )
+      }
       const ownerScope = yield* Effect.scope
       const reclaimable = mode !== undefined
       const adopt = mode !== undefined && "context" in mode && mode.adopt === true
@@ -564,6 +666,17 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       const capabilities = (yield* SubscriptionRef.get(model.adapter.capabilities)).entries
       const reports = (name: string) =>
         capabilities.every((entry) => entry.name !== name || entry.status !== "unsupported")
+      if (credentials !== undefined && !reports("interception.auth")) {
+        return yield* Effect.fail(contextError(
+          operation,
+          new Reason.Unsupported({
+            capability: "interception.auth",
+            backend: runtime.backend,
+            hint: "This backend cannot answer website authentication challenges"
+          }),
+          id
+        ))
+      }
       const reportsDownloads = reports("downloads")
       const asked = options?.downloads ?? (!adopt && reportsDownloads ? "temporary" : "none")
       if (typeof asked === "object" && !/^(\/|[A-Za-z]:[\\/])/.test(asked.directory)) {
@@ -612,7 +725,14 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       const entry = yield* Effect.acquireRelease(
         (mode !== undefined && "context" in mode
           ? Effect.succeed(mode.context)
-          : adapter.createUserContext({ proxy, acceptInsecureCerts: false, reclaimable })).pipe(
+          : adapter.createUserContext({
+            proxy,
+            acceptInsecureCerts: options?.acceptInsecureCerts ?? false,
+            reclaimable,
+            focusEmulated: options?.focus === "emulated",
+            requestTiming: options?.requestTiming,
+            requestSizes: options?.requestSizes
+          })).pipe(
             Effect.catch(failed),
             Effect.flatMap(model.context)
           ),
@@ -625,6 +745,11 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
             }))
           )
       )
+      // A context this scope created is removed with it, which closes the pages it released in it
+      if (mode === undefined || !("context" in mode)) {
+        model.removedWith(entry, ownerScope, () => committed() && !(reclaimable && Handoff.leavesOpen(ownerScope)))
+      }
+      if (options?.storageStateTracking === true) yield* StorageStates.track(runtime, entry, options.storageState)
       const created = entry.id
       // Owned contexts decide dialogs no handler claims at once, and cancel file choosers no handler answers
       // (CONCEPTS.md §5)
@@ -640,23 +765,63 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         keyboardLayout: options?.keyboardLayout ?? settings.keyboardLayout
       })
       const scope: Adapter.DeclarationScope = { _tag: "UserContext", context: created }
+      // Set by the first finalizer to run, ahead of the declarations released below it: the context is removed
+      // when this scope closes unless it is handed off or not yet committed (the release above)
+      let retiring = false
       // Where file choosers aren't reported, as on stock WebKit, the browser cancels them itself
       if (!adopt && reports("fileChooser")) {
-        yield* adapter.declare(scope, { _tag: "FileChooser" }).pipe(Effect.catch(failed))
+        yield* adapter.declare(scope, { _tag: "FileChooser", retiring: () => retiring }).pipe(Effect.catch(failed))
+      }
+      if (credentials !== undefined) {
+        yield* model.route(entry, {
+          phase: "auth",
+          matches: () => true,
+          ask: (_obligation, paused) =>
+            Effect.succeed({
+              _tag: "Decided",
+              decision: paused.authSource === "server" &&
+                  (credentialOrigin === undefined || URL.parse(paused.request.url)?.origin === credentialOrigin)
+                ? {
+                  _tag: "ProvideCredentials",
+                  username: credentials.username,
+                  password: Redacted.value(credentials.password),
+                  once: true
+                }
+                : { _tag: "CancelAuth" }
+            })
+        })
+        yield* adapter.declare(scope, {
+          _tag: "Intercept",
+          patterns: ["*"],
+          phases: ["auth"],
+          retiring: () => retiring
+        }).pipe(
+          Effect.catch(failed)
+        )
       }
       // A challenge no route answers gets the server's response, never the browser's prompt, which nothing answers
       // headless, wherever the backend can pause one (QUIRKS.md, Q95 and Q252)
       if (!adopt && reports("network.challenges")) {
-        yield* adapter.declare(scope, { _tag: "Challenges" }).pipe(Effect.catch(failed))
+        yield* adapter.declare(scope, { _tag: "Challenges", retiring: () => retiring }).pipe(Effect.catch(failed))
       }
       if (asked === "deny") {
-        yield* adapter.declare(scope, { _tag: "Downloads", behavior: { _tag: "Deny" } }).pipe(Effect.catch(failed))
+        yield* adapter.declare(scope, { _tag: "Downloads", behavior: { _tag: "Deny" }, retiring: () => retiring }).pipe(
+          Effect.catch(failed)
+        )
         yield* Effect.annotateCurrentSpan("browser.context.downloads", "deny")
       } else if (Option.isSome(downloads)) {
-        yield* adapter.declare(scope, { _tag: "Downloads", behavior: { _tag: "Allow", directory: downloads.value } })
-          .pipe(Effect.catch(failed))
+        yield* adapter.declare(scope, {
+          _tag: "Downloads",
+          behavior: { _tag: "Allow", directory: downloads.value },
+          retiring: () => retiring
+        }).pipe(Effect.catch(failed))
         yield* Effect.annotateCurrentSpan("browser.context.downloads", downloads.value)
       }
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          retiring = committed() && !(reclaimable && Handoff.leavesOpen(ownerScope))
+        })
+      )
       // The options that are declarations, held for the context's life, before its first page
       if (options?.emulation !== undefined || options?.focus === "emulated") {
         const fields = Emulation.fields(options.emulation ?? {})
@@ -689,6 +854,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         )
       }
       const context: UserContext.UserContext = makeContext(runtime, entry, {
+        recovered: mode !== undefined && "context" in mode,
         grant: Option.none(),
         page: (pageEntry) => Option.getOrThrow(runtime.page(pageEntry)),
         control: Effect.sync(() => context)
@@ -760,7 +926,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         Effect.mapError((error) =>
           Deadline.isTimeout(error) ? error : new Page.PageError({
             operation: "Browser.newPage",
-            reason: error.reason._tag === "Incompatible"
+            reason: error.reason._tag === "Incompatible" || error.reason._tag === "PartiallyApplied"
               ? new Page.InitializationFailed({ step: "create the context", hint: error.reason.message })
               : error.reason,
             diagnostics: error.diagnostics

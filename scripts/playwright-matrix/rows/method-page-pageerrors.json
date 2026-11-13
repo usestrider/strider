@@ -1,0 +1,23 @@
+{
+  "id": "method-page-pageerrors",
+  "upstream": [
+    "method:Page.pageErrors"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "UncaughtException",
+      "symbol": "history",
+      "url": "/docs/api/browser/UncaughtException#history"
+    }
+  ],
+  "notes": "Bounded event history, not an unbounded log.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

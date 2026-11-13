@@ -1,0 +1,30 @@
+{
+  "id": "method-framelocator-first",
+  "upstream": [
+    "method:FrameLocator.first"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.first",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.first"
+    },
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.frame",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.frame"
+    }
+  ],
+  "notes": "Select first, last or nth on the iframe element locator before entering its document. The selection remains lazy; no separate indexed FrameLocator method is needed.",
+  "capabilities": [
+    "frames.contentFrame"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

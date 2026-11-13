@@ -1,0 +1,25 @@
+{
+  "id": "event-browsercontext-dialog",
+  "upstream": [
+    "event:BrowserContext.dialog"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Dialog",
+      "symbol": "stream",
+      "url": "/docs/api/browser/Dialog#stream"
+    }
+  ],
+  "notes": "Subscribe before the triggering action. Events are scoped streams and next-event effects.",
+  "capabilities": [
+    "prompts"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/UserContext.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

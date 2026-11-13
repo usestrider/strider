@@ -1,0 +1,25 @@
+{
+  "id": "method-browsercontext-addcookies",
+  "upstream": [
+    "method:BrowserContext.addCookies"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "CookieJar",
+      "symbol": "CookieJar",
+      "url": "/docs/api/browser/CookieJar#CookieJar"
+    }
+  ],
+  "notes": "Cookie operations use the context cookie jar.",
+  "capabilities": [
+    "cookies"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/UserContext.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

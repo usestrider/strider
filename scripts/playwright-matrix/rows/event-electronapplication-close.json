@@ -1,0 +1,11 @@
+{
+  "id": "event-electronapplication-close",
+  "upstream": [
+    "event:ElectronApplication.close"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No Electron application automation API.",
+  "capabilities": [],
+  "requirements": []
+}

@@ -1,12 +1,11 @@
 ---
 title: Errors
-description: The three kinds of failure, recovering from the reason you expect, strictness, failed expectations, diagnostics, and the secrets and URLs a message leaves out.
+description: Reading Strider's errors and handling them.
 order: 3
 ---
 
-A failure that says only that something went wrong leaves you rerunning the program to find out why. Each of
-Strider's says what happened, why and what to do, and is in the operation's type, so you can recover from the ones
-you expect.
+A Strider failure says what happened, why, and what to do, and appears in its operation's type, so a program can
+recover from the ones it expects.
 
 ## Three kinds of failure
 
@@ -66,7 +65,7 @@ A shared reason is the same class in every module, so one handler serves them al
 `LocatorError`'s `Unsupported` too.
 
 `TargetGone` has reasons of the same kind, declared in `Target`: `PageClosed`, `FrameDetached`, `DocumentReplaced`,
-`ConnectionLost` and the others. A popup that closes under a click is a `PageClosed`, which says what closed it:
+`ConnectionLost`, and the others. A popup that closes under a click is a `PageClosed`, which says what closed it:
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -85,8 +84,9 @@ const dismiss = Effect.fn("dismiss")(function*(popup: Page.Page) {
 
 ## Strictness
 
-Acting on the first of two matches would act on whichever the page rendered first, so a run could pass having
-clicked the wrong button. An action or read needs exactly one element. Two or more fail at once with
+An action or read needs exactly one element, so a run can't pass having clicked whichever of two matches the page
+rendered first.
+Two or more fail at once with
 `StrictViolation`, which lists them and suggests [`.filter({ visible: true })`](/docs/pages/locators#narrowing) when
 only one is visible. Ambiguity doesn't wait: it's a bug in the locator.
 
@@ -105,10 +105,12 @@ const dismissToast = Effect.fn("dismissToast")(function*(page: Page.Page) {
 
 ## Failed expectations
 
-An expectation that runs out of time may have seen the wrong thing, or found nothing at all; `ExpectationFailed`
-tells the two apart without a rerun. Its message is the locator and its `condition`:
+`ExpectationFailed` reports an unmet condition when its deadline expires, or an immediate locator-handler callback
+failure. For an unmet condition, its message is the locator and its `condition`:
 `Expected page.getByRole("main").getByRole("heading", { name: "Order placed" }) to be visible`. `last` is the last
-value seen, and `history` every value seen. When the locator matched nothing, `nearest` is an accessibility
+value seen, and `history` every value seen. When a handler fails, the message describes that failure instead, and
+`handlerFailure.error` retains the original callback error for recovery. A callback `Timeout` or `TargetGone`
+passes through as itself instead of becoming `ExpectationFailed`. When the locator matched nothing, `nearest` is an accessibility
 snapshot of what its first steps found, up to the step that matched nothing. When the locator ends with a
 `getByRole` and a name, `suggestions` are locators for elements with that role and a similar name:
 
@@ -134,12 +136,32 @@ const expectPlaced = Effect.fn("expectPlaced")(function*(page: Page.Page) {
 })
 ```
 
+To recover an assertion's original callback error, check `handlerFailure`:
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const checkReady = Effect.fn("checkReady")(function*(page: Page.Page) {
+  yield* page.getByRole("status").pipe(
+    Expect.toBeVisible,
+    Effect.catchTag(
+      "ExpectationFailed",
+      (failure) =>
+        failure.handlerFailure === undefined
+          ? Effect.fail(failure)
+          : Effect.logWarning("handler failed", failure.handlerFailure.error)
+    )
+  )
+})
+```
+
 ## Diagnostics
 
-An action that fails may still have reached the page, so retrying it could submit twice. Every failure carries
-`diagnostics`:
+Every failure carries `diagnostics`, the record of what its operation sent and saw. A failed action may still have
+reached the page, so check its `dispatch` before retrying it:
 
-- `dispatch`, for an action: whether its input reached the page, `NotSent`, `MayHaveBeenSent` or `Acknowledged`.
+- `dispatch`, for an action: whether its input reached the page, `NotSent`, `MayHaveBeenSent`, or `Acknowledged`.
 - `progress`, for an [operation with steps](/docs/deadlines#operations-of-your-own): how far each step got.
 - `operationId`: the id that links the failure to its operation's span and its entry in a
   [trace](/docs/tools/recordings#traces).
@@ -164,7 +186,7 @@ Errors are Schemas, so they encode as data; the [`strider` CLI](/docs/agents/cli
 
 ## Secrets and URLs
 
-A failure's message ends up in logs, traces and bug reports, so `Redacted` values, cookies and typed passwords are
+A failure's message ends up in logs, traces, and bug reports, so `Redacted` values, cookies, and typed passwords are
 left out of it, and of spans and logs. A diagnostics preset sets how much of a URL they show: the default,
 `strict`, keeps the origin and path and redacts query values, which can hold tokens. To see URLs whole while
 debugging on your own machine, apply `Diagnostics.withPreset("local")` where a debug run starts, not inside a step:

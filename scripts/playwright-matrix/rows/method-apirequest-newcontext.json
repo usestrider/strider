@@ -1,0 +1,11 @@
+{
+  "id": "method-apirequest-newcontext",
+  "upstream": [
+    "method:APIRequest.newContext"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No standalone cookie-sharing HTTP request context; Effect HTTP clients are available separately.",
+  "capabilities": [],
+  "requirements": []
+}

@@ -1,0 +1,23 @@
+{
+  "id": "method-locatorassertions-tomatchariasnapshot",
+  "upstream": [
+    "method:LocatorAssertions.toMatchAriaSnapshot"
+  ],
+  "status": "different",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toMatchAria",
+      "url": "/docs/api/browser/Expect#toMatchAria"
+    }
+  ],
+  "notes": "Matches a typed AriaPattern instead of a YAML template.",
+  "capabilities": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "typed-patterns-and-clock-modes",
+    "quote": "Where Playwright's surface is a string DSL, or overlaps itself, ours isn't and doesn't.",
+    "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
+  },
+  "requirements": []
+}

@@ -4,7 +4,7 @@
  * Integration failures name their bounded protocol traces in `.data/integration-failures/`; CI keeps them with
  * `integration.log`. Each NDJSON file records both directions, connection IDs, sequence numbers and timestamps,
  * with explicit payload truncation and history overflow. Shared setup/teardown context has its own file. Passing
- * tests discard their buffers. Each active test and the shared context independently retain 2 MiB of serialized
+ * tests discard their buffers, except the two macOS-job scopes below. Each active test and the shared context independently retain 2 MiB of serialized
  * UTF-16 parent history and 2 MiB of child history: 4 MiB per scope, including entry metadata. Child replay never
  * consumes the parent budget. Parent eviction follows observation order; child eviction follows origin timestamps,
  * with PID then process-local sequence as deterministic equal-timestamp tie breakers, regardless of slot replay order.
@@ -17,6 +17,92 @@
  * timestamps do not establish causation across processes. Individual parent payloads keep 32 Ki characters, child
  * payloads 8 Ki characters, and late failed-test cleanup has a separate 256 KiB serialized UTF-16 budget.
  * The optional `STRIDER_RECORD` drift sampler is separate and unchanged.
+ *
+ * Recorder-only interception also covers engine action rendering waits and host operation deadlines. Runtime
+ * round IDs are process-local; operation/document/realm IDs correlate each round with its response, not with
+ * unrelated traffic. At most 32 rendering races per round are returned, with an omitted count. Each reports its
+ * requested cap, callback/timer winner, page performance-clock milliseconds and document visibility at start/end.
+ * Null callback/timer means unobserved when serialized, never proof it did not run later. Callbacks after response
+ * serialization are unavailable; no extra wait or evaluation collects them. A host-interrupted/lost evaluation may
+ * have a start and no reply: its page observations are unavailable. Direct adapter engine calls have page evidence
+ * in protocol replies but no runtime round ID. Non-action requests currently have no rendering observations.
+ * Host deadline/timeout entries name the operation, chosen deadline and budget, source (enclosing/default where
+ * known), phase, last refusal and hint. Host monotonic nanoseconds and page performance milliseconds have distinct
+ * origins; neither may be subtracted from the other or from NDJSON UTC timestamps. A custom browser clock is
+ * labelled separately from the host live clock; last-refusal timestamps remain on the adapter host-live clock. visibilityState does not measure OS occlusion or compositor work.
+ * Clock reads, serialization and recorder writes add observation overhead; timings describe the instrumented run.
+ * The existing Node preload applies the same interception in supported children, with origin PID/local sequence;
+ * the child/runtime capture exclusions below still apply. No production source or ordinary execution is instrumented.
+ *
+ * In macOS jobs the Chromium worker test and the deliberate-crash identity test (`ChromiumIdentity.test.ts`, crash
+ * with direct page attachment), plus their files' shared scopes, keep their full ordinary bounded history, raw traffic
+ * and late cleanup on a pass, independent of the 16 MiB passing quota below; `scripts/integration-macos.md` says when
+ * this applies.
+ *
+ * STRIDER_TRACE_RETAIN_PASSES=1 additionally saves host/engine diagnostic entries (plus overflow/attribution)
+ * from passing scopes for an investigation; passing raw protocol traffic is discarded, except for those scopes. Existing per-scope memory,
+ * child spool and payload bounds remain in force. Passing artifacts together consume at most 16 MiB UTF-8 per test
+ * file, charging the actual serialized UTF-8 bytes of headers, entries and omission markers. Empty and
+ * connection-only passing scopes produce no artifact and cost nothing. Ownership entries accompany retained
+ * diagnostics only; ownership replayed from shared context has sequence 0 and ownershipSource with its original
+ * shared artifact/sequence (a metadata-only source context may have no artifact). Child diagnostics keep both
+ * process-local connection metadata and the parent transfer's ownership. A marker's exact bytes are reserved
+ * until exhaustion; a partially retained scope and
+ * subsequent omitted evidence scopes are counted as omissions. Exhaustion is marked in the last passing artifact
+ * and logged. Failed scopes retain their ordinary independent budgets. Passing late cleanup is not retained, except for those scopes. This is a per-file disk bound, so
+ * total retained data also depends on the finite selected suite; CI expires artifacts after 14 days.
+ *
+ * Chromium's recorder-only `viewportProbe.ts` also records `viewport-*` entries at page attachment, before/after
+ * debugger resume and before/after each metrics clear. Each sample correlates target/session, the native window
+ * ID and outer bounds (Browser.getWindowForTarget) and the CSS layout viewport (Page.getLayoutMetrics); the outer
+ * size minus the layout size shows browser UI taking page area. The probe sends only these two browser-side
+ * commands: it runs no page code and creates no execution world, so no realm or context event follows from it.
+ * Setup baseline requests/replies are identified separately. Queries are asynchronous and do not gate adapter
+ * operations. A request with no reply remains pending, not a measurement; protocol errors and detach are marked
+ * unavailable. At most 512 queries are pending at once; once full, further measurements are recorded as
+ * unavailable until replies arrive or the connection ends. Measurements within a sample are separate browser
+ * commands, not an atomic snapshot. Native outer bounds are not content dimensions. Extra queries can perturb
+ * timing; a passing probe cannot establish the cause of an earlier failure.
+ * Passing retention includes these records with STRIDER_TRACE_RETAIN_PASSES=1 and the same bounds described above.
+ * No shipped source changes; the recorder's Transport tap alone issues these diagnostic queries.
+ *
+ * On Chromium, `pointerRecipients.ts` also records which document receives each trusted pointer event
+ * (`pointer-*` entries, kept from passing scopes with STRIDER_TRACE_RETAIN_PASSES=1). When a page or frame target
+ * attaches, the Transport instrumentation sends extra commands on its session: a binding and a capture-phase,
+ * passive `window` listener in an isolated world, which never touch the document's own listeners or their order.
+ * `pointer-dispatch` is each `Input.dispatchMouseEvent` sent; `pointer-recipient` is each trusted
+ * `pointer*`/`mouse*`/`click` event a document received, with its URL, session and target (page, or out-of-process
+ * frame), event type, client coordinates, target element, and the page's `performance.now()` plus time origin
+ * (add them for epoch milliseconds; the entry timestamps are the host's). `pointer-recipient-summary` lists, for each
+ * dispatched press, the documents that received a `mousedown`, or says none did. It shows where the browser
+ * delivered a gesture, such as the middle frame instead of the leaf. It cannot show why, and it doesn't know which
+ * document should have received it. Frames in the same process as their parent share a session, so tell them apart
+ * by URL. Only documents with the capture installed are seen, a target attached before the recorder connected
+ * isn't, and each document keeps 256 events. The added commands are not free: they can change the timing of a
+ * frame's attach, and a race can come out differently. STRIDER_POINTER_CAPTURE=0 leaves the capture out and keeps
+ * `pointer-dispatch`. Firefox and WebKit have no capture.
+ *
+ * The shared-context suites (`slice/sharedContext.ts`) read the context's storage from each page as it closes, with a
+ * 5 second deadline. Typed Deadline.Timeout errors and the older wrapped export timeout
+ * (Rejected with the exact hint `UserContext.exportStorageState timed out while resolving`) trigger the probes;
+ * unrelated rejections do not. This includes cookie reads as well as page evaluation, and does not establish
+ * which browser subsystem stalled. When the read isn't answered in time, on any backend, the entries record,
+ * on the `shared-context` connection, up to three further steps. Each has a budget of 2 seconds of its own, whatever
+ * deadline encloses the read, and is also raced against that long on the browser clock: (1) whether the same page
+ * still answers `1 + 1`; (2) whether a new page in the same context, on the stalled page's origin, opens, navigates
+ * there and answers `indexedDB.databases()`; (3) how long closing that new page took. Each entry holds `probe`,
+ * `outcome` (`answered`, `timed out`, `failed: ...`, or `skipped: no origin`) and, except when skipped, `millis`,
+ * measured on the host clock. The probes run before the case's failure is reported and never change it or its
+ * message; a read that answers, or a page that is gone, runs none. The entries are in the trace of the failing case
+ * only.
+ *
+ * What they can show: whether the original page still ran a script, and whether the fresh page's whole sequence
+ * (open, navigate, call) completed in 2 seconds. What they can't: step 2 is one outcome, so a timeout or failure
+ * there doesn't tell opening or navigating from `indexedDB.databases()` itself, and a responsive first page with a
+ * fresh page that opened doesn't show that the call was ever made, so none of it attributes a stall to IndexedDB by
+ * itself. The close of the new page is waited for 2 seconds; if it runs longer it continues on a fiber of the
+ * suite's scope, and a close still running when that scope closes is interrupted with it. Such a close, like a close
+ * that failed, leaves no entry beyond `timed out` or `failed: ...`.
  *
  * Native trace video failures also record the page, acquisition/stop/file-read stage and underlying cause,
  * rendered with strict URL redaction, even if the test never exports its trace archive. An export made while
@@ -68,6 +154,10 @@
  * are unsupported. Fatal signals and failures before the preload runs cannot produce a node-exit record. Ignored
  * browser stderr remains unavailable; native writes bypassing process.stderr.write are not intercepted.
  *
+ * The manual rendering probe uses `test/fixtures/renderingFailureTrace/vitest.config.ts` with
+ * `-t 'fills an unknown input type as text'` in the same pinned shell as the CLI probe below. It deliberately
+ * fails after a different ordinary fill test so its shared runtime/engine evidence can be inspected.
+ *
  * The manual `test/fixtures/cliFailureTrace/vitest.config.ts` probe deliberately fails real CLI cases after their
  * cleanup. In the pinned Linux shell it has verified launched Chromium, Firefox and stock WebKit and attachment to
  * all three: daemon-owned send/receive, closure and node-exit, plus owned-browser exits for launches. The ordinary
@@ -93,12 +183,35 @@
  * Low-level `closed` records contain an initiator and description, not the original Effect Cause or a malformed
  * WebKit frame. They precede the link's first-loss filtering: the first closure is effective, and later closure or
  * receive observations may be ignored by the link. Apart from native trace video failures, failures above the
- * inspector socket are not instrumented;
+ * inspector socket, apart from rendering rounds and host operation deadlines, are not instrumented;
  * interruption can read as ordinary scope closure. Inspector connection/process pairing is inferred from ordering,
  * pids and process arguments, rather than an explicit connection-to-process identifier. Only child startup prefixes
  * are protected; parent and later page-creation preludes can be evicted. Shared-artifact links identify context
  * files but do not guarantee their complete prelude survives eviction. No real abnormal-loss probe has validated
  * browser kill or malformed-frame capture end to end. Traces assist investigation without guaranteeing a complete loss cause.
+ *
+ * Chromium iframe native capture (`iframeNativeProbe.ts`, `nativeInputCapture.ts`): only the Chromium adapter case
+ * "names an iframe's frame, passes a node across worlds, and sends input into a frame" records Chromium's own trace of
+ * where it routed its input. It exists because that case fails in some macOS nightlies with the press reaching the
+ * parent `iframe` element, and the protocol and the pointer recipients cannot say whether the child's hit-test
+ * region was published before the press. Every run of that case, passing or failing, writes
+ * `.data/integration-failures/iframe-native-<pid>-<uuid>/`, which CI uploads with the other failure traces
+ * (Linux: every job, always; macOS: every run, passing ones included, as the upload step runs `if: always()`):
+ * `trace.json` (a CDP `Tracing` JSON trace, categories `input`, `latencyInfo`, `viz.hit_testing_flow`,
+ * `disabled-by-default-viz.hit_testing_flow`, `viz` and `devtools`, no argument filtering), `browser.stderr.log`
+ * (the browser's complete stderr, from `--enable-logging=stderr`, the only extra launch flag), `metadata.json`
+ * (outcome, `dataLossOccurred`, trace and stderr EOF, byte counts and any capture errors), `protocol.ndjson` (every
+ * adapter packet, written to disk from before bootstrap and frozen before the trace is drained),
+ * `cleanup-protocol.ndjson`, `capture-protocol.ndjson` and a `*-before-native-drain.ndjson` recorder checkpoint with
+ * the pointer recipients. Bounds: the trace buffer is 64 MiB in `recordUntilFull` mode (the start is kept, and Chromium
+ * reports data loss in the metadata); the start, drain and stream-close waits have 5, 10 and 2 second budgets, and
+ * their failures are recorded in the metadata, never replacing the case's own outcome; the test's deadlines are
+ * unchanged. Limits: the routing and hit-test events carry no frame-sink, widget or command IDs, so they join to the
+ * protocol by time and coordinates only, on separate clocks, and show order, not identity. The `devtools` category does
+ * record each DevTools command's call ID and method. Chromium's routing and hit-test sources have no
+ * verbose logging, so `--v` and `--vmodule` add nothing. Cost: about 5 seconds more for the case (draining the trace
+ * after the gesture) and about 0.6 MB of artifact per run; the tracing itself runs inside the browser and may change
+ * timing, which the protocol timestamps cannot show. The capture attaches before the test creates its page.
  */
 import { Buffer } from "node:buffer"
 export interface Origin {
@@ -226,6 +339,7 @@ export class TraceBuffer {
 }
 
 interface Sink {
+  checkpoint?(label: string): string | undefined
   connection(label: string): Record
 }
 const key = Symbol.for("strider.integration.failureTrace")
@@ -235,3 +349,7 @@ export const install = (sink: Sink) => {
 /** Used only by the integration configuration's source instrumentation. */
 export const connection = (label: string): Record =>
   (globalThis as typeof globalThis & { [key]?: Sink })[key]?.connection(label) ?? (() => {})
+
+/** Saves an independent recorder checkpoint before a diagnostic stream can displace its bounded tail. */
+export const checkpoint = (label: string): string | undefined =>
+  (globalThis as typeof globalThis & { [key]?: Sink })[key]?.checkpoint?.(label)

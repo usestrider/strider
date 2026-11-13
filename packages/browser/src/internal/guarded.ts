@@ -24,11 +24,11 @@ export const page: Access.Members = {
     "toString",
     "toJSON"
   ]),
-  declarations: new Set(["route", "addInitScript", "emulate", "clock.install"])
+  declarations: new Set(["route", "addInitScript", "addLocatorHandler", "emulate", "clock.install"])
 }
 
 /** A context's members under a grant. */
 export const context: Access.Members = {
   observed: new Set(["id", "pages", "workers", "closed", "control", "pipe", "toString", "toJSON"]),
-  declarations: new Set(["route", "addInitScript", "emulate", "grant", "clock.install"])
+  declarations: new Set(["route", "routeWebSocket", "addInitScript", "emulate", "grant", "clock.install"])
 }

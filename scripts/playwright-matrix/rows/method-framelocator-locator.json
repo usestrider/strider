@@ -1,0 +1,33 @@
+{
+  "id": "method-framelocator-locator",
+  "upstream": [
+    "method:FrameLocator.locator"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "Locator.locator",
+      "url": "/docs/api/browser/Locator#Locator.locator"
+    }
+  ],
+  "notes": "Queries produce lazy locators; CSS selectors only. See selector differences below.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [],
+  "gaps": [
+    "method-framelocator-locator-value-xpath-and-playwright-selector-dsl"
+  ],
+  "valueCoverage": [
+    {
+      "value": "XPath and Playwright selector DSL",
+      "status": "missing",
+      "gap": "method-framelocator-locator-value-xpath-and-playwright-selector-dsl"
+    }
+  ]
+}

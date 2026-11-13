@@ -1,0 +1,17 @@
+{
+  "id": "method-locatorassertions-tobefocused",
+  "upstream": [
+    "method:LocatorAssertions.toBeFocused"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toBeFocused",
+      "url": "/docs/api/browser/Expect#toBeFocused"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": []
+}

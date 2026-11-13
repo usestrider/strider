@@ -92,7 +92,7 @@ export const report = (m: Measurements): string => {
   out.push("## Scenarios")
   out.push("")
   out.push(
-    "Each scenario is written with each library as its own documentation would write it, against the local site (`src/site.ts`), or a public demo site replayed from a recording, so a run sends nothing to anyone. A run is the whole scenario: its contexts and pages made and closed."
+    "Each scenario is written once with each library, doing the same work, against the local site (`src/site.ts`), or a public demo site replayed from a recording, so a run sends nothing to anyone. A run is the whole scenario: its contexts and pages made and closed."
   )
   out.push("")
   out.push(

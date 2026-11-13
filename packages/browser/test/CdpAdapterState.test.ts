@@ -4,18 +4,22 @@
  * the network received for them, in whatever order the browser's events come; a realm that ended takes its handles.
  */
 import { assert, describe, it } from "@effect/vitest"
+import * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
 import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
+import * as Headers from "effect/http/Headers"
 import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import { TestClock } from "effect/testing"
+import { runInNewContext } from "node:vm"
+import type * as CdpRuntime from "../src/cdp/Runtime.ts"
 import * as Deadline from "../src/Deadline.ts"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as Kit from "../src/internal/adapterKit.ts"
@@ -23,18 +27,27 @@ import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as Capture from "../src/internal/cdpAdapter/capture.ts"
 import * as Contexts from "../src/internal/cdpAdapter/contexts.ts"
 import * as Declare from "../src/internal/cdpAdapter/declare.ts"
+import * as Evaluation from "../src/internal/cdpAdapter/evaluation.ts"
+import * as CdpInput from "../src/internal/cdpAdapter/input.ts"
 import * as Network from "../src/internal/cdpAdapter/network.ts"
 import * as Obligations from "../src/internal/cdpAdapter/obligations.ts"
 import * as Responses from "../src/internal/cdpAdapter/responses.ts"
 import * as State from "../src/internal/cdpAdapter/state.ts"
 import * as Targets from "../src/internal/cdpAdapter/targets.ts"
 import * as Tree from "../src/internal/cdpAdapter/tree.ts"
+import * as CdpWire from "../src/internal/cdpWire.ts"
 import * as Cleanup from "../src/internal/declarationCleanup.ts"
+import * as Ingestion from "../src/internal/ingestion.ts"
+import * as Input from "../src/internal/input.ts"
 import * as Groups from "../src/internal/objectGroups.ts"
 import * as Operation from "../src/internal/operation.ts"
 import * as ProtocolClient from "../src/internal/protocolClient.ts"
+import * as Serialization from "../src/internal/serialization.ts"
+import * as Request from "../src/NetworkRequest.ts"
 import * as Protocol from "../src/protocol/Protocol.ts"
 import * as Target from "../src/Target.ts"
+import { viewportTap } from "./integration/viewportProbe.ts"
+import { makeBrowser } from "./utils/FakeBrowser.ts"
 
 const session = { key: "S1", send: () => Effect.succeed({}) } as unknown as ProtocolClient.Session
 
@@ -45,11 +58,12 @@ const control: ProtocolClient.FoldControl = {
 }
 
 /** A state with one page in the default context, and the facts it reports once flushed. */
-const withPage = Effect.fnUntraced(function*(protocolSession = session) {
+const withPage = Effect.fnUntraced(function*(protocolSession = session, requestTiming = false, requestSizes = false) {
   const facts: Array<Adapter.Fact> = []
   const buffer = yield* Kit.makeFactBuffer((fact) => Effect.sync(() => void facts.push(fact)))
   buffer.connect(control)
   const state = State.make({
+    handlers: Kit.handlers<State.Event>(),
     cleanupScope: yield* Effect.scope,
     connect: { sink: () => Effect.void, ownership: "launched" },
     ids: Kit.makeIds(),
@@ -58,14 +72,12 @@ const withPage = Effect.fnUntraced(function*(protocolSession = session) {
     root: () => protocolSession,
     release: Responses.release
   })
-  const context: State.ContextEntry = {
-    id: state.defaultContext,
-    browserContextId: undefined,
-    isDefault: true,
-    removing: false
-  }
+  const context = new State.ContextEntry(state.defaultContext, undefined, true)
+  if (requestTiming) context.requestTiming = new Map()
+  if (requestSizes) context.requestSizes = new Map()
   state.contexts.set(context.id, context)
   const target: State.TargetEntry = {
+    event: undefined as unknown as State.DispatchContext,
     kind: "page",
     targetId: "T1",
     session: protocolSession,
@@ -77,6 +89,7 @@ const withPage = Effect.fnUntraced(function*(protocolSession = session) {
     scripts: new Map(),
     ended: false
   }
+  target.event = State.dispatchContext(state, target)
   const page: State.PageEntry = {
     id: state.ids.navigable(),
     targetId: "T1",
@@ -91,6 +104,106 @@ const withPage = Effect.fnUntraced(function*(protocolSession = session) {
   state.frames.set("T1", main)
   state.navigables.set(page.id, main)
   return { state, page, target, facts }
+})
+
+describe("CDP viewport diagnostics", () => {
+  it.effect("creates no execution world, so no realm appears in the adapter", () =>
+    Effect.gen(function*() {
+      const { state } = yield* withPage()
+      const frame = state.frames.get("T1")!
+      const document = Tree.commit(
+        state,
+        frame,
+        { loaderId: "initial", url: "about:blank", origin: "://" },
+        () => ({ _tag: "InitialBlank" }),
+        undefined,
+        "test"
+      )
+      const writes: Array<any> = []
+      const tap = viewportTap(() => {})
+      tap.inject = (message) => writes.push(JSON.parse(message))
+      tap.receive(JSON.stringify({
+        method: "Target.attachedToTarget",
+        params: { sessionId: "S1", targetInfo: { targetId: "T1", type: "page" }, waitingForDebugger: false }
+      }))
+      tap.send(JSON.stringify({ id: 1, sessionId: "S1", method: "Emulation.clearDeviceMetricsOverride" }))
+      tap.receive(JSON.stringify({ id: 1, result: {}, sessionId: "S1" }))
+      assert.isAbove(writes.length, 0)
+      // A world exists only if the probe asks for one or runs page code, which would announce a context.
+      for (const command of writes) {
+        assert.isFalse(
+          command.method === "Page.createIsolatedWorld" || command.method.startsWith("Runtime."),
+          command.method
+        )
+      }
+      assert.strictEqual(document.realms.size, 0)
+      assert.strictEqual(state.realms.size, 0)
+    }).pipe(Effect.scoped))
+})
+
+describe("CDP click cleanup", () => {
+  it.effect("releases a successful press when interruption arrives before release dispatch", () =>
+    Effect.gen(function*() {
+      const sent: Array<string> = []
+      let calls = 0
+      const protocolSession = {
+        ...session,
+        sendOrdered: (
+          commands: ReadonlyArray<Protocol.Command<string, { type: string }, void>>,
+          onWritten?: () => void
+        ) =>
+          Effect.suspend(() => {
+            calls++
+            // The press has succeeded, but cancellation wins before the normal release can write.
+            if (calls === 2) return Effect.interrupt
+            sent.push(...commands.map((command) => command.params.type))
+            onWritten?.()
+            return Effect.void
+          })
+      } as unknown as ProtocolClient.Session
+      const { state, page } = yield* withPage(protocolSession)
+      const input = Input.make()
+      const events = Input.click(input, { x: 10, y: 20 }, "left", 1)
+      const exit = yield* CdpInput.dispatchInput(state, page.id, events).pipe(Effect.exit)
+      assert(Exit.isFailure(exit))
+      assert.isTrue(Cause.hasInterruptsOnly(exit.cause))
+      // The release runs apart from the click; what the next gesture waits for is that it has finished
+      Input.uncertain(input, "click", events)
+      yield* Input.recover(input, () => Effect.void)
+      assert.deepStrictEqual(sent, ["mouseMoved", "mousePressed", "mouseReleased"])
+      assert.isTrue(Option.isNone(input.broken))
+    }).pipe(Effect.scoped))
+
+  it.effect("doesn't release again when interruption arrives after the release was written", () =>
+    Effect.gen(function*() {
+      const sent: Array<string> = []
+      let calls = 0
+      const protocolSession = {
+        ...session,
+        sendOrdered: (
+          commands: ReadonlyArray<Protocol.Command<string, { type: string }, void>>,
+          onWritten?: () => void
+        ) =>
+          Effect.suspend(() => {
+            calls++
+            sent.push(...commands.map((command) => command.params.type))
+            onWritten?.()
+            // The release has been written; cancellation arrives while its reply is outstanding.
+            return calls === 2 ? Effect.interrupt : Effect.void
+          })
+      } as unknown as ProtocolClient.Session
+      const { state, page } = yield* withPage(protocolSession)
+      const input = Input.make()
+      const events = Input.click(input, { x: 10, y: 20 }, "left", 1)
+      const exit = yield* CdpInput.dispatchInput(state, page.id, events).pipe(Effect.exit)
+      assert(Exit.isFailure(exit))
+      assert.isTrue(Cause.hasInterruptsOnly(exit.cause))
+      // The release runs apart from the click; what the next gesture waits for is that it has finished
+      Input.uncertain(input, "click", events)
+      yield* Input.recover(input, () => Effect.void)
+      assert.deepStrictEqual(sent, ["mouseMoved", "mousePressed", "mouseReleased"])
+      assert.isTrue(Option.isNone(input.broken))
+    }).pipe(Effect.scoped))
 })
 
 // ── A redirect's headers ──
@@ -1051,6 +1164,206 @@ describe("CDP restoration cleanup", () => {
       })))
   }
 
+  for (const retiring of [undefined, () => false, () => true]) {
+    const skipped = retiring?.() === true
+    it.effect(
+      `${skipped ? "skips" : "sends"} the download restore when its release ${
+        skipped ? "precedes the context's removal" : "leaves the context in place"
+      }`,
+      () =>
+        Effect.scoped(Effect.gen(function*() {
+          const restored: Array<string> = []
+          const mock = {
+            ...session,
+            ended: Effect.void,
+            send: (command: {
+              readonly method: string
+              readonly params: { readonly browserContextId?: string; readonly behavior?: string }
+            }) =>
+              Effect.sync(() => {
+                if (command.method === "Browser.setDownloadBehavior" && command.params.behavior === "default") {
+                  restored.push(command.params.browserContextId ?? "none")
+                }
+                return {}
+              })
+          } as unknown as ProtocolClient.Session
+          const { state, page } = yield* withPage(mock)
+          const context = new State.ContextEntry(state.ids.userContext(), "scoped", false)
+          state.contexts.set(context.id, context)
+          state.contextsByCdp.set("scoped", context)
+          state.pages.set(page.id, { ...page, context })
+          const lifetime = yield* Scope.make()
+          yield* Declare.declare(state, { _tag: "UserContext", context: context.id }, {
+            _tag: "Downloads",
+            behavior: { _tag: "Deny" },
+            ...(retiring === undefined ? {} : { retiring })
+          }).pipe(Scope.provide(lifetime))
+          restored.length = 0
+          yield* Scope.close(lifetime, Exit.void)
+          assert.deepStrictEqual(restored, skipped ? [] : ["scoped"])
+        }))
+    )
+  }
+
+  const declarationSession = (sent: Array<string>, refuseDisposal = false) =>
+    ({
+      ...session,
+      ended: Effect.void,
+      send: (command: { readonly method: string; readonly params: { readonly enabled?: boolean } }) =>
+        command.method === "Target.disposeBrowserContext" && refuseDisposal
+          ? Effect.fail(
+            new Protocol.ProtocolError({
+              reason: new Protocol.Rejected({
+                method: command.method,
+                reason: "Unrecognized",
+                code: -32000,
+                description: "refused"
+              })
+            })
+          )
+          : Effect.sync(() => {
+            if (command.method === "Fetch.enable" || command.method === "Page.setInterceptFileChooserDialog") {
+              sent.push(command.method)
+            }
+            return {}
+          })
+    }) as unknown as ProtocolClient.Session
+
+  const withContextPage = Effect.fnUntraced(function*(mock: ProtocolClient.Session) {
+    const { state, page, target } = yield* withPage(mock)
+    const context = new State.ContextEntry(state.ids.userContext(), "scoped", false)
+    state.contexts.set(context.id, context)
+    state.contextsByCdp.set("scoped", context)
+    const scoped = { ...page, context }
+    state.pages.set(page.id, scoped)
+    const scopedTarget = { ...target, page: scoped }
+    state.targets.set(mock, scopedTarget)
+    return { state, context, target: scopedTarget }
+  })
+
+  for (const retiring of [undefined, () => false, () => true]) {
+    const skipped = retiring?.() === true
+    it.effect(
+      `${skipped ? "skips" : "sends"} the file chooser and challenge retractions when its release ${
+        skipped ? "precedes the context's removal" : "leaves the context in place"
+      }`,
+      () =>
+        Effect.scoped(Effect.gen(function*() {
+          const sent: Array<string> = []
+          const { state, context } = yield* withContextPage(declarationSession(sent))
+          const scope = { _tag: "UserContext", context: context.id } as const
+          const lifetime = yield* Scope.make()
+          const flag = retiring === undefined ? {} : { retiring }
+          yield* Declare.declare(state, scope, { _tag: "FileChooser", ...flag }).pipe(Scope.provide(lifetime))
+          yield* Declare.declare(state, scope, { _tag: "Challenges", ...flag }).pipe(Scope.provide(lifetime))
+          sent.length = 0
+          yield* Scope.close(lifetime, Exit.void)
+          assert.deepStrictEqual(
+            sent.sort(),
+            skipped ? [] : ["Fetch.enable", "Page.setInterceptFileChooserDialog"]
+          )
+        }))
+    )
+  }
+
+  it.effect("restores the file chooser and challenge retractions when the context's disposal is refused", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const sent: Array<string> = []
+      const { state, context, target } = yield* withContextPage(declarationSession(sent, true))
+      const scope = { _tag: "UserContext", context: context.id } as const
+      const lifetime = yield* Scope.make()
+      yield* Declare.declare(state, scope, { _tag: "FileChooser", retiring: () => true }).pipe(Scope.provide(lifetime))
+      yield* Declare.declare(state, scope, { _tag: "Challenges", retiring: () => true }).pipe(Scope.provide(lifetime))
+      yield* Scope.close(lifetime, Exit.void)
+      sent.length = 0
+      const staleKey = target.intercepts
+      const exit = yield* Effect.exit(Contexts.removeUserContext(state, context.id))
+      assert.isTrue(Exit.isFailure(exit))
+      assert.notStrictEqual(target.intercepts, staleKey, "interception was applied again")
+      assert.deepStrictEqual(sent.sort(), ["Fetch.enable", "Page.setInterceptFileChooserDialog"])
+    })))
+
+  for (const rejected of ["Browser.setDownloadBehavior", "Fetch.enable"]) {
+    it.effect(`restores independent declarations after refused disposal even when ${rejected} rejects`, () =>
+      Effect.scoped(Effect.gen(function*() {
+        const sent: Array<string> = []
+        const base = declarationSession(sent, true)
+        let restoring = false
+        const mock = {
+          ...base,
+          send: (command: Parameters<ProtocolClient.Session["send"]>[0]) =>
+            restoring && command.method === rejected
+              ? Effect.fail(
+                new Protocol.ProtocolError({
+                  reason: new Protocol.Rejected({
+                    method: command.method,
+                    reason: "Unrecognized",
+                    code: -32000,
+                    description: "restoration refused"
+                  })
+                })
+              )
+              : base.send(command)
+        } as ProtocolClient.Session
+        const { state, context } = yield* withContextPage(mock)
+        const scope = { _tag: "UserContext", context: context.id } as const
+        const lifetime = yield* Scope.make()
+        yield* Declare.declare(state, scope, { _tag: "FileChooser", retiring: () => true }).pipe(
+          Scope.provide(lifetime)
+        )
+        yield* Declare.declare(state, scope, { _tag: "Challenges", retiring: () => true }).pipe(Scope.provide(lifetime))
+        sent.length = 0
+        yield* Scope.close(lifetime, Exit.void)
+        restoring = true
+        const exit = yield* Effect.exit(Contexts.removeUserContext(state, context.id))
+        assert.isTrue(Exit.isFailure(exit))
+        assert.include(sent, "Page.setInterceptFileChooserDialog", "file chooser retraction is independent")
+        if (rejected === "Browser.setDownloadBehavior") {
+          assert.include(sent, "Fetch.enable", "interception retraction is independent of downloads")
+        }
+      })))
+  }
+
+  it.effect("restores the download behavior and leaves the context usable when its disposal is refused", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const restored: Array<string> = []
+      const mock = {
+        ...session,
+        ended: Effect.void,
+        send: (command: {
+          readonly method: string
+          readonly params: { readonly browserContextId?: string; readonly behavior?: string }
+        }) =>
+          command.method === "Target.disposeBrowserContext"
+            ? Effect.fail(
+              new Protocol.ProtocolError({
+                reason: new Protocol.Rejected({
+                  method: "Target.disposeBrowserContext",
+                  reason: "Unrecognized",
+                  code: -32000,
+                  description: "refused"
+                })
+              })
+            )
+            : Effect.sync(() => {
+              if (command.method === "Browser.setDownloadBehavior" && command.params.behavior === "default") {
+                restored.push(command.params.browserContextId ?? "none")
+              }
+              return {}
+            })
+      } as unknown as ProtocolClient.Session
+      const { state, page } = yield* withPage(mock)
+      const context = new State.ContextEntry(state.ids.userContext(), "kept", false)
+      state.contexts.set(context.id, context)
+      state.contextsByCdp.set("kept", context)
+      state.pages.set(page.id, { ...page, context })
+      const exit = yield* Effect.exit(Contexts.removeUserContext(state, context.id))
+      assert.isTrue(Exit.isFailure(exit))
+      assert.isFalse(context.removing)
+      assert.notOk(context.disposed)
+      assert.deepStrictEqual(restored, ["kept"])
+    })))
+
   it.effect("holds disposal until a download restore already sent to the context has replied", () =>
     Effect.scoped(Effect.gen(function*() {
       const restoreSent = yield* Deferred.make<void>()
@@ -1083,12 +1396,7 @@ describe("CDP restoration cleanup", () => {
           })
       } as unknown as ProtocolClient.Session
       const { state, page } = yield* withPage(mock)
-      const closing = {
-        id: state.ids.userContext(),
-        browserContextId: "disposing",
-        isDefault: false,
-        removing: false
-      }
+      const closing = new State.ContextEntry(state.ids.userContext(), "disposing", false)
       state.contexts.set(closing.id, closing)
       state.contextsByCdp.set("disposing", closing)
       state.pages.set(page.id, { ...page, context: closing })
@@ -1468,6 +1776,129 @@ describe("CDP declaration cleanup lifetime", () => {
   }
 })
 
+it.effect("waits for observed Network ownership before providing automatic credentials and bounds attempts", () =>
+  Effect.gen(function*() {
+    const calls: Array<{ method: string; params: unknown }> = []
+    const mock = {
+      ...session,
+      send: (command: { method: string; params: unknown }) =>
+        Effect.sync(() => {
+          calls.push({ method: command.method, params: command.params })
+          return {}
+        })
+    } as unknown as ProtocolClient.Session
+    const { state, target } = yield* withPage(mock)
+    const handlers = Obligations.register(Network.register(Kit.handlers<State.Event>()))
+    handlers.apply("Fetch.requestPaused", {
+      requestId: "F1",
+      networkId: "R1",
+      frameId: "T1",
+      resourceType: "Document",
+      request: sent(`${origin}/auth`).request
+    }, { state, target })
+    const challenge = () =>
+      handlers.apply("Fetch.authRequired", {
+        requestId: "F1",
+        frameId: "T1",
+        resourceType: "Document",
+        request: sent(`${origin}/auth`).request,
+        authChallenge: { source: "Server", origin, scheme: "basic", realm: "website" }
+      }, { state, target })
+    const decision = { _tag: "ProvideCredentials", username: "user", password: "secret", once: true } as const
+    challenge()
+    const first = [...state.obligations.values()].find((entry) =>
+      entry._tag === "PausedRequest" && entry.phase === "auth"
+    )!
+    yield* Obligations.resolve(state, first.id, decision)
+    assert.deepStrictEqual(calls.at(-1), {
+      method: "Fetch.continueWithAuth",
+      params: {
+        requestId: "F1",
+        authChallengeResponse: { response: "CancelAuth" }
+      }
+    })
+    handlers.apply("Network.requestWillBeSent", sent(`${origin}/auth`), { state, target })
+    challenge()
+    const second = [...state.obligations.values()].find((entry) =>
+      entry._tag === "PausedRequest" && entry.phase === "auth"
+    )!
+    yield* Obligations.resolve(state, second.id, decision)
+    assert.deepStrictEqual(calls.at(-1), {
+      method: "Fetch.continueWithAuth",
+      params: {
+        requestId: "F1",
+        authChallengeResponse: { response: "ProvideCredentials", username: "user", password: Redacted.make("secret") }
+      }
+    })
+    challenge()
+    const third = [...state.obligations.values()].find((entry) =>
+      entry._tag === "PausedRequest" && entry.phase === "auth"
+    )!
+    yield* Obligations.resolve(state, third.id, decision)
+    assert.deepStrictEqual(calls.at(-1), {
+      method: "Fetch.continueWithAuth",
+      params: { requestId: "F1", authChallengeResponse: { response: "CancelAuth" } }
+    })
+    handlers.apply("Network.loadingFinished", { requestId: "R1", encodedDataLength: 0 }, { state, target })
+    yield* state.buffer.flush
+  }))
+
+it.effect("correlates parent-page Fetch authentication with its worker's Network request", () =>
+  Effect.gen(function*() {
+    const calls: Array<{ method: string; params: unknown }> = []
+    const mock = {
+      ...session,
+      send: (command: { method: string; params: unknown }) =>
+        Effect.sync(() => {
+          calls.push({ method: command.method, params: command.params })
+          return {}
+        })
+    } as unknown as ProtocolClient.Session
+    const { state, page, target } = yield* withPage(mock)
+    const parent: State.TargetEntry = { ...target, page }
+    const worker: State.TargetEntry = {
+      ...target,
+      page,
+      kind: "worker",
+      session: { ...mock, key: "worker" as Protocol.SessionKey }
+    }
+    const handlers = Obligations.register(Network.register(Kit.handlers<State.Event>()))
+    handlers.apply("Network.requestWillBeSent", sent(`${origin}/auth`), { state, target: worker })
+    handlers.apply("Fetch.requestPaused", {
+      requestId: "F1",
+      networkId: "R1",
+      frameId: "T1",
+      resourceType: "Fetch",
+      request: sent(`${origin}/auth`).request
+    }, { state, target: parent })
+    handlers.apply("Fetch.authRequired", {
+      requestId: "F1",
+      frameId: "T1",
+      resourceType: "Fetch",
+      request: sent(`${origin}/auth`).request,
+      authChallenge: { source: "Server", origin, scheme: "basic", realm: "website" }
+    }, { state, target: parent })
+    const obligation = [...state.obligations.values()].find((entry) =>
+      entry._tag === "PausedRequest" && entry.phase === "auth"
+    )!
+    yield* Obligations.resolve(state, obligation.id, {
+      _tag: "ProvideCredentials",
+      username: "user",
+      password: "secret",
+      once: true
+    })
+    assert.deepStrictEqual(calls.filter((command) => command.method === "Fetch.continueWithAuth").at(-1), {
+      method: "Fetch.continueWithAuth",
+      params: {
+        requestId: "F1",
+        authChallengeResponse: { response: "ProvideCredentials", username: "user", password: Redacted.make("secret") }
+      }
+    })
+    assert.isTrue(state.requests.get(State.requestKey(worker, "R1"))?.credentialsAttempted)
+    assert.isUndefined(parent.proxyAuth)
+    yield* state.buffer.flush
+  }))
+
 describe("CDP proxy and website challenge separation", () => {
   for (const coverage of ["none", "auth route", "request route", "document policy"] as const) {
     it.effect(`preserves website challenge coverage: ${coverage}`, () =>
@@ -1563,3 +1994,1340 @@ for (const terminal of ["Network.loadingFinished", "Network.loadingFailed"]) {
       yield* state.buffer.flush
     }))
 }
+
+describe("CdpAdapter navigation-interrupted evaluation", () => {
+  for (const outcome of ["retired", "closed", "deadline", "unrelated"] as const) {
+    it.effect(`waits for lifecycle confirmation without replay (${outcome})`, () =>
+      Effect.gen(function*() {
+        const rejected = yield* Deferred.make<void>()
+        const reply = yield* Deferred.make<void>()
+        let calls = 0
+        const error = new Protocol.ProtocolError({
+          reason: new Protocol.Rejected({
+            method: "Runtime.callFunctionOn",
+            reason: "Unrecognized",
+            code: -32000,
+            description: outcome === "unrelated" ? "Something else failed" : "Inspected target navigated or closed"
+          })
+        })
+        const mock = {
+          ...session,
+          send: Effect.fnUntraced(function*() {
+            calls++
+            yield* Deferred.await(reply)
+            yield* Deferred.succeed(rejected, undefined)
+            return yield* Effect.fail(error)
+          })
+        } as unknown as ProtocolClient.Session
+        const { state, target, page } = yield* withPage(mock)
+        const frame = state.frames.get("T1")!
+        const document = Tree.commit(
+          state,
+          frame,
+          {
+            loaderId: "initial",
+            url: "about:blank",
+            origin: "://"
+          },
+          () => ({ _tag: "InitialBlank" }),
+          undefined,
+          "test"
+        )
+        const realm = Tree.addRealm(state, {
+          uniqueId: "interrupted",
+          contextId: 1,
+          target,
+          frame,
+          world: { _tag: "Main" },
+          origin: "://"
+        })
+        document.realms.add(realm)
+        const at = yield* BrowserClock.after(100)
+        // The call may have mutated the page before its reply was cut off. It must run exactly once.
+        const waiting = yield* Evaluation.evaluate(state, realm.id, {
+          functionDeclaration: "() => { globalThis.applied = true; return new Promise(() => {}) }",
+          arguments: [],
+          awaitPromise: true,
+          result: "value",
+          userActivation: false
+        }).pipe(
+          Effect.provideService(ProtocolClient.CommandDeadline, Option.some(at)),
+          Effect.flip,
+          Effect.forkChild
+        )
+        yield* TestClock.adjust("40 millis")
+        yield* Deferred.succeed(reply, undefined)
+        yield* Deferred.await(rejected)
+        yield* TestClock.adjust("0 millis")
+        if (outcome === "unrelated") {
+          const result = yield* Fiber.join(waiting)
+          assert.strictEqual(result.reason._tag, "Protocol")
+          assert.strictEqual(calls, 1)
+          return
+        }
+        assert.isUndefined(waiting.pollUnsafe(), "rejection alone must not claim the realm ended")
+        yield* TestClock.adjust("59 millis")
+        assert.isUndefined(waiting.pollUnsafe())
+        if (outcome === "deadline") {
+          yield* TestClock.adjust("1 millis")
+          const result = yield* Fiber.join(waiting)
+          assert.strictEqual(result.reason._tag, "Protocol")
+          if (result.reason._tag === "Protocol") assert.strictEqual(result.reason.error.reason._tag, "NoReply")
+          // A later lifecycle event cannot restart an expired evaluation.
+          Tree.removeRealm(state, realm, new Target.RealmDestroyed({}))
+        } else if (outcome === "closed") {
+          Tree.endPage(state, page, new Target.PageClosed({ by: "command" }), "test closure")
+        } else {
+          Tree.removeRealm(state, realm, new Target.RealmDestroyed({}))
+        }
+        yield* state.buffer.flush
+        if (outcome !== "deadline") {
+          const result = yield* Fiber.join(waiting)
+          assert.strictEqual(result.reason._tag, "Gone")
+          if (result.reason._tag === "Gone") {
+            assert.deepStrictEqual(result.reason.target, { _tag: "Realm", id: realm.id })
+          }
+        }
+        assert.strictEqual(calls, 1)
+      }).pipe(
+        Effect.scoped,
+        Effect.provideServiceEffect(
+          BrowserClock.CurrentClock,
+          Effect.map(Effect.service(Clock.Clock), BrowserClock.fromClock)
+        )
+      ))
+  }
+})
+
+describe("CdpAdapter evaluation in a context destroyed by a frame swap", () => {
+  // Chromium answers a command in a context it destroys as the frame moves to its own target with
+  // "Execution context was destroyed." (-32000) as often as with "Inspected target navigated or closed": the
+  // destroy event precedes the reply on the wire, but the reply can complete before the fold has run it.
+  it.effect("waits for the context's destruction to be folded and reports the realm Gone", () =>
+    Effect.gen(function*() {
+      const reply = yield* Deferred.make<void>()
+      const rejected = yield* Deferred.make<void>()
+      const mock = {
+        ...session,
+        send: Effect.fnUntraced(function*() {
+          yield* Deferred.await(reply)
+          yield* Deferred.succeed(rejected, undefined)
+          return yield* Effect.fail(
+            new Protocol.ProtocolError({
+              reason: new Protocol.Rejected({
+                method: "Runtime.callFunctionOn",
+                reason: "Unrecognized",
+                code: -32000,
+                description: "Execution context was destroyed."
+              })
+            })
+          )
+        })
+      } as unknown as ProtocolClient.Session
+      const { state, target } = yield* withPage(mock)
+      const frame = state.frames.get("T1")!
+      const document = Tree.commit(
+        state,
+        frame,
+        { loaderId: "initial", url: "about:blank", origin: "://" },
+        () => ({ _tag: "InitialBlank" }),
+        undefined,
+        "test"
+      )
+      const realm = Tree.addRealm(state, {
+        uniqueId: "swapped",
+        contextId: 4,
+        target,
+        frame,
+        world: { _tag: "Main" },
+        origin: "://"
+      })
+      document.realms.add(realm)
+      const at = yield* BrowserClock.after(100)
+      const waiting = yield* Evaluation.evaluate(state, realm.id, {
+        functionDeclaration: "() => 1",
+        arguments: [],
+        awaitPromise: true,
+        result: "value",
+        userActivation: false
+      }).pipe(
+        Effect.provideService(ProtocolClient.CommandDeadline, Option.some(at)),
+        Effect.flip,
+        Effect.forkChild
+      )
+      yield* TestClock.adjust("40 millis")
+      // On the wire the destroy event precedes the rejection; the fold may not have run it when the reply lands.
+      yield* state.buffer.run(() => Tree.removeRealm(state, realm, new Target.RealmDestroyed({})))
+      yield* Deferred.succeed(reply, undefined)
+      yield* Deferred.await(rejected)
+      const result = yield* Fiber.join(waiting)
+      assert.strictEqual(result.reason._tag, "Gone")
+    }).pipe(
+      Effect.scoped,
+      Effect.provideServiceEffect(
+        BrowserClock.CurrentClock,
+        Effect.map(Effect.service(Clock.Clock), BrowserClock.fromClock)
+      )
+    ))
+  for (const outcome of ["folded", "deadline"] as const) {
+    it.effect(`drains a queued context destruction before classifying the reply (${outcome})`, () =>
+      Effect.gen(function*() {
+        const reply = yield* Deferred.make<void>()
+        const rejected = yield* Deferred.make<void>()
+        const mock = {
+          ...session,
+          send: Effect.fnUntraced(function*() {
+            yield* Deferred.await(reply)
+            yield* Deferred.succeed(rejected, undefined)
+            return yield* Effect.fail(
+              new Protocol.ProtocolError({
+                reason: new Protocol.Rejected({
+                  method: "Runtime.callFunctionOn",
+                  reason: "Unrecognized",
+                  code: -32000,
+                  description: "Execution context was destroyed."
+                })
+              })
+            )
+          })
+        } as unknown as ProtocolClient.Session
+        const { state, target } = yield* withPage(mock)
+        const frame = state.frames.get("T1")!
+        const document = Tree.commit(
+          state,
+          frame,
+          { loaderId: "initial", url: "about:blank", origin: "://" },
+          () => ({ _tag: "InitialBlank" }),
+          undefined,
+          "test"
+        )
+        const realm = Tree.addRealm(state, {
+          uniqueId: "swapped",
+          contextId: 4,
+          target,
+          frame,
+          world: { _tag: "Main" },
+          origin: "://"
+        })
+        document.realms.add(realm)
+        const handlers = Kit.handlers<State.Event>()
+        Evaluation.register(handlers)
+        const ingestion = yield* Ingestion.make({
+          fold: (control) => {
+            state.buffer.connect(control)
+            return {
+              events: handlers.events,
+              apply: (_session, method, params) =>
+                Effect.suspend(() => {
+                  handlers.apply(method, params, target.event)
+                  return state.buffer.flush
+                }),
+              lost: () => Effect.void,
+              ended: () => Effect.void
+            }
+          },
+          limits: { events: 100, bytes: 100_000 },
+          decoder: () => (params) => Effect.succeed(params),
+          session: () => mock,
+          end: () => {},
+          lost: () => false
+        })
+        const ingest = ingestion.track(mock, false, 0)
+        const at = yield* BrowserClock.after(100)
+        const waiting = yield* Evaluation.evaluate(state, realm.id, {
+          functionDeclaration: "() => 1",
+          arguments: [],
+          awaitPromise: true,
+          result: "value",
+          userActivation: false
+        }).pipe(
+          Effect.provideService(ProtocolClient.CommandDeadline, Option.some(at)),
+          Effect.flip,
+          Effect.forkChild
+        )
+        yield* TestClock.adjust("40 millis")
+        // Use the real FIFO but hold its worker: receipt must precede the reply, folding must not.
+        ingestion.event(ingest, 1, "Runtime.executionContextDestroyed", {
+          executionContextId: 4,
+          executionContextUniqueId: "swapped"
+        }, "destroy")
+        yield* Deferred.succeed(reply, undefined)
+        yield* Deferred.await(rejected)
+        yield* TestClock.adjust("0 millis")
+        assert.isFalse(realm.ended)
+        assert.isUndefined(waiting.pollUnsafe(), "the reply must await the already-queued destroy")
+        if (outcome === "folded") {
+          yield* ingestion.worker.pipe(Effect.forkChild)
+          const result = yield* Fiber.join(waiting)
+          assert.isTrue(realm.ended)
+          assert.strictEqual(result.reason._tag, "Gone")
+        } else {
+          yield* TestClock.adjust("60 millis")
+          assert.isDefined(waiting.pollUnsafe(), "a stopped worker must not hold the evaluation past its deadline")
+          const result = yield* Fiber.join(waiting)
+          assert.strictEqual(result.reason._tag, "Protocol")
+          if (result.reason._tag === "Protocol") {
+            assert.strictEqual(result.reason.error.reason._tag, "NoReply")
+          }
+        }
+      }).pipe(
+        Effect.scoped,
+        Effect.provideServiceEffect(
+          BrowserClock.CurrentClock,
+          Effect.map(Effect.service(Clock.Clock), BrowserClock.fromClock)
+        )
+      ))
+  }
+
+  it.effect("preserves a prompt rejection when no lifecycle event follows", () =>
+    Effect.gen(function*() {
+      const reply = yield* Deferred.make<void>()
+      const rejected = yield* Deferred.make<void>()
+      const mock = {
+        ...session,
+        send: Effect.fnUntraced(function*() {
+          yield* Deferred.await(reply)
+          yield* Deferred.succeed(rejected, undefined)
+          return yield* Effect.fail(
+            new Protocol.ProtocolError({
+              reason: new Protocol.Rejected({
+                method: "Runtime.callFunctionOn",
+                reason: "Unrecognized",
+                code: -32000,
+                description: "Execution context was destroyed."
+              })
+            })
+          )
+        })
+      } as unknown as ProtocolClient.Session
+      const { state, target } = yield* withPage(mock)
+      const frame = state.frames.get("T1")!
+      const document = Tree.commit(
+        state,
+        frame,
+        { loaderId: "initial", url: "about:blank", origin: "://" },
+        () => ({ _tag: "InitialBlank" }),
+        undefined,
+        "test"
+      )
+      const realm = Tree.addRealm(state, {
+        uniqueId: "swapped",
+        contextId: 4,
+        target,
+        frame,
+        world: { _tag: "Main" },
+        origin: "://"
+      })
+      document.realms.add(realm)
+      const at = yield* BrowserClock.after(100)
+      const waiting = yield* Evaluation.evaluate(state, realm.id, {
+        functionDeclaration: "() => 1",
+        arguments: [],
+        awaitPromise: true,
+        result: "value",
+        userActivation: false
+      }).pipe(
+        Effect.provideService(ProtocolClient.CommandDeadline, Option.some(at)),
+        Effect.flip,
+        Effect.forkChild
+      )
+      yield* TestClock.adjust("40 millis")
+      yield* Deferred.succeed(reply, undefined)
+      yield* Deferred.await(rejected)
+      yield* TestClock.adjust("0 millis")
+      const beforeDeadline = waiting.pollUnsafe()
+      // Advance the test clock so a broken implementation settles without hanging the test.
+      yield* TestClock.adjust("60 millis")
+      const result = yield* Fiber.join(waiting)
+      assert.isDefined(beforeDeadline, "a rejection without lifecycle evidence must not wait for the deadline")
+      assert.strictEqual(result.reason._tag, "Protocol")
+      if (result.reason._tag === "Protocol") {
+        assert.strictEqual(result.reason.error.reason._tag, "Rejected")
+      }
+    }).pipe(
+      Effect.scoped,
+      Effect.provideServiceEffect(
+        BrowserClock.CurrentClock,
+        Effect.map(Effect.service(Clock.Clock), BrowserClock.fromClock)
+      )
+    ))
+})
+
+describe("CdpAdapter transient evaluation results", () => {
+  for (const releaseResult of [false, true]) {
+    for (const thrown of [false, true]) {
+      it.effect(`releases incidental result ids only when requested (${releaseResult}, thrown=${thrown})`, () =>
+        Effect.gen(function*() {
+          const released: Array<string> = []
+          const mock = {
+            ...session,
+            send: (command: { readonly method: string; readonly params: { readonly objectId?: string } }) => {
+              if (command.method === "Runtime.releaseObject") {
+                released.push(command.params.objectId!)
+                return Effect.succeed({})
+              }
+              assert.strictEqual(command.method, "Runtime.callFunctionOn")
+              return Effect.succeed({
+                result: { type: "object", objectId: "array", deepSerializedValue: { type: "array", value: [] } },
+                ...(thrown
+                  ? { exceptionDetails: { text: "failed", exception: { type: "object", objectId: "exception" } } }
+                  : {})
+              })
+            }
+          } as unknown as ProtocolClient.Session
+          const { state, target } = yield* withPage(mock)
+          const realm = Tree.addRealm(state, {
+            uniqueId: "transient",
+            contextId: 1,
+            target,
+            frame: undefined,
+            world: { _tag: "Main" },
+            origin: "http://127.0.0.1:8000"
+          })
+          const result = yield* Evaluation.evaluate(state, realm.id, {
+            functionDeclaration: "() => []",
+            arguments: [],
+            awaitPromise: true,
+            result: "value",
+            userActivation: false,
+            releaseResult
+          })
+          assert.strictEqual(result._tag, thrown ? "Exception" : "Value")
+          assert.deepStrictEqual(released, releaseResult ? thrown ? ["array", "exception"] : ["array"] : [])
+          assert.strictEqual(state.handles.size, 0)
+        }).pipe(Effect.scoped))
+    }
+  }
+})
+
+describe("CdpAdapter node arguments under interruption", () => {
+  it.effect("releases the nodes it resolved when the call is interrupted before dispatch", () =>
+    Effect.gen(function*() {
+      const released: Array<string> = []
+      const resolving = yield* Deferred.make<void>()
+      const mock = {
+        ...session,
+        send: (
+          command: {
+            readonly method: string
+            readonly params: { readonly backendNodeId?: number; readonly objectId?: string }
+          }
+        ) => {
+          if (command.method === "Runtime.releaseObject") {
+            released.push(command.params.objectId!)
+            return Effect.succeed({})
+          }
+          assert.strictEqual(command.method, "DOM.resolveNode")
+          // The first two nodes resolve; the third never answers, as when a deadline ends the call on its way
+          return command.params.backendNodeId === 3
+            ? Effect.andThen(Deferred.succeed(resolving, undefined), Effect.never)
+            : Effect.succeed({ object: { type: "object", objectId: `node-${command.params.backendNodeId}` } })
+        }
+      } as unknown as ProtocolClient.Session
+      const { state, target } = yield* withPage(mock)
+      const realm = Tree.addRealm(state, {
+        uniqueId: "nodes",
+        contextId: 1,
+        target,
+        frame: undefined,
+        world: { _tag: "Main" },
+        origin: "http://127.0.0.1:8000"
+      })
+      const node = (binding: string): Adapter.LocalValue => ({
+        _tag: "Node",
+        node: { document: "document" as never, binding }
+      })
+      const fiber = yield* Evaluation.evaluate(state, realm.id, {
+        functionDeclaration: "(...nodes) => nodes.length",
+        arguments: [node("1"), node("2"), node("3")],
+        awaitPromise: true,
+        result: "value",
+        userActivation: false,
+        releaseResult: true
+      }).pipe(Effect.forkChild)
+      yield* Deferred.await(resolving)
+      yield* Fiber.interrupt(fiber)
+      assert.deepStrictEqual(released.sort(), ["node-1", "node-2"])
+    }).pipe(Effect.scoped))
+})
+
+it.effect("releases a callback reply lost to interruption during node cleanup", () =>
+  Effect.gen(function*() {
+    const cleaning = yield* Deferred.make<void>()
+    const finishCleanup = yield* Deferred.make<void>()
+    const released: Array<string> = []
+    const mock = {
+      ...session,
+      send: (command: { method: string; params: { objectId?: string } }) => {
+        if (command.method === "DOM.resolveNode") {
+          return Effect.succeed({ object: { type: "object", objectId: "node" } })
+        }
+        if (command.method === "Runtime.callFunctionOn") {
+          return Effect.succeed({
+            result: { type: "object", objectId: "result", deepSerializedValue: { type: "array", value: [] } }
+          })
+        }
+        assert.strictEqual(command.method, "Runtime.releaseObject")
+        return Effect.gen(function*() {
+          if (command.params.objectId === "node") {
+            yield* Deferred.succeed(cleaning, undefined)
+            yield* Deferred.await(finishCleanup)
+          }
+          released.push(command.params.objectId!)
+          return {}
+        })
+      }
+    } as unknown as ProtocolClient.Session
+    const { state, target } = yield* withPage(mock)
+    const realm = Tree.addRealm(state, {
+      uniqueId: "reply",
+      contextId: 1,
+      target,
+      frame: undefined,
+      world: { _tag: "Main" },
+      origin: "http://127.0.0.1"
+    })
+    const waiting = yield* Evaluation.evaluate(state, realm.id, {
+      functionDeclaration: "() => []",
+      arguments: [{ _tag: "Node", node: { document: "document" as never, binding: "1" } }],
+      awaitPromise: true,
+      result: "value",
+      releaseResult: true,
+      userActivation: false
+    }).pipe(Effect.forkChild)
+    yield* Deferred.await(cleaning)
+    const interrupting = yield* Fiber.interrupt(waiting).pipe(Effect.forkChild)
+    yield* Effect.yieldNow
+    yield* Deferred.succeed(finishCleanup, undefined)
+    yield* Fiber.join(interrupting)
+    assert.deepStrictEqual(released.sort(), ["node", "result"])
+  }).pipe(Effect.scoped))
+
+for (const command of ["resolve", "callback"] as const) {
+  it.effect(`releases late ${command} objects after interruption while the browser reply is pending`, () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire)
+      const { state, target } = yield* withPage(client.root)
+      const realm = Tree.addRealm(state, {
+        uniqueId: "pending",
+        contextId: 1,
+        target,
+        frame: undefined,
+        world: { _tag: "Main" },
+        origin: "http://127.0.0.1"
+      })
+      const waiting = yield* Evaluation.evaluate(state, realm.id, {
+        functionDeclaration: "async () => await new Promise(() => {})",
+        arguments: command === "resolve"
+          ? [{ _tag: "Node", node: { document: "document" as never, binding: "1" } }]
+          : [],
+        awaitPromise: true,
+        result: "value",
+        releaseResult: true,
+        userActivation: false
+      }).pipe(Effect.forkChild)
+      const sent = yield* browser.next
+      assert.strictEqual(sent.method, command === "resolve" ? "DOM.resolveNode" : "Runtime.callFunctionOn")
+      // No reply exists yet: interrupt must finish without waiting for the page's promise.
+      yield* Fiber.interrupt(waiting)
+      assert.strictEqual(yield* browser.pending, 0)
+      // The page finishes later. Cleanup must be triggered by these newly-created ids, not an earlier group release.
+      yield* browser.receive({
+        id: sent.id,
+        result: command === "resolve"
+          ? { object: { type: "object", objectId: "late-node" } }
+          : {
+            result: { type: "object", objectId: "late-result" },
+            exceptionDetails: { text: "late", exception: { type: "object", objectId: "late-exception" } }
+          }
+      })
+      const first = yield* browser.next
+      assert.strictEqual(first.method, "Runtime.releaseObject")
+      assert.strictEqual(first.params?.objectId, command === "resolve" ? "late-node" : "late-result")
+      yield* browser.receive({ id: first.id, result: {} })
+      if (command === "callback") {
+        const second = yield* browser.next
+        assert.strictEqual(second.method, "Runtime.releaseObject")
+        assert.strictEqual(second.params?.objectId, "late-exception")
+        yield* browser.receive({ id: second.id, result: {} })
+      }
+      yield* browser.delivered
+      assert.strictEqual(state.handles.size, 0)
+    }).pipe(Effect.scoped))
+}
+
+for (const failure of ["resolution", "conversion", "dispatch"] as const) {
+  it.effect(`cleans acquired node ids outside the command deadline on ${failure} failure`, () =>
+    Effect.gen(function*() {
+      const released: Array<string> = []
+      const mock = {
+        ...session,
+        send: (command: { method: string; params: { backendNodeId?: number; objectId?: string } }) => {
+          if (command.method === "Runtime.releaseObject") {
+            return Effect.gen(function*() {
+              assert(Option.isNone(yield* ProtocolClient.CommandDeadline))
+              assert(Option.isNone(yield* Operation.current))
+              released.push(command.params.objectId!)
+              return {}
+            })
+          }
+          if (command.method === "DOM.resolveNode" && command.params.backendNodeId === 1) {
+            return Effect.succeed({ object: { type: "object", objectId: "acquired" } })
+          }
+          assert.strictEqual(command.method, failure === "resolution" ? "DOM.resolveNode" : "Runtime.callFunctionOn")
+          return Effect.fail(
+            new Protocol.ProtocolError({
+              reason: new Protocol.Rejected({
+                method: command.method,
+                reason: "Unrecognized",
+                code: -32000,
+                description: "failed"
+              })
+            })
+          )
+        }
+      } as unknown as ProtocolClient.Session
+      const { state, target } = yield* withPage(mock)
+      const realm = Tree.addRealm(state, {
+        uniqueId: "failure",
+        contextId: 1,
+        target,
+        frame: undefined,
+        world: { _tag: "Main" },
+        origin: "http://127.0.0.1"
+      })
+      const node = (binding: string): Adapter.LocalValue => ({
+        _tag: "Node",
+        node: { document: "document" as never, binding }
+      })
+      const extra: Array<Adapter.LocalValue> = failure === "resolution"
+        ? [node("2")]
+        : failure === "conversion"
+        ? [{ _tag: "Handle", handle: "missing" as Adapter.HandleId }]
+        : []
+      yield* Evaluation.evaluate(state, realm.id, {
+        functionDeclaration: "() => []",
+        arguments: [node("1"), ...extra],
+        awaitPromise: true,
+        result: "value",
+        releaseResult: true,
+        userActivation: false
+      }).pipe(
+        Operation.named("test.evaluation"),
+        Effect.provideService(ProtocolClient.CommandDeadline, Option.some(BrowserClock.live.now())),
+        Effect.flip
+      )
+      assert.deepStrictEqual(released, ["acquired"])
+    }).pipe(Effect.scoped))
+}
+
+it.effect("interruption doesn't wait for a busy page to acknowledge node releases", () =>
+  Effect.gen(function*() {
+    const browser = yield* makeBrowser
+    const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire)
+    const { state, target } = yield* withPage(client.root)
+    const realm = Tree.addRealm(state, {
+      uniqueId: "busy",
+      contextId: 1,
+      target,
+      frame: undefined,
+      world: { _tag: "Main" },
+      origin: "http://127.0.0.1"
+    })
+    const waiting = yield* Evaluation.evaluate(state, realm.id, {
+      functionDeclaration: "(node) => { while (true) {} }",
+      arguments: [{ _tag: "Node", node: { document: "document" as never, binding: "1" } }],
+      awaitPromise: true,
+      result: "value",
+      releaseResult: true,
+      userActivation: false
+    }).pipe(Effect.forkChild)
+    const resolve = yield* browser.next
+    assert.strictEqual(resolve.method, "DOM.resolveNode")
+    yield* browser.receive({ id: resolve.id, result: { object: { type: "object", objectId: "node" } } })
+    const callback = yield* browser.next
+    assert.strictEqual(callback.method, "Runtime.callFunctionOn")
+    // The callback never returns, so the page's main thread answers nothing more, including the release below.
+    const interrupting = yield* Fiber.interrupt(waiting).pipe(Effect.forkChild)
+    const release = yield* browser.next
+    assert.strictEqual(release.method, "Runtime.releaseObject")
+    for (let i = 0; i < 100; i++) yield* Effect.yieldNow
+    assert.isDefined(interrupting.pollUnsafe(), "interrupting the caller waited for the busy page's release reply")
+  }).pipe(Effect.scoped))
+
+for (const finish of ["reply", "shutdown", "success", "shutdown-success"] as const) {
+  it.effect(`evaluation cleanup waits and remains owned on ${finish}`, () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire)
+      const owner = yield* Scope.make()
+      yield* Effect.addFinalizer(() => Scope.close(owner, Exit.void))
+      const { state, target } = yield* withPage(client.root)
+      const realm = Tree.addRealm(state, {
+        uniqueId: "owned-cleanup",
+        contextId: 1,
+        target,
+        frame: undefined,
+        world: { _tag: "Main" },
+        origin: "http://127.0.0.1"
+      })
+      const node = (binding: string): Adapter.LocalValue => ({
+        _tag: "Node",
+        node: { document: "document" as never, binding }
+      })
+      const waiting = yield* Evaluation.evaluate({ ...state, cleanupScope: owner }, realm.id, {
+        functionDeclaration: "() => []",
+        arguments: [node("1"), node("2")],
+        awaitPromise: true,
+        result: "value",
+        releaseResult: true,
+        userActivation: false
+      }).pipe(Effect.forkChild)
+      for (const id of ["node-1", "node-2"]) {
+        const resolving = yield* browser.next
+        assert.strictEqual(resolving.method, "DOM.resolveNode")
+        yield* browser.receive({ id: resolving.id, result: { object: { type: "object", objectId: id } } })
+      }
+      const callback = yield* browser.next
+      yield* browser.receive({
+        id: callback.id,
+        result: {
+          result: { type: "object", objectId: "result", deepSerializedValue: { type: "array", value: [] } },
+          exceptionDetails: {
+            exceptionId: 1,
+            text: "failed",
+            lineNumber: 0,
+            columnNumber: 0,
+            exception: { type: "object", objectId: "exception" }
+          }
+        }
+      })
+      const first = yield* browser.next
+      assert.strictEqual(first.method, "Runtime.releaseObject")
+      assert.strictEqual(first.params?.objectId, "node-1")
+      assert.isUndefined(waiting.pollUnsafe(), "successful completion must still wait for its cleanup")
+      if (finish === "reply" || finish === "shutdown") {
+        const interrupting = yield* Fiber.interrupt(waiting).pipe(Effect.forkChild)
+        for (let i = 0; i < 100; i++) yield* Effect.yieldNow
+        assert.isDefined(interrupting.pollUnsafe(), "caller interruption must not wait for a release acknowledgment")
+      }
+      if (finish === "reply" || finish === "success") {
+        // Resuming the page drains every id already owned before interruption, including the received result.
+        yield* browser.receive({ id: first.id, result: {} })
+        for (const id of ["node-2", "result", "exception"]) {
+          const release = yield* browser.next
+          assert.strictEqual(release.method, "Runtime.releaseObject")
+          assert.strictEqual(release.params?.objectId, id)
+          yield* browser.receive({ id: release.id, result: {} })
+        }
+        yield* browser.delivered
+        assert.strictEqual(yield* browser.pending, 0)
+        if (finish === "success") assert.strictEqual((yield* Fiber.join(waiting))._tag, "Exception")
+        yield* Scope.close(owner, Exit.void)
+      } else {
+        const closing = yield* Scope.close(owner, Exit.void).pipe(Effect.forkChild)
+        for (let i = 0; i < 100; i++) yield* Effect.yieldNow
+        assert.isDefined(closing.pollUnsafe(), "shutdown must interrupt an unanswered cleanup request")
+        if (finish === "shutdown-success") {
+          for (let i = 0; i < 100; i++) yield* Effect.yieldNow
+          assert.isDefined(waiting.pollUnsafe(), "closing the cleanup owner must end a successful caller's wait")
+          assert.strictEqual((yield* Fiber.join(waiting))._tag, "Exception")
+        }
+        // An acknowledgment after shutdown cannot restart cleanup in an unowned fiber.
+        yield* browser.receive({ id: first.id, result: {} })
+        yield* browser.delivered
+        assert.strictEqual(yield* browser.pending, 0)
+      }
+    }).pipe(Effect.scoped))
+}
+
+it.effect("does not register evaluation cleanup in the connection scope when it owns no ids", () =>
+  Effect.gen(function*() {
+    const owner = yield* Scope.make()
+    const { state, target } = yield* withPage(
+      {
+        ...session,
+        send: () => Effect.succeed({ result: { type: "number", value: 1 } })
+      } as unknown as ProtocolClient.Session
+    )
+    const realm = Tree.addRealm(state, {
+      uniqueId: "no-objects",
+      contextId: 1,
+      target,
+      frame: undefined,
+      world: { _tag: "Main" },
+      origin: "http://127.0.0.1"
+    })
+    const result = yield* Evaluation.evaluate({ ...state, cleanupScope: owner }, realm.id, {
+      functionDeclaration: "() => 1",
+      arguments: [],
+      awaitPromise: true,
+      result: "value",
+      userActivation: false
+    })
+    assert.deepStrictEqual(result, { _tag: "Value", value: { type: "number", value: 1 } })
+    assert.strictEqual(owner.state._tag, "Empty")
+    yield* Scope.close(owner, Exit.void)
+  }).pipe(Effect.scoped))
+
+describe("CDP request body identity", () => {
+  it.effect("refuses fallback bytes when a redirect changes the hop during the native read", () =>
+    Effect.gen(function*() {
+      const called = yield* Deferred.make<void>()
+      const reply = yield* Deferred.make<{ postData: string; base64Encoded: boolean }>()
+      const wire = {
+        ...session,
+        send: () => Deferred.succeed(called, undefined).pipe(Effect.andThen(Deferred.await(reply)))
+      } as unknown as ProtocolClient.Session
+      const { page, state, target } = yield* withPage(wire)
+      Object.assign(target, { page })
+      state.registry.add({ _tag: "Page", page: page.id }, {
+        _tag: "BodyCollection",
+        bodies: ["request"],
+        maxBytes: 100
+      }, state.ids.registration())
+      const handlers = Network.register(Kit.handlers<State.Event>())
+      const event = { state, target }
+      const params = sent(`${origin}/send`)
+      handlers.apply("Network.requestWillBeSent", {
+        ...params,
+        request: { ...params.request, method: "POST", hasPostData: true }
+      }, event)
+      const entry = [...state.requests.values()][0]!
+      const snapshot = new Request.NetworkRequest({
+        hop: entry.hop,
+        method: "POST",
+        url: `${origin}/send` as Request.NetworkRequest["url"],
+        headers: Headers.empty,
+        resourceType: "fetch",
+        initiator: { _tag: "Unattributed" },
+        at: 0 as Request.NetworkRequest["at"]
+      })
+      const reading = yield* Network.captureRequestBody(state, snapshot, 100).pipe(Effect.forkChild)
+      yield* Deferred.await(called)
+      handlers.apply("Network.requestWillBeSent", sent(`${origin}/next`, { location: "/next" }), event)
+      yield* Deferred.succeed(reply, { postData: "different-hop", base64Encoded: false })
+      assert.deepStrictEqual(yield* Fiber.join(reading), { _tag: "Unavailable", why: "redirect" })
+    }))
+})
+
+describe("CDP request body fallback completeness", () => {
+  it.effect("refuses an empty fallback for a request with native body presence", () =>
+    Effect.gen(function*() {
+      const wire = {
+        ...session,
+        send: () => Effect.succeed({ postData: "", base64Encoded: false })
+      } as unknown as ProtocolClient.Session
+      const { page, state, target } = yield* withPage(wire)
+      Object.assign(target, { page })
+      state.registry.add({ _tag: "Page", page: page.id }, {
+        _tag: "BodyCollection",
+        bodies: ["request"],
+        maxBytes: 100
+      }, state.ids.registration())
+      const handlers = Network.register(Kit.handlers<State.Event>())
+      const params = sent(`${origin}/send`)
+      handlers.apply("Network.requestWillBeSent", {
+        ...params,
+        request: { ...params.request, method: "POST", hasPostData: true }
+      }, { state, target })
+      const entry = [...state.requests.values()][0]!
+      const snapshot = new Request.NetworkRequest({
+        hop: entry.hop,
+        method: "POST",
+        url: `${origin}/send` as Request.NetworkRequest["url"],
+        headers: Headers.empty,
+        resourceType: "fetch",
+        initiator: { _tag: "Unattributed" },
+        at: 0 as Request.NetworkRequest["at"]
+      })
+      assert.deepStrictEqual(yield* Network.captureRequestBody(state, snapshot, 100), {
+        _tag: "Unavailable",
+        why: "unavailable"
+      })
+      // The stricter subscription contract does not alter legacy route/recording reads.
+      assert.deepStrictEqual(yield* Network.requestBody(state, snapshot.hop), Option.some(new Uint8Array()))
+    }))
+})
+describe("CDP request timing opt-in dispatch", () => {
+  for (const enabled of [false, true]) {
+    it.effect(`touches native timing only for an enabled context (${enabled})`, () =>
+      Effect.gen(function*() {
+        const { state, target, page, facts } = yield* withPage(session, enabled)
+        const context = page.context
+        const event = { state, target }
+        const handlers = Network.register(Kit.handlers<State.Event>())
+        handlers.apply(
+          "Network.requestWillBeSent",
+          { ...sent(`${origin}/landed`), timestamp: 10, wallTime: 1000 },
+          event
+        )
+        assert.strictEqual(context.requestTiming?.size ?? 0, enabled ? 1 : 0)
+        let nativeReads = 0
+        const native = {
+          ...landed,
+          hasExtraInfo: false,
+          response: {
+            ...landed.response,
+            get timing() {
+              nativeReads++
+              return { requestTime: 10, sendStart: 2, receiveHeadersStart: 3 }
+            }
+          }
+        }
+        handlers.apply("Network.responseReceived", native, event)
+        handlers.apply("Network.loadingFinished", { requestId: "R1", timestamp: 10.01, encodedDataLength: 0 }, event)
+        yield* state.buffer.flush
+        assert.strictEqual(nativeReads, enabled ? 1 : 0)
+        assert.strictEqual(facts.filter((fact) => fact._tag === "HopTiming").length, enabled ? 2 : 0)
+        assert.strictEqual(context.requestTiming?.size ?? 0, 0, "terminal completion releases the native collector")
+      }).pipe(Effect.scoped))
+  }
+})
+
+it.effect("bounds active native baselines and clears them when their frame closes", () =>
+  Effect.gen(function*() {
+    const { state, target, page } = yield* withPage(session, true)
+    const handlers = Network.register(Kit.handlers<State.Event>())
+    for (let i = 0; i <= 1000; i++) {
+      handlers.apply("Network.requestWillBeSent", {
+        ...sent(`${origin}/landed`),
+        requestId: `timing-${i}`,
+        timestamp: 10 + i,
+        wallTime: 1000 + i
+      }, { state, target })
+    }
+    const store = page.context.requestTiming!
+    assert.strictEqual(store.size, 1000)
+    const oldest = state.requests.get(State.requestKey(target, "timing-0"))!
+    assert.isFalse(store.has(oldest.hop))
+    Tree.endPage(state, page, new Target.PageClosed({ by: "command" }), "test")
+    assert.strictEqual(store.size, 0)
+  }).pipe(Effect.scoped))
+
+describe("CdpAdapter evaluation argument transport", () => {
+  const capture = Effect.fnUntraced(function*(values: ReadonlyArray<unknown>, fn: string, bindings = false) {
+    let sent!: CdpRuntime.CallFunctionOnParams
+    const mock = {
+      ...session,
+      send: (command: { readonly method: string; readonly params: CdpRuntime.CallFunctionOnParams }) => {
+        if (command.method === "DOM.resolveNode") {
+          return Effect.succeed({ object: { type: "object", objectId: "node" } })
+        }
+        if (command.method === "Runtime.releaseObject") return Effect.succeed({})
+        assert.strictEqual(command.method, "Runtime.callFunctionOn")
+        sent = command.params
+        return Effect.succeed({ result: { type: "undefined" } })
+      }
+    } as unknown as ProtocolClient.Session
+    const { state, target } = yield* withPage(mock)
+    const realm = Tree.addRealm(state, {
+      uniqueId: "argument-transport",
+      contextId: 1,
+      target,
+      frame: undefined,
+      world: { _tag: "Main" },
+      origin: "http://127.0.0.1"
+    })
+    const handle = state.ids.handle()
+    state.handles.set(handle, { target, realm, objectId: "handle", group: undefined })
+    const args: Array<Adapter.LocalValue> = values.map((value) => ({
+      _tag: "Value",
+      value: Serialization.toRemote(value)
+    }))
+    if (bindings) {
+      args.push(
+        { _tag: "Handle", handle },
+        { _tag: "Node", node: { document: "document" as never, binding: "1" } }
+      )
+    }
+    yield* Evaluation.evaluate(state, realm.id, {
+      functionDeclaration: fn,
+      arguments: args,
+      awaitPromise: true,
+      result: "value",
+      userActivation: false
+    })
+    return sent
+  })
+
+  it.effect("sends ordinary arguments directly without compiling a decoder", () =>
+    Effect.gen(function*() {
+      const data = { text: "data" }
+      // This arbitrary callback text must not determine which argument transport is used.
+      const fn = "(...values) => values"
+      for (const values of [[], ["engine request"], [{ data, items: [null, true, 3, "text"] }], [undefined]]) {
+        const sent = yield* capture(values, fn)
+        assert.strictEqual(sent.functionDeclaration, fn)
+        assert.strictEqual(sent.arguments!.length, values.length)
+        const wire = JSON.parse(JSON.stringify(sent.arguments)) as Array<{ value?: unknown }>
+        const result = runInNewContext(`(${sent.functionDeclaration})`)(...wire.map((arg) => arg.value))
+        if (values.length === 1 && typeof values[0] === "object") {
+          assert.strictEqual(Object.prototype.hasOwnProperty.call(result[0].data, "text"), true)
+          assert.strictEqual(result[0].data.text, "data")
+        } else assert.deepStrictEqual(Array.from(result), values)
+      }
+      const sent = yield* capture(["request"], fn, true)
+      assert.strictEqual(sent.functionDeclaration, fn)
+      assert.deepStrictEqual(sent.arguments, [
+        { value: "request" },
+        { objectId: "handle" as CdpRuntime.RemoteObjectId },
+        { objectId: "node" as CdpRuntime.RemoteObjectId }
+      ])
+    }).pipe(Effect.scoped))
+
+  it.effect("reconstructs own __proto__ keys through objects and arrays", () =>
+    Effect.gen(function*() {
+      const data = Object.fromEntries([["__proto__", { polluted: true }]])
+      for (const value of [data, { nested: data }, [{ nested: data }]]) {
+        const sent = yield* capture([value], "value => value")
+        assert.notStrictEqual(sent.functionDeclaration, "value => value")
+      }
+    }).pipe(Effect.scoped))
+
+  it.effect("reconstructs nested special values and undefined while preserving bindings and callback scope", () =>
+    Effect.gen(function*() {
+      const fn = `(value, handle, node) => {
+        const map = value.items[0]; const key = Array.from(map.keys())[0]; const set = map.get(key);
+        return [map instanceof Map, key.id === 1, set instanceof Set, set.has(undefined), set.has(42n),
+          set.has(NaN), set.has(Infinity), Object.is(value.zero, -0), value.date instanceof Date,
+          value.regexp instanceof RegExp, value.absent === undefined,
+          Object.prototype.hasOwnProperty.call(value.data, "__proto__"), value.data["__proto__"] === "data",
+          handle.id === "handle", node.id === "node", args, kinds, decode, fn, arguments];
+      }`
+      const sent = yield* capture(
+        [{
+          items: [new Map([[{ id: 1 }, new Set([undefined, 42n, NaN, Infinity])]])],
+          zero: -0,
+          date: new Date("2020-01-02"),
+          regexp: /a+/gi,
+          absent: undefined,
+          data: Object.fromEntries([["__proto__", "data"]])
+        }],
+        fn,
+        true
+      )
+      assert.notStrictEqual(sent.functionDeclaration, fn)
+      assert.deepStrictEqual(sent.arguments!.slice(-2), [{ objectId: "handle" as CdpRuntime.RemoteObjectId }, {
+        objectId: "node" as CdpRuntime.RemoteObjectId
+      }])
+      const wire = JSON.parse(JSON.stringify(sent.arguments)) as Array<{ value?: unknown; objectId?: string }>
+      const call = runInNewContext(`(${sent.functionDeclaration})`, {
+        args: "page:args",
+        kinds: "page:kinds",
+        decode: "page:decode",
+        fn: "page:fn",
+        arguments: "page:arguments"
+      })
+      const result = call(...wire.map((arg) => arg.objectId === undefined ? arg.value : { id: arg.objectId }))
+      assert.deepStrictEqual(Array.from(result), [
+        ...Array.from({ length: 15 }, () => true),
+        "page:args",
+        "page:kinds",
+        "page:decode",
+        "page:fn",
+        "page:arguments"
+      ])
+      const nested = yield* capture(
+        [{ absent: undefined }],
+        "value => Object.hasOwn(value, 'absent') && value.absent === undefined"
+      )
+      assert.strictEqual(
+        runInNewContext(`(${nested.functionDeclaration})`)(...nested.arguments!.map((arg) => arg.value)),
+        true
+      )
+    }).pipe(Effect.scoped))
+})
+
+describe("CDP request sizes opt-in", () => {
+  for (const enabled of [false, true]) {
+    it.effect(`collects bytes only in its opted-in context (${enabled})`, () =>
+      Effect.gen(function*() {
+        const { state, target, page, facts } = yield* withPage(session, false, enabled)
+        Object.assign(target, { page })
+        const handlers = Network.register(Kit.handlers<State.Event>())
+        const event = { state, target }
+        handlers.apply("Network.requestWillBeSent", sent(`${origin}/landed`), event)
+        assert.strictEqual(page.context.requestSizes?.size ?? 0, enabled ? 1 : 0)
+        handlers.apply("Network.responseReceived", { ...landed, hasExtraInfo: false }, event)
+        handlers.apply("Network.dataReceived", {
+          requestId: "R1",
+          timestamp: 10,
+          dataLength: 4124,
+          encodedDataLength: 0
+        }, event)
+        handlers.apply("Network.loadingFinished", { requestId: "R1", timestamp: 11, encodedDataLength: 281 }, event)
+        yield* state.buffer.flush
+        const observed = facts.flatMap((fact) => fact._tag === "HopSizes" ? [fact.sizes] : [])
+        assert.strictEqual(observed.length, enabled ? 1 : 0)
+        if (enabled) {
+          assert.deepStrictEqual(observed[0]!.responseBodyDecodedSize, Option.some(4124))
+          assert.deepStrictEqual(observed[0]!.responseBodyEncodedSize, Option.none())
+        }
+        assert.strictEqual(page.context.requestSizes?.size ?? 0, 0)
+      }).pipe(Effect.scoped))
+  }
+  it.effect("invalidates decoded counts on session loss while preserving other sessions", () =>
+    Effect.gen(function*() {
+      const { state, target, page, facts } = yield* withPage(session, false, true)
+      Object.assign(target, { page })
+      state.targets.set(session, target)
+      const siblingSession = { ...session, key: "S2" } as ProtocolClient.Session
+      const sibling = { ...target, session: siblingSession, kind: "iframe" as const }
+      const frame = Tree.newFrame({
+        frameId: "F2",
+        id: state.ids.navigable(),
+        page,
+        parent: state.frames.get("T1")!,
+        owner: sibling
+      })
+      Object.assign(sibling, { frame })
+      state.frames.set("F2", frame)
+      state.navigables.set(frame.id, frame)
+      state.targets.set(siblingSession, sibling)
+      const handlers = Network.register(Kit.handlers<State.Event>())
+      for (const [owner, frameId] of [[target, "T1"], [sibling, "F2"]] as const) {
+        const event = { state, target: owner }
+        handlers.apply("Network.requestWillBeSent", { ...sent(`${origin}/landed`), frameId }, event)
+        handlers.apply("Network.responseReceived", { ...landed, frameId, hasExtraInfo: false }, event)
+        handlers.apply("Network.dataReceived", {
+          requestId: "R1",
+          timestamp: 1,
+          dataLength: 10,
+          encodedDataLength: 0
+        }, event)
+      }
+      // Both queue overflow and fold schema-decode failure enter this adapter loss hook.
+      Targets.lost(state, session)
+      for (const owner of [sibling, target]) {
+        const event = { state, target: owner }
+        handlers.apply("Network.dataReceived", {
+          requestId: "R1",
+          timestamp: 2,
+          dataLength: 5,
+          encodedDataLength: 0
+        }, event)
+        handlers.apply("Network.loadingFinished", {
+          requestId: "R1",
+          timestamp: 3,
+          encodedDataLength: 100
+        }, event)
+      }
+      yield* state.buffer.flush
+      const observed = facts.flatMap((fact) => fact._tag === "HopSizes" ? [fact.sizes] : [])
+      assert.strictEqual(observed.length, 2)
+      assert.deepStrictEqual(observed[0]!.responseBodyDecodedSize, Option.some(15))
+      assert.deepStrictEqual(observed[1]!.responseTransferSize, Option.some(100))
+      assert.deepStrictEqual(observed[1]!.responseBodyDecodedSize, Option.none())
+    }).pipe(Effect.scoped))
+
+  it.effect("does not collect requests arriving after confirmed context disposal", () =>
+    Effect.gen(function*() {
+      const mock = { ...session, ended: Effect.never } as ProtocolClient.Session
+      const { state, page, target, facts } = yield* withPage(mock, false, true)
+      const context = { ...page.context, isDefault: false, browserContextId: "disposed" }
+      const current = { ...page, context }
+      Object.assign(target, { page: current })
+      state.pages.set(page.id, current)
+      state.contexts.set(context.id, context)
+      state.targets.set(mock, target)
+      yield* Contexts.removeUserContext(state, context.id)
+      assert.isTrue(context.disposed)
+      const handlers = Network.register(Kit.handlers<State.Event>())
+      const event = { state, target }
+      handlers.apply("Network.requestWillBeSent", sent(`${origin}/landed`), event)
+      const collectorsAfterRequest = context.requestSizes!.size
+      handlers.apply("Network.responseReceived", { ...landed, hasExtraInfo: false }, event)
+      // Reader-side scope drops chunks after disposal, even if request/finish events remain queued.
+      assert.isFalse(Network.eventScopes(state).get("Network.dataReceived")!(mock))
+      handlers.apply("Network.loadingFinished", {
+        requestId: "R1",
+        timestamp: 3,
+        encodedDataLength: 100
+      }, event)
+      yield* state.buffer.flush
+      const observed = facts.flatMap((fact) => fact._tag === "HopSizes" ? [fact.sizes] : [])
+      assert.deepStrictEqual(observed, [], "disposed contexts must not report a known zero")
+      assert.strictEqual(collectorsAfterRequest, 0, "disposed contexts must not allocate collectors")
+    }).pipe(Effect.scoped))
+
+  it.effect("bounds active collectors and clears them on frame removal", () =>
+    Effect.gen(function*() {
+      const { state, target, page } = yield* withPage(session, false, true)
+      Object.assign(target, { page })
+      const handlers = Network.register(Kit.handlers<State.Event>())
+      for (let i = 0; i <= 1000; i++) {
+        handlers.apply("Network.requestWillBeSent", { ...sent(`${origin}/landed`), requestId: `size-${i}` }, {
+          state,
+          target
+        })
+      }
+      assert.strictEqual(page.context.requestSizes!.size, 1000)
+      Tree.endPage(state, page, new Target.PageClosed({ by: "command" }), "test")
+      assert.strictEqual(page.context.requestSizes!.size, 0)
+    }).pipe(Effect.scoped))
+})
+
+for (const boundary of ["cache", "304", "late headers", "failure", "invalid chunk"] as const) {
+  it.effect(`keeps unavailable size counts honest at ${boundary}`, () =>
+    Effect.gen(function*() {
+      const { state, target, page, facts } = yield* withPage(session, false, true)
+      Object.assign(target, { page })
+      const handlers = Network.register(Kit.handlers<State.Event>())
+      const event = { state, target }
+      handlers.apply("Network.requestWillBeSent", sent(`${origin}/landed`), event)
+      handlers.apply(
+        "Network.responseReceived",
+        landedAs({
+          hasExtraInfo: boundary === "304" || boundary === "late headers",
+          fromDiskCache: boundary === "cache"
+        }),
+        event
+      )
+      if (boundary === "304") {
+        handlers.apply("Network.requestWillBeSentExtraInfo", sentAs({}), event)
+        handlers.apply("Network.responseReceivedExtraInfo", received(304, {}), event)
+      }
+      handlers.apply(
+        "Network.dataReceived",
+        { requestId: "R1", timestamp: 1, dataLength: 10, encodedDataLength: 0 },
+        event
+      )
+      if (boundary === "invalid chunk") {
+        handlers.apply(
+          "Network.dataReceived",
+          { requestId: "R1", timestamp: 1, dataLength: -1, encodedDataLength: 0 },
+          event
+        )
+      }
+      handlers.apply(boundary === "failure" ? "Network.loadingFailed" : "Network.loadingFinished", {
+        requestId: "R1",
+        timestamp: 2,
+        encodedDataLength: 281,
+        errorText: "failed"
+      }, event)
+      if (boundary === "late headers") {
+        handlers.apply("Network.requestWillBeSentExtraInfo", sentAs({}), event)
+        handlers.apply("Network.responseReceivedExtraInfo", received(304, {}), event)
+      }
+      yield* state.buffer.flush
+      const observed = facts.flatMap((fact) => fact._tag === "HopSizes" ? [fact.sizes] : [])
+      assert.strictEqual(observed.length, boundary === "invalid chunk" ? 1 : 0)
+      if (boundary === "invalid chunk") assert.deepStrictEqual(observed[0]!.responseBodyDecodedSize, Option.none())
+      assert.strictEqual(page.context.requestSizes!.size, 0)
+    }).pipe(Effect.scoped))
+}
+
+for (const outcome of ["success", "failure"] as const) {
+  it.effect(`ends size ingestion only after confirmed context disposal (${outcome})`, () =>
+    Effect.gen(function*() {
+      const mock = {
+        ...session,
+        ended: Effect.never,
+        send: () =>
+          outcome === "success"
+            ? Effect.succeed({})
+            : Effect.fail(new Protocol.ProtocolError({ reason: new Protocol.SessionEnded({ why: "detached" }) }))
+      } as unknown as ProtocolClient.Session
+      const { state, page, target } = yield* withPage(mock, false, true)
+      const context = { ...page.context, isDefault: false, browserContextId: "enabled" }
+      const current = { ...page, context }
+      Object.assign(target, { page: current })
+      state.pages.set(page.id, current)
+      state.contexts.set(context.id, context)
+      state.targets.set(mock, target)
+      context.requestSizes!.set("hop", { owner: page.id, network: true, decoded: 65 })
+      const accepts = Network.eventScopes(state).get("Network.dataReceived")!
+      assert.isTrue(accepts(mock))
+      const result = yield* Contexts.removeUserContext(state, context.id).pipe(Effect.exit)
+      assert.strictEqual(Exit.isSuccess(result), outcome === "success")
+      assert.strictEqual(context.requestSizes!.size, outcome === "success" ? 0 : 1)
+      assert.strictEqual(accepts(mock), outcome !== "success")
+    }).pipe(Effect.scoped))
+}
+
+it.effect("rejects an isolated realm created in a replacement document while acquisition is pending", () =>
+  Effect.gen(function*() {
+    let create: Effect.Effect<unknown> = Effect.void
+    const native = {
+      ...session,
+      drainObserved: Effect.void,
+      send: (command: { readonly method: string }) => {
+        assert.strictEqual(command.method, "Page.createIsolatedWorld")
+        return create
+      }
+    } as unknown as ProtocolClient.Session
+    const { state, target } = yield* withPage(native)
+    const frame = state.frames.get("T1")!
+    const document = Tree.commit(
+      state,
+      frame,
+      {
+        loaderId: "initial",
+        url: "about:blank",
+        origin: "://"
+      },
+      () => ({ _tag: "InitialBlank" }),
+      undefined,
+      "test"
+    )
+    create = Effect.sync(() => {
+      Tree.commit(
+        state,
+        frame,
+        {
+          loaderId: "replacement",
+          url: "https://example.test/",
+          origin: "https://example.test"
+        },
+        () => ({ _tag: "Adopted" }),
+        undefined,
+        "test"
+      )
+      Evaluation.contextCreated({
+        context: {
+          id: 7 as CdpRuntime.ExecutionContextId,
+          uniqueId: "replacement-utility",
+          origin: "https://example.test",
+          name: "utility",
+          auxData: { frameId: "T1", isDefault: false, type: "isolated" }
+        }
+      }, target.event)
+      return { executionContextId: 7 }
+    })
+    const result = yield* Evaluation.realm(state, document.id, { _tag: "Isolated", name: "utility" }).pipe(Effect.exit)
+    assert(
+      Exit.isFailure(result),
+      "realm acquisition must refuse the ended document instead of returning its replacement's realm"
+    )
+    if (Exit.isFailure(result)) {
+      const error = yield* Effect.failCause(result.cause).pipe(Effect.flip)
+      assert.strictEqual(error.reason._tag, "Gone")
+      if (error.reason._tag === "Gone") {
+        assert.deepStrictEqual(error.reason.target, { _tag: "Document", id: document.id })
+      }
+    }
+  }).pipe(Effect.scoped))
+
+it.effect("falls back for malformed network and paused request URLs", () =>
+  Effect.gen(function*() {
+    const { state, target, facts } = yield* withPage()
+    const handlers = Obligations.register(Network.register(Kit.handlers<State.Event>()))
+    handlers.apply("Network.requestWillBeSent", sent("not a URL"), { state, target })
+    // An unattributed worker pause is surfaced without a page route registration.
+    handlers.apply("Fetch.requestPaused", {
+      requestId: "malformed",
+      resourceType: "Fetch",
+      request: sent("also not a URL").request
+    }, { state, target: { ...target, page: undefined, kind: "worker" } })
+    yield* state.buffer.flush
+    const request = facts.find((fact) => fact._tag === "RequestSent")
+    assert.isDefined(request)
+    if (request?._tag === "RequestSent") assert.strictEqual(request.request.url, "about:blank")
+    const obligation = facts.find((fact) => fact._tag === "ObligationOpened")
+    assert.isDefined(obligation)
+    if (obligation?._tag === "ObligationOpened" && obligation.subject._tag === "PausedRequest") {
+      assert.strictEqual(obligation.subject.request.url, "about:blank")
+    } else assert.fail("expected a paused request")
+  }))

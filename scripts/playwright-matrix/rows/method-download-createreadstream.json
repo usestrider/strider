@@ -1,0 +1,25 @@
+{
+  "id": "method-download-createreadstream",
+  "upstream": [
+    "method:Download.createReadStream"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Download",
+      "symbol": "stream",
+      "url": "/docs/api/browser/Download#stream"
+    }
+  ],
+  "notes": "Download data is scoped; remote files may require explicit local download capability.",
+  "capabilities": [
+    "downloads"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Download.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

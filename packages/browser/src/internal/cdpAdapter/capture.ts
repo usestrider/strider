@@ -143,6 +143,11 @@ export const screenshot = Effect.fnUntraced(
         }
       }
     }
+    const viewport = metrics.cssVisualViewport
+    const fitsViewport = clip !== undefined &&
+      clip.x >= viewport.pageX && clip.y >= viewport.pageY &&
+      clip.x + clip.width <= viewport.pageX + viewport.clientWidth &&
+      clip.y + clip.height <= viewport.pageY + viewport.clientHeight
     if (options.omitBackground) {
       yield* Kit.protocol(Emulation.setDefaultBackgroundColorOverride({ color: { r: 0, g: 0, b: 0, a: 0 } }).pipe(on))
     }
@@ -152,7 +157,7 @@ export const screenshot = Effect.fnUntraced(
       Page.captureScreenshot({
         format: options.format,
         ...(Option.isSome(options.quality) ? { quality: options.quality.value } : {}),
-        ...(clip === undefined ? {} : { clip: { ...clip, scale }, captureBeyondViewport: true }),
+        ...(clip === undefined ? {} : { clip: { ...clip, scale }, captureBeyondViewport: !fitsViewport }),
         fromSurface: true
       }).pipe(on, Effect.provideService(ProtocolClient.ReplyReceived, guard?.reply))
     ).pipe(

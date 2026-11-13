@@ -1,0 +1,17 @@
+{
+  "id": "method-webstorage-setitem",
+  "upstream": [
+    "method:WebStorage.setItem"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "OriginStorage",
+      "symbol": "OriginStorage.set",
+      "url": "/docs/api/browser/OriginStorage#OriginStorage.set"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": []
+}

@@ -26,6 +26,7 @@ import type * as PageNavigation from "../PageNavigation.ts"
 import * as Target from "../Target.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as Adapter from "./adapter.ts"
+import * as Declarations from "./declarations.ts"
 import * as Urls from "./urls.ts"
 
 /** One step of a timeline. */
@@ -56,7 +57,7 @@ export const parse = (timeline: string): ReadonlyArray<Step> => {
     if (match === null) {
       throw new Error(
         `Browser.layerTest: ${JSON.stringify(timeline.slice(at, at + 12))} at ${at} isn't a step; ` +
-          "the steps are -, commit, load, resp(name), dialog(kind), popup, crash and |"
+          "the steps are -, commit, load, resp(name), dialog(kind), popup, crash, and |"
       )
     }
     at = token.lastIndex
@@ -73,7 +74,7 @@ export const parse = (timeline: string): ReadonlyArray<Step> => {
       steps.push({ _tag: "Dialog", kind: kind as "alert" | "confirm" | "prompt" | "beforeunload" })
     } else {
       throw new Error(
-        `Browser.layerTest: dialog(${kind}) at ${at - text.length} isn't alert, confirm, prompt or beforeunload`
+        `Browser.layerTest: dialog(${kind}) at ${at - text.length} isn't alert, confirm, prompt, or beforeunload`
       )
     }
   }
@@ -112,6 +113,7 @@ export const capabilities: ReadonlyArray<Browser.CapabilityEntry> = [
   entry("popups.opener", "supported"),
   entry("close.runBeforeUnload", "supported", ["no page has a document to ask"]),
   entry("engine", "unsupported", [noDom]),
+  entry("boundingBox.frameTransforms", "unsupported", [noDom]),
   entry("isolatedWorlds", "unsupported", [noDom]),
   entry("input.native", "unsupported", [noDom]),
   entry("interception.request", "unsupported", ["the timeline's requests are never paused"]),
@@ -146,6 +148,7 @@ export const connect = (
   Effect.gen(function*() {
     const scope = yield* Effect.scope
     const ids = Adapter.makeIds()
+    const registry = Declarations.make()
     // One fact at a time, in order, as a backend's fold delivers them
     const lock = yield* Semaphore.make(1)
     const emit = (...facts: ReadonlyArray<Adapter.Fact>) =>
@@ -358,6 +361,8 @@ export const connect = (
             ? Effect.void
             : end(page, new Target.PageClosed({ by: "command" }), "fake: closePage")
         }),
+      viewportSize: (id) =>
+        Effect.map(pageOf(id), (page) => Declarations.viewportSize(registry, { page: page.id, context: page.context })),
       activatePage: (id) => Effect.asVoid(pageOf(id)),
       navigate: (id, url) => Effect.flatMap(pageOf(id), (page) => commit(page, url, "crossDocument", true)),
       reload: (id) => Effect.flatMap(pageOf(id), (page) => commit(page, page.url, "reload", true)),
@@ -367,6 +372,8 @@ export const connect = (
       releaseHandles: () => Effect.void,
       dispatchInput: () => unsupported("input.native"),
       contentFrame: () => unsupported("engine"),
+      releaseNodes: () => Effect.void,
+      geometry: () => unsupported("Locator.boundingBox"),
       resolve: (obligation, decision) =>
         Effect.suspend(() => {
           const open = prompts.get(obligation)
@@ -382,7 +389,16 @@ export const connect = (
             }
           )
         }),
-      declare: () => Effect.succeed(ids.registration()),
+      declare: Effect.fnUntraced(function*(scope, declaration) {
+        const id = ids.registration()
+        registry.add(scope, declaration, id)
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            registry.remove(id)
+          })
+        )
+        return id
+      }),
       screenshot: () => unsupported("screenshot", "nothing is painted"),
       pdf: () => unsupported("pdf", "nothing is painted"),
       accessibilityTree: () => unsupported("capability.axTree"),
@@ -409,6 +425,7 @@ export const connect = (
       grantPermissions: () => Effect.void,
       resetPermissions: () => Effect.void,
       responseBody: () => Effect.succeed(new Uint8Array()),
+      captureRequestBody: () => Effect.succeed({ _tag: "Unavailable", why: "notCollected" }),
       requestBody: () => Effect.succeedNone,
       pausedRequestBody: () => Effect.succeedNone,
       pausedResponseBody: () => unsupported("interception.responseBody", "the timeline's requests are never paused"),

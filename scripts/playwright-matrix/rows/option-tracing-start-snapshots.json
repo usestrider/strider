@@ -1,0 +1,18 @@
+{
+  "id": "option-tracing-start-snapshots",
+  "upstream": [
+    "method:Tracing.start"
+  ],
+  "option": "snapshots",
+  "status": "has",
+  "api": [
+    {
+      "module": "Trace",
+      "symbol": "Options",
+      "url": "/docs/api/browser/Trace#Options"
+    }
+  ],
+  "notes": "Capture settings are explicit; not every Playwright tracing option is supported.",
+  "capabilities": [],
+  "requirements": []
+}

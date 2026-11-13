@@ -1,0 +1,12 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "capabilities": [],
+  "id": "option-screencast-start-size",
+  "upstream": [
+    "method:Screencast.start"
+  ],
+  "option": "size",
+  "requirements": []
+}

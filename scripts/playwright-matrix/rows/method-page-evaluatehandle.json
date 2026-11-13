@@ -1,0 +1,35 @@
+{
+  "id": "method-page-evaluatehandle",
+  "upstream": [
+    "method:Page.evaluateHandle"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "Page.evaluateHandle",
+      "url": "/docs/api/browser/Page#Page.evaluateHandle"
+    }
+  ],
+  "notes": "Returns an isolated-world handle. No main-world handle evaluation equivalent.",
+  "capabilities": [
+    "isolatedWorlds"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [],
+  "gaps": [
+    "method-page-evaluatehandle-value-main-world-handles"
+  ],
+  "valueCoverage": [
+    {
+      "value": "main-world handles",
+      "status": "missing",
+      "gap": "method-page-evaluatehandle-value-main-world-handles"
+    }
+  ]
+}

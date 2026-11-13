@@ -103,7 +103,8 @@ export interface ConnectOptions extends Browser.ConnectOptions {
  * crashed without waiting for the host to write a core. `coreDumps: true` leaves the limit as the host sets it.
  *
  * Launch requires Linux with readable child procfs (`/proc/<pid>/net/tcp` and `/proc/<pid>/fd`). Before and after
- * connecting, the spawned PID itself must hold the same inspector listener. A wrapper must exec MiniBrowser rather
+ * connecting, the spawned PID itself must hold the same inspector listener; its descriptors are read only once a
+ * listener on the port exists. A wrapper must exec MiniBrowser rather
  * than only fork it. Unsupported operating systems and unverifiable ownership fail with `ConnectionFailed`.
  * A procfs read failure stops ownership attempts and closes any rejected connection, then waits for the child's
  * exit event within the remaining launch deadline. If no exit is observed, refusal retains the access error.
@@ -116,7 +117,7 @@ export interface ConnectOptions extends Browser.ConnectOptions {
  * Video is disabled unless `video` and a `VideoWriter` service are both provided. `polled` is a finite positive
  * delay after each completed PNG capture; 100 ms is a starting point, not a default or a responsiveness guarantee.
  * Captures add work to the page and can miss short states. The variable-rate file keeps each sample until the next or recording end. The output directory
- * must already exist, be absolute and writable; invalid video settings fail with `InvalidInput` before launch.
+ * must already exist, be absolute, and writable; invalid video settings fail with `InvalidInput` before launch.
  * Files remain in that caller-owned directory. Downloads and native screencasts remain unsupported.
  *
  * **Gotchas**
@@ -130,8 +131,8 @@ export interface ConnectOptions extends Browser.ConnectOptions {
  * - A context's cookie list is the cookies its open pages are sent, and a host-only cookie is set as a domain
  *   cookie.
  * - Each new context starts a browser process, which takes about 0.6 seconds.
- * - History traversal, the locale, time zone and user agent, a mobile viewport, touch, keyboard layouts,
- *   permissions, downloads, file choosers (`setInputFiles` works), screencasts, PDFs and JPEG screenshots fail
+ * - History traversal, the locale, the time zone, the user agent, a mobile viewport, touch, keyboard layouts,
+ *   permissions, downloads, file choosers (`setInputFiles` works), screencasts, PDFs, and JPEG screenshots fail
  *   with `Unsupported`. `Browser.capabilities` lists what it offers.
  * - Linux only: WebKitGTK and WPE are the stock WebKit ports with an automation mode.
  * - A MiniBrowser from Nix needs `glib-networking`'s modules on `GIO_EXTRA_MODULES` for HTTPS, which otherwise
@@ -278,8 +279,8 @@ export const layerConfig = (
  *
  * **Gotchas**
  *
- * - The inspector can look but not drive: it has no input, dialogs, emulation, isolated worlds or browser session.
- *   `newContext`, `newPage`, clicks, typing, dialog handling and `evaluate` fail with `Unsupported`;
+ * - The inspector can look but not drive: it has no input, dialogs, emulation, isolated worlds, or browser session.
+ *   `newContext`, `newPage`, clicks, typing, dialog handling, and `evaluate` fail with `Unsupported`;
  *   `evaluateInMainWorld` runs in the page's world. `Browser.capabilities` lists what it offers.
  * - The locator engine and init scripts run in the page's own world, where its scripts can see them.
  * - `goto` navigates by setting `location.href`, and fails with `Unsupported` for a fragment of the current

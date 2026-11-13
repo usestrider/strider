@@ -1,5 +1,5 @@
 /**
- * Navigations of a page: the event, and what `goto`, `reload`, `back` and `forward` return.
+ * Navigations of a page: the event, and what `goto`, `reload`, `back`, and `forward` return.
  *
  * A navigation commits a new document, changes the current one (a fragment or the History API), restores one from
  * the back/forward cache, or activates a prerendered one. An HTTP 404 or 500 still commits, with the status in its
@@ -49,7 +49,7 @@ export type Id = typeof Id.Type
  *
  * **Details**
  *
- * - `Committed`: a new document. `response` is `None` for `about:blank`, `data:` URLs and similar.
+ * - `Committed`: a new document. `response` is `None` for `about:blank`, `data:` URLs, and similar.
  * - `SameDocument`: the document stayed, through a fragment, the History API, or an intercepted navigation.
  * - `Restored`: a document came back from the back/forward cache.
  * - `Activated`: a prerendered document became the page's.
@@ -208,7 +208,7 @@ export const next = <PE = never, PR = never>(
 
 /**
  * Subscribes to a page's navigations and emits every successful match from now on: `Committed`, `SameDocument`,
- * `Restored` or `Activated`.
+ * `Restored`, or `Activated`.
  *
  * **Example** (Logging every URL a single-page app visits)
  *

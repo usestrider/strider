@@ -1,0 +1,23 @@
+{
+  "id": "method-page-getbyref",
+  "upstream": [
+    "method:Page.getByRef"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Snapshot",
+      "symbol": "Node.ref",
+      "url": "/docs/api/browser/Snapshot#Node.ref"
+    }
+  ],
+  "notes": "Take a snapshot, then snapshot.ref(id). Refs belong to that snapshot and fail StaleRef after node/document/generation changes; this is not a latest-snapshot global ref dispatcher.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

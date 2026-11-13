@@ -1,0 +1,23 @@
+{
+  "id": "method-browsercontext-removealllisteners",
+  "upstream": [
+    "method:BrowserContext.removeAllListeners"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "ConsoleMessage",
+      "symbol": "stream",
+      "url": "/docs/api/browser/ConsoleMessage#stream"
+    }
+  ],
+  "notes": "Stream lifetime and scope replace listener mutation.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/UserContext.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

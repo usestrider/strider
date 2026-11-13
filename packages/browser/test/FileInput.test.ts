@@ -15,6 +15,7 @@ import { vi } from "vitest"
 import * as Adapter from "../src/internal/adapter.ts"
 import * as BrowserImpl from "../src/internal/browser.ts"
 import * as Evaluation from "../src/internal/evaluation.ts"
+import * as Execution from "../src/internal/execution.ts"
 import * as Fake from "../src/internal/fake.ts"
 import * as Preparation from "../src/internal/fileInput.ts"
 import * as Handles from "../src/internal/handles.ts"
@@ -58,7 +59,7 @@ describe("FileInput across a connection", () => {
             const evaluate = Evaluation.call
             const observed = vi.spyOn(Evaluation, "call").mockImplementation((runtime, options) => {
               calls.push({
-                assignment: options.functionDeclaration.includes("function commitUpload"),
+                assignment: /function (commitUpload|uploadAll)/.test(options.functionDeclaration),
                 dispatched: options.dispatch !== undefined
               })
               return evaluate(runtime, options)
@@ -109,7 +110,7 @@ describe("FileInput across a connection", () => {
               })))
             })
             // Stub only DOM lookup/readiness: keep file preparation and adapter dispatch real.
-            const ready = vi.spyOn(Runtime, "sendRouted").mockReturnValue(Effect.succeed({
+            const ready = vi.spyOn(Execution.ordinary, "action").mockReturnValue(Effect.succeed({
               routed,
               response: {
                 _tag: "Ready",
@@ -230,7 +231,7 @@ describe("FileInput across a connection", () => {
                 assert.deepStrictEqual(paths, [])
                 if (failure) {
                   if (!unreadable && source !== "changed-cardinality") assert.deepStrictEqual(evaluations, [])
-                } else assert.strictEqual(evaluations.length, 3)
+                } else assert.strictEqual(evaluations.length, 1)
                 return
               }
               if (source === "remote" || (ownership === "launched" && source !== "bytes")) {
@@ -381,7 +382,7 @@ describe("a local read under the deadline", () => {
 
   it.live("Locator.setInputFiles times out when the read doesn't end", () =>
     Effect.scoped(Effect.gen(function*() {
-      const ready = vi.spyOn(Runtime, "sendRouted").mockReturnValue(Effect.succeed({
+      const ready = vi.spyOn(Execution.ordinary, "action").mockReturnValue(Effect.succeed({
         routed,
         response: {
           _tag: "Ready",

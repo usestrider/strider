@@ -1,0 +1,23 @@
+{
+  "id": "method-page-reload",
+  "upstream": [
+    "method:Page.reload"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "Page.reload",
+      "url": "/docs/api/browser/Page#Page.reload"
+    }
+  ],
+  "notes": "Navigation defaults to commit, not load; explicit load states exclude networkidle.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}
