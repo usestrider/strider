@@ -596,6 +596,35 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
       )
 
       it.effect(
+        "a click that timed out on an inert page names the inert element and the open dialog",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const html =
+              `<div id="app" inert><button>Pay</button></div><div role="dialog" aria-modal="true" aria-label="Choose a hospital"><p>Pick one</p></div>`
+            const url = `${served.origin}/fixture?html=${encodeURIComponent(html)}`
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const tools = yield* BrowserToolkit.make({
+                context: page.context,
+                secrets: {},
+                capture: CapturePolicy.local
+              })
+              yield* call(tools, "newPage", { name: "shop", url })
+              const clicked = yield* call(tools, "click", { page: "shop", target: `role=button[name="Pay"]` }).pipe(
+                Deadline.within("1 second")
+              )
+              assert.isTrue(clicked.failed, JSON.stringify(clicked.value))
+              const message = String(clicked.value.message)
+              assert.include(message, "inert")
+              assert.include(message, "div#app")
+              assert.include(message, "dialog")
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
         "drives a page as a model would: names, refs, secrets, the digest and waits",
         () =>
           Effect.gen(function*() {

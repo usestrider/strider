@@ -1964,6 +1964,24 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         )
       }
 
+      it.effect(
+        "an inert target's Timeout names the inert ancestor and the open modal dialog",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div id="app" inert><button id="go">Pay</button></div><div role="dialog" aria-modal="true" aria-label="Choose a hospital"><p>Pick one</p></div>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            const error = yield* page.locator("#go").click().pipe(Deadline.within("1 second"), Effect.flip)
+            assert(Deadline.isTimeout(error), String(error))
+            const text = JSON.stringify(error.last) + JSON.stringify(error.hint) + error.message
+            assert.include(text, "div#app")
+            assert.include(text, "dialog")
+          })),
+        timeout
+      )
+
       for (
         const [change, handler, reason] of [
           ["hidden target", `this.style.visibility='hidden'`, "NotVisible"],
