@@ -784,6 +784,22 @@ old-versus-current speed ratios; every candidate must equal the reviewed engine.
 hashes, fixture definitions and partial failures are retained. Same-page pairing reduces some sources of noise,
 but does not eliminate JIT, GC, scheduling, order or thermal effects.
 
+### Hosted upload and response phase diagnostic
+
+Dispatch `benchmarks.yml` from the tooling branch with `workload=bench`, `only=phase-diagnostic`,
+`browser=chromium`, and pinned base/head commits. This diagnostic profiles head and Playwright, with three
+warmups and the requested alternating pairs. `phase-diagnostic/report.json` and `phases.md` split the upload
+and response scenarios at timing marks; `phase-summary.md` also includes separate traced `setInputFiles` and
+close timelines. `phase-diagnostic/trace/input.md` reports commands, serial round trips, wire bytes, and
+per-command timing for the upload call. The trace pass uses separate samples and protocol hooks that add overhead;
+its timings do not replace the untraced phase samples or the paired scenario comparison.
+
+The upload fixture exercises an all-Bytes selection totaling at most 64 KiB: Strider constructs and assigns it
+in one evaluation call using the engine utility world. Its trace includes locator work and node resolution as
+well as assignment; command count is not the number of upload evaluation calls. It does not measure the collector
+path used for larger Bytes selections or any attached Local file. A remaining phase difference does not by itself
+identify removable locator or transport work.
+
 ### Hosted launch phase diagnostics
 
 Dispatch `benchmarks.yml` from the tooling branch with `workload=bench`, `only=launch-diagnostic`,

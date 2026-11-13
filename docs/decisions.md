@@ -1074,20 +1074,29 @@ An attached browser may be local, but always transferring there makes remote fil
 connection classification. Copying every launched upload was rejected because it adds many commands and browser
 storage to the common native-path case.
 
-Attached Local and Bytes share a sequential transfer. Local descriptors open in a scope and use open-file stat
+Transferred selections consisting entirely of Bytes with a combined raw size of at most 64 KiB (including an
+empty selection) encode the complete files as base64 and construct and assign the Files in one evaluation call.
+This library-owned function reuses the engine's utility world rather than creating another isolated world;
+stock WebKit uses the page world where an isolated world is unavailable. This bounded exception avoids collector
+setup and serial acknowledgements for small in-memory uploads without changing selection validation or deadlines.
+Using it for larger files was rejected because it would construct unbounded encoded files and messages.
+
+All other transferred selections, including any Attached Local file, use a sequential collector transfer in the
+isolated world (or the page world on stock WebKit). Local descriptors open in a scope and use open-file stat
 metadata followed by reads of at most 64 KiB. Bytes use views of their existing input. Each chunk is independently
-base64 encoded, sent, and acknowledged before the next is read; no complete encoded file or message is constructed.
-A remote collector holds chunk parts and completed Files through an owned handle. The upload scope closes local
-files, clears the collector, and releases the handle on success, failure, or interruption; remote cleanup has its
-own bounded budget. Browser backing storage grows with the files. There is no arbitrary library size cap or
-constant browser-memory promise: browser resource limits still apply. A disk sink and hard quota were rejected
+base64 encoded, sent, and acknowledged before the next is read; this path constructs no complete encoded file or
+message. A remote collector holds chunk parts and completed Files through an owned handle. The upload scope closes
+local files, clears the collector, and releases the handle on success, failure, or interruption; remote cleanup
+has its own bounded budget. Browser backing storage grows with the files. There is no arbitrary library size cap
+or constant browser-memory promise: browser resource limits still apply. A disk sink and hard quota were rejected
 as new capability and compatibility contracts without an established requirement.
 
 Native paths and transferred files cannot coexist in one selection, because their two setters each replace it.
 Preparation rejects such mixtures before any selection changes. Attached Local therefore combines with Bytes,
 while launched Local combines with Remote. Empty lists use page-side construction: Chromium can retain synthetic
 files after an empty native-path command. The collector validates live input type and cardinality before transfer
-and again before final assignment; it never mutates selection or dispatches events during transfer. Locator native
+and again before final assignment. The one-call Bytes path validates before constructing and assigning Files.
+Neither path mutates selection or dispatches events before validation and construction succeed. Locator native
 selections also check live cardinality before dispatch, since native backends do not uniformly refuse several
 files on a single-file input. Detached
 chooser inputs remain valid when the backend identifies them. No WebKit adapter behavior is changed here: stock
