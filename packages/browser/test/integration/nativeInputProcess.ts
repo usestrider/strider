@@ -15,4 +15,4 @@ export const selectProcessCapture = (capture: Capture | undefined) => {
   Object.assign(globalThis, { [processKey]: capture })
 }
 export const processCapture = (args: ReadonlyArray<string> | undefined): Capture | undefined =>
-  args?.includes(flags[2]) ? (globalThis as CaptureGlobal)[processKey] : undefined
+  args?.includes(flags[0]) ? (globalThis as CaptureGlobal)[processKey] : undefined

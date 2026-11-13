@@ -136,7 +136,7 @@ describe("test-scoped Chromium native capture", () => {
           "-e",
           "process.stderr.write(Buffer.alloc(200000, 120)); process.stderr.write('tail\\n')",
           "--",
-          flags[2]
+          flags[0]
         ], { stdio: ["ignore", "ignore", "pipe"] })
         const received: Array<Buffer> = []
         child.stderr.on("data", (chunk: Buffer) => received.push(chunk))
