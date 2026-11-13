@@ -260,7 +260,6 @@ export const engine = (backend: Backend) =>
     ).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor)))
     layer(fixture, { excludeTestServices: true })(
       (it) => {
-<<<<<<< HEAD
         it.effect("reuses same-frame stability inside a reachable scrolling layout", () =>
           Effect.gen(function*() {
             const { call } = yield* open(
@@ -313,7 +312,6 @@ export const engine = (backend: Backend) =>
             }), timeout)
         }
 
-=======
         for (const ending of ["cancel", "departure"] as const) {
           it.effect(`cooperative viewport ${ending} releases its pending round immediately`, () =>
             Effect.gen(function*() {
@@ -1173,7 +1171,6 @@ export const engine = (backend: Backend) =>
             }
           }), timeout)
 
->>>>>>> origin/main
         it.effect("collects field metadata only for masking snapshots and clears it across mode switches", () =>
           Effect.gen(function*() {
             const { call, send } = yield* open(

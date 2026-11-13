@@ -2107,7 +2107,10 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   /** Resolves fresh DOM and runs exactly one readiness/application check. */
-  const checkAction = (request: Extract<Request, { op: "act" }>, state: ActionState): Response | undefined => {
+  const checkAction = async (
+    request: Extract<Request, { op: "act" }>,
+    state: ActionState
+  ): Promise<Response | undefined> => {
     const action = request.action
     clearTreeCaches()
     const found = resolve(request.steps)
@@ -2117,88 +2120,25 @@ export function engine(render: (root: SnapNode) => string) {
       state.tracked = element ?? null
       state.rects = []
     }
+    let clipped = false
+    if (element !== undefined && request.checks.inViewport && visibleFragment(element, request.clip) !== null) {
+      const observation = clippedByScroller(element, state.end - now(), request.clip)
+      if (observation !== null) {
+        const result = await observation
+        state.previous = null
+        if (result === null || now() >= state.end) return
+        clearTreeCaches()
+        const current = resolve(request.steps)
+        // An observation belongs to one node; a replacement must start its own complete check.
+        if (current.length !== 1 || current[0] !== element) return
+        clipped = result
+      }
+    }
     // What no waiting mends fails at once
     if (element !== undefined) {
       if (request.checks.editable && !editableKind(element)) {
         return { _tag: "Final", final: { _tag: "NotEditable", element: describe(element) } }
       }
-<<<<<<< HEAD
-      sampled = true
-      clearTreeCaches()
-      const found = resolve(request.steps)
-      if (found.length > 1) return strict(found)
-      const element = found[0]
-      if (element !== tracked) {
-        tracked = element ?? null
-        rects = []
-      }
-      let clipped = false
-      if (element !== undefined && request.checks.inViewport && visibleFragment(element, request.clip) !== null) {
-        const observation = clippedByScroller(element, end - now(), request.clip)
-        if (observation !== null) {
-          const result = await observation
-          previous = null
-          if (result === null || now() >= end) continue
-          clearTreeCaches()
-          const current = resolve(request.steps)
-          // An observation belongs to one node; a replacement must start its own complete check.
-          if (current.length !== 1 || current[0] !== element) continue
-          clipped = result
-        }
-      }
-      // What no waiting mends fails at once
-      if (element !== undefined) {
-        if (request.checks.editable && !editableKind(element)) {
-          return { _tag: "Final", final: { _tag: "NotEditable", element: describe(element) } }
-        }
-        if (action._tag === "Checked" && checkedOf(element) === null) {
-          return {
-            _tag: "Final",
-            final: {
-              _tag: "WrongElement",
-              expected: "a checkbox, a radio or an ARIA checkable",
-              element: describe(element)
-            }
-          }
-        }
-        if (action._tag === "Select" && !(element instanceof HTMLSelectElement)) {
-          return { _tag: "Final", final: { _tag: "WrongElement", expected: "a <select>", element: describe(element) } }
-        }
-        if (action._tag === "FileInput" && !(element instanceof HTMLInputElement && element.type === "file")) {
-          return {
-            _tag: "Final",
-            final: { _tag: "WrongElement", expected: "a file input", element: describe(element) }
-          }
-        }
-      }
-      const checks = request.checks
-      const evidence = previous
-      previous = null
-      let reason: NotReady | null = null
-      if (element === undefined) reason = { _tag: "NoMatch" }
-      else if (checks.visible && !rendered(element, false)) reason = { _tag: "NotVisible" }
-      else if (checks.enabled && !enabled(element)) reason = { _tag: "Disabled" }
-      else if (checks.editable && readOnly(element)) reason = { _tag: "ReadOnly" }
-      else if (checks.notInert && inertReason(element) !== null) reason = inertReason(element)
-      if (reason === null && element !== undefined && checks.inViewport) {
-        const outside = visibleFragment(element, request.clip) === null || clipped
-        if (outside) {
-          reason = { _tag: "OutsideViewport" }
-          if (!scrolled) {
-            scrollToFragments(element, request.clip)
-            scrolled = true
-          }
-        }
-      }
-      if (reason === null && element !== undefined && checks.stable > 0) {
-        const rect = element.getBoundingClientRect()
-        rects.push(rect)
-        if (rects.length > checks.stable + 1) rects.shift()
-        const unchanged = evidence !== null && evidence.element === element && evidence.frames === checks.stable &&
-          sameRect(evidence.rect, rect)
-        if (!unchanged && (rects.length < checks.stable + 1 || !rects.every((rect) => sameRect(rect, rects[0]!)))) {
-          reason = { _tag: "NotStable" }
-=======
       if (
         (action._tag === "Checked" && checkedOf(element) === null) ||
         (action._tag === "Point" && action.checked === true && checkableForAction(element) === null)
@@ -2219,7 +2159,6 @@ export function engine(render: (root: SnapNode) => string) {
         return {
           _tag: "Final",
           final: { _tag: "WrongElement", expected: "a file input", element: describe(element) }
->>>>>>> origin/main
         }
       }
     }
@@ -2237,7 +2176,7 @@ export function engine(render: (root: SnapNode) => string) {
     ) reason = { _tag: "Disabled" }
     else if (checks.editable && readOnly(element)) reason = { _tag: "ReadOnly" }
     else if (checks.notInert && inertReason(element) !== null) reason = inertReason(element)
-    else if (checks.inViewport && visibleFragment(element, request.clip) === null) {
+    else if (checks.inViewport && (visibleFragment(element, request.clip) === null || clipped)) {
       reason = { _tag: "OutsideViewport" }
       if (!state.scrolled) {
         scrollToFragments(element, request.clip)
@@ -2338,7 +2277,7 @@ export function engine(render: (root: SnapNode) => string) {
         state.frames++
       }
       state.sampled = true
-      const response = checkAction(request, state)
+      const response = await checkAction(request, state)
       if (response !== undefined) return response
     }
   }
@@ -3837,7 +3776,7 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
     try {
       if (session.request.op === "act") {
         session.state!.sampled = true
-        const response = helpers.checkAction(session.request, session.state!)
+        const response = await helpers.checkAction(session.request, session.state!)
         if (response !== undefined) return finished(session, response)
         if (!(await wait(session, false))) return stopped(session)
       } else {

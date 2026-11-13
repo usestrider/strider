@@ -566,6 +566,7 @@ const prepareRound = Effect.fnUntraced(function*(
         op: "frame",
         steps: hop.steps,
         scroll: request.checks.inViewport,
+        cap: request.cap,
         point: null,
         ...(clip === undefined ? {} : { clip })
       }, id)
@@ -632,33 +633,6 @@ export const sendRouted = (
         const routed = route.routed
         const stale = replaced(routed.document, last)
         if (route._tag === "Entered" && Option.isSome(stale)) return Option.some({ response: stale.value, routed })
-<<<<<<< HEAD
-        let clip: Engine.Clip | undefined
-        if (
-          route._tag === "Entered" && request.op === "act" &&
-          ((request.action._tag === "Point" && request.action.position === null) || request.checks.receivesPointer)
-        ) {
-          // Read each ancestor in its own document: this also works across origin and process boundaries.
-          for (const hop of routed.hops) {
-            const answer = yield* sendToDocument(runtime, page, hop.document, {
-              op: "frame",
-              steps: hop.steps,
-              scroll: request.checks.inViewport,
-              cap: request.cap,
-              point: null,
-              ...(clip === undefined ? {} : { clip })
-            }, id)
-            if (Option.isNone(answer)) return Option.none()
-            if (answer.value._tag === "NoMatch") {
-              return Option.some({
-                routed,
-                response: {
-                  _tag: "NotReady" as const,
-                  reason: { _tag: "NoMatch" as const },
-                  history: [{ _tag: "NoMatch" as const }],
-                  scrolled: false,
-                  checked: true
-=======
         const prepared = yield* prepareRound(runtime, page, request, route, id)
         if (prepared._tag === "Moved") return Option.none()
         if (prepared._tag === "Answer") return Option.some(prepared.answer)
@@ -691,7 +665,6 @@ export const sendRouted = (
                   ...request,
                   ...(token === undefined ? {} : { token }),
                   cap: Math.min(request.cap, roundCap(yield* BrowserClock.left(at)))
->>>>>>> origin/main
                 }
                 : request
               return JSON.stringify(
