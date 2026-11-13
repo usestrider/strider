@@ -5290,20 +5290,48 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* newPage
               yield* page.goto(url)
-              // Warm the engine, then schedule the stall only after the failing check samples CSS.
-              yield* page.locator("#css").pipe(Expect.toHaveCSS("color", "rgb(12, 34, 56)"))
-              yield* page.evaluate(() => {
-                const original = window.getComputedStyle
-                window.getComputedStyle = function(...args) {
-                  const result = original.apply(this, args)
-                  window.getComputedStyle = original
-                  setTimeout(() => {
-                    const end = Date.now() + 2500
-                    while (Date.now() < end);
-                  }, 0)
-                  return result
-                }
-              })
+              const locator = page.locator("#css") as LocatorImpl
+              const adapter = locator.owner.runtime.model.adapter
+              const original = adapter.evaluate
+              let instrumented = false
+              yield* Effect.acquireRelease(
+                Effect.sync(() => {
+                  const evaluate: typeof original = (realm, call) => {
+                    const argument = call.arguments[0]
+                    if (
+                      instrumented || call.functionDeclaration !== Engine.run ||
+                      argument?._tag !== "Value" || argument.value.type !== "string" ||
+                      (JSON.parse(argument.value.value) as Engine.Request).op !== "expect"
+                    ) {
+                      return original(realm, call)
+                    }
+                    instrumented = true
+                    return original(realm, {
+                      ...call,
+                      functionDeclaration: `async function(request) {
+                        const original = globalThis.getComputedStyle;
+                        globalThis.getComputedStyle = function(...args) {
+                          const result = original.apply(this, args);
+                          globalThis.getComputedStyle = original;
+                          setTimeout(() => {
+                            const end = Date.now() + 2500;
+                            while (Date.now() < end) {}
+                            document.documentElement.dataset.stalled = "yes";
+                          }, 50);
+                          return result;
+                        };
+                        try { return await (${Engine.run})(request); }
+                        finally { globalThis.getComputedStyle = original; }
+                      }`
+                    })
+                  }
+                  Object.assign(adapter, { evaluate })
+                }),
+                () =>
+                  Effect.sync(() => {
+                    Object.assign(adapter, { evaluate: original })
+                  })
+              )
               const error = yield* page.locator("#css").pipe(
                 Expect.toHaveCSS("color", "red"),
                 Deadline.within("1500 millis"),
@@ -5311,6 +5339,8 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               )
               assert(Expect.isExpectationFailed(error), String(error))
               assert.deepStrictEqual(error.history.map((entry) => entry.value), ["rgb(12, 34, 56)"])
+              assert.strictEqual(instrumented, true)
+              assert.deepStrictEqual(yield* page.locator("html").readAttribute("data-stalled"), Option.some("yes"))
             }))
           }),
         timeout
