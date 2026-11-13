@@ -1230,6 +1230,28 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }), timeout)
       }
 
+      it.effect(
+        "reports no NotStable for a still element whose click times out while covered",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<!doctype html><style>body{margin:0}#go{position:absolute;left:20px;top:20px;width:100px;height:40px}#cover{position:absolute;left:0;top:0;width:300px;height:200px}</style><button id="go">Go</button><div id="cover"></div>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              const error = yield* page.locator("#go").click().pipe(Deadline.within("1 second"), Effect.flip)
+              assert(Deadline.isTimeout(error), String(error))
+              // The button never moves, so its unsettled baseline sample is not evidence that it was unstable
+              assert.deepStrictEqual(
+                error.history.map((entry) => (entry.value as { _tag: string })._tag),
+                ["Covered"]
+              )
+            }))
+          }),
+        timeout
+      )
+
       it.effect("clicks a wrapped link whose first line a scrolling ancestor clips", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
