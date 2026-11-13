@@ -495,7 +495,10 @@ export function engine(render: (root: SnapNode) => string) {
   // The tree
   const SKIPPED = new Set(["script", "style", "noscript", "template"])
 
-  /** Every element under `root`, in tree order, with each open shadow root's elements after its host. */
+  /**
+   * Every element under `root`, in tree order, with each open shadow root's elements after its host. An element
+   * root's own open shadow root counts as under it, before its light children.
+   */
   const elementsUnder = (root: Document | Element | ShadowRoot): Array<Element> => {
     const out: Array<Element> = []
     const visit = (node: Document | Element | ShadowRoot) => {
@@ -505,6 +508,7 @@ export function engine(render: (root: SnapNode) => string) {
         visit(child)
       }
     }
+    if (root instanceof Element && root.shadowRoot !== null) visit(root.shadowRoot)
     visit(root)
     return out
   }
@@ -1287,6 +1291,7 @@ export function engine(render: (root: SnapNode) => string) {
     switch (step._tag) {
       case "Css": {
         const roots: Array<Document | Element | ShadowRoot> = [scope]
+        if (scope instanceof Element && scope.shadowRoot !== null) roots.push(scope.shadowRoot)
         for (const element of under) if (element.shadowRoot !== null) roots.push(element.shadowRoot)
         const found = new Set<Element>()
         for (const root of roots) {
