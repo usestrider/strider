@@ -891,6 +891,33 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
         timeout
       )
 
+      for (
+        const [variant, fn] of [
+          ["a plain value", (n: number) => n * 2],
+          ["the worker's location", () => self.location.pathname],
+          ["a Map", () => new Map([["a", 1]])]
+        ] as const
+      ) {
+        it.effect(
+          `evaluates in a dedicated worker before its script has loaded (${variant})`,
+          () =>
+            Effect.gen(function*() {
+              if (name !== "Chromium") return
+              const { url } = yield* fixture(() => button("Start", "window.worker = new Worker('/slow-worker.js')"))
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                yield* page.goto(url)
+                const started = yield* BrowserWorker.next(page)
+                yield* page.getByText("Start").click()
+                const worker = yield* started
+                const result = yield* worker.evaluate(fn as (n: number) => unknown, 21)
+                assert.isDefined(result)
+              }))
+            }),
+          timeout
+        )
+      }
+
       it.effect("finds a context's service worker where the backend says whose it is", () =>
         Effect.gen(function*() {
           const { origin, url } = yield* fixture(() => button("Register", "navigator.serviceWorker.register('/sw.js')"))

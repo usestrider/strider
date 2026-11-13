@@ -96,6 +96,13 @@ const routes: Record<string, Route> = {
     response.writeHead(200, { "content-type": "text/javascript" })
     response.end(`console.log("from the worker"); postMessage("ready")`)
   },
+  // A dedicated worker's script that the server holds back for a second.
+  "/slow-worker.js": (_request, response) => {
+    setTimeout(() => {
+      response.writeHead(200, { "content-type": "text/javascript" })
+      response.end(`postMessage("ready")`)
+    }, 1000)
+  },
   "/worker": (_request, response) =>
     html(response, `<title>worker</title><script>const w = new Worker("/worker.js"); w.onmessage = () => {}</script>`),
   "/init": (_request, response) =>
