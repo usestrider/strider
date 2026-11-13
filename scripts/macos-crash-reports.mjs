@@ -182,7 +182,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const status = await collect(directory, [
       path.join(homedir(), "Library/Logs/DiagnosticReports"),
       "/Library/Logs/DiagnosticReports"
-    ], process.env.STRIDER_MACOS_CRASH_DATABASE)
+    ], path.join(homedir(), "Library/Application Support/Google/Chrome for Testing/Crashpad"))
     // Keep the artifact first; a green suite must not silently certify a probe that collected no deliberate crash.
     if (status.suiteOutcome === "success" && status.verification.state !== "verified") process.exitCode = 1
   } else throw new Error("Expected start or finish")
