@@ -1308,7 +1308,7 @@ describe("BidiAdapter state", () => {
 
   // Reduced from Firefox 158's recorded 204, download, HAR and November nightly traffic.
   // The load predates A's start although Firefox assigns it A; B has no document request.
-  for (const outcome of ["NoContent", "Download", "Committed", "nightly"] as const) {
+  for (const outcome of ["NoContent", "Download", "Committed", "nightly", "Failed"] as const) {
     it.effect(`correlates Firefox's stale load and replacement identity for ${outcome}`, () =>
       Effect.gen(function*() {
         const url = "http://example.test/fixture"
@@ -1378,6 +1378,13 @@ describe("BidiAdapter state", () => {
         yield* Deferred.succeed(release, undefined)
         yield* Fiber.join(running)
         event("browsingContext.navigationFailed", info("B", 14))
+        if (outcome === "Failed") {
+          event("browsingContext.navigationCommitted", {
+            ...info("B", 15),
+            url: "about:neterror?e=connectionFailure&u=" + encodeURIComponent(url)
+          })
+          assert.deepStrictEqual(page.document!.createdBy, { _tag: "ErrorPage", navigation: reserved })
+        }
         yield* state.buffer.flush
         const ends = facts.filter((fact) => fact._tag === "NavigationEnded").filter((fact) =>
           fact.navigation === reserved
