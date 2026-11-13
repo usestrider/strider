@@ -162,6 +162,14 @@ const save = (file: string, trace: TraceBuffer, scope: string, passing = false):
 }
 
 install({
+  checkpoint(label) {
+    const task = TestRunner.getCurrentTest<RunnerTestCase | undefined>()
+    if (task === undefined || active.size !== 1) return undefined
+    const running = active.get(task.id)
+    if (running === undefined) return undefined
+    const file = filename(task, label)
+    return save(file, running.trace, task.name)
+  },
   connection(label) {
     const id = `${++nextConnection}:${label}`
     // Vitest exposes one global current test, so it cannot identify a concurrent creator safely.
