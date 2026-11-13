@@ -39,7 +39,7 @@ const AdasFirefox = Firefox.layer({
   [`ProcessExited`](/docs/api/browser/Browser#ProcessExited) if Firefox exited.
 - On Firefox, a launch profile is the preferences it writes to the profile's `user.js`; its Chromium switches are
   ignored. `LaunchProfile.automation`, the default, writes: no first-run page,
-  no updates, no telemetry, the JSON viewer off, and popups opened as windows.
+  no updates, no telemetry, the JSON viewer and new-tab preloading off, and popups opened as windows.
 - `LaunchProfile.stock` sets nothing, for Firefox as a person's install shows it, with its first-run page, JSON
   viewer, and popups in tabs. [`LaunchProfile.concurrent`](/docs/tools/testing#concurrent-pages) also turns off
   background timer throttling, for pages that run side by side.

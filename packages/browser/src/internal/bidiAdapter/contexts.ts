@@ -30,45 +30,12 @@ import {
 } from "./state.ts"
 import { addNavigable, endNavigation, removeNavigable } from "./tree.ts"
 
-/**
- * Selects a page's tab again, started apart from any operation: a tab of its window that Strider never opened
- * left it behind, where Firefox renders it about once a second.
- */
-const reselect = (state: State, page: { readonly bidi: BrowsingContext.BrowsingContext } | BrowsingContext.Info) => {
-  const context = "bidi" in page ? page.bidi : page.context
-  state.buffer.later(Kit.protocol(state.send(BrowsingContext.activate({ context }))))
-}
-
 // ── Events ────────────────────────────────────────────────────────────────────────────────────────────────
 
 export const register = (handlers: Kit.Handlers<Event>) =>
   handlers
     .on(BrowsingContext.contextCreated, (params, { state }) => {
-      if (state.adopting || params.userContext === null || params.parent != null || params.originalOpener !== null) {
-        addNavigable(state, params, state.adopting)
-        return
-      }
-      const window = state.pageWindows.get(params.clientWindow)
-      if (window !== undefined) {
-        // A tab Firefox adds to a page's window, in another user context: not a page, and it hides the page
-        if (window.context.bidi !== params.userContext) reselect(state, window)
-        else addNavigable(state, params, false)
-        return
-      }
-      if (state.creating.length === 0) {
-        addNavigable(state, params, false)
-        return
-      }
-      if (!state.creating.includes(params.userContext)) {
-        state.held.push(params)
-        return
-      }
-      const page = addNavigable(state, params, false)
-      if (page !== undefined) state.pageWindows.set(params.clientWindow, page)
-      for (const other of state.held.splice(0)) {
-        if (other.clientWindow === params.clientWindow) reselect(state, page ?? other)
-        else addNavigable(state, other, false)
-      }
+      addNavigable(state, params, state.adopting)
     })
     .on(BrowsingContext.contextDestroyed, (params, { state }) => {
       const navigable = state.navigables.get(params.context)
@@ -302,18 +269,11 @@ export const createPage = Effect.fnUntraced(function*(state: State, id: UserCont
   const context = yield* contextOf(state, id)
   // A window of its own, as Chromium's pages are (QUIRKS.md, Q70): a tab behind another renders about once a
   // second, too seldom to act on, and a window keeps rendering whichever page came last (Q71)
-  state.creating.push(context.bidi)
   const created = yield* Kit.protocol(
     state.send(BrowsingContext.create({ type: "window", userContext: context.bidi }))
-  ).pipe(Effect.ensuring(Effect.sync(() => void state.creating.splice(state.creating.indexOf(context.bidi), 1))))
+  )
   // The context was announced before the reply; it is folded once this returns
   yield* state.root().drainObserved
-  // What arrived meanwhile and shares no window with the page is adopted now
-  if (state.creating.length === 0 && state.held.length > 0) {
-    yield* state.buffer.run(() => {
-      for (const other of state.held.splice(0)) addNavigable(state, other, false)
-    })
-  }
   const navigable = state.navigables.get(created.context)
   if (navigable === undefined) {
     return yield* Effect.fail(Kit.gone({ _tag: "Browser" }, new L1Target.Vanished({})))
