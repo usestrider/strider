@@ -134,6 +134,36 @@ const errorNavigation = (
 }
 
 describe("BidiAdapter state", () => {
+  it.effect("recognizes an owned window when its creation events are folded after the reply", () =>
+    Effect.gen(function*() {
+      let state!: State.State
+      const handlers = Contexts.register(Kit.handlers<State.Event>())
+      const { root } = session({ "browsingContext.create": { context: "created-page" } })
+      const protocolRoot = {
+        ...root,
+        // The reader settles replies independently of the ingestion worker. These events were received
+        // before the reply but remain queued when createPage starts draining them.
+        drainObserved: Effect.sync(() => {
+          for (const [context, userContext] of [["created-page", "owned-user"], ["stray", "default"]]) {
+            handlers.apply("browsingContext.contextCreated", {
+              context,
+              userContext,
+              clientWindow: "created-window",
+              parent: null,
+              originalOpener: null,
+              url: "about:blank",
+              children: null
+            }, { state })
+          }
+        })
+      }
+      ;({ state } = yield* withPage({}, {}, protocolRoot))
+      state.adopting = false
+      const context = Tree.contextFor(state, "owned-user")
+      yield* Contexts.createPage(state, context.id)
+      assert.isFalse(state.navigables.has("stray"), "queued creation events must still identify the owned window")
+    }))
+
   it.effect("keeps another pending window's stray tab held when the first page arrives", () =>
     Effect.gen(function*() {
       const { state } = yield* withPage()
