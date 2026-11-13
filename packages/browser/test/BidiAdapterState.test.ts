@@ -1306,6 +1306,123 @@ describe("BidiAdapter state", () => {
       assert.isEmpty(page.pendingTerminals)
     }))
 
+  // Reduced from Firefox 158's recorded 204, download, HAR and November nightly traffic.
+  // The load predates A's start although Firefox assigns it A; B has no document request.
+  for (const outcome of ["NoContent", "Download", "Committed", "nightly"] as const) {
+    it.effect(`correlates Firefox's stale load and replacement identity for ${outcome}`, () =>
+      Effect.gen(function*() {
+        const url = "http://example.test/fixture"
+        const entered = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const { facts, page, state } = yield* withPage({
+          "browsingContext.navigate": Effect.gen(function*() {
+            yield* Deferred.succeed(entered, undefined)
+            yield* Deferred.await(release)
+            return { navigation: "A", url }
+          })
+        })
+        const handlers = Contexts.register(Network.register(Navigation.register(Kit.handlers<State.Event>())))
+        const event = (method: string, params: unknown) => handlers.apply(method, params, { state })
+        const info = (navigation: string, timestamp: number) => ({ context: "C1", navigation, url, timestamp })
+        // The complete nightly trace has an earlier successful command, then a second command.
+        // Its initial "failure" names the already committed first navigation, not the second one.
+        if (outcome === "nightly") {
+          event("browsingContext.navigationStarted", info("prior", 1))
+          event("browsingContext.navigationCommitted", info("prior", 2))
+        }
+        const running = yield* Effect.forkChild(Navigation.navigate(state, page.id, url, { referrer: Option.none() }))
+        yield* Deferred.await(entered)
+        const reserved = page.expected.list[0]!.id
+        if (outcome === "nightly") event("browsingContext.navigationFailed", info("prior", 9))
+        event("browsingContext.navigationStarted", info("A", 10))
+        const params = {
+          ...info("A", 11),
+          redirectCount: 0,
+          isBlocked: false,
+          request: { request: "request", url, method: "GET", headers: [], destination: "document", bodySize: 0 }
+        }
+        event("network.beforeRequestSent", params)
+        event("browsingContext.load", { ...info("A", 9), url: outcome === "nightly" ? url : "about:blank" })
+        event("browsingContext.navigationStarted", info("B", 12))
+        event("network.responseStarted", {
+          ...params,
+          response: {
+            url,
+            status: outcome === "NoContent" ? 204 : 200,
+            statusText: "",
+            protocol: "HTTP/1.1",
+            headers: [],
+            fromCache: false
+          }
+        })
+        if (outcome === "NoContent") event("network.fetchError", { ...params, errorText: "NS_BINDING_ABORTED" })
+        else if (outcome === "Download") {
+          event("browsingContext.downloadWillBegin", {
+            ...info("A", 13),
+            download: "download",
+            suggestedFilename: "file.txt"
+          })
+        } else event("browsingContext.navigationCommitted", info("B", 13))
+        yield* Deferred.succeed(release, undefined)
+        yield* Fiber.join(running)
+        event("browsingContext.navigationFailed", info("B", 14))
+        yield* state.buffer.flush
+        const ends = facts.filter((fact) => fact._tag === "NavigationEnded" && fact.navigation === reserved)
+        assert.lengthOf(ends, 1)
+        assert.strictEqual(ends[0]!.outcome._tag, outcome === "nightly" ? "Committed" : outcome)
+        assert.strictEqual(state.requests.get("request")!.navigation!.id, reserved)
+        if (ends[0]!.outcome._tag === "Committed") {
+          assert.deepStrictEqual(ends[0]!.outcome.response, Option.some(state.requests.get("request")!.hop))
+        }
+        assert.isEmpty(page.navigations)
+        assert.isEmpty(state.navigations)
+        assert.isEmpty(page.expected.list)
+        assert.isEmpty(page.commandNavigations)
+        assert.isEmpty(page.pendingTerminals)
+      }))
+  }
+
+  for (
+    const competition of ["same-URL command", "page request", "fresh load", "other context", "no request"] as const
+  ) {
+    it.effect(`preserves supersession after a stale load with ${competition}`, () =>
+      Effect.gen(function*() {
+        const { facts, page, state } = yield* withPage()
+        const url = "http://example.test/fixture"
+        const handlers = Network.register(Navigation.register(Kit.handlers<State.Event>()))
+        const event = (method: string, params: unknown) => handlers.apply(method, params, { state })
+        const info = (navigation: string, timestamp: number) => ({ context: "C1", navigation, url, timestamp })
+        const reserved = Kit.expect(state.ids, page.expected, url)
+        event("browsingContext.navigationStarted", info("A", 10))
+        const request = (navigation: string, id: string) => ({
+          ...info(navigation, 11),
+          redirectCount: 0,
+          isBlocked: false,
+          request: { request: id, url, method: "GET", headers: [], destination: "document", bodySize: 0 }
+        })
+        if (competition !== "no request") event("network.beforeRequestSent", request("A", "first"))
+        event("browsingContext.load", {
+          ...info("A", competition === "fresh load" ? 11 : 9),
+          context: competition === "other context" ? "other" : "C1",
+          url: "about:blank"
+        })
+        const second = competition === "same-URL command" ? Kit.expect(state.ids, page.expected, url) : undefined
+        event("browsingContext.navigationStarted", info("B", 12))
+        if (competition === "page request") event("network.beforeRequestSent", request("B", "second"))
+        event("browsingContext.navigationCommitted", info("B", 13))
+        event("browsingContext.navigationFailed", info("A", 14))
+        yield* state.buffer.flush
+        const ended = facts.filter((fact) => fact._tag === "NavigationEnded" && fact.navigation === reserved)
+        assert.lengthOf(ended, 1)
+        assert.strictEqual(ended[0]!.outcome._tag, "Superseded")
+        if (second !== undefined && ended[0]!.outcome._tag === "Superseded") {
+          assert.strictEqual(ended[0]!.outcome.by, second)
+        }
+        assert.isEmpty(page.navigations)
+        assert.isEmpty(state.navigations)
+      }))
+  }
+
   for (const status of [204, 205, 500]) {
     for (const completion of ["reply", "rejected", "interrupted"] as const) {
       it.effect(`keeps request identity and ${status === 500 ? "fetch failure" : status} completion observable before command ${completion}`, () =>
