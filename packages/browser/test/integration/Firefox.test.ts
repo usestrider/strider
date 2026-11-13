@@ -65,7 +65,7 @@ describe("Firefox over WebDriver BiDi", () => {
           Effect.gen(function*() {
             const replies = new Map<number, Deferred.Deferred<any>>()
             let next = 1_000_000
-            let raw!: (method: string, params: object) => Effect.Effect<any>
+            let raw!: (method: string, params: object) => Effect.Effect<any, unknown>
             const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
               const { transport } = yield* FirefoxLauncher.launch({ executablePath: executable })
               // Commands of the test's own, sent over Strider's connection, with replies kept from its client
@@ -91,16 +91,29 @@ describe("Firefox over WebDriver BiDi", () => {
               const browser = yield* StriderBrowser.Browser
               const page = yield* StriderBrowser.newPage()
               yield* page.goto("data:text/html,<title>page</title>")
+              // Firefox's own first tab is the default context's page, adopted at connect
+              const before = yield* browser.defaultContext.pages
               const tree = yield* raw("browsingContext.getTree", {})
               const mine = tree.result.contexts.find((info: any) => info.userContext !== "default")
               // A tab in the default user context, in the page's window, as the macOS runs show Firefox adding
-              const added = yield* raw("browsingContext.create", {
+              // Started apart: Firefox sometimes leaves the reply unsent, so the tab is found in the tree
+              yield* Effect.forkChild(raw("browsingContext.create", {
                 type: "tab",
                 referenceContext: mine.context,
                 userContext: "default",
                 background: false
+              }))
+              const windowHasStray = Effect.gen(function*() {
+                const { result } = yield* raw("browsingContext.getTree", {})
+                return result.contexts.some((info: any) =>
+                  info.userContext === "default" && info.clientWindow === mine.clientWindow
+                  && info.context !== mine.context
+                )
               })
-              assert.isUndefined(added.error, JSON.stringify(added))
+              for (let attempt = 0; attempt < 50 && !(yield* windowHasStray); attempt++) {
+                yield* Effect.sleep("100 millis")
+              }
+              assert.isTrue(yield* windowHasStray, "Firefox didn't add the tab")
               yield* Effect.sleep("1 second")
               const outcome = yield* page.evaluate(() =>
                 new Promise<string>((resolve) => {
@@ -117,7 +130,7 @@ describe("Firefox over WebDriver BiDi", () => {
               // A tab behind another renders about once a second: 2 frames in 2 s, not about 120
               assert.strictEqual(visibility, "visible")
               assert.isAbove(Number(count), 30)
-              assert.deepStrictEqual(yield* browser.defaultContext.pages, [])
+              assert.deepStrictEqual(yield* browser.defaultContext.pages, before)
             }).pipe(Effect.provide(backend))
           }),
         timeout

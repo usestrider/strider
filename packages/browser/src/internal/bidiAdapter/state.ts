@@ -45,6 +45,8 @@ export interface ContextEntry {
 export interface NavigableEntry extends Kit.NavigableNode<NavigableEntry> {
   readonly bidi: BrowsingContext.BrowsingContext
   readonly context: ContextEntry
+  /** The browser window of a top-level context. */
+  readonly clientWindow: string
   /** The page: itself for a top-level context. */
   readonly page: NavigableEntry
   closing: L1Target.CloseReason | undefined
@@ -240,6 +242,15 @@ export interface State {
   preloads: ReadonlyArray<{ readonly script: Script.PreloadScript; readonly declaration: Adapter.RegistrationId }>
   /** Contexts reported now existed before the connection: they are adopted. */
   adopting: boolean
+  /** The window of each page Strider created, by BiDi client window, while the page lives. */
+  readonly pageWindows: Map<string, NavigableEntry>
+  /** The BiDi user context of each page creation in flight. */
+  readonly creating: Array<string>
+  /**
+   * Top-level contexts with no opener that arrived during a creation, in another user context than any page being
+   * created: held until the new page's window says whether they share it.
+   */
+  readonly held: Array<BrowsingContext.Info>
 }
 
 /** A connection's empty state, with its default context mapped to BiDi's `"default"`. */
@@ -297,7 +308,10 @@ export const make = (options: {
     requestCollectors: new Map(),
     granted: new Map(),
     preloads: [],
-    adopting: true
+    adopting: true,
+    pageWindows: new Map(),
+    creating: [],
+    held: []
   }
   return state
 }

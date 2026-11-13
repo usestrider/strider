@@ -78,6 +78,7 @@ export const removeNavigable = (
 ) =>
   Kit.removeNavigable(state.buffer, navigable, reason, evidence, (navigable, reason) => {
     cancelRestoration(navigable)
+    if (state.pageWindows.get(navigable.clientWindow) === navigable) state.pageWindows.delete(navigable.clientWindow)
     for (const [key, request] of state.requests) {
       if (request.navigable === navigable) navigable.context.proxyAttempts?.delete(key)
     }
@@ -254,6 +255,7 @@ export const contextFor = (state: State, bidi: string | null | undefined): Conte
 
 export const addNavigable = (state: State, info: {
   readonly context: BrowsingContext.BrowsingContext
+  readonly clientWindow?: string | undefined
   readonly parent?: string | null | undefined
   readonly userContext: string | null
   readonly originalOpener: string | null
@@ -271,6 +273,7 @@ export const addNavigable = (state: State, info: {
   const navigable: NavigableEntry = {
     bidi: info.context,
     id: state.ids.navigable(),
+    clientWindow: info.clientWindow ?? "",
     parent,
     children: new Set(),
     context,
