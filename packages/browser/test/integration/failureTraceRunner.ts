@@ -7,6 +7,7 @@ import "./traceProcesses.ts"
 import type { Entry, Origin } from "./failureTrace.ts"
 import { connection } from "./failureTrace.ts"
 import { install, TraceBuffer } from "./failureTrace.ts"
+import * as FirefoxCrashReports from "./firefoxCrashReports.ts"
 import { summarize } from "./pointerRecipients.ts"
 import { installTransfer, TransferScope } from "./traceTransfer.ts"
 
@@ -36,7 +37,7 @@ installTransfer(() => {
     ? transfers.get(id) ?? sharedTransfer
     : sharedTransfer
 })
-const active = new Map<string, { trace: TraceBuffer; inBody: boolean }>()
+const active = new Map<string, { trace: TraceBuffer; inBody: boolean; started: number }>()
 let sharedFile = ""
 const completed = new Map<string, { file?: string | undefined; sequence: number; bytes: number; overflow: boolean }>()
 let nextConnection = 0
@@ -243,7 +244,7 @@ export default class FailureTraceRunner extends TestRunner {
     await super.onBeforeRunTask(task)
     // Vitest returns early for skipped/todo tasks without calling onAfterRunTask.
     if (task.type === "test" && (task.mode === "run" || task.mode === "queued")) {
-      active.set(task.id, { trace: new TraceBuffer(), inBody: false })
+      active.set(task.id, { trace: new TraceBuffer(), inBody: false, started: Date.now() })
       transfers.set(task.id, new TransferScope(() => connection("child-transfer")))
     }
   }
@@ -275,6 +276,13 @@ export default class FailureTraceRunner extends TestRunner {
     transfers.delete(task.id)
     active.delete(task.id)
     const failed = task.result?.state === "fail"
+    // Firefox's crash reports from this test: kept beside its trace when it failed, discarded when it passed
+    FirefoxCrashReports.keep(
+      FirefoxCrashReports.pendingDirectory(),
+      path.join(directory, `${path.basename(task.file.filepath)}-${task.id}-${process.pid}-firefox-crash`),
+      running.started,
+      failed
+    )
     const file = failed || retainPasses || diagnosticTest(task)
       ? save(filename(task, "test"), running.trace, task.name, !failed && !diagnosticTest(task))
       : undefined

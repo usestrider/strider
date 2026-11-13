@@ -6,6 +6,12 @@
  *
  * Bounded diagnostic history; independent of the optional drift fixture sampler.
  *
+ * A failed test also keeps Firefox's crash reports from while it ran, as
+ * `.data/integration-failures/<test file>-<test id>-<pid>-firefox-crash/`: each report's `.extra` annotations (with
+ * `ipc_channel_error`, the reason, when the parent process killed a content process) and its minidumps, up to 8 MiB
+ * each and 32 MiB per test (`omitted.txt` names the rest). A passing test keeps nothing. `firefoxCrashReports.ts`
+ * says what makes Firefox write them; `FirefoxCrashReportsWritten.test.ts` checks that one is written, and `test/FirefoxCrashReports.test.ts` what is kept.
+ *
  * Integration failures name their bounded protocol traces in `.data/integration-failures/`; CI keeps them with
  * `integration.log`. Each NDJSON file records both directions, connection IDs, sequence numbers and timestamps,
  * with explicit payload truncation and history overflow. Shared setup/teardown context has its own file. Passing
