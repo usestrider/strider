@@ -1367,7 +1367,9 @@ describe("BidiAdapter state", () => {
         yield* Fiber.join(running)
         event("browsingContext.navigationFailed", info("B", 14))
         yield* state.buffer.flush
-        const ends = facts.filter((fact) => fact._tag === "NavigationEnded" && fact.navigation === reserved)
+        const ends = facts.filter((fact) => fact._tag === "NavigationEnded").filter((fact) =>
+          fact.navigation === reserved
+        )
         assert.lengthOf(ends, 1)
         assert.strictEqual(ends[0]!.outcome._tag, outcome === "nightly" ? "Committed" : outcome)
         assert.strictEqual(state.requests.get("request")!.navigation!.id, reserved)
@@ -1412,7 +1414,9 @@ describe("BidiAdapter state", () => {
         event("browsingContext.navigationCommitted", info("B", 13))
         event("browsingContext.navigationFailed", info("A", 14))
         yield* state.buffer.flush
-        const ended = facts.filter((fact) => fact._tag === "NavigationEnded" && fact.navigation === reserved)
+        const ended = facts.filter((fact) => fact._tag === "NavigationEnded").filter((fact) =>
+          fact.navigation === reserved
+        )
         assert.lengthOf(ended, 1)
         assert.strictEqual(ended[0]!.outcome._tag, "Superseded")
         if (second !== undefined && ended[0]!.outcome._tag === "Superseded") {
@@ -1422,6 +1426,27 @@ describe("BidiAdapter state", () => {
         assert.isEmpty(state.navigations)
       }))
   }
+
+  it.effect("ignores a delayed start older than the active navigation and clears its stale-load evidence", () =>
+    Effect.gen(function*() {
+      const { facts, page, state } = yield* withPage()
+      const handlers = Navigation.register(Kit.handlers<State.Event>())
+      const event = (method: string, navigation: string, timestamp: number) =>
+        handlers.apply(method, { context: "C1", navigation, url: "http://example.test/", timestamp }, { state })
+      event("browsingContext.navigationStarted", "current", 20)
+      const current = state.navigations.get("current")!
+      event("browsingContext.navigationStarted", "old", 10)
+      assert.isFalse(current.ended)
+      assert.isFalse(state.navigations.has("old"))
+      event("browsingContext.navigationCommitted", "current", 30)
+      event("browsingContext.navigationStarted", "old", 10)
+      yield* state.buffer.flush
+      assert.lengthOf(facts.filter((fact) => fact._tag === "NavigationStarted"), 1)
+      assert.isEmpty(state.navigations)
+      assert.isEmpty(current.starts)
+      assert.isUndefined(current.staleLoad)
+      assert.isEmpty(page.navigations)
+    }))
 
   for (const status of [204, 205, 500]) {
     for (const completion of ["reply", "rejected", "interrupted"] as const) {
