@@ -49,7 +49,10 @@ export interface NavigableEntry extends Kit.NavigableNode<NavigableEntry> {
   readonly page: NavigableEntry
   closing: L1Target.CloseReason | undefined
   document: DocumentEntry | undefined
-  /** Main-world realms created for the next document, before it commits. */
+  /**
+   * Realms created for the next document, before it commits: replacement main realms, and the sandboxes held with
+   * them, including a same-name sandbox that arrives before the main realm.
+   */
   readonly pendingRealms: Array<RealmEntry>
   /** The traversal eligible to observe a restoration, from command issuance until invalidation. */
   restoring: {
