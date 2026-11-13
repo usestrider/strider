@@ -14,12 +14,35 @@ import * as FirefoxLauncher from "../../src/internal/firefoxLauncher.ts"
 import { firefox } from "./browsers.ts"
 import * as FirefoxCrashReports from "./firefoxCrashReports.ts"
 
+interface Row {
+  readonly pid: number
+  readonly ppid: number
+  readonly args: string
+}
+
+/** Every process, from `/proc` on Linux, where the integration environment has no `ps`, and from `ps` elsewhere. */
+const processes = (): ReadonlyArray<Row> => {
+  if (process.platform !== "linux") {
+    return execFileSync("ps", ["-A", "-o", "pid=,ppid=,args="], { encoding: "utf8" }).split("\n")
+      .map((line) => line.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/))
+      .filter((match) => match !== null)
+      .map((match) => ({ pid: Number(match[1]), ppid: Number(match[2]), args: match[3]! }))
+  }
+  return fs.readdirSync("/proc").filter((name) => /^\d+$/.test(name)).flatMap((name) => {
+    try {
+      const stat = fs.readFileSync(`/proc/${name}/stat`, "utf8")
+      const ppid = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1])
+      const args = fs.readFileSync(`/proc/${name}/cmdline`, "utf8").split("\0").join(" ")
+      return [{ pid: Number(name), ppid, args }]
+    } catch {
+      return []
+    }
+  })
+}
+
 /** The command lines of a process's descendants, by pid. */
 const descendants = (root: number): Map<number, string> => {
-  const rows = execFileSync("ps", ["-A", "-o", "pid=,ppid=,args="], { encoding: "utf8" }).split("\n")
-    .map((line) => line.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/))
-    .filter((match) => match !== null)
-    .map((match) => ({ pid: Number(match[1]), ppid: Number(match[2]), args: match[3]! }))
+  const rows = processes()
   const found = new Map<number, string>()
   const parents = new Set([root])
   for (let grew = true; grew;) {
