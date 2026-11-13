@@ -1312,6 +1312,11 @@ export interface Locator extends ReadonlyLocator {
    * didn't check it fails with `StateUnchanged{expected: "checked"}`. The selected element's own checked
    * state takes precedence. Otherwise a selected label, or an ordinary descendant's nearest DOM label,
    * supplies its associated control. The selected element remains the click target and position origin.
+   * When input is needed, the enabled check applies to both the selected element and that control,
+   * using native disabled, fieldset and ARIA-disabled state. If that control stays disabled, the action
+   * fails with `Timeout`, its history showing `Disabled`, and no input is sent.
+   * Set `checks: { enabled: false }` to skip this check.
+   * Trial actions check readiness without input; already-correct state still succeeds immediately.
    *
    * Association follows DOM parents without crossing a shadow root and uses only the label's control,
    * never the ancestor label's ARIA state. Descendant fallback checks the selected node, its DOM
@@ -1356,7 +1361,11 @@ export interface Locator extends ReadonlyLocator {
    * click target and position origin. If already unchecked, nothing is sent. A checked native radio
    * fails with `WrongElement` before input, including with `trial: true`; check another radio in its
    * group instead. Page-managed ARIA radios can be unchecked. Otherwise it clicks and reads the state
-   * again, failing with `StateUnchanged{expected: "unchecked"}` if the state stays checked.
+   * again, failing with `StateUnchanged{expected: "unchecked"}` if the state stays checked. When input is
+   * needed, the enabled check applies to both the selected element and its associated control, including
+   * native, fieldset and ARIA-disabled state. If that control stays disabled, the action fails with
+   * `Timeout`, its history showing `Disabled`, and no input is sent.
+   * `checks: { enabled: false }` skips this check; trial checks the same readiness without input.
    *
    * Association follows DOM parents without crossing a shadow root and uses only the label's control,
    * never the ancestor label's ARIA state. Descendant fallback checks the selected node, its DOM
@@ -2000,7 +2009,8 @@ export const LocatorErrorReason = Schema.Union([
   Reason.NotPermitted,
   Reason.Unsupported,
   Reason.BackendFailure,
-  Reason.PromptBlocking
+  Reason.PromptBlocking,
+  Reason.LocatorHandlerFailed
 ])
 
 /**

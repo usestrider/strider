@@ -86,10 +86,33 @@ const sameDocument = (
   )
 }
 
-const readiness = (state: State, context: string, bidi: string | null, readiness: "interactive" | "complete") => {
+const readiness = (
+  state: State,
+  context: string,
+  bidi: string | null,
+  readiness: "interactive" | "complete",
+  params: BrowsingContext.NavigationInfo
+) => {
   const document = navigableOf(state, context)?.document
   if (document === undefined) return
-  if (document.navigation !== undefined && bidi !== null && document.navigation !== bidi) return
+  const navigation = bidi === null ? undefined : state.navigations.get(bidi)
+  const startedAt = bidi === null ? undefined : navigation?.starts.get(bidi)
+  if (navigation !== undefined && !navigation.ended && startedAt !== undefined && params.timestamp < startedAt) {
+    // Firefox stamps a delayed old-document load with the current navigation's identity.
+    // Its timestamp, not its arrival or a matching destination URL, proves it predates that start.
+    if (
+      readiness === "complete" && document.navigation !== bidi && params.url === document.url &&
+      (document.committedAt === undefined || params.timestamp >= document.committedAt)
+    ) {
+      navigation.staleLoad = document.id
+    }
+    return
+  }
+  if (bidi !== null) {
+    const documentStart = document.navigationStarts?.get(bidi)
+    if (documentStart !== undefined && params.timestamp < documentStart) return
+    if (document.navigation !== undefined && document.navigation !== bidi && documentStart === undefined) return
+  }
   if (readiness === "interactive" && document.complete) {
     // Loaded again after it was complete: `document.open()` replaced its tree (probe 17)
     document.generation++
@@ -109,9 +132,10 @@ const committed = (state: State, navigable: NavigableEntry, params: BrowsingCont
   const known = state.navigations.get(bidi)
   const bound = navigable.commandNavigations.has(bidi)
   const rejected = navigable.failedNavigation
-  const identifiedFailure = rejected !== undefined && (rejected.bidi === bidi ||
-    (rejected.bidi === undefined && navigable.navigationCommands.size === 0 &&
-      Kit.normalize(rejected.url) === Kit.normalize(intended(url))))
+  const identifiedFailure = rejected !== undefined &&
+    (rejected.bidi === bidi || (bidi !== null && rejected.aliases?.has(bidi)) ||
+      (rejected.bidi === undefined && navigable.navigationCommands.size === 0 &&
+        Kit.normalize(rejected.url) === Kit.normalize(intended(url))))
   if (isError && known === undefined && !bound) {
     if (
       navigable.pendingTerminals.some((event) =>
@@ -146,6 +170,8 @@ const committed = (state: State, navigable: NavigableEntry, params: BrowsingCont
     bidi,
     "bidi:browsingContext.navigationCommitted"
   )
+  document.committedAt = params.timestamp
+  document.navigationStarts = new Map(navigation.starts)
   endNavigation(
     state,
     navigation,
@@ -175,8 +201,40 @@ const failed = (state: State, navigable: NavigableEntry, params: BrowsingContext
 
 const started = (state: State, navigable: NavigableEntry, params: BrowsingContext.NavigationInfo) => {
   if (params.navigation === null || state.navigations.has(params.navigation)) return
+  const pending = [...new Set(navigable.navigations.values())].filter((entry) => !entry.ended && !entry.sameDocument)
+  // Delivery can lag behind a newer start or a commit; old starts cannot replace newer work.
+  if (
+    (navigable.document?.committedAt !== undefined && params.timestamp < navigable.document.committedAt) ||
+    pending.some((entry) => [...entry.starts.values()].some((timestamp) => params.timestamp < timestamp))
+  ) return
+  const previous = pending.length === 1 ? pending[0] : undefined
+  const staleDocument = previous?.staleLoad
+  for (const entry of pending) entry.staleLoad = undefined
+  if (
+    previous !== undefined && staleDocument !== undefined && staleDocument === navigable.document?.id &&
+    previous.documentHop !== undefined && navigable.expected.list.length === 0 &&
+    navigable.commandNavigations.size === 0 && navigable.navigationCommands.size <= 1 &&
+    (navigable.navigationCommands.size === 0 || navigable.navigationCommands.has(previous.id)) &&
+    params.timestamp > Math.max(...previous.starts.values()) &&
+    Kit.normalize(previous.url) === Kit.normalize(intended(params.url ?? ""))
+  ) {
+    // A delayed load can make Firefox allocate another wire identity without another document request.
+    // Correlate provisionally: a distinct document request for this identity separates it again.
+    previous.starts.set(params.navigation, params.timestamp)
+    navigable.navigations.set(params.navigation, previous)
+    state.navigations.set(params.navigation, previous)
+    return
+  }
   // Firefox leaves out the URL of the navigation that closing with promptUnload starts.
-  startNavigation(state, navigable, params.navigation, intended(params.url ?? ""), "crossDocument", false)
+  const navigation = startNavigation(
+    state,
+    navigable,
+    params.navigation,
+    intended(params.url ?? ""),
+    "crossDocument",
+    false
+  )
+  navigation.starts.set(params.navigation, params.timestamp)
 }
 
 /** Resolves attribution only; no deferred event can start a competing navigation or commit a document. */
@@ -188,7 +246,7 @@ const resolveTerminals = (state: State, navigable: NavigableEntry) => {
     const bound = bidi !== null && navigable.commandNavigations.has(bidi)
     const rejected = event.rejected ?? navigable.failedNavigation
     const matchesFailure = !bound && rejected !== undefined && (known === undefined || known.id === rejected.id) &&
-      (rejected.bidi === bidi ||
+      (rejected.bidi === bidi || (bidi !== null && rejected.aliases?.has(bidi)) ||
         (rejected.bidi === undefined && navigable.navigationCommands.size === 0 &&
           Kit.normalize(rejected.url) === Kit.normalize(intended(event.params.url ?? ""))))
     if (known === undefined && !bound && !matchesFailure && navigable.navigationCommands.size > 0) {
@@ -221,6 +279,8 @@ const resolveTerminals = (state: State, navigable: NavigableEntry) => {
       if (!navigation.ended) continue
       navigable.navigations.delete(bidi)
       if (state.navigations.get(bidi) === navigation) state.navigations.delete(bidi)
+      navigation.starts.clear()
+      navigation.staleLoad = undefined
     }
   }
 }
@@ -266,9 +326,12 @@ export const register = (handlers: Kit.Handlers<Event>) => {
     )
     .on(
       BrowsingContext.domContentLoaded,
-      (params, { state }) => readiness(state, params.context, params.navigation, "interactive")
+      (params, { state }) => readiness(state, params.context, params.navigation, "interactive", params)
     )
-    .on(BrowsingContext.load, (params, { state }) => readiness(state, params.context, params.navigation, "complete"))
+    .on(
+      BrowsingContext.load,
+      (params, { state }) => readiness(state, params.context, params.navigation, "complete", params)
+    )
 }
 
 // ── Operations ────────────────────────────────────────────────────────────────────────────────────────────

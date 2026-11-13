@@ -9,6 +9,7 @@ import { Browser, Deadline, Expect, Ledger } from "@usestrider/browser"
 import * as BrowserCdp from "@usestrider/browser/cdp/Browser"
 import * as Page from "@usestrider/browser/cdp/Page"
 import * as Target from "@usestrider/browser/cdp/Target"
+import { Chromium } from "@usestrider/browser/chromium"
 import { CdpConnection, Protocol, Transport } from "@usestrider/browser/protocol"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -264,6 +265,38 @@ describe("Chromium adapter, CDP only", () => {
         )
       }
 
+      it.effect(
+        "persists immediate localStorage writes in a supplied profile when the browser layer closes before the page scope",
+        () =>
+          Effect.gen(function*() {
+            const fs = yield* FileSystem.FileSystem
+            const served = yield* site
+            const directory = yield* fs.makeTempDirectoryScoped({ prefix: "strider-profile-storage-test-" })
+            // Keep the page alive until the browser layer shuts down; closing it first can flush storage.
+            for (const round of [0, 1]) {
+              yield* Effect.scoped(
+                Effect.gen(function*() {
+                  const browser = yield* Browser.Browser
+                  assertPinned("Chromium", browser.info.version, chromium.version)
+                  const context = yield* browser.defaultContext.control
+                  const page = yield* context.newPage
+                  yield* page.goto(`${served.origin}/hello`)
+                  if (round === 0) {
+                    yield* page.evaluateInMainWorld(() => localStorage.setItem("scope-shutdown", "kept"))
+                  } else {
+                    assert.strictEqual(
+                      yield* page.evaluateInMainWorld(() => localStorage.getItem("scope-shutdown")),
+                      "kept"
+                    )
+                  }
+                }).pipe(Effect.provide(Chromium.layer({ executablePath: executable, userDataDir: directory })))
+              )
+              assert.isTrue(yield* fs.exists(directory))
+            }
+          }),
+        timeout
+      )
+
       for (const candidate of [false, true]) {
         it.effect(
           `reads persisted storage and preserves a supplied profile on ${candidate ? "windowless" : "ordinary"} launch`,
@@ -302,8 +335,8 @@ describe("Chromium adapter, CDP only", () => {
                     yield* page.goto(`${served.origin}/hello`)
                     if (round === 0) {
                       yield* page.evaluateInMainWorld(() => localStorage.setItem("windowless", "kept"))
-                      // Seed durable browser data with Chromium's graceful close. Scope shutdown is a signal,
-                      // which does not guarantee flushing newly written localStorage on either launch mode.
+                      // These raw-launcher controls seed with explicit graceful close; unlike Chromium.layer,
+                      // raw launcher scope release still terminates by signal on either launch mode.
                       yield* gracefulClose
                       yield* child!.handle.exitCode
                     } else {

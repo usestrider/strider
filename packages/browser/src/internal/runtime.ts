@@ -291,7 +291,11 @@ const nothing: ReadonlyArray<Engine.Step> = [{ _tag: "Css", selector: ":not(*)" 
 const missingCap = 100
 
 /** The request with its steps in the document it goes to; one with no steps goes as it is. */
-const retarget = (request: Engine.Request, steps: ReadonlyArray<Engine.Step>, missing: boolean): Engine.Request => {
+const retarget = <R extends Engine.Request | Engine.CooperativeRequest>(
+  request: R,
+  steps: ReadonlyArray<Engine.Step>,
+  missing: boolean
+): R => {
   if (!("steps" in request) || request.steps === null) return request
   const at = missing ? nothing : steps
   switch (request.op) {
@@ -505,15 +509,15 @@ const route = (
  * Goes where a locator's steps lead, again whenever a document on the way ends, until `at`: `answer` is given
  * the route and returns `None` to go again.
  */
-const routing = <A>(
+const routing = <A, E = never, R = never>(
   runtime: Runtime,
   page: Model.PageEntry,
   steps: ReadonlyArray<Engine.Step>,
   scroll: boolean,
   id: Diagnostics.OperationId,
   at: MonotonicInstant.MonotonicInstant,
-  answer: (route: Route, last: ReadonlyArray<Engine.Step>) => Effect.Effect<Option.Option<A>, SendFailure>
-): Effect.Effect<A, SendFailure> =>
+  answer: (route: Route, last: ReadonlyArray<Engine.Step>) => Effect.Effect<Option.Option<A>, SendFailure | E, R>
+): Effect.Effect<A, SendFailure | E, R> =>
   Effect.gen(function*() {
     const { frames, last } = split(steps)
     while (true) {
@@ -543,6 +547,66 @@ export interface Answer {
   readonly routed: Routed
 }
 
+const prepareRound = Effect.fnUntraced(function*(
+  runtime: Runtime,
+  page: Model.PageEntry,
+  request: Engine.Request | Engine.CooperativeRequest,
+  route: Exclude<Route, { readonly _tag: "Answer" }>,
+  id: Diagnostics.OperationId
+) {
+  const routed = route.routed
+  let clip: Engine.Clip | undefined
+  if (
+    route._tag === "Entered" && request.op === "act" &&
+    ((request.action._tag === "Point" && request.action.position === null) || request.checks.receivesPointer)
+  ) {
+    // Read each ancestor in its own document: this also works across origin and process boundaries.
+    for (const hop of routed.hops) {
+      const answer = yield* sendToDocument(runtime, page, hop.document, {
+        op: "frame",
+        steps: hop.steps,
+        scroll: request.checks.inViewport,
+        point: null,
+        ...(clip === undefined ? {} : { clip })
+      }, id)
+      if (Option.isNone(answer)) return { _tag: "Moved" } as const
+      if (answer.value._tag === "NoMatch") {
+        return {
+          _tag: "Answer",
+          answer: {
+            routed,
+            response: {
+              _tag: "NotReady" as const,
+              reason: { _tag: "NoMatch" as const },
+              history: [{ _tag: "NoMatch" as const }],
+              scrolled: false,
+              checked: true
+            }
+          }
+        } as const
+      }
+      if (answer.value._tag !== "Frame") return { _tag: "Answer", answer: { response: answer.value, routed } } as const
+      if (answer.value.scrolled) {
+        return {
+          _tag: "Answer",
+          answer: {
+            routed,
+            response: {
+              _tag: "NotReady" as const,
+              reason: { _tag: "OutsideViewport" as const },
+              history: [{ _tag: "OutsideViewport" as const }],
+              scrolled: true,
+              checked: true
+            }
+          }
+        } as const
+      }
+      clip = answer.value.viewport
+    }
+  }
+  return { _tag: "Prepared", clip } as const
+})
+
 /**
  * Sends the engine a request in the document its steps lead to (the page's current document, or a frame's) and
  * returns its answer, going again when a document on the way ends, until `at`.
@@ -568,49 +632,10 @@ export const sendRouted = (
         const routed = route.routed
         const stale = replaced(routed.document, last)
         if (route._tag === "Entered" && Option.isSome(stale)) return Option.some({ response: stale.value, routed })
-        let clip: Engine.Clip | undefined
-        if (
-          route._tag === "Entered" && request.op === "act" &&
-          ((request.action._tag === "Point" && request.action.position === null) || request.checks.receivesPointer)
-        ) {
-          // Read each ancestor in its own document: this also works across origin and process boundaries.
-          for (const hop of routed.hops) {
-            const answer = yield* sendToDocument(runtime, page, hop.document, {
-              op: "frame",
-              steps: hop.steps,
-              scroll: request.checks.inViewport,
-              point: null,
-              ...(clip === undefined ? {} : { clip })
-            }, id)
-            if (Option.isNone(answer)) return Option.none()
-            if (answer.value._tag === "NoMatch") {
-              return Option.some({
-                routed,
-                response: {
-                  _tag: "NotReady" as const,
-                  reason: { _tag: "NoMatch" as const },
-                  history: [{ _tag: "NoMatch" as const }],
-                  scrolled: false,
-                  checked: true
-                }
-              })
-            }
-            if (answer.value._tag !== "Frame") return Option.some({ response: answer.value, routed })
-            if (answer.value.scrolled) {
-              return Option.some({
-                routed,
-                response: {
-                  _tag: "NotReady" as const,
-                  reason: { _tag: "OutsideViewport" as const },
-                  history: [{ _tag: "OutsideViewport" as const }],
-                  scrolled: true,
-                  checked: true
-                }
-              })
-            }
-            clip = answer.value.viewport
-          }
-        }
+        const prepared = yield* prepareRound(runtime, page, request, route, id)
+        if (prepared._tag === "Moved") return Option.none()
+        if (prepared._tag === "Answer") return Option.some(prepared.answer)
+        const clip = prepared.clip
         const token = request.op === "expect" && request.expectation._tag === "Viewport"
           ? crypto.randomUUID()
           : undefined
@@ -676,6 +701,212 @@ export const sendRouted = (
       })
     ),
     promptBlocked(page)
+  )
+
+let cooperativeSessions = 0
+
+/**
+ * The opted-in driver. The hook probes triggers through ordinary routing on their OWN pages/frames; it never
+ * runs under a browser-side check. An apply hook returns restart, releasing the caller's input permit first.
+ * This is a sequence of document-bound handshakes, not an atomic snapshot across frames.
+ */
+export const sendCooperative = <E, R>(
+  runtime: Runtime,
+  page: Model.PageEntry,
+  request: Engine.CooperativeRequest,
+  id: Diagnostics.OperationId,
+  at: MonotonicInstant.MonotonicInstant,
+  beforeCheck: (routed: Routed, final: boolean) => Effect.Effect<"continue" | "invalidate" | "restart", E, R>,
+  options?: { readonly final?: boolean }
+): Effect.Effect<Answer | { readonly _tag: "Restart" }, SendFailure | E, R> =>
+  routing<Answer | { readonly _tag: "Restart" }, E, R>(
+    runtime,
+    page,
+    request.steps ?? [],
+    request.op === "act",
+    id,
+    at,
+    (routed, last) =>
+      Effect.gen(function*() {
+        if (routed._tag === "Answer") return Option.some({ response: routed.response, routed: routed.routed })
+        const destination = routed.routed
+        const stale = replaced(destination.document, last)
+        if (routed._tag === "Entered" && Option.isSome(stale)) {
+          return Option.some({ response: stale.value, routed: destination })
+        }
+        let prepared = yield* prepareRound(runtime, page, request, routed, id)
+        if (prepared._tag === "Moved") return Option.none()
+        if (prepared._tag === "Answer") return Option.some(prepared.answer)
+        const session = `cooperative-${++cooperativeSessions}-${Math.random().toString(36).slice(2)}`
+        let completed = false
+        type Payload<T> = T extends unknown ? Omit<T, "document" | "operation" | "session"> : never
+        const command = (
+          value: Payload<Engine.CooperativeCommand>
+        ): Effect.Effect<Option.Option<Engine.CooperativeResponse>, SendFailure> =>
+          Effect.flatMap(
+            callInDocument(
+              runtime,
+              destination.document,
+              Engine.cooperate,
+              Effect.gen(function*() {
+                // Compute after cold engine setup, immediately before the wire call, not before routing/probing.
+                const remaining = value.command === "start" || value.command === "resume"
+                  ? yield* BrowserClock.left(at) :
+                  undefined
+                return JSON.stringify({
+                  ...value,
+                  ...(value.command === "start" ?
+                    { budget: Math.min(value.budget, remaining!) } :
+                    value.command === "resume"
+                    ? { left: Math.min(value.left, remaining!) }
+                    : {}),
+                  document: destination.document,
+                  operation: id,
+                  session
+                })
+              }),
+              id,
+              undefined,
+              request.op !== "act" || !request.apply || !Engine.appliesInRound(request.action)
+            ),
+            (reply) => {
+              if (Option.isNone(reply)) return Effect.succeed(Option.none<Engine.CooperativeResponse>())
+              if (reply.value.type !== "string") {
+                return Effect.die(new Error("Cooperative engine answered without text"))
+              }
+              return Engine.decodeCooperativeResponse(reply.value.value).pipe(
+                Effect.map(Option.some),
+                Effect.mapError((error): SendFailure => ({
+                  _tag: "Reason",
+                  reason: new Reason.BackendFailure({
+                    kind: "IncompatibleResponse",
+                    method: "engine.cooperative",
+                    hint: error.message,
+                    cause: error
+                  })
+                }))
+              )
+            }
+          )
+        // Evidence collection/acknowledgement is bounded cleanup, never another readiness check.
+        const cleanupCommand = (value: Payload<Engine.CooperativeCommand>) =>
+          command(value).pipe(
+            Operation.detached,
+            Deadline.within("250 millis"),
+            Effect.catch(() => Effect.succeed(Option.none<Engine.CooperativeResponse>()))
+          )
+        const timedOut = Effect.fnUntraced(function*(): Effect.fn.Return<Option.Option<Answer>, SendFailure> {
+          const answer = yield* cleanupCommand({ command: "finish" })
+          if (Option.isSome(answer) && answer.value._tag === "Done") {
+            const response = answer.value.response
+            // An interrupted hook must never turn the triggering operation into a success.
+            if (response._tag === "NotReady" || response._tag === "Expected" && !response.passed) {
+              completed = true
+              return Option.some({ response, routed: destination })
+            }
+          }
+          return yield* Effect.fail<SendFailure>({
+            _tag: "Deadline",
+            hint: "The cooperative timeout evidence is unavailable after deadline cleanup"
+          })
+        })
+        // Disposal alone is not evidence of navigation: compare the target and its whole ancestor route.
+        const unchangedRoute = Effect.gen(function*() {
+          const top = yield* openState(page, id)
+          const again = yield* route(
+            runtime,
+            top.document.id,
+            split(request.steps ?? []).frames,
+            request.op === "act",
+            id,
+            request.steps ?? []
+          )
+          if (
+            Option.isNone(again) || again.value._tag === "Answer" || again.value._tag !== routed._tag ||
+            again.value.routed.document !== destination.document ||
+            again.value.routed.hops.length !== destination.hops.length ||
+            again.value.routed.hops.some((hop, index) =>
+              hop.document !== destination.hops[index]!.document ||
+              hop.frame !== destination.hops[index]!.frame
+            )
+          ) return Option.none()
+          return Option.some(again.value)
+        })
+        const drive = Effect.gen(function*() {
+          const budget = yield* BrowserClock.left(at)
+          const current = retarget(
+            request.op === "act" && prepared._tag === "Prepared" && prepared.clip !== undefined
+              ? { ...request, clip: prepared.clip }
+              : request,
+            last,
+            routed._tag === "Missing"
+          ) as Engine.CooperativeRequest
+          let reply = yield* command({ command: "start", request: current, budget, final: options?.final === true })
+          while (Option.isSome(reply)) {
+            const response = reply.value
+            if (response._tag === "Done") {
+              if (response.retained === true) yield* cleanupCommand({ command: "cancel" })
+              completed = true
+              return Option.some({ response: response.response, routed: destination })
+            }
+            if (response._tag === "Restart") {
+              completed = true
+              return Option.some({ _tag: "Restart" } as const)
+            }
+            if (response._tag === "Departed") return Option.none()
+            if (response._tag === "Disposed") {
+              if (Option.isNone(yield* unchangedRoute)) return Option.none()
+
+              return yield* Effect.fail<SendFailure>({
+                _tag: "Reason",
+                reason: new Reason.BackendFailure({
+                  kind: "Rejected",
+                  method: "engine.cooperative",
+                  hint:
+                    "The cooperative continuation answer is unavailable (disposed or evicted); the round was not restarted"
+                })
+              })
+            }
+            const decision = yield* beforeCheck(destination, response.final)
+            const left = yield* BrowserClock.left(at)
+            if (left <= 0) return "Expired" as const
+            if (decision === "restart") {
+              reply = yield* command({ command: "resume", token: response.token, left, decision })
+              continue
+            }
+            const again = yield* unchangedRoute
+            if (Option.isNone(again)) return Option.none()
+            // A handler invalidates viewport coordinates as well as samples and resolved elements.
+            if (decision === "invalidate") {
+              prepared = yield* prepareRound(runtime, page, request, again.value, id)
+              if (prepared._tag === "Moved") return Option.none()
+              if (prepared._tag === "Answer") return Option.some(prepared.answer)
+            }
+            reply = yield* command({
+              command: "resume",
+              token: response.token,
+              left,
+              decision,
+              ...(prepared._tag === "Prepared" && prepared.clip !== undefined ? { clip: prepared.clip } : {})
+            })
+          }
+          return Option.none()
+        })
+        return yield* drive.pipe(
+          BrowserClock.until(at),
+          Effect.flatMap((answer) =>
+            Option.isNone(answer) || answer.value === "Expired"
+              ? timedOut() :
+              Effect.succeed(answer.value)
+          ),
+          Effect.ensuring(Effect.suspend(() =>
+            completed ?
+              Effect.void :
+              Effect.ignore(cleanupCommand({ command: "cancel" }))
+          )),
+          Effect.raceFirst(promptBlocked(page))
+        )
+      })
   )
 
 /** `sendRouted`'s answer alone. */
