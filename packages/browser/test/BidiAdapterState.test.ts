@@ -134,6 +134,37 @@ const errorNavigation = (
 }
 
 describe("BidiAdapter state", () => {
+  it.effect("preserves the main realm of an unrelated tab held during page creation", () =>
+    Effect.gen(function*() {
+      const { state } = yield* withPage()
+      state.adopting = false
+      state.creating.push("owned-user")
+      const handlers = Evaluation.register(Contexts.register(Kit.handlers<State.Event>()))
+      const announce = (context: string, clientWindow: string, userContext: string) =>
+        handlers.apply("browsingContext.contextCreated", {
+          context,
+          clientWindow,
+          userContext,
+          parent: null,
+          originalOpener: null,
+          url: "about:blank",
+          children: null
+        }, { state })
+      announce("unrelated-tab", "external-window", "default")
+      handlers.apply("script.realmCreated", {
+        realm: "unrelated-main",
+        context: "unrelated-tab",
+        type: "window",
+        origin: "null"
+      }, { state })
+      announce("owned-page", "owned-window", "owned-user")
+      assert.isTrue(state.navigables.has("unrelated-tab"))
+      assert.isTrue(
+        state.realms.has("unrelated-main"),
+        "adopting the unrelated tab must preserve its reported main realm"
+      )
+    }))
+
   it.effect("recognizes an owned window when its creation events are folded after the reply", () =>
     Effect.gen(function*() {
       let state!: State.State
