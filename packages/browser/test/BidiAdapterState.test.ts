@@ -134,6 +134,121 @@ const errorNavigation = (
 }
 
 describe("BidiAdapter state", () => {
+  it.effect("keeps another pending window's stray tab held when the first page arrives", () =>
+    Effect.gen(function*() {
+      const { state } = yield* withPage()
+      state.adopting = false
+      state.creating.push("first-user", "second-user")
+      const handlers = Contexts.register(Kit.handlers<State.Event>())
+      const announce = (context: string, clientWindow: string, userContext: string) =>
+        handlers.apply("browsingContext.contextCreated", {
+          context,
+          clientWindow,
+          userContext,
+          parent: null,
+          originalOpener: null,
+          url: "about:blank",
+          children: null
+        }, { state })
+      announce("stray-second", "second-window", "default")
+      announce("first-page", "first-window", "first-user")
+      announce("second-page", "second-window", "second-user")
+      assert.isFalse(
+        state.navigables.has("stray-second"),
+        "an unrelated creation must not adopt the other window's stray tab"
+      )
+    }))
+
+  it.effect("keeps a stray tab excluded when the browser tree is reconciled", () =>
+    Effect.gen(function*() {
+      const { page, state } = yield* withPage()
+      state.adopting = false
+      state.pageWindows.set("owned-window", page)
+      const info = {
+        context: "stray" as BrowsingContext.BrowsingContext,
+        clientWindow: "owned-window",
+        userContext: "external",
+        parent: null,
+        originalOpener: null,
+        url: "about:blank",
+        children: null
+      }
+      Contexts.register(Kit.handlers<State.Event>()).apply("browsingContext.contextCreated", info, { state })
+      assert.isFalse(state.navigables.has(info.context))
+      Tree.reconcile(state, {
+        contexts: [
+          { ...info, context: page.bidi, userContext: "default" },
+          info
+        ]
+      } as unknown as BrowsingContext.GetTreeResult)
+      assert.isFalse(state.navigables.has(info.context), "tree recovery must preserve stray-tab exclusion")
+    }))
+
+  it.effect("adopts unrelated held contexts when page creation fails", () =>
+    Effect.gen(function*() {
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const { page, state } = yield* withPage({
+        "browsingContext.create": Effect.gen(function*() {
+          yield* Deferred.succeed(entered, undefined)
+          yield* Deferred.await(release)
+          return yield* Effect.fail(
+            new Protocol.ProtocolError({
+              reason: new Protocol.SessionEnded({ why: "targetDestroyed" })
+            })
+          )
+        })
+      })
+      state.adopting = false
+      const handlers = Contexts.register(Kit.handlers<State.Event>())
+      const creation = yield* Effect.forkChild(Effect.exit(Contexts.createPage(state, page.context.id)))
+      yield* Deferred.await(entered)
+      handlers.apply("browsingContext.contextCreated", {
+        context: "unrelated",
+        clientWindow: "other-window",
+        userContext: "external",
+        parent: null,
+        originalOpener: null,
+        url: "about:blank",
+        children: null
+      }, { state })
+      yield* Deferred.succeed(release, undefined)
+      assert.isTrue(Exit.isFailure(yield* Fiber.join(creation)))
+      assert.isTrue(state.navigables.has("unrelated"), "an unrelated live tab must not stay held after failure")
+      assert.isEmpty(state.held)
+    }))
+
+  it.effect("does not adopt a held context destroyed before page creation completes", () =>
+    Effect.gen(function*() {
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const { page, state } = yield* withPage({
+        "browsingContext.create": Effect.gen(function*() {
+          yield* Deferred.succeed(entered, undefined)
+          yield* Deferred.await(release)
+          return { context: "C1" }
+        })
+      })
+      state.adopting = false
+      const handlers = Contexts.register(Kit.handlers<State.Event>())
+      const creation = yield* Effect.forkChild(Contexts.createPage(state, page.context.id))
+      yield* Deferred.await(entered)
+      const info = {
+        context: "closed-tab",
+        clientWindow: "other-window",
+        userContext: "external",
+        parent: null,
+        originalOpener: null,
+        url: "about:blank",
+        children: null
+      }
+      handlers.apply("browsingContext.contextCreated", info, { state })
+      handlers.apply("browsingContext.contextDestroyed", info, { state })
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(creation)
+      assert.isFalse(state.navigables.has("closed-tab"), "a closed tab must not be adopted from the held queue")
+    }))
+
   it.effect("keeps the active document usable after prospective realms are destroyed without commit", () =>
     Effect.gen(function*() {
       const { document, page, realm, state } = yield* withPage({
