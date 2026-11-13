@@ -69,6 +69,39 @@ describe("slice browser recycling", () => {
       try {
         const result = yield* Effect.exit(recycler.due)
         assert.deepStrictEqual(result, Exit.succeed(false))
+        assert.isFalse(yield* recycler.run)
+        yield* browser.newContext()
+        assert.isFalse(yield* recycler.due)
+        assert.strictEqual(vi.mocked(appendFileSync).mock.calls.length, 1)
+      } finally {
+        if (previous === undefined) delete process.env["STRIDER_TRACE_RETAIN_PASSES"]
+        else process.env["STRIDER_TRACE_RETAIN_PASSES"] = previous
+        vi.mocked(appendFileSync).mockReset()
+      }
+    }).pipe(Effect.scoped, Effect.provide(backend)))
+
+  it.effect("logs changed refusal reasons up to 200 entries and one limit marker", () =>
+    Effect.gen(function*() {
+      const browser = yield* Browser.Browser
+      const recycler = yield* Recycler
+      yield* pages(100)
+      const previous = process.env["STRIDER_TRACE_RETAIN_PASSES"]
+      process.env["STRIDER_TRACE_RETAIN_PASSES"] = "1"
+      vi.mocked(appendFileSync).mockReset()
+      try {
+        for (let index = 0; index < 205; index++) {
+          yield* Effect.scoped(Effect.gen(function*() {
+            yield* browser.newContext()
+            assert.isFalse(yield* recycler.due)
+            assert.isFalse(yield* recycler.run)
+            assert.isFalse(yield* recycler.due)
+          }))
+          assert.strictEqual(vi.mocked(appendFileSync).mock.calls.length, Math.min(index + 1, 201))
+        }
+        const entries = vi.mocked(appendFileSync).mock.calls.map((call) => JSON.parse(String(call[1])))
+        assert.isTrue(entries.slice(0, 200).every((entry) => entry.held.length === 1 && entry.pages === 100))
+        assert.strictEqual(entries[200].limit, 200)
+        assert.isUndefined(entries[200].held)
       } finally {
         if (previous === undefined) delete process.env["STRIDER_TRACE_RETAIN_PASSES"]
         else process.env["STRIDER_TRACE_RETAIN_PASSES"] = previous
