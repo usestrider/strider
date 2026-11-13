@@ -768,15 +768,6 @@ Head/Playwright figures retain the existing library defaults and timing boundari
 lifecycle cases compare different readiness/release paths and resources; their ratios are not isolated protocol
 costs. Ratios from these controls describe this source revision and these runners, not a general parity claim.
 
-The `unused-handlers-never`, `unused-handlers-other` and `unused-handlers-removed` controls create a locator and
-its effect before setup, then time fill, a waiting visibility assertion and a value read. Extra pages in the same
-context and another context remain open during timing. Setup, activation and cleanup are excluded. The `other`
-control registers handlers only on those extra pages; `removed` registers and removes one on the measured page.
-The identical driver harness is overlaid onto both refs. A ref without the registration API omits that optional
-setup, so these controls compare the measured ordinary path against its pre-feature behavior; they do not measure
-registration or callback performance. Playwright receives the same extra-page and handler setup. The ordinary
-click, fill, visible, visible-delayed, evaluate and locator-read controls remain separate.
-
 The `role-presentation` workload counts 100 headings with `role="none" tabindex="0.5"` twenty times per sample.
 Preparation is outside the timer. It exercises role traversal and the presentation-conflict tabindex predicate
 without using `Expect.toHaveRole`; Strider and Playwright must each return 100 every time. Ordinary `locator-read`,
@@ -792,22 +783,6 @@ query clears its caches. Original list/table outputs are recorded as incorrect a
 old-versus-current speed ratios; every candidate must equal the reviewed engine. Raw batches, engine source
 hashes, fixture definitions and partial failures are retained. Same-page pairing reduces some sources of noise,
 but does not eliminate JIT, GC, scheduling, order or thermal effects.
-
-### Hosted upload and response phase diagnostic
-
-Dispatch `benchmarks.yml` from the tooling branch with `workload=bench`, `only=phase-diagnostic`,
-`browser=chromium`, and pinned base/head commits. This diagnostic profiles head and Playwright, with three
-warmups and the requested alternating pairs. `phase-diagnostic/report.json` and `phases.md` split the upload
-and response scenarios at timing marks; `phase-summary.md` also includes separate traced `setInputFiles` and
-close timelines. `phase-diagnostic/trace/input.md` reports commands, serial round trips, wire bytes, and
-per-command timing for the upload call. The trace pass uses separate samples and protocol hooks that add overhead;
-its timings do not replace the untraced phase samples or the paired scenario comparison.
-
-The upload fixture exercises an all-Bytes selection totaling at most 64 KiB: Strider constructs and assigns it
-in one evaluation call using the engine utility world. Its trace includes locator work and node resolution as
-well as assignment; command count is not the number of upload evaluation calls. It does not measure the collector
-path used for larger Bytes selections or any attached Local file. A remaining phase difference does not by itself
-identify removable locator or transport work.
 
 ### Hosted launch phase diagnostics
 
@@ -889,40 +864,6 @@ The `navigate-title-locator` case retains the original `navigate` load/title wor
 `Shop` heading through each library's role locator. It verifies both results as `Shop`. This combined timer
 checks whether a cheaper title read merely defers initialization to the next locator. Setup, verification and
 cleanup remain outside timing, as for `navigate`.
-
-### Viewport and locator-handler default-path controls
-
-`viewport-ready` warms the locator engine with a heading read outside timing, then runs a real
-`Expect.toBeInViewport()` assertion on that intersecting heading. `viewport-retry` uses the same warmup,
-then arms a 100 ms transition moving a fixed 100 × 100 target from `top: 2000px` to `top: 0px` and asserts
-positive intersection. Timer setup and the intentional delay are included; preparation and cleanup are not.
-As with delayed visibility, the timer is not an observer-readiness barrier: a sufficiently delayed host may
-begin checking after the transition. This measures a delayed viewport condition, not a guaranteed retry count.
-No handler is registered, no deadline is shortened, and normal operation tracing remains enabled.
-
-The Playwright control uses its ordinary locator evaluation with a native `IntersectionObserver`, resolving
-only for a strictly positive ratio, disconnecting on success or its 30-second timeout. `playwright-core` does
-not supply Playwright Test's assertion package, so this is a native intersection control, not its `expect`
-implementation. The paired head/base Strider comparison uses the same real Strider assertion on both refs.
-
-`cold-locator-read` measures the first heading read in each fresh document, including lazy engine installation.
-It performs no locator preparation. Page/context creation and initial navigation remain outside timing on
-both sides; it isolates installation from browser launch rather than claiming cold-machine startup coverage.
-
-`--only viewport-install` selects these three cases. `--only handler-default-path` adds the never-registered,
-other-page/context-active and removed-handler controls, plus `click` and `visible` (eight cases total).
-The paired driver overlays the same case definitions, fixture server and runner on both refs, and retains their
-source hashes. Use exact refs and 200 pairs for both an identical-code control and the changed-code comparison;
-run them sequentially through `benchmarks.yml` and retain every interval, including slowdown signals.
-
-For correctness-only local validation, without collecting benchmark timings:
-
-```sh
-clutch lock browser -- nix develop .#integration --ignore-environment --keep TERM --command node packages/scenarios/benchmark/validate-viewport.ts
-```
-
-This runs each of the three case bodies once for each library, checks the pinned Chromium version, and verifies
-its output. It does not call the measurement runner or write performance samples.
 
 ### Hosted twenty-page protocol trace
 

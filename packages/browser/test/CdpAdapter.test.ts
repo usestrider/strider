@@ -8,7 +8,6 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
-import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
 import * as Scheduler from "effect/Scheduler"
@@ -16,7 +15,6 @@ import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import { TestClock } from "effect/testing"
-import * as Tracer from "effect/Tracer"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as BrowserImpl from "../src/internal/browser.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
@@ -1487,80 +1485,6 @@ const replacementEvent = (loaderId = "replacement") => ({
     }
   }
 })
-
-for (const mode of ["live", "absent", "ended", "effect-disabled", "browser-disabled"] as const) {
-  it.effect(`records malformed URL diagnostics on live, completed spans (setup: ${mode})`, () => {
-    const warnings: Array<Record<string, unknown>> = []
-    const logger = Logger.make((entry) => {
-      if (entry.logLevel === "Warn") warnings.push(Logger.formatStructured.log(entry).annotations)
-    })
-    const spans: Array<Tracer.NativeSpan> = []
-    const late: Array<string> = []
-    const tracer = Tracer.make({
-      span(options) {
-        const span = new Tracer.NativeSpan(options)
-        const event = span.event.bind(span)
-        span.event = (name, time, attributes) => {
-          if (span.status._tag === "Ended") late.push(name)
-          event(name, time, attributes)
-        }
-        spans.push(span)
-        return span
-      }
-    })
-    const enabled = mode !== "effect-disabled" && mode !== "browser-disabled"
-    const test = withProtocolScheduler((drain) =>
-      Effect.gen(function*() {
-        // The worker inherits connection-time services, including a setup span which may end before an event.
-        const h = yield* (mode === "absent" || mode === "live" || mode === "browser-disabled"
-          ? sentHeaders()
-          : (mode === "effect-disabled" ? sentHeaders().pipe(Effect.withTracerEnabled(false)) : sentHeaders()).pipe(
-            Effect.withSpan("connecting")
-          ))
-        const page = yield* h.page.control
-        const event = replacementEvent()
-        yield* h.browser.receive({ ...event, params: { frame: { ...event.params.frame, url: "nope" } } })
-        yield* drain
-        yield* page.activate
-        assert.strictEqual(h.commands.at(-1)?.method, "Page.bringToFront")
-        assert.strictEqual(h.facts.filter((fact) => fact._tag === "DocumentCommitted").at(-1)?.url, "about:blank")
-        const malformedWarnings = warnings.filter((entry) => entry["browser.url.reported"] === "REDACTED")
-        assert.strictEqual(malformedWarnings.length, 2)
-        for (const warning of malformedWarnings) assert.strictEqual(warning["test.ingestion"], "captured")
-        assert.deepStrictEqual(late, [])
-        const diagnostics = spans.filter((span) => span.name === "diagnostic:browser.url.malformed")
-        assert.strictEqual(diagnostics.length, enabled ? 2 : 0)
-        for (const span of diagnostics) {
-          assert.strictEqual(span.status._tag, "Ended")
-          assert.strictEqual(span.attributes.get("browser.url.reported"), "REDACTED")
-          assert.strictEqual(span.events.length, 1)
-          assert.strictEqual(span.events[0]?.[0], "browser.url.malformed")
-          assert.strictEqual(span.events[0]?.[2]?.["browser.url.reported"], "REDACTED")
-        }
-        // Suppression must never redirect an event to the setup span (live or ended).
-        for (const span of spans.filter((span) => !diagnostics.includes(span))) {
-          assert.isFalse(span.events.some(([name]) => name === "browser.url.malformed"))
-        }
-      })
-    )
-    let program = mode === "live" || mode === "browser-disabled" ? test.pipe(Effect.withSpan("connecting")) : test
-    if (mode === "browser-disabled") {
-      program = program.pipe(
-        Effect.provideService(Browser.TracerDisabledWhen, (operation) => operation.name === "browser.url.malformed")
-      )
-    }
-    return program.pipe(
-      Effect.withTracer(tracer),
-      Effect.provideService(
-        Browser.SpanNameGenerator,
-        (operation) => operation.name === "browser.url.malformed" ? `diagnostic:${operation.name}` : operation.name
-      ),
-      Effect.annotateLogs({ "test.ingestion": "captured" }),
-      Effect.provideService(Logger.CurrentLoggers, new Set([logger])),
-      onTestClock
-    )
-  })
-}
 
 const replyCapture = (browser: Effect.Success<typeof makeBrowser>, command: Sent) =>
   browser.receive({ id: command.id, sessionId: command.sessionId, result: { data: "AA==" } })
@@ -3245,129 +3169,5 @@ describe("Chromium screencast renderer readiness", () => {
         assert.strictEqual(h.commands.filter((c) => c.method === "Page.startScreencast").length, 0)
         assert.strictEqual(h.commands.filter((c) => c.method === "Page.stopScreencast").length, 0)
       }).pipe(onTestClock))
-  }
-})
-
-describe("CDP owned Chromium shutdown", () => {
-  for (
-    const mode of [
-      "order",
-      "no reply",
-      "disconnect before exit",
-      "hung child",
-      "signal exit",
-      "interrupted caller",
-      "expired deadline",
-      "failed handshake",
-      "attached"
-    ] as const
-  ) {
-    it.effect(mode, () =>
-      withProtocolScheduler((drain) =>
-        Effect.gen(function*() {
-          const browser = yield* makeBrowser
-          const exited = yield* Deferred.make<void, string>()
-          const closeSent = yield* Deferred.make<void>()
-          const scope = yield* Scope.make()
-          const commands: Array<string> = []
-          let fallback = false
-          yield* Scope.addFinalizer(
-            scope,
-            Effect.sync(() => {
-              fallback = true
-            })
-          )
-          yield* Effect.gen(function*() {
-            while (true) {
-              const command = yield* browser.next
-              commands.push(command.method)
-              if (command.method === "Browser.close") {
-                assert.strictEqual(fallback, false)
-                yield* Deferred.succeed(closeSent, undefined)
-                // Deliberately never reply: process exit, not a response, ends shutdown.
-                continue
-              }
-              if (mode === "failed handshake") {
-                yield* browser.receive({ id: command.id, error: { code: -1, message: "handshake rejected" } })
-                continue
-              }
-              const result = command.method === "Browser.getVersion"
-                ? {
-                  protocolVersion: "1.3",
-                  product: "Chrome/155",
-                  revision: "test",
-                  userAgent: "HeadlessChrome",
-                  jsVersion: "test"
-                }
-                : command.method === "Target.getBrowserContexts"
-                ? { browserContextIds: [] }
-                : {}
-              yield* browser.receive({ id: command.id, result })
-            }
-          }).pipe(Effect.forkScoped)
-          const options = {
-            ownership: mode === "attached" ? "attached" as const : "launched" as const,
-            sink: () => Effect.void,
-            exited: Deferred.await(exited)
-          }
-          const acquisition = yield* Effect.exit(
-            CdpAdapter.connect(browser.transport, options).pipe(Scope.provide(scope))
-          )
-          assert.strictEqual(Exit.isFailure(acquisition), mode === "failed handshake")
-          if (mode === "attached" || mode === "failed handshake") {
-            yield* Scope.close(scope, Exit.void)
-            assert.strictEqual(commands.includes("Browser.close"), false)
-            assert.strictEqual(fallback, true)
-            return
-          }
-          assert(Exit.isSuccess(acquisition))
-          let connectionLost = false
-          yield* acquisition.value.closed.pipe(
-            Effect.tap(() =>
-              Effect.sync(() => {
-                connectionLost = true
-              })
-            ),
-            Effect.forkScoped
-          )
-          const closing = yield* (mode === "interrupted caller"
-            ? Effect.gen(function*() {
-              yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))
-              return yield* Effect.never
-            }).pipe(Effect.scoped, Effect.forkChild)
-            : Scope.close(scope, Exit.void).pipe(
-              mode === "expired deadline" ? Deadline.within("0 millis") : (self) => self,
-              Effect.forkChild
-            ))
-          yield* drain
-          const interrupted = mode === "interrupted caller"
-            ? yield* Fiber.interrupt(closing).pipe(Effect.forkChild)
-            : undefined
-          // Drain all runnable protocol work without relying on a wall-clock delay.
-          yield* drain
-          assert.strictEqual(commands.includes("Browser.close"), true)
-          yield* Deferred.await(closeSent)
-          assert.strictEqual(connectionLost, false)
-          if (mode === "disconnect before exit") {
-            yield* browser.lose("closed before process exit")
-            yield* drain
-            assert.strictEqual(fallback, false)
-          }
-          if (mode === "hung child" || mode === "expired deadline") {
-            yield* TestClock.adjust("4999 millis")
-            assert.strictEqual(fallback, false)
-            yield* TestClock.adjust("1 millis")
-          } else if (mode === "signal exit") {
-            yield* Deferred.fail(exited, "SIGTERM")
-          } else {
-            yield* Deferred.succeed(exited, undefined)
-          }
-          if (interrupted !== undefined) yield* Fiber.join(interrupted)
-          else yield* Fiber.join(closing)
-          yield* drain
-          assert.strictEqual(connectionLost, true)
-          assert.strictEqual(fallback, true)
-        }).pipe(onTestClock)
-      ))
   }
 })

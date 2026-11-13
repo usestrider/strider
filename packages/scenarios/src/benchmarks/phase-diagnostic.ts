@@ -76,10 +76,8 @@ export const phaseDiagnostic = (options: {
     const read = (file: string, none: string) =>
       fs.existsSync(path.join(directory, file)) ? fs.readFileSync(path.join(directory, file), "utf8") : none
     const table = `${read("phases.md", "No phase table was written.")}\n## Traced close\n\n${
-      read("trace/phases.md", "").length === 0
-        ? "No trace was written."
-        : read("trace/close.md", "")
-    }\n## Traced setInputFiles\n\n${read("trace/input.md", "")}`
+      read("trace/phases.md", "").length === 0 ? "No trace was written." : read("trace/close.md", "")
+    }`
     fs.writeFileSync(
       path.join(output, "phase-summary.md"),
       `Phase diagnostic: **${manifest.status}**.\n\nAttribution only: head profiled with timing marks between steps, ${runs} alternating pairs after three warmups; the paired comparison, not this, gives ratios.\n\n${table}\n`

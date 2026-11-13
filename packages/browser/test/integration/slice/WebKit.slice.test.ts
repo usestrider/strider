@@ -1,4 +1,3 @@
-import { locatorHandlers } from "./locatorHandlers.ts"
 /**
  * The slices against stock WebKit, through the public layer: WebKitGTK's MiniBrowser (`browsers.ts`)
  * launched in automation mode, on an X server of the layer's own (`stockWebKit.ts`), with Node's sockets
@@ -55,7 +54,6 @@ attaching(name, backend, Option.none())
 
 webauthn("WebKit", backend)
 
-locatorHandlers("WebKit", backend)
 requestBodies("WebKit", backend)
 requestTiming("WebKit", backend)
 

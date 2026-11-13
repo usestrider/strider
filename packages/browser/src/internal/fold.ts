@@ -31,7 +31,6 @@ import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as Adapter from "./adapter.ts"
 import * as Events from "./events.ts"
-import * as Execution from "./execution.ts"
 import * as Input from "./input.ts"
 import type * as Model from "./model.ts"
 import * as NetworkIndex from "./networkIndex.ts"
@@ -517,7 +516,6 @@ export const make = Effect.fnUntraced(function*(options: {
           // Owned with its opener, released by the scope that acquired it (CONCEPTS.md §3)
           const owner = Option.flatMap(opener, (page) => page.state.getUnsafe().owner)
           const entry: Model.PageEntry = {
-            execution: Execution.ordinary,
             id: fact.page,
             context: fact.context,
             contextEntry: context,

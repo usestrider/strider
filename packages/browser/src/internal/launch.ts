@@ -165,8 +165,7 @@ export const command = (
 
 /**
  * Starts the browser in the scope. Closing the scope terminates it, killing it after `forceKillAfter` if it
- * hasn't exited. This raw process release sends a signal immediately; Chromium's connected layer attempts
- * graceful closure first, with its own five-second budget. Core dumps are off unless `coreDumps` is true (see `command`).
+ * hasn't exited. Core dumps are off unless `coreDumps` is true (see `command`).
  */
 export const spawn = Effect.fnUntraced(function*(
   executable: string,

@@ -78,12 +78,6 @@ const routes: Record<
       `<h1>Benchmark</h1><label>Name <input></label><button onclick="document.querySelector('#count').textContent = String(Number(document.querySelector('#count').textContent) + 1)">Increment</button><p id="count">0</p>`
     )
   }),
-  "/benchmark-viewport": () => ({
-    body: page(
-      "Viewport benchmark",
-      "<h1>Benchmark</h1><div id=\"viewport-target\" style=\"position:fixed;top:2000px;left:0;width:100px;height:100px\">Target</div>"
-    )
-  }),
   "/benchmark-reads": (url) => ({
     body: page(
       "Read benchmark",

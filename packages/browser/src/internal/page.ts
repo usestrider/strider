@@ -52,7 +52,6 @@ import * as Guarded from "./guarded.ts"
 import * as Handles from "./handles.ts"
 import * as InitScripts from "./initScripts.ts"
 import * as LocatorImpl from "./locator.ts"
-import * as LocatorHandlers from "./locatorHandlers.ts"
 import type * as Model from "./model.ts"
 import * as Navigated from "./navigated.ts"
 import * as Navigation from "./navigation.ts"
@@ -591,8 +590,6 @@ export const make = (owner: PageOwner): Page.Page => {
         handler,
         (options?.phase ?? "request") as P
       )) as Page.Page["route"],
-    addLocatorHandler: (locator, handler, options) =>
-      LocatorHandlers.add({ runtime, page: entry, grant: owner.grant }, locator, handler, options),
     addInitScript: (script, options) =>
       InitScripts.add({ runtime, scope: declared, operation: "Page.addInitScript" }, entry.context, script, options),
     emulate: (settings) => Emulation.emulate({ runtime, scope: declared, operation: "Page.emulate" }, settings),

@@ -19,7 +19,6 @@ import { start } from "../src/site.ts"
 import {
   closeReport,
   compactMessage,
-  inputReport,
   type PhaseSample,
   summarize,
   table,
@@ -37,30 +36,21 @@ assert.ok(Number.isInteger(runs) && runs >= 4 && runs % 4 === 0)
 const mode = process.argv[4] === "trace" ? "trace" : "timing"
 const warmup = 3
 
-type Window = { events: Array<WireEvent>; started: number }
-const windows = new Map<string, Window>()
+let window: { events: Array<WireEvent>; started: number } | undefined
 const trace = {
-  begin: (name: string) => {
-    windows.set(name, { events: [], started: performance.now() })
+  begin: () => {
+    window = { events: [], started: performance.now() }
   },
-  end: (name: string) => {
-    const done = windows.get(name)
-    windows.delete(name)
+  end: () => {
+    const done = window
+    window = undefined
     return done?.events ?? []
   },
-  mark: (name: string) => {
-    for (const window of windows.values()) {
-      window.events.push({ at: performance.now() - window.started, kind: "mark", name })
-    }
-  },
+  mark: (name: string) => window?.events.push({ at: performance.now() - window.started, kind: "mark", name }),
   wire: (kind: "send" | "receive", raw: unknown) => {
-    if (windows.size === 0) return
-    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw as Record<string, unknown>
-    const message = compactMessage(parsed)
-    const bytes = typeof raw === "string" ? Buffer.byteLength(raw) : Buffer.byteLength(JSON.stringify(raw))
-    for (const window of windows.values()) {
-      window.events.push({ at: performance.now() - window.started, kind, message, bytes })
-    }
+    if (window === undefined) return
+    const message = compactMessage(typeof raw === "string" ? JSON.parse(raw) : raw as Record<string, unknown>)
+    window.events.push({ at: performance.now() - window.started, kind, message })
   },
   transport: (transport: Transport.Transport): Transport.Transport => ({
     closed: transport.closed,
@@ -83,7 +73,6 @@ const Cart = Schema.Struct({
 
 /** Marks name the phase that ended at that moment; `finish` records the remainder as `close`. */
 const recorder = (bodyEnd: string) => {
-  let inputEvents: Array<WireEvent> = []
   const phases: Record<string, number> = {}
   let last = performance.now()
   const started = last
@@ -94,11 +83,8 @@ const recorder = (bodyEnd: string) => {
       last = now
       if (mode === "trace") {
         trace.mark(name)
-        // The close window runs from the body's last step to the end of the sample
-        if (name === bodyEnd) trace.begin("close")
-        // The input window is the upload's setInputFiles call: from the end of goto to its own mark
-        if (name === "goto" && bodyEnd === "read") trace.begin("input")
-        if (name === "setInputFiles") inputEvents = trace.end("input")
+        // The window is the close: from the body's last step to the end of the sample
+        if (name === bodyEnd) trace.begin()
       }
     },
     finish: (): { phases: Record<string, number>; total: number } => {
@@ -106,8 +92,7 @@ const recorder = (bodyEnd: string) => {
       phases["close"] = now - last
       return { phases, total: now - started }
     },
-    phases,
-    inputEvents: () => inputEvents
+    phases
   }
 }
 
@@ -230,8 +215,7 @@ try {
         }
       }
       const { phases, total } = clock.finish()
-      const events = mode === "trace" ? trace.end("close") : []
-      const inputEvents = clock.inputEvents()
+      const events = mode === "trace" ? trace.end() : []
       assert.equal(text, program.expected)
       const result: PhaseSample = {
         scenario,
@@ -240,7 +224,7 @@ try {
         warmup: repetition < 0,
         phases,
         total,
-        ...(mode === "trace" ? { events, ...(inputEvents.length === 0 ? {} : { inputEvents }) } : {})
+        ...(mode === "trace" ? { events } : {})
       }
       validate(result)
       samples.push(result)
@@ -266,8 +250,5 @@ try {
   await site.close()
   save()
   fs.writeFileSync(path.join(path.dirname(output), "phases.md"), `${table(summarize(samples))}\n`)
-  if (mode === "trace") {
-    fs.writeFileSync(path.join(path.dirname(output), "close.md"), `${closeReport(samples)}\n`)
-    fs.writeFileSync(path.join(path.dirname(output), "input.md"), `${inputReport(samples)}\n`)
-  }
+  if (mode === "trace") fs.writeFileSync(path.join(path.dirname(output), "close.md"), `${closeReport(samples)}\n`)
 }

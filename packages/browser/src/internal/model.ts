@@ -287,7 +287,6 @@ export interface PageState {
 }
 
 export interface PageEntry {
-  execution: import("./execution.ts").Dispatch
   readonly id: Target.NavigableId
   /** Fixed: a page never changes context. */
   readonly context: UserContext.Id

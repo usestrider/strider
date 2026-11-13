@@ -1,7 +1,7 @@
 /**
  * Realms and evaluation on BiDi: the `script` domain's realms, what they log and throw (`log.entryAdded`), and
  * calls in them. Firefox creates a new document's main-world realm before the document commits: one created for
- * a context whose document already has one is held with its sandboxes for the next commit. Values cross in BiDi's own
+ * a context whose document already has one is held, pending, for the next commit. Values cross in BiDi's own
  * serialization, which L1's `RemoteValue` follows.
  */
 import * as Effect from "effect/Effect"
@@ -161,16 +161,8 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         state.realms.set(realm.bidi, realm)
         state.realmsById.set(realm.id, realm)
         const document = navigable.document
-        // A replacement main realm and its sandboxes belong to the next document. A duplicate sandbox
-        // also proves replacement of that world, even if it arrives before the main realm.
-        if (
-          document === undefined || (realm.world._tag === "Main" && document.hadMainRealm) ||
-          navigable.pendingRealms.length > 0 ||
-          (realm.world._tag === "Isolated" && Array.from(document.realms).some((current) =>
-            current.world._tag === "Isolated" && realm.world._tag === "Isolated" &&
-            current.world.name === realm.world.name
-          ))
-        ) {
+        // A second main-world realm for a document belongs to the next one, which hasn't committed yet
+        if (document === undefined || (realm.world._tag === "Main" && document.hadMainRealm)) {
           realm.pending = true
           navigable.pendingRealms.push(realm)
           if (realm.world._tag === "Main") navigable.restoring?.arrived(realm)

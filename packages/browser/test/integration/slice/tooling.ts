@@ -416,26 +416,6 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           }
         })), timeout)
 
-      it.effect(
-        "refuses several in-memory files for an input without multiple and keeps its selection",
-        () =>
-          Effect.scoped(Effect.gen(function*() {
-            const url = yield* fixture(`<input type="file" aria-label="File"><p id="out">none</p><script>
-            document.querySelector("input").onchange = (event) => {
-              document.getElementById("out").textContent = [...event.target.files].map((file) => file.name).join(",")
-            }
-          </script>`)
-            const page = yield* Browser.newPage()
-            yield* page.goto(url)
-            yield* page.getByLabel("File").setInputFiles(FileInput.bytes("one.txt", "text/plain", text("1")))
-            yield* page.locator("#out").pipe(Expect.toHaveText("one.txt"))
-            const refused = yield* page.getByLabel("File").setInputFiles(made).pipe(Effect.flip)
-            assert(Locator.isLocatorError(refused) && refused.reason._tag === "InvalidInput", String(refused))
-            assert.strictEqual(yield* page.locator("#out").readText, "one.txt")
-          })),
-        timeout
-      )
-
       for (const megabytes of [32, 256, 600]) {
         it.effect(`transfers a local file of ${megabytes} MiB`, () =>
           Effect.gen(function*() {

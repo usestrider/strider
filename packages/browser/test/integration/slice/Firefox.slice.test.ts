@@ -1,4 +1,3 @@
-import { locatorHandlers } from "./locatorHandlers.ts"
 /**
  * The slices against Firefox, through the public layer: the pinned Firefox (`browsers.ts`), in the Nix
  * environment `pnpm test:integration` enters.
@@ -45,7 +44,6 @@ attaching("Firefox", backend, Option.some(firefoxAttachable((endpoint) => Firefo
 
 webauthn("Firefox", backend)
 
-locatorHandlers("Firefox", backend)
 requestBodies("Firefox", backend)
 requestTiming("Firefox", backend)
 

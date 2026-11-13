@@ -135,18 +135,6 @@ export const contents = (
   describe(`${name} contents`, () => {
     layer(SharedContext.layer(backend), { excludeTestServices: true, timeout })((suite) => {
       const it = SharedContext.guard(suite)
-
-      it.effect("preserves viewport assertions while a locator handler is registered", () =>
-        Effect.gen(function*() {
-          const served = yield* site
-          const page = yield* SharedContext.newPage
-          yield* page.goto(fixtureUrl(served.origin, "<div id=\"target\">Visible target</div>"))
-          const target = page.locator("#target")
-          yield* Expect.toBeInViewport(target).pipe(Deadline.within("1 second"))
-          const registration = yield* page.addLocatorHandler(page.locator("#absent-overlay"), () => Effect.void)
-          yield* Expect.toBeInViewport(target).pipe(Deadline.within("1 second"))
-          yield* registration.remove
-        }).pipe(Effect.scoped))
       it.effect("reads fresh titles before a locator and isolates page-world title overrides", () =>
         Effect.gen(function*() {
           const { origin } = yield* site

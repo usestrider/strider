@@ -14,9 +14,8 @@
  * - **No pause.** BiDi scopes declarations natively, by context or user context, so a new context needs no
  *   pause: preload scripts and overrides registered for its user context apply before its scripts run.
  * - **Realms come before commits.** Firefox creates a new document's realm before `navigationCommitted`, after
- *   or before destroying the old one. A replacement main realm and its sandboxes are held for the next
- *   commit; one destroyed first is never reported. Pending replacement realms prevent transfer of old realms,
- *   whose delayed destruction must not be confused with initial about:blank realm reuse.
+ *   destroying the old one. A main-world realm created for a context whose document already had one belongs
+ *   to the next commit, and is held until then; one destroyed first is never reported.
  */
 import * as Effect from "effect/Effect"
 import type * as Scope from "effect/Scope"

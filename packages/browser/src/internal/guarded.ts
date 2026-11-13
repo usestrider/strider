@@ -24,7 +24,7 @@ export const page: Access.Members = {
     "toString",
     "toJSON"
   ]),
-  declarations: new Set(["route", "addInitScript", "addLocatorHandler", "emulate", "clock.install"])
+  declarations: new Set(["route", "addInitScript", "emulate", "clock.install"])
 }
 
 /** A context's members under a grant. */

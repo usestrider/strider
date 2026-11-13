@@ -49,10 +49,7 @@ export interface NavigableEntry extends Kit.NavigableNode<NavigableEntry> {
   readonly page: NavigableEntry
   closing: L1Target.CloseReason | undefined
   document: DocumentEntry | undefined
-  /**
-   * Realms created for the next document, before it commits: replacement main realms, and the sandboxes held with
-   * them, including a same-name sandbox that arrives before the main realm.
-   */
+  /** Main-world realms created for the next document, before it commits. */
   readonly pendingRealms: Array<RealmEntry>
   /** The traversal eligible to observe a restoration, from command issuance until invalidation. */
   restoring: {
@@ -75,14 +72,10 @@ export interface NavigableEntry extends Kit.NavigableNode<NavigableEntry> {
     readonly kind: "commit" | "failure" | "abort"
     readonly params: BrowsingContext.NavigationInfo
     readonly document?: L1Target.DocumentId | undefined
-    readonly rejected?:
-      | (Kit.Expected & { readonly bidi?: string | undefined; readonly aliases?: ReadonlySet<string> | undefined })
-      | undefined
+    readonly rejected?: (Kit.Expected & { readonly bidi?: string | undefined }) | undefined
   }>
   /** The last failure can still install its error document. */
-  failedNavigation:
-    | (Kit.Expected & { readonly bidi?: string | undefined; readonly aliases?: ReadonlySet<string> | undefined })
-    | undefined
+  failedNavigation: (Kit.Expected & { readonly bidi?: string | undefined }) | undefined
   readonly navigations: Map<string, NavigationEntry>
   /** The documents it had, by URL: what a restore from the back/forward cache restores. */
   readonly past: Map<string, L1Target.DocumentId>
@@ -95,9 +88,6 @@ export interface DocumentEntry {
   generation: number
   /** The navigation that created it, whose readiness events are this document's. */
   navigation: string | undefined
-  committedAt?: number | undefined
-  /** Correlated wire identities and their start bounds, retained for this document's readiness. */
-  navigationStarts?: ReadonlyMap<string, number> | undefined
   readonly realms: Set<RealmEntry>
   hadMainRealm: boolean
   complete: boolean
@@ -111,10 +101,6 @@ export interface RealmEntry extends Kit.RealmNode {
 }
 
 export interface NavigationEntry extends Kit.NavigationNode {
-  /** Start timestamps for the wire identities currently correlated with this logical navigation. */
-  readonly starts: Map<string, number>
-  /** A load assigned to this navigation that predates its start and belongs to the current document. */
-  staleLoad?: L1Target.DocumentId | undefined
   readonly bidi: string
   readonly navigable: NavigableEntry
   readonly url: string

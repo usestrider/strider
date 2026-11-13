@@ -22,13 +22,11 @@ import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import type * as AriaPattern from "./AriaPattern.ts"
 import type * as Condition from "./Condition.ts"
-import type * as Deadline from "./Deadline.ts"
 import * as Diagnostics from "./Diagnostics.ts"
 import * as ConditionImpl from "./internal/condition.ts"
 import * as ExpectImpl from "./internal/expect.ts"
 import * as Locator from "./Locator.ts"
 import type * as Page from "./Page.ts"
-import * as Reason from "./Reason.ts"
 import type * as Target from "./Target.ts"
 import * as Watchable from "./Watchable.ts"
 
@@ -39,7 +37,7 @@ import * as Watchable from "./Watchable.ts"
  * @category models
  * @since 0.1.0
  */
-export type Matcher<S> = (subject: S) => Effect.Effect<void, ExpectationFailed | Target.TargetGone | Deadline.Timeout>
+export type Matcher<S> = (subject: S) => Effect.Effect<void, ExpectationFailed | Target.TargetGone>
 
 /**
  * A matcher with arguments, usable data-first or in `pipe`.
@@ -49,8 +47,8 @@ export type Matcher<S> = (subject: S) => Effect.Effect<void, ExpectationFailed |
  * @since 0.1.0
  */
 export interface DualMatcher<S, Args extends ReadonlyArray<unknown>> {
-  (...args: Args): (subject: S) => Effect.Effect<void, ExpectationFailed | Target.TargetGone | Deadline.Timeout>
-  (subject: S, ...args: Args): Effect.Effect<void, ExpectationFailed | Target.TargetGone | Deadline.Timeout>
+  (...args: Args): (subject: S) => Effect.Effect<void, ExpectationFailed | Target.TargetGone>
+  (subject: S, ...args: Args): Effect.Effect<void, ExpectationFailed | Target.TargetGone>
 }
 
 /**
@@ -754,7 +752,7 @@ export const toHaveTitle: DualMatcher<Page.ReadonlyPage, [expected: string | Reg
 export const that = <A, E, R>(
   subject: Effect.Effect<A, E, R>,
   condition: Condition.Condition<A>
-): Effect.Effect<void, E | ExpectationFailed | Target.TargetGone | Deadline.Timeout, R> =>
+): Effect.Effect<void, E | ExpectationFailed | Target.TargetGone, R> =>
   Watchable.isWatchable(subject)
     ? ExpectImpl.watching(
       subject as Watchable.Watchable<A>,
@@ -814,16 +812,10 @@ export const withCheckInterval: {
 const ExpectationFailedTypeId = "~@usestrider/browser/Expect/ExpectationFailed"
 
 /**
- * Error for an expectation that didn't pass before the deadline, or that a locator handler's callback failed while
- * the expectation was waiting.
+ * Error for an expectation that didn't pass before the deadline.
  *
  * **Details**
  *
- * - When a locator handler's callback fails with a typed error, `handlerFailure` is set, and holds that error as
- *   `error`, unchanged and unserialized; `message` names the handler's failure rather than the unmet condition.
- *   Narrow `error` yourself: it can be any value the callback failed with. A callback that exceeds the deadline
- *   fails the expectation with `Deadline.Timeout` instead, and a callback that loses its page fails with
- *   `TargetGone`; neither is wrapped here.
  * - `history` contains observed values and diagnostic error entries, with repeats in a row dropped;
  *   `last` is its final entry. For locator expectations, page values must reach Strider before the deadline.
  *   If neither a page value nor a diagnostic error is recorded, `history` is empty and `last` is `Option.none()`.
@@ -860,7 +852,6 @@ const ExpectationFailedTypeId = "~@usestrider/browser/Expect/ExpectationFailed"
 export class ExpectationFailed extends Schema.TaggedError<ExpectationFailed>(ExpectationFailedTypeId)(
   "ExpectationFailed",
   {
-    handlerFailure: Schema.optional(Reason.LocatorHandlerFailed),
     subject: Schema.String,
     condition: Schema.String,
     last: Schema.Option(Diagnostics.ObservedValue),
@@ -877,9 +868,7 @@ export class ExpectationFailed extends Schema.TaggedError<ExpectationFailed>(Exp
 ) {
   readonly [ExpectationFailedTypeId] = ExpectationFailedTypeId
   override get message(): string {
-    return this.handlerFailure === undefined
-      ? `Expected ${this.subject} ${this.condition}`
-      : this.handlerFailure.message
+    return `Expected ${this.subject} ${this.condition}`
   }
 }
 

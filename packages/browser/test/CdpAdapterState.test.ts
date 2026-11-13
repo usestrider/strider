@@ -3273,25 +3273,3 @@ it.effect("rejects an isolated realm created in a replacement document while acq
       }
     }
   }).pipe(Effect.scoped))
-
-it.effect("falls back for malformed network and paused request URLs", () =>
-  Effect.gen(function*() {
-    const { state, target, facts } = yield* withPage()
-    const handlers = Obligations.register(Network.register(Kit.handlers<State.Event>()))
-    handlers.apply("Network.requestWillBeSent", sent("not a URL"), { state, target })
-    // An unattributed worker pause is surfaced without a page route registration.
-    handlers.apply("Fetch.requestPaused", {
-      requestId: "malformed",
-      resourceType: "Fetch",
-      request: sent("also not a URL").request
-    }, { state, target: { ...target, page: undefined, kind: "worker" } })
-    yield* state.buffer.flush
-    const request = facts.find((fact) => fact._tag === "RequestSent")
-    assert.isDefined(request)
-    if (request?._tag === "RequestSent") assert.strictEqual(request.request.url, "about:blank")
-    const obligation = facts.find((fact) => fact._tag === "ObligationOpened")
-    assert.isDefined(obligation)
-    if (obligation?._tag === "ObligationOpened" && obligation.subject._tag === "PausedRequest") {
-      assert.strictEqual(obligation.subject.request.url, "about:blank")
-    } else assert.fail("expected a paused request")
-  }))
