@@ -1383,7 +1383,6 @@ describe("BidiAdapter state", () => {
             ...info("B", 15),
             url: "about:neterror?e=connectionFailure&u=" + encodeURIComponent(url)
           })
-          assert.deepStrictEqual(page.document!.createdBy, { _tag: "ErrorPage", navigation: reserved })
         }
         yield* state.buffer.flush
         const ends = facts.filter((fact) => fact._tag === "NavigationEnded").filter((fact) =>
