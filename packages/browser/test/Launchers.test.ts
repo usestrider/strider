@@ -408,6 +408,14 @@ describe("Chromium launcher", () => {
         )
       }))
 
+    it.effect("hides infobars in the automation and concurrent profiles, not the stock one", () =>
+      Effect.sync(() => {
+        for (const profile of ["automation", "concurrent"] as const) {
+          assert.include(ChromiumLauncher.argsFor({ profile }, "/p", "pipe"), "--disable-infobars", profile)
+        }
+        assert.notInclude(ChromiumLauncher.argsFor({ profile: "stock" }, "/p", "pipe"), "--disable-infobars")
+      }))
+
     it.effect("waits for the complete DevToolsActivePort endpoint before connecting", () =>
       Effect.gen(function*() {
         const fs = yield* FileSystem.FileSystem

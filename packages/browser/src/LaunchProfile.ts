@@ -45,6 +45,8 @@ export const stock: LaunchProfile = new LaunchProfile({
  *
  * - Chromium enables CDPScreenshotNewSurface to request a repaint on a new surface for captures. Capturing can
  *   drive rendering and is not guaranteed to be unobservable to the page.
+ * - Chromium hides infobars. Chrome for Testing otherwise adds one to each new window shortly after it opens, which
+ *   shrinks the page area.
  * - Firefox's JSON viewer is off, which a page can tell: a JSON response's document is the JSON as served, as in
  *   Chromium and WebKit, not the viewer's page.
  * - Firefox opens popups as windows, so the page that opened one keeps rendering behind it.
