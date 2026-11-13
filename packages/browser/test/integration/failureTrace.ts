@@ -196,7 +196,7 @@
  * parent `iframe` element, and the protocol and the pointer recipients cannot say whether the child's hit-test
  * region was published before the press. Every run of that case, passing or failing, writes
  * `.data/integration-failures/iframe-native-<pid>-<uuid>/`, which CI uploads with the other failure traces
- * (Linux: every job, always; macOS: when the run fails or is cancelled, or with `retain_diagnostics`):
+ * (Linux: every job, always; macOS: every run, passing ones included, as the upload step runs `if: always()`):
  * `trace.json` (a CDP `Tracing` JSON trace, categories `input`, `latencyInfo`, `viz.hit_testing_flow`,
  * `disabled-by-default-viz.hit_testing_flow`, `viz` and `devtools`, no argument filtering), `browser.stderr.log`
  * (the browser's complete stderr, from `--enable-logging=stderr`, the only extra launch flag), `metadata.json`
@@ -206,8 +206,9 @@
  * the pointer recipients. Bounds: the trace buffer is 64 MiB in `recordUntilFull` mode (the start is kept, and Chromium
  * reports data loss in the metadata); the start, drain and stream-close waits have 5, 10 and 2 second budgets, and
  * their failures are recorded in the metadata, never replacing the case's own outcome; the test's deadlines are
- * unchanged. Limits: the events carry no frame-sink, widget or command IDs, so they join to the protocol by time and
- * coordinates only, on separate clocks, and show order, not identity. Chromium's routing and hit-test sources have no
+ * unchanged. Limits: the routing and hit-test events carry no frame-sink, widget or command IDs, so they join to the
+ * protocol by time and coordinates only, on separate clocks, and show order, not identity. The `devtools` category does
+ * record each DevTools command's call ID and method. Chromium's routing and hit-test sources have no
  * verbose logging, so `--v` and `--vmodule` add nothing. Cost: about 5 seconds more for the case (draining the trace
  * after the gesture) and about 0.6 MB of artifact per run; the tracing itself runs inside the browser and may change
  * timing, which the protocol timestamps cannot show. The capture attaches before the test creates its page.
