@@ -51,6 +51,20 @@ export const stock: LaunchProfile = new LaunchProfile({
  *   Chromium and WebKit, not the viewer's page.
  * - Firefox opens popups as windows, so the page that opened one keeps rendering behind it.
  *
+ * **Example** (Launching Chromium with the default profile named)
+ *
+ * ```ts import.meta.vitest
+ * import { NodeServices } from "@effect/platform-node"
+ * import { LaunchProfile } from "@usestrider/browser"
+ * import { Chromium } from "@usestrider/browser/chromium"
+ * import { Layer } from "effect"
+ *
+ * const browser = Chromium.layer({
+ *   executablePath: "/usr/bin/chromium",
+ *   profile: LaunchProfile.automation
+ * }).pipe(Layer.provide(NodeServices.layer))
+ * ```
+ *
  * @stability unstable
  * @category constants
  * @since 0.1.0

@@ -52,7 +52,9 @@
  * and bounds (Browser.getWindowForTarget), CSS layout metrics and renderer inner/outer dimensions and pixel ratio.
  * Setup baseline requests/replies are identified separately. Paused renderer evaluation is explicitly unavailable;
  * it must never block resume. Queries are asynchronous and do not gate adapter operations. A request with no reply
- * remains pending, not a measurement; protocol/renderer errors and detach are marked unavailable. Measurements
+ * remains pending, not a measurement; protocol/renderer errors and detach are marked unavailable. Renderer reads
+ * run in an isolated world of the target's main frame, so page code never runs. At most 512 queries are pending
+ * at once; once full, further measurements are recorded as unavailable until replies arrive or the connection ends. Measurements
  * within a sample are separate browser commands, not an atomic snapshot. Native outer bounds are not content
  * dimensions. Extra queries can perturb timing; a passing probe cannot establish the cause of an earlier failure.
  * Passing retention includes these records with STRIDER_TRACE_RETAIN_PASSES=1 and the same bounds described above.

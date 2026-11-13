@@ -79,7 +79,7 @@ const ChromiumLive = Chromium.layer({
 
 | Profile      | Chromium                                                                                                           | Firefox                                                                                       |
 | ------------ | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
-| `automation` | no first-run, sync, update, or crash-report prompts, no background traffic, and no component extensions as targets | no update, first-run, or data-reporting prompts; the JSON viewer off; popups open as windows |
+| `automation` | no first-run, sync, update, or crash-report prompts, no background traffic, no component extensions as targets, and no infobars, so a new window's page area keeps its size | no update, first-run, or data-reporting prompts; the JSON viewer off; popups open as windows |
 | `concurrent` | `automation`, and background timers, covered windows, and background renderers aren't throttled                    | `automation`, and timers aren't throttled to a budget                                          |
 
 A page can tell `concurrent` apart, such as by its timers' cadence, so it's for runs with many pages at once, as in

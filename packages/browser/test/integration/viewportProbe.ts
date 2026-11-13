@@ -6,21 +6,22 @@ export const viewportTap = (trace: Record): Tap => {
   let nextId = 2 ** 29
   let sample = 0
   const sessions = new Map<string, { targetId: string; paused: boolean }>()
-  const pending = new Map<number, { metadata: object; measurement: string }>()
+  const pending = new Map<number, { metadata: object; measurement: string; then?: (result: any) => void }>()
   const commands = new Map<number, { sessionId: string; method: string }>()
   const query = (
     sessionId: string | undefined,
     method: string,
     params: object,
     metadata: object,
-    measurement: string
+    measurement: string,
+    then?: (result: any) => void
   ) => {
     if (tap.inject === undefined || pending.size >= 512) {
       trace("viewport-unavailable", { ...metadata, measurement, reason: "probe unavailable or pending limit" })
       return
     }
     const id = nextId++
-    pending.set(id, { metadata, measurement })
+    pending.set(id, { metadata, measurement, ...(then === undefined ? {} : { then }) })
     trace("viewport-request", { ...metadata, measurement, id, status: "pending; no reply is not a measurement" })
     tap.inject(JSON.stringify({ id, method, params, ...(sessionId === undefined ? {} : { sessionId }) }))
   }
@@ -37,15 +38,26 @@ export const viewportTap = (trace: Record): Tap => {
         reason: "target paused; evaluation would wait for resume"
       })
     } else {
+      // Read in an isolated world of the main frame, as restoration does, so no page-owned getter runs and no
+      // page-defined name can supply a value.
       query(
         sessionId,
-        "Runtime.evaluate",
-        {
-          expression: "({ width: innerWidth, height: innerHeight, outerWidth, outerHeight, devicePixelRatio })",
-          returnByValue: true
-        },
+        "Page.createIsolatedWorld",
+        { frameId: target.targetId, worldName: "__strider_viewport_probe" },
         metadata,
-        "renderer"
+        "renderer-world",
+        (world) =>
+          query(
+            sessionId,
+            "Runtime.evaluate",
+            {
+              expression: "({ width: innerWidth, height: innerHeight, outerWidth, outerHeight, devicePixelRatio })",
+              contextId: world.executionContextId,
+              returnByValue: true
+            },
+            metadata,
+            "renderer"
+          )
       )
     }
   }
@@ -81,6 +93,10 @@ export const viewportTap = (trace: Record): Tap => {
         const own = pending.get(received.id)
         if (own !== undefined) {
           pending.delete(received.id)
+          if (own.then !== undefined && !received.error && typeof received.result?.executionContextId === "number") {
+            own.then(received.result)
+            return true
+          }
           trace(received.error || received.result?.exceptionDetails ? "viewport-unavailable" : "viewport-measurement", {
             ...own.metadata,
             measurement: own.measurement,
