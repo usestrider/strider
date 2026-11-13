@@ -270,7 +270,12 @@ describe("WebKit's Automation protocol, over stock WebKitGTK's inspector socket"
             ["Runtime.evaluate", {}, target],
             ["Runtime.evaluate", { expression: "1" }, WebKitWire.targetKey(pageProxyId, "page-999999")],
             ["Page.getResourceContent", { frameId: "nope", url: "about:blank" }, target],
-            ["DOM.resolveNode", { nodeId: 99999 }, target]
+            ["DOM.resolveNode", { nodeId: 99999 }, target],
+            [
+              "Runtime.callFunctionOn",
+              { objectId: "{\"injectedScriptId\":999999,\"id\":1}", functionDeclaration: "function() {}" },
+              target
+            ]
           ]
           const rows: Array<ProtocolClient.ErrorMatcher | undefined> = []
           for (const [method, params, key] of cases) {
