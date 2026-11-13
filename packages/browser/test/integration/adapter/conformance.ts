@@ -21,7 +21,6 @@ import type * as Adapter from "../../../src/internal/adapter.ts"
 import type * as PageNavigation from "../../../src/PageNavigation.ts"
 import * as Target from "../../../src/Target.ts"
 import { type Backend, json, makeRecorder, type Recorder, type Site, site, tlsSite } from "./harness.ts"
-import * as IframeTrace from "./iframeTrace.ts"
 
 const timeout = 60_000
 
@@ -672,19 +671,18 @@ export const conformance = (backend: Backend) =>
 
         it.effect("names an iframe's frame, passes a node across worlds, and sends input into a frame", () =>
           Effect.gen(function*() {
-            yield* IframeTrace.start
             const world = yield* setup(backend)
             const { page } = yield* newPage(world)
             const fixture = (origin: string, html: string) =>
               `${origin}/fixture?html=${encodeURIComponent(html)}`
             const child =
-              `<body style="margin:0"><button style="position:absolute;left:10px;top:10px;width:60px;height:30px" onclick="parent.postMessage('clicked', '*')">x</button><script>for (const type of ['pointermove','pointerdown','pointerup','mousedown','mouseup','click']) addEventListener(type, e => parent.postMessage({native: type, x: e.clientX, y: e.clientY, target: e.target.tagName, trusted: e.isTrusted}, '*'), true); parent.postMessage('loaded', '*')</script></body>`
+              `<body style="margin:0"><button style="position:absolute;left:10px;top:10px;width:60px;height:30px" onclick="parent.postMessage('clicked', '*')">x</button><script>parent.postMessage('loaded', '*')</script></body>`
             yield* goto(
               world,
               page,
               fixture(
                 world.site.origin,
-                `<body style="margin:0"><script>window.got = []; addEventListener('message', (e) => got.push(e.data)); for (const type of ['pointermove','pointerdown','pointerup','mousedown','mouseup','click']) addEventListener(type, e => got.push({native: type, frame: 'parent', x: e.clientX, y: e.clientY, target: e.target.tagName, trusted: e.isTrusted}), true)</script><iframe id="cross" src="${
+                `<body style="margin:0"><script>window.got = []; addEventListener('message', (e) => got.push(e.data))</script><iframe id="cross" src="${
                   fixture(world.site.crossSite, child)
                 }" style="position:absolute;left:100px;top:50px;width:200px;height:100px;border:5px solid red;padding:3px"></iframe></body>`
               )
@@ -703,10 +701,7 @@ export const conformance = (backend: Backend) =>
               }),
               (result) => result._tag === "Value" && json(result.value) === true ? Effect.void : Effect.fail("not yet")
             )
-            yield* loaded.pipe(
-              Effect.retry({ times: 50, schedule: Schedule.spaced("100 millis") }),
-              Effect.onExit((exit) => Effect.sync(() => IframeTrace.note("loaded wait", exit)))
-            )
+            yield* loaded.pipe(Effect.retry({ times: 50, schedule: Schedule.spaced("100 millis") }))
             const iframe = yield* world.adapter.evaluate(realm, {
               functionDeclaration: "() => document.getElementById('cross')",
               arguments: [],
@@ -746,7 +741,6 @@ export const conformance = (backend: Backend) =>
             const origin = { x: 100 + 5 + 3, y: 50 + 5 + 3 }
             const x = origin.x + 40
             const y = origin.y + 25
-            IframeTrace.note("dispatch", { page, frame: added.frame, origin, x, y })
             yield* world.adapter.dispatchInput(page, [
               { _tag: "Mouse", type: "move", x, y, button: "none", clickCount: 0, modifiers: none, buttons: 0 },
               { _tag: "Mouse", type: "down", x, y, button: "left", clickCount: 1, modifiers: none, buttons: 1 },
@@ -762,15 +756,7 @@ export const conformance = (backend: Backend) =>
               }),
               (result) => result._tag === "Value" && json(result.value) === true ? Effect.void : Effect.fail("not yet")
             )
-            yield* clicked.pipe(
-              Effect.retry({ times: 30, schedule: Schedule.spaced("100 millis") }),
-              Effect.onExit((exit) => Effect.sync(() => IframeTrace.note("clicked wait", exit))),
-              Effect.onExit(() =>
-                evaluate(world, page, "() => window.got").pipe(
-                  Effect.tap((messages) => Effect.sync(() => IframeTrace.note("messages and native events", messages)))
-                )
-              )
-            )
+            yield* clicked.pipe(Effect.retry({ times: 30, schedule: Schedule.spaced("100 millis") }))
           }), timeout)
 
         it.effect("delivers a prompt as an obligation that takes one decision", () =>

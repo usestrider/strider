@@ -297,6 +297,7 @@ export class TraceBuffer {
 }
 
 interface Sink {
+  checkpoint?(label: string): string | undefined
   connection(label: string): Record
 }
 const key = Symbol.for("strider.integration.failureTrace")
@@ -306,3 +307,7 @@ export const install = (sink: Sink) => {
 /** Used only by the integration configuration's source instrumentation. */
 export const connection = (label: string): Record =>
   (globalThis as typeof globalThis & { [key]?: Sink })[key]?.connection(label) ?? (() => {})
+
+/** Saves an independent recorder checkpoint before a diagnostic stream can displace its bounded tail. */
+export const checkpoint = (label: string): string | undefined =>
+  (globalThis as typeof globalThis & { [key]?: Sink })[key]?.checkpoint?.(label)

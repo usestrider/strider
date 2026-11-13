@@ -7,22 +7,33 @@ import * as CdpAdapter from "../../../src/internal/cdpAdapter.ts"
 import * as CdpWire from "../../../src/internal/cdpWire.ts"
 import * as ChromiumLauncher from "../../../src/internal/chromiumLauncher.ts"
 import { assertPinned, chromium } from "../browsers.ts"
+import * as NativeProbe from "../iframeNativeProbe.ts"
+import { flags } from "../nativeInputCapture.ts"
 import { fixtures, record } from "../record.ts"
 import { conformance, viewportMeasurement, viewportRestoration } from "./conformance.ts"
 import { engine } from "./engine.ts"
 import type { Backend } from "./harness.ts"
-import { trace } from "./iframeTrace.ts"
 
 const executable = chromium.executable
 
 const backend: Backend = {
   name: "Chromium (CDP)",
   connect: Effect.fnUntraced(function*(sink) {
-    const { launched, transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
-    const adapter = yield* CdpAdapter.connect(trace(record(transport, CdpWire.wire, fixtures.cdp)), {
-      sink,
-      ownership: "launched"
+    const capture = NativeProbe.selected() ? yield* NativeProbe.prepare() : undefined
+    const { launched, transport } = yield* ChromiumLauncher.launch({
+      executablePath: executable,
+      ...(capture === undefined ? {} : { args: flags })
     })
+    if (capture !== undefined) yield* NativeProbe.keepStderr(capture, launched.stderrDone)
+    const adapter = yield* CdpAdapter.connect(
+      record(capture?.wrap(transport) ?? transport, CdpWire.wire, fixtures.cdp),
+      {
+        sink,
+        ownership: "launched",
+        ...(capture === undefined ? {} : { exited: launched.handle.exitCode })
+      }
+    )
+    if (capture !== undefined) yield* NativeProbe.start(capture)
     assertPinned("Chromium", adapter.info.version, chromium.version)
     return { adapter, kill: launched.handle.kill({ killSignal: "SIGKILL" }).pipe(Effect.ignore) }
   })
