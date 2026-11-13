@@ -2107,10 +2107,10 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   /** Resolves fresh DOM and runs exactly one readiness/application check. */
-  const checkAction = async (
+  const checkAction = (
     request: Extract<Request, { op: "act" }>,
     state: ActionState
-  ): Promise<Response | undefined> => {
+  ): Response | undefined | Promise<Response | undefined> => {
     const action = request.action
     clearTreeCaches()
     const found = resolve(request.steps)
@@ -2120,148 +2120,151 @@ export function engine(render: (root: SnapNode) => string) {
       state.tracked = element ?? null
       state.rects = []
     }
-    let clipped = false
-    if (element !== undefined && request.checks.inViewport && visibleFragment(element, request.clip) !== null) {
-      const observation = clippedByScroller(element, state.end - now(), request.clip)
-      if (observation !== null) {
-        const result = await observation
-        state.previous = null
-        if (result === null || now() >= state.end) return
-        clearTreeCaches()
-        const current = resolve(request.steps)
-        // An observation belongs to one node; a replacement must start its own complete check.
-        if (current.length !== 1 || current[0] !== element) return
-        clipped = result
-      }
-    }
-    // What no waiting mends fails at once
-    if (element !== undefined) {
-      if (request.checks.editable && !editableKind(element)) {
-        return { _tag: "Final", final: { _tag: "NotEditable", element: describe(element) } }
-      }
-      if (
-        (action._tag === "Checked" && checkedOf(element) === null) ||
-        (action._tag === "Point" && action.checked === true && checkableForAction(element) === null)
-      ) {
-        return {
-          _tag: "Final",
-          final: {
-            _tag: "WrongElement",
-            expected: "a checkbox, a radio, or an ARIA checkable",
-            element: describe(element)
-          }
+    // Observation is asynchronous only when a clipping check is needed: a synchronous caller sees no extra turn.
+    const observation = element !== undefined && request.checks.inViewport &&
+        visibleFragment(element, request.clip) !== null
+      ? clippedByScroller(element, state.end - now(), request.clip)
+      : null
+    const proceed = (clipped: boolean): Response | undefined => {
+      // What no waiting mends fails at once
+      if (element !== undefined) {
+        if (request.checks.editable && !editableKind(element)) {
+          return { _tag: "Final", final: { _tag: "NotEditable", element: describe(element) } }
         }
-      }
-      if (action._tag === "Select" && !(element instanceof HTMLSelectElement)) {
-        return { _tag: "Final", final: { _tag: "WrongElement", expected: "a <select>", element: describe(element) } }
-      }
-      if (action._tag === "FileInput" && !(element instanceof HTMLInputElement && element.type === "file")) {
-        return {
-          _tag: "Final",
-          final: { _tag: "WrongElement", expected: "a file input", element: describe(element) }
-        }
-      }
-    }
-    const checks = request.checks
-    const evidence = state.previous
-    state.previous = null
-    let reason: NotReady | null = null
-    if (element === undefined) reason = { _tag: "NoMatch" }
-    else if (checks.visible && !rendered(element, false)) reason = { _tag: "NotVisible" }
-    else if (
-      checks.enabled && (
-        !enabled(element) || (action._tag === "Point" && action.checked === true &&
-          !enabled(checkableForAction(element) ?? element))
-      )
-    ) reason = { _tag: "Disabled" }
-    else if (checks.editable && readOnly(element)) reason = { _tag: "ReadOnly" }
-    else if (checks.notInert && inertReason(element) !== null) reason = inertReason(element)
-    else if (checks.inViewport && (visibleFragment(element, request.clip) === null || clipped)) {
-      reason = { _tag: "OutsideViewport" }
-      if (!state.scrolled) {
-        scrollToFragments(element, request.clip)
-        state.scrolled = true
-      }
-    } else if (checks.stable > 0) {
-      const rect = element.getBoundingClientRect()
-      state.rects.push(rect)
-      if (state.rects.length > checks.stable + 1) state.rects.shift()
-      const unchanged = evidence !== null && evidence.element === element && evidence.frames === checks.stable &&
-        sameRect(evidence.rect, rect)
-      if (
-        !unchanged &&
-        (state.rects.length < checks.stable + 1 || !state.rects.every((rect) => sameRect(rect, state.rects[0]!)))
-      ) {
-        reason = { _tag: "NotStable" }
-      }
-    }
-    const position = action._tag === "Point" ? action.position : null
-    const points = reason === null && element !== undefined && (action._tag === "Point" || checks.receivesPointer)
-      ? actionPoints(element, position, request.clip, checks.receivesPointer)
-      : []
-    const point = points[0] ?? null
-    if (reason === null && element !== undefined && (action._tag === "Point" || checks.receivesPointer)) {
-      if (point === null) reason = { _tag: "OutsideViewport" }
-      else if (checks.receivesPointer) {
-        const hit = hitTarget(point.x, point.y)
-        if (hit === null || !composedContains(element, hit)) {
-          reason = { _tag: "Covered", by: hit === null ? "nothing at that point" : describe(hit) }
-        }
-      }
-    }
-    if (reason === null && element !== undefined && action._tag === "Select") {
-      const options = Array.from(element instanceof HTMLSelectElement ? element.options : [])
-      const missing = action.choices.find((choice) =>
-        !options.some((option, index) => optionMatches(option, index, choice))
-      )
-      if (missing !== undefined) reason = { _tag: "NoSuchOption", option: describeChoice(missing) }
-    }
-    if (reason === null && element !== undefined) {
-      if (
-        request.apply && action._tag === "Fill" && document.designMode === "on" &&
-        !(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)
-      ) {
-        const active = deepActive()
-        if (active !== element && (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement)) {
-          noteAction(state, { _tag: "PreparingFocus", from: describe(active) })
-          active.blur()
-          // Blur handlers can replace the target or change any effective check. Resolve and check again
-          // through the ordinary wait loop before selecting a range or allowing native insertion.
-          state.rects = []
-          return
-        }
-      }
-      let response = ready(element, action, request.apply, state.scrolled, point, checks)
-      if (response._tag === "Retry") {
-        reason = response.reason
-      } else {
         if (
-          response._tag === "Ready" && action._tag === "Point" && action.position === null &&
-          checks.receivesPointer && request.clip !== undefined && points.length > 1
+          (action._tag === "Checked" && checkedOf(element) === null) ||
+          (action._tag === "Point" && action.checked === true && checkableForAction(element) === null)
         ) {
-          response = { ...response, candidates: points }
-        }
-        if (request.stability === "capture" && checks.stable > 0 && !request.apply && response._tag === "Ready") {
-          const captured = {
-            token: `${generation}:${++stabilitySequence}`,
-            element,
-            rect: state.rects[state.rects.length - 1]!,
-            frames: checks.stable
+          return {
+            _tag: "Final",
+            final: {
+              _tag: "WrongElement",
+              expected: "a checkbox, a radio, or an ARIA checkable",
+              element: describe(element)
+            }
           }
-          stability = captured
-          const token = captured.token
-          onFrame(() => {
-            if (stability?.token === token) stability = null
-          })
-          return { ...response, stability: captured.token }
         }
-        return response
+        if (action._tag === "Select" && !(element instanceof HTMLSelectElement)) {
+          return { _tag: "Final", final: { _tag: "WrongElement", expected: "a <select>", element: describe(element) } }
+        }
+        if (action._tag === "FileInput" && !(element instanceof HTMLInputElement && element.type === "file")) {
+          return {
+            _tag: "Final",
+            final: { _tag: "WrongElement", expected: "a file input", element: describe(element) }
+          }
+        }
       }
+      const checks = request.checks
+      const evidence = state.previous
+      state.previous = null
+      let reason: NotReady | null = null
+      if (element === undefined) reason = { _tag: "NoMatch" }
+      else if (checks.visible && !rendered(element, false)) reason = { _tag: "NotVisible" }
+      else if (
+        checks.enabled && (
+          !enabled(element) || (action._tag === "Point" && action.checked === true &&
+            !enabled(checkableForAction(element) ?? element))
+        )
+      ) reason = { _tag: "Disabled" }
+      else if (checks.editable && readOnly(element)) reason = { _tag: "ReadOnly" }
+      else if (checks.notInert && inertReason(element) !== null) reason = inertReason(element)
+      else if (checks.inViewport && (visibleFragment(element, request.clip) === null || clipped)) {
+        reason = { _tag: "OutsideViewport" }
+        if (!state.scrolled) {
+          scrollToFragments(element, request.clip)
+          state.scrolled = true
+        }
+      } else if (checks.stable > 0) {
+        const rect = element.getBoundingClientRect()
+        state.rects.push(rect)
+        if (state.rects.length > checks.stable + 1) state.rects.shift()
+        const unchanged = evidence !== null && evidence.element === element && evidence.frames === checks.stable &&
+          sameRect(evidence.rect, rect)
+        if (
+          !unchanged &&
+          (state.rects.length < checks.stable + 1 || !state.rects.every((rect) => sameRect(rect, state.rects[0]!)))
+        ) {
+          reason = { _tag: "NotStable" }
+        }
+      }
+      const position = action._tag === "Point" ? action.position : null
+      const points = reason === null && element !== undefined && (action._tag === "Point" || checks.receivesPointer)
+        ? actionPoints(element, position, request.clip, checks.receivesPointer)
+        : []
+      const point = points[0] ?? null
+      if (reason === null && element !== undefined && (action._tag === "Point" || checks.receivesPointer)) {
+        if (point === null) reason = { _tag: "OutsideViewport" }
+        else if (checks.receivesPointer) {
+          const hit = hitTarget(point.x, point.y)
+          if (hit === null || !composedContains(element, hit)) {
+            reason = { _tag: "Covered", by: hit === null ? "nothing at that point" : describe(hit) }
+          }
+        }
+      }
+      if (reason === null && element !== undefined && action._tag === "Select") {
+        const options = Array.from(element instanceof HTMLSelectElement ? element.options : [])
+        const missing = action.choices.find((choice) =>
+          !options.some((option, index) => optionMatches(option, index, choice))
+        )
+        if (missing !== undefined) reason = { _tag: "NoSuchOption", option: describeChoice(missing) }
+      }
+      if (reason === null && element !== undefined) {
+        if (
+          request.apply && action._tag === "Fill" && document.designMode === "on" &&
+          !(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)
+        ) {
+          const active = deepActive()
+          if (active !== element && (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement)) {
+            noteAction(state, { _tag: "PreparingFocus", from: describe(active) })
+            active.blur()
+            // Blur handlers can replace the target or change any effective check. Resolve and check again
+            // through the ordinary wait loop before selecting a range or allowing native insertion.
+            state.rects = []
+            return
+          }
+        }
+        let response = ready(element, action, request.apply, state.scrolled, point, checks)
+        if (response._tag === "Retry") {
+          reason = response.reason
+        } else {
+          if (
+            response._tag === "Ready" && action._tag === "Point" && action.position === null &&
+            checks.receivesPointer && request.clip !== undefined && points.length > 1
+          ) {
+            response = { ...response, candidates: points }
+          }
+          if (request.stability === "capture" && checks.stable > 0 && !request.apply && response._tag === "Ready") {
+            const captured = {
+              token: `${generation}:${++stabilitySequence}`,
+              element,
+              rect: state.rects[state.rects.length - 1]!,
+              frames: checks.stable
+            }
+            stability = captured
+            const token = captured.token
+            onFrame(() => {
+              if (stability?.token === token) stability = null
+            })
+            return { ...response, stability: captured.token }
+          }
+          return response
+        }
+      }
+      if (reason!._tag !== "NotStable") state.rects = []
+      // A rect still settling within its first frames is the check working, not a reason to report
+      if (reason!._tag !== "NotStable" || state.rects.length === checks.stable + 1) noteAction(state, reason!)
+      else if (state.history.length === 0) state.last = reason!
     }
-    if (reason!._tag !== "NotStable") state.rects = []
-    // A rect still settling within its first frames is the check working, not a reason to report
-    if (reason!._tag !== "NotStable" || state.rects.length === checks.stable + 1) noteAction(state, reason!)
-    else if (state.history.length === 0) state.last = reason!
+    if (observation === null) return proceed(false)
+    return observation.then((result) => {
+      state.previous = null
+      if (result === null || now() >= state.end) return
+      clearTreeCaches()
+      const current = resolve(request.steps)
+      // An observation belongs to one node; a replacement must start its own complete check.
+      if (current.length !== 1 || current[0] !== element) return
+      return proceed(result)
+    })
   }
 
   const act = async (request: Extract<Request, { op: "act" }>): Promise<Response> => {
@@ -2277,7 +2280,8 @@ export function engine(render: (root: SnapNode) => string) {
         state.frames++
       }
       state.sampled = true
-      const response = await checkAction(request, state)
+      const checked = checkAction(request, state)
+      const response = checked instanceof Promise ? await checked : checked
       if (response !== undefined) return response
     }
   }
@@ -3781,7 +3785,9 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
     try {
       if (session.request.op === "act") {
         session.state!.sampled = true
-        const response = await helpers.checkAction(session.request, session.state!)
+        // Only a clipping observation is asynchronous; otherwise the wait starts in the same turn.
+        const checked = helpers.checkAction(session.request, session.state!)
+        const response = checked instanceof Promise ? await checked : checked
         if (response !== undefined) return finished(session, response)
         if (!(await wait(session, false))) return stopped(session)
       } else {
