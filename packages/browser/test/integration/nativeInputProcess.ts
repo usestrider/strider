@@ -1,8 +1,6 @@
 /** Lightweight test-only process hook; Node preloads do not load the Effect capture implementation. */
 export const flags = [
-  "--enable-logging=stderr",
-  "--v=0",
-  "--vmodule=render_widget_host_input_event_router=2,render_widget_targeter=2,render_input_router=2,input_router_impl=2,hit_test_query=2,hit_test_manager=2,hit_test_aggregator=2,host_frame_sink_manager=2,input_handler=1"
+  "--enable-logging=stderr"
 ] as const
 
 interface Capture {

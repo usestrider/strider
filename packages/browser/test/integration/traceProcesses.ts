@@ -2,6 +2,7 @@
 import { ChildProcess } from "node:child_process"
 import type { Readable, Writable } from "node:stream"
 import { connection } from "./failureTrace.ts"
+import { enabled as nativeEnabled, recordNative } from "./nativeCrash.ts"
 import { processCapture } from "./nativeInputProcess.ts"
 import { pipeObserver } from "./tracePipe.ts"
 import { stderrText } from "./traceStderr.ts"
@@ -25,6 +26,9 @@ if (!prototype[patched]) {
     diagnostic?.processStarted(this.pid, options.args)
     if (diagnostic !== undefined) this.once("close", () => diagnostic.stderrEnd(false))
     trace("process-start", { command: options.file, args: options.args, pid: this.pid })
+    if (nativeEnabled && options.args?.some((arg) => arg.startsWith("--remote-debugging-"))) {
+      recordNative("launches.ndjson", { command: options.file, args: options.args, browserPid: this.pid })
+    }
     // Observing emit leaves the existing pipe consumer in charge of flow and draining.
     if (this.stderr !== null) {
       trace("stderr-open", "Observing the existing stderr consumer")

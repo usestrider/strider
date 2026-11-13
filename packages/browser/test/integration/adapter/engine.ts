@@ -15,7 +15,7 @@ import * as Expect from "../../../src/Expect.ts"
 import type * as Adapter from "../../../src/internal/adapter.ts"
 import * as BrowserImpl from "../../../src/internal/browser.ts"
 import * as Engine from "../../../src/internal/engine.ts"
-import type { LocatorImpl } from "../../../src/internal/locator.ts"
+import { LocatorImpl } from "../../../src/internal/locator.ts"
 import * as Operation from "../../../src/internal/operation.ts"
 import * as Runtime from "../../../src/internal/runtime.ts"
 import { type LinkGeometry, linkGeometry, wrappedLinkHtml, wrappedLinks } from "../wrappedLinks.ts"
@@ -155,6 +155,98 @@ const revalidate = Effect.fnUntraced(function*(
   return { response: yield* Engine.decodeResponse(measured.response).pipe(Effect.orDie), frames: measured.frames }
 })
 
+/** Count live browser resources, rather than assuming that a canceled host fiber stops page execution. */
+const trackCooperativeResources = `() => {
+  const resources = globalThis.engineTestResources = { timers: new Set(), frames: new Set(), observers: new Set(), listeners: new Set() }
+  const timer = globalThis.setTimeout.bind(globalThis)
+  const clear = globalThis.clearTimeout.bind(globalThis)
+  const frame = globalThis.requestAnimationFrame.bind(globalThis)
+  const cancel = globalThis.cancelAnimationFrame.bind(globalThis)
+  globalThis.setTimeout = (callback, delay) => {
+    const id = timer(() => { resources.timers.delete(id); callback() }, delay)
+    resources.timers.add(id)
+    return id
+  }
+  globalThis.clearTimeout = (id) => { resources.timers.delete(id); clear(id) }
+  globalThis.requestAnimationFrame = (callback) => {
+    const id = frame((time) => { resources.frames.delete(id); callback(time) })
+    resources.frames.add(id)
+    return id
+  }
+  globalThis.cancelAnimationFrame = (id) => { resources.frames.delete(id); cancel(id) }
+  const Observer = globalThis.MutationObserver
+  globalThis.MutationObserver = class extends Observer {
+    observe(...args) { resources.observers.add(this); return super.observe(...args) }
+    disconnect() { resources.observers.delete(this); return super.disconnect() }
+  }
+  const add = globalThis.addEventListener.bind(globalThis)
+  const remove = globalThis.removeEventListener.bind(globalThis)
+  globalThis.addEventListener = (type, callback, options) => {
+    resources.listeners.add(callback)
+    add(type, callback, options)
+  }
+  globalThis.removeEventListener = (type, callback, options) => {
+    resources.listeners.delete(callback)
+    remove(type, callback, options)
+  }
+  Object.defineProperty(globalThis, Symbol.for("@usestrider/browser/clock/real"), {
+    value: {
+      setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout,
+      requestAnimationFrame: globalThis.requestAnimationFrame, cancelAnimationFrame: globalThis.cancelAnimationFrame,
+      now: performance.now.bind(performance)
+    }
+  })
+  globalThis.cancelAnimationFrame = () => { throw Error("The engine canceled a virtual frame") }
+}`
+
+/** Drive the saved real clock deterministically, including automatic terminal-result eviction. */
+const controlledCooperativeClock = `() => {
+  (${trackCooperativeResources})()
+  const real = globalThis[Symbol.for("@usestrider/browser/clock/real")]
+  const resources = globalThis.engineTestResources
+  let time = 0
+  let sequence = 10000
+  const timers = new Map()
+  real.now = () => time
+  real.setTimeout = (callback, delay) => {
+    const id = ++sequence
+    timers.set(id, { at: time + delay, callback })
+    resources.timers.add(id)
+    return id
+  }
+  real.clearTimeout = (id) => { timers.delete(id); resources.timers.delete(id) }
+  globalThis.engineTestAdvance = (millis) => {
+    time += millis
+    while (true) {
+      const due = [...timers].filter(([, timer]) => timer.at <= time).sort((a, b) => a[1].at - b[1].at)[0]
+      if (!due) break
+      timers.delete(due[0]); resources.timers.delete(due[0]); due[1].callback()
+    }
+  }
+}`
+
+/** Execute the opt-in wire protocol in one evaluation to control frame ordering. */
+const cooperativeExercise = Effect.fnUntraced(function*(
+  call: Effect.Success<ReturnType<typeof open>>["call"],
+  script: string
+) {
+  const declaration = Engine.cooperate
+  assert.strictEqual(typeof declaration, "string", "The engine must expose cooperative execution")
+  const result = yield* call(
+    `async () => {
+    const invoke = ${declaration}
+    const command = async (value) => JSON.parse(await invoke(JSON.stringify({
+      document: "test-document", operation: "test-operation", session: "test-session", ...value
+    })))
+    ${script}
+  }`,
+    []
+  )
+  assert(result._tag === "Value", result._tag === "Exception" ? result.text : "")
+  assert(result.value.type === "string")
+  return JSON.parse(result.value.value)
+})
+
 export const engine = (backend: Backend) =>
   describe(`${backend.name} engine`, () => {
     let shared: Effect.Success<ReturnType<typeof Connection.make>>
@@ -168,6 +260,560 @@ export const engine = (backend: Backend) =>
     ).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor)))
     layer(fixture, { excludeTestServices: true })(
       (it) => {
+        for (const ending of ["cancel", "departure"] as const) {
+          it.effect(`cooperative viewport ${ending} releases its pending round immediately`, () =>
+            Effect.gen(function*() {
+              const { call } = yield* open(backend, "<div>Missing target</div>", controlledCooperativeClock)
+              const result = yield* cooperativeExercise(
+                call,
+                `
+                const first = await command({ command: "start", budget: 2000, request: {
+                  op: "expect", steps: [{ _tag: "Css", selector: "#absent" }],
+                  expectation: { _tag: "Viewport", ratio: 0, inViewport: true }, cap: 2000
+                } })
+                const pending = command({ command: "resume", token: first.token, left: 2000, decision: "continue" })
+                ${
+                  ending === "cancel"
+                    ? "await command({ command: \"cancel\" })"
+                    : "dispatchEvent(new Event(\"pagehide\"))"
+                }
+                const remaining = Object.values(globalThis.engineTestResources).map((set) => set.size)
+                globalThis.engineTestAdvance(100)
+                await pending
+                return JSON.stringify(remaining)
+              `
+              )
+              assert.deepStrictEqual(result, [0, 0, 0, 0])
+            }), timeout)
+        }
+        it.effect("cooperative viewport expiry retains observations from its final round", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(backend, "<div>Missing target</div>", controlledCooperativeClock)
+            const result = yield* cooperativeExercise(
+              call,
+              `
+              const first = await command({ command: "start", budget: 50, request: {
+                op: "expect", steps: [{ _tag: "Css", selector: "#absent" }],
+                expectation: { _tag: "Viewport", ratio: 0, inViewport: true }, cap: 50
+              } })
+              const pending = command({ command: "resume", token: first.token, left: 50, decision: "continue" })
+              globalThis.engineTestAdvance(50)
+              const resumed = await pending
+              const terminal = await command({ command: "finish" })
+              return JSON.stringify({ resumed, terminal })
+            `
+            )
+            assert.strictEqual(result.terminal._tag, "Done")
+            assert.deepStrictEqual(result.terminal.response.observed, { matches: 0 })
+            assert.strictEqual(result.resumed._tag, "Done")
+          }), timeout)
+        it.effect("cooperative viewport keeps its last ratio while another observation is pending", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(
+              backend,
+              "<div id=\"target\">Target</div>",
+              `() => {
+              (${controlledCooperativeClock})()
+              let observations = 0
+              globalThis.IntersectionObserver = class {
+                constructor(callback) { this.callback = callback }
+                observe() {
+                  if (++observations === 1) queueMicrotask(() => this.callback([{ intersectionRatio: 0 }]))
+                }
+                disconnect() {}
+              }
+            }`
+            )
+            const result = yield* cooperativeExercise(
+              call,
+              `
+              const first = await command({ command: "start", budget: 50, request: {
+                op: "expect", steps: [{ _tag: "Css", selector: "#target" }],
+                expectation: { _tag: "Viewport", ratio: 0, inViewport: true }, cap: 50
+              } })
+              const next = await command({ command: "resume", token: first.token, left: 50, decision: "continue" })
+              const pending = command({ command: "resume", token: next.token, left: 50, decision: "continue" })
+              globalThis.engineTestAdvance(50)
+              await pending
+              return JSON.stringify(await command({ command: "finish" }))
+            `
+            )
+            assert.strictEqual(result._tag, "Done")
+            assert.deepStrictEqual(result.response.observed, { matches: 1, ratio: 0 })
+          }), timeout)
+        it.effect("cooperative viewport accepts a target whose geometry keeps changing", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(
+              backend,
+              "<div id=\"moving\" style=\"width:100px;height:100px\">Moving</div>",
+              `() => {
+                const Observer = globalThis.IntersectionObserver
+                let offset = 0
+                globalThis.IntersectionObserver = class extends Observer {
+                  constructor(callback, options) {
+                    super((entries, observer) => {
+                      document.querySelector('#moving').style.transform = 'translateX(' + ++offset + 'px)'
+                      callback(entries, observer)
+                    }, options)
+                  }
+                }
+              }`
+            )
+            const result = yield* cooperativeExercise(
+              call,
+              `
+              let reply = await command({ command: "start", budget: 2000, request: {
+                op: "expect", steps: [{ _tag: "Css", selector: "#moving" }],
+                expectation: { _tag: "Viewport", ratio: 0, inViewport: true }, cap: 2000
+              } })
+              let checks = 0
+              while (reply._tag === "Check" && checks++ < 8) {
+                reply = await command({ command: "resume", token: reply.token, left: 2000, decision: "continue" })
+              }
+              await command({ command: "cancel" })
+              return JSON.stringify(reply)
+            `
+            )
+            assert.strictEqual(result._tag, "Done")
+            assert.isTrue(result.response.passed)
+          }), timeout)
+        it.effect("cooperative viewport yields before checking an overlay arriving during a round", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(
+              backend,
+              "<div id=\"done\" hidden>Done</div>",
+              countFrames(`
+              document.querySelector('#done').hidden = false
+              if (!document.querySelector('#overlay')) document.body.insertAdjacentHTML('beforeend', '<div id="overlay">Overlay</div>')
+            `)
+            )
+            const result = yield* cooperativeExercise(
+              call,
+              `
+              let reply = await command({ command: "start", budget: 2000, request: {
+                op: "expect", steps: [{ _tag: "Css", selector: "#done" }], expectation: { _tag: "Viewport", ratio: 0, inViewport: true }, cap: 2000
+              } })
+              if (reply._tag !== "Check") throw Error("No initial check")
+              reply = await command({ command: "resume", token: reply.token, left: 2000, decision: "continue" })
+              const overlayBeforeCheck = document.querySelector('#overlay') !== null
+              const yielded = reply._tag
+              document.querySelector('#overlay')?.remove()
+              reply = await command({ command: "resume", token: reply.token, left: 2000, decision: "invalidate" })
+              return JSON.stringify({ yielded, overlayBeforeCheck, reply })
+            `
+            )
+            assert.strictEqual(result.yielded, "Check")
+            assert.isTrue(result.overlayBeforeCheck)
+            assert.strictEqual(result.reply._tag, "Done")
+            assert.isTrue(result.reply.response.passed)
+          }), timeout)
+        it.effect("cooperative expectation yields before checking an overlay arriving during a round", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(
+              backend,
+              "<div id=\"done\" hidden>Done</div>",
+              countFrames(`
+              document.querySelector('#done').hidden = false
+              if (!document.querySelector('#overlay')) document.body.insertAdjacentHTML('beforeend', '<div id="overlay">Overlay</div>')
+            `)
+            )
+            const result = yield* cooperativeExercise(
+              call,
+              `
+              let reply = await command({ command: "start", budget: 2000, request: {
+                op: "expect", steps: [{ _tag: "Css", selector: "#done" }], expectation: { _tag: "Visible" }, cap: 2000
+              } })
+              if (reply._tag !== "Check") throw Error("No initial check")
+              reply = await command({ command: "resume", token: reply.token, left: 2000, decision: "continue" })
+              const overlayBeforeCheck = document.querySelector('#overlay') !== null
+              const yielded = reply._tag
+              document.querySelector('#overlay')?.remove()
+              reply = await command({ command: "resume", token: reply.token, left: 2000, decision: "invalidate" })
+              return JSON.stringify({ yielded, overlayBeforeCheck, reply })
+            `
+            )
+            assert.strictEqual(result.yielded, "Check")
+            assert.isTrue(result.overlayBeforeCheck)
+            assert.strictEqual(result.reply._tag, "Done")
+            assert.isTrue(result.reply.response.passed)
+          }), timeout)
+        it.effect("cooperative no-handler resumes preserve stable-frame sampling", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(backend, "<button id=\"go\">Go</button>", countFrames())
+            const result = yield* cooperativeExercise(
+              call,
+              `
+              let reply = await command({ command: "start", budget: 2000, request: ${JSON.stringify(point(2))} })
+              let checks = 0
+              while (reply._tag === "Check" && checks++ < 10) {
+                reply = await command({ command: "resume", token: reply.token, left: 2000, decision: "continue" })
+              }
+              return JSON.stringify({ reply, checks, frames: globalThis.engineTestFrames })
+            `
+            )
+            assert.strictEqual(result.reply._tag, "Done")
+            assert.strictEqual(result.reply.response._tag, "Ready")
+            assert.strictEqual(result.frames, 2)
+            assert.strictEqual(result.checks, 3)
+          }), timeout)
+        it.effect("cooperative invalidation discards earlier samples and resolved elements", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(backend, "<button id=\"go\">Go</button>", countFrames())
+            const result = yield* cooperativeExercise(
+              call,
+              `
+              let reply = await command({ command: "start", budget: 2000, request: ${JSON.stringify(point(2))} })
+              reply = await command({ command: "resume", token: reply.token, left: 2000, decision: "continue" })
+              document.querySelector('#go').outerHTML = '<button id="go" style="margin-left:80px">New</button>'
+              const before = globalThis.engineTestFrames
+              reply = await command({ command: "resume", token: reply.token, left: 2000, decision: "invalidate" })
+              while (reply._tag === "Check") reply = await command({ command: "resume", token: reply.token, left: 2000, decision: "continue" })
+              const frames = globalThis.engineTestFrames - before
+              const fresh = await command({ command: "start", budget: 2000, request: ${JSON.stringify(point(0))} })
+              const beforeRendered = globalThis.engineTestFrames
+              const invalidated = await command({ command: "resume", token: fresh.token, left: 2000, decision: "invalidate" })
+              const renderedFrames = globalThis.engineTestFrames - beforeRendered
+              const completed = await command({ command: "resume", token: invalidated.token, left: 2000, decision: "continue" })
+              return JSON.stringify({ reply, frames, invalidated, renderedFrames, completed })
+            `
+            )
+            assert.strictEqual(result.reply.response._tag, "Ready")
+            assert.include(result.reply.response.element, "New")
+            assert.strictEqual(result.frames, 2)
+            assert.strictEqual(result.invalidated._tag, "Check")
+            assert.strictEqual(result.renderedFrames, 1)
+            assert.strictEqual(result.completed.response._tag, "Ready")
+          }), timeout)
+        it.effect("cooperative final checks restart before in-page application", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(backend, "<input id=\"go\">")
+            const request = {
+              ...point(0),
+              checks: { ...all, rendered: false, stable: 0 },
+              action: { _tag: "Focus" },
+              apply: true
+            }
+            const result = yield* cooperativeExercise(
+              call,
+              `
+              const first = await command({ command: "start", budget: 2000, request: ${JSON.stringify(request)} })
+              const reply = await command({ command: "resume", token: first.token, left: 2000, decision: "restart" })
+              const replay = await command({ command: "resume", token: first.token, left: 2000, decision: "continue" })
+              return JSON.stringify({ final: first.final, reply, replay, applied: document.activeElement.id === "go" })
+            `
+            )
+            assert.isTrue(result.final)
+            assert.strictEqual(result.reply._tag, "Restart")
+            assert.strictEqual(result.replay._tag, "Disposed")
+            assert.isFalse(result.applied)
+          }), timeout)
+        it.effect("cooperative tokens enforce ownership, single use and cancellation during a frame wait", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(backend, "<button id=\"go\">Go</button>")
+            const result = yield* cooperativeExercise(
+              call,
+              `
+              const first = await command({ command: "start", budget: 2000, request: ${JSON.stringify(point(2))} })
+              const wrongDocument = await command({ command: "resume", document: "other", token: first.token, left: 2000, decision: "continue" })
+              const foreign = await command({ command: "resume", operation: "other", token: first.token, left: 2000, decision: "continue" })
+              const pending = command({ command: "resume", token: first.token, left: 2000, decision: "continue" })
+              const replay = await command({ command: "resume", token: first.token, left: 2000, decision: "continue" })
+              await command({ command: "cancel" })
+              const canceled = await pending
+              const second = await command({ command: "start", budget: 2000, request: ${JSON.stringify(point(2))} })
+              const departing = command({ command: "resume", token: second.token, left: 2000, decision: "continue" })
+              dispatchEvent(new Event("pagehide"))
+              const departed = await departing
+              const afterNavigation = await command({ command: "resume", token: second.token, left: 2000, decision: "continue" })
+              return JSON.stringify({ wrongDocument, foreign, replay, canceled, afterNavigation, departed })
+            `
+            )
+            assert.strictEqual(result.departed._tag, "Departed")
+            delete result.departed
+            for (const response of Object.values(result)) {
+              assert.strictEqual((response as { _tag: string })._tag, "Disposed")
+            }
+          }), timeout)
+        it.effect("cooperative cancellation and deadline expiry release observers, frames, timers and listeners", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(backend, "<div id=\"done\" hidden>Done</div>", trackCooperativeResources)
+            const result = yield* cooperativeExercise(
+              call,
+              `
+              const request = { op: "expect", steps: [{ _tag: "Css", selector: "#done" }], expectation: { _tag: "Visible" }, cap: 2000 }
+              const first = await command({ command: "start", budget: 2000, request })
+              const pending = command({ command: "resume", token: first.token, left: 2000, decision: "continue" })
+              await command({ command: "cancel" })
+              await pending
+              const afterCancel = Object.values(globalThis.engineTestResources).map((set) => set.size)
+              const second = await command({ command: "start", budget: 2000, request })
+              const expired = await command({ command: "resume", token: second.token, left: 0, decision: "continue" })
+              const afterExpiry = Object.values(globalThis.engineTestResources).map((set) => set.size)
+              return JSON.stringify({ afterCancel, expired, afterExpiry })
+            `
+            )
+            assert.deepStrictEqual(result.afterCancel, [0, 0, 0, 0])
+            assert.strictEqual(result.expired._tag, "Done")
+            assert.isFalse(result.expired.response.passed)
+            assert.deepStrictEqual(result.afterExpiry, [0, 0, 0, 0])
+          }), timeout)
+        it.effect("cooperative expiry while the host holds a token still answers with the timeout evidence", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(backend, "<button id=\"go\" hidden>Go</button>")
+            // The browser-side timer expires the session while the host is probing triggers. Its resume must
+            // receive the terminal response the expiry computed (why the target wasn't actionable), as a resume
+            // that arrives with no time left does, not Disposed, which discards that evidence and reroutes.
+            const result = yield* cooperativeExercise(
+              call,
+              `
+              let control = await command({ command: "start", budget: 2000, request: ${JSON.stringify(point(0))} })
+              control = await command({ command: "resume", token: control.token, left: 2000, decision: "continue" })
+              const answered = await command({ command: "resume", token: control.token, left: 0, decision: "continue" })
+              let first = await command({ command: "start", budget: 100, request: ${JSON.stringify(point(0))} })
+              first = await command({ command: "resume", token: first.token, left: 100, decision: "continue" })
+              await new Promise((resolve) => setTimeout(resolve, 300))
+              const expired = await command({ command: "resume", token: first.token, left: 0, decision: "continue" })
+              return JSON.stringify({ answered, expired })
+            `
+            )
+            assert.strictEqual(result.answered._tag, "Done")
+            assert.strictEqual(result.expired._tag, "Done", JSON.stringify(result.expired))
+            assert.strictEqual(result.expired.response._tag, result.answered.response._tag)
+            assert.deepStrictEqual(result.answered.response.reason, { _tag: "NotVisible" })
+            assert.deepStrictEqual(result.expired.response.reason, { _tag: "NotVisible" })
+            assert.deepStrictEqual(result.expired.response.history, [{ _tag: "NotVisible" }])
+          }), timeout)
+        it.effect("cooperative expired observations are owned, consumed once, and cleared on cancel or departure", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(backend, "<div id=\"go\">actual</div>", controlledCooperativeClock)
+            const result = yield* cooperativeExercise(
+              call,
+              `
+              const resources = () => Object.values(globalThis.engineTestResources).map((set) => set.size)
+              const request = { op: "expect", steps: [{ _tag: "Css", selector: "#go" }], cap: 1000,
+                expectation: { _tag: "Text", expected: [{ _tag: "String", value: "expected", exact: true }], list: false } }
+              const expired = async (session) => {
+                document.querySelector('#go').textContent = "actual"
+                let reply = await command({ command: "start", session, budget: 100, request })
+                reply = await command({ command: "resume", session, token: reply.token, left: 100, decision: "continue" })
+                globalThis.engineTestAdvance(100)
+                document.querySelector('#go').textContent = "changed after expiry"
+                return reply.token
+              }
+              const token = await expired("consume")
+              const retained = resources()
+              const foreignFinish = await command({ command: "finish", session: "consume", operation: "other" })
+              const foreign = await command({ command: "resume", session: "consume", operation: "other", token, left: 0, decision: "continue" })
+              const wrongDocument = await command({ command: "resume", session: "consume", document: "other", token, left: 0, decision: "continue" })
+              const consumed = await command({ command: "resume", session: "consume", token, left: 0, decision: "continue" })
+              const replay = await command({ command: "resume", session: "consume", token, left: 0, decision: "continue" })
+              const afterConsumption = resources()
+              document.querySelector('#go').textContent = "actual"
+              const waiting = await command({ command: "start", session: "pending", budget: 100, request })
+              const pending = command({ command: "resume", session: "pending", token: waiting.token, left: 100, decision: "continue" })
+              globalThis.engineTestAdvance(100)
+              const stopped = await pending
+              const finished = await command({ command: "finish", session: "pending" })
+              const finishedReplay = await command({ command: "resume", session: "pending", token: waiting.token, left: 0, decision: "continue" })
+              const afterFinish = resources()
+              const canceledToken = await expired("cancel")
+              await command({ command: "cancel", session: "cancel" })
+              const canceled = await command({ command: "resume", session: "cancel", token: canceledToken, left: 0, decision: "continue" })
+              const afterCancel = resources()
+              const departedToken = await expired("depart")
+              dispatchEvent(new Event("pagehide"))
+              const departed = await command({ command: "resume", session: "depart", token: departedToken, left: 0, decision: "continue" })
+              const afterDeparture = resources()
+              const abandonedToken = await expired("abandon")
+              globalThis.engineTestAdvance(30000)
+              const afterRetention = resources()
+              const abandoned = await command({ command: "resume", session: "abandon", token: abandonedToken, left: 0, decision: "continue" })
+              return JSON.stringify({ retained, foreignFinish, foreign, wrongDocument, consumed, replay, afterConsumption,
+                stopped, finished, finishedReplay, afterFinish, canceled, afterCancel, departed, afterDeparture, abandoned, afterRetention })
+            `
+            )
+            assert.deepStrictEqual(result.retained, [1, 0, 0, 1])
+            assert.strictEqual(result.consumed._tag, "Done")
+            assert.strictEqual(result.consumed.response.observed, "actual")
+            assert.isFalse(result.consumed.response.passed)
+            assert.isTrue(result.stopped.retained)
+            assert.strictEqual(result.finished.response.observed, "actual")
+            for (
+              const key of [
+                "foreignFinish",
+                "foreign",
+                "wrongDocument",
+                "replay",
+                "finishedReplay",
+                "canceled",
+                "departed",
+                "abandoned"
+              ]
+            ) {
+              assert.strictEqual(result[key]._tag, "Disposed", key)
+            }
+            for (const key of ["afterConsumption", "afterFinish", "afterCancel", "afterDeparture", "afterRetention"]) {
+              assert.deepStrictEqual(result[key], [0, 0, 0, 0], key)
+            }
+          }), timeout)
+        it.effect("cooperative abandoned terminal storage is bounded by count and serialized size", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(backend, "<div id=\"go\">actual</div>", controlledCooperativeClock)
+            const result = yield* cooperativeExercise(
+              call,
+              `
+              const request = { op: "expect", steps: [], cap: 1000, expectation: { _tag: "Title", expected: { _tag: "String", value: "expected", exact: true } } }
+              const tokens = []
+              for (let index = 0; index < 65; index++) {
+                const session = "count-" + index
+                const reply = await command({ command: "start", session, budget: 100, request })
+                tokens.push(reply.token)
+                globalThis.engineTestAdvance(100)
+              }
+              const oldest = await command({ command: "resume", session: "count-0", token: tokens[0], left: 0, decision: "continue" })
+              const newest = await command({ command: "resume", session: "count-64", token: tokens[64], left: 0, decision: "continue" })
+              dispatchEvent(new Event("pagehide"))
+              document.title = "x".repeat(300000)
+              const large = []
+              for (let index = 0; index < 2; index++) {
+                const session = "size-" + index
+                let reply = await command({ command: "start", session, budget: 100, request })
+                reply = await command({ command: "resume", session, token: reply.token, left: 100, decision: "continue" })
+                large.push(reply.token)
+                globalThis.engineTestAdvance(100)
+              }
+              const evicted = await command({ command: "resume", session: "size-0", token: large[0], left: 0, decision: "continue" })
+              const kept = await command({ command: "resume", session: "size-1", token: large[1], left: 0, decision: "continue" })
+              document.title = "x".repeat(600000)
+              let oversized = await command({ command: "start", session: "oversized", budget: 100, request })
+              oversized = await command({ command: "resume", session: "oversized", token: oversized.token, left: 100, decision: "continue" })
+              globalThis.engineTestAdvance(100)
+              oversized = await command({ command: "resume", session: "oversized", token: oversized.token, left: 0, decision: "continue" })
+              return JSON.stringify({ oldest, newest, evicted, oversized, keptTag: kept._tag, observedLength: kept.response?.observed.length,
+                resources: Object.values(globalThis.engineTestResources).map((set) => set.size) })
+            `
+            )
+            assert.strictEqual(result.oldest._tag, "Disposed")
+            assert.strictEqual(result.newest._tag, "Done")
+            assert.strictEqual(result.evicted._tag, "Disposed")
+            assert.strictEqual(result.oversized._tag, "Disposed")
+            assert.strictEqual(result.keptTag, "Done")
+            assert.strictEqual(result.observedLength, 300000)
+            assert.deepStrictEqual(result.resources, [0, 0, 0, 0])
+          }), timeout)
+        it.effect("cooperative runtime probes a top-document trigger while the target is cross-origin", () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const browser = BrowserImpl.layer((sink) =>
+              backend.connect(sink).pipe(Effect.map(({ adapter }) =>
+                adapter
+              ))
+            )
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const child = `${served.crossSite}/fixture?html=${encodeURIComponent("<button id=\"go\">Go</button>")}`
+              yield* page.goto(
+                `${served.origin}/fixture?html=${
+                  encodeURIComponent(
+                    `<div id="overlay">Overlay</div><iframe src="${child.replaceAll("&", "&amp;")}"></iframe>`
+                  )
+                }`
+              )
+              const target = page.frame(page.locator("iframe")).locator("#go") as LocatorImpl
+              const trigger = page.locator("#overlay") as LocatorImpl
+              let probes = 0
+              let removals = 0
+              const reply = yield* Effect.gen(function*() {
+                const record = yield* Operation.record
+                return yield* Runtime.sendCooperative(
+                  target.owner.runtime,
+                  target.owner.page,
+                  {
+                    op: "expect",
+                    steps: target.steps,
+                    expectation: { _tag: "Visible" },
+                    cap: 2000
+                  },
+                  record.id,
+                  record.budget.at,
+                  (routed, final) =>
+                    Effect.gen(function*() {
+                      assert.isFalse(final)
+                      const visible = yield* Runtime.send(
+                        trigger.owner.runtime,
+                        trigger.owner.page,
+                        { op: "visible", steps: trigger.steps },
+                        record.id,
+                        record.budget.at
+                      )
+                      assert.strictEqual(visible._tag, "Visible")
+                      const top = yield* Runtime.openState(trigger.owner.page, record.id)
+                      assert.notStrictEqual(routed.document, top.document.id)
+                      assert.strictEqual(routed.hops.length, 1)
+                      probes++
+                      if (visible._tag === "Visible" && visible.visible) {
+                        yield* page.evaluateInMainWorld(() =>
+                          document.querySelector("#overlay")!.setAttribute("hidden", "")
+                        )
+                        removals++
+                        return "invalidate" as const
+                      }
+                      return "continue" as const
+                    })
+                )
+              }).pipe(Operation.named("Test.cooperativeFrame"))
+              assert(!("_tag" in reply))
+              assert.strictEqual(reply.response._tag, "Expected")
+              if (reply.response._tag === "Expected") {
+                assert.isTrue(reply.response.passed)
+              }
+              assert.isAtLeast(probes, 1)
+              assert.strictEqual(removals, 1)
+            }).pipe(Effect.scoped, Effect.provide(browser))
+          }), timeout)
+        it.effect("cooperative runtime follows a navigation during a waiting round instead of failing", () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const browser = BrowserImpl.layer((sink) =>
+              backend.connect(sink).pipe(Effect.map(({ adapter }) =>
+                adapter
+              ))
+            )
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const next = `${served.origin}/fixture?html=${encodeURIComponent("<div id=\"done\">Done</div>")}`
+              // The page leaves while the engine waits; pagehide disposes the session, as a navigation does in
+              // ordinary dispatch, and the target must then be found again in the new document.
+              yield* page.goto(
+                `${served.origin}/fixture?html=${
+                  encodeURIComponent(
+                    `<div id="done" hidden>Done</div><script>setTimeout(() => { location.href = ${
+                      JSON.stringify(next)
+                    } }, 300)</script>`
+                  )
+                }`
+              )
+              const target = page.locator("#done") as LocatorImpl
+              const reply = yield* Effect.gen(function*() {
+                const record = yield* Operation.record
+                return yield* Runtime.sendCooperative(
+                  target.owner.runtime,
+                  target.owner.page,
+                  { op: "expect", steps: target.steps, expectation: { _tag: "Visible" }, cap: 2000 },
+                  record.id,
+                  record.budget.at,
+                  () =>
+                    Effect.succeed("continue" as const)
+                )
+              }).pipe(Operation.named("Test.cooperativeNavigation"), Effect.result)
+              assert(reply._tag === "Success", JSON.stringify(reply))
+              assert(!("_tag" in reply.success))
+              assert.strictEqual(reply.success.response._tag, "Expected")
+              if (reply.success.response._tag === "Expected") {
+                assert.isTrue(reply.success.response.passed)
+              }
+            }).pipe(Effect.scoped, Effect.provide(browser))
+          }), timeout)
         it.effect("owns viewport observers only during requested rounds and releases them independently", () =>
           Effect.gen(function*() {
             const { call, send } = yield* open(
@@ -295,6 +941,14 @@ export const engine = (backend: Backend) =>
             assert.strictEqual(response.__rendering.events[0].winner, "callback")
             assert.strictEqual(response.__rendering.events[0].clock, "page-performance-ms")
             assert.isNumber(response.__rendering.events[0].callback)
+            const extension = yield* call(
+              `() => Object.prototype.hasOwnProperty.call(
+              globalThis, Symbol.for("@usestrider/browser/engine/cooperative/1")
+            )`,
+              []
+            )
+            assert(extension._tag === "Value" && extension.value.type === "boolean")
+            assert.isFalse(extension.value.value)
           }), timeout)
         for (const state of ["pressed", "expanded", "selected"] as const) {
           it.effect(`includes ASCII case-insensitive ${state} in snapshots as in role filters`, () =>

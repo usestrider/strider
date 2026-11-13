@@ -13,6 +13,7 @@ import * as Diagnostics from "../Diagnostics.ts"
 import * as Expect from "../Expect.ts"
 import * as Locator from "../Locator.ts"
 import type * as Page from "../Page.ts"
+import type * as Reason from "../Reason.ts"
 import type * as Target from "../Target.ts"
 import type * as Watchable from "../Watchable.ts"
 import * as Access from "./access.ts"
@@ -21,6 +22,7 @@ import * as AriaPatterns from "./ariaPattern.ts"
 import * as BrowserClock from "./browserClock.ts"
 import * as ConditionImpl from "./condition.ts"
 import type * as Engine from "./engine.ts"
+import type * as Execution from "./execution.ts"
 import * as Sources from "./expectSource.ts"
 import * as Handles from "./handles.ts"
 import type { LocatorImpl } from "./locator.ts"
@@ -78,12 +80,14 @@ const failure = (
   triggers: ReadonlySet<"initial" | "change" | "interval">,
   explained: Explained = { nearest: Option.none(), suggestions: [] },
   matcherName: string = "that",
-  source?: object
+  source?: object,
+  handlerFailure?: Reason.LocatorHandlerFailed
 ) =>
   classifyFailure(
     new Expect.ExpectationFailed({
       subject,
       condition,
+      ...(handlerFailure === undefined ? {} : { handlerFailure }),
       last: Option.fromNullishOr(history.at(-1)),
       history: [...history],
       elapsed: Duration.millis((now() - started) / 1e6),
@@ -174,43 +178,71 @@ export const expectLocator = (
  * and then again on each change the page makes, until it holds or the deadline ends.
  */
 export const expectIn = (subject: InPage, expectation: Engine.Expectation, matcherName: string, condition: string) =>
+  expectUsing(subject, expectation, matcherName, condition, (cap, record) =>
+    subject.page.execution.expect(
+      subject.runtime,
+      subject.page,
+      { op: "expect", steps: subject.steps, expectation, cap },
+      record.id,
+      record.budget.at
+    ))
+
+const expectUsing = (
+  subject: InPage,
+  expectation: Engine.Expectation | Engine.CooperativeURLRequest["expectation"],
+  matcherName: string,
+  condition: string,
+  execute: (cap: number, record: Operation.Record) => Effect.Effect<Engine.Response, Execution.Failure>
+) =>
   Effect.gen(function*() {
     yield* Access.check(subject.grant)
     const record = yield* Operation.record
     const id = record.id
-    const budget = record.budget
     const started = now()
     const history: Array<Diagnostics.ObservedValue> = []
     const triggers = new Set<"initial" | "change" | "interval">(["initial"])
     let checks = 0
-    const failed = () =>
+    const failed = (handlerFailure?: Reason.LocatorHandlerFailed) =>
       Effect.flatMap(
         // A count or absence is about matching nothing, and a title has no locator: nothing to explain
-        expectation._tag === "Count" || expectation._tag === "Hidden" || expectation._tag === "Detached" ||
-          expectation._tag === "Title"
+        handlerFailure !== undefined || expectation._tag === "Count" || expectation._tag === "Hidden" ||
+          expectation._tag === "Detached" || expectation._tag === "Title" || expectation._tag === "URL"
           ? Effect.succeed<Explained>({ nearest: Option.none(), suggestions: [] })
           : explain(subject, id),
         (explained) =>
           Effect.fail(
-            failure(id, subject.description, condition, started, history, checks, triggers, explained, matcherName)
+            failure(
+              id,
+              subject.description,
+              condition,
+              started,
+              history,
+              checks,
+              triggers,
+              explained,
+              matcherName,
+              undefined,
+              handlerFailure
+            )
           )
       )
     while (true) {
       const left = record.left()
       if (left <= 0 && checks > 0) return yield* failed()
       checks++
-      const response = yield* Runtime.send(
-        subject.runtime,
-        subject.page,
-        { op: "expect", steps: subject.steps, expectation, cap: Runtime.roundCap(left) },
-        id,
-        budget.at
-      ).pipe(
+      const response = yield* execute(Runtime.roundCap(left), record).pipe(
         Effect.map((response): Engine.Response | { readonly error: string; readonly final: boolean } => response),
         Effect.catch((
           failure
-        ): Effect.Effect<{ readonly error: string; readonly final: boolean } | null, Target.TargetGone> =>
-          failure._tag === "Gone"
+        ): Effect.Effect<
+          { readonly error: string; readonly final: boolean } | null,
+          Target.TargetGone | Deadline.Timeout | Expect.ExpectationFailed
+        > =>
+          failure._tag === "Timeout" || failure._tag === "TargetGone" ?
+            Effect.fail(failure)
+            : failure._tag === "Reason" && failure.reason._tag === "LocatorHandlerFailed" ?
+            failed(failure.reason)
+            : failure._tag === "Gone"
             ? Effect.fail(failure.error)
             : failure._tag === "Deadline"
             ? Effect.succeed(null)
@@ -345,6 +377,10 @@ export const polling = Operation.fn("Expect.that")(
 
 /** The page's URL is expected to match: checked on each change of it. */
 export const toHaveURL = (page: Page.ReadonlyPage, expected: string | RegExp) =>
+  Effect.suspend(() => Handles.page(page).entry.execution.url(page, expected))
+
+/** The unchanged model-only URL watcher used by ordinary dispatch and suppressed callbacks. */
+export const watchURL = (page: Page.ReadonlyPage, expected: string | RegExp) =>
   watching(
     page.url,
     (url: string) =>
@@ -354,6 +390,27 @@ export const toHaveURL = (page: Page.ReadonlyPage, expected: string | RegExp) =>
     `to have the URL ${show(expected)}`,
     { "browser.page.id": page.id }
   )
+
+/** Page-bound URL assertions on opted-in pages use the cooperative check/retry boundary. */
+export const handlerURL = (
+  page: Page.ReadonlyPage,
+  expected: string | RegExp,
+  execute: (
+    request: Engine.CooperativeURLRequest,
+    record: Operation.Record
+  ) => Effect.Effect<Engine.Response, Execution.Failure>
+) => {
+  const { entry, runtime } = Handles.page(page)
+  const expectation: Engine.CooperativeURLRequest["expectation"] = { _tag: "URL", expected: matcher(expected, true) }
+  // Reading the URL is an observe operation, including on a formerly borrowed handle.
+  return expectUsing(
+    { runtime, page: entry, grant: Option.none(), steps: [], description: `page ${page.id}` },
+    expectation,
+    "toHaveURL",
+    `to have the URL ${show(expected)}`,
+    (cap, record) => execute({ op: "expect", steps: [], expectation, cap }, record)
+  )
+}
 
 /** The page's title is expected to match, in the page. */
 export const toHaveTitle = (page: Page.ReadonlyPage, expected: string | RegExp) => {

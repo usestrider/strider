@@ -54,7 +54,7 @@ describe("access is typed", () => {
 
   it("selected-value expectations need only inspect access and preserve typed failures", () => {
     expect(reader.locator("select").pipe(Expect.toHaveValues(["red", /green/] as const))).type.toBe<
-      Effect.Effect<void, Expect.ExpectationFailed | Target.TargetGone>
+      Effect.Effect<void, Expect.ExpectationFailed | Target.TargetGone | Deadline.Timeout>
     >()
     expect(Expect.toHaveValues(reader.locator("select"), [])).type.not.toRaiseError()
     expect(observed.locator("select").pipe(Expect.toHaveValues([]))).type.toRaiseError()
