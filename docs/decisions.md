@@ -533,6 +533,18 @@ correlation is released on completion or interruption, and all correlation state
 The one retained completed failure is not a live reservation and is cleared when its document arrives or a normal
 commit supersedes it after outstanding correlation finishes. No public operation or policy is added.
 
+BiDi wire navigation identities do not alone prove logical supersession. A delayed load whose timestamp predates
+an active start and whose URL belongs to the current document can cause Firefox to allocate another identity.
+With an existing document request, the same destination and no competing reservation, correlate that next start
+with the active logical navigation. A distinct document request for the new identity separates the navigations;
+command reservations always retain their separate ownership. This keeps request, commit and terminal outcome
+consistent without delaying observations. Starts older than an observed start or commit cannot supersede it.
+Release live aliases with their navigation's terminal correlation; document readiness keeps the correlated start
+bounds for the document's lifetime, and the retained completed failure keeps its identities until attribution.
+Rejected: treating every new wire identity as
+supersession, matching destinations alone, and using response status, retries or longer deadlines to hide the error.
+
+
 
 ## Chromium viewport restoration as bounded cleanup
 
@@ -1020,7 +1032,11 @@ observability contract require a minor release under the release policy, includi
 Check and uncheck prefer the selected element's own checked state. When it has none, a directly selected label
 or an ordinary descendant's nearest DOM label supplies the associated control. Pointer input and relative positions
 remain on the selected element; already-correct state sends nothing, and post-click verification uses the same
-checked-state lookup. Public isChecked and checked expectations continue to read only the selected element.
+checked-state lookup. When input is needed, Enabled applies to both the selected target and its current
+checked-state source, resolved on every readiness pass including under the input permit. This uses the existing
+native, fieldset and ARIA predicate and honors the explicit enabled-check override. Reject checking only the
+pointer target: a label can receive trusted input while its disabled control cannot change state.
+Public isChecked and checked expectations continue to read only the selected element.
 
 Association follows only DOM parents, without crossing a shadow root. It uses the label's control, never the
 ancestor label's own ARIA state. A selected element inside a shadow root cannot borrow an outside label.
@@ -1070,20 +1086,29 @@ An attached browser may be local, but always transferring there makes remote fil
 connection classification. Copying every launched upload was rejected because it adds many commands and browser
 storage to the common native-path case.
 
-Attached Local and Bytes share a sequential transfer. Local descriptors open in a scope and use open-file stat
+Transferred selections consisting entirely of Bytes with a combined raw size of at most 64 KiB (including an
+empty selection) encode the complete files as base64 and construct and assign the Files in one evaluation call.
+This library-owned function reuses the engine's utility world rather than creating another isolated world;
+stock WebKit uses the page world where an isolated world is unavailable. This bounded exception avoids collector
+setup and serial acknowledgements for small in-memory uploads without changing selection validation or deadlines.
+Using it for larger files was rejected because it would construct unbounded encoded files and messages.
+
+All other transferred selections, including any Attached Local file, use a sequential collector transfer in the
+isolated world (or the page world on stock WebKit). Local descriptors open in a scope and use open-file stat
 metadata followed by reads of at most 64 KiB. Bytes use views of their existing input. Each chunk is independently
-base64 encoded, sent, and acknowledged before the next is read; no complete encoded file or message is constructed.
-A remote collector holds chunk parts and completed Files through an owned handle. The upload scope closes local
-files, clears the collector, and releases the handle on success, failure, or interruption; remote cleanup has its
-own bounded budget. Browser backing storage grows with the files. There is no arbitrary library size cap or
-constant browser-memory promise: browser resource limits still apply. A disk sink and hard quota were rejected
+base64 encoded, sent, and acknowledged before the next is read; this path constructs no complete encoded file or
+message. A remote collector holds chunk parts and completed Files through an owned handle. The upload scope closes
+local files, clears the collector, and releases the handle on success, failure, or interruption; remote cleanup
+has its own bounded budget. Browser backing storage grows with the files. There is no arbitrary library size cap
+or constant browser-memory promise: browser resource limits still apply. A disk sink and hard quota were rejected
 as new capability and compatibility contracts without an established requirement.
 
 Native paths and transferred files cannot coexist in one selection, because their two setters each replace it.
 Preparation rejects such mixtures before any selection changes. Attached Local therefore combines with Bytes,
 while launched Local combines with Remote. Empty lists use page-side construction: Chromium can retain synthetic
 files after an empty native-path command. The collector validates live input type and cardinality before transfer
-and again before final assignment; it never mutates selection or dispatches events during transfer. Locator native
+and again before final assignment. The one-call Bytes path validates before constructing and assigning Files.
+Neither path mutates selection or dispatches events before validation and construction succeed. Locator native
 selections also check live cardinality before dispatch, since native backends do not uniformly refuse several
 files on a single-file input. Detached
 chooser inputs remain valid when the backend identifies them. No WebKit adapter behavior is changed here: stock
@@ -1159,7 +1184,7 @@ session cookie, while closing that startup page first exposed the same loss. Iso
 session cookies. This is an observed boundary while the browser remains alive, not a traced Chromium cause or
 a claim about other session-only state. It affects default contexts with temporary as well as supplied profile
 directories, so preserving the window only for `userDataDir` would leave part of the behavior change in place.
-It is distinct from whether signal-based browser shutdown flushes newly written storage to disk.
+It is distinct from shutdown of a connected Chromium layer, which now attempts graceful close before signals.
 
 Without a startup window, initial `strider tabs` and the `tabs` tool return empty listings. Existing callers
 would have to create a page explicitly. Retain the current initial-page behavior and the session-cookie guard;
@@ -1169,6 +1194,17 @@ Rejected: enabling the flag in automation and concurrent for a once-per-browser 
 silently changing session-cookie lifetime and initial tab listings; enabling it only without a supplied profile,
 which still changes temporary default contexts; and treating the saving as evidence that the startup page has
 no behavioral role. Caller opt-in keeps that trade explicit.
+
+## Owned Chromium attempts graceful close before termination
+
+A successfully connected, owned Chromium launch sends Browser.close while the protocol client is alive and waits
+for actual process exit for up to five seconds on the browser clock, independently of the caller's deadline.
+The existing signal termination and five-second force-kill fallback follow, so a hung process can take roughly
+ten seconds plus process-group cleanup. This best effort helps preserve recent supplied-profile storage without
+promising durability on crashes or forced termination. Signal-only teardown was rejected because the reproduced
+normal shutdown lost a recent write; an unbounded wait could hang scope closure, and a caller-configurable budget
+would add public configuration for a bounded internal cleanup policy. Attached browsers and failed connections
+retain their existing release behavior.
 
 ## Chromium screencast ownership belongs to the session
 
@@ -1541,3 +1577,7 @@ before queueing and parameter decoding. All adapter state changes and fact appli
 the scope again before decoding queued events. This keeps disabled contexts from paying for optional chunk
 collection while preserving per-session isolation. Rejected: queueing every optional event for a worker-side check,
 which charges disabled contexts, and a browser-wide enabled switch, which charges unrelated contexts.
+
+## Malformed browser-reported URLs
+
+Convert malformed browser-reported URLs to `about:blank` across adapters, including network and obligation events, so one unparseable string cannot end the connection's event fold. Show the reported string according to Diagnostics.CurrentPreset (REDACTED under default strict, exact under local) in a warning and an event on its own short-lived span, using the ingestion context's tracer and respecting tracing suppression. Reject throwing as an adapter defect at this boundary: browser data is outside the adapter's control. Use the same span naming and suppression settings as operations, with browser.operation identifying the original operation or diagnostic name. Keep the warning visible when tracing is suppressed. Reject raw malformed strings under strict because they may contain secrets. Keep empty and colon placeholders silent and optional script locations absent when unparseable.

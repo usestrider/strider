@@ -59,7 +59,7 @@ describe("FileInput across a connection", () => {
             const evaluate = Evaluation.call
             const observed = vi.spyOn(Evaluation, "call").mockImplementation((runtime, options) => {
               calls.push({
-                assignment: options.functionDeclaration.includes("function commitUpload"),
+                assignment: /function (commitUpload|uploadAll)/.test(options.functionDeclaration),
                 dispatched: options.dispatch !== undefined
               })
               return evaluate(runtime, options)
@@ -231,7 +231,7 @@ describe("FileInput across a connection", () => {
                 assert.deepStrictEqual(paths, [])
                 if (failure) {
                   if (!unreadable && source !== "changed-cardinality") assert.deepStrictEqual(evaluations, [])
-                } else assert.strictEqual(evaluations.length, 3)
+                } else assert.strictEqual(evaluations.length, 1)
                 return
               }
               if (source === "remote" || (ownership === "launched" && source !== "bytes")) {

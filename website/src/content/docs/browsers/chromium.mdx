@@ -49,6 +49,9 @@ const LikeAUser = Chromium.layer({
 - With `userDataDir`, the profile's logins are in the default context, not the new one `Browser.newPage()` makes:
   open the page there, as [Logging in once](/docs/pages/contexts#logging-in-once) shows.
 
+Closing `Chromium.layer` closes the browser it launched cleanly to preserve recent writes to a supplied
+`userDataDir`. If the browser does not exit within five seconds, Strider stops it.
+
 On the tested Chromium build, capturing a minimized window temporarily produced visible/hidden visibility events
 and animation-frame callbacks while the native window stayed minimized. Both the old and new capture paths did
 this; the new path changed the duration and callback counts in this probe.

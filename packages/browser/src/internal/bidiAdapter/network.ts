@@ -16,7 +16,7 @@ import * as Urls from "../urls.ts"
 import { bytesOf, headersOf, resourceType } from "./mapping.ts"
 import { pause, requestSnapshot } from "./obligations.ts"
 import { type Event, navigableOf, placement, type RequestEntry, type State } from "./state.ts"
-import { endNavigation } from "./tree.ts"
+import { endNavigation, startNavigation } from "./tree.ts"
 
 // ── Events ────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -36,7 +36,26 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         state.hops.set(request.hop, request)
         Deferred.doneUnsafe(previous, Effect.void)
       } else if (request === undefined) {
-        const navigation = params.navigation === null ? undefined : state.navigations.get(params.navigation)
+        let navigation = params.navigation === null ? undefined : state.navigations.get(params.navigation)
+        if (
+          navigation !== undefined && !navigation.ended && resourceType(data) === "document" &&
+          params.navigation !== navigation.bidi && navigation.starts.has(params.navigation!) &&
+          navigation.documentHop !== undefined && params.redirectCount === 0
+        ) {
+          // A new document request is positive evidence of competition, even at the same URL.
+          const timestamp = navigation.starts.get(params.navigation!)!
+          navigation.navigable.navigations.delete(params.navigation!)
+          state.navigations.delete(params.navigation!)
+          navigation = startNavigation(
+            state,
+            navigation.navigable,
+            params.navigation!,
+            data.url,
+            "crossDocument",
+            false
+          )
+          navigation.starts.set(params.navigation!, timestamp)
+        }
         const id = state.ids.request()
         request = {
           id,
