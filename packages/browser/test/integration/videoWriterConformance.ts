@@ -15,7 +15,10 @@ import * as BrowserClock from "../../src/internal/browserClock.ts"
 import * as Video from "../../src/internal/video.ts"
 import { lastVideoFrame } from "./videoFrames.ts"
 
-const png = (width: number, height: number, color: readonly number[]) => {
+const png = (width: number, height: number, color: readonly number[]) =>
+  pngFromRows(width, height, () => Buffer.from(Array.from({ length: width }, () => color).flat()))
+
+const pngFromRows = (width: number, height: number, rowAt: (y: number) => Buffer) => {
   const chunk = (kind: string, data: Buffer) => {
     const body = Buffer.concat([Buffer.from(kind), data])
     let crc = 0xffffffff
@@ -34,13 +37,53 @@ const png = (width: number, height: number, color: readonly number[]) => {
   header.writeUInt32BE(height, 4)
   header[8] = 8
   header[9] = 2
-  const row = Buffer.concat([Buffer.from([0]), Buffer.from(Array.from({ length: width }, () => color).flat())])
   return Buffer.concat([
     Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
     chunk("IHDR", header),
-    chunk("IDAT", deflateSync(Buffer.concat(Array.from({ length: height }, () => row)))),
+    chunk(
+      "IDAT",
+      deflateSync(
+        Buffer.concat(Array.from({ length: height }, (_, y) => Buffer.concat([Buffer.from([0]), rowAt(y)])))
+      )
+    ),
     chunk("IEND", Buffer.alloc(0))
   ])
+}
+
+const textWidth = 1280
+const textHeight = 720
+
+/** A page of small text: 6 by 9 pixel glyph cells with one-pixel strokes in a deterministic pseudo-random pattern. */
+const textPage = (scroll: number) => {
+  const pixels = Buffer.alloc(textWidth * textHeight * 3, 255)
+  const glyph = (code: number) => {
+    let state = (code * 2654435761) >>> 0
+    return Array.from({ length: 5 * 7 }, () => {
+      state = (Math.imul(state, 1664525) + 1013904223) >>> 0
+      return state >>> 29 < 3
+    })
+  }
+  for (let line = 0; line * 12 < textHeight + scroll + 12; line++) {
+    for (let column = 0; column * 6 < textWidth; column++) {
+      if (column % 7 === 6) continue
+      const cells = glyph((line * 131 + column * 17) % 94)
+      for (let i = 0; i < cells.length; i++) {
+        if (!cells[i]) continue
+        const x = column * 6 + (i % 5)
+        const y = line * 12 + Math.floor(i / 5) + 3 - scroll
+        if (y < 0 || y >= textHeight) continue
+        const at = (y * textWidth + x) * 3
+        pixels[at] = pixels[at + 1] = pixels[at + 2] = 20
+      }
+    }
+  }
+  return pixels
+}
+
+const psnr = (a: Buffer, b: Buffer) => {
+  let error = 0
+  for (let i = 0; i < a.length; i++) error += (a[i]! - b[i]!) ** 2
+  return error === 0 ? 100 : 10 * Math.log10((255 * 255) / (error / a.length))
 }
 
 export const writerConformance = (
@@ -290,6 +333,59 @@ export const writerConformance = (
           }
         }),
       60_000
+    )
+
+    it.effect(
+      `${name} keeps small text legible at desktop size`,
+      () =>
+        Effect.gen(function*() {
+          const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-writer-quality-"))
+          yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
+          const encoder = yield* VideoWriter.VideoWriter
+          const scrolls = [0, 0, 5, 11, 17, 17, 29, 40]
+          const sources = scrolls.map(textPage)
+          const started = Date.now()
+          const file = yield* encoder.write(
+            Stream.fromIterable(sources).pipe(Stream.map((pixels, index) => ({
+              at: index * 150e6,
+              format: "png" as const,
+              width: textWidth,
+              height: textHeight,
+              data: pngFromRows(
+                textWidth,
+                textHeight,
+                (y) => pixels.subarray(y * textWidth * 3, (y + 1) * textWidth * 3)
+              )
+            }))),
+            { path: path.join(directory, "quality.webm"), width: textWidth, height: textHeight }
+          )
+          const elapsed = Date.now() - started
+          const decoded = execFileSync(process.env["STRIDER_FFMPEG"]!, [
+            "-v",
+            "error",
+            "-i",
+            file,
+            "-fps_mode",
+            "passthrough",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgb24",
+            "pipe:1"
+          ], { maxBuffer: 1 << 28 })
+          const frameBytes = textWidth * textHeight * 3
+          assert.strictEqual(decoded.length, frameBytes * sources.length)
+          const scores = sources.map((source, index) =>
+            psnr(source, decoded.subarray(index * frameBytes, (index + 1) * frameBytes))
+          )
+          const worst = Math.min(...scores)
+          console.log(
+            `video quality ${name}: encode ${elapsed} ms, ${fs.statSync(file).size} bytes, ` +
+              `PSNR worst ${worst.toFixed(2)} dB, per frame ${scores.map((score) => score.toFixed(1)).join(" ")}`
+          )
+          assert.isAbove(worst, 30, "every decoded frame is close to its source")
+        }),
+      120_000
     )
   })
 }
