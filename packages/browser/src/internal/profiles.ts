@@ -20,6 +20,7 @@ const chromiumAutomation: ReadonlyArray<string> = [
   "--no-first-run",
   "--no-default-browser-check",
   "--no-service-autorun",
+  "--disable-infobars",
   "--disable-sync",
   "--disable-component-update",
   "--disable-background-networking",
