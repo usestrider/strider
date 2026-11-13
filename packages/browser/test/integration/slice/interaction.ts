@@ -1230,6 +1230,69 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }), timeout)
       }
 
+      for (const handlers of [false, true]) {
+        for (
+          const [attribute, reason] of [["disabled", "Disabled"], ["readonly", "ReadOnly"], ["inert", "Inert"]] as const
+        ) {
+          it.effect(
+            `retains initial ${reason} when a later reply stalls with handlers=${handlers}`,
+            () =>
+              Effect.gen(function*() {
+                const { url } = yield* fixture(() => `<input id="go" value="old" ${attribute}>`)
+                yield* Effect.scoped(Effect.gen(function*() {
+                  const page = yield* newPage
+                  yield* page.goto(url)
+                  const locator = page.locator("#go")
+                  assert(locator instanceof LocatorImpl)
+                  yield* locator.isVisible
+                  if (handlers) yield* page.addLocatorHandler(page.locator("#absent"), () => Effect.void)
+                  const adapter = locator.owner.runtime.model.adapter
+                  const original = adapter.evaluate
+                  let observed = false
+                  let stalled = false
+                  const evaluate: typeof original = Effect.fnUntraced(function*(realm, call) {
+                    const argument = call.arguments[0]
+                    const engine = call.functionDeclaration === Engine.run ||
+                      call.functionDeclaration === Engine.cooperate
+                    const request = engine && argument?._tag === "Value" && argument.value.type === "string"
+                      ? JSON.parse(argument.value.value) :
+                      undefined
+                    const hold = observed &&
+                      (request?.op === "act" || request?.command === "start" || request?.command === "resume")
+                    const result = yield* original(realm, call)
+                    if (hold) {
+                      stalled = true
+                      return yield* Effect.never
+                    }
+                    if (engine && result._tag === "Value" && result.value.type === "string") {
+                      const decoded = JSON.parse(result.value.value)
+                      const response = decoded._tag === "Done" ? decoded.response : decoded
+                      if (
+                        response._tag === "NotReady" && response.checked && response.reason._tag === reason
+                      ) observed = true
+                    }
+                    return result
+                  })
+                  yield* Effect.acquireRelease(
+                    Effect.sync(() => Object.assign(adapter, { evaluate })),
+                    () =>
+                      Effect.sync(() => {
+                        Object.assign(adapter, { evaluate: original })
+                      })
+                  )
+                  const error = yield* locator.fill("new").pipe(Deadline.within("1 second"), Effect.flip)
+                  assert(Deadline.isTimeout(error), String(error))
+                  assert.strictEqual(observed, true)
+                  assert.strictEqual(stalled, true)
+                  assert.deepStrictEqual(error.history.map((entry) => (entry.value as { _tag: string })._tag), [reason])
+                  assert.strictEqual(yield* locator.readValue, "old")
+                }))
+              }),
+            timeout
+          )
+        }
+      }
+
       it.effect(
         "reports no NotStable for a still element whose click times out while covered",
         () =>

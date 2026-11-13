@@ -260,6 +260,38 @@ export const engine = (backend: Backend) =>
     ).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor)))
     layer(fixture, { excludeTestServices: true })(
       (it) => {
+        for (const cooperative of [false, true]) {
+          for (const rendered of [false, true]) {
+            it.effect(
+              `keeps a stability baseline out of evidence with cooperative=${cooperative} rendered=${rendered}`,
+              () =>
+                Effect.gen(function*() {
+                  const { send, call } = yield* open(
+                    backend,
+                    "<button id=\"go\">Go</button>",
+                    controlledCooperativeClock
+                  )
+                  const request = { ...point(2), checks: { ...point(2).checks, rendered }, sample: true }
+                  const response = cooperative
+                    ? (yield* cooperativeExercise(
+                      call,
+                      `
+                    let reply = await command({ command: "start", budget: 500, request: ${JSON.stringify(request)} })
+                    reply = await command({ command: "resume", token: reply.token, left: 500, decision: "continue" })
+                    return JSON.stringify(reply)
+                  `
+                    )).response
+                    : yield* send(request)
+                  assert(response._tag === "NotReady")
+                  assert.deepStrictEqual(response.reason, { _tag: "NotStable" })
+                  assert.deepStrictEqual(response.history, [])
+                  assert.strictEqual(response.checked, false)
+                }),
+              timeout
+            )
+          }
+        }
+
         it.effect("returns initial action evidence before waiting for another sample", () =>
           Effect.gen(function*() {
             const { send, call } = yield* open(backend, "<button id=\"go\" disabled>Go</button>", countFrames())
