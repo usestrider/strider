@@ -8,6 +8,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
+import * as Browser from "@usestrider/browser/bidi-protocol/Browser"
 import * as BrowsingContext from "@usestrider/browser/bidi-protocol/BrowsingContext"
 import * as Script from "@usestrider/browser/bidi-protocol/Script"
 import * as Session from "@usestrider/browser/bidi-protocol/Session"
@@ -55,6 +56,42 @@ describe("Firefox over WebDriver BiDi", () => {
           assert(title.type === "success")
           assert.deepStrictEqual(title.result, { type: "string", value: "Strider" })
         }), timeout)
+
+      it.effect(
+        "renders a window's page at full rate after another tab opens in the same window",
+        () =>
+          Effect.gen(function*() {
+            const { transport } = yield* FirefoxLauncher.launch({ executablePath: executable })
+            const bidi = yield* BidiConnection.make(transport)
+            const on = Protocol.on(bidi.session)
+            yield* Session.new_({ capabilities: {} }).pipe(on)
+            const { userContext } = yield* Browser.createUserContext({}).pipe(on)
+            // The page Strider makes: a window of a user context of its own
+            const { context } = yield* BrowsingContext.create({ type: "window", userContext }).pipe(on)
+            yield* BrowsingContext.navigate({ context, url: "data:text/html,<title>page</title>", wait: "complete" })
+              .pipe(on)
+            // A second tab in the page's window, as the macOS runs show Firefox adding (about:newtab, unrequested)
+            yield* BrowsingContext.create({ type: "tab", referenceContext: context, background: false }).pipe(on)
+            const frames = yield* Script.evaluate({
+              expression: `new Promise((resolve) => {
+              let frames = 0
+              const end = performance.now() + 2000
+              const tick = () => performance.now() < end ? (frames++, requestAnimationFrame(tick)) : resolve(
+                document.visibilityState + ":" + frames
+              )
+              requestAnimationFrame(tick)
+            })`,
+              target: { context },
+              awaitPromise: true
+            }).pipe(on)
+            assert(frames.type === "success")
+            const [visibility, count] = String((frames.result as { value: unknown }).value).split(":")
+            // A tab behind another renders about once a second (QUIRKS.md, Q71): 2 frames in 2 s, not about 120
+            assert.strictEqual(visibility, "visible")
+            assert.isAbove(Number(count), 30)
+          }),
+        timeout
+      )
 
       it.effect("keeps the preferences a profile directory of the caller's sets", () =>
         Effect.gen(function*() {
