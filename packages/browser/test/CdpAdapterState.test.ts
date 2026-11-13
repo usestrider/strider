@@ -46,6 +46,7 @@ import * as Serialization from "../src/internal/serialization.ts"
 import * as Request from "../src/NetworkRequest.ts"
 import * as Protocol from "../src/protocol/Protocol.ts"
 import * as Target from "../src/Target.ts"
+import { viewportTap } from "./integration/viewportProbe.ts"
 import { makeBrowser } from "./utils/FakeBrowser.ts"
 
 const session = { key: "S1", send: () => Effect.succeed({}) } as unknown as ProtocolClient.Session
@@ -103,6 +104,46 @@ const withPage = Effect.fnUntraced(function*(protocolSession = session, requestT
   state.frames.set("T1", main)
   state.navigables.set(page.id, main)
   return { state, page, target, facts }
+})
+
+describe("CDP viewport diagnostics", () => {
+  it.effect("does not publish the recorder's isolated world as an adapter realm", () =>
+    Effect.gen(function*() {
+      const { state, target } = yield* withPage()
+      const frame = state.frames.get("T1")!
+      const document = Tree.commit(
+        state,
+        frame,
+        { loaderId: "initial", url: "about:blank", origin: "://" },
+        () => ({ _tag: "InitialBlank" }),
+        undefined,
+        "test"
+      )
+      const writes: Array<any> = []
+      const tap = viewportTap(() => {})
+      tap.inject = (message) => writes.push(JSON.parse(message))
+      tap.receive(JSON.stringify({
+        method: "Target.attachedToTarget",
+        params: { sessionId: "S1", targetInfo: { targetId: "T1", type: "page" }, waitingForDebugger: false }
+      }))
+      const world = writes.find((command) => command.method === "Page.createIsolatedWorld")
+      assert.isDefined(world)
+      const params = {
+        context: {
+          id: 7 as CdpRuntime.ExecutionContextId,
+          uniqueId: "probe-context",
+          origin: "://",
+          name: world.params.worldName,
+          auxData: { frameId: "T1", isDefault: false, type: "isolated" }
+        }
+      }
+      // As in Transport instrumentation, every event not consumed by the tap reaches the adapter.
+      if (!tap.receive(JSON.stringify({ method: "Runtime.executionContextCreated", sessionId: "S1", params }))) {
+        Evaluation.contextCreated(params, target.event)
+      }
+      assert.strictEqual(document.realms.size, 0, "recorder-only worlds must not change the document's realm list")
+      assert.strictEqual(state.realms.size, 0)
+    }).pipe(Effect.scoped))
 })
 
 describe("CDP click cleanup", () => {
