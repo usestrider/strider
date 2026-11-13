@@ -134,6 +134,38 @@ const errorNavigation = (
 }
 
 describe("BidiAdapter state", () => {
+  it.effect("selects the destination main realm when the initial realm survives past commit", () =>
+    Effect.gen(function*() {
+      const url = "http://127.0.0.1:50796/cookie"
+      const { page, realm: initial, state } = yield* withPage({
+        "browsingContext.navigate": { navigation: "N1", url }
+      })
+      const handlers = Evaluation.register(Navigation.register(Kit.handlers<State.Event>()))
+      yield* Navigation.navigate(state, page.id, url, { referrer: Option.none() })
+      const navigation = { context: page.bidi, navigation: "N1", url, timestamp: 0 }
+      handlers.apply("browsingContext.navigationStarted", navigation, { state })
+      // Captured Firefox 158 macOS ordering: a transient null-origin realm is replaced before
+      // commit, while the original about:blank realm is not destroyed until after evaluation.
+      handlers.apply("script.realmCreated", {
+        realm: "transient",
+        context: page.bidi,
+        type: "window",
+        origin: "null"
+      }, { state })
+      handlers.apply("script.realmDestroyed", { realm: "transient" }, { state })
+      handlers.apply("script.realmCreated", {
+        realm: "destination",
+        context: page.bidi,
+        type: "window",
+        origin: "http://127.0.0.1:50796"
+      }, { state })
+      handlers.apply("browsingContext.navigationCommitted", navigation, { state })
+      yield* state.buffer.flush
+      assert.isFalse(initial.ended)
+      const selected = yield* Evaluation.realm(state, page.document!.id, { _tag: "Main" })
+      assert.strictEqual(selected, state.realms.get("destination")!.id)
+    }))
+
   for (
     const boundary of [
       "event-before-reply",
