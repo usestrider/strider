@@ -20,7 +20,7 @@ import * as ChromiumLauncher from "../../../src/internal/chromiumLauncher.ts"
 import * as DevToolsActivePort from "../../../src/internal/devToolsActivePort.ts"
 import * as FirefoxLauncher from "../../../src/internal/firefoxLauncher.ts"
 import * as Launch from "../../../src/internal/launch.ts"
-import { site } from "../adapter/harness.ts"
+import { site, tlsSite } from "../adapter/harness.ts"
 import { chromium, firefox } from "../browsers.ts"
 import { supports } from "./capabilities.ts"
 
@@ -143,14 +143,27 @@ export const attaching = (
               yield* tab.getByRole("button", { name: "Refresh" }).click()
               yield* tab.locator("#out").pipe(Expect.toHaveText("blocked"))
               assert.strictEqual(yield* blocked.hits, 1)
+              assert.isFalse(yield* tab.getByRole("heading").isEditable)
               kept = tab
             }))
             // Released: what the grant gave fails, and the page stays open
             const read = reasonOf(yield* Effect.exit(kept!.getByRole("heading").readText))
             assert.deepInclude(read, { _tag: "TargetGone" })
             assert.deepStrictEqual((read as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
+            const selected = reasonOf(yield* Effect.exit(kept!.getByRole("heading").selectText()))
+            assert.deepStrictEqual((selected as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
+            const viewport = reasonOf(yield* Effect.exit(kept!.viewportSize))
+            assert.deepStrictEqual((viewport as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
+            const editable = reasonOf(yield* Effect.exit(kept!.getByRole("heading").isEditable))
+            assert.deepStrictEqual((editable as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
+            for (const matcher of [Expect.toBeAttached, Expect.toBeDetached]) {
+              const attachment = reasonOf(yield* Effect.exit(kept!.getByRole("heading").pipe(matcher)))
+              assert.deepStrictEqual((attachment as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
+            }
             const navigated = reasonOf(yield* Effect.exit(kept!.reload()))
             assert.deepStrictEqual((navigated as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
+            const replaced = reasonOf(yield* Effect.exit(kept!.setContent("<title>Forbidden</title>")))
+            assert.deepStrictEqual((replaced as unknown as Target.TargetGone).reason, new Target.AccessReleased({}))
             const routed = reasonOf(
               yield* Effect.exit(Effect.scoped(kept!.route("**", () => Route.abort())))
             )
@@ -160,7 +173,9 @@ export const attaching = (
             // A grant's declarations go with it: the analytics call goes through now
             yield* Effect.scoped(Effect.gen(function*() {
               const reader = yield* first.inspect
+              assert.deepStrictEqual(yield* reader.viewportSize, Option.none())
               assert.strictEqual(yield* reader.getByRole("heading").readText, "Initial")
+              assert.isFalse(yield* reader.getByRole("heading").isEditable)
               const tab = yield* first.control
               yield* tab.activate
               yield* tab.getByRole("button", { name: "Refresh" }).click()
@@ -177,7 +192,7 @@ export const attaching = (
           let page: Page.Page | undefined
           yield* Effect.scoped(Effect.gen(function*() {
             context = yield* browser.defaultContext.control
-            yield* context.cookies.set({ name: "who", value: "me", scope: { _tag: "Url", url: origin } })
+            yield* context.cookies.set({ name: "who", value: "me", scope: { url: origin } })
             page = yield* context.newPage
             yield* page.goto(
               fixtureUrl(
@@ -213,6 +228,27 @@ export const attaching = (
 
       if (Option.isSome(attachable)) {
         const start = attachable.value.start
+
+        it.effect("isolates certificate acceptance in new contexts of an attached browser", () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            const secure = yield* tlsSite
+            const { layer: attached } = yield* start(tabUrl(origin, "First"), tabUrl(origin, "Second"))
+            yield* Effect.scoped(Effect.gen(function*() {
+              if (!(yield* supports("acceptInsecureCerts"))) {
+                const error = yield* Browser.newPage({ acceptInsecureCerts: true }).pipe(Effect.flip)
+                assert(Page.isPageError(error) && error.reason._tag === "Unsupported")
+                assert.strictEqual(error.reason.capability, "acceptInsecureCerts")
+              } else {
+                const page = yield* Browser.newPage({ acceptInsecureCerts: true })
+                yield* page.goto(secure.origin)
+                assert.strictEqual(yield* page.title, "secure")
+              }
+              const verified = yield* Browser.newPage()
+              const error = yield* verified.goto(secure.origin).pipe(Effect.flip)
+              assert(Page.isPageError(error) && error.reason._tag === "NavigationFailed")
+            })).pipe(Effect.provide(attached))
+          }), timeout)
 
         it.effect("honors required init-script timing or refuses it for an attached context popup", () =>
           Effect.gen(function*() {
@@ -291,6 +327,7 @@ export const attaching = (
               yield* Effect.scoped(Effect.gen(function*() {
                 const reader = yield* first.inspect
                 yield* reader.getByRole("heading").pipe(Expect.toBeVisible)
+                assert.deepStrictEqual(yield* reader.viewportSize, Option.none())
                 const text = yield* reader.getByRole("heading").readText
                 assert.strictEqual(text, "First")
                 const tab = yield* second.control

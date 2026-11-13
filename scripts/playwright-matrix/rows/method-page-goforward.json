@@ -1,0 +1,25 @@
+{
+  "id": "method-page-goforward",
+  "upstream": [
+    "method:Page.goForward"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "Page.forward",
+      "url": "/docs/api/browser/Page#Page.forward"
+    }
+  ],
+  "notes": "Navigation defaults to commit, not load; explicit load states exclude networkidle.",
+  "capabilities": [
+    "navigation.traverse"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

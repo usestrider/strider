@@ -13,7 +13,10 @@ import * as Engine from "../src/internal/engine.ts"
 import * as Fake from "../src/internal/fake.ts"
 
 /** Real routing, engine cache and bounded adapter; only page execution is simulated. */
-const scenario = Effect.fnUntraced(function*(replies: ReadonlyArray<{ delay: number; value: string }>) {
+const scenario = Effect.fnUntraced(function*(
+  replies: ReadonlyArray<{ delay: number; value: unknown }>,
+  expectation: "visible" | "classes" | "role" | "css" = "visible"
+) {
   const clock = BrowserClock.fromClock(yield* Effect.service(Clock.Clock))
   const caps: Array<number> = []
   let installs = 0
@@ -62,7 +65,13 @@ const scenario = Effect.fnUntraced(function*(replies: ReadonlyArray<{ delay: num
   const error = yield* Effect.scoped(Effect.gen(function*() {
     const page = yield* Browser.newPage()
     const pending = yield* page.getByText("item").pipe(
-      Expect.toBeVisible,
+      expectation === "classes" ?
+        Expect.toHaveClass(["ready"])
+        : expectation === "role" ?
+        Expect.toHaveRole("checkbox")
+        : expectation === "css" ?
+        Expect.toHaveCSS("color", "red", { not: true })
+        : Expect.toBeVisible,
       Deadline.within("500 millis"),
       Effect.flip,
       Effect.forkChild
@@ -104,4 +113,48 @@ describe("Expect received observations", () => {
       assert.deepStrictEqual(error.last, Option.none())
       assert.strictEqual(delivered, 1)
     }))
+  it.effect("retains timely class evidence and ignores a later class reply", () =>
+    Effect.gen(function*() {
+      const { error, delivered } = yield* scenario([
+        { delay: 100, value: ["first", "second"] },
+        { delay: 1000, value: ["late"] }
+      ], "classes")
+      assert.deepStrictEqual(error.history.map((entry) => entry.value), [["first", "second"]])
+      assert.deepStrictEqual(error.last, Option.some(error.history[0]!))
+      assert.strictEqual(delivered, 2)
+    }))
+
+  it.effect("keeps class evidence empty after a late first reply", () =>
+    Effect.gen(function*() {
+      const { error, delivered } = yield* scenario([{ delay: 1000, value: { matches: 0 } }], "classes")
+      assert.deepStrictEqual(error.history, [])
+      assert.deepStrictEqual(error.last, Option.none())
+      assert.strictEqual(delivered, 1)
+    }))
+
+  for (
+    const [expectation, values, late] of [
+      ["role", ["switch", "", { matches: 0 }, { matches: 2 }], "late-role"],
+      ["css", [{ matches: 0 }, { matches: 2 }], { matches: 1 }]
+    ] as const
+  ) {
+    it.effect(`retains every timely ${expectation} observation and ignores a late reply`, () =>
+      Effect.gen(function*() {
+        const { error, delivered } = yield* scenario([
+          ...values.map((value) => ({ delay: 50, value })),
+          { delay: 1000, value: late }
+        ], expectation)
+        assert.deepStrictEqual(error.history.map((entry) => entry.value), [...values])
+        assert.deepStrictEqual(error.last, Option.some(error.history.at(-1)!))
+        assert.strictEqual(delivered, values.length + 1)
+      }))
+
+    it.effect(`keeps ${expectation} evidence empty after a late first reply`, () =>
+      Effect.gen(function*() {
+        const { error, delivered } = yield* scenario([{ delay: 1000, value: values[0] }], expectation)
+        assert.deepStrictEqual(error.history, [])
+        assert.deepStrictEqual(error.last, Option.none())
+        assert.strictEqual(delivered, 1)
+      }))
+  }
 })

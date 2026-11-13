@@ -1,0 +1,553 @@
+/** Public context WebSocket declarations, including stock WebKit's console transport. */
+import * as NodeServices from "@effect/platform-node/NodeServices"
+import * as NodeSocket from "@effect/platform-node/NodeSocket"
+import { assert, describe, layer } from "@effect/vitest"
+import { Browser, Condition, ConsoleMessage, Expect, Popup, WebSocketRoute } from "@usestrider/browser"
+import { Chromium } from "@usestrider/browser/chromium"
+import { Firefox } from "@usestrider/browser/firefox"
+import { WebKit } from "@usestrider/browser/webkit"
+import * as Deferred from "effect/Deferred"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Stream from "effect/Stream"
+import { site } from "./adapter/harness.ts"
+import { chromium, firefox, webkitgtk } from "./browsers.ts"
+import { socketConnector } from "./sockets.ts"
+import { useXvfb } from "./stockWebKit.ts"
+
+const display = Layer.effectDiscard(useXvfb()).pipe(Layer.provide(NodeServices.layer))
+const backends = [
+  ["Chromium", Chromium.layer({ executablePath: chromium.executable }).pipe(Layer.provide(NodeServices.layer))],
+  [
+    "Firefox",
+    Firefox.layer({ executablePath: firefox.executable }).pipe(
+      Layer.provide(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor))
+    )
+  ],
+  [
+    "WebKit",
+    WebKit.layer({ executablePath: webkitgtk.executable }).pipe(
+      Layer.provide(Layer.mergeAll(NodeServices.layer, socketConnector, display))
+    )
+  ]
+] as const
+
+for (const [name, backend] of backends) {
+  describe(`${name} context WebSocket routing`, () => {
+    layer(backend, { excludeTestServices: true, timeout: 60_000 })((it) => {
+      it.effect(
+        "mocks binary sends in order and keeps bridge envelopes out of public console events",
+        () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            const page = yield* Browser.newPage()
+            const console: Array<string> = []
+            const messages = yield* ConsoleMessage.stream(page)
+            yield* messages.pipe(
+              Stream.runForEach((message) => Effect.sync(() => console.push(message.text))),
+              Effect.forkScoped
+            )
+            const registration = yield* page.context.routeWebSocket(
+              "**/socket",
+              (connection) => connection.open({ fromPage: (message, endpoint) => endpoint.send(message) }),
+              {
+                implementation: "script",
+                timing: name === "WebKit" ? "bestEffort" : "beforeAuthorScript"
+              }
+            )
+            const html = `<pre id="out">pending</pre><script>
+            console.debug('ordinary text'); console.debug({ ordinary: true });
+            const ws = new WebSocket('ws://example.invalid/socket'); ws.binaryType = 'arraybuffer';
+            const received = []; ws.onmessage = event => {
+              received.push(typeof event.data === 'string' ? event.data : [...new Uint8Array(event.data)]);
+              if (received.length === 3) document.querySelector('#out').textContent = JSON.stringify(received);
+            };
+            ws.onopen = () => {
+              ws.send(new Blob([new Uint8Array([0, 255, 1])]));
+              const bytes = new Uint8Array([99, 2, 3, 88]); ws.send(bytes.subarray(1, 3)); bytes.fill(9);
+              ws.send('雪');
+            };
+          </script>`
+            yield* page.goto(`${origin}/fixture?html=${encodeURIComponent(html)}`)
+            yield* Expect.that(
+              page.locator("#out").readText,
+              Condition.make("echoed all messages", (text: string) => text !== "pending")
+            )
+            assert.deepStrictEqual(JSON.parse(yield* page.locator("#out").readText), [[0, 255, 1], [2, 3], "雪"])
+            assert.lengthOf(console, 2)
+            assert.strictEqual(console[0], "ordinary text")
+            yield* registration.remove
+            yield* registration.remove
+          }),
+        60_000
+      )
+      it.effect(
+        "converts text like a native WebSocket while preserving valid surrogate pairs",
+        () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            const page = yield* Browser.newPage()
+            const target = origin.replace("http:", "ws:")
+            const observed: Array<string> = []
+            yield* page.context.routeWebSocket(`${target}/mock-unicode`, (connection) =>
+              connection.open({
+                fromPage: Effect.fnUntraced(function*(message, endpoint) {
+                  assert.strictEqual(message._tag, "Text")
+                  if (message._tag === "Text") observed.push(message.data)
+                  yield* endpoint.send(message)
+                })
+              }), { implementation: "script", timing: name === "WebKit" ? "bestEffort" : "beforeAuthorScript" })
+            const inputs = ["a\uD800b", "a\uDC00b", "a\uD83D\uDE00b", "\uD800\uD800\uDC00\uDC00"]
+            const html = `<pre id="out">pending</pre><script>
+            const inputs = ${JSON.stringify(inputs)};
+            const exchange = path => new Promise((resolve, reject) => {
+              const received = []; const ws = new WebSocket(${JSON.stringify(target)} + path);
+              ws.onopen = () => ws.send(inputs[0]);
+              ws.onerror = reject;
+              ws.onmessage = event => {
+                received.push(event.data);
+                if (received.length === inputs.length) { ws.close(); resolve(received); }
+                else ws.send(inputs[received.length]);
+              };
+            });
+            (async () => {
+              const native = await exchange('/native-unicode');
+              const mocked = await exchange('/mock-unicode');
+              document.querySelector('#out').textContent = JSON.stringify({ native, mocked });
+            })();
+          </script>`
+            yield* page.goto(`${origin}/fixture?html=${encodeURIComponent(html)}`)
+            yield* Expect.that(
+              page.locator("#out").readText,
+              Condition.make("both sockets replied", (text: string) => text !== "pending")
+            )
+            const expected = ["a\uFFFDb", "a\uFFFDb", "a\uD83D\uDE00b", "\uFFFD\uD800\uDC00\uFFFD"]
+            assert.deepStrictEqual(JSON.parse(yield* page.locator("#out").readText), {
+              native: expected,
+              mocked: expected
+            })
+            assert.deepStrictEqual(observed, expected)
+          }),
+        60_000
+      )
+
+      it.effect(
+        "preserves a maximum-sized text message when JSON escaping expands its wire envelope",
+        () =>
+          Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.context.routeWebSocket("**/socket", (connection) =>
+              connection.open({ fromPage: (message, endpoint) => endpoint.send(message) }), {
+              implementation: "script",
+              timing: name === "WebKit" ? "bestEffort" : "beforeAuthorScript"
+            })
+            const result = yield* page.evaluateInMainWorld(() =>
+              new Promise<{ length: number; exact: boolean }>((resolve) => {
+                const expected = "\0".repeat(1024 * 1024)
+                const socket = new WebSocket("ws://example.invalid/socket")
+                socket.onopen = () =>
+                  socket.send(expected)
+                socket.onmessage = (event) =>
+                  resolve({ length: event.data.length, exact: event.data === expected })
+                socket.onclose = () => resolve({ length: -1, exact: false })
+              })
+            )
+            assert.deepStrictEqual(result, { length: 1024 * 1024, exact: true })
+          }),
+        60_000
+      )
+      it.effect("answers small messages with eight sockets already open", () =>
+        Effect.gen(function*() {
+          const page = yield* Browser.newPage()
+          yield* page.context.routeWebSocket("**/socket", (connection) =>
+            connection.open({
+              fromPage: (message, endpoint) =>
+                endpoint.send({ _tag: "Text", data: "reply:" + (message._tag === "Text" ? message.data : "binary") })
+            }), { implementation: "script", timing: name === "WebKit" ? "bestEffort" : "beforeAuthorScript" })
+          const replies = yield* page.evaluateInMainWorld(async () => {
+            const sockets = Array.from({ length: 8 }, () => new WebSocket("ws://example.invalid/socket"))
+            await Promise.all(sockets.map((socket) =>
+              new Promise<void>((resolve, reject) => {
+                socket.onopen = () => resolve()
+                socket.onerror = () => reject(new Error("opening failed"))
+              })
+            ))
+            return Promise.all(sockets.map((socket) =>
+              new Promise<string>((resolve) => {
+                socket.onmessage = (event) => resolve(String(event.data))
+                socket.onclose = () => resolve("closed before reply")
+                socket.send("hello")
+              })
+            ))
+          })
+          assert.deepStrictEqual(replies, Array.from({ length: 8 }, () => "reply:hello"))
+        }), 60_000)
+      it.effect(
+        "keeps other contexts native, restores overlap precedence and removes loaded-document shims",
+        () =>
+          Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const sibling = yield* Browser.newPage()
+            const options = {
+              implementation: "script" as const,
+              timing: name === "WebKit" ? "bestEffort" as const : "beforeAuthorScript" as const
+            }
+            const register = (text: string) =>
+              page.context.routeWebSocket("**/socket", (socket) =>
+                socket.open({
+                  fromPage: (_, endpoint) => endpoint.send({ _tag: "Text", data: text })
+                }), options)
+            const first = yield* register("old")
+            assert.strictEqual(yield* sibling.evaluateInMainWorld(() => WebSocket.name), "WebSocket")
+            const inspect = () =>
+              page.evaluateInMainWorld(() =>
+                new Promise<string>((resolve, reject) => {
+                  const ws = new WebSocket("ws://example.invalid/socket")
+                  ws.onopen = () => ws.send("ping")
+                  ws.onmessage = (event) => {
+                    resolve(String(event.data))
+                    ws.close()
+                  }
+                  ws.onerror = () => reject(new Error("socket failed"))
+                })
+              )
+            assert.strictEqual(yield* inspect(), "old")
+            const newest = yield* register("new")
+            assert.strictEqual(yield* inspect(), "new")
+            yield* newest.remove
+            assert.strictEqual(yield* inspect(), "old")
+            yield* first.remove
+            assert.strictEqual(yield* page.evaluateInMainWorld(() => WebSocket.name), "WebSocket")
+            const again = yield* register("again")
+            assert.strictEqual(yield* inspect(), "again")
+            yield* again.remove
+          }),
+        60_000
+      )
+
+      it.effect(
+        "forwards absent directions and lets installed handlers replace both directions without observation changing it",
+        () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            const page = yield* Browser.newPage()
+            const target = origin.replace("http:", "ws:")
+            const options = {
+              implementation: "script" as const,
+              timing: name === "WebKit" ? "bestEffort" as const : "beforeAuthorScript" as const
+            }
+            const observations: Array<WebSocketRoute.Event> = []
+            yield* page.context.routeWebSocket(`${target}/pass`, (connection) =>
+              Effect.gen(function*() {
+                const stream = yield* connection.events
+                yield* stream.pipe(
+                  Stream.runForEach((event) => Effect.sync(() => observations.push(event))),
+                  Effect.forkScoped
+                )
+                yield* connection.connectToServer({})
+              }), options)
+            yield* page.context.routeWebSocket(`${target}/edit`, (connection) =>
+              connection.connectToServer({
+                fromPage: (message, endpoints) =>
+                  endpoints.server.send({
+                    _tag: "Text",
+                    data: message._tag === "Text" ? message.data.toUpperCase() : "binary"
+                  }),
+                fromServer: (message, endpoints) =>
+                  endpoints.page.send({ _tag: "Text", data: message._tag === "Text" ? message.data + "!" : "binary" })
+              }).pipe(Effect.asVoid), options)
+            const html = `<pre id="out">pending</pre><script>
+            const exchange = path => new Promise((resolve,reject) => {
+              const ws = new WebSocket(${JSON.stringify(target)} + path);
+              ws.onopen=()=>ws.send('hello');ws.onmessage=e=>{resolve(e.data);ws.close()};ws.onerror=reject;
+            });
+            (async()=>{const a=await exchange('/pass');const b=await exchange('/edit');document.querySelector('#out').textContent=JSON.stringify([a,b])})()
+          </script>`
+            yield* page.goto(`${origin}/fixture?html=${encodeURIComponent(html)}`)
+            yield* Expect.that(
+              page.locator("#out").readText,
+              Condition.make("forwarded", (text: string) => text !== "pending")
+            )
+            assert.deepStrictEqual(JSON.parse(yield* page.locator("#out").readText), ["hello", "HELLO!"])
+            assert.isTrue(observations.some((event) => event._tag === "Message" && event.direction === "page"))
+            assert.isTrue(observations.some((event) => event._tag === "Message" && event.direction === "server"))
+          }),
+        60_000
+      )
+
+      it.effect(
+        "preserves a final proxy message before native close and error with truthful metadata",
+        () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            const page = yield* Browser.newPage()
+            const target = origin.replace("http:", "ws:")
+            yield* page.context.routeWebSocket(
+              "**/*-proxy",
+              (connection) => connection.connectToServer({}).pipe(Effect.asVoid),
+              {
+                implementation: "script",
+                timing: name === "WebKit" ? "bestEffort" : "beforeAuthorScript"
+              }
+            )
+            const html = `<pre id="out">pending</pre><script>
+            const exchange = path => new Promise(resolve => {
+              const seen = []; const socket = new WebSocket(${JSON.stringify(target)} + path);
+              socket.onopen = () => socket.send('ready');
+              socket.onmessage = event => seen.push('message:' + event.data);
+              socket.onerror = () => seen.push('error');
+              socket.onclose = event => { seen.push('close'); resolve({seen, code:event.code, reason:event.reason, wasClean:event.wasClean}); };
+            });
+            (async () => {
+              const native = await exchange('/ws-final-native'); const proxy = await exchange('/ws-final-proxy');
+              const nativeError = await exchange('/ws-final-error-native'); const proxyError = await exchange('/ws-final-error-proxy');
+              document.querySelector('#out').textContent = JSON.stringify({native, proxy, nativeError, proxyError});
+            })();
+          </script>`
+            yield* page.goto(`${origin}/fixture?html=${encodeURIComponent(html)}`)
+            yield* Expect.that(
+              page.locator("#out").readText,
+              Condition.make("both terminal paths completed", (value: string) => value !== "pending")
+            )
+            const result = JSON.parse(yield* page.locator("#out").readText)
+            assert.deepStrictEqual(result.native, {
+              seen: ["message:bye", "close"],
+              code: 1000,
+              reason: "done",
+              wasClean: true
+            })
+            assert.deepStrictEqual(result.proxy, result.native)
+            // TCP EOF does not produce an error event on every browser; preserve what this native peer reports.
+            assert.strictEqual(result.nativeError.seen[0], "message:bye")
+            assert.strictEqual(result.nativeError.seen.at(-1), "close")
+            assert.deepStrictEqual({
+              code: result.nativeError.code,
+              reason: result.nativeError.reason,
+              wasClean: result.nativeError.wasClean
+            }, {
+              code: 1006,
+              reason: "",
+              wasClean: false
+            })
+            assert.deepStrictEqual(result.proxyError, result.nativeError)
+          }),
+        60_000
+      )
+
+      it.effect(
+        "waits for delayed server handlers to forward or deliberately drop before closing",
+        () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            const page = yield* Browser.newPage()
+            yield* page.goto(origin)
+            // Observe the real native peer ending, independently of the shim's delayed page notification.
+            yield* page.evaluateInMainWorld(() => {
+              document.body.innerHTML = "<pre id=\"native\">pending</pre><pre id=\"out\">pending</pre>"
+              const Native = WebSocket
+              globalThis.WebSocket = class extends Native {
+                constructor(url: string | URL, protocols?: string | Array<string>) {
+                  super(url, protocols)
+                  this.addEventListener("close", () => {
+                    document.querySelector("#native")!.textContent = "closed"
+                  })
+                }
+              }
+            })
+            for (const drop of [false, true]) {
+              const started = yield* Deferred.make<void>()
+              const release = yield* Deferred.make<void>()
+              let completed = false
+              const registration = yield* page.context.routeWebSocket("**/ws-final-delayed", (connection) =>
+                connection.connectToServer({
+                  fromServer: Effect.fnUntraced(function*(message, endpoints) {
+                    yield* Deferred.succeed(started, undefined)
+                    yield* Deferred.await(release)
+                    if (!drop) {
+                      yield* endpoints.page.send(message)
+                    }
+                    completed = true
+                  })
+                }).pipe(Effect.asVoid), {
+                implementation: "script",
+                timing: name === "WebKit" ? "bestEffort" : "beforeAuthorScript"
+              })
+              yield* page.evaluateInMainWorld(() => {
+                document.querySelector("#native")!.textContent = "pending"
+                document.querySelector("#out")!.textContent = "pending"
+                const seen: Array<string> = []
+                ;(globalThis as any).seen = seen
+                const socket = new WebSocket(location.origin.replace("http:", "ws:") + "/ws-final-delayed")
+                socket.onopen = () =>
+                  socket.send("ready")
+                socket.onmessage = (event) =>
+                  seen.push("message:" + event.data)
+                socket.onerror = () =>
+                  seen.push("error")
+                socket.onclose = () => {
+                  seen.push("close")
+                  document.querySelector("#out")!.textContent = JSON.stringify(seen)
+                }
+              })
+              yield* Deferred.await(started)
+              yield* Expect.that(
+                page.locator("#native").readText,
+                Condition.make("native peer ended", (value: string) => value === "closed")
+              )
+              assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => (globalThis as any).seen), [])
+              assert.isFalse(completed)
+              yield* Deferred.succeed(release, undefined)
+              yield* Expect.that(
+                page.locator("#out").readText,
+                Condition.make("page closed", (value: string) => value !== "pending")
+              )
+              assert.deepStrictEqual(
+                JSON.parse(yield* page.locator("#out").readText),
+                drop ? ["close"] : ["message:bye", "close"]
+              )
+              assert.isTrue(completed)
+              yield* registration.remove
+            }
+          }),
+        60_000
+      )
+
+      it.effect("reaches first-script new pages and supported early workers and popups", () =>
+        Effect.gen(function*() {
+          const served = yield* site
+          const page = yield* Browser.newPage()
+          yield* page.context.routeWebSocket("**/socket", (connection) =>
+            connection.open({
+              fromPage: (message, endpoint) => endpoint.send(message)
+            }), {
+            implementation: "script",
+            timing: name === "WebKit" ? "bestEffort" : "beforeAuthorScript",
+            workers: name !== "Firefox"
+          })
+          const html =
+            `<pre id="out">pending</pre><script>const ws=new WebSocket('ws://example.invalid/socket');ws.onopen=()=>ws.send('first author script');ws.onmessage=e=>{document.querySelector('#out').textContent=e.data;ws.close()}</script>`
+          const target = `${served.origin}/fixture?html=${encodeURIComponent(html)}`
+          const next = yield* page.context.newPage
+          yield* next.goto(target)
+          yield* next.locator("#out").pipe(Expect.toHaveText("first author script"))
+          if (name !== "Firefox") {
+            yield* page.goto(`${served.origin}/empty`)
+            const result = yield* page.evaluateInMainWorld(() =>
+              new Promise<string>((resolve) => {
+                const code =
+                  `const ws=new WebSocket('ws://example.invalid/socket');ws.onopen=()=>ws.send('worker first');ws.onmessage=e=>{postMessage(e.data);ws.close()}`
+                const url = URL.createObjectURL(new Blob([code], { type: "text/javascript" }))
+                const worker = new Worker(url)
+                worker.onmessage = (event) => {
+                  resolve(String(event.data))
+                  worker.terminate()
+                  URL.revokeObjectURL(url)
+                }
+              })
+            )
+            assert.strictEqual(result, "worker first")
+          }
+          if (name !== "WebKit") {
+            yield* page.goto(
+              `${served.origin}/fixture?html=${encodeURIComponent(`<a href="${target}" target="_blank">Open</a>`)}`
+            )
+            const opened = yield* Popup.next(page)
+            yield* page.getByText("Open", { exact: true }).click()
+            const popup = yield* opened
+            yield* popup.locator("#out").pipe(Expect.toHaveText("first author script"))
+          }
+        }), 60_000)
+
+      it.effect(
+        "enforces one registration reservation ceiling across origins and releases destroyed realms",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const page = yield* Browser.newPage()
+            yield* page.context.routeWebSocket("**/socket", (connection) => connection.open({}), {
+              implementation: "script",
+              timing: name === "WebKit" ? "bestEffort" : "beforeAuthorScript"
+            })
+            const child =
+              `<script>const sockets=[];for(let n=0;n<8;n++){const ws=new WebSocket('ws://example.invalid/socket');sockets.push(ws);let sent=false;const report=value=>{if(!sent){sent=true;parent.postMessage(value,'*')}};ws.onopen=()=>report('open');ws.onclose=()=>report('closed')}</script>`
+            const url = (origin: string) => `${origin}/fixture?html=${encodeURIComponent(child)}`
+            const html =
+              `<pre id="out">pending</pre><script>const replies=[];onmessage=e=>{replies.push(e.data);if(replies.length===16)document.querySelector('#out').textContent=JSON.stringify(replies.sort())}</script><iframe src="${
+                url(served.origin)
+              }"></iframe><iframe src="${url(served.crossSite)}"></iframe>`
+            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+            yield* Expect.that(
+              page.locator("#out").readText,
+              Condition.make("all constructor admissions settled", (text: string) => text !== "pending")
+            )
+            const admissions = JSON.parse(yield* page.locator("#out").readText) as Array<string>
+            assert.strictEqual(admissions.filter((value) => value === "open").length, 14)
+            assert.strictEqual(admissions.filter((value) => value === "closed").length, 2)
+            // Navigation destroys both frame generations. All their unused credits must become usable again.
+            yield* page.goto(`${served.origin}/empty`)
+            const result = yield* page.evaluateInMainWorld(() =>
+              new Promise<string>((resolve) => {
+                const ws = new WebSocket("ws://example.invalid/socket")
+                ws.onopen = () => {
+                  resolve("opened after reclamation")
+                  ws.close()
+                }
+                ws.onclose = () => resolve("closed")
+              })
+            )
+            assert.strictEqual(result, "opened after reclamation")
+          }),
+        60_000
+      )
+
+      it.effect("refuses unsupported timing/workers before modifying the context", () =>
+        Effect.gen(function*() {
+          const page = yield* Browser.newPage()
+          if (name === "WebKit") {
+            const error = yield* page.context.routeWebSocket("**", () => Effect.void, { implementation: "script" })
+              .pipe(Effect.flip)
+            assert.strictEqual(error._tag, "WebSocketRouteError")
+            assert(error._tag === "WebSocketRouteError" && error.reason._tag === "Unsupported")
+          } else if (name === "Firefox") {
+            const error = yield* page.context.routeWebSocket("**", () => Effect.void, {
+              implementation: "script",
+              workers: true
+            }).pipe(Effect.flip)
+            assert(error._tag === "WebSocketRouteError" && error.reason._tag === "Unsupported")
+          }
+          assert.strictEqual(yield* page.evaluateInMainWorld(() => WebSocket.name), "WebSocket")
+        }), 60_000)
+
+      it.effect("closes on handler failure and rejects native-reserved close codes", () =>
+        Effect.gen(function*() {
+          const page = yield* Browser.newPage()
+          const options = {
+            implementation: "script" as const,
+            timing: name === "WebKit" ? "bestEffort" as const : "beforeAuthorScript" as const
+          }
+          yield* page.context.routeWebSocket("**/fail", () => Effect.fail("deliberate handler failure"), options)
+          const failed = yield* page.evaluateInMainWorld(() =>
+            new Promise<number>((resolve) => {
+              const ws = new WebSocket("ws://example.invalid/fail")
+              ws.onclose = (event) => resolve(event.code)
+            })
+          )
+          assert.strictEqual(failed, 1006)
+          yield* page.context.routeWebSocket("**/close", (connection) =>
+            Effect.gen(function*() {
+              yield* connection.open({})
+              const invalid = yield* connection.page.close({ code: 1011 }).pipe(Effect.flip)
+              assert(invalid._tag === "WebSocketRouteError" && invalid.reason._tag === "InvalidInput")
+              yield* connection.page.close({ code: 4001, reason: "finished" })
+            }), options)
+          const closed = yield* page.evaluateInMainWorld(() =>
+            new Promise<number>((resolve) => {
+              const ws = new WebSocket("ws://example.invalid/close")
+              ws.onclose = (event) => resolve(event.code)
+            })
+          )
+          assert.strictEqual(closed, 4001)
+        }), 60_000)
+    })
+  })
+}

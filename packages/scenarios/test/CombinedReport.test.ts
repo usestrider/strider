@@ -6,7 +6,7 @@ import { afterEach, expect, it } from "vitest"
 import { stats } from "../src/measure.ts"
 import * as Report from "../src/report.ts"
 import { runScenarios } from "../src/runner.ts"
-import type { Scenario } from "../src/scenarios.ts"
+import { type Scenario, scenarios } from "../src/scenarios.ts"
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), "combined-report-"))
 afterEach(() => fs.rmSync(directory, { force: true, recursive: true }))
@@ -122,4 +122,23 @@ it("describes successful samples rather than scheduled attempts after a failure"
   const zero = Report.combine(await Promise.all([measurements("chromium"), measurements("firefox")]))
   expect(zero).toContain("| 0 | – | – |")
   expect(zero).not.toContain("NaN")
+})
+
+it("prints both implementations of the emulated-focus scenario", async () => {
+  const scenario = scenarios.find((scenario) => scenario.name === "many-pages-emulated")!
+  const measurement = await measurements("chromium")
+  const run = {
+    ...measurement,
+    scenarios: await runScenarios([scenario], 1, () => ({
+      strider: async () => scenario.expected,
+      playwright: async () => scenario.expected
+    }), () => {}),
+    source: fs.readFileSync(new URL("../src/scenarios.ts", import.meta.url), "utf8")
+  }
+  let printed = ""
+  Report.writeRunReport(run, undefined, (text) => {
+    printed = text
+  })
+  expect(printed).toContain("Browser.newContext({ focus: \"emulated\" })")
+  expect(printed).toContain("await browser.newContext()")
 })

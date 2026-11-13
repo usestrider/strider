@@ -1,5 +1,163 @@
 # @usestrider/browser
 
+## 0.8.4
+
+### Fixed
+
+- On Chromium builds that report a popup's first frame with the URL `":"`, opening a popup or following a `target="_blank"` link no longer ends the connection to the browser (#290).
+
+## 0.8.3
+
+### Performance
+
+- On Chromium, a context created with `focus: "emulated"` now opens its pages as tabs instead of windows of their own. Creating twenty pages in one context, using them, and closing the context takes 44% less time. The default, `focus: "system"`, still opens a window per page (#281).
+- Closing a context on Chromium is about 27 ms faster. When a scope that created a context ends, Strider removes the context in one protocol command, which closes its pages, instead of closing each page first. A page closed on its own, or in a context that stays open, closes as before, and a context the browser refuses to remove still has its pages closed one by one (#271, #285).
+
+### Fixed
+
+- `Locator.evaluate`, `Locator.evaluateAll`, a synthetic `dragTo`, and `storageState` no longer use the previous document's realm when a frame commits a new document while an element is being found. They use the document the element belongs to (#280).
+- A design-mode fill interrupted while a navigation destroys its page's script context no longer leaves the page's input blocked (#269).
+- Closing a page now ends its frames' documents as well as its own, so a wait on a frame's document finishes at once instead of running to its deadline (#269).
+- Response body subscriptions (`NetworkResponse.next` and `stream` with `body`) now end, and cancel any body read in progress, when borrowed inspect access is released. A subscription started with an expired grant fails with `TargetGone` (#272).
+- Launching stock WebKit no longer fails intermittently with `PermissionDenied` reading `/proc/<pid>/fd`: the child's descriptors are read only once a listener exists on the inspector port (#283).
+
+### Changed
+
+- Documentation comments, error messages, hints, and the `strider` CLI's help and output use the serial comma. A test that matches one of these messages word for word needs the comma too, and a test exported with `strider export test` lists three or more names as "a, b, and c" (#277).
+
+## 0.8.2
+
+### Added
+
+- **`context.routeWebSocket`** (#258): mock WebSocket connections, or proxy them to the real server, and watch or change their messages. It works by replacing the page's `WebSocket` constructor with a script, so it requires `implementation: "script"`, and page scripts can see and interfere with that replacement. A handler that returns without calling `open` or `connectToServer` fails the connection as an unreachable server does, and its deadline covers only that decision. Unrouted sockets in a routed context stay `instanceof WebSocket`. On WebKit it requires explicit best-effort timing, and Firefox refuses worker routing.
+- **`context.setStorageState(state)`** (#243): replace a live context's cookies and origin storage, keeping its pages, for contexts created with `storageStateTracking: true`. It refuses before changing anything when it can't, and reports a partial failure as `StorageState.PartiallyApplied`.
+- **`NetworkRequest.sizes`** (#244): the browser's own byte counts for a request's transfer and its encoded and decoded body, for contexts created with `requestSizes: true`. A count the browser doesn't give is `None`, never estimated.
+
+### Fixed
+
+**Pages, frames and navigation**
+
+- Chromium popups opened with `rel="noopener"` no longer stay at `about:blank` (#250).
+- Firefox `page.back()` and `page.forward()` through a `history.pushState` entry no longer time out (#254).
+- On Chromium, a call into a nested frame that moved to its own process mid-call runs again on the frame's new context instead of failing with "Execution context was destroyed." (#264).
+
+**Input**
+
+- A click, drag or key press that fails or is cut short after it may have pressed a button or key now has that input released before the next gesture. A release whose outcome is unknown is sent again, which can deliver one extra `mouseup` or `keyup` (#262).
+- A fill that runs out of time before its text is typed reports that nothing was sent, instead of that the input was sent and confirmed (#241).
+
+**Evaluation**
+
+- `Map`, `Set`, `Date` and `RegExp` arguments, and special numbers inside arrays and objects, keep their types on Chromium instead of arriving as plain objects (#242, #249).
+
+**Network**
+
+- On Firefox, reading the body of a 301, 302, 303, 307 or 308 response without a `Location` header fails at once with `Unsupported` (capability `network.responseBody.terminalRedirect`) instead of hanging until the deadline, because Firefox doesn't answer for it. A pending body read no longer returns a later redirect hop's bytes (#248).
+
+**Screenshots**
+
+- Chromium element and clip screenshots that fit the viewport keep its scrollbar layout, so wrapped text is no longer cut off (#252).
+
+**CLI and toolkit**
+
+- A failed command reports what happened since the last one along with its error, instead of leaving those events for the next command (#255).
+- A command's own navigation, from `page new`, `goto` or `back`, is no longer reported again as "since last" on the next command (#246, #256).
+
+**Firefox init scripts**
+
+- Init scripts added and removed at the same time no longer interfere, and removing them shares one five-second budget instead of five seconds per script (#258).
+
+### Performance
+
+- Creating a page on Chromium is 13–15% faster (#250).
+- Reading a page's title on Chromium and Firefox no longer installs Strider's in-page query engine first; `goto` followed by a title read is about 21% faster on Chromium (#253).
+
+## 0.8.1
+
+### Added
+
+**Locators and pages**
+
+- **`Locator.boundingBox`** (#221): the element's box in the top-level viewport's CSS pixels, from the browser's own measurements and carried through frames, or `None` for an element without a layout box.
+- **`page.viewportSize`** (#214): the page's configured viewport, or `None` when none is set.
+
+**Assertions**
+
+- **`Expect.toHaveRole`** (#220) and **`Expect.toHaveAccessibleName`** (#218), with a regular-expression form and `ignoreCase`.
+- **`Expect.toHaveCSS`** (#217): a computed style, as a string or a regular expression, including pseudo-elements.
+- **`Expect.toBeAttached`** and **`Expect.toBeDetached`** (#225), independent of visibility.
+- **`Expect.toBeEmpty`** (#223): an empty field value, or element text that's empty once trimmed.
+- **`Expect.toBeInViewport`** (#226), with an optional minimum ratio.
+- **`Expect.toHaveValues`** (#224): a multiple select's selected values, in order.
+
+**Network details**, each opt-in and costing nothing when unused:
+
+- **Request bodies** (#229): decoders on `NetworkRequest.next` and `stream` read what a request sent: text, JSON, forms or bytes.
+- **The response a request got** (#231), with a bounded wait.
+- **`NetworkRequest.failure`** (#227): why a request failed, read at once.
+- **`NetworkRequest.timing`** (#234): the browser's timing phases, for contexts created with `requestTiming: true`.
+- **`NetworkRequest.redirects`** (#235): a request's predecessor and successor in a redirect chain. Where a browser can't tell whether a successor is coming, it says so with a typed outcome instead of guessing.
+
+**Contexts**
+
+- **`UserContext.Options.httpCredentials`** (#233): website authentication for a context on Chromium and Firefox, with a `Redacted` password and an optional origin.
+- **`UserContext.Options.acceptInsecureCerts`** (#228): accept HTTPS certificate errors in one context, on Firefox and launched stock WebKit. Chromium refuses it, because its setting would apply to the whole browser.
+
+### Fixed
+
+- **Role and accessible-name computation** (#220, #218): presentation-role conflicts, required structural parents, and roles that prohibit a name now match the ARIA rules. This affects `getByRole` and snapshots.
+- **Waits interrupted by a navigation** (#230 Chromium, #232 WebKit): a wait that a navigation cut off now follows the new document within its deadline, instead of failing or hanging. An action that may already have happened is never run twice.
+
+## 0.8.0
+
+### Breaking changes
+
+- **Options you write take no `_tag`** (#210). A screenshot's `area` is `"viewport"`, `"fullPage"`, `{ clip }` or `{ element }`, and its format `"png"` or `"jpeg"` with `quality` beside it: `page.screenshot({ area: "fullPage", format: "jpeg", quality: 80 })`. A cookie's `scope` is `{ url }` or `{ domain, path }`, and `TestRun.attach` takes `{ trace }`, `{ har }` or `{ screenshot }`. To migrate, replace `{ _tag: "FullPage" }` with `"fullPage"`, `{ _tag: "Clip", rect }` with `{ clip: rect }`, `{ _tag: "Element", locator }` with `{ element: locator }`, `format: { _tag: "Jpeg", quality }` with `format: "jpeg", quality`, drop `_tag` from a cookie's `scope`, and replace `attach({ _tag: "Trace", path })` with `attach({ trace: path })`. The screenshot span's `browser.screenshot.area` and `browser.screenshot.format` attributes use the same lowercase names.
+- **Only pointer actions wait for a drawn frame** (#213). A new per-action check, `checks.rendered`, is on by default for click, double-click, tap, hover, drag, check and uncheck, and off for fill, focus, press, type, select, file inputs and scrolling. Those now check the element's current layout at once and wait only while it isn't ready. If your app hydrates late and resets an early fill, wait for an app-defined readiness condition, or pass `checks: { rendered: true }` for that call. Actions with `rendered` off no longer give the "rendered no frame" hint.
+
+### Performance
+
+- **Fill-heavy sessions run about twice as fast** (#213). On Chromium, a 300-action session takes 5.3 s instead of 10.2 s, level with Playwright, and four parallel tests sharing a browser take 29% less time. Firefox sessions are about half as long as before.
+
+### Added
+
+- **`Locator.blur`** (#200): removes focus from the one matched element, without keyboard or pointer input.
+- **`Locator.dispatchEvent`** (#204): dispatches an untrusted DOM event. You choose the event class (`Event` by default) and pass its initialization data.
+- **`Locator.isEditable`** (#205): reads whether the element is editable, by the same rules fill and `toBeEditable` use. Unsupported kinds of element read `false`.
+- **`Locator.selectText`** (#206): selects an input's value or an element's contents, following labels, with trial mode and frames.
+- **`Locator.evaluateAll`** (#211): evaluates a function over all current matches at once, including none.
+- **`Page.setContent`** (#209): replaces a document's HTML through the browser's parser, keeping its URL and history. It waits for `load` by default.
+- **`Expect.toHaveClass`** (#215): a retrying assertion on an element's class, as a whole string, a regular expression or an ordered list.
+- **Extra request headers** (#212): set headers on every request from a page or a context, through emulation. A page's headers override its context's.
+
+### Fixed
+
+- **Fill re-checks its target after focus** (#198): if a focus or selection handler hides the field or makes it inert, fill waits instead of typing into it.
+- **Fill in design-mode documents** (#213): a focus change between selecting and inserting no longer sends text to the wrong place, and partly inserted text is never typed again.
+- **A Chromium click whose mousedown opens a dialog** (#216) now delivers its mouseup and click. It was finishing without them. Clicks are no slower.
+
+## 0.7.0
+
+### Breaking changes
+
+- **Requires Effect 4.1.2** (#188): `effect` and `@effect/platform-node` `^4.1.2`. A program on Effect 4.0 upgrades both, to the same version.
+
+### Added
+
+- **`strider export test --state <path>` for forked sessions** (#182): writes the state the session started from to `<path>`, with mode `0600`, and the exported test loads it. Without the flag, a forked session's test still starts empty. Sessions started with `--user-data-dir` can't be exported this way.
+- **A warning when Git could commit saved credentials** (#177): `strider state save` and `export test --state` warn on stderr when the file is in a Git work tree and not ignored. Saving still succeeds.
+- **Unknown secret placeholders are reported** (#174): a `%name%` that names no configured secret is reported in toolkit results, CLI output and exported tests, with a suggestion when it's a near miss of a configured name. The text is still sent as written.
+
+### Fixed
+
+- **Firefox locator checks after a navigation** (#180): a check that was waiting in a page the navigation replaced now continues in the new page, instead of waiting until its timeout.
+- **Chromium download settings and closing contexts** (#181): restoring a context's download settings no longer races the context closing, and restores only the contexts it affects.
+- **Stock WebKit opens a page after another closed** (#135): a new page in a launched context whose previous page had closed waited until its deadline.
+
+### Documentation
+
+- A route applies to requests that start after it's declared (#175). On Chromium, a request already underway may miss a response route declared later.
+
 ## 0.6.0
 
 ### Breaking changes
@@ -102,7 +260,7 @@
 
 - 2cf324b: Enable Chromium's CDPScreenshotNewSurface in the default automation and concurrent launch profiles, changing the capture rendering path for headed and headless launches. Captures can drive rendering observable to the page; no capture non-observability guarantee applies. This changes the previous unstable default/contract, including CLI launches.
   
-  Stock, attached browsers and independently constructed custom profiles are unchanged. Caller switches remain verbatim: a later --enable-features list replaces the preset list, so include CDPScreenshotNewSurface in it to retain the new path. Chromium also replaces repeated --disable-features lists. To opt out while preserving the preset's five existing disabled features, supply --disable-features=Translate,MediaRouter,DialMediaRouteProvider,OptimizationHints,AutofillServerCommunication,CDPScreenshotNewSurface as one combined list. Strider does not merge feature lists. Validated on Chromium 155.0.8059.79; other Chrome and Edge versions remain unverified.
+  Stock, attached browsers and independently constructed custom profiles are unchanged. Caller switches remain verbatim: a later `--enable-features` list replaces the preset list, so include `CDPScreenshotNewSurface` in it to retain the new path. Chromium also replaces repeated `--disable-features` lists. To opt out while preserving the preset's five existing disabled features, supply `--disable-features=Translate,MediaRouter,DialMediaRouteProvider,OptimizationHints,AutofillServerCommunication,CDPScreenshotNewSurface` as one combined list. Strider does not merge feature lists. Validated on Chromium 155.0.8059.79; other Chrome and Edge versions remain unverified.
 - b0c0931: Restrict Page.route and UserContext.route handlers to the phases selected by options, including the request default. Calls that previously inferred response or authentication phases from their handlers must now pass `{ phase: "response" }` or `{ phase: "auth" }` explicitly. Explicit type arguments cannot override the default. When phase options are optional or unions, use a handler compatible with every possible phase (including request when phase can be omitted), or narrow the options before registering a phase-specific handler.
 - dabf930: Make strict CLI and MCP find search only redacted snapshot content, preserving label searches and role filters.
   Mask semantic and plaintext-only editable content and all page-supplied exception details under strict capture,

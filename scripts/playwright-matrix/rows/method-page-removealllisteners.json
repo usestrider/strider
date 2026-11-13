@@ -1,0 +1,23 @@
+{
+  "id": "method-page-removealllisteners",
+  "upstream": [
+    "method:Page.removeAllListeners"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "ConsoleMessage",
+      "symbol": "stream",
+      "url": "/docs/api/browser/ConsoleMessage#stream"
+    }
+  ],
+  "notes": "Stream lifetime and scope replace listener mutation.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

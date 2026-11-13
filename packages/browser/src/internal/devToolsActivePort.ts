@@ -23,10 +23,20 @@ export const parse = (text: string): { readonly port: number; readonly browserPa
   return { port: Number(port), browserPath }
 }
 
+/** Captures the previous endpoint before spawning; unreadable existing files must not bypass freshness. */
+export const snapshot = Effect.fnUntraced(function*(userDataDir: string) {
+  const fs = yield* FileSystem.FileSystem
+  return yield* fs.readFileString(`${userDataDir}/DevToolsActivePort`).pipe(
+    Effect.map(parse),
+    Effect.catch((error) => error.reason._tag === "NotFound" ? Effect.succeed(undefined) : Effect.fail(error))
+  )
+})
+
 /** Retries missing, partial and invalid contents on the live clock, bounded by the caller's launch wait. */
 export const read = Effect.fnUntraced(function*(
   userDataDir: string,
   options?: {
+    readonly previous?: ReturnType<typeof parse> | undefined
     readonly timeout?: Duration.Input | undefined
     readonly until?: (() => Effect.Effect<boolean>) | undefined
   }
@@ -34,7 +44,11 @@ export const read = Effect.fnUntraced(function*(
   const fs = yield* FileSystem.FileSystem
   return yield* fs.readFileString(`${userDataDir}/DevToolsActivePort`).pipe(
     Effect.map(parse),
-    Effect.filterOrFail((endpoint) => endpoint !== undefined),
+    Effect.filterOrFail((endpoint): endpoint is NonNullable<ReturnType<typeof parse>> =>
+      endpoint !== undefined && !(options?.previous !== undefined &&
+        endpoint.port === options.previous.port &&
+        endpoint.browserPath.toLowerCase() === options.previous.browserPath.toLowerCase())
+    ),
     Effect.retry({ schedule: Schedule.spaced("50 millis"), until: options?.until }),
     Effect.timeout(options?.timeout ?? "30 seconds"),
     BrowserClock.onLive

@@ -1,0 +1,25 @@
+{
+  "id": "method-page-viewportsize",
+  "upstream": [
+    "method:Page.viewportSize"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "ReadonlyPage.viewportSize",
+      "url": "/docs/api/browser/Page#ReadonlyPage.viewportSize"
+    }
+  ],
+  "notes": "Reads effective configured CSS width and height as an Effect of Option; None when unset. Uses declaration precedence and scoped release, not measured inner dimensions. Requires inspect access; closed pages fail with TargetGone. Only declarations made through this connection are known; attached stock WebKit cannot configure a viewport and returns None when unset.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts",
+      "packages/browser/src/internal/page.ts",
+      "packages/browser/src/internal/declarations.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

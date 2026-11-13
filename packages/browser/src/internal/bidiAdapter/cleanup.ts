@@ -1,6 +1,7 @@
 /** BiDi teardown: bounded independently of the failed operation, preserving its primary outcome. */
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import type * as Scope from "effect/Scope"
@@ -27,6 +28,36 @@ export const bounded = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
         reason: new Protocol.NoReply({ method: "BiDi cleanup", timeout: Duration.millis(millis) })
       })
     )
+  })))
+
+/**
+ * Runs `each` over the items under one shared five-second budget, so a stalled browser holds teardown for that
+ * budget in total, not once per item. An item unfinished when it ends fails with the same no-reply error.
+ */
+export const boundedEach = <T, A, E, R>(items: ReadonlyArray<T>, each: (item: T) => Effect.Effect<A, E, R>) =>
+  Operation.detached(Effect.uninterruptible(Effect.gen(function*() {
+    const at = yield* BrowserClock.after(millis)
+    const exits: Array<Exit.Exit<A, E | Protocol.ProtocolError>> = []
+    for (const item of items) {
+      const result = yield* each(item).pipe(
+        Effect.interruptible,
+        Effect.provideService(ProtocolClient.CommandDeadline, Option.some(at)),
+        BrowserClock.until(at),
+        Effect.exit
+      )
+      exits.push(
+        Exit.isFailure(result) ?
+          Exit.failCause(result.cause) :
+          Option.isSome(result.value) ?
+          Exit.succeed(result.value.value) :
+          Exit.fail(
+            new Protocol.ProtocolError({
+              reason: new Protocol.NoReply({ method: "BiDi cleanup", timeout: Duration.millis(millis) })
+            })
+          )
+      )
+    }
+    return exits
   })))
 
 /** An ended transport cannot accept restoration, and is already the caller's failure. */

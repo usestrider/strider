@@ -1,0 +1,11 @@
+{
+  "id": "method-apirequestcontext-dispose",
+  "upstream": [
+    "method:APIRequestContext.dispose"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No built-in APIRequestContext equivalent, including cookie-sharing API testing.",
+  "capabilities": [],
+  "requirements": []
+}

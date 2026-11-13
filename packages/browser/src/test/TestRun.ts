@@ -1,7 +1,7 @@
 /**
  * Test support that works with any test runner: the running test, and the files attached to it.
  *
- * Nothing changes because it's a test: profile, focus, diagnostics and tracing are whatever the test chose, and a
+ * Nothing changes because it's a test: profile, focus, diagnostics, and tracing are whatever the test chose, and a
  * test gets its page from `Browser.newPage()`, like any program. A runner's adapter, such as `@usestrider/vitest`,
  * provides `TestRun`, through which a test attaches its traces and screenshots.
  *
@@ -43,16 +43,16 @@ export class TestInfo extends Schema.Class<TestInfo>("@usestrider/browser/test/T
 }) {}
 
 /**
- * Schema for a file to attach to the running test.
+ * Schema for a file to attach to the running test: `{ trace }`, `{ har }`, or `{ screenshot }`, each a path.
  *
  * @stability unstable
  * @category schemas
  * @since 0.1.0
  */
 export const TestArtifact = Schema.Union([
-  Schema.TaggedStruct("Trace", { path: FilePath.Local }),
-  Schema.TaggedStruct("Har", { path: FilePath.Local }),
-  Schema.TaggedStruct("Screenshot", { path: FilePath.Local })
+  Schema.Struct({ trace: FilePath.Local }),
+  Schema.Struct({ har: FilePath.Local }),
+  Schema.Struct({ screenshot: FilePath.Local })
 ])
 
 /**
@@ -73,9 +73,9 @@ export type TestArtifact = typeof TestArtifact.Type
  */
 export interface TestRun {
   /**
-   * The test identity supplied by the adapter. Explicit callback bindings retain the identity, retry attempt and
+   * The test identity supplied by the adapter. Explicit callback bindings retain the identity, retry attempt, and
    * repeat captured for that invocation. Vitest’s unbound layer uses a global lookup, which supports sequential tests
-   * only; without a current test its project, file and id are empty and its attempt and repeat are zero.
+   * only; without a current test its project, file, and id are empty and its attempt and repeat are zero.
    */
   readonly info: TestInfo
   /**
@@ -95,7 +95,7 @@ export interface TestRun {
    *   yield* page.getByRole("button", { name: "Checkout" }).click()
    *   const path = yield* trace.exportTrace("traces/checkout.zip")
    *   const run = yield* TestRun.TestRun
-   *   yield* run.attach({ _tag: "Trace", path })
+   *   yield* run.attach({ trace: path })
    * })
    * ```
    */

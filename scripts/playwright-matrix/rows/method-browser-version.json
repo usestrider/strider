@@ -1,0 +1,23 @@
+{
+  "id": "method-browser-version",
+  "upstream": [
+    "method:Browser.version"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Browser",
+      "symbol": "Info",
+      "url": "/docs/api/browser/Browser#Info"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Browser.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

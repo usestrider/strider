@@ -1,0 +1,23 @@
+{
+  "id": "method-page-mainframe",
+  "upstream": [
+    "method:Page.mainFrame"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "ReadonlyPage",
+      "url": "/docs/api/browser/Page#ReadonlyPage"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

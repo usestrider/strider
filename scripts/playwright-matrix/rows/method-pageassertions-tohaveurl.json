@@ -1,0 +1,17 @@
+{
+  "id": "method-pageassertions-tohaveurl",
+  "upstream": [
+    "method:PageAssertions.toHaveURL"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toHaveURL",
+      "url": "/docs/api/browser/Expect#toHaveURL"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": []
+}

@@ -61,6 +61,27 @@ const routes: Record<string, Route> = {
     })
     response.end("hello, download")
   },
+  // Three hops at the same URL; cookies advance the server-side redirect sequence.
+  "/redirect-repeat": (request, response) => {
+    const step = Number(/striderRedirectStep=(\d+)/.exec(request.headers.cookie ?? "")?.[1] ?? 0)
+    if (step < 2) {
+      response.writeHead(302, { location: "/redirect-repeat", "set-cookie": `striderRedirectStep=${step + 1}; Path=/` })
+      response.end()
+    } else {
+      response.setHeader("set-cookie", "striderRedirectStep=; Max-Age=0; Path=/")
+      html(response, "<title>redirected</title>")
+    }
+  },
+  // A redirect status with no location, which the browser doesn't follow: the response is the request's last
+  "/redirect-unfollowed": (_request, response) => {
+    response.writeHead(302, { "content-type": "text/html" })
+    response.end("<title>unfollowed</title>")
+  },
+  // A 3xx that isn't a redirect status, with no location: Firefox reads Location only for 301, 302, 303, 307, 308
+  "/multiple-choices": (_request, response) => {
+    response.writeHead(300, { "content-type": "text/html" })
+    response.end("<title>choices</title>")
+  },
   "/redirect": (_request, response) => {
     response.writeHead(302, { location: "/landed" })
     response.end()
@@ -193,6 +214,18 @@ self.addEventListener("fetch", (event) => {
       response.end(`<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>`)
     }, 500)
   },
+  // A deferred parser script: interactive readiness alone is too early to observe its effect.
+  "/set-content-deferred.js": (_request, response) => {
+    setTimeout(() => {
+      response.writeHead(200, { "content-type": "text/javascript" })
+      response.end("document.title = \"Deferred\"")
+    }, 200)
+  },
+  // A resource that never completes, until the page closes or replaces it. No sleep-based readiness assertion.
+  "/pending-image": (_request, response) => {
+    response.writeHead(200, { "content-type": "image/svg+xml" })
+    response.write("<svg xmlns=\"http://www.w3.org/2000/svg\">")
+  },
   // An event stream that never ends
   "/events": (_request, response) => {
     response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" })
@@ -217,6 +250,19 @@ const upgrade = (request: http.IncomingMessage, socket: net.Socket) => {
   socket.write(
     `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`
   )
+  if (request.url?.startsWith("/ws-final")) {
+    const message = Buffer.from([0x81, 3, 98, 121, 101]) // text: bye
+    const close = Buffer.concat([Buffer.from([0x88, 6, 0x03, 0xe8]), Buffer.from("done")])
+    let sent = false
+    socket.on("data", () => {
+      if (sent) return socket.end()
+      sent = true
+      // The client starts delivery after open; a clean fixture waits for its close reply before TCP FIN.
+      if (request.url!.includes("error")) socket.end(message)
+      else socket.write(Buffer.concat([message, close]))
+    })
+    return
+  }
   socket.on("data", (data: Buffer) => {
     const opcode = data[0]! & 0x0f
     if (opcode === 8) return socket.end()

@@ -306,7 +306,11 @@ export const realm = Effect.fnUntraced(function*(state: State, id: L1Target.Docu
   })))
   yield* state.root().drainObserved
   const created = state.realms.get(result.realm)
-  if (created === undefined || created.ended) return yield* Effect.fail(replaced())
+  // The creation is addressed to the frame, not the document: a commit meanwhile makes the new realm the
+  // replacement's, which is not the realm asked for, and the requested document is gone.
+  if (created === undefined || created.ended || !state.documents.has(id) || !document.realms.has(created)) {
+    return yield* Effect.fail(replaced())
+  }
   return created.id
 })
 
@@ -336,7 +340,15 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
     serializationOptions: { maxObjectDepth: keep ? 0 : 64, maxDomDepth: 0 },
     userActivation: call.userActivation
   })).pipe(
-    Effect.mapError(Kit.realmFailure(id, () => realm.ended)),
+    Effect.catch((error) => {
+      // callFunction targets this exact realm. Firefox can reject it before sending realmDestroyed.
+      const missing = error.reason._tag === "Rejected" && error.reason.reason === "NoSuchFrame"
+      return (missing
+        ? state.buffer.run(() => removeRealm(state, realm, new L1Target.RealmDestroyed({})))
+        : Effect.void).pipe(
+          Effect.andThen(Effect.suspend(() => Effect.fail(Kit.realmFailure(id, () => realm.ended)(error))))
+        )
+    }),
     Effect.raceFirst(
       state.buffer.waitFor(() => realm.ended ? true : undefined).pipe(
         Effect.flatMap(() => Effect.fail(Kit.gone({ _tag: "Realm", id }, new L1Target.RealmDestroyed({}))))

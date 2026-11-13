@@ -1,0 +1,17 @@
+{
+  "id": "method-browsertype-launchserver",
+  "upstream": [
+    "method:BrowserType.launchServer"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No Playwright-compatible remote browser server.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Browser.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

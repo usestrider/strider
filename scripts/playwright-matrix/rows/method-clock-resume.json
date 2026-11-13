@@ -1,0 +1,23 @@
+{
+  "id": "method-clock-resume",
+  "upstream": [
+    "method:Clock.resume"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "PageClock",
+      "symbol": "PageClock.resume",
+      "url": "/docs/api/browser/PageClock#PageClock.resume"
+    }
+  ],
+  "notes": "Clock modes are explicit; adjust fires every due timer and setTime jumps to an absolute instant.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/PageClock.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

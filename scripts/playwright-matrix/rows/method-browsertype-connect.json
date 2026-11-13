@@ -1,0 +1,17 @@
+{
+  "id": "method-browsertype-connect",
+  "upstream": [
+    "method:BrowserType.connect"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "Strider connects directly over CDP, BiDi or the inspector, not the Playwright server wire protocol.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Browser.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

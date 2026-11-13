@@ -1,7 +1,7 @@
 /**
  * What page content may reach a model.
  *
- * Snapshots, screenshots and digests are page-derived, and a page can contain secrets or instructions aimed
+ * Snapshots, screenshots, and digests are page-derived, and a page can contain secrets or instructions aimed
  * at the model. A policy states what may leave the process before anything does.
  *
  * @stability experimental
@@ -10,32 +10,32 @@
 import * as Schema from "effect/Schema"
 
 /**
- * What snapshots, screenshots and digests may contain before they reach a model.
+ * What snapshots, screenshots, and digests may contain before they reach a model.
  *
  * **Details**
  *
  * - `screenshots`: whether images may be sent at all; `"denied"` fails the `screenshot` tool with `NotPermitted`.
  * - `snapshotText`: `"redacted"` masks names and text inside editable fields, including semantic and
  *   plaintext-only contenteditables, and names containing field content copied through descendants,
- *   embedded values, referenced controls, nearby fields or image-alt inference. Field editability is
+ *   embedded values, referenced controls, nearby fields, or image-alt inference. Field editability is
  *   independent of semantic role. Contributors under a native/ARIA field remain field content across shadow
  *   hosts and assigned slots. Mixed names are masked whole; native select and ARIA listbox options are masked
- *   with the field subtree. Public labels, roles, refs and states remain visible; validation messages become
+ *   with the field subtree. Public labels, roles, refs, and states remain visible; validation messages become
  *   `•••`. Both snapshot output and `find` use this redacted tree, so hidden content cannot match a query.
- *   `"full"` keeps content, validation messages and matching against them.
+ *   `"full"` keeps content, validation messages, and matching against them.
  *   Field editability and field-content name provenance are collected only for `"redacted"` capture, including custom policies.
  *   Ordinary library snapshots and `"full"` capture omit this masking metadata and skip its collection.
  * - `consoleText`: `"full"` sends console text and exception names/messages; `"redacted"` says a message
  *   was logged without its text; `"omitted"` also leaves console errors out of `sinceLast`. Both non-full
  *   modes replace exception details in digests and history with `uncaught exception at <time>`, retaining
- *   occurrence time in monotonic nanoseconds and sending no exception name, message, stack or origin text.
+ *   occurrence time in monotonic nanoseconds and sending no exception name, message, stack, or origin text.
  *
  * Strict capture is a bounded policy, not a secrecy or inference guarantee. Labels and ordinary page text,
- * URLs, dialogs, network and download metadata, tool arguments and failures may still contain page content.
+ * URLs, dialogs, network and download metadata, tool arguments, and failures may still contain page content.
  * A page can put sensitive text in a label or another unmasked channel. Assertions such as `expect --text`
  * and action selectors still match original content and can confirm guesses at masked values. Choose what
  * pages and tools to expose.
- * `strict` denies screenshots, redacts snapshots and omits console text. `local` keeps full capture and search.
+ * `strict` denies screenshots, redacts snapshots, and omits console text. `local` keeps full capture and search.
  *
  * **Example** (Allowing screenshots but masking text)
  *
@@ -68,7 +68,7 @@ export class CapturePolicy extends Schema.Class<CapturePolicy>("@usestrider/brow
 }) {}
 
 /**
- * No screenshots, redacted snapshots and no console text: for production and untrusted pages.
+ * No screenshots, redacted snapshots, and no console text: for production and untrusted pages.
  *
  * @stability experimental
  * @category constants

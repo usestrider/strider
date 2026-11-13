@@ -1,0 +1,23 @@
+{
+  "id": "property-browsercontext-tracing",
+  "upstream": [
+    "property:BrowserContext.tracing"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Trace",
+      "symbol": "record",
+      "url": "/docs/api/browser/Trace#record"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/UserContext.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

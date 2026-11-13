@@ -1,11 +1,11 @@
 ---
 title: Proxies
-description: HTTP proxies for a context, direct connections for selected hosts, and proxy credentials separate from website authentication.
+description: Giving each context its own proxy.
 order: 6
 ---
 
-Traffic from a browser normally uses its launch or system proxy settings. A context's `proxy` option routes its
-HTTP and HTTPS requests through an HTTP proxy of your choice.
+A context's `proxy` option routes its HTTP and HTTPS requests through an HTTP proxy you choose, in place of the
+browser's launch or system settings.
 
 ## Routing a context
 
@@ -24,7 +24,7 @@ const visit = Effect.fn("visit")(function*() {
 ```
 
 The endpoint may also be `proxy.example.com:8080`; an omitted port is 80. It takes no username, password, path,
-query or fragment. HTTP destinations use the proxy directly; HTTPS destinations use CONNECT and retain normal
+query, or fragment. HTTP destinations use the proxy directly; HTTPS destinations use CONNECT and retain normal
 certificate verification. HTTPS proxy endpoints and SOCKS fail with `Unsupported`.
 
 Each context has its own proxy settings. Its pages and connections close with its scope. Chromium and Firefox
@@ -51,8 +51,8 @@ const staging = Effect.fn("staging")(function*() {
 }, Effect.scoped)
 ```
 
-Entries contain no URL scheme, port, wildcard or CIDR range. Matching uses the browser's native host rules,
-which may also exclude subdomains. `localhost`, `127.0.0.1` and `::1` always stay direct, so browser control
+Entries contain no URL scheme, port, wildcard, or CIDR range. Matching uses the browser's native host rules,
+which may also exclude subdomains. `localhost`, `127.0.0.1`, and `::1` always stay direct, so browser control
 connections also avoid the proxy.
 
 ## Proxy credentials

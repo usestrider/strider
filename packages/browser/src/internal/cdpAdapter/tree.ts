@@ -12,7 +12,7 @@ import * as Kit from "../adapterKit.ts"
 import * as Urls from "../urls.ts"
 import { releaseDocument } from "./responses.ts"
 import {
-  type ContextEntry,
+  ContextEntry,
   contextKey,
   type DocumentEntry,
   type FrameEntry,
@@ -81,6 +81,16 @@ export const adoptPending = (state: State, frame: FrameEntry, document: Document
 /** Ends a frame and everything below it, deepest first. */
 export const removeFrame = (state: State, frame: FrameEntry, reason: L1Target.CloseReason, evidence: string) =>
   Kit.removeNavigable(state.buffer, frame, reason, evidence, (frame, reason) => {
+    if (frame.page.context.requestTiming !== undefined) {
+      for (const [hop, timing] of frame.page.context.requestTiming) {
+        if (timing.owner === frame.id) frame.page.context.requestTiming.delete(hop)
+      }
+    }
+    if (frame.page.context.requestSizes !== undefined) {
+      for (const [hop, timing] of frame.page.context.requestSizes) {
+        if (timing.owner === frame.id) frame.page.context.requestSizes.delete(hop)
+      }
+    }
     state.frames.delete(frame.frameId)
     state.navigables.delete(frame.id)
     if (frame.document !== undefined) {
@@ -246,7 +256,7 @@ export const contextFor = (state: State, browserContextId: string | undefined): 
     return fallback
   }
   // A context someone else created
-  const entry: ContextEntry = { id: state.ids.userContext(), browserContextId, isDefault: false, removing: false }
+  const entry = new ContextEntry(state.ids.userContext(), browserContextId, false)
   state.contexts.set(entry.id, entry)
   state.contextsByCdp.set(browserContextId, entry)
   state.buffer.emit({ _tag: "UserContextAdded", context: entry.id, isDefault: false })

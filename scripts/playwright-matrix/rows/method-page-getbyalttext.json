@@ -1,0 +1,23 @@
+{
+  "id": "method-page-getbyalttext",
+  "upstream": [
+    "method:Page.getByAltText"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "Locator.getByAltText",
+      "url": "/docs/api/browser/Locator#Locator.getByAltText"
+    }
+  ],
+  "notes": "Queries produce lazy locators; CSS selectors only. See selector differences below.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

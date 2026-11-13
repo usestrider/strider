@@ -1,0 +1,17 @@
+{
+  "id": "method-locatorassertions-tohavetext",
+  "upstream": [
+    "method:LocatorAssertions.toHaveText"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toHaveText",
+      "url": "/docs/api/browser/Expect#toHaveText"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": []
+}

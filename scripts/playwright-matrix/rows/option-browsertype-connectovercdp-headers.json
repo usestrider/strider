@@ -1,0 +1,12 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public option for this contract.",
+  "capabilities": [],
+  "id": "option-browsertype-connectovercdp-headers",
+  "upstream": [
+    "method:BrowserType.connectOverCDP"
+  ],
+  "option": "headers",
+  "requirements": []
+}

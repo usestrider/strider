@@ -102,6 +102,7 @@ describe("Stock WebKit, attached through its remote inspector", () => {
             const second = yield* byTitle(browser, "Second")
             yield* Effect.scoped(Effect.gen(function*() {
               const reader = yield* first.inspect
+              assert.deepStrictEqual(yield* reader.viewportSize, Option.none())
               assert.strictEqual(yield* reader.getByRole("heading").readText, "First")
               const snapshot = yield* reader.locator("body").snapshot()
               assert.include(snapshot.text, `heading "First"`)
@@ -223,12 +224,12 @@ describe("Stock WebKit, attached through its remote inspector", () => {
               "number"
             )
             const context = yield* browser.defaultContext.control
-            yield* context.cookies.set({ name: "who", value: "me", scope: { _tag: "Url", url: origin } })
+            yield* context.cookies.set({ name: "who", value: "me", scope: { url: origin } })
             const cookies = yield* context.cookies.list
             assert.isTrue(cookies.some((cookie) => cookie.name === "who"))
             yield* tab.evaluateInMainWorld(() => localStorage.setItem("kept", "yes"))
             assert.deepStrictEqual(yield* tab.localStorage.entries, [["kept", "yes"]])
-            const full = yield* tab.screenshot({ area: { _tag: "FullPage" } })
+            const full = yield* tab.screenshot({ area: "fullPage" })
             assert.deepStrictEqual([...full.subarray(1, 4)], [0x50, 0x4e, 0x47])
           }))
         }).pipe(Effect.provide(attach(endpoint)))
@@ -250,6 +251,14 @@ describe("Stock WebKit, attached through its remote inspector", () => {
           assert.strictEqual(opened?.reason?._tag, "Unsupported")
           yield* Effect.scoped(Effect.gen(function*() {
             const tab = yield* (yield* byTitle(browser, "Refusals")).control
+            assert.deepStrictEqual(yield* tab.viewportSize, Option.none())
+            const viewport = reasonOf(yield* Effect.exit(tab.emulate({ viewport: { width: 640, height: 480 } })))
+            assert.strictEqual(viewport?.reason?.capability, "emulation.viewport")
+            assert.deepStrictEqual(yield* tab.viewportSize, Option.none())
+            const headers = reasonOf(yield* Effect.exit(tab.emulate({ extraHTTPHeaders: { "x-test": "value" } })))
+            assert.strictEqual(headers?.reason?._tag, "Unsupported")
+            assert.strictEqual(headers?.reason?.capability, "emulation.extraHTTPHeaders")
+            assert.deepStrictEqual(yield* tab.viewportSize, Option.none())
             // Refused before anything was sent
             const clicked = reasonOf(yield* Effect.exit(tab.getByRole("button", { name: "Refresh" }).click()))
             assert.strictEqual(clicked?.reason?.capability, "input.native")
@@ -258,7 +267,7 @@ describe("Stock WebKit, attached through its remote inspector", () => {
             const evaluated = reasonOf(yield* Effect.exit(tab.evaluate(() => document.title)))
             assert.strictEqual(evaluated?.reason?.capability, "isolatedWorlds")
             assert.strictEqual(yield* tab.evaluateInMainWorld(() => document.title), "Refusals")
-            const jpeg = reasonOf(yield* Effect.exit(tab.screenshot({ format: { _tag: "Jpeg", quality: 80 } })))
+            const jpeg = reasonOf(yield* Effect.exit(tab.screenshot({ format: "jpeg", quality: 80 })))
             assert.strictEqual(jpeg?.reason?.capability, "screenshot.format")
             // Bringing a page forward is refused as an error, not a defect
             const activated = reasonOf(yield* Effect.exit(tab.activate))

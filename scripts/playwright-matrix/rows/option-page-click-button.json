@@ -1,0 +1,41 @@
+{
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "ClickOptions",
+      "url": "/docs/api/browser/Locator#ClickOptions"
+    }
+  ],
+  "notes": "Use the corresponding locator action option; source position is position and target position is targetPosition.",
+  "capabilities": [],
+  "id": "option-page-click-button",
+  "upstream": [
+    "method:Page.click"
+  ],
+  "option": "button",
+  "requirements": [
+    {
+      "capability": "input.native",
+      "alternatives": [
+        "input.webdriver"
+      ],
+      "file": "packages/browser/src/internal/webkitAdapter.ts",
+      "quote": "dispatchInput: refuse(\"input.native\", \"stock WebKit's inspector protocol has no Input domain\")"
+    }
+  ],
+  "valueCoverage": [
+    {
+      "value": "left",
+      "status": "has"
+    },
+    {
+      "value": "middle",
+      "status": "has"
+    },
+    {
+      "value": "right",
+      "status": "has"
+    }
+  ]
+}

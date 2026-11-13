@@ -27,7 +27,7 @@ declare module "vitest" {
   interface TestArtifactRegistry {
     "@usestrider/browser": {
       readonly type: "@usestrider/browser"
-      readonly artifact: TestRun.TestArtifact["_tag"]
+      readonly artifact: ArtifactKind
       readonly attachments: Array<{ readonly path: string; readonly contentType: string }>
     }
   }
@@ -59,7 +59,17 @@ const infoOf = (test: RunnerTest | undefined): TestRun.TestInfo =>
     shard: env("VITEST_SHARD")
   })
 
-const contentType: Record<TestRun.TestArtifact["_tag"], string> = {
+/** What reporters see an attachment as. */
+type ArtifactKind = "Trace" | "Har" | "Screenshot"
+
+const kindOf = (artifact: TestRun.TestArtifact): readonly [ArtifactKind, string] =>
+  "trace" in artifact
+    ? ["Trace", artifact.trace]
+    : "har" in artifact
+    ? ["Har", artifact.har]
+    : ["Screenshot", artifact.screenshot]
+
+const contentType: Record<ArtifactKind, string> = {
   Trace: "application/zip",
   Har: "application/json",
   Screenshot: "image/png"
@@ -72,24 +82,21 @@ const makeTestRun = (current: () => RunnerTest | undefined, snapshot?: TestRun.T
   },
   attach: (artifact) =>
     Effect.suspend(() => {
+      const [kind, path] = kindOf(artifact)
       const test = current()
       if (test === undefined) {
-        return Effect.logWarning(`TestRun.attach: no test is running, so ${artifact.path} wasn't attached`)
+        return Effect.logWarning(`TestRun.attach: no test is running, so ${path} wasn't attached`)
       }
-      const type = artifact._tag === "Screenshot" && /\.jpe?g$/i.test(artifact.path)
-        ? "image/jpeg"
-        : contentType[artifact._tag]
+      const type = kind === "Screenshot" && /\.jpe?g$/i.test(path) ? "image/jpeg" : contentType[kind]
       return Effect.tryPromise(() =>
         recordArtifact(test, {
           type: "@usestrider/browser",
-          artifact: artifact._tag,
-          attachments: [{ path: artifact.path, contentType: type }]
+          artifact: kind,
+          attachments: [{ path, contentType: type }]
         })
       ).pipe(
         Effect.asVoid,
-        Effect.catch((error) =>
-          Effect.logWarning(`TestRun.attach: Vitest didn't attach ${artifact.path}: ${error.message}`)
-        )
+        Effect.catch((error) => Effect.logWarning(`TestRun.attach: Vitest didn't attach ${path}: ${error.message}`))
       )
     })
 })
@@ -152,7 +159,7 @@ const warn = (effect: Effect.Effect<unknown, unknown>): Effect.Effect<void> =>
  *
  * **Details**
  *
- * Call inside every test callback, including each retry and repeat. Captures identity, retry attempt and repeat
+ * Call inside every test callback, including each retry and repeat. Captures identity, retry attempt, and repeat
  * immediately; attachments use the captured task. Works with a browser layer shared by a block, without rebuilding the browser, and
  * with a per-effect browser layer in either composition order. Complete attachments before the callback ends;
  * Vitest does not guarantee that artifacts attached later reach reporters.
@@ -231,7 +238,7 @@ export const withTest = (
           const finish = Effect.fnUntraced(function*(failed: boolean) {
             if (failed) yield* exportFailure
             if (failed) {
-              if (staged !== undefined) yield* warn(run.attach({ _tag: "Trace", path: staged }))
+              if (staged !== undefined) yield* warn(run.attach({ trace: staged }))
             } else if (exported) {
               // A failed write can leave a partial archive, too.
               const path = staged ?? destination
@@ -263,15 +270,15 @@ export const withTest = (
  *
  * Set `trace: { directory }` once to record contexts created through this layer's `Browser.newContext` and
  * `Browser.newPage`, including their pages and popups. Each callback must use `withTest(context)` around its
- * complete test effect. No recordings start without that binding. Existing, default and reclaimed contexts are
+ * complete test effect. No recordings start without that binding. Existing, default, and reclaimed contexts are
  * outside automatic recording; use `Trace.record` explicitly for those.
  *
- * A failed effect, defect or interruption exports one ZIP per context and attaches it before the binding
+ * A failed effect, defect, or interruption exports one ZIP per context and attaches it before the binding
  * returns. Paths are `directory/context-N/traceFileName(info)`, numbered within each callback. Successful
  * callbacks retain no archives. A failing nested scope stages its archive before target cleanup; if the callback
  * recovers, the staged file is deleted. A target scope that succeeds before a later callback failure has already
  * closed, so its retained recording is exported after cleanup. Put `withTest` inside the scope that owns the
- * targets to export before that scope closes. Recording, export, attachment and deletion failures log warnings
+ * targets to export before that scope closes. Recording, export, attachment, and deletion failures log warnings
  * and preserve the test result. Abrupt process termination and failures outside the bound effect cannot be traced.
  *
  * Automatic tracing is off unless `trace` is supplied.
@@ -377,12 +384,12 @@ export const layer = <E, R>(
  *
  * **Details**
  *
- * The basename contains only ASCII letters, digits, hyphens and underscores, followed by `.zip`. A readable
- * prefix is capped at 48 characters; a full SHA-256 digest of project, file, test ID, attempt and repeat distinguishes
+ * The basename contains only ASCII letters, digits, hyphens, and underscores, followed by `.zip`. A readable
+ * prefix is capped at 48 characters; a full SHA-256 digest of project, file, test ID, attempt, and repeat distinguishes
  * identities whose prefixes match. Repeat zero keeps the original four-field digest and filename; later repeats
  * add a repeat suffix and include the repeat in the digest. Workers and shards do not change the name. Exports
  * for the same identity use the same name, so choose another directory to keep separate runs or recordings.
- * Capture `TestRun.info` beside `Trace.record`, before another test, retry or repeat starts. No file is written or attached.
+ * Capture `TestRun.info` beside `Trace.record`, before another test, retry, or repeat starts. No file is written or attached.
  *
  * **Example** (Exporting a trace named for its test)
  *

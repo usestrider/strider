@@ -1,0 +1,23 @@
+{
+  "id": "event-page-framenavigated",
+  "upstream": [
+    "event:Page.frameNavigated"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "PageNavigation",
+      "symbol": "stream",
+      "url": "/docs/api/browser/PageNavigation#stream"
+    }
+  ],
+  "notes": "Subscribe to PageNavigation.stream with frames: all; navigation values identify their frame and outcome rather than returning a Frame object.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

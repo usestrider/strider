@@ -1,0 +1,11 @@
+{
+  "id": "method-webmcp-calltool",
+  "upstream": [
+    "method:WebMCP.callTool"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No public WebMCP discovery or tool-call API.",
+  "capabilities": [],
+  "requirements": []
+}

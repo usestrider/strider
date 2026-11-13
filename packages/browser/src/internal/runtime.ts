@@ -6,8 +6,9 @@
  * locator's frame boundaries lead to: each iframe on the way is found by the engine of
  * the document it is in, and the adapter names the frame it holds. The engine is installed in a document on first
  * use; when a document on the way changes under a request (a navigation committed, the realm went), the request
- * goes again from the page's document, within the operation's deadline. Nothing the engine does dispatches input,
- * so sending a request again is always safe. A frame that isn't there yet is a request that matches nothing.
+ * goes again from the page's document, within the operation's deadline. A round that may already have applied
+ * an action fails instead: its lost reply cannot establish whether the action happened. A frame that isn't there
+ * yet is a request that matches nothing.
  *
  * A dialog pauses its page, and on some backends every evaluation with it. A request waits for
  * a dialog that a handler or the policy is deciding, within its deadline, and fails at once with
@@ -180,13 +181,15 @@ const call = (
   runtime: Runtime,
   realm: Target.RealmId,
   functionDeclaration: string,
-  args: ReadonlyArray<Adapter.LocalValue>
+  args: ReadonlyArray<Adapter.LocalValue>,
+  releaseResult?: boolean
 ) =>
   runtime.model.adapter.evaluate(realm, {
     functionDeclaration,
     arguments: args,
     awaitPromise: true,
     result: "value",
+    ...(releaseResult === true ? { releaseResult: true } : {}),
     userActivation: false
   })
 
@@ -241,7 +244,11 @@ export interface Hop {
   readonly frame: Target.NavigableId
 }
 
-/** Where a request went: its document, and the iframes entered on the way, outermost first. */
+/**
+ * Where a request went: its document, and the iframes entered on the way, outermost first. For a lookup that
+ * returns node bindings, `document` is the bindings' document, which differs from the one first routed to when a
+ * frame commits mid-lookup.
+ */
 export interface Routed {
   readonly document: Target.DocumentId
   readonly hops: ReadonlyArray<Hop>
@@ -310,28 +317,54 @@ export const fromAdapter = (
   return mapped._tag === "Timeout" ? { _tag: "Deadline" } : mapped
 }
 
+/** The title response uses the same decoder and exception handling as engine reads. */
+const titleRead = "function() { return JSON.stringify({ _tag: \"Title\", title: document.title }); }"
+
 /**
- * The engine's realm in a document, and a call to it; `None` when the document or its realm went, or the realm
+ * A document's prepared realm and a call to it; `None` when the document or its realm went, or the realm
  * lost its engine, so the caller goes again.
  */
-const callEngine = (
+const callInDocument = Effect.fnUntraced(function*(
   runtime: Runtime,
   document: Target.DocumentId,
   functionDeclaration: string,
-  request: string | Effect.Effect<string>,
-  id: Diagnostics.OperationId
-): Effect.Effect<Option.Option<Adapter.RemoteValue>, SendFailure> =>
-  engineRealm(runtime, document).pipe(
+  request: string | Effect.Effect<string> | undefined,
+  id: Diagnostics.OperationId,
+  releaseResult?: boolean,
+  replay = true,
+  prepareRealm: Effect.Effect<Target.RealmId, Adapter.AdapterError | Deadline.Timeout> = engineRealm(runtime, document),
+  // Called when the realm or document was gone, so `None` is not the engine's own `missing`
+  onGone?: () => void
+) {
+  let sent = false
+  return yield* prepareRealm.pipe(
     Effect.flatMap((realm) =>
       Effect.flatMap(
-        typeof request === "string" ? Effect.succeed(request) : request,
-        (encoded) => call(runtime, realm, functionDeclaration, [string(encoded)])
+        request === undefined || typeof request === "string" ? Effect.succeed(request) : request,
+        Effect.fnUntraced(function*(encoded: string | undefined) {
+          // Realm lookup and installation cannot apply this round. Its own evaluation may do so once started.
+          if (!replay) {
+            const record = yield* Operation.current
+            if (Option.isSome(record)) record.value.markSent()
+          }
+          sent = true
+          return yield* encoded === undefined
+            ? call(runtime, realm, functionDeclaration, [], releaseResult)
+            : call(runtime, realm, functionDeclaration, [string(encoded)], releaseResult)
+        })
       )
     ),
     Effect.map(Option.some),
     Effect.catch((error: Adapter.AdapterError | Deadline.Timeout) => {
       if (isMoved(error)) {
-        return Effect.as(Cache.invalidate(runtime.engineRealms, document), Option.none<Adapter.RemoteResult>())
+        onGone?.()
+        return Cache.invalidate(runtime.engineRealms, document).pipe(
+          Effect.andThen(
+            replay || !sent
+              ? Effect.succeed(Option.none<Adapter.RemoteResult>())
+              : Effect.fail(fromAdapter(error, id, runtime.backend))
+          )
+        )
       }
       return Effect.fail(fromAdapter(error, id, runtime.backend))
     }),
@@ -341,12 +374,17 @@ const callEngine = (
         if (result._tag === "Exception") return Effect.die(new Error(`The engine threw: ${result.text}`))
         if (result.value.type === "string" && result.value.value === Engine.missing) {
           // A realm that lost its engine, as a reused realm can: install again
-          return Effect.as(Cache.invalidate(runtime.engineRealms, document), Option.none())
+          return Effect.flatMap(Operation.current, (record) => {
+            // The engine answered before running the request, so this round applied nothing.
+            if (!replay && Option.isSome(record)) record.value.markNotSent()
+            return Effect.as(Cache.invalidate(runtime.engineRealms, document), Option.none())
+          })
         }
         return Effect.succeed(Option.some(result.value))
       }
     }))
   )
+})
 
 /**
  * The engine's answer, decoded. One that isn't an answer the engine gives fails as `IncompatibleResponse`: where
@@ -371,14 +409,14 @@ type Element =
   | { readonly _tag: "Found"; readonly node: Adapter.NodeBinding }
   | { readonly _tag: "Response"; readonly response: Engine.Response }
 
-const elementIn = (
+export const elementIn = (
   runtime: Runtime,
   document: Target.DocumentId,
   steps: ReadonlyArray<Engine.Step>,
   frame: { readonly scroll: boolean; readonly validationSteps?: ReadonlyArray<Engine.Step> } | null,
   id: Diagnostics.OperationId
 ): Effect.Effect<Option.Option<Element>, SendFailure> =>
-  callEngine(
+  callInDocument(
     runtime,
     document,
     Engine.element,
@@ -573,25 +611,60 @@ export const sendRouted = (
             clip = answer.value.viewport
           }
         }
-        return yield* callEngine(
-          runtime,
-          routed.document,
-          Engine.run,
-          Effect.gen(function*() {
-            // Recompute after every route and install, including a stale realm's replacement.
-            const current = request.op === "expect"
-              ? { ...request, cap: Math.min(request.cap, roundCap(yield* BrowserClock.left(at))) }
-              : request
-            return JSON.stringify(
-              retarget(
-                current.op === "act" && clip !== undefined ? { ...current, clip } : current,
-                last,
-                route._tag === "Missing"
+        const token = request.op === "expect" && request.expectation._tag === "Viewport"
+          ? crypto.randomUUID()
+          : undefined
+        // Plain title reads need the same isolated world and replay rules, but none of the query engine.
+        // Backends without isolated worlds retain the existing shared-world engine path.
+        const directTitle = request.op === "title" && !(yield* makesNoWorlds(runtime))
+        const pending = directTitle
+          ? callInDocument(
+            runtime,
+            routed.document,
+            titleRead,
+            undefined,
+            id,
+            undefined,
+            true,
+            runtime.model.adapter.realm(routed.document, utilityWorld)
+          )
+          : callInDocument(
+            runtime,
+            routed.document,
+            Engine.run,
+            Effect.gen(function*() {
+              // Recompute after every route and install, including a stale realm's replacement.
+              const current = request.op === "expect"
+                ? {
+                  ...request,
+                  ...(token === undefined ? {} : { token }),
+                  cap: Math.min(request.cap, roundCap(yield* BrowserClock.left(at)))
+                }
+                : request
+              return JSON.stringify(
+                retarget(
+                  current.op === "act" && clip !== undefined ? { ...current, clip } : current,
+                  last,
+                  route._tag === "Missing"
+                )
               )
-            )
-          }),
-          id
-        ).pipe(
+            }),
+            id,
+            undefined,
+            request.op !== "act" || !request.apply || !Engine.appliesInRound(request.action)
+          )
+        const owned = token === undefined ? pending : pending.pipe(
+          Effect.onExit((exit) =>
+            Exit.isSuccess(exit) ?
+              Effect.void :
+              releaseInDocument(runtime, routed.document, { op: "expectStop", token }, id).pipe(
+                Operation.detached,
+                Effect.catchCause((cause) => Effect.logWarning("Viewport observation cleanup failed", cause)),
+                Effect.forkIn(runtime.model.scope, { startImmediately: true })
+              )
+          )
+        )
+        return yield* owned.pipe(
           Effect.flatMap(Option.match({
             onNone: () => Effect.succeedNone,
             onSome: (value) =>
@@ -629,7 +702,7 @@ export const sendToDocument = (
   Effect.raceFirst(
     Effect.suspend(() =>
       Option.isSome(runtime.model.document(document))
-        ? callEngine(runtime, document, Engine.run, JSON.stringify(request), id).pipe(
+        ? callInDocument(runtime, document, Engine.run, JSON.stringify(request), id).pipe(
           Effect.flatMap((value) =>
             Option.isSome(value) && value.value.type === "string"
               ? Effect.asSome(decode(value.value.value))
@@ -644,19 +717,53 @@ export const sendToDocument = (
 /**
  * Idempotent engine cleanup in its original document, including while a dialog is open. Unlike a read, release
  * must remain queued until the document can execute it. Run apart in an owning scope; never wait for it in a
- * caller's uninterruptible finalizer. A gone document needs no release.
+ * caller's uninterruptible finalizer. A gone document needs no release, and a document whose realm is destroyed
+ * counts as released once the model ends it, within the cleanup's deadline.
  */
 export const releaseInDocument = (
   runtime: Runtime,
   document: Target.DocumentId,
-  request: Extract<Engine.Request, { readonly op: "validationStop" }>,
+  request: Extract<Engine.Request, { readonly op: "validationStop" | "fillDisarm" | "expectStop" }>,
   id: Diagnostics.OperationId
 ): Effect.Effect<void, SendFailure> =>
-  Effect.suspend(() =>
-    Option.isSome(runtime.model.document(document))
-      ? Effect.asVoid(callEngine(runtime, document, Engine.run, JSON.stringify(request), id))
-      : Effect.void
-  )
+  Effect.suspend(() => {
+    const entry = runtime.model.document(document)
+    if (Option.isNone(entry)) return Effect.void
+    let gone = false
+    return callInDocument(
+      runtime,
+      document,
+      Engine.run,
+      JSON.stringify(request),
+      id,
+      undefined,
+      true,
+      engineRealm(runtime, document),
+      () => {
+        gone = true
+      }
+    ).pipe(
+      Effect.flatMap((value) =>
+        Effect.gen(function*() {
+          if (request.op !== "fillDisarm" || Option.isNone(runtime.model.document(document))) return
+          if (
+            Option.isSome(value) && value.value.type === "string" &&
+            (yield* decode(value.value.value))._tag === "FillGuard"
+          ) {
+            return
+          }
+          // A destroyed realm took the guard's listeners with it once the document ends. Wait for the model to say
+          // so, until the cleanup's deadline; a document that is still live then has not confirmed anything.
+          if (gone) {
+            const { at } = yield* Operation.budget
+            const ended = yield* Deferred.await(entry.value.ended).pipe(BrowserClock.until(at))
+            if (Option.isSome(ended)) return
+          }
+          return yield* Effect.die("The live document did not confirm removal of its native insertion guard")
+        })
+      )
+    )
+  })
 
 /** The one match, by its node binding and where it is, or the engine's answer for why there is none. */
 export type Found =
@@ -687,9 +794,99 @@ export const element = (
         return Effect.succeedSome({ _tag: "Response", response: stale.value, routed: route.routed })
       }
       return elementIn(runtime, route.routed.document, last, null, id).pipe(
-        Effect.map(Option.map((found): Found => ({ ...found, routed: route.routed })))
+        Effect.flatMap(Option.match({
+          onNone: () => Effect.succeedNone,
+          onSome: (found) =>
+            found._tag === "Found"
+              // A child document can commit while the utility realm is installed: the binding then names the
+              // new document, which is the one the node lives in. The frames' parent hops still hold.
+              ? Effect.succeedSome<Found>({
+                ...found,
+                routed: found.node.document === route.routed.document
+                  ? route.routed
+                  : { ...route.routed, document: found.node.document }
+              })
+              // No binding names a document, so the one routed to is the one whose realm ran the lookup: a realm
+              // acquired for a document is that document's, or fails and the lookup routes again.
+              : Effect.succeedSome<Found>({ ...found, routed: route.routed })
+        }))
       )
     }),
+    promptBlocked(page)
+  )
+
+type FoundElements =
+  | { readonly _tag: "Found"; readonly nodes: ReadonlyArray<Adapter.NodeBinding>; readonly routed: Routed }
+  | { readonly _tag: "Response"; readonly response: Engine.Response; readonly routed: Routed }
+
+/** All matches resolved together in the final document; node bindings carry no retained array handle. */
+export const elements = (
+  runtime: Runtime,
+  page: Model.PageEntry,
+  steps: ReadonlyArray<Engine.Step>,
+  id: Diagnostics.OperationId,
+  at: MonotonicInstant.MonotonicInstant
+): Effect.Effect<
+  FoundElements,
+  SendFailure
+> =>
+  Effect.raceFirst(
+    routing(
+      runtime,
+      page,
+      steps,
+      false,
+      id,
+      at,
+      Effect.fnUntraced(
+        function*(
+          route: Route,
+          last: ReadonlyArray<Engine.Step>
+        ): Effect.fn.Return<Option.Option<FoundElements>, SendFailure> {
+          const routed = route.routed
+          if (route._tag === "Answer") {
+            return Option.some({ _tag: "Response" as const, response: route.response, routed })
+          }
+          if (route._tag === "Missing") {
+            return Option.some({ _tag: "Found" as const, nodes: [], routed })
+          }
+          const stale = replaced(routed.document, last)
+          if (Option.isSome(stale)) return Option.some({ _tag: "Response" as const, response: stale.value, routed })
+          const result = yield* callInDocument(
+            runtime,
+            routed.document,
+            Engine.element,
+            JSON.stringify({ steps: last, all: true }),
+            id,
+            true
+          )
+          if (Option.isNone(result)) return Option.none()
+          const value = result.value
+          if (value.type === "string") {
+            return Option.some({ _tag: "Response" as const, response: yield* decode(value.value), routed })
+          }
+          if (value.type !== "array" || value.value === undefined) {
+            return yield* Effect.die(new Error("The engine's matches came back without an array"))
+          }
+          const nodes: Array<Adapter.NodeBinding> = []
+          for (const member of value.value) {
+            if (member.type !== "node" || member.node === undefined) {
+              return yield* Effect.die(new Error("The engine's match came back without a node binding"))
+            }
+            nodes.push(member.node)
+          }
+          // As in `element`: the bindings' document is authoritative when a commit straddled the lookup.
+          const first = nodes[0]
+          return Option.some({
+            _tag: "Found" as const,
+            nodes,
+            routed: first === undefined || first.document === routed.document
+              ? routed
+              : { ...routed, document: first.document }
+          })
+        }
+      )
+    ),
     promptBlocked(page)
   )
 

@@ -204,6 +204,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
           request: pausedRequest(hop, params.request, params.resourceType, undefined, target),
           phase: "auth",
           response: Option.none(),
+          authSource: params.authChallenge.source === "Server" ? "server" : "proxy",
           challenge: Option.some({
             origin: params.authChallenge.origin,
             scheme: params.authChallenge.scheme,
@@ -334,7 +335,30 @@ const decide = (
         state.routeFailed.add(requestKey(obligation.target, obligation.networkId))
       }
       return Fetch.failRequest({ requestId, errorReason: failReasons[decision.error] }).pipe(on)
-    case "ProvideCredentials":
+    case "ProvideCredentials": {
+      if (decision.once === true) {
+        const direct = [...state.requests.values()].find((entry) =>
+          entry.target === obligation.target && entry.attribution.fetchId === requestId
+        )
+        // Dedicated-worker Network events can arrive on the worker session while Fetch pauses arrive
+        // on its parent page. The existing pending attribution supplies their native Network id.
+        const pending = direct === undefined ?
+          [...state.pendingAttribution].find(([, entry]) =>
+            entry.target === obligation.target && entry.fetchId === requestId
+          ) :
+          undefined
+        const networkId = pending?.[0].slice(requestKey(obligation.target, "").length)
+        const related = direct === undefined && networkId !== undefined && obligation.target.page !== undefined
+          ? [...state.requests.values()].filter((entry) =>
+            entry.requestId === networkId && entry.target.page === obligation.target.page
+          )
+          : []
+        const request = direct ?? (related.length === 1 ? related[0] : undefined)
+        if (request === undefined || request.credentialsAttempted === true) {
+          return Fetch.continueWithAuth({ requestId, authChallengeResponse: { response: "CancelAuth" } }).pipe(on)
+        }
+        request.credentialsAttempted = true
+      }
       return Fetch.continueWithAuth({
         requestId,
         authChallengeResponse: {
@@ -343,6 +367,7 @@ const decide = (
           password: Redacted.make(decision.password)
         }
       }).pipe(on)
+    }
     case "DefaultAuth":
     case "CancelAuth":
       return Fetch.continueWithAuth({

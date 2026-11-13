@@ -178,3 +178,58 @@ describe("a context's removal", () => {
       )
     }))
 })
+
+describe("A context's download declaration", () => {
+  it.effect("is released knowing its context is removed with its scope, after the removal is decided", () =>
+    Effect.gen(function*() {
+      const seen: Array<boolean | undefined> = []
+      yield* Effect.scoped(Browser.newContext({ downloads: "deny" })).pipe(
+        Effect.provide(layer((fake) => ({
+          declare: Effect.fnUntraced(function*(scope, declaration) {
+            const id = yield* fake.declare(scope, declaration)
+            // Added after the library's own finalizer for this declaration, so it runs before it is released
+            if (declaration._tag === "Downloads") {
+              yield* Effect.addFinalizer(() => Effect.sync(() => seen.push(declaration.retiring?.())))
+            }
+            return id
+          })
+        })))
+      )
+      assert.deepStrictEqual(seen, [true])
+    }))
+})
+
+describe("A page and the context created with it", () => {
+  it.effect("are closed by one removal, the page ending before the context's end", () =>
+    Effect.gen(function*() {
+      const sent: Array<string> = []
+      const page = yield* Effect.scoped(Browser.newPage()).pipe(
+        Effect.provide(layer((fake) => ({
+          closePage: (id, options) =>
+            Effect.sync(() => void sent.push("closePage")).pipe(Effect.andThen(fake.closePage(id, options))),
+          removeUserContext: (id) =>
+            Effect.sync(() => void sent.push("removeUserContext")).pipe(Effect.andThen(fake.removeUserContext(id)))
+        })))
+      )
+      assert.deepStrictEqual(sent, ["removeUserContext"])
+      assert.strictEqual((yield* page.status)._tag, "Closed")
+    }))
+
+  it.effect("still close a page of a context that outlives its scope through the page's own close", () =>
+    Effect.gen(function*() {
+      const sent: Array<string> = []
+      yield* Effect.scoped(Effect.gen(function*() {
+        const context = yield* Browser.newContext()
+        yield* Effect.scoped(context.newPage)
+      })).pipe(
+        Effect.provide(layer((fake) => ({
+          closePage: (id, options) =>
+            Effect.sync(() => void sent.push("closePage")).pipe(Effect.andThen(fake.closePage(id, options))),
+          removeUserContext: (id) =>
+            Effect.sync(() => void sent.push("removeUserContext")).pipe(Effect.andThen(fake.removeUserContext(id)))
+        })))
+      )
+      // The page's scope is an inner one: it closes the page itself, then the context's scope removes the context
+      assert.deepStrictEqual(sent, ["closePage", "removeUserContext"])
+    }))
+})

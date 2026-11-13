@@ -1,5 +1,5 @@
 /**
- * URLs, URL patterns, origins and sites, as branded strings.
+ * URLs, URL patterns, origins, and sites, as branded strings.
  *
  * A `Url` is an absolute URL after WHATWG parsing. Unlike `URL`, it's immutable and equal by value, so it works as
  * a key and with `Equal`. Outputs are always branded; inputs such as `goto(url)` also take a plain string, parsed
@@ -122,12 +122,12 @@ export const Pattern = Schema.String.pipe(Schema.brand("~@usestrider/browser/Url
 export type Pattern = typeof Pattern.Type
 
 /**
- * Schema for an origin: scheme, host and port, such as `https://shop.example.com`.
+ * Schema for an origin: scheme, host, and port, such as `https://shop.example.com`.
  *
  * **Details**
  *
  * It decodes a serialized origin: the string a `URL`'s `origin` gives, in lower case with no path and no default
- * port. `"https://shop.example.com:8443"` is one; `"https://shop.example.com/"`, `"HTTPS://Shop.example.com"` and
+ * port. `"https://shop.example.com:8443"` is one; `"https://shop.example.com/"`, `"HTTPS://Shop.example.com"`, and
  * the opaque `"null"` are not.
  *
  * **Example** (Checking a string)
@@ -151,7 +151,7 @@ export const Origin = Schema.String.pipe(
 )
 
 /**
- * An origin: scheme, host and port.
+ * An origin: scheme, host, and port.
  *
  * @stability unstable
  * @category models

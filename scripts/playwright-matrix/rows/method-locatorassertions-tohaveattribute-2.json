@@ -1,0 +1,11 @@
+{
+  "id": "method-locatorassertions-tohaveattribute-2",
+  "upstream": [
+    "method:LocatorAssertions.toHaveAttribute#2"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public Strider capability for this member.",
+  "capabilities": [],
+  "requirements": []
+}

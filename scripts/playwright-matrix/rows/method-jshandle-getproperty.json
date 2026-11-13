@@ -1,0 +1,23 @@
+{
+  "id": "method-jshandle-getproperty",
+  "upstream": [
+    "method:JSHandle.getProperty"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "JSHandle",
+      "symbol": "JSHandle.evaluateHandle",
+      "url": "/docs/api/browser/JSHandle#JSHandle.evaluateHandle"
+    }
+  ],
+  "notes": "Use handle.evaluateHandle(value => value[propertyName]). It returns a scoped handle; property evaluation can invoke a getter or fail, and errors remain visible.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/JSHandle.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

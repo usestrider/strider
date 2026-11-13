@@ -54,7 +54,7 @@ const matcher = (value: string | RegExp): Engine.TextMatcher =>
 export const isAriaPattern = (u: unknown): u is AriaPattern => Predicate.hasProperty(u, TypeId)
 
 /**
- * A node with a role, an accessible name and children compared as `children` says. A string name is matched whole
+ * A node with a role, an accessible name, and children compared as `children` says. A string name is matched whole
  * after collapsing whitespace, and an empty one means no accessible name.
  *
  * **Example** (Matching a heading whose name varies)

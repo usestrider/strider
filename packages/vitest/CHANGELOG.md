@@ -1,5 +1,28 @@
 # @usestrider/vitest
 
+## 0.2.2
+
+### Changed
+
+- Documentation comments and messages use the serial comma (#277).
+- Updated dependencies: `@usestrider/browser@0.8.3`.
+
+## 0.2.1
+
+### Patch Changes
+
+- Uses `@usestrider/browser` 0.8.0, whose `TestRun.attach` takes `{ trace }`, `{ har }` or `{ screenshot }` (#210). Reporters see the same artifact kinds as before.
+
+## 0.2.0
+
+### Breaking changes
+
+- **Requires Effect 4.1.2** (#188): `effect` and `@effect/platform-node` `^4.1.2`.
+
+### Patch Changes
+
+- Uses `@usestrider/browser` 0.7.0.
+
 ## 0.1.6
 
 ### Patch Changes

@@ -1,0 +1,26 @@
+{
+  "id": "method-tracing-stop",
+  "upstream": [
+    "method:Tracing.stop"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Trace",
+      "symbol": "Recording",
+      "url": "/docs/api/browser/Trace#Recording"
+    }
+  ],
+  "notes": "Record in a scope, then exportTrace writes a Playwright-viewer-compatible archive.",
+  "capabilities": [],
+  "requirements": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Capability.ts",
+      "packages/browser/src/Trace.ts",
+      "packages/browser/src/Har.ts",
+      "packages/browser/src/Operation.ts"
+    ],
+    "scope": "Recording declarations inspected; independent scopes, completed files and operation groups are distinguished from chunks and overlays."
+  }
+}

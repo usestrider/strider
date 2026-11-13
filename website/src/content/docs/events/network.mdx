@@ -1,18 +1,19 @@
 ---
 title: Requests and responses
-description: A page's requests and responses as events, their bodies decoded with a Schema, who answered them, the headers they sent, and resending a request.
+description: What a page asks the server for, and what it gets back.
 order: 3
 ---
 
-What a page shows can lag behind its calls to the server, or look the same when one failed. Waiting on the
-response an action causes checks what the server said, and decoding its body gives what it returned as typed data.
+A page's requests and responses are events, reported as each is sent and arrives. Wait on the response an action
+causes to check what the server said, and decode its body with a Schema to get typed data.
 
 ## Request and response events
 
-`NetworkRequest` and `NetworkResponse` are event modules, with `next`, `stream` and `history`.
+`NetworkRequest` and `NetworkResponse` are event modules, with `next`, `stream`, and `history`.
 
-- A request is reported when sent and a response when it arrives, one of each per redirect hop.
+- Each redirect hop has its own request and response.
 - Both are Schemas, with Effect's `Headers` and `HttpMethod`.
+- [`NetworkRequest.failure`](/docs/events/request-failures) reads why a request's transfer failed.
 
 `next` needs a `url`: a glob such as `"**/api/**"`, a URL, or a `URLPattern` string with `:name` groups, such as
 `"https://shop.example.com/api/orders/:id"`. A filter can also name a `method`; a request filter a `resourceType`,
@@ -33,11 +34,13 @@ const deleteOrder = Effect.fn("deleteOrder")(function*(page: Page.Page) {
 })
 ```
 
+For a request you already observed, [retain its response association](/docs/events/request-responses) to wait for
+that exact hop rather than matching by URL.
+
 ## Decoding bodies
 
-A status says the call went through, not what came back. A body decoded with a Schema gives the data the server
-returned, typed, and fails if it isn't that shape. A body is collected only when a subscription asks with `body`: a
-decoder of an Effect `HttpIncomingMessage`, such as `HttpIncomingMessage.schemaBodyJson`. The response arrives
+A body is collected only when a subscription asks with `body`: a decoder of an Effect `HttpIncomingMessage`, such
+as `HttpIncomingMessage.schemaBodyJson`, which fails if the body isn't the Schema's shape. The response arrives
 decoded, and `where`, the [predicate](/docs/events/events#next-stream-and-history) after the filter, gets it typed:
 
 ```ts
@@ -62,10 +65,16 @@ const addToCart = Effect.fn("addToCart")(function*(page: Page.Page) {
 ```
 
 - The body is copied out of the browser, so it outlives the page.
+- Collection ends with the subscription's scope or when borrowed inspect access is released; a subscription started with an expired grant fails with `TargetGone`.
 - A body that can't be read fails the wait with a `ResponseError`, whose reason is one of:
   - `BodyUnavailable`: there's no body to read. Its `why` says which: a redirect, over the limit, released by the
     browser, a failed transfer, or a stream that never ends, such as server-sent events.
   - `MalformedBody`: the body isn't what it was read as.
+  - `Unsupported`: the browser cannot supply this body's bytes. On Firefox, a terminal response with status 301,
+    302, 303, 307, or 308 without a `Location` header fails immediately with capability
+    `"network.responseBody.terminalRedirect"`, because Firefox does not answer `network.getData` for it. Other
+    statuses remain readable, and Chromium and WebKit return these bodies normally. Followed redirect hops
+    still fail with `BodyUnavailable`, `why: "redirect"`; their final response's body can be collected.
 - Reading a body needs [read access](/docs/pages/attaching#access-levels) to the page.
 
 Bodies are collected up to 10 MiB; `NetworkResponse.withBodyLimit` raises it for the subscriptions inside it. A step
@@ -94,6 +103,9 @@ const exportOrders = Effect.fn("exportOrders")(function*(page: Page.Page) {
   )
 })
 ```
+
+A request can also be captured with a decoder; see [Request bodies](/docs/events/request-bodies) for submitted
+text, JSON, forms, byte limits, and browser restrictions.
 
 ## Streams and history
 
@@ -130,8 +142,8 @@ const failedCalls = Effect.fn("failedCalls")(function*(page: Page.Page) {
 
 ## Response sources
 
-A response from a cache or a service worker never reached the server, so a check of caching or offline support
-needs to know where it came from. `servedBy` is `"network"`, `"cache"`, `"serviceWorker"`, `"route"` when a
+A response's `servedBy` says what answered it, such as a cache or a service worker rather than the server, so you
+can check caching or offline support. It's `"network"`, `"cache"`, `"serviceWorker"`, `"route"` when a
 [route](/docs/events/routes) fulfilled it, `"cacheOrServiceWorker"` on Firefox, which can't tell them apart, or
 `"unknown"`, which WebKit can report when it doesn't know:
 
@@ -175,7 +187,7 @@ const sentCookies = Effect.fn("sentCookies")(function*(page: Page.Page) {
 ```
 
 The operation's deadline bounds the wait. If the request ends, is evicted from the retained 1000 hops, or loses
-its frame, worker, context, page or browser connection, the wait returns already-attributed sent headers, or the
+its frame, worker, context, page, or browser connection, the wait returns already-attributed sent headers, or the
 immutable request event's headers when none were reported. A new lookup after eviction returns that snapshot too.
 These fallbacks can omit network additions such as `Cookie`.
 
@@ -184,14 +196,14 @@ prevents it from being sent. Continue the route first and inspect sent headers o
 event subscription example above. On Chromium, the same trap applies while holding the response: attribution
 can need the response or redirect information. Read `request.headers` for an immediate snapshot inside a handler.
 
-Credential headers, such as cookies and authorization, are redacted in logs, errors and spans.
+Credential headers, such as cookies and authorization, are redacted in logs, errors, and spans.
 
 ## Resending requests
 
-Rebuilt by hand, a call to the page's API misses what the page put in it, such as an auth header.
-`NetworkRequest.toHttpClientRequest` turns a captured request into an Effect `HttpClientRequest`, to send again or
-changed: its method, URL and headers, with their values, still redacted in logs. It has no body, so a replay of a
-`POST` sets one. Sent from outside the browser, it goes without the browser's cache, proxy and service workers, and
+`NetworkRequest.toHttpClientRequest` turns a captured request into an Effect `HttpClientRequest` with its method,
+URL, and headers, to send again as it is or changed. It keeps what the page put in, such as an auth header, which
+stays redacted in logs. It has no body, so a replay of a
+`POST` sets one. Sent from outside the browser, it goes without the browser's cache, proxy, and service workers, and
 without its cookies, except on Firefox, whose request events carry the `Cookie` the browser sent:
 
 ```ts
@@ -214,3 +226,9 @@ const nextPageOfOrders = Effect.fn("nextPageOfOrders")(function*(page: Page.Page
 ```
 
 To change what the browser sends or receives, use a [route](/docs/events/routes).
+
+Read a request's predecessor or successor with [scoped redirect access](/docs/events/redirects).
+
+For native phase measurements, opt into [request timings](/docs/events/request-timings) when creating the context.
+
+For native byte accounting, opt into [request sizes](/docs/events/request-sizes) when creating the context.

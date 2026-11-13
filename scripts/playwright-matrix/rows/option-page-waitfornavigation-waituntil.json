@@ -1,0 +1,30 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "capabilities": [],
+  "id": "option-page-waitfornavigation-waituntil",
+  "upstream": [
+    "method:Page.waitForNavigation"
+  ],
+  "option": "waitUntil",
+  "requirements": [],
+  "valueCoverage": [
+    {
+      "value": "commit",
+      "status": "missing"
+    },
+    {
+      "value": "domcontentloaded",
+      "status": "missing"
+    },
+    {
+      "value": "load",
+      "status": "missing"
+    },
+    {
+      "value": "networkidle",
+      "status": "missing"
+    }
+  ]
+}

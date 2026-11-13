@@ -1,5 +1,6 @@
 # The browser integration tests: every night and on demand. They run in `devShells.integration`,
-# a file at a time, as on a maintainer's machine, with the browsers the flake pins, from the Nix binary cache.
+# a file at a time, as on a maintainer's machine, with the browsers the flake pins, from the Nix binary cache. On Linux,
+# a job per browser, and one for the other files (`vitest.integration.config.ts`).
 name: Integration
 
 on:
@@ -8,20 +9,34 @@ on:
   workflow_dispatch:
     inputs:
       macos-diagnostics:
-        description: Run only the macOS suite once and retain native crash diagnostics
+        description: Run macOS only and retain worker crash diagnostics
         type: boolean
         default: false
+      retain_diagnostics:
+        description: Run macOS only and keep bounded diagnostic traces even on success
+        type: boolean
+        default: false
+      macos:
+        description: Run the macOS job too; a change that doesn't touch what differs on macOS can skip it
+        type: boolean
+        default: true
 
 permissions:
   contents: read
 
+# One run at a time per branch, so branches validate side by side
 concurrency:
-  group: integration
+  group: integration-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   integration:
-    if: ${{ inputs.macos-diagnostics != true }}
+    if: ${{ !inputs.retain_diagnostics && !inputs.macos-diagnostics }}
+    name: integration (${{ matrix.job }})
+    strategy:
+      fail-fast: false
+      matrix:
+        job: [chromium, firefox, webkit, other]
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     defaults:
@@ -42,25 +57,49 @@ jobs:
         run: |
           sudo sysctl -w "kernel.core_pattern=$(sed 's/ 9223372036854775808 / %c /' /proc/sys/kernel/core_pattern)"
           cat /proc/sys/kernel/core_pattern
+      # The layout tests' file names no browser, so they run with the other files
       - name: Build the documentation for layout tests
+        if: matrix.job == 'other'
         run: nix develop --command pnpm website:dist
       - name: Integration tests
-        run: nix develop --command pnpm test:integration --no-file-parallelism 2>&1 | tee integration.log
-      # Failure-only protocol and owned browser process traces accompany the log.
-      - name: Keep the log
-        if: failure() || cancelled()
+        env:
+          STRIDER_INTEGRATION_JOB: ${{ matrix.job }}
+        run: nix develop --command pnpm test:integration:full --no-file-parallelism 2>&1 | tee integration.log
+      # Retain timings on green runs too; failure-only traces still accompany failed runs.
+      - name: Keep the log and timings
+        if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: integration-log
+          name: integration-log-${{ matrix.job }}
           path: |
             integration.log
+            .data/integration-timings/
             .data/integration-failures/
           include-hidden-files: true
           retention-days: 14
 
+  integration-budget:
+    name: Linux integration budget summary
+    needs: integration
+    if: always()
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Report Linux operating goals (informational)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/integration-budget.ts
+
   integration-macos:
-    # Run independently of Linux; respect workflow cancellation.
-    if: ${{ !cancelled() }}
+    # Run independently of Linux; respect workflow cancellation. Every scheduled run includes macOS.
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.macos || inputs.retain_diagnostics || inputs.macos-diagnostics) }}
     runs-on: macos-15
     timeout-minutes: 60
     defaults:
@@ -84,10 +123,19 @@ jobs:
       - name: Start native crash report capture
         if: inputs.macos-diagnostics
         run: node scripts/macos-crash-reports.mjs start
+      - name: Record investigation metadata
+        if: inputs.retain_diagnostics
+        run: |
+          git rev-parse HEAD > integration-macos-metadata.txt
+          sw_vers >> integration-macos-metadata.txt
+          uname -a >> integration-macos-metadata.txt
+          node --version >> integration-macos-metadata.txt
+          cat packages/browser/test/integration/browsers.macos.json >> integration-macos-metadata.txt
       - name: Install verified macOS browsers and video tools, then run integration tests
         id: macos-suite
         env:
           STRIDER_MACOS_WORKER_DIAGNOSTICS: ${{ inputs.macos-diagnostics && '1' || '' }}
+          STRIDER_TRACE_RETAIN_PASSES: ${{ inputs.retain_diagnostics && '1' || '0' }}
         run: pnpm test:integration:macos --no-file-parallelism 2>&1 | tee integration-macos.log
       - name: Collect native crash reports
         if: always() && inputs.macos-diagnostics
@@ -95,12 +143,13 @@ jobs:
           STRIDER_MACOS_SUITE_OUTCOME: ${{ steps.macos-suite.outcome }}
         run: node scripts/macos-crash-reports.mjs finish
       - name: Keep the macOS log
-        if: always()
+        if: always() && (failure() || cancelled() || inputs.retain_diagnostics)
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: integration-macos-log
           path: |
             integration-macos.log
+            integration-macos-metadata.txt
             .data/macos-crash-reports/
             .data/integration-failures/
           include-hidden-files: true

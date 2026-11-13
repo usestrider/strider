@@ -1,6 +1,6 @@
 {
   "name": "@usestrider/cli",
-  "version": "0.2.3",
+  "version": "0.3.1",
   "type": "module",
   "license": "MIT",
   "homepage": "https://usestrider.dev",
@@ -34,8 +34,8 @@
     "provenance": true
   },
   "dependencies": {
-    "@effect/platform-node": "^4.0.6",
+    "@effect/platform-node": "^4.1.2",
     "@usestrider/browser": "workspace:^",
-    "effect": "^4.0.6"
+    "effect": "^4.1.2"
   }
 }

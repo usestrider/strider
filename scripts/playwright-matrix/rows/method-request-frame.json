@@ -1,0 +1,28 @@
+{
+  "id": "method-request-frame",
+  "upstream": [
+    "method:Request.frame"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "NetworkRequest",
+      "symbol": "Initiator",
+      "url": "/docs/api/browser/NetworkRequest#Initiator"
+    },
+    {
+      "module": "Page",
+      "symbol": "FrameTree",
+      "url": "/docs/api/browser/Page#FrameTree"
+    }
+  ],
+  "notes": "A Document initiator contains the navigable frame id, which can be matched in page.frames. Worker and Unattributed initiators have no frame. This returns identity data, not a retained Frame object, and a removed frame may no longer appear in the current tree.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/NetworkRequest.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

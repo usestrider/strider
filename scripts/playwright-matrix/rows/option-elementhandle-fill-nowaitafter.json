@@ -1,0 +1,27 @@
+{
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toBeVisible",
+      "url": "/docs/api/browser/Expect#toBeVisible"
+    }
+  ],
+  "notes": "Actions do not add an implicit navigation wait; request the required expectation explicitly.",
+  "capabilities": [],
+  "id": "option-elementhandle-fill-nowaitafter",
+  "upstream": [
+    "method:ElementHandle.fill"
+  ],
+  "option": "noWaitAfter",
+  "requirements": [
+    {
+      "capability": "input.native",
+      "alternatives": [
+        "input.webdriver"
+      ],
+      "file": "packages/browser/src/internal/webkitAdapter.ts",
+      "quote": "dispatchInput: refuse(\"input.native\", \"stock WebKit's inspector protocol has no Input domain\")"
+    }
+  ]
+}

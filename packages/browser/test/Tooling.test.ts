@@ -194,7 +194,7 @@ describe("Spans", () => {
 describe("Browser.layerTest", () => {
   it("fails at once on a step it can't read, naming where", () => {
     assert.throws(() => Fake.parse("--resp(cart)--wat"), /"wat" at 14/)
-    assert.throws(() => Fake.parse("dialog(popup)"), /isn't alert, confirm, prompt or beforeunload/)
+    assert.throws(() => Fake.parse("dialog(popup)"), /isn't alert, confirm, prompt, or beforeunload/)
     assert.deepStrictEqual(Fake.parse(" - | ").map((step) => step._tag), ["Tick", "Close"])
   })
 
@@ -414,6 +414,10 @@ describe("Recordings", () => {
 
   for (
     const [matcher, condition, observed, secrets] of [
+      ["toHaveValues", "to have the values [\"expected-password-secret\"]", ["typed-password-secret"], [
+        "expected-password-secret",
+        "typed-password-secret"
+      ]],
       ["toHaveValue", "to have the value \"expected-password-secret\"", "typed-password-secret", [
         "expected-password-secret",
         "typed-password-secret"
@@ -482,9 +486,11 @@ describe("Recordings", () => {
                   assert.notInclude(failures[0].message, "History:")
                 }
                 if (matcher !== "toHaveURL") {
-                  const hidden = matcher === "toHaveValue" || preset === "strict"
+                  const hidden = (matcher === "toHaveValue" || matcher === "toHaveValues") || preset === "strict"
                   const expectedCondition = hidden
-                    ? matcher === "toHaveValue" ? "to have the value REDACTED" : "to have the title REDACTED"
+                    ? (matcher === "toHaveValue" || matcher === "toHaveValues")
+                      ? "to have the value REDACTED"
+                      : "to have the title REDACTED"
                     : condition
                   const expectedValue = hidden ? "REDACTED" : observed
                   assert.strictEqual(
@@ -498,8 +504,9 @@ describe("Recordings", () => {
                   )
                 }
                 for (const secret of secrets) {
-                  if (matcher === "toHaveValue" || preset === "strict") assert.notInclude(content, secret)
-                  else if (delivered || condition.includes(secret)) assert.include(failures[0].message, secret)
+                  if ((matcher === "toHaveValue" || matcher === "toHaveValues") || preset === "strict") {
+                    assert.notInclude(content, secret)
+                  } else if (delivered || condition.includes(secret)) assert.include(failures[0].message, secret)
                   else assert.notInclude(content, secret)
                 }
               }

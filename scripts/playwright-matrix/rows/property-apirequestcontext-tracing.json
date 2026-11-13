@@ -1,0 +1,11 @@
+{
+  "id": "property-apirequestcontext-tracing",
+  "upstream": [
+    "property:APIRequestContext.tracing"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No built-in APIRequestContext equivalent, including cookie-sharing API testing.",
+  "capabilities": [],
+  "requirements": []
+}

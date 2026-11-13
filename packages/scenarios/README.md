@@ -12,21 +12,16 @@ navigation and assertions; operation timings help identify which individual acti
 The [investigation workflow](BENCHMARKS.md#investigating-an-area) covers benchmark coverage, architecture comparisons,
 experiments and the human review required for public API or contract changes. Findings and progress stay in issues.
 
-A private workspace package, never published. It runs the same scenarios with Strider
-and with Playwright against the same pinned stock Chromium, or pinned stock Firefox versus Playwright-patched Firefox, and prints each run’s report. The combined [RESULTS.md](RESULTS.md) is generated explicitly from preserved measurements. A prior full run at `c732173` (2026-11-05) recorded failures for both
-libraries on The Internet's dynamic controls: the preserved `the-internet.har` lacks the
-`https://the-internet.herokuapp.com/dynamic_controls` URL, so replay aborts that navigation. In that prior run, each library failed its
-initial attempt and all ten timed repetitions. These are stale-recording failures, not established library or browser
-defects. The separate local HAR recording/replay scenario passed in that run; this does not resolve its earlier
-intermittent failure.
+A private workspace package, never published: a harness that compares Strider with Playwright. It runs the same
+scenarios with each library against the same pinned stock Chromium, or pinned stock Firefox versus Playwright-patched
+Firefox, and prints each run’s report. The combined [RESULTS.md](RESULTS.md) is generated explicitly from preserved
+measurements.
 
 The report contains:
 
-- **Scenarios:** API.md's call sites that both libraries can do, each written twice, as each library's own
-  documentation would write it (`src/scenarios.ts`), with their outcomes and wall times. The documentation site's
-  Scenarios section shows each Strider program, read from its `#region <name>/strider` markers, with its title and
-  `description`. A scenario that only shows Strider, such as the video one, has no Playwright twin, and its
-  Playwright columns are `–`;
+- **Scenarios:** API.md's call sites that both libraries can do, each written twice, once with each
+  library (`src/scenarios.ts`), with their outcomes and wall times. Older preserved measurements can hold scenarios
+  that have no Playwright twin, which the report shows with `–` in the Playwright columns;
 - **Chromium-only controls:** waiting-expectation renderer CPU (Q82) and retained Fetch interception (Q103).
   The public page layer pauses document requests to handle authentication challenges even without a user route;
   the historical description of a no-match-only interceptor is stale for this workload. These grouped sequential
@@ -40,11 +35,6 @@ pnpm scenarios              # Chromium scenarios and diagnostics, 10 timed pairs
 pnpm scenarios --runs 3     # fewer runs
 pnpm scenarios --only login # one scenario, and no measurements, printed: RESULTS.md keeps the full run
 ```
-
-The video scenario encodes Chromium's screencast with ffmpeg, which the integration environment provides, and
-writes `dynamic-controls.webm` where it runs, which for the runner is `.data/scenarios/`. Its Firefox counterpart runs on the environment's Firefox, which
-writes the video itself (`Capability.Video`), copied to `dynamic-controls-firefox.webm` beside it. The
-documentation site shows a copy of one run of each, in `website/public/videos/`.
 
 `pnpm scenarios` enters the integration environment (`flake.nix`, `devShells.integration`), as
 `pnpm test:integration` does, and fails anywhere else.
@@ -127,8 +117,7 @@ retain their own default launch settings, waits and schedulers; this run changes
 The report gives p50 and p90 gaps as `(Strider / Playwright - 1) × 100`; positive is slower. Statistics use the
 existing upper median and sorted sample at `floor(0.9 × n)`, without interpolation. Ten repetitions provide only a
 small p90 sample, and the desktop's other work can affect timings. Raw samples allow independent recalculation.
-Firefox omits video scenarios because they have no equivalent Playwright twin, and omits Chromium's renderer CPU,
-Fetch interception and automation-tell diagnostics. It never substitutes different work to create a timing twin.
+Firefox omits Chromium's renderer CPU, Fetch interception and automation-tell diagnostics. It never substitutes different work to create a timing twin.
 
 ## Sites
 
@@ -137,13 +126,34 @@ Fetch interception and automation-tell diagnostics. It never substitutes differe
 - **A public demo site made for automation practice,** The Internet (`https://the-internet.herokuapp.com`, Sauce
   Labs' `the-internet`, Apache-2.0): its login and its dynamic controls. It's visited live once by
   `pnpm scenarios --record`, which records it with Strider's `Har.record`, and replayed by each library's own HAR
-  replay from then on, every request answered from the recording, so a run sends nothing to anyone. A Strider
-  program visits the site live, as a reader copying it from the documentation would, and the runner replays the
-  recording under it (`src/replay.ts`): every context its browser makes routes its requests to the recording. A
-  Playwright twin routes its context itself, with `routeFromHAR`.
+  replay from then on, every request answered from the recording, so a run sends nothing to anyone. Each
+  program opens its own context and routes it to the recording: Strider with `Route.fromHar`, Playwright with
+  `routeFromHAR`.
 
-  The recording is kept in `.data/scenarios/`, which git ignores: it holds the site's own files, which the
-  repository doesn't redistribute.
+  The recording is kept in a private R2 bucket, which the repository's public copy can't hold: it has the site's own
+  files, which the repository doesn't redistribute. `recordings.json` commits each recording's name, SHA-256 and size,
+  and the bucket holds each under `sha256/<hash>`. A run copies any recording that is missing from `.data/scenarios/`
+  (git-ignored) or differs from the manifest out of the bucket, checks it against the manifest, and fails naming the
+  file when it doesn't match. The bucket is read with these variables, which `pnpm scenarios` passes into the
+  integration environment:
+
+  | Variable                               | Holds                                   |
+  | -------------------------------------- | --------------------------------------- |
+  | `STRIDER_RECORDINGS_ACCOUNT_ID`        | The Cloudflare account                  |
+  | `STRIDER_RECORDINGS_BUCKET`            | The bucket's name, `strider-recordings` |
+  | `STRIDER_RECORDINGS_ACCESS_KEY_ID`     | The bucket's R2 token's access key      |
+  | `STRIDER_RECORDINGS_SECRET_ACCESS_KEY` | That token's secret                     |
+
+  Without all four, the local-site scenarios run and each real-site scenario whose recording isn't already in
+  `.data/scenarios/` is skipped: the output and the report's unsupported comparisons say so and why.
+
+  The bucket, `strider-recordings`, was made by hand in Cloudflare's dashboard: private, with no public access or
+  domain. Its one token reads and writes only that bucket. The four values are kept encrypted in
+  `recordings.sops.env`, for the maintainer's age key and the benchmarks' CI key (`.sops.yaml`).
+  `pnpm scenarios:recorded` decrypts them and runs `pnpm scenarios` with them, taking the same arguments, and
+  `benchmarks.yml` decrypts them with the `benchmarks` environment's `SOPS_AGE_KEY`. Every recording's hash is
+  committed, so a key that can write can delete or replace a recording, which makes runs fail naming it, but can't
+  change one unnoticed.
 
 ## Refreshing recordings
 
@@ -153,8 +163,10 @@ refresh command. This checks page coverage, not the completeness of assets, resp
 Ordinary runs never fetch a missing request live. `--only controls` checks the dynamic-controls page without requiring
 the login pages used by other scenarios.
 
-`pnpm scenarios --record` visits the live sites and overwrites the ignored working recordings in `.data/scenarios/`.
-Preserve the old files outside that directory first, using a new evidence directory for each refresh. For example,
+`pnpm scenarios --record` visits the live sites, overwrites the ignored working recordings in `.data/scenarios/`,
+uploads each to the bucket under its hash, and rewrites `recordings.json`: commit that file with the refresh. Uploading
+needs the same four variables, which `pnpm scenarios:recorded --record` supplies; without them the recording is kept locally and the command fails
+saying it wasn't uploaded. `pnpm scenarios --upload` does the upload and the manifest alone, for the recordings already in `.data/scenarios/`, without visiting any site: use it to pin the recordings an earlier run was measured on. Run it as `pnpm scenarios:recorded --upload`; it fails naming any recording file that is missing. Preserve the old files outside that directory first, using a new evidence directory for each refresh. For example,
 from the repository root (choose an absolute `evidence` path that does not already exist):
 
 ```sh

@@ -56,7 +56,7 @@ export const classifyFailure = (
         ? "URL"
         : matcherName === "toHaveTitle"
         ? "Title"
-        : matcherName === "toHaveValue"
+        : (matcherName === "toHaveValue" || matcherName === "toHaveValues")
         ? "Value"
         : Sources.kind(source) ?? "Other"
     )
@@ -186,7 +186,8 @@ export const expectIn = (subject: InPage, expectation: Engine.Expectation, match
     const failed = () =>
       Effect.flatMap(
         // A count or absence is about matching nothing, and a title has no locator: nothing to explain
-        expectation._tag === "Count" || expectation._tag === "Hidden" || expectation._tag === "Title"
+        expectation._tag === "Count" || expectation._tag === "Hidden" || expectation._tag === "Detached" ||
+          expectation._tag === "Title"
           ? Effect.succeed<Explained>({ nearest: Option.none(), suggestions: [] })
           : explain(subject, id),
         (explained) =>
@@ -367,17 +368,31 @@ export const toHaveTitle = (page: Page.ReadonlyPage, expected: string | RegExp) 
 
 // ── The matchers' expectations: what each public matcher expects of its subject ──────────────────────────
 
-const stateOf =
-  (tag: "Visible" | "Hidden" | "Enabled" | "Disabled" | "Checked" | "Focused" | "Editable") =>
-  (matcherName: string, condition: string) =>
-  (locator: Locator.ReadonlyLocator) => expectLocator(locator, { _tag: tag }, matcherName, condition)
+const stateOf = (
+  tag:
+    | "Attached"
+    | "Detached"
+    | "Visible"
+    | "Hidden"
+    | "Enabled"
+    | "Disabled"
+    | "Checked"
+    | "Focused"
+    | "Editable"
+    | "Empty"
+) =>
+(matcherName: string, condition: string) =>
+(locator: Locator.ReadonlyLocator) => expectLocator(locator, { _tag: tag }, matcherName, condition)
 
+export const toBeAttached = stateOf("Attached")("toBeAttached", "to be attached")
+export const toBeDetached = stateOf("Detached")("toBeDetached", "to be detached")
 export const toBeVisible = stateOf("Visible")("toBeVisible", "to be visible")
 export const toBeHidden = stateOf("Hidden")("toBeHidden", "to be hidden")
 export const toBeEnabled = stateOf("Enabled")("toBeEnabled", "to be enabled")
 export const toBeDisabled = stateOf("Disabled")("toBeDisabled", "to be disabled")
 export const toBeChecked = stateOf("Checked")("toBeChecked", "to be checked")
 export const toBeFocused = stateOf("Focused")("toBeFocused", "to have focus")
+export const toBeEmpty = stateOf("Empty")("toBeEmpty", "to be empty")
 export const toBeEditable = stateOf("Editable")("toBeEditable", "to be editable")
 
 export const toHaveText = (
@@ -391,6 +406,20 @@ export const toHaveText = (
     { _tag: "Text", expected: all.map((each) => matcher(each, true)), list },
     "toHaveText",
     `to have the text ${list ? `[${all.map(show).join(", ")}]` : show(all[0]!)}`
+  )
+}
+
+export const toHaveClass = (
+  locator: Locator.ReadonlyLocator,
+  expected: string | RegExp | ReadonlyArray<string | RegExp>
+) => {
+  const list = Array.isArray(expected)
+  const all = (list ? expected : [expected]) as ReadonlyArray<string | RegExp>
+  return expectLocator(
+    locator,
+    { _tag: "Class", expected: all.map((each) => matcher(each, true)), list },
+    "toHaveClass",
+    `to have the class ${list ? `[${all.map(show).join(", ")}]` : show(all[0]!)}`
   )
 }
 
@@ -408,6 +437,22 @@ export const toHaveValue = (locator: Locator.ReadonlyLocator, expected: string |
     { _tag: "Value", expected: matcher(expected, true) },
     "toHaveValue",
     `to have the value ${show(expected)}`
+  )
+
+export const toHaveValues = (locator: Locator.ReadonlyLocator, expected: ReadonlyArray<string | RegExp>) =>
+  expectLocator(
+    locator,
+    { _tag: "Values", expected: expected.map((value) => matcher(value, true)) },
+    "toHaveValues",
+    `to have the values [${expected.map(show).join(", ")}]`
+  )
+
+export const toHaveRole = (locator: Locator.ReadonlyLocator, expected: string) =>
+  expectLocator(
+    locator,
+    { _tag: "Role", expected },
+    "toHaveRole",
+    `to have the role ${show(expected)}`
   )
 
 export const toHaveAttribute = (locator: Locator.ReadonlyLocator, name: string, expected?: string | RegExp) =>
@@ -435,3 +480,60 @@ export const toMatchAria = (locator: Locator.ReadonlyLocator, pattern: AriaPatte
     `to match ${AriaPatterns.describe(data)}`
   )
 }
+
+export const toBeInViewport = (
+  locator: Locator.ReadonlyLocator,
+  options?: { readonly ratio?: number | undefined; readonly inViewport?: boolean | undefined } | undefined
+) => {
+  const ratio = options?.ratio ?? 0
+  const inViewport = options?.inViewport ?? true
+  return expectLocator(
+    locator,
+    { _tag: "Viewport", ratio, inViewport },
+    "toBeInViewport",
+    `to ${inViewport ? "" : "not "}intersect the viewport at ratio ${ratio}`
+  )
+}
+/** Accessible names use the shared engine only when this expectation is requested. */
+export const toHaveAccessibleName = (
+  locator: Locator.ReadonlyLocator,
+  expected: string | RegExp,
+  options?: { readonly ignoreCase?: boolean | undefined } | undefined
+) => {
+  const ignoreCase = options?.ignoreCase
+  const flags = typeof expected === "string" ? "" : expected.flags
+  const text = typeof expected === "string" ? matcher(expected, true) : {
+    _tag: "RegExp" as const,
+    source: expected.source,
+    flags: ignoreCase === undefined ? flags : flags.replace(/i/g, "") + (ignoreCase ? "i" : "")
+  }
+  return expectLocator(
+    locator,
+    { _tag: "AccessibleName", expected: text, ignoreCase: ignoreCase === true },
+    "toHaveAccessibleName",
+    `to have the accessible name ${show(expected)}${
+      ignoreCase === undefined ? "" : ignoreCase ? " ignoring case" : " matching case"
+    }`
+  )
+}
+
+export const toHaveCSS = (
+  locator: Locator.ReadonlyLocator,
+  name: string,
+  expected: string | RegExp,
+  options?: { readonly not?: boolean | undefined; readonly pseudo?: "before" | "after" | undefined }
+) =>
+  expectLocator(
+    locator,
+    {
+      _tag: "CSS",
+      name,
+      expected: matcher(expected, true),
+      not: options?.not ?? false,
+      pseudo: options?.pseudo ?? null
+    },
+    "toHaveCSS",
+    `${options?.not ? "not " : ""}to have the computed CSS ${name}${options?.pseudo ? ` on ::${options.pseudo}` : ""} ${
+      show(expected)
+    }`
+  )

@@ -21,8 +21,8 @@ and does what you claim. Don't run commands that change anything.
 
 <Round 2 and later:> Earlier rounds' findings, and what was done with each:
 <findings, each with: fixed, declined and why, or asked>
-Don't raise a declined finding again unless its fix made the page worse. Check the fixes too: a lead that tells a
-story, gives history or praises is a finding under Orient.
+Don't raise a declined finding again unless its fix made the page worse. Check the fixes too: a lead that follows a
+template, tells a story, gives history, or praises is a finding under Orient.
 
 Check the page against the rubric's four checks, Split, Orient, Example and Consistent, and nothing else. For
 Consistent, compare it with the pages before it and with the style. The audit lists

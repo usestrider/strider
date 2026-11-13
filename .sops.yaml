@@ -1,8 +1,14 @@
-# What sops encrypts in this repository, and to whom: the docs deploy's settings (its Cloudflare token and account),
-# for the maintainer's main age key and the deploy's CI key, whose private half is the SOPS_AGE_KEY secret of the
-# docs-deploy environment (.github/workflows/docs.yml)
+# What sops encrypts in this repository, and to whom:
+# - the docs deploy's settings (its Cloudflare token and account), for the maintainer's main age key and the deploy's
+#   CI key, whose private half is the SOPS_AGE_KEY secret of the docs-deploy environment (.github/workflows/docs.yml);
+# - the scenario recordings bucket's keys, for the maintainer's main age key and the benchmarks' CI key, whose private
+#   half is the SOPS_AGE_KEY secret of the benchmarks environment (.github/workflows/benchmarks.yml)
 creation_rules:
   - path_regex: website/deploy\.sops\.env$
     age: >-
       age1vpv2m4w7erdchjzhuygkf7wpmsk3mm8k26ua744s0fuh6esvxqssfctzaw,
       age16udn6psg5aru7yy4efhvz7j4zlpq5fu067uz74568q4q3h74pvtsjadzus
+  - path_regex: packages/scenarios/recordings\.sops\.env$
+    age: >-
+      age1vpv2m4w7erdchjzhuygkf7wpmsk3mm8k26ua744s0fuh6esvxqssfctzaw,
+      age1cet8hu6757u0k5jhnprlu68snc62737mlq6euzd709wwjc2q7pwssty2t8

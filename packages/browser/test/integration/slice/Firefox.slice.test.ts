@@ -16,7 +16,12 @@ import { events } from "./events.ts"
 import { interaction } from "./interaction.ts"
 import { modules } from "./modules.ts"
 import { recordings } from "./recordings.ts"
+import { requestBodies } from "./requestBodies.ts"
+import { requestSizes } from "./requestSizes.ts"
+import { requestTiming } from "./requestTiming.ts"
 import { slice } from "./slice.ts"
+import { stalledReadProbes } from "./stalledReadProbes.ts"
+import { storageReplacement } from "./storageReplacement.ts"
 import { tooling } from "./tooling.ts"
 import { toolkit } from "./toolkit.ts"
 import { webauthn } from "./webauthn.ts"
@@ -38,3 +43,11 @@ deadlines("Firefox", backend)
 attaching("Firefox", backend, Option.some(firefoxAttachable((endpoint) => Firefox.layerConnect(endpoint))))
 
 webauthn("Firefox", backend)
+
+requestBodies("Firefox", backend)
+requestTiming("Firefox", backend)
+
+storageReplacement("Firefox", backend)
+requestSizes("Firefox", backend)
+
+stalledReadProbes("Firefox", backend)

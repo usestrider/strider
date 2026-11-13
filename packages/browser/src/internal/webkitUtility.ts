@@ -13,6 +13,8 @@
  * It lives in a closure, never on a global, so a page can't reach it.
  */
 
+import * as Argument from "./evaluationArgument.ts"
+
 /** The expression that installs the helper; its value is the helper object. */
 export const source = String.raw`(() => {
   const toStringTag = Object.prototype.toString
@@ -35,9 +37,6 @@ export const source = String.raw`(() => {
   const ErrorType = Error
   const MapType = Map
   const SetType = Set
-  const DateType = Date
-  const RegExpType = RegExp
-  const BigIntType = BigInt
   const batches = new Map()
   let batchId = 0
 
@@ -147,49 +146,7 @@ export const source = String.raw`(() => {
     }
   }
 
-  const deserialize = (value) => {
-    switch (value.type) {
-      case "undefined": return undefined
-      case "null": return null
-      case "string":
-      case "boolean": return value.value
-      case "number":
-        return typeof value.value === "number" ? value.value : value.value === "-0" ? -0 : Number(value.value)
-      case "bigint": return BigIntType(value.value)
-      case "date": return new DateType(value.value)
-      case "regexp": return new RegExpType(value.value.pattern, value.value.flags)
-      case "array": {
-        const items = []
-        const list = value.value || []
-        for (let i = 0; i < list.length; i++) items.push(deserialize(list[i]))
-        return items
-      }
-      case "set": {
-        const set = new SetType()
-        const list = value.value || []
-        for (let i = 0; i < list.length; i++) set.add(deserialize(list[i]))
-        return set
-      }
-      case "map": {
-        const map = new MapType()
-        const list = value.value || []
-        for (let i = 0; i < list.length; i++) {
-          map.set(typeof list[i][0] === "string" ? list[i][0] : deserialize(list[i][0]), deserialize(list[i][1]))
-        }
-        return map
-      }
-      case "object": {
-        const object = {}
-        const list = value.value || []
-        for (let i = 0; i < list.length; i++) {
-          object[typeof list[i][0] === "string" ? list[i][0] : String(deserialize(list[i][0]))] = deserialize(list[i][1])
-        }
-        return object
-      }
-      default:
-        throw new TypeError("A " + value.type + " can't be passed by value; pass a handle")
-    }
-  }
+  const deserialize = ${Argument.decoder}
 
   const encode = (value) => {
     const nodes = []
@@ -220,16 +177,18 @@ export const source = String.raw`(() => {
  * (`"v"` for a value, `"h"` for a handle) first and the arguments after.
  */
 export const call = (fn: string, mode: "value" | "handle", awaitResult: boolean): string =>
-  `function(kinds, ...args) { return this.run((${fn}), kinds, args, ${JSON.stringify(mode)}, ${awaitResult}) }`
+  `((fn) => function(kinds, ...args) { return this.run(fn, kinds, args, ${
+    JSON.stringify(mode)
+  }, ${awaitResult}) })((${fn}))`
 
 /**
  * The function declaration that runs `fn` through the helper, called on another object with the helper first, the
  * argument kinds next and the arguments after: its result joins that object's group (Q132).
  */
 export const callBeside = (fn: string, mode: "value" | "handle", awaitResult: boolean): string =>
-  `function(helper, kinds, ...args) { return helper.run((${fn}), kinds, args, ${
+  `((fn) => function(helper, kinds, ...args) { return helper.run(fn, kinds, args, ${
     JSON.stringify(mode)
-  }, ${awaitResult}) }`
+  }, ${awaitResult}) })((${fn}))`
 
 /** The function declaration that takes a batch of nodes, as an array. */
 export const takeNodes = "function(id) { return this.takeNodes(id) }"
