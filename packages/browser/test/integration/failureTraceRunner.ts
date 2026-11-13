@@ -74,7 +74,7 @@ const save = (file: string, trace: TraceBuffer, scope: string, passing = false):
   }
   if (passing && file !== sharedFile) {
     const needed = new Set(
-      entries.filter((entry) => /^(engine-round-|host-|pointer-)/.test(entry.kind)).flatMap(ownershipKeys)
+      entries.filter((entry) => /^(engine-round-|host-|pointer-|viewport-)/.test(entry.kind)).flatMap(ownershipKeys)
     )
     const local = new Set(entries.filter((entry) => entry.kind === "connection").map(connectionKey))
     const replay = shared.entries().filter((entry) =>
@@ -87,7 +87,7 @@ const save = (file: string, trace: TraceBuffer, scope: string, passing = false):
     entries.unshift(...replay)
   }
   const diagnostics = passing
-    ? entries.filter((entry) => /^(engine-round-|host-|pointer-|overflow$|attribution$)/.test(entry.kind))
+    ? entries.filter((entry) => /^(engine-round-|host-|pointer-|viewport-|overflow$|attribution$)/.test(entry.kind))
     : entries
   // Connection creation alone is not evidence and must not consume the passing budget.
   if (passing && diagnostics.length === 0) return undefined
