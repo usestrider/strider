@@ -123,6 +123,7 @@ export type Action =
     readonly _tag: "Point"
     readonly position: { readonly x: number; readonly y: number } | null
     readonly guard: boolean
+    readonly checked?: boolean | undefined
   }
   | { readonly _tag: "Focus" }
   | { readonly _tag: "SelectText" }
@@ -2080,7 +2081,10 @@ export function engine(render: (root: SnapNode) => string) {
         if (request.checks.editable && !editableKind(element)) {
           return { _tag: "Final", final: { _tag: "NotEditable", element: describe(element) } }
         }
-        if (action._tag === "Checked" && checkedOf(element) === null) {
+        if (
+          (action._tag === "Checked" && checkedOf(element) === null) ||
+          (action._tag === "Point" && action.checked === true && checkableForAction(element) === null)
+        ) {
           return {
             _tag: "Final",
             final: {
@@ -2106,7 +2110,12 @@ export function engine(render: (root: SnapNode) => string) {
       let reason: NotReady | null = null
       if (element === undefined) reason = { _tag: "NoMatch" }
       else if (checks.visible && !rendered(element, false)) reason = { _tag: "NotVisible" }
-      else if (checks.enabled && !enabled(element)) reason = { _tag: "Disabled" }
+      else if (
+        checks.enabled && (
+          !enabled(element) || (action._tag === "Point" && action.checked === true &&
+            !enabled(checkableForAction(element) ?? element))
+        )
+      ) reason = { _tag: "Disabled" }
       else if (checks.editable && readOnly(element)) reason = { _tag: "ReadOnly" }
       else if (checks.notInert && inertReason(element) !== null) reason = inertReason(element)
       else if (checks.inViewport && visibleFragment(element, request.clip) === null) {
