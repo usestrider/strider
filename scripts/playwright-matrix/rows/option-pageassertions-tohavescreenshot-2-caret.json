@@ -1,0 +1,22 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "capabilities": [],
+  "id": "option-pageassertions-tohavescreenshot-2-caret",
+  "upstream": [
+    "method:PageAssertions.toHaveScreenshot#2"
+  ],
+  "option": "caret",
+  "requirements": [],
+  "valueCoverage": [
+    {
+      "value": "hide",
+      "status": "missing"
+    },
+    {
+      "value": "initial",
+      "status": "missing"
+    }
+  ]
+}

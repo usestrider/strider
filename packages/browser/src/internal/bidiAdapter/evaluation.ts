@@ -1,7 +1,7 @@
 /**
  * Realms and evaluation on BiDi: the `script` domain's realms, what they log and throw (`log.entryAdded`), and
  * calls in them. Firefox creates a new document's main-world realm before the document commits: one created for
- * a context whose document already has one is held, pending, for the next commit. Values cross in BiDi's own
+ * a context whose document already has one is held with its sandboxes for the next commit. Values cross in BiDi's own
  * serialization, which L1's `RemoteValue` follows.
  */
 import * as Effect from "effect/Effect"
@@ -161,11 +161,19 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         state.realms.set(realm.bidi, realm)
         state.realmsById.set(realm.id, realm)
         const document = navigable.document
-        // A second main-world realm for a document belongs to the next one, which hasn't committed yet
-        if (document === undefined || (realm.world._tag === "Main" && document.hadMainRealm)) {
+        // A replacement main realm and its sandboxes belong to the next document. A duplicate sandbox
+        // also proves replacement of that world, even if it arrives before the main realm.
+        if (
+          document === undefined || (realm.world._tag === "Main" && document.hadMainRealm) ||
+          navigable.pendingRealms.length > 0 ||
+          (realm.world._tag === "Isolated" && Array.from(document.realms).some((current) =>
+            current.world._tag === "Isolated" && realm.world._tag === "Isolated" &&
+            current.world.name === realm.world.name
+          ))
+        ) {
           realm.pending = true
           navigable.pendingRealms.push(realm)
-          if (realm.world._tag === "Main") navigable.restoring?.(realm)
+          if (realm.world._tag === "Main") navigable.restoring?.arrived(realm)
         } else {
           addWindowRealm(state, realm, document)
         }
@@ -306,7 +314,11 @@ export const realm = Effect.fnUntraced(function*(state: State, id: L1Target.Docu
   })))
   yield* state.root().drainObserved
   const created = state.realms.get(result.realm)
-  if (created === undefined || created.ended) return yield* Effect.fail(replaced())
+  // The creation is addressed to the frame, not the document: a commit meanwhile makes the new realm the
+  // replacement's, which is not the realm asked for, and the requested document is gone.
+  if (created === undefined || created.ended || !state.documents.has(id) || !document.realms.has(created)) {
+    return yield* Effect.fail(replaced())
+  }
   return created.id
 })
 
@@ -325,7 +337,8 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
       // A shared id names a node in every realm of its document
       node: (node) => ({ sharedId: node.binding as Script.SharedId })
     }))
-  // A call cut short when its page closes is `Gone`, not the protocol's error
+  // Firefox may never answer an awaited promise in a destroyed realm. End the call
+  // through the model lifecycle; interrupting send preserves protocol late-reply cleanup.
   const reply = yield* state.send(Script.callFunction({
     functionDeclaration: call.functionDeclaration,
     awaitPromise: call.awaitPromise,
@@ -334,7 +347,22 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
     resultOwnership: keep ? "root" : "none",
     serializationOptions: { maxObjectDepth: keep ? 0 : 64, maxDomDepth: 0 },
     userActivation: call.userActivation
-  })).pipe(Effect.mapError(Kit.realmFailure(id, () => realm.ended)))
+  })).pipe(
+    Effect.catch((error) => {
+      // callFunction targets this exact realm. Firefox can reject it before sending realmDestroyed.
+      const missing = error.reason._tag === "Rejected" && error.reason.reason === "NoSuchFrame"
+      return (missing
+        ? state.buffer.run(() => removeRealm(state, realm, new L1Target.RealmDestroyed({})))
+        : Effect.void).pipe(
+          Effect.andThen(Effect.suspend(() => Effect.fail(Kit.realmFailure(id, () => realm.ended)(error))))
+        )
+    }),
+    Effect.raceFirst(
+      state.buffer.waitFor(() => realm.ended ? true : undefined).pipe(
+        Effect.flatMap(() => Effect.fail(Kit.gone({ _tag: "Realm", id }, new L1Target.RealmDestroyed({}))))
+      )
+    )
+  )
   if (reply.type === "exception") {
     const details = reply.exceptionDetails
     if (keep && "handle" in details.exception && details.exception.handle !== undefined) {

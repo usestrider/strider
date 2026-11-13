@@ -7,21 +7,27 @@ import { assert, describe, it } from "@effect/vitest"
 import {
   AriaRole,
   Browser,
+  Deadline,
   Diagnostics,
   Dialog,
+  Expect,
   FileInput,
   Har,
   LaunchProfile,
   NetworkResponse,
+  Operation as PublicOperation,
   Page,
   PageNavigation,
   Popup,
+  Reason,
   Target,
   Trace
 } from "@usestrider/browser"
 import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Zip from "effect/encoding/Zip"
+import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Stream from "effect/Stream"
@@ -35,6 +41,8 @@ import * as ExportTest from "../src/internal/cli/exportTest.ts"
 import * as CliSession from "../src/internal/cli/session.ts"
 import * as Fake from "../src/internal/fake.ts"
 import * as Firefox from "../src/internal/firefoxLauncher.ts"
+import * as Operation from "../src/internal/operation.ts"
+import * as Recorders from "../src/internal/recorders.ts"
 import * as Spans from "../src/internal/spans.ts"
 import * as ToolkitImpl from "../src/internal/toolkit.ts"
 
@@ -187,7 +195,7 @@ describe("Spans", () => {
 describe("Browser.layerTest", () => {
   it("fails at once on a step it can't read, naming where", () => {
     assert.throws(() => Fake.parse("--resp(cart)--wat"), /"wat" at 14/)
-    assert.throws(() => Fake.parse("dialog(popup)"), /isn't alert, confirm, prompt or beforeunload/)
+    assert.throws(() => Fake.parse("dialog(popup)"), /isn't alert, confirm, prompt, or beforeunload/)
     assert.deepStrictEqual(Fake.parse(" - | ").map((step) => step._tag), ["Tick", "Close"])
   })
 
@@ -253,7 +261,8 @@ const unzip = (file: string) =>
 describe("Recordings", () => {
   it.effect("records a HAR of the timeline's responses, with the library's timings", () =>
     Effect.gen(function*() {
-      const out = path.join(directory(), "cart.har")
+      // The directories on the way don't exist yet: the export creates them
+      const out = path.join(directory(), "test-results", "cart", "cart.har")
       yield* Effect.scoped(Effect.gen(function*() {
         const page = yield* Browser.newPage()
         const har = yield* Har.record(page, { content: "embed" })
@@ -274,9 +283,449 @@ describe("Recordings", () => {
       assert.strictEqual(entry._resourceType, "fetch")
     }).pipe(Effect.provide(NodeServices.layer)))
 
+  it.effect("exports expectation evidence in the viewer's error message", () =>
+    Effect.gen(function*() {
+      const out = path.join(directory(), "expectation.zip")
+      const first = Operation.observed(false)
+      const last = Operation.observed({ text: "Loading", count: 2 })
+      const details = {
+        subject: "cart",
+        condition: "to be visible",
+        last: Option.some(last),
+        history: [first, last],
+        elapsed: Duration.millis(125),
+        checks: { count: 3, triggeredBy: ["initial", "change"] as const },
+        nearest: Option.some("- button \"Cart\""),
+        suggestions: ["getByRole(\"button\", { name: \"Cart\" })"],
+        diagnostics: Operation.diagnostics("OP-test" as Diagnostics.OperationId)
+      }
+      const circular: { self?: unknown } = {}
+      circular.self = circular
+      const unprintable = {
+        toJSON() {
+          throw new Error("cannot encode")
+        },
+        toString() {
+          throw new Error("cannot display")
+        }
+      }
+      const errors = [
+        new Expect.ExpectationFailed(details),
+        new Expect.ExpectationFailed({
+          ...details,
+          last: Option.none(),
+          history: [],
+          nearest: Option.none(),
+          suggestions: [],
+          checks: { count: 0, triggeredBy: [] }
+        }),
+        new Expect.ExpectationFailed({
+          ...details,
+          last: Option.some(Operation.observed(circular)),
+          history: [
+            Operation.observed(1n),
+            Operation.observed(undefined),
+            Operation.observed(circular),
+            Operation.observed(unprintable),
+            Operation.observed(Redacted.make("wrapped-secret"))
+          ]
+        }),
+        new Error("ordinary failure")
+      ]
+      yield* Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const trace = yield* Trace.record(page)
+        for (const error of errors) {
+          const result = yield* Recorders.observe(
+            "Expect.test",
+            { "browser.page.id": page.id },
+            false,
+            Effect.fail(error)
+          ).pipe(Effect.flip)
+          assert.strictEqual(result, error)
+        }
+        yield* trace.exportTrace(out)
+      })).pipe(Effect.provide(Browser.layerTest("")))
+      const files = yield* unzip(out)
+      const failures = files.get("trace.trace")!.trim().split("\n").map((line) => JSON.parse(line))
+        .filter((event) => event.type === "after" && event.error).map((event) => event.error)
+      assert.strictEqual(failures.length, 4)
+      assert.strictEqual(failures[0].name, "ExpectationFailed")
+      for (
+        const evidence of [
+          "Expected cart to be visible",
+          "Last observed:",
+          "Loading",
+          "History:",
+          "false",
+          "Checks: 3 (initial, change)",
+          "Elapsed: 125 ms",
+          "Nearest match:\n- button \"Cart\"",
+          "Suggestions:\ngetByRole(\"button\", { name: \"Cart\" })"
+        ]
+      ) assert.include(failures[0].message, evidence)
+      assert.include(failures[1].message, "Checks: 0")
+      for (const absent of ["Last observed:", "History:", "Nearest match:", "Suggestions:"]) {
+        assert.notInclude(failures[1].message, absent)
+      }
+      assert.include(failures[2].message, "History:")
+      assert.include(failures[2].message, "undefined")
+      assert.include(failures[2].message, "1")
+      assert.include(failures[2].message, "[Unprintable observed value]")
+      assert.notInclude(files.get("trace.trace")!, "wrapped-secret")
+      assert.deepStrictEqual(failures[3], { name: "Error", message: "ordinary failure" })
+    }).pipe(Effect.provide(NodeServices.layer)))
+
+  it.effect("projects locator handler failures into trace messages without serializing original callback data", () =>
+    Effect.gen(function*() {
+      const out = path.join(directory(), "handler-error.zip")
+      const original: { message: string; custom: string; self?: unknown } = {
+        message: "dismiss callback failed",
+        custom: "private-custom-payload"
+      }
+      original.self = original
+      const handlerFailure = new Reason.LocatorHandlerFailed({
+        error: original,
+        trigger: "#overlay",
+        hint: original.message
+      })
+      const error = new Expect.ExpectationFailed({
+        subject: "cart",
+        condition: "to be visible",
+        handlerFailure,
+        last: Option.none(),
+        history: [],
+        elapsed: Duration.millis(1),
+        checks: { count: 1, triggeredBy: ["initial"] },
+        nearest: Option.none(),
+        suggestions: [],
+        diagnostics: Operation.diagnostics("OP-handler" as Diagnostics.OperationId)
+      })
+      yield* Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const trace = yield* Trace.record(page)
+        const received = yield* Recorders.observe(
+          "Expect.toBeVisible",
+          { "browser.page.id": page.id },
+          false,
+          Effect.fail(error)
+        ).pipe(Effect.flip)
+        assert.strictEqual(received, error)
+        assert.strictEqual(error.handlerFailure!.error, original)
+        yield* trace.exportTrace(out)
+      })).pipe(Effect.provide(Browser.layerTest("")))
+      const content = (yield* unzip(out)).get("trace.trace")!
+      assert.include(content, "dismiss callback failed")
+      assert.include(content, "#overlay")
+      assert.notInclude(content, "private-custom-payload")
+      assert.strictEqual(original.self, original)
+    }).pipe(Effect.provide(NodeServices.layer)))
+
+  it.effect("strips classified value evidence from exported expectation errors", () =>
+    Effect.gen(function*() {
+      const out = path.join(directory(), "value.zip")
+      const value = Operation.observed("typed-password-secret")
+      const error = new Expect.ExpectationFailed({
+        subject: "getByLabel(\"Password\")",
+        condition: "to have the value \"expected-password-secret\"",
+        last: Option.some(value),
+        history: [value],
+        elapsed: Duration.millis(100),
+        checks: { count: 1, triggeredBy: ["initial"] },
+        nearest: Option.none(),
+        suggestions: [],
+        diagnostics: Operation.diagnostics("OP-test" as Diagnostics.OperationId)
+      })
+      yield* Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const trace = yield* Trace.record(page)
+        const result = yield* Recorders.observe(
+          "Expect.toHaveValue",
+          { "browser.page.id": page.id },
+          false,
+          Effect.fail(error)
+        ).pipe(Effect.flip)
+        assert.strictEqual(result, error)
+        for (const preset of ["strict", "local"] as const) {
+          yield* trace.exportTrace(out).pipe(Diagnostics.withPreset(preset))
+          const content = (yield* unzip(out)).get("trace.trace")!
+          assert.notInclude(content, "typed-password-secret")
+          assert.notInclude(content, "expected-password-secret")
+          assert.include(content, "Last observed: REDACTED")
+        }
+        assert.include(error.message, "expected-password-secret")
+        assert.deepStrictEqual(error.last, Option.some(value))
+      })).pipe(Effect.provide(Browser.layerTest("")))
+    }).pipe(Effect.provide(NodeServices.layer)))
+
+  for (
+    const [matcher, condition, observed, secrets] of [
+      ["toHaveValues", "to have the values [\"expected-password-secret\"]", ["typed-password-secret"], [
+        "expected-password-secret",
+        "typed-password-secret"
+      ]],
+      ["toHaveValue", "to have the value \"expected-password-secret\"", "typed-password-secret", [
+        "expected-password-secret",
+        "typed-password-secret"
+      ]],
+      [
+        "toHaveURL",
+        "to have the URL \"https://user:password@example.test/done?token=expected-secret#expected-fragment\"",
+        "https://user:password@example.test/start?token=observed-secret#observed-fragment",
+        ["user:", "password@", "expected-secret", "observed-secret", "expected-fragment", "observed-fragment"]
+      ],
+      ["toHaveTitle", "to have the title \"expected-title-secret\"", "observed-title-secret", [
+        "expected-title-secret",
+        "observed-title-secret"
+      ]]
+    ] as const
+  ) {
+    for (const delivered of [true, false]) {
+      it.effect(`keeps ${matcher} classification with ${delivered ? "delivered" : "empty"} history through enclosing operations and rethrows`, () =>
+        Effect.gen(function*() {
+          const out = path.join(directory(), "enclosing.zip")
+          const value = Operation.observed(observed)
+          const error = new Expect.ExpectationFailed({
+            subject: "subject",
+            condition,
+            last: delivered ? Option.some(value) : Option.none(),
+            history: delivered ? [value] : [],
+            elapsed: Duration.millis(100),
+            checks: { count: 1, triggeredBy: ["initial"] },
+            nearest: Option.none(),
+            suggestions: [],
+            diagnostics: Operation.diagnostics("OP-test" as Diagnostics.OperationId)
+          })
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const trace = yield* Trace.record(page)
+            const attributes = { "browser.page.id": page.id }
+            const caught = yield* Recorders.observe(`Expect.${matcher}`, attributes, false, Effect.fail(error)).pipe(
+              PublicOperation.named("checkout", { attributes }),
+              Effect.flip
+            )
+            assert.strictEqual(caught, error)
+            yield* trace.remove
+            // The originating recording has stopped; classification follows the same error into a new one.
+            const later = yield* Trace.record(page)
+            const rethrown = yield* Effect.fail(caught).pipe(
+              PublicOperation.named(matcher === "toHaveURL" ? "Expect.toHaveValue" : "Expect.toHaveURL", {
+                attributes
+              }),
+              Effect.flip
+            )
+            assert.strictEqual(rethrown, error)
+            for (const [index, preset] of (["strict", "local", "strict"] as const).entries()) {
+              for (const [recording, count] of [[trace, 2], [later, 1]] as const) {
+                yield* recording.exportTrace(`${out}-${index}-${count}`).pipe(Diagnostics.withPreset(preset))
+                const content = (yield* unzip(`${out}-${index}-${count}`)).get("trace.trace")!
+                const failures = content.trim().split("\n").map((line) => JSON.parse(line))
+                  .filter((event) => event.type === "after" && event.error).map((event) => event.error)
+                assert.strictEqual(failures.length, count)
+                assert.isTrue(failures.every((failure) => failure.message === failures[0].message))
+                assert.strictEqual(failures[0].name, "ExpectationFailed")
+                if (delivered) {
+                  assert.include(failures[0].message, "Last observed:")
+                  assert.include(failures[0].message, "History:")
+                } else {
+                  assert.notInclude(failures[0].message, "Last observed:")
+                  assert.notInclude(failures[0].message, "History:")
+                }
+                if (matcher !== "toHaveURL") {
+                  const hidden = (matcher === "toHaveValue" || matcher === "toHaveValues") || preset === "strict"
+                  const expectedCondition = hidden
+                    ? (matcher === "toHaveValue" || matcher === "toHaveValues")
+                      ? "to have the value REDACTED"
+                      : "to have the title REDACTED"
+                    : condition
+                  const expectedValue = hidden ? "REDACTED" : observed
+                  assert.strictEqual(
+                    failures[0].message,
+                    [
+                      `Expected subject ${expectedCondition}`,
+                      ...(delivered ? [`Last observed: ${expectedValue}`, "History:", `  ${expectedValue}`] : []),
+                      "Checks: 1 (initial)",
+                      "Elapsed: 100 ms"
+                    ].join("\n")
+                  )
+                }
+                for (const secret of secrets) {
+                  if ((matcher === "toHaveValue" || matcher === "toHaveValues") || preset === "strict") {
+                    assert.notInclude(content, secret)
+                  } else if (delivered || condition.includes(secret)) assert.include(failures[0].message, secret)
+                  else assert.notInclude(content, secret)
+                }
+              }
+            }
+          })).pipe(Effect.provide(Browser.layerTest("")))
+        }).pipe(Effect.provide(NodeServices.layer)))
+    }
+  }
+
+  it.effect("keeps a real URL failure classified when caught before recording and rethrown", () =>
+    Effect.gen(function*() {
+      const out = path.join(directory(), "real-rethrow.zip")
+      yield* Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const pending = yield* page.pipe(
+          Expect.toHaveURL("https://example.test/done?token=expected-secret#fragment-secret"),
+          Deadline.within("100 millis"),
+          Effect.flip,
+          Effect.forkChild
+        )
+        yield* TestClock.adjust("2 seconds")
+        const caught = yield* Fiber.join(pending)
+        assert(Expect.isExpectationFailed(caught), String(caught))
+        const trace = yield* Trace.record(page)
+        const rethrown = yield* Effect.fail(caught).pipe(
+          PublicOperation.named("checkout", { attributes: { "browser.page.id": page.id } }),
+          Effect.flip
+        )
+        assert.strictEqual(rethrown, caught)
+        for (const preset of ["strict", "local", "strict"] as const) {
+          yield* trace.exportTrace(out).pipe(Diagnostics.withPreset(preset))
+          const content = (yield* unzip(out)).get("trace.trace")!
+          if (preset === "strict") {
+            assert.notInclude(content, "expected-secret")
+            assert.notInclude(content, "fragment-secret")
+          } else assert.include(content, "expected-secret#fragment-secret")
+        }
+      })).pipe(Effect.provide(Browser.layerTest("")))
+    }).pipe(Effect.provide(NodeServices.layer)))
+
+  it.effect("hides title evidence only under strict and URL regexps under strict", () =>
+    Effect.gen(function*() {
+      const out = path.join(directory(), "classified.zip")
+      yield* Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const trace = yield* Trace.record(page)
+        for (
+          const [name, condition] of [
+            ["Expect.toHaveTitle", "to have the title \"expected-title-secret\""],
+            ["Expect.toHaveURL", "to have the URL /expected-regexp-secret/"]
+          ]
+        ) {
+          const value = Operation.observed("observed-title-secret")
+          const error = new Expect.ExpectationFailed({
+            subject: `page ${page.id}`,
+            condition: condition!,
+            last: Option.some(value),
+            history: [value],
+            elapsed: Duration.millis(1.703511),
+            checks: { count: 1, triggeredBy: ["initial"] },
+            nearest: Option.none(),
+            suggestions: [],
+            diagnostics: Operation.diagnostics("OP-test" as Diagnostics.OperationId)
+          })
+          yield* Recorders.observe(name!, { "browser.page.id": page.id }, false, Effect.fail(error)).pipe(Effect.flip)
+        }
+        for (const preset of ["strict", "local"] as const) {
+          yield* trace.exportTrace(out).pipe(Diagnostics.withPreset(preset))
+          const content = (yield* unzip(out)).get("trace.trace")!
+          for (const secret of ["expected-title-secret", "observed-title-secret", "expected-regexp-secret"]) {
+            if (preset === "strict") assert.notInclude(content, secret)
+            else assert.include(content, secret)
+          }
+          assert.include(content, "Elapsed: 2 ms")
+        }
+      })).pipe(Effect.provide(Browser.layerTest("")))
+    }).pipe(Effect.provide(NodeServices.layer)))
+
+  it.effect("records a failed URL expectation as a step of the page's trace", () =>
+    Effect.gen(function*() {
+      const out = path.join(directory(), "url-expectation.zip")
+      yield* Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const trace = yield* Trace.record(page)
+        yield* page.goto("https://shop.example.com/account?token=secret-token")
+        const pending = yield* page.pipe(
+          Expect.toHaveURL("https://shop.example.com/done"),
+          Deadline.within("100 millis"),
+          Effect.flip,
+          Effect.forkChild
+        )
+        yield* TestClock.adjust("2 seconds")
+        const error = yield* Fiber.join(pending)
+        assert(Expect.isExpectationFailed(error), String(error))
+        yield* trace.exportTrace(out)
+      })).pipe(Effect.provide(Browser.layerTest("")))
+      const files = yield* unzip(out)
+      const failures = files.get("trace.trace")!.trim().split("\n").map((line) => JSON.parse(line))
+        .filter((event) => event.type === "after" && event.error).map((event) => event.error)
+      // The page's URL expectation is a step of the page's trace, as its locator expectations are
+      const failure = failures.find((error) => error.name === "ExpectationFailed")
+      assert.isDefined(failure, JSON.stringify(failures))
+    }).pipe(Effect.provide(NodeServices.layer)))
+
+  it.effect("redacts observed URLs in an exported expectation message under the strict preset", () =>
+    Effect.gen(function*() {
+      const folder = directory()
+      const actual =
+        "https://observed-user:observed-password@shop.example.com/account?token=secret-token#observed-fragment"
+      const expected =
+        "https://expected-user:expected-password@shop.example.com/done?token=expected-token#expected-fragment"
+      const earlier = Operation.observed("https://shop.example.com/start?token=earlier-token#earlier-fragment")
+      const url = Operation.observed(actual)
+      const error = new Expect.ExpectationFailed({
+        subject: "page N1",
+        condition: `to have the URL ${JSON.stringify(expected)}`,
+        last: Option.some(url),
+        history: [earlier, url],
+        elapsed: Duration.millis(100),
+        checks: { count: 2, triggeredBy: ["initial", "change"] },
+        nearest: Option.none(),
+        suggestions: [],
+        diagnostics: Operation.diagnostics("OP-test" as Diagnostics.OperationId)
+      })
+      yield* Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const trace = yield* Trace.record(page)
+        const original = yield* Recorders.observe(
+          "Expect.toHaveURL",
+          { "browser.page.id": page.id },
+          false,
+          Effect.fail(error)
+        ).pipe(Effect.flip)
+        assert.strictEqual(original, error)
+        for (const [index, preset] of (["strict", "local", "strict"] as const).entries()) {
+          const out = path.join(folder, `${index}.zip`)
+          yield* trace.exportTrace(out).pipe(Diagnostics.withPreset(preset))
+          const files = yield* unzip(out)
+          const content = files.get("trace.trace")!
+          const failure = content.trim().split("\n").map((line) => JSON.parse(line))
+            .find((event) => event.type === "after" && event.error)?.error
+          if (preset === "local") {
+            assert.include(failure.message, actual)
+            assert.include(failure.message, expected)
+            assert.include(failure.message, "earlier-token#earlier-fragment")
+          } else {
+            assert.include(failure.message, "https://shop.example.com/account?token=REDACTED")
+            assert.include(failure.message, "https://shop.example.com/done?token=REDACTED")
+            assert.include(failure.message, "https://shop.example.com/start?token=REDACTED")
+            for (
+              const secret of [
+                "secret-token",
+                "expected-token",
+                "earlier-token",
+                "observed-user",
+                "observed-password",
+                "expected-user",
+                "expected-password",
+                "observed-fragment",
+                "expected-fragment",
+                "earlier-fragment"
+              ]
+            ) assert.notInclude(content, secret)
+          }
+        }
+        assert.deepStrictEqual(error.last, Option.some(url))
+        assert.strictEqual(error.condition, `to have the URL ${JSON.stringify(expected)}`)
+      })).pipe(Effect.provide(Browser.layerTest("")))
+    }).pipe(Effect.provide(NodeServices.layer)))
+
   it.effect("records a trace whose steps nest in the caller's spans", () =>
     Effect.gen(function*() {
-      const out = path.join(directory(), "trace.zip")
+      const out = path.join(directory(), "test-results", "trace.zip")
       const checkout = Effect.fn("checkout")(function*(page: Page.Page) {
         yield* page.goto("https://example.test/cart")
         yield* Effect.ignore(page.title)
@@ -338,7 +787,7 @@ describe("BrowserToolkit", () => {
       const first = yield* Browser.newPage()
       const tools = yield* BrowserToolkit.make({
         context: first.context,
-        secrets: { token: Redacted.make("abc") },
+        secrets: { token: Redacted.make("abc%hidden%") },
         capture: CapturePolicy.local
       })
       const call = (name: BrowserToolkit.ToolName, params: Record<string, unknown>) =>
@@ -348,12 +797,49 @@ describe("BrowserToolkit", () => {
       // A URL's percent-escapes are its own, not secrets
       const opened = yield* call("newPage", { name: "shop", url: "https://example.test/caf%C3%A9" })
       assert.deepStrictEqual(opened.outcome, { page: "shop", url: "https://example.test/caf%C3%A9" })
+      assert.notInclude(opened.sinceLast.join("\n"), "names no secret")
       // A mistyped name is sent as written too; the result shows the secret's value as its name again
       const url = "https://example.test/caf%C3%A9?token=%token%&typo=%tokn%"
       const went = yield* call("goto", { page: "shop", url })
       assert.deepStrictEqual(went.outcome, { url })
+      assert.include(went.sinceLast.join("\n"), "%tokn% names no secret")
+      assert.include(went.sinceLast.join("\n"), "Did you mean %token%?")
+      assert.notInclude(went.sinceLast.join("\n"), "abc")
+      assert.notInclude(went.sinceLast.join("\n"), "%hidden% names no secret")
       const shop = (yield* first.context.pages).find((page) => page.id !== first.id)!
-      assert.strictEqual(yield* shop.url, "https://example.test/caf%C3%A9?token=abc&typo=%tokn%")
+      assert.strictEqual(yield* shop.url, "https://example.test/caf%C3%A9?token=abc%hidden%&typo=%tokn%")
+      const real = yield* call("goto", { page: "shop", url: "https://example.test/?token=%token%" })
+      assert.notInclude(real.sinceLast.join("\n"), "names no secret")
+    })).pipe(Effect.provide(Browser.layerTest(""))))
+
+  it.effect("keeps typed tool failures and redaction while diagnosing original inputs", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const first = yield* Browser.newPage()
+      const tools = yield* BrowserToolkit.make({
+        context: first.context,
+        secrets: { password: Redacted.make("private-secret"), token: Redacted.make("other-secret%hidden%") },
+        capture: CapturePolicy.local
+      })
+      const last = yield* tools.handle("goto", {
+        page: "private-secret",
+        url: "https://example.test/?real=%password%-%token%&typo=%pasword%&again=%pasword%"
+      }).pipe(Effect.flatMap(Stream.runLast), Effect.map(Option.getOrThrow))
+      assert.isTrue(last.isFailure)
+      const failure = last.result as BrowserToolkit.ToolFailure
+      assert.strictEqual(failure.error, "PageNotFound")
+      assert.strictEqual(failure.reason, undefined)
+      assert.include(failure.message, "No page named %password%; the pages are")
+      assert.include(failure.message, "%pasword% names no secret")
+      assert.include(failure.message, "Did you mean %password%?")
+      assert.lengthOf(failure.message.match(/%pasword% names no secret/g) ?? [], 1)
+      assert.notInclude(failure.message, "was sent")
+      assert.notInclude(failure.message, "%hidden% names no secret")
+      assert.notInclude(JSON.stringify(last), "private-secret")
+      assert.notInclude(JSON.stringify(last), "other-secret")
+      const plain = yield* tools.handle("goto", { page: "missing", url: "https://example.test/caf%C3%A9" })
+        .pipe(Effect.flatMap(Stream.runLast), Effect.map(Option.getOrThrow))
+      assert.isTrue(plain.isFailure)
+      assert.notInclude((plain.result as BrowserToolkit.ToolFailure).message, "names no secret")
     })).pipe(Effect.provide(Browser.layerTest(""))))
 
   it.effect("tells of each page it comes to know that no tool opened: one listed in the context, and each popup", () =>

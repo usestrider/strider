@@ -16,7 +16,9 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
+import type * as CommandLine from "effect/process/CommandLine"
 import * as Random from "effect/Random"
+import * as Redacted from "effect/Redacted"
 import { createServer, type Server, type Socket } from "node:net"
 import * as Launch from "../../src/internal/launch.ts"
 import * as WebKitAutomation from "../../src/internal/webkitAutomation.ts"
@@ -24,6 +26,9 @@ import { site } from "./adapter/harness.ts"
 import { webkitgtk } from "./browsers.ts"
 import { socketConnector } from "./sockets.ts"
 import { useXvfb } from "./stockWebKit.ts"
+
+/** A child process's argument or environment value as the test wrote it. */
+const plain = (word: CommandLine.Word): string => Redacted.isRedacted(word) ? Redacted.value(word) : word
 
 const timeout = 90_000
 
@@ -125,6 +130,28 @@ const silentListenerCases = [
 
 describe("Stock WebKit, launched in automation mode", () => {
   layer(NodeServices.layer, { excludeTestServices: true, timeout })((it) => {
+    it.effect(
+      "keeps child snapshot text when time origin reads differ by one millisecond",
+      () =>
+        launched(Effect.gen(function*() {
+          const served = yield* site
+          const page = yield* Browser.newPage()
+          // Model the two adjacent time-origin values observed for one loaded srcdoc document.
+          // Every Automation/inspector pair differs, without a navigation or a timing dependency.
+          const child = `<h2>child heading</h2><script>
+          let reads = 0;
+          const origin = performance.timeOrigin;
+          Object.defineProperty(performance, "timeOrigin", {
+            get() { return origin + (reads++ % 2); }
+          });
+        </script>`
+          yield* page.goto(fixtureUrl(served.origin, `<iframe srcdoc="${child.replaceAll("\"", "&quot;")}"></iframe>`))
+          const snapshot = yield* page.snapshot()
+          assert.include(snapshot.text, "child heading")
+        })),
+      timeout
+    )
+
     for (const { after, before, collisions, name, repeat } of silentListenerCases) {
       it.effect(
         `${name}, and starts the real MiniBrowser owned on another port`,
@@ -157,7 +184,7 @@ describe("Stock WebKit, launched in automation mode", () => {
               if (command._tag === "StandardCommand") {
                 const endpoint = command.options.env?.["WEBKIT_INSPECTOR_SERVER"]
                 if (endpoint !== undefined) {
-                  const port = Number(endpoint.split(":")[1])
+                  const port = Number(plain(endpoint).split(":")[1])
                   ports.push(port)
                 }
               }
@@ -234,6 +261,9 @@ describe("Stock WebKit, launched in automation mode", () => {
         Effect.gen(function*() {
           yield* useXvfb()
           const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+          const occupiedPort = yield* silentListener(() => {})
+          const random = yield* Random.Random
+          let firstChoice = true
           const children: Array<
             {
               readonly pid: number
@@ -249,9 +279,9 @@ describe("Stock WebKit, launched in automation mode", () => {
               if (endpoint !== undefined) {
                 children.push({
                   pid: Number(handle.pid),
-                  port: Number(endpoint.split(":")[1]),
+                  port: Number(plain(endpoint).split(":")[1]),
                   executable: command.command,
-                  args: command.args
+                  args: command.args.map(plain)
                 })
               }
             }
@@ -259,10 +289,21 @@ describe("Stock WebKit, launched in automation mode", () => {
           }))
           yield* WebKitAutomation.start({ executablePath: webkitgtk.executable }).pipe(
             Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, observing),
+            Effect.provideService(Random.Random, {
+              nextIntUnsafe: () => random.nextIntUnsafe(),
+              nextDoubleUnsafe: () => {
+                if (!firstChoice) return random.nextDoubleUnsafe()
+                firstChoice = false
+                // Force the first child to collide with the scoped listener.
+                return (occupiedPort - 49152 + 0.5) / 16384
+              }
+            }),
             Effect.provide(socketConnector)
           )
-          assert.strictEqual(children.length, 1)
-          const child = children[0]!
+          assert.strictEqual(children[0]?.port, occupiedPort)
+          assert.isAtLeast(children.length, 2, "the forced collision must replace the first child")
+          // Successful startup leaves the last spawned child owning the inspector listener.
+          const child = children[children.length - 1]!
           const [executable, args] = Launch.command(webkitgtk.executable, ["--automation"], false)
           assert.strictEqual(child.executable, executable)
           assert.deepStrictEqual(child.args, args)
@@ -299,6 +340,7 @@ describe("Stock WebKit, launched in automation mode", () => {
         launched(Effect.gen(function*() {
           const page = yield* Browser.newPage()
           yield* page.emulate({ viewport: { width: 640, height: 480 } })
+          assert.deepStrictEqual(yield* page.viewportSize, Option.some({ width: 640, height: 480 }))
           assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => [innerWidth, innerHeight]), [640, 480])
           const result = yield* Effect.scoped(page.emulate({ viewport: { width: 1440, height: 1000 } })).pipe(
             Effect.exit
@@ -310,6 +352,7 @@ describe("Stock WebKit, launched in automation mode", () => {
             requested: { width: 1440, height: 1000 },
             actual: { width: 1280, height: 762 }
           })
+          assert.deepStrictEqual(yield* page.viewportSize, Option.some({ width: 640, height: 480 }))
           assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => [innerWidth, innerHeight]), [640, 480])
         })),
       timeout

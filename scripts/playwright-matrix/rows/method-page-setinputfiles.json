@@ -1,0 +1,31 @@
+{
+  "id": "method-page-setinputfiles",
+  "upstream": [
+    "method:Page.setInputFiles"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "Locator.setInputFiles",
+      "url": "/docs/api/browser/Locator#Locator.setInputFiles"
+    }
+  ],
+  "notes": "Use a locator for the element; actions check actionability. Raw ElementHandle identity is not preserved.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [
+    {
+      "unavailable": [
+        "webkit.attached"
+      ],
+      "file": "packages/browser/src/internal/webkitAdapter.ts",
+      "quote": "setInputFiles: refuse(\"fileChooser\", \"stock WebKit's inspector can't set a file input's files\")"
+    }
+  ]
+}

@@ -31,6 +31,8 @@ export type Source =
   | { readonly _tag: "Remote"; readonly path: string }
   | Made
 
+const chunkSize = 64 * 1024
+
 const TypeId = "~@usestrider/browser/FileInput"
 const SourceKey = "~@usestrider/browser/FileInput/source"
 
@@ -143,6 +145,26 @@ function commitUpload(collector: Collector, element: HTMLInputElement) {
   collector.files.length = 0
   return true
 }
+/** The whole upload in one call, for files that fit a single chunk: no collector, no handle to release. */
+function uploadAll(
+  element: HTMLInputElement,
+  files: ReadonlyArray<readonly [string, string, number | undefined, string]>
+) {
+  if (element.type !== "file" || (files.length > 1 && !element.multiple)) return false
+  const transfer = new DataTransfer()
+  for (const [name, mimeType, lastModified, encoded] of files) {
+    const binary = atob(encoded)
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+    transfer.items.add(
+      new File([bytes], name, { type: mimeType, ...(lastModified === undefined ? {} : { lastModified }) })
+    )
+  }
+  element.files = transfer.files
+  element.dispatchEvent(new Event("input", { bubbles: true, composed: true }))
+  element.dispatchEvent(new Event("change", { bubbles: true }))
+  return true
+}
 function discardUpload(collector: Collector) {
   collector.parts.length = 0
   collector.files.length = 0
@@ -183,24 +205,33 @@ export const validateCount = Effect.fnUntraced(
   }
 )
 
-/** Transfer chunks in the upload scope, returning the final assignment to run before that scope closes. */
+/**
+ * Prepare a scoped upload and return its final assignment. All-Bytes selections totaling at most 64 KiB
+ * encode complete files for one assignment call in the engine utility world. Other selections transfer
+ * acknowledged chunks into an isolated-world collector before assignment; stock WebKit uses the page world.
+ */
 export const prepareMade = Effect.fnUntraced(
   function*(runtime: Runtime.Runtime, node: Adapter.NodeBinding, files: ReadonlyArray<TransferFile>, options: {
+    readonly dispatch: Operation.Record
     readonly page: Option.Option<Model.PageEntry>
     readonly at: MonotonicInstant.MonotonicInstant
     readonly id: Diagnostics.OperationId
   }) {
+    // All-Bytes selections totaling at most 64 KiB, including empty ones, reuse the engine utility world.
+    const single = files.every((file): file is Made => file._tag === "Bytes") &&
+      files.reduce((total, file) => total + file.data.length, 0) <= chunkSize
     const realm = yield* Evaluation.documentRealm(
       runtime,
       node.document,
-      yield* Runtime.ownWorld(runtime, Evaluation.isolatedWorld),
+      yield* Runtime.ownWorld(runtime, single ? Runtime.utilityWorld : Evaluation.isolatedWorld),
       options.id
     )
     const call = Effect.fnUntraced(function*(
       fn: Function,
       args: ReadonlyArray<Adapter.LocalValue>,
       result: "value" | "handle" = "value",
-      at = options.at
+      at = options.at,
+      dispatch?: Operation.Record
     ) {
       if ((yield* BrowserClock.left(at)) <= 0) return yield* Effect.fail({ _tag: "Deadline" as const })
       return yield* Evaluation.call(runtime, {
@@ -209,7 +240,9 @@ export const prepareMade = Effect.fnUntraced(
         arguments: args,
         result,
         userActivation: false,
-        ...options,
+        page: options.page,
+        id: options.id,
+        ...(dispatch === undefined ? {} : { dispatch }),
         at
       })
     })
@@ -221,6 +254,22 @@ export const prepareMade = Effect.fnUntraced(
         hint: "The existing selection is unchanged"
       })
     })
+    if (single) {
+      const encoded = (files as ReadonlyArray<Made>).map((file) =>
+        [file.name, file.mimeType, file.lastModified, Encoding.encode(file.data)] as const
+      )
+      const commitAll = Effect.fnUntraced(function*() {
+        const result = yield* call(
+          uploadAll,
+          [{ _tag: "Node", node }, ...yield* Evaluation.toLocal([encoded], realm)],
+          "value",
+          options.at,
+          options.dispatch
+        )
+        if (result.type === "boolean" && !result.value) return yield* Effect.fail(invalid())
+      })
+      return commitAll()
+    }
     const collector = yield* Effect.acquireRelease(
       call(beginUpload, [{ _tag: "Node", node }, ...yield* Evaluation.toLocal([files.length], realm)], "handle"),
       (value) => {
@@ -252,14 +301,14 @@ export const prepareMade = Effect.fnUntraced(
           const info = yield* opened.stat.pipe(Effect.mapError(unreadable))
           lastModified = Option.getOrUndefined(Option.map(info.mtime, (time) => time.getTime()))
           while (true) {
-            const bytes = yield* opened.readAlloc(64 * 1024).pipe(Effect.mapError(unreadable))
+            const bytes = yield* opened.readAlloc(chunkSize).pipe(Effect.mapError(unreadable))
             if (Option.isNone(bytes)) break
             yield* chunk(bytes.value)
           }
         } else {
           lastModified = file.lastModified
-          for (let offset = 0; offset < file.data.length; offset += 64 * 1024) {
-            yield* chunk(file.data.subarray(offset, offset + 64 * 1024))
+          for (let offset = 0; offset < file.data.length; offset += chunkSize) {
+            yield* chunk(file.data.subarray(offset, offset + chunkSize))
           }
         }
         yield* call(finishFile, [
@@ -269,7 +318,7 @@ export const prepareMade = Effect.fnUntraced(
       }))
     }
     const commit = Effect.fnUntraced(function*() {
-      const result = yield* call(commitUpload, [handle, { _tag: "Node", node }])
+      const result = yield* call(commitUpload, [handle, { _tag: "Node", node }], "value", options.at, options.dispatch)
       if (result.type === "boolean" && !result.value) return yield* Effect.fail(invalid())
     })
     return commit()
@@ -279,6 +328,7 @@ export const prepareMade = Effect.fnUntraced(
 /** Prepare and commit in one upload scope for locator actions. */
 export const setMade = Effect.fnUntraced(
   function*(runtime: Runtime.Runtime, node: Adapter.NodeBinding, files: ReadonlyArray<TransferFile>, options: {
+    readonly dispatch: Operation.Record
     readonly page: Option.Option<Model.PageEntry>
     readonly at: MonotonicInstant.MonotonicInstant
     readonly id: Diagnostics.OperationId

@@ -1,0 +1,30 @@
+{
+  "status": "has",
+  "api": [
+    {
+      "module": "Capability",
+      "symbol": "VideoRecording.file",
+      "url": "/docs/api/browser/Capability#VideoRecording.file"
+    }
+  ],
+  "notes": "VideoRecording.file returns the completed local path; use explicit file copying to choose another path.",
+  "capabilities": [
+    "capability.video"
+  ],
+  "id": "option-screencast-start-path",
+  "upstream": [
+    "method:Screencast.start"
+  ],
+  "option": "path",
+  "requirements": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Capability.ts"
+    ],
+    "scope": "Public recording operations inspected; scope, file lifetime and operation-group behavior are stated explicitly."
+  },
+  "configuration": {
+    "chromium": "Provide a VideoWriter service.",
+    "webkit": "Provide polling options and a VideoWriter service."
+  }
+}

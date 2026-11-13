@@ -1,0 +1,24 @@
+{
+  "id": "option-browsertype-launchpersistentcontext-recordvideo",
+  "upstream": [
+    "method:BrowserType.launchPersistentContext"
+  ],
+  "option": "recordVideo",
+  "status": "has",
+  "api": [
+    {
+      "module": "Capability",
+      "symbol": "Video",
+      "url": "/docs/api/browser/Capability#Video"
+    }
+  ],
+  "notes": "Explicit scoped recording with optional writer/polling configuration.",
+  "capabilities": [
+    "capability.video"
+  ],
+  "configuration": {
+    "chromium": "Provide a VideoWriter service.",
+    "webkit": "Provide polling options and a VideoWriter service."
+  },
+  "requirements": []
+}

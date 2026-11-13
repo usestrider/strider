@@ -1,0 +1,25 @@
+{
+  "id": "method-download-cancel",
+  "upstream": [
+    "method:Download.cancel"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Download",
+      "symbol": "Download.cancel",
+      "url": "/docs/api/browser/Download#Download.cancel"
+    }
+  ],
+  "notes": "Download data is scoped; remote files may require explicit local download capability.",
+  "capabilities": [
+    "downloads.cancel"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Download.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

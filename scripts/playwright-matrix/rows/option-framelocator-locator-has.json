@@ -1,0 +1,12 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public option for this contract.",
+  "capabilities": [],
+  "id": "option-framelocator-locator-has",
+  "upstream": [
+    "method:FrameLocator.locator"
+  ],
+  "option": "has",
+  "requirements": []
+}

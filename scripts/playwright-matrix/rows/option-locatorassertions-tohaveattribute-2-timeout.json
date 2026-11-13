@@ -1,0 +1,12 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "capabilities": [],
+  "id": "option-locatorassertions-tohaveattribute-2-timeout",
+  "upstream": [
+    "method:LocatorAssertions.toHaveAttribute#2"
+  ],
+  "option": "timeout",
+  "requirements": []
+}

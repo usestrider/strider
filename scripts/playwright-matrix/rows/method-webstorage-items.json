@@ -1,0 +1,17 @@
+{
+  "id": "method-webstorage-items",
+  "upstream": [
+    "method:WebStorage.items"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "OriginStorage",
+      "symbol": "ReadonlyOriginStorage.entries",
+      "url": "/docs/api/browser/OriginStorage#ReadonlyOriginStorage.entries"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "requirements": []
+}

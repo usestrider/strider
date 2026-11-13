@@ -1,0 +1,12 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public option for this contract.",
+  "capabilities": [],
+  "id": "option-frame-goto-referer",
+  "upstream": [
+    "method:Frame.goto"
+  ],
+  "option": "referer",
+  "requirements": []
+}

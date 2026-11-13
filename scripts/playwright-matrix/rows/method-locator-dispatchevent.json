@@ -1,0 +1,29 @@
+{
+  "id": "method-locator-dispatchevent",
+  "upstream": [
+    "method:Locator.dispatchEvent"
+  ],
+  "status": "different",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "Locator.dispatchEvent",
+      "url": "/docs/api/browser/Locator#Locator.dispatchEvent"
+    }
+  ],
+  "notes": "Owned action waits for one attached match with no default readiness checks, shares deadlines, and dispatches at most once. eventClass explicitly selects the native constructor (Event by default), rather than inferring it from the event name. init crosses by value under evaluation serialization rules: no nested handles or DOM references, and no touch-dictionary or missing-constructor emulation. Missing native constructors are Unsupported; rejected initialization is InvalidInput. Flags bubbles/cancelable/composed default true. Works in frames and in the main world where isolated worlds are unavailable.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "explicit-dom-event-constructors",
+    "quote": "DOM event dispatch explicitly selects a native constructor, defaulting to Event independently of the event name.",
+    "revision": "605f7cfb5321df5274a2cd4d769ceec169c3e52e"
+  }
+}

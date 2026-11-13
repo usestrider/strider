@@ -1,0 +1,31 @@
+{
+  "id": "method-request-response",
+  "upstream": [
+    "method:Request.response"
+  ],
+  "status": "different",
+  "api": [
+    {
+      "module": "NetworkRequest",
+      "symbol": "response",
+      "url": "/docs/api/browser/NetworkRequest#response"
+    }
+  ],
+  "notes": "Scoped opt-in retention of one observed request hop; acquisition must occur within the existing 1000-hop model window on its owning page or context. Returns a bounded response wait, Option.none on completion without a response, and typed unavailable errors for eviction, foreign targets, release or target closure. Each redirect hop resolves separately. Does not retain response bodies.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/NetworkRequest.ts",
+      "packages/browser/src/internal/networkRequest.ts",
+      "packages/browser/test/NetworkLifetime.test.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "pay-for-what-you-use",
+    "quote": "Optional browser features do work only when requested, within the owning context or operation.",
+    "revision": "b394e41022892dc667e61f1693cda15eb4440668"
+  }
+}

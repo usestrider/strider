@@ -1,0 +1,20 @@
+{
+  "status": "has",
+  "api": [
+    {
+      "module": "Emulation",
+      "symbol": "Media",
+      "url": "/docs/api/browser/Emulation#Media"
+    }
+  ],
+  "notes": "Set the scoped media emulation value; remove its registration to restore prior values.",
+  "capabilities": [
+    "emulation.media"
+  ],
+  "id": "option-page-emulatemedia-contrast",
+  "upstream": [
+    "method:Page.emulateMedia"
+  ],
+  "option": "contrast",
+  "requirements": []
+}

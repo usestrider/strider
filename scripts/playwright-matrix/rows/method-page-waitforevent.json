@@ -1,0 +1,17 @@
+{
+  "id": "method-page-waitforevent",
+  "upstream": [
+    "method:Page.waitForEvent"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No arbitrary event-name wait dispatcher; use each event module. Event-specific rows show which events are available.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

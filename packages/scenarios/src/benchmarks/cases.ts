@@ -1,4 +1,12 @@
-import { ConsoleMessage, Expect, NetworkResponse, type Page } from "@usestrider/browser"
+import {
+  Browser,
+  ConsoleMessage,
+  type Declaration,
+  Expect,
+  type Locator,
+  NetworkResponse,
+  type Page
+} from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import type * as Scope from "effect/Scope"
 import * as assert from "node:assert/strict"
@@ -14,8 +22,9 @@ export interface Case {
   readonly fixture?: string
   readonly strider: (page: Page.Page, origin: string) => Effect.Effect<unknown, unknown, Scope.Scope>
   readonly playwright: (page: Playwright.Page, origin: string) => Promise<unknown>
-  readonly prepareStrider?: (page: Page.Page) => Effect.Effect<unknown, unknown>
+  readonly prepareStrider?: (page: Page.Page) => Effect.Effect<unknown, unknown, Scope.Scope | Browser.Browser>
   readonly preparePlaywright?: (page: Playwright.Page) => Promise<unknown>
+  readonly cleanupPlaywright?: (page: Playwright.Page) => Promise<void>
   readonly verify: (value: unknown) => void
 }
 
@@ -61,6 +70,13 @@ const snapshot = () =>
     label: input.getAttribute("aria-label")
   }))
 
+const presentationHeadings = () => {
+  document.body.innerHTML = Array.from(
+    { length: 100 },
+    (_, index) => `<h3 role="none" tabindex="0.5">Item ${index}</h3>`
+  ).join("")
+}
+
 const snapshots: ReadonlyArray<Case> = [100, 1000].map((size) => ({
   name: `read-snapshot-${size}`,
   description:
@@ -76,7 +92,157 @@ const snapshots: ReadonlyArray<Case> = [100, 1000].map((size) => ({
   })))
 }))
 
+// The driver overlays this identical harness onto both refs. Older refs omit optional handler setup only.
+const unusedPages = (mode: "never" | "other" | "removed"): Case => {
+  const actions = new WeakMap<Page.Page, Effect.Effect<string, unknown>>()
+  const extraContexts = new WeakMap<Playwright.Page, Playwright.BrowserContext>()
+  return {
+    name: `unused-handlers-${mode}`,
+    description:
+      `Fill and assert through a previously created locator with extra pages/contexts; handler setup ${mode}, excluded`,
+    prepareStrider: Effect.fnUntraced(function*(page) {
+      const locator = page.getByLabel("Name")
+      actions.set(
+        page,
+        Effect.gen(function*() {
+          yield* locator.fill("untouched")
+          yield* Expect.toBeVisible(locator)
+          return yield* locator.readValue
+        })
+      )
+      const sameContext = yield* page.context.newPage
+      const context = yield* Browser.newContext()
+      const elsewhere = yield* context.newPage
+      if (mode !== "never") {
+        const targets = mode === "other" ? [sameContext, elsewhere] : [page]
+        for (const target of targets) {
+          const optional = target as Page.Page & {
+            readonly addLocatorHandler?: (
+              locator: Locator.Locator,
+              handler: () => Effect.Effect<void>,
+              options: { readonly noWaitAfter: boolean }
+            ) => Effect.Effect<Declaration.Registration, unknown, Scope.Scope>
+          }
+          if (typeof optional.addLocatorHandler === "function") {
+            const registration = yield* optional.addLocatorHandler(
+              target.locator("body"),
+              () => Effect.die("An unused-page handler was invoked"),
+              { noWaitAfter: true }
+            )
+            if (mode === "removed") yield* registration.remove
+          }
+        }
+      }
+      yield* page.activate
+    }),
+    preparePlaywright: async (page) => {
+      const sameContext = await page.context().newPage()
+      const context = await page.context().browser()!.newContext()
+      extraContexts.set(page, context)
+      const elsewhere = await context.newPage()
+      if (mode !== "never") {
+        for (const target of mode === "other" ? [sameContext, elsewhere] : [page]) {
+          const locator = target.locator("body")
+          await target.addLocatorHandler(locator, () => {
+            throw new Error("An unused-page handler was invoked")
+          }, { noWaitAfter: true })
+          if (mode === "removed") await target.removeLocatorHandler(locator)
+        }
+      }
+      await page.bringToFront()
+    },
+    cleanupPlaywright: async (page) => {
+      await extraContexts.get(page)?.close()
+      extraContexts.delete(page)
+    },
+    strider: (page) => actions.get(page)!,
+    playwright: async (page) => {
+      const locator = page.getByLabel("Name")
+      await locator.fill("untouched")
+      await locator.waitFor({ state: "visible" })
+      return locator.inputValue()
+    },
+    verify: equals("untouched")
+  }
+}
+
+// Native intersection control: playwright-core has no assertion package. Its locator evaluation
+// retains the normal protocol/tracing path and bounds the native observer by the usual case timeout.
+const waitForViewport = (element: Element) =>
+  new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      observer.disconnect()
+      reject(new Error("Viewport intersection did not become positive"))
+    }, 30_000)
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0]!.intersectionRatio <= 0) return
+      observer.disconnect()
+      clearTimeout(timer)
+      resolve()
+    })
+    observer.observe(element)
+  })
+
+const moveIntoViewport = () => {
+  const target = document.querySelector<HTMLElement>("#viewport-target")!
+  target.style.position = "fixed"
+  target.style.top = "2000px"
+  target.style.left = "0px"
+  target.style.width = "100px"
+  target.style.height = "100px"
+  setTimeout(() => {
+    target.style.top = "0px"
+  }, 100)
+}
+
+export const viewportCases: ReadonlyArray<Case> = [
+  ...[false, true].map((retry): Case => ({
+    name: retry ? "viewport-retry" : "viewport-ready",
+    description: retry
+      ? "Warm-engine viewport assertion after arming a 100ms offscreen-to-onscreen transition; timer setup and wait included"
+      : "Warm-engine viewport assertion on an intersecting heading; setup excluded",
+    prepareStrider: (page) => page.getByRole("heading").readText,
+    preparePlaywright: (page) => page.getByRole("heading").textContent(),
+    strider: Effect.fnUntraced(function*(page) {
+      if (retry) yield* page.evaluateInMainWorld(moveIntoViewport)
+      yield* page.locator(retry ? "#viewport-target" : "h1").pipe(Expect.toBeInViewport())
+    }),
+    playwright: async (page) => {
+      if (retry) await page.evaluate(moveIntoViewport)
+      await page.locator(retry ? "#viewport-target" : "h1").evaluate(waitForViewport)
+    },
+    fixture: retry ? "/benchmark-viewport" : "/benchmark",
+    verify: equals(undefined)
+  })),
+  {
+    name: "cold-locator-read",
+    description:
+      "First locator read in a fresh document, including engine installation; page/navigation setup excluded",
+    strider: (page) => page.getByRole("heading").readText,
+    playwright: (page) => page.getByRole("heading").textContent(),
+    verify: equals("Benchmark")
+  }
+]
+
+export const viewportMeasurementNames = [
+  "viewport-ready",
+  "viewport-retry",
+  "cold-locator-read"
+]
+export const handlerMeasurementNames = [
+  ...viewportMeasurementNames,
+  "unused-handlers-never",
+  "unused-handlers-other",
+  "unused-handlers-removed",
+  "click",
+  "visible"
+]
+
 export const cases: ReadonlyArray<Case> = [
+  ...viewportCases,
+  unusedPages("never"),
+  unusedPages("other"),
+  unusedPages("removed"),
   bodyCase("response-body-small", 4096),
   bodyCase("response-body-large", 4 * 1024 * 1024),
   {
@@ -91,6 +257,19 @@ export const cases: ReadonlyArray<Case> = [
       return page.title()
     },
     verify: equals("Shop")
+  },
+  {
+    name: "navigate-title-locator",
+    description: "Navigate through load, read the title, then resolve and read a heading",
+    strider: Effect.fnUntraced(function*(page, origin) {
+      yield* page.goto(`${origin}/`, { waitUntil: "load" })
+      return [yield* page.title, yield* page.getByRole("heading").readText]
+    }),
+    playwright: async (page, origin) => {
+      await page.goto(`${origin}/`, { waitUntil: "load" })
+      return [await page.title(), await page.getByRole("heading").textContent()]
+    },
+    verify: equals(["Shop", "Shop"])
   },
   {
     name: "resources",
@@ -127,6 +306,19 @@ export const cases: ReadonlyArray<Case> = [
       return values
     },
     verify: equals(Array.from({ length: 20 }, () => "Benchmark"))
+  },
+  {
+    name: "role-presentation",
+    description: "20 role counts over 100 presentational headings with focusable decimal tabindex (ms per batch)",
+    prepareStrider: (page) => page.evaluateInMainWorld(presentationHeadings),
+    preparePlaywright: (page) => page.evaluate(presentationHeadings),
+    strider: (page) => Effect.forEach(Array.from({ length: 20 }), () => page.getByRole("heading").count),
+    playwright: async (page) => {
+      const counts = []
+      for (let i = 0; i < 20; i++) counts.push(await page.getByRole("heading").count())
+      return counts
+    },
+    verify: equals(Array.from({ length: 20 }, () => 100))
   },
   {
     name: "locator-values",
@@ -396,7 +588,7 @@ export const captureCases: ReadonlyArray<Case> = [
     description: "Capture a seeded dense 1280 by 2880 canvas full page as PNG; setup excluded",
     prepareStrider: (page) => page.evaluateInMainWorld(prepareDenseCapture),
     preparePlaywright: (page) => page.evaluate(prepareDenseCapture),
-    strider: (page) => page.screenshot({ area: { _tag: "FullPage" } }),
+    strider: (page) => page.screenshot({ area: "fullPage" }),
     playwright: (page) => page.screenshot({ type: "png", fullPage: true }),
     verify: verifyDensePng
   },
@@ -422,7 +614,7 @@ export const captureCases: ReadonlyArray<Case> = [
     description: "Capture a prepared 1280 by 2880 full page as PNG; fixture setup excluded",
     prepareStrider: (page) => page.evaluateInMainWorld(prepareCapture),
     preparePlaywright: (page) => page.evaluate(prepareCapture),
-    strider: (page) => page.screenshot({ area: { _tag: "FullPage" } }),
+    strider: (page) => page.screenshot({ area: "fullPage" }),
     playwright: (page) => page.screenshot({ type: "png", fullPage: true }),
     verify: verifyPng(1280, 2880, [12, 34, 56])
   },
@@ -431,7 +623,7 @@ export const captureCases: ReadonlyArray<Case> = [
     description: "Capture a prepared visible 320 by 180 element as PNG; fixture setup excluded",
     prepareStrider: (page) => page.evaluateInMainWorld(prepareCapture),
     preparePlaywright: (page) => page.evaluate(prepareCapture),
-    strider: (page) => page.screenshot({ area: { _tag: "Element", locator: page.locator("#capture") } }),
+    strider: (page) => page.screenshot({ area: { element: page.locator("#capture") } }),
     playwright: (page) => page.locator("#capture").screenshot({ type: "png" }),
     verify: verifyPng(320, 180, [200, 100, 50])
   }

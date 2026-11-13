@@ -1,11 +1,11 @@
 ---
 title: Routes
-description: Declarations and their scope, route handlers and the decisions they return, the response phase, HTTP authentication, and replaying a recording.
+description: Mocking, changing, or blocking a page's requests.
 order: 4
 ---
 
-A page that talks to a real backend shows whatever data and failures the backend has that run. A route decides
-each matching request before it leaves the browser, so the page gets the answer you chose.
+A route intercepts the requests that match it, and its handler decides what happens to each: let it through,
+change it, answer it, or fail it.
 
 ## Declarations
 
@@ -14,7 +14,7 @@ A declaration is a setting held for a scope: a route, an [init script](/docs/eve
 [emulated setting or a granted permission](/docs/pages/contexts#settings-for-a-while), a
 [dialog or file chooser handler](/docs/events/kinds#dialogs-and-file-choosers).
 
-- The browser confirms it before the call returns, so it applies from the next line.
+- The browser confirms it before the call returns. A route is in force for requests that start after its declaration returns.
 - It's removed when its scope closes, or earlier with its handle's `remove`.
 
 ## Handlers and decisions
@@ -52,14 +52,18 @@ const asTestAccount = Effect.fn("asTestAccount")(function*(page: Page.Page) {
 | [`Route.abort(reason?)`](/docs/api/browser/Route#abort) | fails, as a network error would                                          |
 | `Route.fallthrough`         | asks the next route that matches, or lets the request continue           |
 
-- A pattern is a glob, a URL or a `URLPattern`.
+- A pattern is a glob, a URL, or a `URLPattern`.
 - A handler runs in the request phase, before the request is sent, unless given a `phase`.
+- On Chromium, a request already underway without response interception may miss a later response route, even
+  before its headers arrive. Existing response pauses select the current routes by precedence.
 - On Chromium, a route also sees a cross-origin request's CORS preflight, an `OPTIONS` request, which Firefox and
   WebKit don't show.
+- On Chromium, a prefetch sent through `<script type="speculationrules">` isn't passed to the page's or context's
+  routes and reaches the server as the page sent it.
 - The page's routes are asked before its context's, the newest first; `fallthrough` passes to the next.
 - A route's handle counts the requests it was asked about in [`hits`](/docs/pages/attaching#access-levels), a
   watchable number.
-- A handler that fails, is interrupted or times out lets the request continue. So does a decision the browser
+- A handler that fails, is interrupted, or times out lets the request continue. So does a decision the browser
   can't apply, which fails with `Unsupported`: a `continueWith` to a new URL on Firefox, which would abort the
   request, or an `abort` reason other than `"failed"` anywhere but Chromium. The failure is logged and reported as
   an [`AutoResolution`](/docs/events/events#event-modules) event.
@@ -67,7 +71,7 @@ const asTestAccount = Effect.fn("asTestAccount")(function*(page: Page.Page) {
 Each decision is an Effect, so a handler returns it directly. After other work in a generator, use
 `return yield*` to return its decision, as in the response handler below.
 
-A handler gets the paused request, so it can decide by method, headers or body, and pass the rest on with
+A handler gets the paused request, so it can decide by method, headers, or body, and pass the rest on with
 `fallthrough`. The handle's `remove` ends a route before its scope does, to see the page recover:
 
 ```ts
@@ -120,7 +124,7 @@ const freshApi = Effect.fn("freshApi")(function*(page: Page.Page) {
 - Reading `intercepted.responseBody` and fulfilling with a patched copy: Chromium only.
 - WebKit does neither.
 
-To switch on a feature flag the real server sends off, decode its body, patch it and fulfill with the copy:
+To switch on a feature flag the real server sends off, decode its body, patch it, and fulfill with the copy:
 
 ```ts
 import { Expect, Page, Route } from "@usestrider/browser"
@@ -151,10 +155,40 @@ const enableNewCheckout = Effect.fn("enableNewCheckout")(function*(page: Page.Pa
 
 ## HTTP authentication
 
-A site behind HTTP authentication asks the browser for credentials, where no locator can reach. With no route to
-answer, the page gets the server's own response, such as its `401` page, on Chromium and Firefox, and `goto` returns
-it; on WebKit the navigation waits for an answer nothing gives, until it times out. `{ phase: "auth" }` answers the
-challenge with credentials instead, on Chromium and Firefox:
+A site behind HTTP authentication asks the browser for credentials, where no locator can reach. Set
+`httpCredentials` when creating a context or page to answer challenges for its pages and subresources:
+
+```ts
+import { Browser } from "@usestrider/browser"
+import { Config, Effect } from "effect"
+
+const openStaging = Effect.fn("openStaging")(function*() {
+  const password = yield* Config.Redacted("STAGING_PASSWORD")
+  const page = yield* Browser.newPage({
+    httpCredentials: {
+      origin: "https://staging.example.com",
+      username: "ada",
+      password
+    }
+  })
+  yield* page.goto("https://staging.example.com")
+}, Effect.scoped)
+```
+
+The password is `Redacted`. The optional origin matches scheme, hostname, and effective port; omit it to allow
+any website origin. Credentials answer challenges rather than adding an authorization header to every request.
+The pair is submitted once across the whole request and redirect chain. A later challenge in the chain is
+canceled, even at another origin. Proxy challenges never receive this
+pair; configure [proxy credentials](/docs/pages/proxies) separately. Chromium enables interception for the configured
+context, which can affect request timing. Omitting this option adds no interception or credential retry state.
+Firefox cancels ambiguous website/proxy challenges instead of supplying either automatic pair.
+Stock WebKit refuses the option with `Unsupported`.
+
+For a handler that chooses credentials per challenge, register an auth route. Page routes run first, then context
+routes, then configured credentials if every route falls through. `Route.continue` cancels authentication and
+prevents the configured pair from being used; a failed handler also keeps the existing cancellation behavior.
+With neither credentials nor an auth route, the page gets the server's own `401` response on Chromium and Firefox,
+and `goto` returns it; on WebKit the navigation waits until it times out.
 
 ```ts
 import { Page, Route } from "@usestrider/browser"
@@ -175,17 +209,17 @@ A challenge the route lets continue, with `Route.continue` or a handler that fai
 too; the browser's prompt never opens. On WebKit an `auth` route fails with `Unsupported`, since WebKit answers
 challenges only from credentials set in advance.
 
-- On Chromium, a challenge to a `fetch`, an image or a script with no route still waits on Chromium's own prompt,
+- On Chromium, a challenge to a `fetch`, an image, or a script with no route still waits on Chromium's own prompt,
   until it times out: only a document's is answered without one, since pausing every request would slow them all.
-  An `auth` route on its URL answers it.
+  An `auth` route on its URL or context HTTP credentials answers it.
 - A page in a context Strider didn't create, such as a tab of a browser it [attached](/docs/pages/attaching) to,
   keeps the browser's own answer.
 
 ## Replaying a recording
 
-A recorded backend answers the same way every run, with no server running. `Route.fromHar` reads a HAR file, from
-[`Har.record`](/docs/tools/recordings) or another tool, and makes a handler that answers each request from the
-entry matching its method, URL and body. Reading the file needs Effect's `FileSystem`, so build the backend's layer
+`Route.fromHar` makes a handler that answers requests from a HAR file, recorded by
+[`Har.record`](/docs/tools/recordings) or another tool, so the page gets the same answers every run, with no server
+running. Each request is answered from the entry matching its method, URL, and body. Reading the file needs Effect's `FileSystem`, so build the backend's layer
 with `Layer.provideMerge(NodeServices.layer)` instead of `Layer.provide`, and the program gets it too:
 
 ```ts

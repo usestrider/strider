@@ -1,0 +1,23 @@
+{
+  "id": "method-response-ok",
+  "upstream": [
+    "method:Response.ok"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "NetworkResponse",
+      "symbol": "NetworkResponse",
+      "url": "/docs/api/browser/NetworkResponse#NetworkResponse"
+    }
+  ],
+  "notes": "Check status >= 200 && status <= 299 on the response value. No additional browser wait or request-body read is involved.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/NetworkResponse.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

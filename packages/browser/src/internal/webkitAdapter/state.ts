@@ -36,6 +36,8 @@ import * as WebKitWire from "../webkitWire.ts"
 // ── Entries ───────────────────────────────────────────────────────────────────────────────────────────────
 
 export interface ContextEntry {
+  readonly requestSizes?: Map<string, import("../requestSizes.ts").Collector> | undefined
+  readonly requestTiming?: Map<string, import("../requestTiming.ts").Collector> | undefined
   readonly id: UserContext.Id
   /** WebKit's id; the default context's too, once a page in it reports it. */
   browserContextId: string | undefined
@@ -44,10 +46,13 @@ export interface ContextEntry {
 }
 
 export interface PageEntry {
+  event: Event
   readonly id: L1Target.NavigableId
   readonly pageProxyId: string
   readonly session: ProtocolClient.Session
   readonly context: ContextEntry
+  /** Document body reads still using this page’s resources, independent of the bounded request history. */
+  readonly retaining: Set<RequestEntry>
   readonly popup: boolean
   readonly ready: Deferred.Deferred<void, Adapter.AdapterError>
   /** The committed target, and the one a cross-site navigation is loading in. */
@@ -62,6 +67,7 @@ export interface PageEntry {
 }
 
 export interface TargetEntry {
+  event: Event
   readonly targetId: string
   readonly session: ProtocolClient.Session
   readonly page: PageEntry
@@ -75,6 +81,7 @@ export interface TargetEntry {
 }
 
 export interface WorkerEntry {
+  event: Event
   readonly workerId: string
   readonly session: ProtocolClient.Session
   readonly target: TargetEntry
@@ -132,6 +139,8 @@ export interface RequestEntry {
   readonly session: ProtocolClient.Session
   /** WebKit's id, its target's own. */
   readonly requestId: string
+  /** The request event’s loader key, when reported. */
+  readonly loaderId: string | undefined
   redirects: number
   hop: NetworkRequest.HopId
   /** The last hop a response was reported for: WebKit can report one twice. */
@@ -188,6 +197,7 @@ export interface HandleEntry {
 // ── The state ─────────────────────────────────────────────────────────────────────────────────────────────
 
 export interface State {
+  readonly handlers: Kit.Handlers<Event>
   readonly options: Adapter.ConnectOptions
   readonly ids: Kit.Ids
   readonly buffer: Kit.FactBuffer
@@ -253,6 +263,7 @@ export interface State {
 /** A connection's empty state. */
 export const make = (options: {
   readonly connect: Adapter.ConnectOptions
+  readonly handlers: Kit.Handlers<Event>
   readonly ids: Kit.Ids
   readonly buffer: Kit.FactBuffer
   readonly control: ProtocolClient.FoldControl
@@ -267,6 +278,7 @@ export const make = (options: {
   const hops = new Map<NetworkRequest.HopId, RequestEntry>()
   const defaultContext = options.ids.userContext()
   return {
+    handlers: options.handlers,
     options: options.connect,
     ids: options.ids,
     buffer: options.buffer,
@@ -326,23 +338,36 @@ export const make = (options: {
 
 /** What a fold handler gets beside the event's params: the state, and where the session that sent it is. */
 export interface Event {
-  readonly state: State
+  state: State
+  handlers: Kit.Handlers<Event>
   readonly session: ProtocolClient.Session
   readonly page: PageEntry | undefined
   readonly target: TargetEntry | undefined
   readonly worker: WorkerEntry | undefined
 }
 
+/** A prebound native dispatch context; its default table is shared and has no optional feature probes. */
+export const eventContext = (
+  state: State,
+  session: ProtocolClient.Session,
+  page: PageEntry | undefined,
+  target: TargetEntry | undefined,
+  worker: WorkerEntry | undefined
+): Event => ({ state, handlers: state.handlers, session, page, target, worker })
+
 /** Where a session is: a worker's, a target's, or a page proxy's. */
 export const eventOf = (state: State, session: ProtocolClient.Session): Event => {
   const worker = state.workers.get(session)
-  if (worker !== undefined) return { state, session, page: worker.target.page, target: worker.target, worker }
+  if (worker !== undefined) return worker.event
   const target = state.targets.get(session)
-  if (target !== undefined) return { state, session, page: target.page, target, worker: undefined }
+  if (target !== undefined) return target.event
   const key = session.key
-  if (key === undefined) return { state, session, page: undefined, target: undefined, worker: undefined }
+  if (key === undefined) return eventContext(state, session, undefined, undefined, undefined)
   const route = WebKitWire.route(key)
-  return { state, session, page: state.pagesByProxy.get(route.pageProxyId), target: undefined, worker: undefined }
+  const page = state.pagesByProxy.get(route.pageProxyId)
+  return page !== undefined && page.session === session
+    ? page.event
+    : eventContext(page?.event.state ?? state, session, page, undefined, undefined)
 }
 
 // ── Keys ──────────────────────────────────────────────────────────────────────────────────────────────────

@@ -10,6 +10,7 @@ import * as Inspector from "@usestrider/browser/cdp/Inspector"
 import * as Page from "@usestrider/browser/cdp/Page"
 import * as Preload from "@usestrider/browser/cdp/Preload"
 import * as Runtime from "@usestrider/browser/cdp/Runtime"
+import * as SystemInfo from "@usestrider/browser/cdp/SystemInfo"
 import * as Target from "@usestrider/browser/cdp/Target"
 import * as Tracing from "@usestrider/browser/cdp/Tracing"
 import { CdpConnection, Protocol, Transport } from "@usestrider/browser/protocol"
@@ -17,10 +18,11 @@ import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Stream from "effect/Stream"
-import { readFile } from "node:fs/promises"
 import { createServer } from "node:http"
 import * as ChromiumLauncher from "../../../src/internal/chromiumLauncher.ts"
+import * as DevToolsActivePort from "../../../src/internal/devToolsActivePort.ts"
 import { assertPinned, chromium } from "../browsers.ts"
+import { enabled as nativeEnabled, recordNative } from "../nativeCrash.ts"
 
 const serve = Effect.acquireRelease(
   Effect.promise(async () => {
@@ -84,8 +86,7 @@ describe("Chromium reconnect identity probes", () => {
             const driver = yield* CdpConnection.make(transport)
             const version = yield* Browser.getVersion().pipe(Protocol.on(driver.browser))
             assertPinned("Chromium", version.product.split("/")[1]!, chromium.version)
-            const [port] = (yield* Effect.promise(() => readFile(`${launched.userDataDir}/DevToolsActivePort`, "utf8")))
-              .split("\n")
+            const { port } = yield* DevToolsActivePort.read(launched.userDataDir)
             const endpoint = () =>
               Effect.promise(async () => {
                 const response = await fetch(`http://127.0.0.1:${port}/json/version`)
@@ -250,8 +251,33 @@ describe("Chromium reconnect identity probes", () => {
               assert.isNotEmpty(oldToken)
               const crashes = yield* session.subscribe(Inspector.targetCrashed)
               const crashed = yield* Stream.runHead(crashes).pipe(Effect.forkChild)
+              // Mark this existing deliberate crash separately from an unexpected worker crash.
+              const native = nativeEnabled
+                ? yield* SystemInfo.getProcessInfo().pipe(
+                  Protocol.on(driver.browser),
+                  Effect.map(({ processInfo }) => ({
+                    processInfo,
+                    captureError: null as string | null
+                  })),
+                  Effect.catch((error) => Effect.succeed({ processInfo: [], captureError: String(error) }))
+                )
+                : undefined
+              const intent = {
+                started: new Date().toISOString(),
+                test: "Chromium reconnect identity probes > crash (direct page attachment)",
+                targetId: subject.targetId,
+                session: session.key,
+                version,
+                browserPid: native?.processInfo.find((info) => info.type === "browser")?.id,
+                rendererPids: native?.processInfo.filter((info) => info.type === "renderer").map((info) => info.id),
+                captureError: native?.captureError
+              }
+              yield* Effect.sync(() => recordNative("deliberate-crash.json", intent))
               yield* Page.crash().pipe(Protocol.on(session), Effect.ignore, Effect.forkChild)
               yield* Fiber.join(crashed)
+              yield* Effect.sync(() =>
+                recordNative("deliberate-crash.json", { ...intent, observed: new Date().toISOString() })
+              )
               const during = yield* targets
               console.log("identity crashed", JSON.stringify(during))
               const crashedPage = during.find((info) => info.type === "page" && info.targetId === subject.targetId)

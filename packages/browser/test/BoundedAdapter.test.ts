@@ -10,9 +10,11 @@ import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import * as Adapter from "../src/internal/adapter.ts"
 import * as BoundedAdapter from "../src/internal/boundedAdapter.ts"
+import * as Input from "../src/internal/input.ts"
 import * as Operation from "../src/internal/operation.ts"
 import * as ProtocolClient from "../src/internal/protocolClient.ts"
 import type * as Target from "../src/Target.ts"
@@ -29,6 +31,7 @@ const stub = (overrides: Partial<Adapter.AdapterConnection>) =>
   BoundedAdapter.make({
     cookies: () => Effect.never,
     setCookies: () => Effect.never,
+    clearCookies: () => Effect.never,
     ...overrides
   } as unknown as Adapter.AdapterConnection)
 
@@ -61,6 +64,573 @@ describe("BoundedAdapter", () => {
       assert(Deadline.isTimeout(timeout), String(timeout))
       assert.strictEqual(timeout.phase, "dispatchedUnconfirmed")
       assert.deepStrictEqual(timeout.diagnostics.dispatch, { _tag: "MayHaveBeenSent" })
+    }))
+
+  it.effect("reports a confirmed write followed by a missing postcondition as acknowledged", () =>
+    Effect.gen(function*() {
+      const adapter = stub({ setCookies: () => Effect.void })
+      const timeout = yield* Effect.gen(function*() {
+        yield* adapter.setCookies(context, [])
+        const record = yield* Operation.record
+        return yield* Effect.fail(record.timeout(Option.none()))
+      }).pipe(Operation.named("CookieJar.set"), Effect.flip)
+      assert(Deadline.isTimeout(timeout), String(timeout))
+      assert.deepStrictEqual(timeout.diagnostics.dispatch, { _tag: "Acknowledged", result: "ok" })
+      assert.strictEqual(timeout.phase, "postcondition")
+    }))
+
+  it.effect("records a browser rejection as acknowledged without replacing the error", () =>
+    Effect.gen(function*() {
+      const rejected = new Adapter.AdapterError({
+        reason: {
+          _tag: "Protocol",
+          error: new Protocol.ProtocolError({
+            reason: new Protocol.Rejected({
+              method: "Storage.setCookies",
+              reason: "InvalidArgument",
+              code: -32602,
+              description: "Invalid cookie"
+            })
+          })
+        }
+      })
+      const adapter = stub({ setCookies: () => Effect.fail(rejected) })
+      yield* Effect.gen(function*() {
+        const error = yield* adapter.setCookies(context, []).pipe(Effect.flip)
+        assert.strictEqual(error, rejected)
+        const record = yield* Operation.record
+        assert.deepStrictEqual(Operation.diagnostics(record.id).dispatch, { _tag: "Acknowledged", result: "rejected" })
+      }).pipe(Operation.named("CookieJar.set"))
+    }))
+
+  it.effect("does not claim acknowledgement for a local refusal or an unanswered write", () =>
+    Effect.gen(function*() {
+      const reasons: Array<Adapter.AdapterErrorReason> = [
+        { _tag: "Unsupported", capability: "input", hint: "Unavailable" },
+        {
+          _tag: "Protocol",
+          error: new Protocol.ProtocolError({
+            reason: new Protocol.NoReply({
+              method: "Storage.setCookies",
+              timeout: Duration.zero
+            })
+          })
+        }
+      ]
+      for (const reason of reasons) {
+        const adapter = stub({ setCookies: () => Effect.fail(new Adapter.AdapterError({ reason })) })
+        yield* Effect.gen(function*() {
+          yield* adapter.setCookies(context, []).pipe(Effect.exit)
+          const record = yield* Operation.record
+          assert.notStrictEqual(Operation.diagnostics(record.id).dispatch._tag, "Acknowledged")
+        }).pipe(Operation.named("CookieJar.set"))
+      }
+    }))
+
+  it.effect("does not inherit confirmation when a later write goes unanswered", () =>
+    Effect.gen(function*() {
+      const adapter = stub({ setCookies: () => Effect.void })
+      const timeout = yield* Effect.gen(function*() {
+        yield* adapter.setCookies(context, [])
+        yield* adapter.clearCookies(context)
+      }).pipe(Operation.named("cookies"), Deadline.within("50 millis"), Effect.flip)
+      assert(Deadline.isTimeout(timeout))
+      assert.deepStrictEqual(timeout.diagnostics.dispatch, { _tag: "MayHaveBeenSent" })
+    }))
+
+  it.effect("does not inherit a completed step's confirmation in a later unanswered step", () =>
+    Effect.gen(function*() {
+      const adapter = stub({ setCookies: () => Effect.void })
+      const timeout = yield* Effect.gen(function*() {
+        yield* adapter.setCookies(context, []).pipe(Operation.named("first"))
+        yield* adapter.clearCookies(context).pipe(Operation.named("second"))
+      }).pipe(Operation.named("cookies"), Deadline.within("50 millis"), Effect.flip)
+      assert(Deadline.isTimeout(timeout))
+      assert.deepStrictEqual(timeout.diagnostics.dispatch, { _tag: "MayHaveBeenSent" })
+      assert.deepStrictEqual(timeout.diagnostics.progress.map((step) => step.state), ["ok", "uncertain"])
+    }))
+
+  it.effect("does not let one write's reply confirm another still in flight", () =>
+    Effect.gen(function*() {
+      const adapter = stub({ setCookies: () => real(10) })
+      const timeout = yield* Effect.all([adapter.clearCookies(context), adapter.setCookies(context, [])], {
+        concurrency: "unbounded"
+      }).pipe(Operation.named("cookies"), Deadline.within("100 millis"), Effect.flip)
+      assert(Deadline.isTimeout(timeout))
+      assert.deepStrictEqual(timeout.diagnostics.dispatch, { _tag: "MayHaveBeenSent" })
+    }))
+
+  it.effect("does not let a concurrent step's reply confirm another still in flight", () =>
+    Effect.gen(function*() {
+      const adapter = stub({ setCookies: () => real(10) })
+      const timeout = yield* Effect.all([
+        adapter.clearCookies(context).pipe(Operation.named("unanswered")),
+        adapter.setCookies(context, []).pipe(Operation.named("answered"))
+      ], { concurrency: "unbounded" }).pipe(Operation.named("cookies"), Deadline.within("100 millis"), Effect.flip)
+      assert(Deadline.isTimeout(timeout))
+      assert.deepStrictEqual(timeout.diagnostics.dispatch, { _tag: "MayHaveBeenSent" })
+    }))
+
+  for (const nested of [false, true]) {
+    for (const outcome of ["ok", "rejected", "noReply", "interrupt"] as const) {
+      it.effect(`preserves overlapping ${nested ? "step" : "direct"} evidence when the first call ends with ${outcome}`, () =>
+        Effect.gen(function*() {
+          const firstStarted = yield* Deferred.make<void>()
+          const secondStarted = yield* Deferred.make<void>()
+          const firstReply = yield* Deferred.make<void, Adapter.AdapterError>()
+          const secondReply = yield* Deferred.make<void>()
+          const adapter = stub({
+            clearCookies: () =>
+              Deferred.succeed(firstStarted, undefined).pipe(Effect.andThen(Deferred.await(firstReply))),
+            setCookies: () =>
+              Deferred.succeed(secondStarted, undefined).pipe(Effect.andThen(Deferred.await(secondReply)))
+          })
+          const wrap = <A, E>(effect: Effect.Effect<A, E>, name: string) =>
+            nested ? effect.pipe(Operation.named(name)) : effect
+          yield* Effect.gen(function*() {
+            const record = yield* Operation.record
+            const first = yield* Effect.forkChild(wrap(adapter.clearCookies(context), "first").pipe(Effect.exit))
+            yield* Deferred.await(firstStarted)
+            const second = yield* Effect.forkChild(wrap(adapter.setCookies(context, []), "second").pipe(Effect.exit))
+            yield* Deferred.await(secondStarted)
+            if (outcome === "interrupt") yield* Fiber.interrupt(first)
+            else {
+              if (outcome === "ok") yield* Deferred.succeed(firstReply, undefined)
+              else {yield* Deferred.fail(
+                  firstReply,
+                  new Adapter.AdapterError({
+                    reason: {
+                      _tag: "Protocol",
+                      error: new Protocol.ProtocolError({
+                        reason: outcome === "rejected"
+                          ? new Protocol.Rejected({
+                            method: "clearCookies",
+                            reason: "InvalidArgument",
+                            code: -32602,
+                            description: "refused"
+                          })
+                          : new Protocol.NoReply({ method: "clearCookies", timeout: Duration.zero })
+                      })
+                    }
+                  })
+                )}
+              yield* Fiber.join(first)
+            }
+            // Finish both fibers before asserting so an expected pre-fix failure leaves no wait behind.
+            const whileWaiting = record.diagnostics()
+            yield* Deferred.succeed(secondReply, undefined)
+            yield* Fiber.join(second)
+            const afterReplies = record.diagnostics()
+            assert.deepStrictEqual(whileWaiting.dispatch, { _tag: "MayHaveBeenSent" })
+            assert.deepStrictEqual(
+              afterReplies.dispatch,
+              outcome === "ok" || outcome === "rejected"
+                ? { _tag: "Acknowledged", result: outcome }
+                : { _tag: "MayHaveBeenSent" }
+            )
+            // An independent subsequent write gets evidence of its own after the overlap has ended.
+            yield* wrap(adapter.setCookies(context, []), "later")
+            assert.deepStrictEqual(record.diagnostics().dispatch, { _tag: "Acknowledged", result: "ok" })
+          }).pipe(Operation.named("overlapping writes"))
+        }))
+    }
+  }
+
+  it.effect("does not turn a handled unanswered reply into confirmation when its step succeeds", () =>
+    Effect.gen(function*() {
+      const adapter = stub({
+        setCookies: () =>
+          Effect.fail(
+            new Adapter.AdapterError({
+              reason: {
+                _tag: "Protocol",
+                error: new Protocol.ProtocolError({
+                  reason: new Protocol.NoReply({
+                    method: "setCookies",
+                    timeout: Duration.zero
+                  })
+                })
+              }
+            })
+          )
+      })
+      yield* Effect.gen(function*() {
+        yield* adapter.setCookies(context, []).pipe(Effect.exit, Operation.named("handled no reply"))
+        assert.deepStrictEqual((yield* Operation.record).diagnostics().dispatch, { _tag: "MayHaveBeenSent" })
+      }).pipe(Operation.named("outer"))
+    }))
+
+  for (const mark of ["sent", "not sent", "rejected"] as const) {
+    it.effect(`keeps a manual ${mark} mark after a confirmed write while a read-only step overlaps`, () =>
+      Effect.gen(function*() {
+        const adapter = stub({ setCookies: () => Effect.void })
+        const dispatch = yield* Effect.gen(function*() {
+          const record = yield* Operation.record
+          const watch = yield* Effect.forkChild(Effect.never.pipe(Operation.named("watch")))
+          yield* real(1)
+          yield* adapter.setCookies(context, [])
+          if (mark === "sent") record.markSent()
+          else if (mark === "not sent") {
+            record.markSent()
+            record.markNotSent()
+          } else record.markConfirmed("rejected")
+          const dispatch = record.diagnostics().dispatch
+          yield* Fiber.interrupt(watch)
+          return dispatch
+        }).pipe(Operation.named("cookies"))
+        assert.deepStrictEqual(
+          dispatch,
+          mark === "sent"
+            ? { _tag: "MayHaveBeenSent" }
+            : mark === "not sent"
+            ? { _tag: "NotSent" }
+            : { _tag: "Acknowledged", result: "rejected" }
+        )
+      }))
+  }
+
+  for (const ending of ["complete", "interrupt"] as const) {
+    for (const pending of [false, true]) {
+      for (const mark of ["sent", "not sent", "rejected"] as const) {
+        it.effect(`retains manual ${mark} evidence after a read step ${ending}s with ${pending ? "an unanswered write" : "no write"}`, () =>
+          Effect.gen(function*() {
+            const started = yield* Deferred.make<void>()
+            const stop = yield* Deferred.make<void>()
+            const writeStarted = yield* Deferred.make<void>()
+            const adapter = stub({
+              setCookies: () => Effect.void,
+              clearCookies: () => Deferred.succeed(writeStarted, undefined).pipe(Effect.andThen(Effect.never))
+            })
+            yield* Effect.gen(function*() {
+              const record = yield* Operation.record
+              const watch = yield* Effect.forkChild(
+                Deferred.succeed(started, undefined).pipe(
+                  Effect.andThen(Deferred.await(stop)),
+                  Operation.named("watch")
+                )
+              )
+              yield* Deferred.await(started)
+              yield* adapter.setCookies(context, [])
+              const write = pending
+                ? yield* Effect.forkChild(adapter.clearCookies(context).pipe(Effect.exit))
+                : undefined
+              if (pending) yield* Deferred.await(writeStarted)
+              if (mark === "sent") record.markSent()
+              else if (mark === "not sent") {
+                record.markSent()
+                record.markNotSent()
+              } else record.markConfirmed("rejected")
+              const during = record.diagnostics()
+              if (ending === "complete") {
+                yield* Deferred.succeed(stop, undefined)
+                yield* Fiber.join(watch)
+              } else yield* Fiber.interrupt(watch)
+              const after = record.diagnostics()
+              if (write !== undefined) yield* Fiber.interrupt(write)
+              const afterWrite = record.diagnostics()
+              const expected: typeof during.dispatch = pending || mark === "sent"
+                ? { _tag: "MayHaveBeenSent" }
+                : mark === "not sent"
+                ? { _tag: "NotSent" }
+                : { _tag: "Acknowledged", result: "rejected" }
+              assert.deepStrictEqual(during.dispatch, expected)
+              assert.deepStrictEqual(after.dispatch, expected)
+              assert.deepStrictEqual(afterWrite.dispatch, expected)
+            }).pipe(Operation.named("manual evidence"))
+          }))
+      }
+    }
+  }
+
+  it.effect("starts fresh sequential reply evidence while a read-only step stays active", () =>
+    Effect.gen(function*() {
+      const started = yield* Deferred.make<void>()
+      const adapter = stub({
+        clearCookies: () =>
+          Effect.fail(
+            new Adapter.AdapterError({
+              reason: {
+                _tag: "Protocol",
+                error: new Protocol.ProtocolError({
+                  reason: new Protocol.NoReply({ method: "clearCookies", timeout: Duration.zero })
+                })
+              }
+            })
+          ),
+        setCookies: () => Effect.void
+      })
+      yield* Effect.gen(function*() {
+        const record = yield* Operation.record
+        const watch = yield* Effect.forkChild(
+          Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never), Operation.named("watch"))
+        )
+        yield* Deferred.await(started)
+        yield* adapter.clearCookies(context).pipe(Effect.exit)
+        const unanswered = record.diagnostics()
+        yield* adapter.setCookies(context, [])
+        const answered = record.diagnostics()
+        yield* Fiber.interrupt(watch)
+        assert.deepStrictEqual(unanswered.dispatch, { _tag: "MayHaveBeenSent" })
+        assert.deepStrictEqual(answered.dispatch, { _tag: "Acknowledged", result: "ok" })
+        assert.deepStrictEqual(record.diagnostics().dispatch, answered.dispatch)
+      }).pipe(Operation.named("sequential writes"))
+    }))
+
+  for (const nested of [false, true]) {
+    for (const guarded of [false, true]) {
+      it.effect(`preserves an ended unanswered call when an overlapping ${nested ? "step" : "direct"} manual send is ${guarded ? "guarded" : "confirmed"}`, () =>
+        Effect.gen(function*() {
+          const started = yield* Deferred.make<void>()
+          const manualStarted = yield* Deferred.make<void>()
+          const finishManual = yield* Deferred.make<void>()
+          const adapter = stub({
+            clearCookies: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))
+          })
+          yield* Effect.gen(function*() {
+            const record = yield* Operation.record
+            const write = yield* Effect.forkChild(adapter.clearCookies(context).pipe(Effect.exit))
+            yield* Deferred.await(started)
+            const manual = Effect.gen(function*() {
+              const local = yield* Operation.record
+              local.markSent()
+              yield* Deferred.succeed(manualStarted, undefined)
+              yield* Deferred.await(finishManual)
+              if (guarded) local.markNotSent()
+              else local.markConfirmed()
+            })
+            const gesture = yield* Effect.forkChild(nested ? manual.pipe(Operation.named("manual gesture")) : manual)
+            yield* Deferred.await(manualStarted)
+            yield* Fiber.interrupt(write)
+            yield* Deferred.succeed(finishManual, undefined)
+            yield* Fiber.join(gesture)
+            assert.deepStrictEqual(record.diagnostics().dispatch, { _tag: "MayHaveBeenSent" })
+          }).pipe(Operation.named("overlap with manual gesture"))
+        }))
+    }
+  }
+
+  it.effect("keeps an earlier step's acknowledgement when a later step's gesture is guarded", () =>
+    Effect.gen(function*() {
+      const adapter = stub({ setCookies: () => Effect.void })
+      const diagnostics = yield* Effect.gen(function*() {
+        yield* adapter.setCookies(context, []).pipe(Operation.named("first"))
+        yield* Effect.gen(function*() {
+          const step = yield* Operation.record
+          step.markSent()
+          step.markNotSent()
+        }).pipe(Operation.named("guarded"))
+        return (yield* Operation.record).diagnostics()
+      }).pipe(Operation.named("checkout"))
+      assert.deepStrictEqual(diagnostics.progress.map((step) => step.state), ["ok", "ok"])
+      assert.deepStrictEqual(diagnostics.dispatch, { _tag: "Acknowledged", result: "ok" })
+    }))
+
+  for (const earlier of ["ok", "rejected", "uncertain"] as const) {
+    for (const firstStep of [false, true]) {
+      for (const nestedGuard of [false, true]) {
+        for (const active of [false, true]) {
+          it.effect(`keeps earlier ${earlier} ${firstStep ? "step" : "direct"} evidence through a ${nestedGuard ? "nested" : "child"} guard with ${active ? "an active write" : "no active write"}`, () =>
+            Effect.gen(function*() {
+              const started = yield* Deferred.make<void>()
+              const error = new Adapter.AdapterError({
+                reason: {
+                  _tag: "Protocol",
+                  error: new Protocol.ProtocolError({
+                    reason: earlier === "rejected"
+                      ? new Protocol.Rejected({
+                        method: "setCookies",
+                        reason: "InvalidArgument",
+                        code: -32602,
+                        description: "refused"
+                      })
+                      : new Protocol.NoReply({ method: "setCookies", timeout: Duration.zero })
+                  })
+                }
+              })
+              const adapter = stub({
+                setCookies: () => earlier === "ok" ? Effect.void : Effect.fail(error),
+                clearCookies: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))
+              })
+              yield* Effect.gen(function*() {
+                const parent = yield* Operation.record
+                const first = adapter.setCookies(context, []).pipe(Effect.exit)
+                yield* firstStep ? first.pipe(Operation.named("first")) : first
+                const before = parent.diagnostics()
+                const write = active
+                  ? yield* Effect.forkChild(adapter.clearCookies(context).pipe(Effect.exit))
+                  : undefined
+                if (active) yield* Deferred.await(started)
+                let child: ReturnType<Operation.Record["diagnostics"]> | undefined
+                const guard = Effect.gen(function*() {
+                  const local = yield* Operation.record
+                  local.markSent()
+                  local.markNotSent()
+                  child = local.diagnostics()
+                }).pipe(Operation.named("guard"))
+                yield* nestedGuard ? guard.pipe(Operation.named("wrapper")) : guard
+                const after = parent.diagnostics()
+                if (write !== undefined) yield* Fiber.interrupt(write)
+                assert.deepStrictEqual(child?.dispatch, { _tag: "NotSent" })
+                assert.deepStrictEqual(after.dispatch, active ? { _tag: "MayHaveBeenSent" } : before.dispatch)
+                assert.deepStrictEqual(
+                  parent.diagnostics().dispatch,
+                  active ? { _tag: "MayHaveBeenSent" } : before.dispatch
+                )
+              }).pipe(Operation.named("parent"))
+            }))
+        }
+      }
+    }
+
+    it.effect(`restores earlier ${earlier} evidence after overlapping child guards cancel in reverse order`, () =>
+      Effect.gen(function*() {
+        const firstStarted = yield* Deferred.make<void>()
+        const secondStarted = yield* Deferred.make<void>()
+        const finishFirst = yield* Deferred.make<void>()
+        const finishSecond = yield* Deferred.make<void>()
+        yield* Effect.gen(function*() {
+          const parent = yield* Operation.record
+          if (earlier === "uncertain") {
+            parent.markSent()
+            yield* Operation.answered(parent, Effect.fail("unanswered")).pipe(Effect.exit)
+          } else parent.markConfirmed(earlier)
+          const before = parent.diagnostics()
+          const guard = (started: Deferred.Deferred<void>, finish: Deferred.Deferred<void>, name: string) =>
+            Effect.gen(function*() {
+              const local = yield* Operation.record
+              local.markSent()
+              yield* Deferred.succeed(started, undefined)
+              yield* Deferred.await(finish)
+              local.markNotSent()
+              return local.diagnostics()
+            }).pipe(Operation.named(name))
+          const first = yield* Effect.forkChild(guard(firstStarted, finishFirst, "first guard"))
+          yield* Deferred.await(firstStarted)
+          const second = yield* Effect.forkChild(guard(secondStarted, finishSecond, "second guard"))
+          yield* Deferred.await(secondStarted)
+          yield* Deferred.succeed(finishSecond, undefined)
+          const secondResult = yield* Fiber.join(second)
+          const between = parent.diagnostics()
+          yield* Deferred.succeed(finishFirst, undefined)
+          const firstResult = yield* Fiber.join(first)
+          assert.deepStrictEqual(secondResult.dispatch, { _tag: "NotSent" })
+          assert.deepStrictEqual(firstResult.dispatch, { _tag: "NotSent" })
+          assert.deepStrictEqual(between.dispatch, { _tag: "MayHaveBeenSent" })
+          assert.deepStrictEqual(parent.diagnostics().dispatch, before.dispatch)
+        }).pipe(Operation.named("overlapping guards"))
+      }))
+  }
+
+  for (const failed of [false, true]) {
+    for (const recoverFirst of [false, true]) {
+      it.effect(`summarizes ${failed ? "failed" : "completed"} recovery ${recoverFirst ? "before" : "after"} pending creation`, () =>
+        Effect.gen(function*() {
+          const made = yield* Deferred.make<Target.NavigableId>()
+          const closed = yield* Deferred.make<void>()
+          const adapter = stub({
+            createPage: () => Deferred.await(made),
+            closePage: () => Deferred.succeed(closed, undefined).pipe(Effect.asVoid)
+          })
+          const result = yield* Effect.gen(function*() {
+            const state = Input.make()
+            state.broken = Option.some({ description: "held input", release: [] })
+            const recover = Input.recover(state, () => failed ? Effect.fail("release refused") : Effect.void)
+            if (recoverFirst) yield* recover
+            const timeout = yield* adapter.createPage(context).pipe(Effect.flip)
+            assert(Deadline.isTimeout(timeout))
+            if (!recoverFirst) yield* recover
+            return { snapshot: timeout.diagnostics, current: (yield* Operation.record).diagnostics() }
+          }).pipe(Operation.named("cleanup"), Deadline.within("50 millis"))
+          yield* Deferred.succeed(made, page)
+          yield* Deferred.await(closed)
+          assert.strictEqual(result.current.cleanup._tag, failed ? "Failed" : "Pending")
+          assert.strictEqual(result.snapshot.cleanup._tag, failed && recoverFirst ? "Failed" : "Pending")
+        }))
+    }
+  }
+
+  it.effect("records successful claims dismissal", () =>
+    Effect.gen(function*() {
+      const adapter = stub({ claims: { dismiss: () => Effect.succeed(true) } as unknown as Adapter.Claims })
+      yield* Effect.gen(function*() {
+        yield* adapter.claims!.dismiss(page, "prompt" as import("../src/Dialog.ts").PromptId)
+        const record = yield* Operation.record
+        assert.deepStrictEqual(record.diagnostics().dispatch, { _tag: "Acknowledged", result: "ok" })
+      }).pipe(Operation.named("dismiss"))
+    }))
+
+  it.effect("reports pending cleanup while a late creation has not answered", () =>
+    Effect.gen(function*() {
+      const made = yield* Deferred.make<Target.NavigableId>()
+      const closed = yield* Deferred.make<void>()
+      const adapter = stub({
+        createPage: () => Deferred.await(made),
+        closePage: () => Deferred.succeed(closed, undefined).pipe(Effect.asVoid)
+      })
+      const timeout = yield* adapter.createPage(context).pipe(
+        Operation.named("UserContext.newPage"),
+        Deadline.within("50 millis"),
+        Effect.flip
+      )
+      assert(Deadline.isTimeout(timeout), String(timeout))
+      // Finish detached work even if the assertion below fails.
+      yield* Deferred.succeed(made, page)
+      yield* Deferred.await(closed)
+      assert.deepStrictEqual(timeout.diagnostics.cleanup, { _tag: "Pending" })
+    }))
+
+  it.effect("does not let an abandoned creation confirm later input", () =>
+    Effect.gen(function*() {
+      const made = yield* Deferred.make<Target.NavigableId>()
+      const closed = yield* Deferred.make<void>()
+      const adapter = stub({
+        createPage: () => Deferred.await(made),
+        closePage: () => Deferred.succeed(closed, undefined).pipe(Effect.asVoid)
+      })
+      yield* Effect.gen(function*() {
+        yield* adapter.createPage(context).pipe(Effect.exit)
+        const record = yield* Operation.record
+        record.markSent()
+        yield* Deferred.succeed(made, page)
+        yield* Deferred.await(closed)
+        assert.deepStrictEqual(record.timeout(Option.none()).diagnostics.dispatch, { _tag: "MayHaveBeenSent" })
+      }).pipe(Operation.named("creation then input"), Deadline.within("50 millis"))
+    }))
+
+  it.effect("releases a virtual authenticator created after the acquisition deadline", () =>
+    Effect.gen(function*() {
+      const made = yield* Deferred.make<Adapter.Authenticator>()
+      const closed = yield* Deferred.make<Adapter.Authenticator>()
+      const ref = { page, id: "test-authenticator" }
+      const adapter = stub({
+        createAuthenticator: () => Deferred.await(made),
+        releaseAuthenticator: (ref) => Deferred.succeed(closed, ref).pipe(Effect.asVoid)
+      })
+      const timeout = yield* adapter.createAuthenticator(page).pipe(
+        Operation.named("Page.capability"),
+        Deadline.within("50 millis"),
+        Effect.flip
+      )
+      assert(Deadline.isTimeout(timeout), String(timeout))
+      yield* Deferred.succeed(made, ref)
+      assert.strictEqual(yield* Deferred.await(closed), ref)
+    }))
+
+  it.effect("releases a virtual authenticator when acquisition is interrupted before its reply", () =>
+    Effect.gen(function*() {
+      const started = yield* Deferred.make<void>()
+      const made = yield* Deferred.make<Adapter.Authenticator>()
+      const closed = yield* Deferred.make<Adapter.Authenticator>()
+      const ref = { page, id: "test-authenticator" }
+      const adapter = stub({
+        createAuthenticator: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(made))),
+        releaseAuthenticator: (ref) => Deferred.succeed(closed, ref).pipe(Effect.asVoid)
+      })
+      const fiber = yield* adapter.createAuthenticator(page).pipe(Operation.named("Page.capability"), Effect.forkChild)
+      yield* Deferred.await(started)
+      yield* Fiber.interrupt(fiber)
+      yield* Deferred.succeed(made, ref)
+      assert.strictEqual(yield* Deferred.await(closed), ref)
     }))
 
   it.effect("never cuts a release short", () =>

@@ -1,0 +1,11 @@
+{
+  "id": "method-consolemessage-timestamp",
+  "upstream": [
+    "method:ConsoleMessage.timestamp"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public Strider capability for this member.",
+  "capabilities": [],
+  "requirements": []
+}

@@ -2,10 +2,13 @@
 import { ChildProcess } from "node:child_process"
 import type { Readable, Writable } from "node:stream"
 import { connection } from "./failureTrace.ts"
+import { enabled as nativeEnabled, recordNative } from "./nativeCrash.ts"
 import { pipeObserver } from "./tracePipe.ts"
+import { stderrText } from "./traceStderr.ts"
+import { prepareChild } from "./traceTransfer.ts"
+import type { SpawnOptions } from "./traceTransfer.ts"
 
 const patched = Symbol.for("strider.integration.processObserver")
-type SpawnOptions = { readonly file: string; readonly args?: ReadonlyArray<string> }
 // Node's spawn, execFile and fork all reach this method; it is absent from @types/node's public surface.
 const prototype = ChildProcess.prototype as ChildProcess & {
   [patched]?: boolean
@@ -16,8 +19,12 @@ if (!prototype[patched]) {
   const spawn = prototype.spawn
   prototype.spawn = function(this: ChildProcess, options: SpawnOptions) {
     const trace = connection(`process:${options.file}`)
+    prepareChild(options)
     const result = spawn.call(this, options)
     trace("process-start", { command: options.file, args: options.args, pid: this.pid })
+    if (nativeEnabled && options.args?.some((arg) => arg.startsWith("--remote-debugging-"))) {
+      recordNative("launches.ndjson", { command: options.file, args: options.args, browserPid: this.pid })
+    }
     // Observing emit leaves the existing pipe consumer in charge of flow and draining.
     if (this.stderr !== null) {
       trace("stderr-open", "Observing the existing stderr consumer")
@@ -25,7 +32,7 @@ if (!prototype[patched]) {
       const emit = this.stderr.emit
       this.stderr.emit = function(event: string, ...values: Array<unknown>) {
         if (event === "data") {
-          const text = String(values[0])
+          const text = stderrText(values[0])
           observedBytes += Buffer.byteLength(text)
           trace("stderr", text)
         }

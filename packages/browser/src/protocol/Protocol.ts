@@ -2,15 +2,15 @@
  * The raw protocol client: commands and events as data, the session they run on, and the errors a session
  * reports.
  *
- * The generated modules (`@usestrider/browser/cdp`, `/bidi-protocol`, `/webkit-stock-protocol` and
- * `/webkit-automation-protocol`) declare each command and event with `command` and `event`: a method name, codecs
+ * The generated modules (`@usestrider/browser/cdp`, `/bidi-protocol`, `/webkit-stock-protocol`, and
+ * `/webkit-automation-protocol`) declare each command and event with `command` and `event`: a method name, codecs,
  * and traits, and no behavior. Behavior lives in the session. A command is a yieldable value:
  * `yield* Page.navigate({ url })` runs on the `ProtocolSession` in context, and `Protocol.on(session)` picks one
  * explicitly.
  *
  * **Gotchas**
  *
- * This is the raw protocol, for power users. Nothing here tracks state, waits for readiness or classifies
+ * This is the raw protocol, for power users. Nothing here tracks state, waits for readiness, or classifies
  * failures beyond the protocol's own; the API in `@usestrider/browser` does that.
  *
  * @stability experimental
@@ -149,7 +149,7 @@ export interface EventDef<M extends string, A> {
 }
 
 /**
- * Declares a command from its method, codecs and traits; nothing is sent until the command runs. The generated
+ * Declares a command from its method, codecs, and traits; nothing is sent until the command runs. The generated
  * modules call it.
  *
  * **Example** (Declaring a command by hand)
@@ -188,7 +188,7 @@ export const command = <M extends string, P, A>(
 }
 
 /**
- * Declares an event from its method, codec and traits. The generated modules call it.
+ * Declares an event from its method, codec, and traits. The generated modules call it.
  *
  * **Example** (Declaring an event by hand)
  *
@@ -214,7 +214,7 @@ export const event = <M extends string, A>(
 ): EventDef<M, A> => ({ method, Params, traits })
 
 /**
- * Schema for the key that routes messages to a session: a CDP `sessionId`, or, on WebKit, the page proxy, target
+ * Schema for the key that routes messages to a session: a CDP `sessionId`, or, on WebKit, the page proxy, target,
  * and worker ids on the session's path.
  *
  * @stability experimental

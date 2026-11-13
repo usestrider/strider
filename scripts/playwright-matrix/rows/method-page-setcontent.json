@@ -1,0 +1,23 @@
+{
+  "id": "method-page-setcontent",
+  "upstream": [
+    "method:Page.setContent"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "Page.setContent",
+      "url": "/docs/api/browser/Page#Page.setContent"
+    }
+  ],
+  "notes": "Replaces HTML with document.open/write/close, preserving URL, history and document identity; parser scripts and resources run. Defaults to load. Interruption stops waiting without undoing browser side effects.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

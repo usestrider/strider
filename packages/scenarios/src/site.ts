@@ -84,6 +84,12 @@ const routes: Record<
       `<div style="height:200px;overflow:auto"><button onclick="document.querySelector('#count').textContent = String(Number(document.querySelector('#count').textContent) + 1)">Increment</button><div style="height:1200px"></div></div><p id="count">0</p>`
     )
   }),
+  "/benchmark-viewport": () => ({
+    body: page(
+      "Viewport benchmark",
+      "<h1>Benchmark</h1><div id=\"viewport-target\" style=\"position:fixed;top:2000px;left:0;width:100px;height:100px\">Target</div>"
+    )
+  }),
   "/benchmark-reads": (url) => ({
     body: page(
       "Read benchmark",
@@ -181,11 +187,11 @@ const routes: Record<
       "Heavy",
       `<div id="grid"></div><script>
 const grid = document.querySelector("#grid")
-for (let i = 0; i < 3000; i++) { const cell = document.createElement("span"); cell.textContent = i; grid.append(cell) }
+for (let i = 0; i < 3000; i++) { const cell = document.createElement("span"); cell.textContent = i; cell.id = "cell-" + i; grid.append(cell) }
 const cells = grid.children
 const frame = (t) => { for (let i = 0; i < 200; i++) cells[(Math.floor(t) + i * 13) % cells.length].style.opacity = String((i % 10) / 10); requestAnimationFrame(frame) }
-requestAnimationFrame(frame)
-setTimeout(() => { const ready = document.createElement("p"); ready.id = "ready"; ready.textContent = "Ready"; document.body.append(ready) }, ${
+if (new URLSearchParams(location.search).get("animation") !== "static") requestAnimationFrame(frame)
+if (!new URLSearchParams(location.search).has("armed")) setTimeout(() => { const ready = document.createElement("p"); ready.id = "ready"; ready.textContent = "Ready"; document.body.append(ready) }, ${
         Number(url.searchParams.get("after") ?? "3000")
       })
 </script>`

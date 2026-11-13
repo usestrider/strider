@@ -94,6 +94,19 @@ export const add = (
     const { id } = yield* Operation.record
     const fail = (reason: Declaration.DeclarationErrorReason) =>
       new Declaration.DeclarationError({ declaration: owner.operation, reason, diagnostics: Operation.diagnostics(id) })
+    const adapter = owner.runtime.model.adapter
+    if (
+      adapter.info.protocol === "cdp" && adapter.ownership === "attached" && owner.scope._tag !== "Page" &&
+      options?.timing !== "bestEffort"
+    ) {
+      return yield* Effect.fail(fail(
+        new Declaration.TimingUnsupported({
+          needed: "beforeAuthorScript",
+          hint:
+            "Attached Chromium does not pause new popups; use bestEffort if weaker timing is acceptable, or register on an existing page for its later documents"
+        })
+      ))
+    }
     const source = yield* sourceOf(owner.runtime, script).pipe(Effect.mapError(fail))
     const world: Adapter.World = options?.world === "isolated" ? isolatedWorld : { _tag: "Main" }
     const workers = options?.workers === true

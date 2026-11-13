@@ -1,0 +1,13 @@
+{
+  "id": "method-page-waitforloadstate-value-networkidle",
+  "upstream": [
+    "method:Page.waitForLoadState"
+  ],
+  "parent": "method-page-waitforloadstate",
+  "value": "networkidle",
+  "status": "missing",
+  "api": [],
+  "notes": "No networkidle readiness state. Observe an explicit application condition.",
+  "capabilities": [],
+  "requirements": []
+}

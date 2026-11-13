@@ -1,0 +1,11 @@
+{
+  "id": "method-apirequestcontext-get",
+  "upstream": [
+    "method:APIRequestContext.get"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No built-in APIRequestContext equivalent, including cookie-sharing API testing.",
+  "capabilities": [],
+  "requirements": []
+}

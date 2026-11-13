@@ -1,0 +1,20 @@
+{
+  "id": "option-route-continue-method",
+  "upstream": [
+    "method:Route.continue"
+  ],
+  "option": "method",
+  "status": "has",
+  "api": [
+    {
+      "module": "Route",
+      "symbol": "continueWith",
+      "url": "/docs/api/browser/Route#continueWith"
+    }
+  ],
+  "notes": "Return a continue decision; redirects and URL rewriting have browser limits.",
+  "capabilities": [
+    "interception.request"
+  ],
+  "requirements": []
+}

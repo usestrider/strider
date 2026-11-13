@@ -1,0 +1,23 @@
+{
+  "id": "method-page-framelocator",
+  "upstream": [
+    "method:Page.frameLocator"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "ReadonlyPage.frame",
+      "url": "/docs/api/browser/Page#ReadonlyPage.frame"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

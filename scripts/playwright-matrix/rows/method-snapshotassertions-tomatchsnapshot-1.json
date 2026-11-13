@@ -1,0 +1,11 @@
+{
+  "id": "method-snapshotassertions-tomatchsnapshot-1",
+  "upstream": [
+    "method:SnapshotAssertions.toMatchSnapshot#1"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No snapshot-file or pixel-diff baseline comparison API.",
+  "capabilities": [],
+  "requirements": []
+}

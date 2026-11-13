@@ -1,0 +1,12 @@
+{
+  "id": "option-browsertype-launch-handlesigterm",
+  "upstream": [
+    "method:BrowserType.launch"
+  ],
+  "option": "handleSIGTERM",
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public option; the parent row does not imply option parity.",
+  "capabilities": [],
+  "requirements": []
+}

@@ -3,6 +3,7 @@
  * the commands that start them. A navigation command whose reply is an error may still have started a
  * navigation, whose outcome the events report; one that never started ends at once.
  */
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as BrowsingContext from "../../bidi-protocol/BrowsingContext.ts"
@@ -11,6 +12,7 @@ import type * as PageNavigation from "../../PageNavigation.ts"
 import type * as Protocol from "../../protocol/Protocol.ts"
 import type * as L1Target from "../../Target.ts"
 import * as Kit from "../adapterKit.ts"
+import * as ProtocolClient from "../protocolClient.ts"
 import * as Urls from "../urls.ts"
 import { errorPage, errorText, intended, originOf } from "./mapping.ts"
 import {
@@ -22,7 +24,7 @@ import {
   type RealmEntry,
   type State
 } from "./state.ts"
-import { commit, endNavigation, startNavigation } from "./tree.ts"
+import { cancelRestoration, commit, endNavigation, startNavigation } from "./tree.ts"
 
 // ── Events ────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -31,7 +33,8 @@ const sameDocument = (
   context: string,
   bidi: string | null,
   url: string,
-  via: "fragment" | "historyApi"
+  via: "fragment" | "historyApi",
+  received?: number
 ) => {
   const navigable = navigableOf(state, context)
   const document = navigable?.document
@@ -42,7 +45,19 @@ const sameDocument = (
   // startNavigation consumes an exact reply binding itself. Only claim by URL when neither
   // live nor reply identity owns this event, so one observation cannot take two reservations.
   if (known === undefined && bound === undefined) {
-    const index = navigable.expected.list.findIndex((expected) => Kit.normalize(expected.url) === Kit.normalize(url))
+    let index = navigable.expected.list.findIndex((expected) => Kit.normalize(expected.url) === Kit.normalize(url))
+    // Traversal reservations have no destination URL. Only the surviving, unambiguous
+    // traversal owner can claim them while its command is in flight; never take an older command.
+    if (
+      index < 0 && !navigable.restorationAmbiguous && navigable.restoring !== undefined &&
+      navigable.traversalCommands.has(navigable.restoring.navigation) &&
+      (received === undefined || navigable.restoring.sameDocumentThrough === undefined ||
+        received < navigable.restoring.sameDocumentThrough)
+    ) {
+      index = navigable.expected.list.findIndex((expected) =>
+        expected.id === navigable.restoring!.navigation && expected.initiatedAs === "traversal"
+      )
+    }
     if (index >= 0) expected = navigable.expected.list.splice(index, 1)[0]!
   }
   const navigation = known ??
@@ -71,10 +86,33 @@ const sameDocument = (
   )
 }
 
-const readiness = (state: State, context: string, bidi: string | null, readiness: "interactive" | "complete") => {
+const readiness = (
+  state: State,
+  context: string,
+  bidi: string | null,
+  readiness: "interactive" | "complete",
+  params: BrowsingContext.NavigationInfo
+) => {
   const document = navigableOf(state, context)?.document
   if (document === undefined) return
-  if (document.navigation !== undefined && bidi !== null && document.navigation !== bidi) return
+  const navigation = bidi === null ? undefined : state.navigations.get(bidi)
+  const startedAt = bidi === null ? undefined : navigation?.starts.get(bidi)
+  if (navigation !== undefined && !navigation.ended && startedAt !== undefined && params.timestamp < startedAt) {
+    // Firefox stamps a delayed old-document load with the current navigation's identity.
+    // Its timestamp, not its arrival or a matching destination URL, proves it predates that start.
+    if (
+      readiness === "complete" && document.navigation !== bidi && params.url === document.url &&
+      (document.committedAt === undefined || params.timestamp >= document.committedAt)
+    ) {
+      navigation.staleLoad = document.id
+    }
+    return
+  }
+  if (bidi !== null) {
+    const documentStart = document.navigationStarts?.get(bidi)
+    if (documentStart !== undefined && params.timestamp < documentStart) return
+    if (document.navigation !== undefined && document.navigation !== bidi && documentStart === undefined) return
+  }
   if (readiness === "interactive" && document.complete) {
     // Loaded again after it was complete: `document.open()` replaced its tree (probe 17)
     document.generation++
@@ -94,9 +132,10 @@ const committed = (state: State, navigable: NavigableEntry, params: BrowsingCont
   const known = state.navigations.get(bidi)
   const bound = navigable.commandNavigations.has(bidi)
   const rejected = navigable.failedNavigation
-  const identifiedFailure = rejected !== undefined && (rejected.bidi === bidi ||
-    (rejected.bidi === undefined && navigable.navigationCommands.size === 0 &&
-      Kit.normalize(rejected.url) === Kit.normalize(intended(url))))
+  const identifiedFailure = rejected !== undefined &&
+    (rejected.bidi === bidi || (bidi !== null && rejected.aliases?.has(bidi)) ||
+      (rejected.bidi === undefined && navigable.navigationCommands.size === 0 &&
+        Kit.normalize(rejected.url) === Kit.normalize(intended(url))))
   if (isError && known === undefined && !bound) {
     if (
       navigable.pendingTerminals.some((event) =>
@@ -131,6 +170,8 @@ const committed = (state: State, navigable: NavigableEntry, params: BrowsingCont
     bidi,
     "bidi:browsingContext.navigationCommitted"
   )
+  document.committedAt = params.timestamp
+  document.navigationStarts = new Map(navigation.starts)
   endNavigation(
     state,
     navigation,
@@ -160,8 +201,40 @@ const failed = (state: State, navigable: NavigableEntry, params: BrowsingContext
 
 const started = (state: State, navigable: NavigableEntry, params: BrowsingContext.NavigationInfo) => {
   if (params.navigation === null || state.navigations.has(params.navigation)) return
+  const pending = [...new Set(navigable.navigations.values())].filter((entry) => !entry.ended && !entry.sameDocument)
+  // Delivery can lag behind a newer start or a commit; old starts cannot replace newer work.
+  if (
+    (navigable.document?.committedAt !== undefined && params.timestamp < navigable.document.committedAt) ||
+    pending.some((entry) => [...entry.starts.values()].some((timestamp) => params.timestamp < timestamp))
+  ) return
+  const previous = pending.length === 1 ? pending[0] : undefined
+  const staleDocument = previous?.staleLoad
+  for (const entry of pending) entry.staleLoad = undefined
+  if (
+    previous !== undefined && staleDocument !== undefined && staleDocument === navigable.document?.id &&
+    previous.documentHop !== undefined && navigable.expected.list.length === 0 &&
+    navigable.commandNavigations.size === 0 && navigable.navigationCommands.size <= 1 &&
+    (navigable.navigationCommands.size === 0 || navigable.navigationCommands.has(previous.id)) &&
+    params.timestamp > Math.max(...previous.starts.values()) &&
+    Kit.normalize(previous.url) === Kit.normalize(intended(params.url ?? ""))
+  ) {
+    // A delayed load can make Firefox allocate another wire identity without another document request.
+    // Correlate provisionally: a distinct document request for this identity separates it again.
+    previous.starts.set(params.navigation, params.timestamp)
+    navigable.navigations.set(params.navigation, previous)
+    state.navigations.set(params.navigation, previous)
+    return
+  }
   // Firefox leaves out the URL of the navigation that closing with promptUnload starts.
-  startNavigation(state, navigable, params.navigation, intended(params.url ?? ""), "crossDocument", false)
+  const navigation = startNavigation(
+    state,
+    navigable,
+    params.navigation,
+    intended(params.url ?? ""),
+    "crossDocument",
+    false
+  )
+  navigation.starts.set(params.navigation, params.timestamp)
 }
 
 /** Resolves attribution only; no deferred event can start a competing navigation or commit a document. */
@@ -173,7 +246,7 @@ const resolveTerminals = (state: State, navigable: NavigableEntry) => {
     const bound = bidi !== null && navigable.commandNavigations.has(bidi)
     const rejected = event.rejected ?? navigable.failedNavigation
     const matchesFailure = !bound && rejected !== undefined && (known === undefined || known.id === rejected.id) &&
-      (rejected.bidi === bidi ||
+      (rejected.bidi === bidi || (bidi !== null && rejected.aliases?.has(bidi)) ||
         (rejected.bidi === undefined && navigable.navigationCommands.size === 0 &&
           Kit.normalize(rejected.url) === Kit.normalize(intended(event.params.url ?? ""))))
     if (known === undefined && !bound && !matchesFailure && navigable.navigationCommands.size > 0) {
@@ -206,6 +279,8 @@ const resolveTerminals = (state: State, navigable: NavigableEntry) => {
       if (!navigation.ended) continue
       navigable.navigations.delete(bidi)
       if (state.navigations.get(bidi) === navigation) state.navigations.delete(bidi)
+      navigation.starts.clear()
+      navigation.staleLoad = undefined
     }
   }
 }
@@ -241,17 +316,22 @@ export const register = (handlers: Kit.Handlers<Event>) => {
     .on(BrowsingContext.navigationAborted, (params, { state }) => terminal(state, params, "abort"))
     .on(
       BrowsingContext.fragmentNavigated,
-      (params, { state }) => sameDocument(state, params.context, params.navigation, params.url ?? "", "fragment")
+      (params, { state, received }) =>
+        sameDocument(state, params.context, params.navigation, params.url ?? "", "fragment", received)
     )
     .on(
       BrowsingContext.historyUpdated,
-      (params, { state }) => sameDocument(state, params.context, null, params.url ?? "", "historyApi")
+      (params, { state, received }) =>
+        sameDocument(state, params.context, null, params.url ?? "", "historyApi", received)
     )
     .on(
       BrowsingContext.domContentLoaded,
-      (params, { state }) => readiness(state, params.context, params.navigation, "interactive")
+      (params, { state }) => readiness(state, params.context, params.navigation, "interactive", params)
     )
-    .on(BrowsingContext.load, (params, { state }) => readiness(state, params.context, params.navigation, "complete"))
+    .on(
+      BrowsingContext.load,
+      (params, { state }) => readiness(state, params.context, params.navigation, "complete", params)
+    )
 }
 
 // ── Operations ────────────────────────────────────────────────────────────────────────────────────────────
@@ -327,6 +407,7 @@ export const navigate = Effect.fnUntraced(function*(
   if (Option.isSome(options.referrer)) {
     return yield* Effect.fail(Kit.unsupported("navigation.referrer", "WebDriver BiDi's navigate takes no referrer"))
   }
+  cancelRestoration(navigable)
   const navigation = Kit.expect(state.ids, navigable.expected, url)
   return yield* sendNavigation(
     state,
@@ -341,6 +422,7 @@ export const reload = Effect.fnUntraced(
   function*(state: State, id: L1Target.NavigableId, options: { readonly ignoreCache: boolean }) {
     const navigable = yield* navigableById(state, id)
     const url = navigable.document?.url ?? ""
+    cancelRestoration(navigable)
     const navigation = Kit.expect(state.ids, navigable.expected, url, "reload")
     return yield* sendNavigation(
       state,
@@ -359,12 +441,14 @@ export const reload = Effect.fnUntraced(
 
 export const traverse = Effect.fnUntraced(function*(state: State, id: L1Target.NavigableId, delta: number) {
   const navigable = yield* navigableById(state, id)
+  // An unannounced realm cannot distinguish overlapping traversals. Invalidated commands remain
+  // in traversalCommands until their replies, so a third command cannot silently regain ownership.
+  const ambiguous = navigable.restorationAmbiguous || navigable.restoring !== undefined ||
+    navigable.traversalCommands.size > 0
+  cancelRestoration(navigable)
   const navigation = Kit.expect(state.ids, navigable.expected, "", "traversal")
-  const exit = yield* Effect.exit(state.send(BrowsingContext.traverseHistory({ context: navigable.bidi, delta })))
-  if (exit._tag === "Failure") {
-    Kit.unexpect(navigable.expected, navigation)
-    return Option.none<PageNavigation.Id>()
-  }
+  if (ambiguous) Kit.unexpect(navigable.expected, navigation)
+  let replied = false
   // The reply comes once the traversal is done. One still in flight then, with a new main-world realm and
   // no commit, restored its document from the back/forward cache, which Firefox reports no other way. It may
   // not even have started one (Firefox 158, leaving its JSON viewer): then the realm says where it is.
@@ -392,25 +476,24 @@ export const traverse = Effect.fnUntraced(function*(state: State, id: L1Target.N
     )
   }
   const pendingRealm = () => navigable.pendingRealms.find((pending) => !pending.ended && pending.world._tag === "Main")
-  let unannounced: RealmEntry | undefined
-  yield* state.buffer.run(() => {
+  const restoration = {
+    navigation,
+    sameDocumentThrough: undefined as number | undefined,
+    arrived: (realm: RealmEntry) => {
+      if (replied) state.buffer.later(complete(realm))
+    }
+  }
+  const valid = (realm: RealmEntry) =>
+    navigable.restoring === restoration && !navigable.removed && !realm.ended && pendingRealm() === realm
+  const complete = Effect.fnUntraced(function*(realm: RealmEntry) {
+    if (!valid(realm)) return
     const entry = [...navigable.navigations.values()].find((pending) => pending.id === navigation)
-    const realm = pendingRealm()
-    if (realm === undefined) {
-      // Its realm hasn't arrived yet: restore when it does, unless the traversal has ended by then
-      if (entry !== undefined && !entry.ended) {
-        navigable.restoring = (arrived) => {
-          navigable.restoring = undefined
-          if (!entry.ended) restore(entry, arrived)
-        }
-      }
+    if (entry !== undefined) {
+      yield* state.buffer.run(() => {
+        if (valid(realm) && !entry.ended) restore(entry, realm)
+      })
       return
     }
-    if (entry !== undefined && !entry.ended) restore(entry, realm)
-    else if (navigable.expected.list.some((expected) => expected.id === navigation)) unannounced = realm
-  })
-  if (unannounced !== undefined) {
-    const realm = unannounced
     const href = yield* state.send(Script.evaluate({
       expression: "location.href",
       target: { realm: realm.bidi },
@@ -422,12 +505,75 @@ export const traverse = Effect.fnUntraced(function*(state: State, id: L1Target.N
       Effect.orElseSucceed(() => undefined)
     )
     yield* state.buffer.run(() => {
-      if (href === undefined || pendingRealm() !== realm) return
+      if (!valid(realm)) return
+      if (href === undefined) {
+        cancelRestoration(navigable)
+        return
+      }
       const index = navigable.expected.list.findIndex((expected) => expected.id === navigation)
-      if (index < 0) return
+      if (index < 0) {
+        const announced = [...navigable.navigations.values()].find((pending) => pending.id === navigation)
+        if (announced !== undefined && !announced.ended) restore(announced, realm)
+        return
+      }
       const [taken] = navigable.expected.list.splice(index, 1)
       restore(startNavigation(state, navigable, `restored:${navigation}`, href, "traversal", false, taken), realm)
     })
-  }
-  return Option.some(navigation)
+  })
+  // Install before sending: newer commands and events can invalidate this record while the reply
+  // is pending. A late reply may use its own surviving record, but can never install one again.
+  navigable.restoring = restoration
+  navigable.traversalCommands.add(navigation)
+  const release = (noHistory: boolean) =>
+    state.buffer.run(() => {
+      Kit.unexpect(navigable.expected, navigation)
+      if (navigable.restoring !== restoration) return
+      // Only this rejection proves the command did not traverse. Do not clear ambiguity that
+      // already existed, or disregard a navigation the browser positively announced.
+      if (noHistory && ![...navigable.navigations.values()].some((entry) => entry.id === navigation)) {
+        navigable.restoring = undefined
+      } else cancelRestoration(navigable)
+    })
+  return yield* Effect.gen(function*() {
+    const exit = yield* Effect.exit(
+      state.send(BrowsingContext.traverseHistory({ context: navigable.bidi, delta })).pipe(
+        // Replies bypass the fold worker. Keep ownership until earlier observations are folded,
+        // but fence it at receipt so events received later cannot claim it while the drain waits.
+        Effect.provideService(ProtocolClient.ReplyReceived, (received) => {
+          restoration.sameDocumentThrough = received
+        }),
+        Effect.tap(() => state.root().drainObserved),
+        Effect.ensuring(Effect.sync(() => {
+          navigable.traversalCommands.delete(navigation)
+        }))
+      )
+    )
+    if (exit._tag === "Failure") {
+      const noHistory = Option.exists(
+        Cause.findErrorOption(exit.cause),
+        (error) =>
+          error.reason._tag === "Rejected" && error.reason.method === "browsingContext.traverseHistory" &&
+          error.reason.code === "no such history entry"
+      )
+      yield* release(noHistory)
+      return Option.none<PageNavigation.Id>()
+    }
+    let realm: RealmEntry | undefined
+    yield* state.buffer.run(() => {
+      if (navigable.restoring !== restoration) return
+      const entry = [...navigable.navigations.values()].find((pending) => pending.id === navigation)
+      if (
+        ambiguous || navigable.removed || (entry === undefined
+          ? !navigable.expected.list.some((expected) => expected.id === navigation)
+          : entry.ended)
+      ) {
+        cancelRestoration(navigable)
+        return
+      }
+      replied = true
+      realm = pendingRealm()
+    })
+    if (realm !== undefined) yield* complete(realm)
+    return Option.some(navigation)
+  }).pipe(Effect.onInterrupt(() => release(false)))
 })

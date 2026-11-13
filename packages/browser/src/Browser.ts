@@ -3,16 +3,24 @@
  *
  * A backend's layer provides `Browser`: `Chromium.layer({ executablePath })` launches the browser at that path, and
  * `Chromium.layerConnect(endpoint)` attaches to one that's already running. Each backend is an import of its own
- * (`@usestrider/browser/chromium`, `/firefox`, `/webkit` and `/bidi`), so a program loads only the protocol code it
+ * (`@usestrider/browser/chromium`, `/firefox`, `/webkit`, and `/bidi`), so a program loads only the protocol code it
  * uses. A launched browser gets a temporary profile, made before it starts and deleted after it exits.
  *
  * **Tracing**
  *
  * Every operation you call opens one span, named like `Locator.click`, with attributes in OpenTelemetry's style:
- * `browser.operation`, `browser.page.id`, `url.full` (redacted under the current diagnostics preset) and
+ * `browser.operation`, `browser.page.id`, `url.full` (redacted under the current diagnostics preset), and
  * `error.type`. What happens inside an operation isn't traced, unless `TraceProtocolCommands` adds a span for each
  * protocol command. `SpanNameGenerator` and `TracerDisabledWhen` rename or suppress spans, as their namesakes do
  * for Effect's `HttpClient`.
+ *
+ * An unparseable browser-reported URL becomes `about:blank` and emits a warning plus a
+ * `browser.url.malformed` event on its own short-lived span. It uses the logger, tracer and settings captured
+ * when the connection opens, even after its setup span ends. The naming and suppression functions receive
+ * `name: "browser.url.malformed"` with a Browser target. Suppression leaves the warning visible.
+ * `browser.operation` holds the original operation or diagnostic name, regardless of the generated span name.
+ * The warning, span attribute and event carry `browser.url.reported`: `REDACTED` under the default strict
+ * diagnostics preset, or the exact reported string under local.
  *
  * @stability unstable
  * @since 0.1.0
@@ -332,7 +340,8 @@ export interface LaunchOptions {
   readonly profile?: LaunchProfile.LaunchProfile | undefined
   /**
    * A profile directory you own, never deleted. Chromium and Firefox lock it while they run, so two browsers can't
-   * share one. On WebKit, it's the default context's only.
+   * share one. On WebKit, it's the default context's only. Closing `Chromium.layer` closes the browser it
+   * launched cleanly to preserve recent writes to this profile, stopping it if it does not exit within five seconds.
    *
    * @default a temporary profile, deleted after the browser exits
    */
@@ -377,11 +386,11 @@ export interface ConnectOptions {
  * - `-` is a tick of 10 ms;
  * - `commit` commits a document at `https://example.test/`, and `load` makes it interactive, then complete;
  * - `resp(name)` is a request for `https://example.test/name`, answered with 200 and finished;
- * - `dialog(kind)` opens an `alert`, `confirm`, `prompt` or `beforeunload` prompt, decided as any dialog is;
+ * - `dialog(kind)` opens an `alert`, `confirm`, `prompt`, or `beforeunload` prompt, decided as any dialog is;
  * - `popup` opens a popup with the page as its opener;
  * - `crash` ends the page as crashed, and `|` as closed by its script.
  *
- * The same model that follows a real browser's events follows the fake's, so events, waits and lifetimes behave
+ * The same model that follows a real browser's events follows the fake's, so events, waits, and lifetimes behave
  * as they do with a browser. `goto` and `reload` commit at once; `info.protocol` is `"fake"`.
  *
  * **Gotchas**
@@ -423,7 +432,11 @@ export const layerTest = (timeline: string): Layer.Layer<Browser> =>
   ))
 
 /**
- * What a span is about, as given to `SpanNameGenerator` and `TracerDisabledWhen`.
+ * What an operation or diagnostic span is about, as given to `SpanNameGenerator` and `TracerDisabledWhen`.
+ *
+ * **Details**
+ *
+ * Malformed browser-reported URLs use `name: "browser.url.malformed"` and a Browser target.
  *
  * @stability unstable
  * @category models
@@ -431,21 +444,26 @@ export const layerTest = (timeline: string): Layer.Layer<Browser> =>
  */
 export interface Operation extends Tracing.Operation {
   /**
-   * The operation, such as `Locator.click` or `Download.next`.
+   * The operation, such as `Locator.click` or `Download.next`, or the diagnostic `browser.url.malformed`.
    */
   readonly name: string
   readonly target: Target.Description
 }
 
 /**
- * Reference to the function that names each operation's span; by default the operation's name, such as
+ * Reference to the function that names operation and diagnostic spans; by default their name, such as
  * `Locator.click`.
  *
  * **Details**
  *
  * Every operation opens one span. Its attributes are `browser.operation`, the id of what it acts on
- * (`browser.page.id`, `browser.context.id` or `browser.realm.id`), attributes of its own, such as
+ * (`browser.page.id`, `browser.context.id`, or `browser.realm.id`), attributes of its own, such as
  * `browser.locator`, and a URL as `url.full`, shown as `Diagnostics.CurrentPreset` allows.
+ * The short-lived malformed-URL diagnostic also passes through this function with
+ * `name: "browser.url.malformed"` and a Browser target. `browser.operation` holds the original operation or
+ * diagnostic name, independent of the generated span name. Its `browser.url.reported` attribute and event follow
+ * `Diagnostics.CurrentPreset`: `REDACTED` under strict (the default), or the exact browser string under local.
+ * Set this reference around building the browser layer so its connection captures it.
  *
  * **Example** (Prefixing every span with the service's name)
  *
@@ -470,7 +488,14 @@ export interface Operation extends Tracing.Operation {
 export const SpanNameGenerator: Context.Reference<(operation: Operation) => string> = Tracing.SpanNameGenerator
 
 /**
- * Reference to a predicate that suppresses an operation's span when it returns `true`.
+ * Reference to a predicate that suppresses an operation or diagnostic span when it returns `true`.
+ *
+ * **Details**
+ *
+ * Malformed-URL diagnostics pass `name: "browser.url.malformed"` with a Browser target. Suppressing the diagnostic
+ * leaves its warning visible, with `browser.url.reported` redacted under strict or shown in full under local,
+ * as `Diagnostics.CurrentPreset` allows. The diagnostic never adds its event to an inherited span.
+ * Set this reference around building the browser layer so its connection captures it.
  *
  * **Example** (Leaving visibility checks out of traces)
  *

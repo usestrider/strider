@@ -1,8 +1,9 @@
 // The documentation site on Cloudflare, with Alchemy: the built site as a Worker's static assets at usestrider.dev.
 // `pnpm website:deploy` deploys it with the settings decrypted from deploy.sops.env, and `.github/workflows/docs.yml`
-// does from main.
+// does after each release.
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import * as Alchemy from "alchemy"
+import * as Config from "effect/Config"
 import * as Effect from "effect/Effect"
 import * as Path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -21,10 +22,19 @@ export default Alchemy.Stack(
       command: "pnpm website:dist",
       cwd: root,
       outdir: "website/dist",
+      // In front of the assets, only for the page-view counter's paths (worker.ts); every other path is served
+      // straight from the assets
+      main: Path.relative(process.cwd(), fileURLToPath(new URL("worker.ts", import.meta.url))),
+      assets: { runWorkerFirst: ["/a/*"] },
+      // The analytics server, kept out of the repository: deploy.sops.env sets it
+      env: { METRICS_ORIGIN: Config.Redacted("METRICS_ORIGIN"), METRICS_SCRIPT: "/js/pa-mUb9xbMUS7lS2Hf0a0EUo.js" },
       // www redirects to the bare domain (301, path kept), by a zone redirect rule ahead of the Worker
       domain: { name: "usestrider.dev", redirects: ["www.usestrider.dev"] },
       // No workers.dev URL: the domain is the only way in
-      workersDev: false
+      workersDev: false,
+      // The Worker's name, fixed: Alchemy otherwise derives it from a random instance ID kept in the state, so a lost
+      // state would make a second Worker rather than adopt this one (`alchemy deploy --adopt`)
+      name: "striderdocs-docs-prod-xhnnb6iygm53x7c5"
     })
     return { url: site.url }
   })

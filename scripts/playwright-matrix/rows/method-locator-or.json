@@ -1,0 +1,23 @@
+{
+  "id": "method-locator-or",
+  "upstream": [
+    "method:Locator.or"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.or",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.or"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

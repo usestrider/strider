@@ -1,0 +1,28 @@
+{
+  "id": "method-locator-ishidden",
+  "upstream": [
+    "method:Locator.isHidden"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.isVisible",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.isVisible"
+    },
+    {
+      "module": "Expect",
+      "symbol": "toBeHidden",
+      "url": "/docs/api/browser/Expect#toBeHidden"
+    }
+  ],
+  "notes": "For a current read, map isVisible to its boolean inverse. No match is visible=false, hence hidden=true; multiple matches remain StrictViolation. Use toBeHidden to wait rather than read once.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Locator.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

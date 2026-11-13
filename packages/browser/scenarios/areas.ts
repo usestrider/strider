@@ -28,7 +28,7 @@ export const frames = Effect.fn("frames")(function*(page: Page.Page) {
 // Cookies, localStorage and uploads
 export const storage = Effect.fn("storage")(function*(page: Page.Page) {
   const sent = yield* page.context.cookies.listFor("https://app.example.com") // what a request would send
-  yield* page.context.cookies.set({ name: "beta", value: "1", scope: { _tag: "Url", url: "https://app.example.com" } })
+  yield* page.context.cookies.set({ name: "beta", value: "1", scope: { url: "https://app.example.com" } })
   const theme = yield* page.localStorage.get("theme")
   yield* page.localStorage.set("theme", "dark")
   yield* page.getByLabel("Avatar").setInputFiles(FileInput.local("./avatar.png"))

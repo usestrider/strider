@@ -1,0 +1,11 @@
+{
+  "id": "method-coverage-stopcsscoverage",
+  "upstream": [
+    "method:Coverage.stopCSSCoverage"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No public JavaScript/CSS coverage collection API.",
+  "capabilities": [],
+  "requirements": []
+}

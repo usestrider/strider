@@ -2,6 +2,7 @@
  * What a page looks like on CDP: screenshots, PDFs, the browser's accessibility tree and a screencast of its
  * frames.
  */
+import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
@@ -10,6 +11,7 @@ import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as FiberSet from "effect/FiberSet"
 import * as Option from "effect/Option"
+import * as Queue from "effect/Queue"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as Accessibility from "../../cdp/Accessibility.ts"
@@ -19,13 +21,16 @@ import * as Page from "../../cdp/Page.ts"
 import * as Runtime from "../../cdp/Runtime.ts"
 import * as L1Page from "../../Page.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
+import * as Reason from "../../Reason.ts"
 import type * as L1Target from "../../Target.ts"
+import type * as VideoWriter from "../../VideoWriter.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as BrowserClock from "../browserClock.ts"
 import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
-import { type CaptureGuard, pageOf, type State, type TargetEntry } from "./state.ts"
+import * as Video from "../video.ts"
+import { type CaptureGuard, downloadDirectory, pageOf, type State, type TargetEntry } from "./state.ts"
 
 interface Guard {
   readonly check: Effect.Effect<void, Adapter.AdapterError>
@@ -138,6 +143,11 @@ export const screenshot = Effect.fnUntraced(
         }
       }
     }
+    const viewport = metrics.cssVisualViewport
+    const fitsViewport = clip !== undefined &&
+      clip.x >= viewport.pageX && clip.y >= viewport.pageY &&
+      clip.x + clip.width <= viewport.pageX + viewport.clientWidth &&
+      clip.y + clip.height <= viewport.pageY + viewport.clientHeight
     if (options.omitBackground) {
       yield* Kit.protocol(Emulation.setDefaultBackgroundColorOverride({ color: { r: 0, g: 0, b: 0, a: 0 } }).pipe(on))
     }
@@ -147,7 +157,7 @@ export const screenshot = Effect.fnUntraced(
       Page.captureScreenshot({
         format: options.format,
         ...(Option.isSome(options.quality) ? { quality: options.quality.value } : {}),
-        ...(clip === undefined ? {} : { clip: { ...clip, scale }, captureBeyondViewport: true }),
+        ...(clip === undefined ? {} : { clip: { ...clip, scale }, captureBeyondViewport: !fitsViewport }),
         fromSurface: true
       }).pipe(on, Effect.provideService(ProtocolClient.ReplyReceived, guard?.reply))
     ).pipe(
@@ -164,6 +174,24 @@ export const screenshot = Effect.fnUntraced(
           Effect.andThen(guard.check),
           Effect.andThen(Effect.fail(error))
         )
+      }),
+      Effect.mapError((error) => {
+        const reason = error.reason
+        if (
+          reason._tag === "Protocol" && reason.error.reason._tag === "Rejected" &&
+          reason.error.reason.method === "Page.captureScreenshot" && reason.error.reason.code === -32000 &&
+          reason.error.reason.description === "Unable to capture screenshot"
+        ) {
+          return new Adapter.AdapterError({
+            reason: new Reason.BackendFailure({
+              kind: "Rejected",
+              method: "Page.captureScreenshot",
+              hint: "Chromium returned an empty image",
+              cause: reason.error
+            })
+          })
+        }
+        return error
       }),
       Effect.ensuring(
         options.omitBackground ? Emulation.setDefaultBackgroundColorOverride({}).pipe(on, Effect.ignore) : Effect.void
@@ -265,12 +293,28 @@ const frameTree = (
     return root === undefined ? [] : convert(root)
   })
 
+/** A normal target/session end closes input; transport and model failures retain their original errors. */
+const normalSourceEnd = (error: Adapter.AdapterError): boolean => {
+  const reason = error.reason
+  return reason._tag === "Protocol" && reason.error.reason._tag === "SessionEnded" &&
+    reason.error.reason.why !== "connectionLost" && reason.error.reason.why !== "modelUnavailable"
+}
+
+interface Delivery {
+  readonly frame: Adapter.ScreencastFrame
+  readonly take: Effect.Effect<void>
+}
 interface ScreencastOwner {
+  readonly frames: Queue.Queue<Delivery, Adapter.AdapterError | Cause.Done>
+  readonly pending: Set<() => Effect.Effect<void>>
   status: "reserved" | "pending" | "success" | "failure" | "sessionEnded"
   released: boolean
   stopAtDispatch: number
 }
 interface ScreencastOwners {
+  readonly termination: Deferred.Deferred<void, Adapter.AdapterError>
+  time: ReturnType<typeof makeScreencastClock>
+  latest: Adapter.ScreencastFrame | undefined
   readonly active: Set<ScreencastOwner>
   /** Starts awaiting an outcome, including abandoned commands retained until reply or session end. */
   readonly pending: Set<ScreencastOwner>
@@ -298,6 +342,9 @@ const ownersOf = Effect.fnUntraced(function*(state: State, session: Protocol.Pro
         Effect.provideService(ProtocolClient.CommandDeadline, Option.none())
       )
       const owners: ScreencastOwners = {
+        termination: Deferred.makeUnsafe<void, Adapter.AdapterError>(),
+        time: makeScreencastClock(),
+        latest: undefined,
         active: new Set(),
         pending: new Set(),
         run,
@@ -318,6 +365,61 @@ const ownersOf = Effect.fnUntraced(function*(state: State, session: Protocol.Pro
         Operation.detached,
         Effect.forkIn(state.cleanupScope)
       )
+      const clock = yield* BrowserClock.CurrentClock
+      const frames = yield* session.subscribe(Page.screencastFrame).pipe(
+        Effect.provideService(Scope.Scope, state.cleanupScope)
+      )
+      yield* frames.pipe(
+        Stream.mapError(Kit.protocolError),
+        Stream.runForEach((event) =>
+          Effect.gen(function*() {
+            const received = clock.now()
+            const jpeg = yield* Kit.decodeBase64(event.data, "Page.screencastFrame")
+            const frame = {
+              at: owners.time(event.metadata.timestamp, received),
+              ...Adapter.jpegSize(jpeg),
+              jpeg
+            }
+            owners.latest = frame
+            const pending = new Set(owners.active)
+            let acked = false
+            const ack = Effect.suspend(() => {
+              if (acked || pending.size > 0) return Effect.void
+              acked = true
+              return Page.screencastFrameAck({ sessionId: event.sessionId }).pipe(
+                Protocol.on(session),
+                Effect.ignore,
+                Effect.provideService(ProtocolClient.CommandDeadline, Option.none())
+              )
+            })
+            for (const owner of pending) {
+              const take = () =>
+                Effect.suspend(() => {
+                  pending.delete(owner)
+                  owner.pending.delete(take)
+                  return ack
+                })
+              owner.pending.add(take)
+              yield* Queue.offer(owner.frames, { frame, take: take() })
+            }
+            yield* ack
+          })
+        ),
+        Effect.tapError((error) =>
+          Effect.gen(function*() {
+            if (normalSourceEnd(error)) {
+              yield* Deferred.succeed(owners.termination, undefined)
+            } else {
+              yield* Deferred.fail(owners.termination, error)
+            }
+            yield* Effect.forEach([...owners.active], (owner) => Queue.fail(owner.frames, error))
+          })
+        ),
+        Effect.ignore,
+        Effect.ensuring(Deferred.succeed(owners.termination, undefined)),
+        Operation.detached,
+        Effect.forkIn(state.cleanupScope)
+      )
       yield* Deferred.succeed(ready, owners)
       return owners
     })
@@ -325,11 +427,10 @@ const ownersOf = Effect.fnUntraced(function*(state: State, session: Protocol.Pro
 })
 
 /** Frames as Chromium paints them; the next comes once this one is acknowledged. */
-export const screencast = Effect.fnUntraced(function*(state: State, id: L1Target.NavigableId) {
+const screencastDeliveries = Effect.fnUntraced(function*(state: State, id: L1Target.NavigableId) {
   const page = yield* pageOf(state, id)
   const session = page.target.session
   const on = Protocol.on(session)
-  const frames = yield* session.subscribe(Page.screencastFrame)
   const owners = yield* ownersOf(state, session)
   const acquiring = yield* Effect.withFiberSucceed((fiber) => fiber)
   let waiting = true
@@ -339,6 +440,7 @@ export const screencast = Effect.fnUntraced(function*(state: State, id: L1Target
     owners.stopping = done
     owners.needsStop = false
     owners.confirmed = false
+    owners.latest = undefined
     owners.stops++
     // Bound transport writing as well as reply confirmation. A new start waits for this exchange to finish
     // (or be interrupted at its budget) before it can dispatch, so this stop cannot overtake that start.
@@ -360,7 +462,13 @@ export const screencast = Effect.fnUntraced(function*(state: State, id: L1Target
       }))
     )
   })
-  const owner: ScreencastOwner = { status: "reserved", released: false, stopAtDispatch: owners.stops }
+  const owner: ScreencastOwner = {
+    frames: yield* Queue.unbounded<Delivery, Adapter.AdapterError | Cause.Done>(),
+    pending: new Set(),
+    status: "reserved",
+    released: false,
+    stopAtDispatch: owners.stops
+  }
   const release = Effect.suspend(() => {
     if (owner.released) return Effect.void
     owner.released = true
@@ -371,7 +479,12 @@ export const screencast = Effect.fnUntraced(function*(state: State, id: L1Target
       // is fresh evidence, reported separately by ReplyOutcome even after this owner has been released.
       if (owner.stopAtDispatch === owners.stops && owners.stopping === undefined) owners.needsStop = true
     }
-    return stop
+    return Effect.forEach([...owner.pending], (take) => take()).pipe(
+      Effect.andThen(Queue.clear(owner.frames).pipe(Effect.ignore)),
+      Effect.andThen(Queue.end(owner.frames)),
+      Effect.andThen(stop),
+      Effect.asVoid
+    )
   })
   const reserve: Effect.Effect<void> = Effect.suspend(() => {
     if (owner.released) return Effect.interrupt
@@ -388,7 +501,12 @@ export const screencast = Effect.fnUntraced(function*(state: State, id: L1Target
           return release
         })
       )
-      if (!owner.released) owners.active.add(owner)
+      if (!owner.released) {
+        owners.active.add(owner)
+        if (owners.latest !== undefined && owners.confirmed) {
+          yield* Queue.offer(owner.frames, { frame: owners.latest, take: Effect.void })
+        }
+      }
       yield* restore(
         layoutMetrics(session).pipe(
           Effect.andThen(reserve),
@@ -399,6 +517,7 @@ export const screencast = Effect.fnUntraced(function*(state: State, id: L1Target
               return Effect.void
             }
             const joining = owners.pending.size > 0 || owners.needsStop
+            if (!joining) owners.time = makeScreencastClock()
             owner.status = "pending"
             owner.stopAtDispatch = owners.stops
             owners.pending.add(owner)
@@ -444,17 +563,66 @@ export const screencast = Effect.fnUntraced(function*(state: State, id: L1Target
       ))
     })
   )
-  return frames.pipe(
-    Stream.mapError(Kit.protocolError),
-    Stream.mapEffect((frame) =>
-      Effect.flatMap(Kit.decodeBase64(frame.data, "Page.screencastFrame"), (jpeg) => {
-        const at = Adapter.now()
-        return Page.screencastFrameAck({ sessionId: frame.sessionId }).pipe(
-          on,
-          Effect.ignore,
-          Effect.as({ at, ...Adapter.jpegSize(jpeg), jpeg } satisfies Adapter.ScreencastFrame)
-        )
-      })
+  return Stream.fromEffectRepeat(
+    Queue.take(owner.frames).pipe(
+      Effect.raceFirst(session.ended.pipe(Effect.andThen(Cause.done())))
     )
   )
 })
+
+/** A user screencast acknowledges when its stream consumer takes the image. */
+export const screencast = Effect.fnUntraced(function*(state: State, id: L1Target.NavigableId) {
+  const deliveries = yield* screencastDeliveries(state, id)
+  return deliveries.pipe(Stream.mapEffect(({ frame, take }) => Effect.as(take, frame)))
+})
+
+/** Anchor each native stream to local receipt time and cap browser-clock deltas at receipt. */
+export const makeScreencastClock = () => {
+  let origin: { readonly seconds: number; readonly received: number } | undefined
+  return (seconds: number | undefined, received: number): Adapter.ScreencastFrame["at"] => {
+    if (seconds === undefined) return received as Adapter.ScreencastFrame["at"]
+    origin ??= { seconds, received }
+    return Math.min(
+      received,
+      origin.received + Math.round((seconds - origin.seconds) * 1e9)
+    ) as Adapter.ScreencastFrame["at"]
+  }
+}
+
+/** Video is another session consumer; timing and its lifetime are independent of the caller's acquisition deadline. */
+export const video = Effect.fnUntraced(
+  function*(state: State, id: L1Target.NavigableId, writer: Option.Option<VideoWriter.VideoWriter>) {
+    if (Option.isNone(writer)) {
+      return yield* Effect.fail(Kit.unsupported("capability.video", "Chromium video requires a VideoWriter service"))
+    }
+    const page = yield* pageOf(state, id)
+    const directory = downloadDirectory(state, page.context.id)
+    if (Option.isNone(directory)) {
+      return yield* Effect.fail(Kit.unsupported("capability.video", "The context must allow downloads to a directory"))
+    }
+    return yield* Video.record(
+      Effect.gen(function*() {
+        const frames = yield* screencastDeliveries(state, id)
+        const owners = yield* ownersOf(state, page.target.session)
+        return {
+          frames: frames.pipe(
+            Stream.map(({ frame, take }) => ({
+              frame: {
+                at: frame.at,
+                format: "jpeg" as const,
+                data: frame.jpeg,
+                width: frame.width,
+                height: frame.height
+              },
+              take
+            })),
+            Stream.catch((error) => normalSourceEnd(error) ? Stream.empty : Stream.fail(error))
+          ),
+          ended: Deferred.await(owners.termination)
+        }
+      }),
+      writer.value,
+      directory.value
+    )
+  }
+)

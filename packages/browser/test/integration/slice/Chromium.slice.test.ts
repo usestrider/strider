@@ -1,3 +1,4 @@
+import { locatorHandlers } from "./locatorHandlers.ts"
 /**
  * The slices against Chromium, through the public layer: the pinned Chromium (`browsers.ts`), in the Nix
  * environment `pnpm test:integration` enters.
@@ -15,9 +16,15 @@ import { events } from "./events.ts"
 import { interaction } from "./interaction.ts"
 import { modules } from "./modules.ts"
 import { recordings } from "./recordings.ts"
+import { requestBodies } from "./requestBodies.ts"
+import { requestSizes } from "./requestSizes.ts"
+import { requestTiming } from "./requestTiming.ts"
 import { slice } from "./slice.ts"
+import { stalledReadProbes } from "./stalledReadProbes.ts"
+import { storageReplacement } from "./storageReplacement.ts"
 import { tooling } from "./tooling.ts"
 import { toolkit } from "./toolkit.ts"
+import { webauthn } from "./webauthn.ts"
 
 const backend = Chromium.layer({ executablePath: chromium.executable }).pipe(Layer.provide(NodeServices.layer))
 
@@ -32,3 +39,14 @@ recordings("Chromium", backend)
 toolkit("Chromium", backend)
 deadlines("Chromium", backend)
 attaching("Chromium", backend, Option.some(chromiumAttachable((endpoint) => Chromium.layerConnect(endpoint))))
+
+webauthn("Chromium", backend)
+
+locatorHandlers("Chromium", backend)
+requestBodies("Chromium", backend)
+requestTiming("Chromium", backend)
+
+storageReplacement("Chromium", backend)
+requestSizes("Chromium", backend)
+
+stalledReadProbes("Chromium", backend)

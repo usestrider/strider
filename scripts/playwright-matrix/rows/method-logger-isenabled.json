@@ -1,0 +1,11 @@
+{
+  "id": "method-logger-isenabled",
+  "upstream": [
+    "method:Logger.isEnabled"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public Strider capability for this member.",
+  "capabilities": [],
+  "requirements": []
+}

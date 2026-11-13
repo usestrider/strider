@@ -1,0 +1,26 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "capabilities": [],
+  "id": "option-tracing-starthar-content",
+  "upstream": [
+    "method:Tracing.startHar"
+  ],
+  "option": "content",
+  "requirements": [],
+  "valueCoverage": [
+    {
+      "value": "attach",
+      "status": "missing"
+    },
+    {
+      "value": "embed",
+      "status": "missing"
+    },
+    {
+      "value": "omit",
+      "status": "missing"
+    }
+  ]
+}

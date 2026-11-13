@@ -11,14 +11,14 @@ export interface Section {
 const section = (title: string, description: string, collapsed = false): Section => ({ title, description, collapsed })
 
 export const sections = {
-  core: section("Core", "Browsers, contexts, pages, locators, expectations, events and declarations."),
+  core: section("Core", "Browsers, contexts, pages, locators, expectations, events, and declarations."),
   backends: section(
     "Backends",
-    "A layer for each browser engine: Chromium, Firefox and WebKit, and one for any WebDriver BiDi endpoint."
+    "A layer for each browser engine (Chromium, Firefox, and WebKit) and one for any WebDriver BiDi endpoint."
   ),
   testing: section("Testing", "Support for tests under any runner, and the Vitest adapter."),
   agents: section("Agents and the CLI", "The agent toolkit, and what the `strider` command gives a segment."),
-  protocol: section("Protocol", "The raw protocol: transports, connections and the client every backend runs on."),
+  protocol: section("Protocol", "The raw protocol: transports, connections, and the client every backend runs on."),
   cdp: section("Chrome DevTools Protocol", "Generated from Chrome's protocol, one module per domain.", true),
   bidi: section(
     "WebDriver BiDi",

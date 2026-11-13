@@ -1,0 +1,25 @@
+{
+  "id": "method-download-url",
+  "upstream": [
+    "method:Download.url"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Download",
+      "symbol": "Download.url",
+      "url": "/docs/api/browser/Download#Download.url"
+    }
+  ],
+  "notes": "Download data is scoped; remote files may require explicit local download capability.",
+  "capabilities": [
+    "downloads"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Download.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

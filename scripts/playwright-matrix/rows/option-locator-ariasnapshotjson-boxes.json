@@ -1,0 +1,12 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public option for this contract.",
+  "capabilities": [],
+  "id": "option-locator-ariasnapshotjson-boxes",
+  "upstream": [
+    "method:Locator.ariaSnapshotJSON"
+  ],
+  "option": "boxes",
+  "requirements": []
+}

@@ -1,0 +1,25 @@
+{
+  "id": "method-dialog-accept",
+  "upstream": [
+    "method:Dialog.accept"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Dialog",
+      "symbol": "Pending",
+      "url": "/docs/api/browser/Dialog#Pending"
+    }
+  ],
+  "notes": "A handler returns a dialog decision. WebKit reports Unknown dialogs.",
+  "capabilities": [
+    "prompts"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Dialog.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

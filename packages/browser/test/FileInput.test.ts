@@ -14,6 +14,8 @@ import * as path from "node:path"
 import { vi } from "vitest"
 import * as Adapter from "../src/internal/adapter.ts"
 import * as BrowserImpl from "../src/internal/browser.ts"
+import * as Evaluation from "../src/internal/evaluation.ts"
+import * as Execution from "../src/internal/execution.ts"
 import * as Fake from "../src/internal/fake.ts"
 import * as Preparation from "../src/internal/fileInput.ts"
 import * as Handles from "../src/internal/handles.ts"
@@ -53,6 +55,17 @@ describe("FileInput across a connection", () => {
             const evaluations: Array<Adapter.EvaluationCall> = []
             const decisions: Array<Adapter.Decision> = []
             const released: Array<Adapter.HandleId> = []
+            const calls: Array<{ assignment: boolean; dispatched: boolean }> = []
+            const evaluate = Evaluation.call
+            const observed = vi.spyOn(Evaluation, "call").mockImplementation((runtime, options) => {
+              calls.push({
+                assignment: /function (commitUpload|uploadAll)/.test(options.functionDeclaration),
+                dispatched: options.dispatch !== undefined
+              })
+              return evaluate(runtime, options)
+            })
+            yield* Effect.addFinalizer(() => Effect.sync(() => observed.mockRestore()))
+
             let send!: Adapter.Sink
             const decided = yield* Deferred.make<void>()
             // No shared filesystem is implemented by this peer: paths refer to its own host.
@@ -97,7 +110,7 @@ describe("FileInput across a connection", () => {
               })))
             })
             // Stub only DOM lookup/readiness: keep file preparation and adapter dispatch real.
-            const ready = vi.spyOn(Runtime, "sendRouted").mockReturnValue(Effect.succeed({
+            const ready = vi.spyOn(Execution.ordinary, "action").mockReturnValue(Effect.succeed({
               routed,
               response: {
                 _tag: "Ready",
@@ -207,6 +220,8 @@ describe("FileInput across a connection", () => {
                 }
                 yield* handler.remove
               }
+              // Chunk transfer, validation and detached disposal must not acknowledge the assignment.
+              for (const call of calls) assert.strictEqual(call.dispatched, call.assignment)
               const hasCollector = evaluations.some((call) => call.result === "handle")
               assert.strictEqual(released.length, hasCollector ? 1 : 0)
               if (hasCollector) {
@@ -216,7 +231,7 @@ describe("FileInput across a connection", () => {
                 assert.deepStrictEqual(paths, [])
                 if (failure) {
                   if (!unreadable && source !== "changed-cardinality") assert.deepStrictEqual(evaluations, [])
-                } else assert.strictEqual(evaluations.length, 3)
+                } else assert.strictEqual(evaluations.length, 1)
                 return
               }
               if (source === "remote" || (ownership === "launched" && source !== "bytes")) {
@@ -367,7 +382,7 @@ describe("a local read under the deadline", () => {
 
   it.live("Locator.setInputFiles times out when the read doesn't end", () =>
     Effect.scoped(Effect.gen(function*() {
-      const ready = vi.spyOn(Runtime, "sendRouted").mockReturnValue(Effect.succeed({
+      const ready = vi.spyOn(Execution.ordinary, "action").mockReturnValue(Effect.succeed({
         routed,
         response: {
           _tag: "Ready",

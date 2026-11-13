@@ -102,7 +102,7 @@ export type ServedBy = typeof ServedBy.Type
  *
  * **Details**
  *
- * - `servedBy` says what answered: the network, a cache, a service worker or a route.
+ * - `servedBy` says what answered: the network, a cache, a service worker, or a route.
  * - `statusText` is the status line's reason phrase as the browser reports it, empty for HTTP/2 and later.
  * - `httpVersion` is the protocol as the browser names it, such as `http/1.1` or `h2`. It's `None` where the
  *   browser doesn't report it with the response, as WebKit doesn't: it reports it only when the response ends.
@@ -244,6 +244,19 @@ export const withBodyLimit: {
  * `url` is required. Without `body`, only the status and headers are delivered. With it, body collection is set
  * up before this returns, which needs inspect access (a `ReadonlyPage` or a `UserContext`), and a response
  * matches once its body has loaded and been decoded, within the deadline in force when `next` is called.
+ * Collection also ends when borrowed inspect access is released; an expired grant fails with `TargetGone`.
+ *
+ * On Firefox, a terminal response with status 301, 302, 303, 307, or 308 without a `Location` header fails body
+ * collection immediately with `Unsupported`, capability `"network.responseBody.terminalRedirect"`: Firefox does
+ * not answer the native body command for it. Other statuses remain readable, and Chromium and WebKit can collect
+ * these terminal responses' bodies.
+ *
+ * On WebKit, response-body collection makes navigation and reload wait for the responded, committed main
+ * document to finish loading and for document body reads already started on the page to settle. Unresponded or
+ * uncommitted loads and unfinished iframe loads do not delay dispatch. This interruptible wait uses the existing
+ * navigation deadline with no grace. An indefinitely streaming main document can consume that deadline and
+ * cause `Deadline.Timeout`; close the scopes owning all response-body collection before navigating if preserving
+ * the body is unnecessary. Navigation started by page scripts or input is outside this coordination.
  *
  * **Example** (Waiting for the cart's response)
  *
@@ -289,7 +302,7 @@ export const next: {
       CapturedResponse<B>,
       DE | PE | ResponseError | Target.TargetGone | Deadline.Timeout
     >,
-    Subscription.SubscriptionError | Deadline.Timeout,
+    Subscription.SubscriptionError | Target.TargetGone | Deadline.Timeout,
     Scope.Scope | DR | PR
   >
   <PE = never, PR = never>(
@@ -310,6 +323,10 @@ export const next: {
  *
  * Each body has `Deadline.DefaultBudget`, as read when `stream` is called, to finish loading. One that doesn't,
  * such as an event stream's, fails the stream with `BodyUnavailable`, `why: "streaming"`.
+ * Collection also ends when borrowed inspect access is released; an expired grant fails with `TargetGone`.
+ * Firefox terminal responses with status 301, 302, 303, 307, or 308 without a `Location` header fail body collection
+ * immediately with `Unsupported`, capability `"network.responseBody.terminalRedirect"`, because Firefox does not
+ * answer the native body command for them. Other statuses remain readable.
  *
  * **Example** (Logging server errors)
  *
@@ -341,7 +358,7 @@ export const stream: {
     where?: Subscription.Where<CapturedResponse<B>, PE, PR> | undefined
   ): Effect.Effect<
     Stream.Stream<CapturedResponse<B>, DE | PE | ResponseError | Subscription.EventOverflow | Target.TargetGone>,
-    Subscription.SubscriptionError | Deadline.Timeout,
+    Subscription.SubscriptionError | Target.TargetGone | Deadline.Timeout,
     Scope.Scope | DR | PR
   >
   <PE = never, PR = never>(
@@ -439,7 +456,12 @@ export class MalformedBody extends Schema.Error<MalformedBody>("@usestrider/brow
  * @category schemas
  * @since 0.1.0
  */
-export const ResponseErrorReason = Schema.Union([BodyUnavailable, MalformedBody, Reason.BackendFailure])
+export const ResponseErrorReason = Schema.Union([
+  BodyUnavailable,
+  MalformedBody,
+  Reason.Unsupported,
+  Reason.BackendFailure
+])
 
 /**
  * The reasons reading a response can fail.

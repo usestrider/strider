@@ -43,7 +43,7 @@ import type * as Target from "./Target.ts"
  *
  * - `fixed`: wall time frozen at `at`; timers still run.
  * - `offset`: wall time shifted by `by`; everything else real.
- * - `controlled`: wall time, monotonic time, timers and animation frames move only when you call `adjust` or
+ * - `controlled`: wall time, monotonic time, timers, and animation frames move only when you call `adjust` or
  *   `setTime`.
  *
  * @stability unstable
@@ -65,7 +65,7 @@ export type Mode =
 export interface InstallOptions {
   /**
    * Whether the pages' dedicated workers get the clock too, on the same timeline: a running worker gets it at
-   * once, and a later one before its own script. `adjust`, `setTime` and `resume` reach workers as they reach
+   * once, and a later one before its own script. `adjust`, `setTime`, and `resume` reach workers as they reach
    * documents. Fails with `Unsupported` on Firefox (`initScripts.workers`).
    *
    * @default false

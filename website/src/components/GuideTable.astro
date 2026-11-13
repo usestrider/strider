@@ -1,0 +1,8 @@
+---
+// Keep the native table layout and semantics inside a keyboard-accessible scroll area.
+const { "data-scroll-label": label = "Table", ...props } = Astro.props
+---
+
+<div class="overflow-x-auto" tabindex="0" role="region" aria-label={label}>
+  <table {...props}><slot /></table>
+</div>

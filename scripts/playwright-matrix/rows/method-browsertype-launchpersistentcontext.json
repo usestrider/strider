@@ -1,0 +1,23 @@
+{
+  "id": "method-browsertype-launchpersistentcontext",
+  "upstream": [
+    "method:BrowserType.launchPersistentContext"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Browser",
+      "symbol": "LaunchOptions",
+      "url": "/docs/api/browser/Browser#LaunchOptions"
+    }
+  ],
+  "notes": "Launch with userDataDir, then use the default context; no separate launchPersistentContext factory.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Browser.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

@@ -1,0 +1,12 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public option for this contract.",
+  "capabilities": [],
+  "id": "option-locatorassertions-tocontaintext-useinnertext",
+  "upstream": [
+    "method:LocatorAssertions.toContainText"
+  ],
+  "option": "useInnerText",
+  "requirements": []
+}

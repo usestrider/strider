@@ -3,19 +3,31 @@
  * `pnpm test-types`.
  */
 import {
+  Capability,
   Deadline,
   Download,
+  Expect,
   JSHandle,
   Locator,
   NetworkRequest,
   NetworkResponse,
   Page,
   Snapshot,
+  Subscription,
   Target
 } from "@usestrider/browser"
-import { Effect, Schema } from "effect"
+import { Context, Effect, Schema, Scope } from "effect"
 import { HttpIncomingMessage } from "effect/http"
 import { describe, expect, it } from "tstyche"
+
+class RequestDecoderService extends Context.Service<RequestDecoderService, {}>()("RequestDecoderService") {}
+class RequestPredicateService extends Context.Service<RequestPredicateService, {}>()("RequestPredicateService") {}
+declare const requestDecoder: NetworkRequest.BodyDecoder<string, "decoder-error", RequestDecoderService>
+declare const requestPredicate: Subscription.Where<
+  NetworkRequest.CapturedRequest<string>,
+  "predicate-error",
+  RequestPredicateService
+>
 
 declare const observed: Page.ObservedPage
 declare const reader: Page.ReadonlyPage
@@ -23,8 +35,35 @@ declare const page: Page.Page
 declare const ref: Snapshot.RefId
 
 describe("access is typed", () => {
+  it("configured viewport requires only inspect access", () => {
+    expect(reader.viewportSize).type.not.toRaiseError()
+    expect(observed.viewportSize).type.toRaiseError()
+  })
+
   it("a page you may only inspect offers no actions", () => {
+    expect(reader.locator("div").boundingBox).type.not.toRaiseError()
     expect(reader.getByRole("button").click()).type.toRaiseError("Property 'click' does not exist")
+    expect(reader.locator("input").selectText()).type.toRaiseError("Property 'selectText' does not exist")
+    expect(page.locator("input").selectText()).type.not.toRaiseError()
+    expect(reader.getByRole("button").dispatchEvent("change")).type.toRaiseError(
+      "Property 'dispatchEvent' does not exist"
+    )
+    expect(reader.getByRole("button").blur()).type.toRaiseError("Property 'blur' does not exist")
+    expect(page.getByRole("button").blur()).type.not.toRaiseError()
+  })
+
+  it("selected-value expectations need only inspect access and preserve typed failures", () => {
+    expect(reader.locator("select").pipe(Expect.toHaveValues(["red", /green/] as const))).type.toBe<
+      Effect.Effect<void, Expect.ExpectationFailed | Target.TargetGone | Deadline.Timeout>
+    >()
+    expect(Expect.toHaveValues(reader.locator("select"), [])).type.not.toRaiseError()
+    expect(observed.locator("select").pipe(Expect.toHaveValues([]))).type.toRaiseError()
+  })
+
+  it("editability needs only inspect access and preserves read failures", () => {
+    const read = reader.getByRole("textbox").isEditable
+    expect(read).type.toBe<Effect.Effect<boolean, Locator.LocatorError | Target.TargetGone | Deadline.Timeout>>()
+    expect(observed.locator("input").isEditable).type.toRaiseError()
   })
 
   it("a snapshot carries its page's access, so its refs can't act either", () => {
@@ -35,8 +74,29 @@ describe("access is typed", () => {
     )
   })
 
+  it("native authenticators require control while read capabilities retain inspect access", () => {
+    expect(reader.capability(Capability.VirtualAuthenticator)).type.toRaiseError()
+    expect(page.capability(Capability.VirtualAuthenticator)).type.not.toRaiseError()
+    expect(reader.capability(Capability.AxTree)).type.not.toRaiseError()
+  })
+
+  it("a capability guard preserves the access discriminator", () => {
+    const input: unknown = Capability.AxTree
+    if (Capability.isCapability(input) && input.access === "inspect") {
+      expect(reader.capability(input)).type.not.toRaiseError()
+    }
+  })
+
   it("the main world needs control", () => {
     expect(reader.evaluateInMainWorld(() => 1)).type.toRaiseError("Property 'evaluateInMainWorld' does not exist")
+  })
+
+  it("replacing HTML needs control and returns a bounded typed effect", () => {
+    expect(reader.setContent("<p>Hello</p>")).type.toRaiseError("Property 'setContent' does not exist")
+    expect(observed.setContent("<p>Hello</p>")).type.toRaiseError("Property 'setContent' does not exist")
+    expect(page.setContent("<p>Hello</p>")).type.toBe<
+      Effect.Effect<void, Page.PageError | Target.TargetGone | Deadline.Timeout>
+    >()
   })
 
   it("downloads need control", () => {
@@ -50,6 +110,38 @@ describe("access is typed", () => {
         body: HttpIncomingMessage.schemaBodyJson(Schema.String)
       })
     ).type.toRaiseError()
+  })
+
+  it("request body collection needs inspect access, including filters stored in variables", () => {
+    const filter = {
+      url: "https://example.com/**",
+      body: (message: Parameters<NetworkRequest.BodyDecoder<string, never, never>>[0]) => message.text
+    }
+    expect(NetworkRequest.next(observed, filter)).type.toRaiseError()
+    expect(NetworkRequest.stream(observed, filter)).type.toRaiseError()
+    expect(NetworkRequest.next(reader, filter)).type.toBe<
+      Effect.Effect<
+        Effect.Effect<
+          NetworkRequest.CapturedRequest<string>,
+          NetworkRequest.RequestError | Target.TargetGone | Deadline.Timeout
+        >,
+        Subscription.SubscriptionError | Target.TargetGone | Deadline.Timeout,
+        Scope.Scope
+      >
+    >()
+  })
+
+  it("request body subscriptions preserve decoder and predicate requirements and errors", () => {
+    expect(NetworkRequest.next(reader, { url: "**/submit", body: requestDecoder }, requestPredicate)).type.toBe<
+      Effect.Effect<
+        Effect.Effect<
+          NetworkRequest.CapturedRequest<string>,
+          "decoder-error" | "predicate-error" | NetworkRequest.RequestError | Target.TargetGone | Deadline.Timeout
+        >,
+        Subscription.SubscriptionError | Target.TargetGone | Deadline.Timeout,
+        Scope.Scope | RequestDecoderService | RequestPredicateService
+      >
+    >()
   })
 
   it("kind guards never narrow access", () => {
@@ -84,6 +176,15 @@ describe("a wait is an effect", () => {
 })
 
 describe("evaluation results are what arrives", () => {
+  it("evaluateAll is available with inspect access and preserves result and error types", () => {
+    expect(reader.locator("p").evaluateAll((elements) => elements.length)).type.toBe<
+      Effect.Effect<number, Locator.LocatorError | Target.TargetGone | Deadline.Timeout>
+    >()
+    expect(reader.locator("p").evaluateAll(async () => new Date(0))).type.toBe<
+      Effect.Effect<Date, Locator.LocatorError | Target.TargetGone | Deadline.Timeout>
+    >()
+  })
+
   it("a Date survives the crossing", () => {
     expect<Effect.Success<ReturnType<typeof page.evaluate<[], Date>>>>().type.toBe<Date>()
   })

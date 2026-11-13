@@ -35,7 +35,7 @@ import type * as Transport from "./Transport.ts"
  */
 export interface CdpConnection {
   /**
-   * The browser's own session, for `Browser`, `Target`, `SystemInfo` and `Storage` commands.
+   * The browser's own session, for `Browser`, `Target`, `SystemInfo`, and `Storage` commands.
    */
   readonly browser: Protocol.ProtocolSession
   /**

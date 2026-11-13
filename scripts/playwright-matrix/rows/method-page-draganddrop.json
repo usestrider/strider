@@ -1,0 +1,34 @@
+{
+  "id": "method-page-draganddrop",
+  "upstream": [
+    "method:Page.dragAndDrop"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "Locator.dragTo",
+      "url": "/docs/api/browser/Locator#Locator.dragTo"
+    }
+  ],
+  "notes": "Native HTML drag is Chromium only; synthetic drag is explicit.",
+  "capabilities": [
+    "input.dragAndDrop"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [
+    {
+      "capability": "input.native",
+      "alternatives": [
+        "input.webdriver"
+      ],
+      "file": "packages/browser/src/internal/webkitAdapter.ts",
+      "quote": "dispatchInput: refuse(\"input.native\", \"stock WebKit's inspector protocol has no Input domain\")"
+    }
+  ]
+}
