@@ -49,7 +49,7 @@ type ProtocolError =
   | { _tag: "Decode"; method: string; issue: string }
   | { _tag: "SessionEnded"; reason: SessionEndReason }
   | { _tag: "Unsupported"; method: string }
-type RejectReason = "NoSuchTarget" | "NoSuchFrame" | "NoSuchNode" | "InvalidArgument" | "Unrecognized"
+type RejectReason = "NoSuchTarget" | "NoSuchFrame" | "NoSuchNode" | "NoSuchObject" | "InvalidArgument" | "Unrecognized"
 type SessionEndReason = "detached" | "targetDestroyed" | "connectionLost" | "swapped"
 
 // ── Error matchers: one table per backend, data ───────────

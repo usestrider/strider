@@ -5,6 +5,7 @@ import * as Protocol from "../../protocol/Protocol.ts"
 import * as Console from "../../webkit-stock-protocol/Console.ts"
 import * as Runtime from "../../webkit-stock-protocol/Runtime.ts"
 import * as Adapter from "../adapter.ts"
+import * as Kit from "../adapterKit.ts"
 import { contextKey, type Event, placement, type State, type TargetEntry, type WorkerEntry } from "./state.ts"
 
 type Installation = { readonly view: State; readonly registered: Set<string> }
@@ -96,7 +97,7 @@ export const prepare: (
         }).pipe(
           Protocol.on(session),
           Effect.map((result) => typeof result.result.value === "string" ? result.result.value : ""),
-          Effect.mapError(Adapter.protocolError)
+          Effect.mapError(Kit.realmFailure(realm.id, () => realm.ended))
         ),
         worker === undefined
           ? { _tag: "Frame", page: realm.document!.frame.page.id, frame: realm.document!.frame.id }

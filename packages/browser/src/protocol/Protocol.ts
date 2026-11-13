@@ -692,7 +692,13 @@ export const withLateReplyHandler: {
  * @category models
  * @since 0.1.0
  */
-export type RejectReason = "NoSuchTarget" | "NoSuchFrame" | "NoSuchNode" | "InvalidArgument" | "Unrecognized"
+export type RejectReason =
+  | "NoSuchTarget"
+  | "NoSuchFrame"
+  | "NoSuchNode"
+  | "NoSuchObject"
+  | "InvalidArgument"
+  | "Unrecognized"
 
 /**
  * Reason for a command the browser rejected.
@@ -709,7 +715,14 @@ export type RejectReason = "NoSuchTarget" | "NoSuchFrame" | "NoSuchNode" | "Inva
 export class Rejected extends Schema.Error<Rejected>("@usestrider/browser/protocol/Protocol/Rejected")({
   _tag: Schema.tag("Rejected"),
   method: Schema.String,
-  reason: Schema.Literals(["NoSuchTarget", "NoSuchFrame", "NoSuchNode", "InvalidArgument", "Unrecognized"]),
+  reason: Schema.Literals([
+    "NoSuchTarget",
+    "NoSuchFrame",
+    "NoSuchNode",
+    "NoSuchObject",
+    "InvalidArgument",
+    "Unrecognized"
+  ]),
   code: Schema.Union([Schema.Number, Schema.String]),
   description: Schema.String
 }) {
