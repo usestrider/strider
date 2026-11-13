@@ -166,6 +166,89 @@ describe("BidiAdapter state", () => {
       assert.strictEqual(selected, state.realms.get("destination")!.id)
     }))
 
+  it.effect("publishes only replacement realms at commit, including pending isolated worlds", () =>
+    Effect.gen(function*() {
+      const { facts, page, realm: initial, state } = yield* withPage()
+      const handlers = Evaluation.register(Kit.handlers<State.Event>())
+      const created = (realm: string, sandbox?: string) =>
+        handlers.apply("script.realmCreated", {
+          realm,
+          context: page.bidi,
+          type: "window",
+          origin: "http://next.example",
+          sandbox
+        }, { state })
+      created("old-isolated", "tools")
+      const oldIsolated = state.realms.get("old-isolated")!
+      created("next-main")
+      created("next-isolated", "tools")
+      yield* state.buffer.flush
+      assert.isFalse(facts.some((fact) =>
+        fact._tag === "RealmAdded" &&
+        fact.realm === state.realms.get("next-isolated")!.id
+      ))
+      const document = Tree.commit(
+        state,
+        page,
+        "http://next.example/",
+        "http://next.example",
+        { _tag: "InitialBlank" },
+        "next",
+        "test"
+      )
+      yield* state.buffer.flush
+      assert.deepStrictEqual([...document.realms].map((realm) => realm.bidi), ["next-main", "next-isolated"])
+      assert.isFalse(facts.some((fact) => fact._tag === "RealmDocumentAdded" && fact.document === document.id))
+      assert.strictEqual(
+        yield* Evaluation.realm(state, document.id, { _tag: "Isolated", name: "tools" }),
+        state.realms.get("next-isolated")!.id
+      )
+      handlers.apply("script.realmDestroyed", { realm: initial.bidi }, { state })
+      handlers.apply("script.realmDestroyed", { realm: oldIsolated.bidi }, { state })
+      assert.strictEqual(document.realms.size, 2)
+    }))
+
+  it.effect("transfers genuinely reused realms and reports their new document", () =>
+    Effect.gen(function*() {
+      const { facts, page, realm, state } = yield* withPage()
+      const document = Tree.commit(state, page, "about:blank", "null", { _tag: "InitialBlank" }, "next", "test")
+      yield* state.buffer.flush
+      assert.deepStrictEqual([...document.realms], [realm])
+      assert.deepStrictEqual(facts.filter((fact) => fact._tag === "RealmDocumentAdded"), [
+        { _tag: "RealmDocumentAdded", realm: realm.id, document: document.id }
+      ])
+      assert.strictEqual(yield* Evaluation.realm(state, document.id, { _tag: "Main" }), realm.id)
+    }))
+
+  it.effect("publishes a late main realm directly when no realm survived commit", () =>
+    Effect.gen(function*() {
+      const { facts, page, realm, state } = yield* withPage()
+      const handlers = Evaluation.register(Kit.handlers<State.Event>())
+      handlers.apply("script.realmDestroyed", { realm: realm.bidi }, { state })
+      const document = Tree.commit(
+        state,
+        page,
+        "http://next.example/",
+        "http://next.example",
+        { _tag: "InitialBlank" },
+        "next",
+        "test"
+      )
+      handlers.apply("script.realmCreated", {
+        realm: "late",
+        context: page.bidi,
+        type: "window",
+        origin: "http://next.example"
+      }, { state })
+      yield* state.buffer.flush
+      assert.strictEqual(yield* Evaluation.realm(state, document.id, { _tag: "Main" }), state.realms.get("late")!.id)
+      assert.isEmpty(page.pendingRealms)
+      assert.isTrue(facts.some((fact) =>
+        fact._tag === "RealmAdded" && fact.realm === state.realms.get("late")!.id &&
+        fact.kind._tag === "Window" && fact.kind.document === document.id
+      ))
+    }))
+
   for (
     const boundary of [
       "event-before-reply",
