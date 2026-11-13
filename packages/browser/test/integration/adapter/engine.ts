@@ -559,29 +559,62 @@ export const engine = (backend: Backend) =>
           }), timeout)
         it.effect("cooperative expiry while the host holds a token still answers with the timeout evidence", () =>
           Effect.gen(function*() {
-            const { call } = yield* open(backend, "<button id=\"go\" hidden>Go</button>")
-            // The browser-side timer expires the session while the host is probing triggers. Its resume must
-            // receive the terminal response the expiry computed (why the target wasn't actionable), as a resume
-            // that arrives with no time left does, not Disposed, which discards that evidence and reroutes.
+            const { call } = yield* open(backend, "<button id=\"go\" hidden>Go</button>", controlledCooperativeClock)
+            // The session expires while the host holds its token, whatever the frame timing: the virtual clock only
+            // moves when advanced. Its resume must receive the terminal response the expiry computed (why the target
+            // wasn't actionable), as a resume that arrives with no time left does, not Disposed.
             const result = yield* cooperativeExercise(
               call,
               `
-              let control = await command({ command: "start", budget: 2000, request: ${JSON.stringify(point(0))} })
-              control = await command({ command: "resume", token: control.token, left: 2000, decision: "continue" })
-              const answered = await command({ command: "resume", token: control.token, left: 0, decision: "continue" })
-              let first = await command({ command: "start", budget: 100, request: ${JSON.stringify(point(0))} })
-              first = await command({ command: "resume", token: first.token, left: 100, decision: "continue" })
-              await new Promise((resolve) => setTimeout(resolve, 300))
-              const expired = await command({ command: "resume", token: first.token, left: 0, decision: "continue" })
-              return JSON.stringify({ answered, expired })
+              let control = await command({ command: "start", session: "control", budget: 2000, request: ${
+                JSON.stringify(point(0))
+              } })
+              control = await command({ command: "resume", session: "control", token: control.token, left: 2000, decision: "continue" })
+              const answered = await command({ command: "resume", session: "control", token: control.token, left: 0, decision: "continue" })
+              let first = await command({ command: "start", session: "held", budget: 100, request: ${
+                JSON.stringify(point(0))
+              } })
+              first = await command({ command: "resume", session: "held", token: first.token, left: 100, decision: "continue" })
+              globalThis.engineTestAdvance(100)
+              const expired = await command({ command: "resume", session: "held", token: first.token, left: 0, decision: "continue" })
+              return JSON.stringify({ answered, held: first._tag, expired })
             `
             )
+            assert.strictEqual(result.held, "Check")
             assert.strictEqual(result.answered._tag, "Done")
             assert.strictEqual(result.expired._tag, "Done", JSON.stringify(result.expired))
             assert.strictEqual(result.expired.response._tag, result.answered.response._tag)
             assert.deepStrictEqual(result.answered.response.reason, { _tag: "NotVisible" })
             assert.deepStrictEqual(result.expired.response.reason, { _tag: "NotVisible" })
             assert.deepStrictEqual(result.expired.response.history, [{ _tag: "NotVisible" }])
+          }), timeout)
+        it.effect("cooperative expiry while a resume waits for a frame answers it, and retains the terminal", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(backend, "<button id=\"go\" hidden>Go</button>", controlledCooperativeClock)
+            // The session's budget runs out while its resume is in the browser's frame wait, so the host holds no
+            // token: the pending resume itself answers with the timeout evidence, a later tokenless resume is
+            // Disposed, and cancel clears the retained terminal.
+            const result = yield* cooperativeExercise(
+              call,
+              `
+              const resources = () => Object.values(globalThis.engineTestResources).map((set) => set.size)
+              let reply = await command({ command: "start", budget: 100, request: ${JSON.stringify(point(0))} })
+              const pending = command({ command: "resume", token: reply.token, left: 100, decision: "continue" })
+              globalThis.engineTestAdvance(100)
+              const stopped = await pending
+              const afterStop = resources()
+              const tokenless = await command({ command: "resume", token: reply.token, left: 0, decision: "continue" })
+              await command({ command: "cancel" })
+              const afterCancel = resources()
+              return JSON.stringify({ stopped, tokenless, afterStop, afterCancel })
+            `
+            )
+            assert.strictEqual(result.stopped._tag, "Done", JSON.stringify(result.stopped))
+            assert.isTrue(result.stopped.retained)
+            assert.deepStrictEqual(result.stopped.response.reason, { _tag: "NotVisible" })
+            assert.strictEqual(result.tokenless._tag, "Disposed")
+            assert.deepStrictEqual(result.afterStop, [1, 0, 0, 1])
+            assert.deepStrictEqual(result.afterCancel, [0, 0, 0, 0])
           }), timeout)
         it.effect("cooperative expired observations are owned, consumed once, and cleared on cancel or departure", () =>
           Effect.gen(function*() {
