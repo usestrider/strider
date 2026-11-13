@@ -46,6 +46,7 @@ import * as Serialization from "../src/internal/serialization.ts"
 import * as Request from "../src/NetworkRequest.ts"
 import * as Protocol from "../src/protocol/Protocol.ts"
 import * as Target from "../src/Target.ts"
+import { viewportTap } from "./integration/viewportProbe.ts"
 import { makeBrowser } from "./utils/FakeBrowser.ts"
 
 const session = { key: "S1", send: () => Effect.succeed({}) } as unknown as ProtocolClient.Session
@@ -103,6 +104,41 @@ const withPage = Effect.fnUntraced(function*(protocolSession = session, requestT
   state.frames.set("T1", main)
   state.navigables.set(page.id, main)
   return { state, page, target, facts }
+})
+
+describe("CDP viewport diagnostics", () => {
+  it.effect("creates no execution world, so no realm appears in the adapter", () =>
+    Effect.gen(function*() {
+      const { state } = yield* withPage()
+      const frame = state.frames.get("T1")!
+      const document = Tree.commit(
+        state,
+        frame,
+        { loaderId: "initial", url: "about:blank", origin: "://" },
+        () => ({ _tag: "InitialBlank" }),
+        undefined,
+        "test"
+      )
+      const writes: Array<any> = []
+      const tap = viewportTap(() => {})
+      tap.inject = (message) => writes.push(JSON.parse(message))
+      tap.receive(JSON.stringify({
+        method: "Target.attachedToTarget",
+        params: { sessionId: "S1", targetInfo: { targetId: "T1", type: "page" }, waitingForDebugger: false }
+      }))
+      tap.send(JSON.stringify({ id: 1, sessionId: "S1", method: "Emulation.clearDeviceMetricsOverride" }))
+      tap.receive(JSON.stringify({ id: 1, result: {}, sessionId: "S1" }))
+      assert.isAbove(writes.length, 0)
+      // A world exists only if the probe asks for one or runs page code, which would announce a context.
+      for (const command of writes) {
+        assert.isFalse(
+          command.method === "Page.createIsolatedWorld" || command.method.startsWith("Runtime."),
+          command.method
+        )
+      }
+      assert.strictEqual(document.realms.size, 0)
+      assert.strictEqual(state.realms.size, 0)
+    }).pipe(Effect.scoped))
 })
 
 describe("CDP click cleanup", () => {
