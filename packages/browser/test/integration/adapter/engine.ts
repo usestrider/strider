@@ -260,6 +260,61 @@ export const engine = (backend: Backend) =>
     ).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor)))
     layer(fixture, { excludeTestServices: true })(
       (it) => {
+        it.effect("returns initial action evidence before waiting for another sample", () =>
+          Effect.gen(function*() {
+            const { send, call } = yield* open(backend, "<button id=\"go\" disabled>Go</button>", countFrames())
+            const request = { ...point(2), sample: true }
+            const response = yield* send(request)
+            assert(response._tag === "NotReady")
+            assert.deepStrictEqual(response.reason, { _tag: "Disabled" })
+            assert.deepStrictEqual(response.history, [{ _tag: "Disabled" }])
+            assert.strictEqual(response.checked, true)
+            assert.strictEqual(yield* framesRead(call), 0)
+          }), timeout)
+
+        for (const kind of ["expect", "act"] as const) {
+          it.effect(`cooperative initial ${kind} samples after the host checks handlers`, () =>
+            Effect.gen(function*() {
+              const { call } = yield* open(
+                backend,
+                "<button id=\"go\" disabled>Actual</button>",
+                controlledCooperativeClock
+              )
+              const request = kind === "act"
+                ? { ...point(2), sample: true }
+                : {
+                  op: "expect",
+                  steps: [{ _tag: "Css", selector: "#go" }],
+                  cap: 0,
+                  expectation: {
+                    _tag: "Text",
+                    expected: [{ _tag: "String", value: "Expected", exact: true }],
+                    list: false
+                  }
+                }
+              const result = yield* cooperativeExercise(
+                call,
+                `
+                let reply = await command({ command: "start", budget: 500, request: ${JSON.stringify(request)} })
+                const started = reply._tag
+                globalThis.engineTestAdvance(10)
+                reply = await command({ command: "resume", token: reply.token, left: 490, decision: "continue" })
+                if (reply._tag === "Check") await command({ command: "cancel" })
+                return JSON.stringify({ started, reply })
+              `
+              )
+              assert.strictEqual(result.started, "Check")
+              assert.strictEqual(result.reply._tag, "Done")
+              if (kind === "act") {
+                assert.deepStrictEqual(result.reply.response.reason, { _tag: "Disabled" })
+                assert.strictEqual(result.reply.response.checked, true)
+              } else {
+                assert.strictEqual(result.reply.response.observed, "Actual")
+                assert.strictEqual(result.reply.response.passed, false)
+              }
+            }), timeout)
+        }
+
         for (const ending of ["cancel", "departure"] as const) {
           it.effect(`cooperative viewport ${ending} releases its pending round immediately`, () =>
             Effect.gen(function*() {
