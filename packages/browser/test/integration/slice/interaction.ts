@@ -3706,6 +3706,28 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }), timeout)
       }
 
+      it.effect(
+        "selectOption waits while the chosen option or its optgroup is disabled",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<select id="s"><option value="a">Ay</option><option value="off" disabled>Off</option><optgroup label="G" disabled><option value="grouped">Grouped</option></optgroup></select>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            const select = page.locator("#s")
+            for (const value of ["off", "grouped"]) {
+              const error = yield* select.selectOption({ value }).pipe(
+                Deadline.within("300 millis"),
+                Effect.flip
+              )
+              assert(Deadline.isTimeout(error), String(error))
+              assert.strictEqual(yield* select.readValue, "a")
+            }
+          })),
+        timeout
+      )
+
       it.effect("chooses options, checks boxes and sets files", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
