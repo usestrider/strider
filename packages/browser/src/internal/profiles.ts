@@ -60,6 +60,9 @@ const firefoxAutomation: Prefs = {
   // A popup, or a link that opens a new page, opens as a window rather than a tab over its opener, which would
   // leave the opener rendering about once a second (QUIRKS.md, Q71)
   "browser.link.open_newwindow": 2,
+  // A visible window preloads about:newtab into a browser of the default user context, which BiDi announces as a
+  // top-level context in the window of the page; off, the window has only the page's contexts
+  "browser.newtab.preload": false,
   "app.update.disabledForTesting": true,
   "browser.shell.checkDefaultBrowser": false,
   "browser.startup.homepage_override.mstone": "ignore",
@@ -71,7 +74,8 @@ const firefoxAutomation: Prefs = {
 /**
  * Each profile's preferences. `automation` turns off update, first-run and data-reporting prompts, nothing a
  * page can observe, and the JSON viewer, so a JSON response is the document the server sent, and opens new pages
- * as windows, so a page behind a popup keeps rendering; `concurrent` adds background-timer throttling off, which
+ * as windows, so a page behind a popup keeps rendering, and preloads no new-tab page, which a window would
+ * announce as a context of the default user context; `concurrent` adds background-timer throttling off, which
  * pages can observe, so it is opt-in.
  */
 export const firefoxPrefs: Readonly<Record<Profile, Prefs>> = {
