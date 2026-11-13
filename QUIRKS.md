@@ -1429,7 +1429,6 @@ An entry with no marker is open.
 - *We:* each independent invocation has its own named test; assertions about the same output stay together, including toolkit descriptions. The five-second test budget, ten-second subprocess limit, actual subprocess boundary and argument coverage stay intact.
 - *Reconsider:* if an individual invocation exceeds its budget, measure its phases on the failing runner before changing CLI loading or the timeout.
 
-
 **Q257. Firefox assigns delayed loads to a newer navigation and then changes its identity** (Browser).
 A load from the current document can arrive tagged with the next navigation's identity even though its timestamp
 predates that navigation's start. Firefox then announces another identity for the same document request; the command
@@ -1437,6 +1436,6 @@ and request can keep the first identity while the commit uses the second.
 - *Seen:* Firefox 158.0 over BiDi, in HTTP 204, download and ordinary HTTP 200 navigation traffic.
 - *We:* correlate the identities using the old document, event timestamps, command reservations and document request;
   a competing command or distinct request still establishes a separate navigation.
-- **Resolved:** the BiDi adapter preserves one logical navigation, its document request and its terminal outcome across
+- **Resolved** (GitHub #247): the BiDi adapter preserves one logical navigation, its document request and its terminal outcome across
   this identity change. Deterministic regressions cover the recorded sequences and competing navigation evidence.
 - *Reconsider:* the correlation if Firefox changes its navigation event attribution or document-request ordering.
