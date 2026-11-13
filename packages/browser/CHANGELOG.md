@@ -1,5 +1,30 @@
 # @usestrider/browser
 
+## 0.9.0
+
+### Breaking changes
+
+- **Expectations can fail with `Deadline.Timeout`** (#299). Every `Expect` matcher, and `Expect.that`, has `Deadline.Timeout` in its error type, because a locator handler's callback that runs out of time fails the expectation with its own timeout. `LocatorError`'s reason gains `LocatorHandlerFailed`. An expectation whose condition never holds still fails with `ExpectationFailed`. To migrate, widen annotated error unions to include `Deadline.Timeout`, and handle `LocatorHandlerFailed` where you match reasons exhaustively.
+- **Storage export keeps its timeouts** (#292). `UserContext.exportStorageState` fails with `Deadline.Timeout` when its cookie or page read runs out of time, instead of a wrapped backend rejection, and its error type includes `Deadline.Timeout`. To migrate, handle `Timeout` on its own or widen annotated error unions.
+
+### Performance
+
+- **Small in-memory uploads take one call** (#298). `setInputFiles` and `FileChooser` send in-memory files totaling 64 KiB or less in a single call into the page, instead of a chunked transfer. On Chromium, the gap to Playwright for a small upload falls from about 13 ms to 4 ms. Larger and local files transfer as before.
+
+### Added
+
+- **`Page.addLocatorHandler`** (#299): dismisses an overlay, such as a consent prompt, before actions and waiting assertions check their target, including on retries, while the registration's scope lives. Handlers run one at a time on their page, within the triggering operation's deadline, and actions inside a handler don't trigger handlers. `times` caps the invocations, and `noWaitAfter` skips waiting for the overlay to hide. A callback's own error is kept, unchanged, in `LocatorHandlerFailed` or `ExpectationFailed.handlerFailure`.
+
+### Fixed
+
+- **Firefox navigations survive a changed identity** (#300, closes #247). Firefox 158 can tag a delayed `load` from the old document with the next navigation's id, then announce another id for the same request. `goto`, 204 responses, and downloads no longer fail as `NavigationSuperseded` when it does.
+- **Firefox evaluations right after a navigation commits** (#301) go to the new document's realm. They could reach the old `about:blank` realm while Firefox was still destroying it, and fail with `TargetGone`.
+- **Chromium's automation profiles hide infobars** (#303). Chrome for Testing's "automated testing only" bar arrived after a page opened and took 56 px of its page area, which left viewport restoration waiting for a size that was gone. Pages under the `automation` and `concurrent` profiles keep the area they open with; `stock` is unchanged.
+- **Closing `Chromium.layer` closes the browser it launched cleanly** (#294), so recent writes to a supplied `userDataDir` survive. A browser that doesn't exit within five seconds is stopped.
+- **Relaunching Chromium on a supplied profile** (#293) waits for that launch's own debugging endpoint, instead of reading the previous launch's.
+- **Check and uncheck through a label** (#296) wait for both the selected element and the control it toggles to be enabled. A disabled control times out without receiving input; `checks: { enabled: false }` skips the check.
+- **A URL the browser reports that Strider can't parse** (#297) becomes `about:blank` instead of ending the connection, with a warning and a `browser.url.malformed` span event. The reported string follows the diagnostics preset: `REDACTED` under `strict`, the default, and in full under `local`.
+
 ## 0.8.4
 
 ### Fixed
