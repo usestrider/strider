@@ -1318,6 +1318,18 @@ describe("BidiAdapter state", () => {
           "browsingContext.navigate": Effect.gen(function*() {
             yield* Deferred.succeed(entered, undefined)
             yield* Deferred.await(release)
+            if (outcome === "NoContent" || outcome === "Download") {
+              return yield* Effect.fail(
+                new Protocol.ProtocolError({
+                  reason: new Protocol.Rejected({
+                    method: "browsingContext.navigate",
+                    reason: "Unrecognized",
+                    code: "unknown error",
+                    description: "NS_BINDING_ABORTED"
+                  })
+                })
+              )
+            }
             return { navigation: "A", url }
           })
         })
@@ -1446,6 +1458,29 @@ describe("BidiAdapter state", () => {
       assert.isEmpty(current.starts)
       assert.isUndefined(current.staleLoad)
       assert.isEmpty(page.navigations)
+    }))
+
+  it.effect("releases navigation identity evidence when its context is removed", () =>
+    Effect.gen(function*() {
+      const { page, state } = yield* withPage()
+      const handlers = Navigation.register(Kit.handlers<State.Event>())
+      handlers.apply("browsingContext.navigationStarted", {
+        context: "C1",
+        navigation: "active",
+        url: "http://example.test/",
+        timestamp: 10
+      }, { state })
+      const navigation = state.navigations.get("active")!
+      handlers.apply("browsingContext.load", {
+        context: "C1",
+        navigation: "active",
+        url: "about:blank",
+        timestamp: 9
+      }, { state })
+      Tree.removeNavigable(state, page, new Target.PageClosed({ by: "command" }), "test")
+      assert.isEmpty(navigation.starts)
+      assert.isUndefined(navigation.staleLoad)
+      assert.isEmpty(state.navigations)
     }))
 
   for (const status of [204, 205, 500]) {
