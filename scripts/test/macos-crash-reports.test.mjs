@@ -1,5 +1,7 @@
 import assert from "node:assert/strict"
+import fs from "node:fs/promises"
 import { mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises"
+import { syncBuiltinESMExports } from "node:module"
 import { tmpdir } from "node:os"
 import * as path from "node:path"
 import { test } from "node:test"
@@ -129,4 +131,25 @@ test("records setup failure instead of losing collection status", () =>
     assert.match(result.setupError, /ENOENT/)
     assert.equal(result.nativeReports, "absent")
     assert.equal(result.verification.state, "not-observed")
+  }))
+
+test("keeps the total byte limit when native files grow between selection and open", () =>
+  fixture(async ({ output, database }) => {
+    const source = path.join(database, "completed")
+    for (let i = 0; i < 5; i++) await writeFile(path.join(source, `${i}.dmp`), "")
+    const originalOpen = fs.open
+    // Crashpad can still be writing during collection. Complete each sparse file after lstat,
+    // before opening it, so the race is deterministic and the opened file itself is stable.
+    fs.open = async (file, ...args) => {
+      if (String(file).endsWith(".dmp")) await fs.truncate(file, 16 * 1024 * 1024)
+      return originalOpen(file, ...args)
+    }
+    syncBuiltinESMExports()
+    try {
+      const result = await collect(output, [], database)
+      assert.ok(result.copiedBytes <= 64 * 1024 * 1024, `${result.copiedBytes} bytes exceeds the 64 MiB limit`)
+    } finally {
+      fs.open = originalOpen
+      syncBuiltinESMExports()
+    }
   }))
