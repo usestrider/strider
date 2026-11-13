@@ -1,0 +1,12 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public option for this contract.",
+  "capabilities": [],
+  "id": "option-locatorassertions-tobeeditable-editable",
+  "upstream": [
+    "method:LocatorAssertions.toBeEditable"
+  ],
+  "option": "editable",
+  "requirements": []
+}

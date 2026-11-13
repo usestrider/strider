@@ -1,0 +1,12 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "The parent capability is missing; Effect interruption does not provide that operation. This is a parent-capability gap, not a separate cancellation feature request.",
+  "capabilities": [],
+  "id": "option-apirequestcontext-patch-signal",
+  "upstream": [
+    "method:APIRequestContext.patch"
+  ],
+  "option": "signal",
+  "requirements": []
+}

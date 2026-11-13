@@ -1,7 +1,7 @@
 /**
- * The dialogs a page opens: `alert`, `confirm`, `prompt` and `beforeunload`.
+ * The dialogs a page opens: `alert`, `confirm`, `prompt`, and `beforeunload`.
  *
- * A dialog blocks its page until something decides it. `next`, `stream` and `history` report a `Dialog`, which is
+ * A dialog blocks its page until something decides it. `next`, `stream`, and `history` report a `Dialog`, which is
  * data; `handle` registers a scoped handler that decides each one, given as `Pending` with only the decisions valid
  * for its kind. A dialog no handler decides is decided by the context's policy (`UserContext.Options.dialogs`) and
  * reported as an `AutoResolution`. On WebKit every dialog is `Unknown`, because WebKit doesn't say which kind is
@@ -280,7 +280,7 @@ export const history = (
  * **Gotchas**
  *
  * A dialog blocks its page, so register the handler before the action that opens one. A handler that fails,
- * is interrupted or runs out of time leaves the dialog to the context's policy, and its failure is logged at
+ * is interrupted, or runs out of time leaves the dialog to the context's policy, and its failure is logged at
  * Effect's `References.UnhandledLogLevel`. On a backend without the `prompts` capability, such as attached WebKit,
  * it fails at once with `DeclarationError`, reason `Unsupported`: no dialog would reach the handler.
  *
@@ -316,8 +316,8 @@ export const handle = <E, R>(
   DialogImpl.handle(page, handler)
 
 /**
- * A handler that accepts every dialog: accept for `Alert`, `Confirm`, `Prompt` (with its default value) and
- * `Unknown`, leave for `BeforeUnload`.
+ * A handler that accepts every dialog: accept for `Alert`, `Confirm`, `Prompt` (with its default value), and
+ * `Unknown`; leave for `BeforeUnload`.
  *
  * **Example** (Confirming a bulk delete)
  *
@@ -339,8 +339,8 @@ export const acceptAll = (dialog: Pending): Effect.Effect<Decision> =>
   dialog._tag === "BeforeUnload" ? dialog.leave : dialog.accept
 
 /**
- * A handler that declines every dialog: dismiss for `Confirm`, `Prompt` and `Unknown`, accept for `Alert` (its
- * only decision), stay for `BeforeUnload`.
+ * A handler that declines every dialog: dismiss for `Confirm`, `Prompt`, and `Unknown`; accept for `Alert` (its
+ * only decision); stay for `BeforeUnload`.
  *
  * **Example** (Staying on a page with unsaved changes)
  *

@@ -1,8 +1,8 @@
 /**
  * What operations act on, how each one is identified, and how it ends.
  *
- * A target is a page, a frame, a document, a JavaScript realm, a user context or the browser. A dialog or file
- * chooser awaiting a decision, a download and a request's hop can also end, and are named when they do. Strider gives each an
+ * A target is a page, a frame, a document, a JavaScript realm, a user context, or the browser. A dialog or file
+ * chooser awaiting a decision, a download, and a request's hop can also end, and are named when they do. Strider gives each an
  * id, which only means something where it came from, so ids are accepted only in branded form and checked against
  * their origin when used. When a target ends, every operation on it fails with `TargetGone`, which says what ended
  * and why.
@@ -173,24 +173,6 @@ export class AccessReleased extends Schema.Error<AccessReleased>("@usestrider/br
 }
 
 /**
- * Reason for a page that ended because a prerendered document took its place.
- *
- * @stability unstable
- * @category reasons
- * @since 0.1.0
- */
-export class PrerenderActivated
-  extends Schema.Error<PrerenderActivated>("@usestrider/browser/Target/PrerenderActivated")({
-    _tag: Schema.tag("PrerenderActivated"),
-    hint: hinted("Use the page the prerendered one became")
-  })
-{
-  override get message(): string {
-    return `A prerendered page took over (${this.hint})`
-  }
-}
-
-/**
  * Reason for a target that ended because its page's renderer crashed.
  *
  * @stability unstable
@@ -343,7 +325,7 @@ export class PageClosed extends Schema.Error<PageClosed>("@usestrider/browser/Ta
 }
 
 /**
- * Reason for a dialog, file chooser or paused request that ended before it was decided, or was decided already.
+ * Reason for a dialog, file chooser, or paused request that ended before it was decided, or was decided already.
  *
  * @stability unstable
  * @category reasons
@@ -354,7 +336,7 @@ export class ObligationEnded extends Schema.Error<ObligationEnded>("@usestrider/
   hint: hinted("It was decided or its page moved on; handle the next one")
 }) {
   override get message(): string {
-    return `The dialog, file chooser or paused request ended (${this.hint})`
+    return `The dialog, file chooser, or paused request ended (${this.hint})`
   }
 }
 
@@ -418,9 +400,9 @@ export class Vanished extends Schema.Error<Vanished>("@usestrider/browser/Target
  *
  * - Browser-wide: `BrowserClosed`, `BrowserCrashed`, `ConnectionLost`, `ModelUnavailable` (Strider lost track
  *   of the browser's state).
- * - Context and access: `UserContextRemoved`, `AccessReleased`, `PrerenderActivated`.
+ * - Context and access: `UserContextRemoved`, `AccessReleased`.
  * - Pages and frames: `PageClosed` (with what closed it), `PageCrashed`, `FrameDetached`.
- * - Dialogs, file choosers, paused requests, downloads and request hops: `ObligationEnded` (a dialog, file chooser
+ * - Dialogs, file choosers, paused requests, downloads, and request hops: `ObligationEnded` (a dialog, file chooser,
  *   or paused request), `DownloadEnded`, `HopEnded`.
  * - No cause seen: `Vanished`, for a target Strider knows is gone but not why.
  * - Documents and realms: `DocumentReplaced`, `DocumentEvicted`, `DocumentDestroyed`, `DocumentUnloaded`,
@@ -439,7 +421,6 @@ export const CloseReason = Schema.Union([
   ModelUnavailable,
   UserContextRemoved,
   AccessReleased,
-  PrerenderActivated,
   PageClosed,
   ObligationEnded,
   DownloadEnded,
@@ -520,7 +501,7 @@ const TargetGoneTypeId = "~@usestrider/browser/Target/TargetGone"
  *
  * **Details**
  *
- * Every operation on a page, frame, document, realm, context or browser can fail this way, so it isn't part of
+ * Every operation on a page, frame, document, realm, context, or browser can fail this way, so it isn't part of
  * any module's error. `reason` is one of the `CloseReason` classes, such as `PageClosed`, each with a `hint` that
  * says what to do next; match one with `Effect.catchReason`. When a page closes normally, its event streams end instead of failing; its waits and other
  * operations still fail.

@@ -1,0 +1,14 @@
+{
+  "id": "option-browsertype-launchpersistentcontext-proxy-value-socks-or-https-proxy-endpoint",
+  "upstream": [
+    "method:BrowserType.launchPersistentContext"
+  ],
+  "status": "missing",
+  "api": [],
+  "capabilities": [],
+  "requirements": [],
+  "parent": "option-browsertype-launchpersistentcontext-proxy",
+  "value": "SOCKS or HTTPS proxy endpoint",
+  "notes": "Only HTTP proxy endpoints are accepted; SOCKS and HTTPS-to-proxy configuration are unsupported.",
+  "option": "proxy"
+}

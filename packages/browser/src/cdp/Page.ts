@@ -5836,7 +5836,7 @@ export const startScreencast: Protocol.CommandDef<"Page.startScreencast", StartS
     "Page.startScreencast",
     StartScreencastParams,
     undefined,
-    { status: "experimental" }
+    { status: "experimental", createsResource: true }
   )
 
 /**

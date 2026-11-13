@@ -1,0 +1,25 @@
+{
+  "id": "method-browsercontext-serviceworkers",
+  "upstream": [
+    "method:BrowserContext.serviceWorkers"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "UserContext",
+      "symbol": "UserContext.workers",
+      "url": "/docs/api/browser/UserContext#UserContext.workers"
+    }
+  ],
+  "notes": "Filter context workers by kind.",
+  "capabilities": [
+    "workers.service"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/UserContext.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

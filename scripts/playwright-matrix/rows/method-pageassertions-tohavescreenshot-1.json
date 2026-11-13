@@ -1,0 +1,11 @@
+{
+  "id": "method-pageassertions-tohavescreenshot-1",
+  "upstream": [
+    "method:PageAssertions.toHaveScreenshot#1"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public Strider capability for this member.",
+  "capabilities": [],
+  "requirements": []
+}

@@ -1,0 +1,11 @@
+{
+  "id": "method-androiddevice-scroll",
+  "upstream": [
+    "method:AndroidDevice.scroll"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No Android device or Android WebView automation API.",
+  "capabilities": [],
+  "requirements": []
+}

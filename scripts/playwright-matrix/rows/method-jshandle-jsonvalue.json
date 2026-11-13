@@ -1,0 +1,23 @@
+{
+  "id": "method-jshandle-jsonvalue",
+  "upstream": [
+    "method:JSHandle.jsonValue"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "JSHandle",
+      "symbol": "JSHandle.read",
+      "url": "/docs/api/browser/JSHandle#JSHandle.read"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/JSHandle.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

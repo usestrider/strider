@@ -1,0 +1,20 @@
+{
+  "id": "option-page-setcontent-waituntil-value-networkidle",
+  "upstream": [
+    "method:Page.setContent"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "networkidle is not a load state; observe explicit application readiness.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [],
+  "parent": "option-page-setcontent-waituntil",
+  "value": "networkidle",
+  "option": "waitUntil"
+}

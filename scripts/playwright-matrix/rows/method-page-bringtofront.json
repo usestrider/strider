@@ -1,0 +1,31 @@
+{
+  "id": "method-page-bringtofront",
+  "upstream": [
+    "method:Page.bringToFront"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "Page.activate",
+      "url": "/docs/api/browser/Page#Page.activate"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [
+    {
+      "unavailable": [
+        "webkit.attached"
+      ],
+      "file": "packages/browser/src/internal/webkitAdapter.ts",
+      "quote": "activatePage: refuse(\"emulation.focus\", \"stock WebKit's inspector has no Emulation domain\")"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "status": "has",
+  "api": [
+    {
+      "module": "Capability",
+      "symbol": "ScreencastControl.frames",
+      "url": "/docs/api/browser/Capability#ScreencastControl.frames"
+    }
+  ],
+  "notes": "Consume the frames stream with Stream.runForEach. It delivers timestamped JPEG frames, with scope-controlled subscription and backpressure.",
+  "capabilities": [
+    "capability.screencast"
+  ],
+  "id": "option-screencast-start-onframe",
+  "upstream": [
+    "method:Screencast.start"
+  ],
+  "option": "onFrame",
+  "requirements": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Capability.ts"
+    ],
+    "scope": "Public recording operations inspected; scope, file lifetime and operation-group behavior are stated explicitly."
+  }
+}

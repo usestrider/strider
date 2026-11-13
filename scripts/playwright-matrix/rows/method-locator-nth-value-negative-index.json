@@ -1,0 +1,13 @@
+{
+  "id": "method-locator-nth-value-negative-index",
+  "upstream": [
+    "method:Locator.nth"
+  ],
+  "status": "missing",
+  "api": [],
+  "capabilities": [],
+  "requirements": [],
+  "parent": "method-locator-nth",
+  "value": "negative index",
+  "notes": "Negative nth indexes match nothing; use last for the final element."
+}

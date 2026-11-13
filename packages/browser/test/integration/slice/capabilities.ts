@@ -19,3 +19,18 @@ export const supports = (name: string) => Effect.map(status(name), (found) => fo
 
 /** Whether the browser has a capability in full. */
 export const fullySupports = (name: string) => Effect.map(status(name), (found) => found === "supported")
+
+/** Native upload metadata supplied by the pinned browsers, independently of transferred File construction. */
+export const nativeFileModificationTime: Readonly<Record<string, "disk" | "creation">> = {
+  Chromium: "disk",
+  Firefox: "disk",
+  WebKit: "creation",
+  "Chromium attached": "disk"
+}
+
+/** Whether adding a response intercept can reach a request that already passed its request stage. */
+export const responseRouteInFlight: Readonly<Record<"Chromium" | "Firefox" | "WebKit", boolean>> = {
+  Chromium: false,
+  Firefox: true,
+  WebKit: true
+}

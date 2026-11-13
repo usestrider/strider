@@ -4,6 +4,7 @@
  * (`browser.operation`, `url.full` under the diagnostics preset, and `error.type` when the operation fails), and
  * recordings learn of each operation.
  */
+import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 import * as Diagnostics from "../Diagnostics.ts"
@@ -53,23 +54,42 @@ export const errorType = (error: unknown): string => {
 
 /** Wraps an operation in its span. */
 export const operation = (name: string, options: Options = {}) => <A, E, R>(self: Effect.Effect<A, E, R>) =>
-  Effect.gen(function*() {
-    const operation: Tracing.Operation = { name, target: targetOf(options.attributes) }
-    const raw = options.attributes ?? {}
-    if ((yield* Tracing.TracerDisabledWhen)(operation)) return yield* Recorders.observe(name, raw, false, self)
-    const preset = yield* Diagnostics.CurrentPreset
-    const attributes: Record<string, unknown> = { "browser.operation": name }
-    for (const [key, value] of Object.entries(options.attributes ?? {})) {
-      attributes[key] = typeof value === "string" && (key === "url.full" || key === "browser.endpoint")
-        ? redactUrl(value, preset)
-        : value
-    }
-    return yield* Effect.withSpan(
-      Recorders.observe(name, raw, true, self).pipe(
-        Effect.tapError((error) => Effect.annotateCurrentSpan("error.type", errorType(error)))
-      ),
-      (yield* Tracing.SpanNameGenerator)(operation),
-      // The frame a span captures would be this line's, for every operation: `Operation.fn` adds its caller's instead
-      { attributes, captureStackTrace: false }
-    )
-  })
+  wrap(name, options, self, self)
+
+/** Records a diagnostic event on its own span, without writing to an inherited span when suppressed. */
+export const event = (name: string, attributes: Readonly<Record<string, unknown>>) =>
+  wrap(
+    name,
+    { attributes },
+    Effect.gen(function*() {
+      const span = yield* Effect.currentSpan
+      span.event(name, yield* Clock.currentTimeNanos, attributes)
+    }),
+    Effect.void
+  )
+
+const wrap = Effect.fnUntraced(function*<A, E, R>(
+  name: string,
+  options: Options,
+  self: Effect.Effect<A, E, R>,
+  suppressed: Effect.Effect<A, E, R>
+) {
+  const operation: Tracing.Operation = { name, target: targetOf(options.attributes) }
+  const raw = options.attributes ?? {}
+  if ((yield* Tracing.TracerDisabledWhen)(operation)) return yield* Recorders.observe(name, raw, false, suppressed)
+  const preset = yield* Diagnostics.CurrentPreset
+  const attributes: Record<string, unknown> = { "browser.operation": name }
+  for (const [key, value] of Object.entries(options.attributes ?? {})) {
+    attributes[key] = typeof value === "string" && (key === "url.full" || key === "browser.endpoint")
+      ? redactUrl(value, preset)
+      : value
+  }
+  return yield* Effect.withSpan(
+    Recorders.observe(name, raw, true, self).pipe(
+      Effect.tapError((error) => Effect.annotateCurrentSpan("error.type", errorType(error)))
+    ),
+    (yield* Tracing.SpanNameGenerator)(operation),
+    // The frame a span captures would be this line's, for every operation: `Operation.fn` adds its caller's instead
+    { attributes, captureStackTrace: false }
+  )
+})

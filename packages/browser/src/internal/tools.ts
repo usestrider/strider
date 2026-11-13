@@ -16,7 +16,9 @@ import * as Snapshot from "../Snapshot.ts"
 export class ToolFailure extends Schema.Class<ToolFailure>("@usestrider/browser/ai/BrowserToolkit/ToolFailure")({
   error: Schema.String,
   reason: Schema.optional(Schema.String),
-  message: Schema.String
+  message: Schema.String,
+  /** What happened since the previous call, as a result's `sinceLast` says, when the call failed with some of it unreported. */
+  sinceLast: Schema.optional(Schema.Array(Schema.String))
 }) {}
 
 const PageName = Schema.String.annotate({ description: "The page, by the name `pages` or `newPage` gave it" })
@@ -30,7 +32,7 @@ export const Ref = Snapshot.RefId.pipe(Schema.check(Schema.isPattern(/^e\d+$/)))
 /** A target: a ref, which is checked against the page's latest snapshot, or a locator string. */
 const Target = Schema.Union([Ref, Schema.String]).annotate({
   description:
-    "A ref from the page's latest snapshot (e12), or role=button[name=\"Save\"], text=\"Add to cart\", label=Email, testid=cart or css=…"
+    "A ref from the page's latest snapshot (e12), or role=button[name=\"Save\"], text=\"Add to cart\", label=Email, testid=cart, or css=…"
 })
 
 const Digest = Schema.Array(Schema.String).annotate({
@@ -152,7 +154,7 @@ export const screenshot = tool(
 
 export const click = tool(
   "click",
-  "Clicks the target once it is visible, stable, enabled and not covered." + front,
+  "Clicks the target once it is visible, stable, enabled, and not covered." + front,
   { page: PageName, target: Target },
   Schema.String,
   "acts"
@@ -257,7 +259,7 @@ export const history = tool(
 
 export const find = tool(
   "find",
-  "Searches the page's latest snapshot, taking one if there is none, for elements whose name or text contains the query, or equals it with exact; narrows by role. Returns their refs, which are targets, each with its role, name and the named elements it is in.",
+  "Searches the page's latest snapshot, taking one if there is none, for elements whose name, text, or inferred password designation contains the query (case-insensitive), or equals it with exact (case-sensitive); narrows by role. Inferred password controls use role editable; explicit ARIA roles are preserved. Returns their refs, which are targets, each with its role, name, and the named elements it is in.",
   {
     page: PageName,
     query: Schema.String,

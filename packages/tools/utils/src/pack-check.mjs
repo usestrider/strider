@@ -119,6 +119,7 @@ export const packCheck = (root) => {
           fail(`${name}: ${file} is packed, which is the workspace's`)
         }
       }
+      if (pkg.files?.includes("INDEX.md") && !files.includes("INDEX.md")) fail(`${name}: INDEX.md isn't packed`)
       // Its license
       if (!files.includes("LICENSE")) fail(`${name}: LICENSE isn't packed`)
       if (pkg.license !== "MIT") fail(`${name}: license ${pkg.license}, not MIT`)
@@ -199,6 +200,30 @@ export const packCheck = (root) => {
       run(path.join(root, "node_modules", ".bin", "tsc"), ["-p", consumer])
     } catch (error) {
       fail(`type-checking the subpaths under nodenext:\n${String(error.stdout || error.message).trim()}`)
+    }
+
+    // A real installed public getter exports its caller, including next to src/ and in encoded install paths.
+    const traceCaller = path.join("node_modules", "@usestrider", "browser", "src-neighbor", "caller.mjs")
+    fs.mkdirSync(path.dirname(path.join(consumer, traceCaller)), { recursive: true })
+    fs.copyFileSync(path.join(root, "packages/tools/utils/test/trace-sources.mjs"), path.join(consumer, traceCaller))
+    const checkTraceSources = (directory) => {
+      for (const flags of [[], ["--enable-source-maps"]]) {
+        const label = `${path.basename(directory)} ${flags.length === 0 ? "plain" : "source maps"}`
+        try {
+          const result = run("node", [...flags, traceCaller], { cwd: directory, timeout: 30_000 })
+          process.stdout.write(`pack-check: ${label}: ${result}`)
+        } catch (error) {
+          fail(`trace source caller (${label}):\n${String(error.stderr || error.message).trim()}`)
+        }
+      }
+    }
+    checkTraceSources(consumer)
+    const encodedConsumer = path.join(work, "consumer space %2F # café")
+    fs.renameSync(consumer, encodedConsumer)
+    try {
+      checkTraceSources(encodedConsumer)
+    } finally {
+      fs.renameSync(encodedConsumer, consumer)
     }
 
     // The command runs from the installed package, and says what it needs where its optional peer is missing

@@ -204,19 +204,38 @@ const madeIn = (realm: RealmEntry) => (error: Protocol.ProtocolError): Adapter.A
     ? Kit.gone({ _tag: "Realm", id: realm.id }, new L1Target.RealmDestroyed({}))
     : Kit.realmFailure(realm.id, () => realm.ended)(error)
 
+/** Observe the captured realm through acquisition and result processing, including an already-ended realm. */
+const inRealm = <A, E, R>(state: State, realm: RealmEntry, work: Effect.Effect<A, E, R>) => {
+  const gone = () => Kit.gone({ _tag: "Realm", id: realm.id }, new L1Target.RealmDestroyed({}))
+  const check = Effect.suspend(() => realm.ended ? Effect.fail(gone()) : Effect.void)
+  return check.pipe(
+    Effect.andThen(work),
+    Effect.tap(() => check),
+    Effect.raceFirst(
+      state.buffer.waitFor(() => realm.ended ? true : undefined).pipe(
+        Effect.andThen(Effect.fail(gone()))
+      )
+    )
+  )
+}
+
 /** An object an expression makes in a realm, by its id. */
-const make = (realm: RealmEntry, params: Omit<Runtime.EvaluateParams, "contextId">) =>
-  Runtime.evaluate({
-    ...params,
-    ...(realm.contextId === undefined ? {} : { contextId: realm.contextId as Runtime.ExecutionContextId }),
-    doNotPauseOnExceptionsAndMuteConsole: true
-  }).pipe(
-    Protocol.on(realm.session),
-    Effect.mapError(madeIn(realm)),
-    Effect.flatMap((reply) =>
-      reply.wasThrown === true || reply.result.objectId === undefined
-        ? Effect.fail(Kit.gone({ _tag: "Realm", id: realm.id }, new L1Target.RealmDestroyed({})))
-        : Effect.succeed(reply.result.objectId as string)
+const make = (state: State, realm: RealmEntry, params: Omit<Runtime.EvaluateParams, "contextId">) =>
+  inRealm(
+    state,
+    realm,
+    Runtime.evaluate({
+      ...params,
+      ...(realm.contextId === undefined ? {} : { contextId: realm.contextId as Runtime.ExecutionContextId }),
+      doNotPauseOnExceptionsAndMuteConsole: true
+    }).pipe(
+      Protocol.on(realm.session),
+      Effect.mapError(madeIn(realm)),
+      Effect.flatMap((reply) =>
+        reply.wasThrown === true || reply.result.objectId === undefined
+          ? Effect.fail(Kit.gone({ _tag: "Realm", id: realm.id }, new L1Target.RealmDestroyed({})))
+          : Effect.succeed(reply.result.objectId as string)
+      )
     )
   )
 
@@ -229,7 +248,7 @@ export const madeCapacity = 4096
 
 /** A realm's helper (`webkitUtility.ts`), which every evaluation in it calls: `State.helpers`' lookup. */
 export const installHelper = (state: State, id: L1Target.RealmId) =>
-  Effect.flatMap(realmOf(state, id), (realm) => make(realm, { expression: Utility.source }))
+  Effect.flatMap(realmOf(state, id), (realm) => make(state, realm, { expression: Utility.source }))
 
 /**
  * An object group's anchor in a realm: `State.anchors`' lookup. WebKit puts what a call returns in the object group
@@ -239,7 +258,7 @@ export const installHelper = (state: State, id: L1Target.RealmId) =>
 export const makeAnchor = (state: State, key: string) =>
   Effect.flatMap(
     realmOf(state, anchorRealm(key)),
-    (realm) => make(realm, { expression: "({})", objectGroup: anchorGroup(key) })
+    (realm) => make(state, realm, { expression: "({})", objectGroup: anchorGroup(key) })
   )
 
 /** Forgets the anchors `drop` names, by realm and group. */
@@ -266,101 +285,108 @@ export const evaluate = Effect.fnUntraced(function*(
   call: Adapter.EvaluationCall
 ) {
   const realm = yield* realmOf(state, id)
-  const helper = yield* Cache.get(state.helpers, id)
-  const anchor = call.result === "handle" && call.group !== undefined
-    ? yield* Cache.get(state.anchors, anchorKey(id, call.group))
-    : undefined
-  const on = Protocol.on(realm.session)
-  const realmGone = Kit.realmFailure(id, () => realm.ended)
-  // A node crosses as its binding: stock WebKit has one world, the page's, whose object the binding already is,
-  // and its `DOM.resolveNode` takes only a node id (QUIRKS.md, Q229)
-  const args = yield* Effect.forEach(call.arguments, (local) =>
-    Kit.argument<Runtime.CallArgument>(local, {
-      ids: state.ids,
-      realm: id,
-      value: (value) => ({ value }),
-      handle: (handle) => {
-        const entry = state.handles.get(handle)
-        return entry === undefined ? undefined : { objectId: entry.objectId as Runtime.RemoteObjectId }
-      },
-      node: (node) => ({ objectId: node.binding as Runtime.RemoteObjectId })
-    }))
-  const reply = yield* Runtime.callFunctionOn({
-    objectId: (anchor ?? helper) as Runtime.RemoteObjectId,
-    functionDeclaration: anchor === undefined
-      ? Utility.call(call.functionDeclaration, call.result, call.awaitPromise)
-      : Utility.callBeside(call.functionDeclaration, call.result, call.awaitPromise),
-    arguments: [
-      ...(anchor === undefined ? [] : [{ objectId: helper as Runtime.RemoteObjectId }]),
-      { value: call.arguments.map((argument) => argument._tag === "Value" ? "v" : "h") },
-      ...args
-    ],
-    awaitPromise: call.awaitPromise,
-    returnByValue: false,
-    emulateUserGesture: call.userActivation
-  }).pipe(on, Effect.mapError(realmGone))
-  const document = realm.document
-  const handleOf = (object: Runtime.RemoteObject): Adapter.RemoteValue => {
-    const type = remoteType(object)
-    if (object.objectId === undefined || object.subtype === "null") return primitive(object)
-    const handle = state.ids.handle()
-    state.handles.set(handle, { session: realm.session, realm: id, objectId: object.objectId, group: call.group })
-    if (call.group !== undefined) Groups.join(state.groups, call.group, handle)
-    return type === "node"
-      ? {
-        type,
-        handle,
-        ...(document === undefined ? {} : { node: { document: document.id, binding: object.objectId } })
+  return yield* inRealm(
+    state,
+    realm,
+    Effect.gen(function*() {
+      const helper = yield* Cache.get(state.helpers, id)
+      const anchor = call.result === "handle" && call.group !== undefined
+        ? yield* Cache.get(state.anchors, anchorKey(id, call.group))
+        : undefined
+      const realmGone = Kit.realmFailure(id, () => realm.ended)
+      const on = <M extends string, P, A>(command: Protocol.Command<M, P, A>) =>
+        inRealm(state, realm, Protocol.on(command, realm.session).pipe(Effect.mapError(realmGone)))
+      // A node crosses as its binding: stock WebKit has one world, the page's, whose object the binding already is,
+      // and its `DOM.resolveNode` takes only a node id (QUIRKS.md, Q229)
+      const args = yield* Effect.forEach(call.arguments, (local) =>
+        Kit.argument<Runtime.CallArgument>(local, {
+          ids: state.ids,
+          realm: id,
+          value: (value) => ({ value }),
+          handle: (handle) => {
+            const entry = state.handles.get(handle)
+            return entry === undefined ? undefined : { objectId: entry.objectId as Runtime.RemoteObjectId }
+          },
+          node: (node) => ({ objectId: node.binding as Runtime.RemoteObjectId })
+        }))
+      const reply = yield* Runtime.callFunctionOn({
+        objectId: (anchor ?? helper) as Runtime.RemoteObjectId,
+        functionDeclaration: anchor === undefined
+          ? Utility.call(call.functionDeclaration, call.result, call.awaitPromise)
+          : Utility.callBeside(call.functionDeclaration, call.result, call.awaitPromise),
+        arguments: [
+          ...(anchor === undefined ? [] : [{ objectId: helper as Runtime.RemoteObjectId }]),
+          { value: call.arguments.map((argument) => argument._tag === "Value" ? "v" : "h") },
+          ...args
+        ],
+        awaitPromise: call.awaitPromise,
+        returnByValue: false,
+        emulateUserGesture: call.userActivation
+      }).pipe(on)
+      const document = realm.document
+      const handleOf = (object: Runtime.RemoteObject): Adapter.RemoteValue => {
+        const type = remoteType(object)
+        if (object.objectId === undefined || object.subtype === "null") return primitive(object)
+        const handle = state.ids.handle()
+        state.handles.set(handle, { session: realm.session, realm: id, objectId: object.objectId, group: call.group })
+        if (call.group !== undefined) Groups.join(state.groups, call.group, handle)
+        return type === "node"
+          ? {
+            type,
+            handle,
+            ...(document === undefined ? {} : { node: { document: document.id, binding: object.objectId } })
+          }
+          : { type, handle } as Adapter.RemoteValue
       }
-      : { type, handle } as Adapter.RemoteValue
-  }
-  if (reply.wasThrown === true) {
-    const thrown = reply.result
-    const text = thrown.description ?? Kit.textOf(thrown)
-    return {
-      _tag: "Exception",
-      text,
-      exception: thrown.objectId === undefined
-        ? primitive(thrown)
-        : { type: remoteType(thrown) } as Adapter.RemoteValue,
-      stack: Option.fromUndefinedOr(text.includes("\n") ? text : undefined)
-    } satisfies Adapter.RemoteResult
-  }
-  if (call.result === "handle") {
-    return { _tag: "Value", value: handleOf(reply.result) } satisfies Adapter.RemoteResult
-  }
-  const encoded = yield* Effect.try({
-    try: () => JSON.parse(String(reply.result.value)) as { readonly batch: number; readonly value: Serialized },
-    catch: () => Kit.undecodable("Runtime.callFunctionOn", "the helper's result isn't JSON")
-  })
-  if (encoded.batch === 0 || document === undefined) {
-    return { _tag: "Value", value: withBindings(encoded.value, () => undefined) } satisfies Adapter.RemoteResult
-  }
-  // The nodes it holds, as remote objects: WebKit's handle on a node
-  const batch = yield* Runtime.callFunctionOn({
-    objectId: helper as Runtime.RemoteObjectId,
-    functionDeclaration: Utility.takeNodes,
-    arguments: [{ value: encoded.batch }]
-  }).pipe(on, Effect.mapError(realmGone))
-  const objectIds = new Map<number, string>()
-  if (batch.result.objectId !== undefined) {
-    const { properties } = yield* Runtime.getProperties({ objectId: batch.result.objectId, ownProperties: true })
-      .pipe(on, Effect.mapError(realmGone))
-    for (const property of properties) {
-      const index = Number(property.name)
-      if (Number.isInteger(index) && property.value?.objectId !== undefined) {
-        objectIds.set(index, property.value.objectId)
+      if (reply.wasThrown === true) {
+        const thrown = reply.result
+        const text = thrown.description ?? Kit.textOf(thrown)
+        return {
+          _tag: "Exception",
+          text,
+          exception: thrown.objectId === undefined
+            ? primitive(thrown)
+            : { type: remoteType(thrown) } as Adapter.RemoteValue,
+          stack: Option.fromUndefinedOr(text.includes("\n") ? text : undefined)
+        } satisfies Adapter.RemoteResult
       }
-    }
-    yield* Runtime.releaseObject({ objectId: batch.result.objectId }).pipe(on, Effect.ignore)
-  }
-  return {
-    _tag: "Value",
-    value: withBindings(encoded.value, (index) => {
-      const objectId = objectIds.get(index)
-      return objectId === undefined ? undefined : { document: document.id, binding: objectId }
+      if (call.result === "handle") {
+        return { _tag: "Value", value: handleOf(reply.result) } satisfies Adapter.RemoteResult
+      }
+      const encoded = yield* Effect.try({
+        try: () => JSON.parse(String(reply.result.value)) as { readonly batch: number; readonly value: Serialized },
+        catch: () => Kit.undecodable("Runtime.callFunctionOn", "the helper's result isn't JSON")
+      })
+      if (encoded.batch === 0 || document === undefined) {
+        return { _tag: "Value", value: withBindings(encoded.value, () => undefined) } satisfies Adapter.RemoteResult
+      }
+      // The nodes it holds, as remote objects: WebKit's handle on a node
+      const batch = yield* Runtime.callFunctionOn({
+        objectId: helper as Runtime.RemoteObjectId,
+        functionDeclaration: Utility.takeNodes,
+        arguments: [{ value: encoded.batch }]
+      }).pipe(on)
+      const objectIds = new Map<number, string>()
+      if (batch.result.objectId !== undefined) {
+        const { properties } = yield* Runtime.getProperties({ objectId: batch.result.objectId, ownProperties: true })
+          .pipe(on)
+        for (const property of properties) {
+          const index = Number(property.name)
+          if (Number.isInteger(index) && property.value?.objectId !== undefined) {
+            objectIds.set(index, property.value.objectId)
+          }
+        }
+        yield* Runtime.releaseObject({ objectId: batch.result.objectId }).pipe(on, Effect.ignore)
+      }
+      return {
+        _tag: "Value",
+        value: withBindings(encoded.value, (index) => {
+          const objectId = objectIds.get(index)
+          return objectId === undefined ? undefined : { document: document.id, binding: objectId }
+        })
+      } satisfies Adapter.RemoteResult
     })
-  } satisfies Adapter.RemoteResult
+  )
 })
 
 /** A group given whole goes in one command, its anchors with it (QUIRKS.md, Q132). */
@@ -375,3 +401,16 @@ export const releaseHandles = (state: State, list: ReadonlyArray<Adapter.HandleI
       : Runtime.releaseObject({ objectId: released.handle.objectId as Runtime.RemoteObjectId }).pipe(
         Protocol.on(released.handle.session)
       )).pipe(Effect.ignore), { concurrency: "unbounded", discard: true })
+
+/** Temporary node reads own their inspector objects only until the read ends. */
+export const releaseNodes = (state: State, nodes: ReadonlyArray<Adapter.NodeBinding>) =>
+  Effect.forEach(nodes, (node) => {
+    const document = state.documents.get(node.document)
+    const realm = document === undefined ? undefined : [...document.realms].find((realm) => !realm.ended)
+    return realm === undefined
+      ? Effect.void
+      : Runtime.releaseObject({ objectId: node.binding as Runtime.RemoteObjectId }).pipe(
+        Protocol.on(realm.session),
+        Effect.ignore
+      )
+  }, { discard: true })

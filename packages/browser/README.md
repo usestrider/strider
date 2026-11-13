@@ -1,12 +1,16 @@
+<!-- Generated from the repository's README.md by `pnpm readme`. Edit that one. -->
+
 # @usestrider/browser
 
-Strider: Effect-native browser automation that speaks the Chrome DevTools Protocol, WebDriver BiDi and the WebKit
-inspector protocol directly. Scoped lifetimes, typed errors that say what happened, events you subscribe to before
-you act, and an agent toolkit, all built on [Effect](https://effect.website).
+Browser automation for [Effect](https://effect.website): scripts, tests, and agents that drive Chromium, Firefox, or
+WebKit. Strider speaks each browser's protocol directly (the Chrome DevTools Protocol, WebDriver BiDi, and WebKit's
+inspector protocol), so it drives browsers as they're installed, with no driver or patched build beside them.
 
-**Status:** pre-release. The API is designed, type-checked and documented, and every member it declares is built:
-the program below runs on Chromium, Firefox and WebKit, and what a backend can't do fails with `Unsupported`,
-naming the capability.
+**Documentation: [usestrider.dev](https://usestrider.dev)**
+
+```sh
+pnpm add @usestrider/browser effect @effect/platform-node
+```
 
 ```ts
 import { NodeServices } from "@effect/platform-node"
@@ -14,27 +18,331 @@ import { Browser, Expect } from "@usestrider/browser"
 import { Chromium } from "@usestrider/browser/chromium"
 import { Effect, Layer } from "effect"
 
-const BrowserLive = Chromium.layer({ executablePath: "/usr/bin/chromium" }).pipe(
+const BrowserLive = Chromium.layer({
+  executablePath: "/usr/bin/chromium"
+}).pipe(
   Layer.provide(NodeServices.layer)
 )
 
 const program = Effect.scoped(Effect.gen(function*() {
   const page = yield* Browser.newPage()
   yield* page.goto("https://shop.example.com")
-  yield* page.getByRole("button", { name: "Add to cart" }).click()
+  yield* page.getByRole("button", {
+    name: "Add to cart"
+  }).click()
   yield* page.getByText("1 item").pipe(Expect.toBeVisible)
 })).pipe(Effect.provide(BrowserLive))
 ```
 
-A launch runs the executable you name, and the library never looks for or installs a browser. To find the paths
-on your machine, install the `strider` command and run it; it lists each browser it finds with its version:
+A launch runs the executable you name; Strider never finds or installs a browser.
+[`strider browsers`](https://usestrider.dev/docs/installation#a-browser) lists the browsers on your machine.
+
+## Why Strider
+
+### Browser workflows that compose
+
+Browser jobs use the same concurrency, services, and scopes as the rest of your Effect application.
+Run up to two jobs at once here, with each job closing its page and isolated context on success, failure, or interruption:
+
+```ts
+import { Browser, Deadline } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const pageTitle = Effect.fn("pageTitle")(function*(url: string) {
+  const page = yield* Browser.newPage()
+  yield* page.goto(url)
+  return yield* page.title
+}, Effect.scoped) // Close this job's page and context when it ends.
+
+const titles = Effect.forEach(
+  [
+    "https://shop.example.com/products",
+    "https://shop.example.com/cart",
+    "https://shop.example.com/orders"
+  ],
+  pageTitle,
+  {
+    concurrency: 2
+  }
+).pipe(Deadline.within("30 seconds"))
+```
+
+The [deadline](https://usestrider.dev/docs/deadlines) is one budget for the whole batch, shared by the operations inside it.
+Provide a browser layer as in the opening example; the same jobs can run in a script, a service, or a test.
+
+### Typed failures
+
+When a step is optional, recover from the specific failure you expect and let unexpected failures reach the caller.
+This invoice step returns `None` when PDF generation reports `Unsupported`, as it does on WebKit;
+timeouts, closed pages, and other failures still propagate:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect, Option } from "effect"
+
+const invoicePdf = Effect.fn("invoicePdf")(function*(page: Page.Page) {
+  return yield* page.pdf().pipe(
+    Effect.map(Option.some),
+    Effect.catchReason(
+      "PageError",
+      "Unsupported",
+      () => Effect.succeed(Option.none())
+    )
+  )
+})
+```
+
+[Errors](https://usestrider.dev/docs/errors) also carry diagnostic details and hints, such as which elements matched an ambiguous locator
+and how to narrow it.
+
+### Events as streams
+
+[Browser events](https://usestrider.dev/docs/events/events#streams) are Effect Streams: transform and consume them with the usual Stream operators.
+A scoped consumer runs in the background and stops when its scope closes.
+
+```ts
+import { ConsoleMessage, Page } from "@usestrider/browser"
+import { Effect, Stream } from "effect"
+
+const logErrors = Effect.fn("logErrors")(function*(page: Page.Page) {
+  const errors = yield* ConsoleMessage.stream(page, {
+    level: "error"
+  })
+  yield* errors.pipe(
+    Stream.map((message) => message.text),
+    Stream.runForEach(Effect.logError),
+    Effect.forkScoped // Stop logging when the caller's scope closes.
+  )
+})
+```
+
+### Responses decoded with schemas
+
+A successful HTTP status does not tell you whether the server returned the data your program needs.
+Decode the response with an Effect Schema so the next step gets validated, typed data:
+
+```ts
+import { NetworkResponse, Page } from "@usestrider/browser"
+import { Effect, Schema } from "effect"
+import { HttpIncomingMessage } from "effect/http"
+
+const Order = Schema.Struct({
+  id: Schema.String,
+  total: Schema.Number
+})
+
+const placeOrder = Effect.fn("placeOrder")(function*(page: Page.Page) {
+  const nextOrder = yield* NetworkResponse.next(page, {
+    url: "**/api/orders",
+    method: "POST",
+    body: HttpIncomingMessage.schemaBodyJson(Order)
+  })
+  yield* page.getByRole("button", {
+    name: "Place order"
+  }).click()
+  const response = yield* nextOrder
+  return response.body.id // A string from the decoded Order; invalid bodies fail.
+})
+```
+
+[Response subscriptions](https://usestrider.dev/docs/events/network#decoding-bodies) collect and decode the body only when you ask for it.
+
+### Browser operations in your traces
+
+A slow application workflow can spend its time in browser actions as well as your own code.
+Every browser operation creates a span beneath your `Effect.fn` step, so your configured Effect tracer shows them together:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const checkout = Effect.fn("checkout")(function*(page: Page.Page) {
+  yield* page.goto("https://shop.example.com/cart")
+  yield* page.getByRole("button", {
+    name: "Pay"
+  }).click()
+})
+// The checkout span contains Page.goto and Locator.click spans.
+// Each browser span carries its page and operation details.
+```
+
+Use [Effect DevTools or an OTLP exporter](https://usestrider.dev/docs/tools/recordings#spans) to view those spans.
+You can also [record the page](https://usestrider.dev/docs/tools/recordings#traces) for Playwright's trace viewer.
+
+## Working with existing browsers and agents
+
+Give a shell-based agent Strider's [usage guide](https://usestrider.dev/docs/agents/cli#agent-usage) as context: it explains sessions, page targets,
+event waits, and reusable login state, with command examples for the installed version:
+
+```sh
+pnpx @usestrider/cli agent instructions
+```
+
+The command runs without a browser or session. It can also [generate a skill](https://usestrider.dev/docs/agents/cli#agent-usage) from the same guide.
+
+### Inspecting a tab before taking control
+
+A tool attached to your browser may need to read a tab you are using without changing it.
+[Inspection access](https://usestrider.dev/docs/pages/attaching#access-levels) gives it a page type with reads, snapshots, and screenshots;
+clicking or navigating requires explicitly taking control:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const describeTab = Effect.fn("describeTab")(function*(tab: Page.ObservedPage) {
+  const page = yield* tab.inspect // ReadonlyPage: no click or goto methods.
+  return {
+    title: yield* page.title,
+    snapshot: yield* page.snapshot()
+  }
+}, Effect.scoped) // Release inspection access; leave the existing tab open.
+```
+
+### The CLI
+
+A shell-based agent can inspect a page, act on it, and check the result in separate commands while the browser stays open.
+The [`strider` CLI](https://usestrider.dev/docs/agents/cli) gives each session and page a name, so every command says which browser and tab it uses:
 
 ```sh
 pnpm add -g @usestrider/cli
-strider browsers
+
+strider start --name shop --chromium /usr/bin/chromium
+strider -s shop page new --name main https://shop.example.com
+strider -s shop -p main snapshot
+strider -s shop -p main click 'role=button[name="Add to cart"]'
+strider -s shop -p main expect 'text="1 item"' visible
+strider -s shop stop
 ```
 
-The guides and the full API are at https://usestrider.dev, and the source is at https://github.com/usestrider/strider.
+Commands report their outcome and what happened since the last call, such as a failed request or a new popup.
+A failed check exits with a nonzero status, so scripts can act on it too.
 
-MIT licensed. The protocol modules and keyboard layouts are generated from others' definitions, whose notices are
-in `THIRD_PARTY_NOTICES.md`.
+Log in once and [save the login state](https://usestrider.dev/docs/agents/cli#sessions-and-state), then reuse it for later jobs even after the login session has ended.
+Refresh this saved state when you sign in again, for example at the start of the day:
+
+```sh
+# APP_PASSWORD is set in the environment.
+strider start --name login --chromium /usr/bin/chromium \
+  --secret password=APP_PASSWORD
+strider -s login page new --name main https://shop.example.com/login
+strider -s login -p main fill 'label=Email' 'ada@example.com'
+strider -s login -p main fill 'label=Password' '%password%'
+strider -s login -p main click 'role=button[name="Sign in"]'
+strider -s login -p main expect 'text=Welcome' visible
+strider -s login state save ./auth/shop.state
+strider -s login stop
+```
+
+Start each task from that file while the saved login is valid. Each session gets its own copy of the cookies, localStorage, and IndexedDB,
+so multiple agents can work concurrently without sharing browser tabs. An agent checking orders starts its own session:
+
+```sh
+strider start --name orders --chromium /usr/bin/chromium --state ./auth/shop.state
+strider -s orders page new --name main https://shop.example.com/orders
+strider -s orders -p main expect 'role=heading[name="Orders"]' visible
+```
+
+Another agent can use the same saved login to check the profile in a separate session:
+
+```sh
+strider start --name profile --chromium /usr/bin/chromium --state ./auth/shop.state
+strider -s profile page new --name main https://shop.example.com/profile
+strider -s profile -p main expect 'role=heading[name="Profile"]' visible
+```
+
+For a still-running login session, `--fork login` copies its state directly without a file.
+Stop each task's session when its work is done, for example `strider -s orders stop`; the saved state file remains for the next task.
+
+### The Effect toolkit
+
+Give an agent a browser task through `effect/ai`, with the [toolkit](https://usestrider.dev/docs/agents/toolkit) executing its tool calls.
+Each call returns its outcome, events since the previous call, and structured failures with hints, so the agent can choose its next step:
+
+```ts
+import { Browser } from "@usestrider/browser"
+import { BrowserToolkit, CapturePolicy } from "@usestrider/browser/ai"
+import { Config, Effect } from "effect"
+import { Chat } from "effect/ai"
+
+const signIn = Effect.fn("signIn")(function*() {
+  const context = yield* Browser.newContext()
+  const toolkit = yield* BrowserToolkit.make({
+    context,
+    secrets: {
+      password: yield* Config.Redacted("APP_PASSWORD")
+    },
+    capture: CapturePolicy.strict
+  })
+
+  const chat = yield* Chat.fromPrompt(
+    "On app.example.com, sign in as ada@example.com with %password%. " +
+      "Check that the account page opens and report whether sign-in succeeded."
+  )
+
+  // Run browser tools, then let the model read the results and choose its next step.
+  // Stop when it answers without calling tools.
+  return yield* chat.generateText({
+    prompt: [],
+    toolkit,
+    concurrency: 1
+  }).pipe(
+    Effect.repeat({
+      until: (turn) => turn.toolCalls.length === 0
+    }),
+    Effect.map((turn) => turn.text) // Return the final turn's text.
+  )
+}, Effect.scoped) // Close the agent's context and pages when the task ends.
+```
+
+The caller supplies the browser and language-model layers.
+The agent refers to the password as `%password%`; the tool substitutes its value when it runs.
+The [capture policy](https://usestrider.dev/docs/agents/toolkit#capture-policy) controls what page content is sent to the model.
+
+### MCP tools
+
+An agent that calls tools can use the same browser operations through [MCP](https://usestrider.dev/docs/agents/cli#mcp).
+With pnpm installed, this configuration runs the CLI through `pnpx`, starts a browser session for the MCP client,
+and closes it when the server exits:
+
+```json
+{
+  "mcpServers": {
+    "strider": {
+      "command": "pnpx",
+      "args": [
+        "@usestrider/cli",
+        "mcp",
+        "--start",
+        "--chromium",
+        "/usr/bin/chromium",
+        "--capture",
+        "strict"
+      ]
+    }
+  }
+}
+```
+
+This is the configuration for clients that use `mcpServers`; it selects the same strict capture policy as the toolkit example.
+To share a `shop` session you started with `pnpx @usestrider/cli start --name shop --chromium /usr/bin/chromium --capture strict`, replace `args` with `["@usestrider/cli", "mcp", "-s", "shop"]`;
+you can inspect and act on the same pages from either interface.
+
+[Introduction](https://usestrider.dev/docs) · [Coming from Playwright](https://usestrider.dev/docs/playwright) ·
+[Choosing a browser](https://usestrider.dev/docs/browsers/choosing)
+
+## Status
+
+Pre-release, and the API can still change before 1.0. It runs on Chromium, Firefox, and WebKit, and what a browser can't
+do fails with `Unsupported`, naming the capability. The packages are on npm:
+
+| Package                                   | What it's for                              |
+| ----------------------------------------- | ------------------------------------------ |
+| [`@usestrider/browser`](https://github.com/usestrider/strider/blob/main/packages/browser) | The library and its backends               |
+| [`@usestrider/vitest`](https://github.com/usestrider/strider/blob/main/packages/vitest)   | The Vitest adapter                         |
+| [`@usestrider/cli`](https://github.com/usestrider/strider/blob/main/packages/cli)         | The `strider` command, to install globally |
+
+## License
+
+[MIT](https://github.com/usestrider/strider/blob/main/LICENSE). The generated protocol modules and keyboard layouts also carry their sources' notices
+([THIRD_PARTY_NOTICES.md](https://github.com/usestrider/strider/blob/main/packages/browser/THIRD_PARTY_NOTICES.md)).

@@ -3,18 +3,43 @@
  *
  * `Url.Url` checks what it holds, so a string becomes one here and nowhere by a cast.
  */
+import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
+import * as Diagnostics from "../Diagnostics.ts"
 import * as Url from "../Url.ts"
+import * as Redaction from "./redaction.ts"
+import * as Spans from "./spans.ts"
 
 /**
  * A URL a browser reported, as a `Url.Url`.
  *
- * A browser names a document it hasn't navigated by `about:blank` or, before its first commit, by an empty string;
- * the model treats the two as one placeholder, and so does this: `""` is `about:blank`. A string that is neither an
- * empty one nor an absolute URL is a defect in the adapter that reported it, and throws.
+ * A browser names a document it hasn't navigated by `about:blank` or, before its first commit, by an empty string,
+ * which some Chromium builds write as `":"` for a popup's first frame (#207). The model treats them as one
+ * placeholder, and so does this: `""` and `":"` are `about:blank`. Other strings that are not absolute URLs also
+ * become `about:blank`, with a warning and a `browser.url.malformed` event on its own short-lived span unless tracing is suppressed.
+ * Both diagnostics carry `browser.url.reported`: `REDACTED` under the default strict preset, or the exact string
+ * under local. The span naming and suppression settings see `browser.url.malformed` as a browser target.
  */
-export const reported = (url: string): Url.Url => Url.Url.make(url === "" ? "about:blank" : url)
+export const reported = (url: string): Url.Url => {
+  if (url === "" || url === ":") return blank
+  const parsed = reportedOption(url)
+  if (Option.isSome(parsed)) return parsed.value
+  // Event folds are synchronous inside the ingestion fiber. Keep its logger, annotations and parent span;
+  // a fresh default runtime would silently send these diagnostics somewhere else.
+  const diagnostic = Effect.gen(function*() {
+    const attributes = { "browser.url.reported": Redaction.url(url, yield* Diagnostics.CurrentPreset) }
+    yield* Effect.logWarning("Malformed browser-reported URL; using about:blank").pipe(Effect.annotateLogs(attributes))
+    yield* Spans.event("browser.url.malformed", attributes)
+  })
+  const fiber = Fiber.getCurrent()
+  if (fiber === undefined) Effect.runSync(diagnostic)
+  else Effect.runSyncWith(fiber.context)(diagnostic)
+  return blank
+}
+
+const blank = Url.Url.make("about:blank")
 
 /**
  * A URL a browser reported where a URL is optional, such as a stack frame's script: `None` for one that isn't a URL,

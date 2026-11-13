@@ -1,0 +1,25 @@
+{
+  "id": "method-browsercontext-storagestate",
+  "upstream": [
+    "method:BrowserContext.storageState"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "UserContext",
+      "symbol": "UserContext.exportStorageState",
+      "url": "/docs/api/browser/UserContext#UserContext.exportStorageState"
+    }
+  ],
+  "notes": "Restore at context creation with storageState; see option differences.",
+  "capabilities": [
+    "storageState.partitioned"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/UserContext.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

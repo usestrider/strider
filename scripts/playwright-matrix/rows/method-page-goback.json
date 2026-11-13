@@ -1,0 +1,25 @@
+{
+  "id": "method-page-goback",
+  "upstream": [
+    "method:Page.goBack"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "Page.back",
+      "url": "/docs/api/browser/Page#Page.back"
+    }
+  ],
+  "notes": "Navigation defaults to commit, not load; explicit load states exclude networkidle.",
+  "capabilities": [
+    "navigation.traverse"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

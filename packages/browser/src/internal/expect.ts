@@ -21,6 +21,7 @@ import * as AriaPatterns from "./ariaPattern.ts"
 import * as BrowserClock from "./browserClock.ts"
 import * as ConditionImpl from "./condition.ts"
 import type * as Engine from "./engine.ts"
+import * as Sources from "./expectSource.ts"
 import * as Handles from "./handles.ts"
 import type { LocatorImpl } from "./locator.ts"
 import type * as Model from "./model.ts"
@@ -37,6 +38,35 @@ export const matcher = (expected: string | RegExp, exact: boolean): Engine.TextM
     ? { _tag: "String", value: expected, exact }
     : { _tag: "RegExp", source: expected.source, flags: expected.flags }
 
+/** Export classification follows the failure's identity, including catches and rethrows outside its operation. */
+export type EvidenceKind = "URL" | "Title" | "Value" | "Other" | "SourceURL" | "SourceTitle"
+
+const evidenceKinds = new WeakMap<Expect.ExpectationFailed, EvidenceKind>()
+
+/** First classification wins; recording an enclosing operation can never reclassify its failure. */
+export const classifyFailure = (
+  error: Expect.ExpectationFailed,
+  matcherName: string,
+  source?: object
+): Expect.ExpectationFailed => {
+  if (!evidenceKinds.has(error)) {
+    evidenceKinds.set(
+      error,
+      matcherName === "toHaveURL"
+        ? "URL"
+        : matcherName === "toHaveTitle"
+        ? "Title"
+        : (matcherName === "toHaveValue" || matcherName === "toHaveValues")
+        ? "Value"
+        : Sources.kind(source) ?? "Other"
+    )
+  }
+  return error
+}
+
+/** Metadata lives as long as its failure; it does not keep the failure alive or change the public error. */
+export const evidenceKind = (error: Expect.ExpectationFailed): EvidenceKind | undefined => evidenceKinds.get(error)
+
 /** What a failed expectation says, from what it saw. */
 const failure = (
   id: Diagnostics.OperationId,
@@ -46,19 +76,25 @@ const failure = (
   history: ReadonlyArray<Diagnostics.ObservedValue>,
   checks: number,
   triggers: ReadonlySet<"initial" | "change" | "interval">,
-  explained: Explained = { nearest: Option.none(), suggestions: [] }
+  explained: Explained = { nearest: Option.none(), suggestions: [] },
+  matcherName: string = "that",
+  source?: object
 ) =>
-  new Expect.ExpectationFailed({
-    subject,
-    condition,
-    last: Option.fromNullishOr(history.at(-1)),
-    history: [...history],
-    elapsed: Duration.millis((now() - started) / 1e6),
-    checks: { count: checks, triggeredBy: Array.from(triggers) },
-    nearest: explained.nearest,
-    suggestions: explained.suggestions,
-    diagnostics: Operation.diagnostics(id, { last: Option.fromNullishOr(history.at(-1)) })
-  })
+  classifyFailure(
+    new Expect.ExpectationFailed({
+      subject,
+      condition,
+      last: Option.fromNullishOr(history.at(-1)),
+      history: [...history],
+      elapsed: Duration.millis((now() - started) / 1e6),
+      checks: { count: checks, triggeredBy: Array.from(triggers) },
+      nearest: explained.nearest,
+      suggestions: explained.suggestions,
+      diagnostics: Operation.diagnostics(id, { last: Option.fromNullishOr(history.at(-1)) })
+    }),
+    matcherName,
+    source
+  )
 
 /** What a failed expectation says when nothing matched its locator. */
 interface Explained {
@@ -150,11 +186,14 @@ export const expectIn = (subject: InPage, expectation: Engine.Expectation, match
     const failed = () =>
       Effect.flatMap(
         // A count or absence is about matching nothing, and a title has no locator: nothing to explain
-        expectation._tag === "Count" || expectation._tag === "Hidden" || expectation._tag === "Title"
+        expectation._tag === "Count" || expectation._tag === "Hidden" || expectation._tag === "Detached" ||
+          expectation._tag === "Title"
           ? Effect.succeed<Explained>({ nearest: Option.none(), suggestions: [] })
           : explain(subject, id),
         (explained) =>
-          Effect.fail(failure(id, subject.description, condition, started, history, checks, triggers, explained))
+          Effect.fail(
+            failure(id, subject.description, condition, started, history, checks, triggers, explained, matcherName)
+          )
       )
     while (true) {
       const left = record.left()
@@ -223,7 +262,8 @@ export const watching = <A>(
   holds: (value: A) => boolean,
   matcherName: string,
   description: string,
-  condition: string
+  condition: string,
+  attributes: Readonly<Record<string, unknown>> = {}
 ): Effect.Effect<void, Expect.ExpectationFailed | Target.TargetGone> =>
   Effect.gen(function*() {
     const record = yield* Operation.record
@@ -243,8 +283,10 @@ export const watching = <A>(
       BrowserClock.until(record.budget.at)
     )
     if (Option.isSome(found) && Option.isSome(found.value)) return
-    return yield* Effect.fail(failure(id, description, condition, started, history, checks, triggers))
-  }).pipe(Operation.named(`Expect.${matcherName}`, { attributes: { "browser.subject": description } }))
+    return yield* Effect.fail(
+      failure(id, description, condition, started, history, checks, triggers, undefined, matcherName, subject)
+    )
+  }).pipe(Operation.named(`Expect.${matcherName}`, { attributes: { ...attributes, "browser.subject": description } }))
 
 /**
  * An expectation on any other effect: run again at `CheckInterval` until its value holds or the deadline ends.
@@ -262,7 +304,18 @@ export const polling = Operation.fn("Expect.that")(
     const triggers = new Set<"initial" | "change" | "interval">(["initial"])
     let checks = 0
     const failed = () =>
-      failure(id, "the subject", ConditionImpl.describe(condition), started, history, checks, triggers)
+      failure(
+        id,
+        "the subject",
+        ConditionImpl.describe(condition),
+        started,
+        history,
+        checks,
+        triggers,
+        undefined,
+        "that",
+        subject
+      )
     while (true) {
       checks++
       const checked = yield* Operation.under(subject, budget.at).pipe(
@@ -298,7 +351,8 @@ export const toHaveURL = (page: Page.ReadonlyPage, expected: string | RegExp) =>
       typeof expected === "string" ? url === expected : new RegExp(expected.source, expected.flags).test(url),
     "toHaveURL",
     `page ${page.id}`,
-    `to have the URL ${show(expected)}`
+    `to have the URL ${show(expected)}`,
+    { "browser.page.id": page.id }
   )
 
 /** The page's title is expected to match, in the page. */
@@ -314,17 +368,31 @@ export const toHaveTitle = (page: Page.ReadonlyPage, expected: string | RegExp) 
 
 // ── The matchers' expectations: what each public matcher expects of its subject ──────────────────────────
 
-const stateOf =
-  (tag: "Visible" | "Hidden" | "Enabled" | "Disabled" | "Checked" | "Focused" | "Editable") =>
-  (matcherName: string, condition: string) =>
-  (locator: Locator.ReadonlyLocator) => expectLocator(locator, { _tag: tag }, matcherName, condition)
+const stateOf = (
+  tag:
+    | "Attached"
+    | "Detached"
+    | "Visible"
+    | "Hidden"
+    | "Enabled"
+    | "Disabled"
+    | "Checked"
+    | "Focused"
+    | "Editable"
+    | "Empty"
+) =>
+(matcherName: string, condition: string) =>
+(locator: Locator.ReadonlyLocator) => expectLocator(locator, { _tag: tag }, matcherName, condition)
 
+export const toBeAttached = stateOf("Attached")("toBeAttached", "to be attached")
+export const toBeDetached = stateOf("Detached")("toBeDetached", "to be detached")
 export const toBeVisible = stateOf("Visible")("toBeVisible", "to be visible")
 export const toBeHidden = stateOf("Hidden")("toBeHidden", "to be hidden")
 export const toBeEnabled = stateOf("Enabled")("toBeEnabled", "to be enabled")
 export const toBeDisabled = stateOf("Disabled")("toBeDisabled", "to be disabled")
 export const toBeChecked = stateOf("Checked")("toBeChecked", "to be checked")
 export const toBeFocused = stateOf("Focused")("toBeFocused", "to have focus")
+export const toBeEmpty = stateOf("Empty")("toBeEmpty", "to be empty")
 export const toBeEditable = stateOf("Editable")("toBeEditable", "to be editable")
 
 export const toHaveText = (
@@ -338,6 +406,20 @@ export const toHaveText = (
     { _tag: "Text", expected: all.map((each) => matcher(each, true)), list },
     "toHaveText",
     `to have the text ${list ? `[${all.map(show).join(", ")}]` : show(all[0]!)}`
+  )
+}
+
+export const toHaveClass = (
+  locator: Locator.ReadonlyLocator,
+  expected: string | RegExp | ReadonlyArray<string | RegExp>
+) => {
+  const list = Array.isArray(expected)
+  const all = (list ? expected : [expected]) as ReadonlyArray<string | RegExp>
+  return expectLocator(
+    locator,
+    { _tag: "Class", expected: all.map((each) => matcher(each, true)), list },
+    "toHaveClass",
+    `to have the class ${list ? `[${all.map(show).join(", ")}]` : show(all[0]!)}`
   )
 }
 
@@ -355,6 +437,22 @@ export const toHaveValue = (locator: Locator.ReadonlyLocator, expected: string |
     { _tag: "Value", expected: matcher(expected, true) },
     "toHaveValue",
     `to have the value ${show(expected)}`
+  )
+
+export const toHaveValues = (locator: Locator.ReadonlyLocator, expected: ReadonlyArray<string | RegExp>) =>
+  expectLocator(
+    locator,
+    { _tag: "Values", expected: expected.map((value) => matcher(value, true)) },
+    "toHaveValues",
+    `to have the values [${expected.map(show).join(", ")}]`
+  )
+
+export const toHaveRole = (locator: Locator.ReadonlyLocator, expected: string) =>
+  expectLocator(
+    locator,
+    { _tag: "Role", expected },
+    "toHaveRole",
+    `to have the role ${show(expected)}`
   )
 
 export const toHaveAttribute = (locator: Locator.ReadonlyLocator, name: string, expected?: string | RegExp) =>
@@ -382,3 +480,60 @@ export const toMatchAria = (locator: Locator.ReadonlyLocator, pattern: AriaPatte
     `to match ${AriaPatterns.describe(data)}`
   )
 }
+
+export const toBeInViewport = (
+  locator: Locator.ReadonlyLocator,
+  options?: { readonly ratio?: number | undefined; readonly inViewport?: boolean | undefined } | undefined
+) => {
+  const ratio = options?.ratio ?? 0
+  const inViewport = options?.inViewport ?? true
+  return expectLocator(
+    locator,
+    { _tag: "Viewport", ratio, inViewport },
+    "toBeInViewport",
+    `to ${inViewport ? "" : "not "}intersect the viewport at ratio ${ratio}`
+  )
+}
+/** Accessible names use the shared engine only when this expectation is requested. */
+export const toHaveAccessibleName = (
+  locator: Locator.ReadonlyLocator,
+  expected: string | RegExp,
+  options?: { readonly ignoreCase?: boolean | undefined } | undefined
+) => {
+  const ignoreCase = options?.ignoreCase
+  const flags = typeof expected === "string" ? "" : expected.flags
+  const text = typeof expected === "string" ? matcher(expected, true) : {
+    _tag: "RegExp" as const,
+    source: expected.source,
+    flags: ignoreCase === undefined ? flags : flags.replace(/i/g, "") + (ignoreCase ? "i" : "")
+  }
+  return expectLocator(
+    locator,
+    { _tag: "AccessibleName", expected: text, ignoreCase: ignoreCase === true },
+    "toHaveAccessibleName",
+    `to have the accessible name ${show(expected)}${
+      ignoreCase === undefined ? "" : ignoreCase ? " ignoring case" : " matching case"
+    }`
+  )
+}
+
+export const toHaveCSS = (
+  locator: Locator.ReadonlyLocator,
+  name: string,
+  expected: string | RegExp,
+  options?: { readonly not?: boolean | undefined; readonly pseudo?: "before" | "after" | undefined }
+) =>
+  expectLocator(
+    locator,
+    {
+      _tag: "CSS",
+      name,
+      expected: matcher(expected, true),
+      not: options?.not ?? false,
+      pseudo: options?.pseudo ?? null
+    },
+    "toHaveCSS",
+    `${options?.not ? "not " : ""}to have the computed CSS ${name}${options?.pseudo ? ` on ::${options.pseudo}` : ""} ${
+      show(expected)
+    }`
+  )

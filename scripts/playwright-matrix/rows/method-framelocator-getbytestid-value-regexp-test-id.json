@@ -1,0 +1,13 @@
+{
+  "id": "method-framelocator-getbytestid-value-regexp-test-id",
+  "upstream": [
+    "method:FrameLocator.getByTestId"
+  ],
+  "parent": "method-framelocator-getbytestid",
+  "value": "RegExp test id",
+  "status": "missing",
+  "api": [],
+  "notes": "Strider getByTestId takes a string, not a RegExp.",
+  "capabilities": [],
+  "requirements": []
+}

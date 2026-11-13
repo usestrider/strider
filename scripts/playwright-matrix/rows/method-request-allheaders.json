@@ -1,0 +1,25 @@
+{
+  "id": "method-request-allheaders",
+  "upstream": [
+    "method:Request.allHeaders"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "NetworkRequest",
+      "symbol": "headersSent",
+      "url": "/docs/api/browser/NetworkRequest#headersSent"
+    }
+  ],
+  "notes": "Read confirmed sent headers and use Effect Headers for lookup.",
+  "capabilities": [
+    "network.headersSent"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/NetworkRequest.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

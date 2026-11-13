@@ -76,7 +76,8 @@ export const handle = <E, R>(
         add: (handler) => runtime.model.handleChoosers(entry, handler),
         handler,
         pending: toPending,
-        decision: (chosen, chooser): Effect.Effect<Adapter.Decision | Handlers.Staged, unknown> => {
+        scopedDecision: true,
+        decision: (chosen, chooser): Effect.Effect<Adapter.Decision | Handlers.Staged, unknown, Scope.Scope> => {
           if (!isDecision(chosen) || !("files" in chosen)) {
             return Effect.die(
               new Error("FileChooser.handle: the handler returned something that isn't a FileChooser decision")
@@ -85,28 +86,25 @@ export const handle = <E, R>(
           const files = (chosen as DecisionImpl).files
           if (files === undefined) return Effect.succeed({ _tag: "Cancel" })
           return Effect.flatMap(
-            FileInputImpl.partition(files, "files"),
-            (given): Effect.Effect<Adapter.Decision | Handlers.Staged, unknown> =>
+            FileInputImpl.prepare(runtime, files),
+            (given): Effect.Effect<Adapter.Decision | Handlers.Staged, unknown, Scope.Scope> =>
               given._tag === "Paths"
-                ? Effect.map(
-                  Effect.forEach(given.files, (file) => FileInputImpl.path(runtime, file)),
-                  (paths): Adapter.Decision => ({ _tag: "SetFiles", files: paths })
-                )
+                ? Effect.succeed<Adapter.Decision>({ _tag: "SetFiles", files: given.files })
                 // Made files are set on the chooser's input by the page, and the chooser is let go
                 : Option.match(chooser.element, {
                   onNone: (): Effect.Effect<Handlers.Staged, unknown> =>
                     Effect.fail(
                       new Reason.Unsupported({
-                        capability: "FileChooser.choose with FileInput.bytes",
+                        capability: "FileChooser.choose with FileInput.local or FileInput.bytes",
                         backend: runtime.backend,
                         hint: "The browser didn't say which input opened the chooser, so files can't be made on it"
                       })
                     ),
                   onSome: (node) =>
-                    Effect.succeed<Handlers.Staged>({
-                      _tag: "Staged",
-                      apply: setMade(runtime, entry, node, given.files)
-                    })
+                    Effect.map(
+                      prepareMade(runtime, entry, node, given.files),
+                      (apply): Handlers.Staged => ({ _tag: "Staged", apply })
+                    )
                 })
           )
         },
@@ -119,26 +117,30 @@ export const handle = <E, R>(
     )
   })
 
-const setMade = Effect.fnUntraced(function*(
+const prepareMade = Effect.fnUntraced(function*(
   runtime: Runtime.Runtime,
   page: Model.PageEntry,
   node: Adapter.NodeBinding,
-  files: ReadonlyArray<FileInputImpl.Made>
+  files: ReadonlyArray<FileInputImpl.TransferFile>
 ) {
   // Part of the handler's decision, under its deadline
   const record = yield* Operation.start("FileChooser.handle")
-  record.markSent()
-  yield* FileInputImpl.setMade(runtime, node, files, { page: Option.some(page), at: record.budget.at, id: record.id })
-    .pipe(
-      Effect.mapError((failure) =>
-        failure._tag === "Gone"
-          ? failure.error
-          : failure._tag === "Reason"
-          ? failure.reason
-          : record.timeout(Option.some("The page didn't answer before the deadline; the files may have been set"))
-      )
-    )
-  return { _tag: "Cancel" } satisfies Adapter.Decision as Adapter.Decision
+  const mapFailure = (failure: Effect.Error<ReturnType<typeof FileInputImpl.prepareMade>>) =>
+    failure._tag === "Gone"
+      ? failure.error
+      : failure._tag === "Reason"
+      ? failure.reason
+      : record.timeout(Option.some("The page didn't answer before the deadline; the files may have been set"))
+  const apply = yield* FileInputImpl.prepareMade(runtime, node, files, {
+    dispatch: record,
+    page: Option.some(page),
+    at: record.budget.at,
+    id: record.id
+  }).pipe(Effect.mapError(mapFailure))
+  return Effect.andThen(Effect.sync(() => record.markSent()), apply).pipe(
+    Effect.mapError(mapFailure),
+    Effect.as({ _tag: "Cancel" } satisfies Adapter.Decision as Adapter.Decision)
+  )
 })
 
 /** A handler that gives a chooser the files, or fails with `FileChooserError` for one it can't. */

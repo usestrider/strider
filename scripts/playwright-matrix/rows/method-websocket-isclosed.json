@@ -1,0 +1,18 @@
+{
+  "id": "method-websocket-isclosed",
+  "upstream": [
+    "method:WebSocket.isClosed"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No immediate boolean status query for this object. The public closed effect waits for its lifetime to end.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/NetworkConnection.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [],
+  "patches": []
+}

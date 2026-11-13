@@ -1,0 +1,29 @@
+{
+  "id": "method-browsertype-executablepath",
+  "upstream": [
+    "method:BrowserType.executablePath"
+  ],
+  "status": "different",
+  "api": [
+    {
+      "module": "Browser",
+      "symbol": "LaunchOptions",
+      "url": "/docs/api/browser/Browser#LaunchOptions"
+    }
+  ],
+  "notes": "No installed-browser lookup or installer; supply an executable path.",
+  "capabilities": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "explicit-browser-path",
+    "quote": "A launch takes an executable path. There are no channels, no default to an installed browser, and no lookup on `PATH`.",
+    "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
+  },
+  "audit": {
+    "sources": [
+      "packages/browser/src/Browser.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

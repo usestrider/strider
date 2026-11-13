@@ -1,0 +1,29 @@
+{
+  "id": "method-page-setdefaultnavigationtimeout",
+  "upstream": [
+    "method:Page.setDefaultNavigationTimeout"
+  ],
+  "status": "different",
+  "api": [
+    {
+      "module": "Deadline",
+      "symbol": "withDefaultBudget",
+      "url": "/docs/api/browser/Deadline#withDefaultBudget"
+    }
+  ],
+  "notes": "A deadline bounds a call or a group of effects; no mutable navigation timeout.",
+  "capabilities": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "composable-operation-deadlines",
+    "quote": "There is one deadline per operation, inherited by nested calls and only ever shortened.",
+    "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
+  },
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

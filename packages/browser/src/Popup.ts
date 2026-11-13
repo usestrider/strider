@@ -4,9 +4,9 @@
  * A popup has its opener's access: waiting on a `Page` gives a `Page`, and on an observed page an observed one. It
  * belongs to the scope that owns its opener, and closes when that scope does. It is reported as soon as it appears,
  * before it loads, so a handler or route registered on it at once is in place for its first document. `next`,
- * `history` and the context's `pages` give the same `Page` for it.
+ * `history`, and the context's `pages` give the same `Page` for it.
  *
- * On a backend without the `popups.opener` capability, such as WebKit, `next`, `stream` and `history` fail with
+ * On a backend without the `popups.opener` capability, such as WebKit, `next`, `stream`, and `history` fail with
  * `Unsupported`, because the browser doesn't say which page opened another; wait for the new page in the context's
  * `pages` instead.
  *

@@ -35,17 +35,19 @@ import type * as PageNavigation from "../PageNavigation.ts"
 import * as Reason from "../Reason.ts"
 import type * as Route from "../Route.ts"
 import type * as Snapshot from "../Snapshot.ts"
-import type * as Target from "../Target.ts"
+import * as Target from "../Target.ts"
 import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
+import * as BrowserClock from "./browserClock.ts"
 import * as Capabilities from "./capabilities.ts"
 import * as Captures from "./captures.ts"
 import * as Clock from "./clock.ts"
 import * as Devices from "./devices.ts"
 import * as Emulation from "./emulation.ts"
 import * as Evaluation from "./evaluation.ts"
+import * as ExpectSource from "./expectSource.ts"
 import * as Guarded from "./guarded.ts"
 import * as Handles from "./handles.ts"
 import * as InitScripts from "./initScripts.ts"
@@ -118,13 +120,16 @@ const observeMembers = (owner: ObservedOwner) => {
       target: { _tag: "Page", id: entry.id },
       operation: "Page.status.waitFor"
     }),
-    url: Watchable.make({
-      ref: entry.state,
-      project: ({ status }: Model.PageState) => status._tag === "Opening" ? Option.none() : Option.some(status.url),
-      ended: pageEnded,
-      target: { _tag: "Page", id: entry.id },
-      operation: "Page.url.waitFor"
-    }),
+    url: ExpectSource.mark(
+      Watchable.make({
+        ref: entry.state,
+        project: ({ status }: Model.PageState) => status._tag === "Opening" ? Option.none() : Option.some(status.url),
+        ended: pageEnded,
+        target: { _tag: "Page", id: entry.id },
+        operation: "Page.url.waitFor"
+      }),
+      "SourceURL"
+    ),
     frames: Watchable.make({
       ref: entry.state,
       project: (state: Model.PageState) => Option.some(frameTree(entry.id, state)),
@@ -271,8 +276,8 @@ export const make = (owner: PageOwner): Page.Page => {
         const values = yield* Evaluation.toLocal(args, realm)
         const group = yield* Evaluation.groupFor(runtime, realm, result)
         // The call is on its way: a deadline after it can't say the function didn't run
-        record.markSent()
         const value = yield* Evaluation.call(runtime, {
+          dispatch: record,
           realm,
           functionDeclaration: fn.toString(),
           arguments: values,
@@ -311,14 +316,38 @@ export const make = (owner: PageOwner): Page.Page => {
     ...observeMembers(owner),
     ...queries,
     frame: (iframe) => LocatorImpl.pageFrame({ runtime, page: entry, grant: owner.grant }, iframe),
-    get title() {
+    get viewportSize() {
       return Effect.gen(function*() {
         const record = yield* Operation.record
-        const response = yield* Runtime.send(runtime, entry, { op: "title" }, record.id, record.budget.at).pipe(
-          Effect.mapError(fromSend("Page.title", record))
+        const { id } = record
+        const { status } = yield* entry.state.get
+        if (status._tag === "Closed") {
+          return yield* Effect.fail(
+            new Target.TargetGone({
+              target: { _tag: "Page", id: entry.id },
+              reason: status.reason,
+              diagnostics: Operation.diagnostics(id)
+            })
+          )
+        }
+        return yield* adapter.viewportSize(entry.id).pipe(
+          Effect.mapError((error) => failure("Page.viewportSize", id, error))
         )
-        return response._tag === "Title" ? response.title : yield* Effect.die(new Error(`Page.title: ${response._tag}`))
-      }).pipe(Operation.named("Page.title", { attributes: { "browser.page.id": entry.id } }))
+      }).pipe(Operation.named("Page.viewportSize", { attributes: { "browser.page.id": entry.id } }))
+    },
+    get title() {
+      return ExpectSource.mark(
+        Effect.gen(function*() {
+          const record = yield* Operation.record
+          const response = yield* Runtime.send(runtime, entry, { op: "title" }, record.id, record.budget.at).pipe(
+            Effect.mapError(fromSend("Page.title", record))
+          )
+          return response._tag === "Title"
+            ? response.title
+            : yield* Effect.die(new Error(`Page.title: ${response._tag}`))
+        }).pipe(Operation.named("Page.title", { attributes: { "browser.page.id": entry.id } })),
+        "SourceTitle"
+      )
     },
     get readHtml() {
       return Effect.gen(function*() {
@@ -370,7 +399,7 @@ export const make = (owner: PageOwner): Page.Page => {
         JSHandle.Serialized<A>,
         Page.PageError | Target.TargetGone | Deadline.Timeout
       >,
-    capability: (capability) => Capabilities.acquire(runtime, entry, capability),
+    capability: (capability) => Capabilities.acquire(runtime, entry, capability, owner.grant),
     context: owner.context,
     goto: (url, options) => {
       const result = HttpUrl.fromString(url)
@@ -397,6 +426,94 @@ export const make = (owner: PageOwner): Page.Page => {
         options?.accept ?? []
       ).pipe(Effect.map(Option.getOrThrow))
     },
+    setContent: (html, options) =>
+      Effect.gen(function*() {
+        const record = yield* Operation.record
+        const waitUntil = options?.waitUntil ?? "load"
+        const key = `__strider_setContent_${record.id}`
+        return yield* Effect.gen(function*() {
+          const realm = yield* Evaluation.pageRealm(runtime, entry, { _tag: "Main" }, record.id, record.budget.at)
+          const call = (fn: Function, args: ReadonlyArray<Adapter.LocalValue>, write: boolean, at = record.budget.at) =>
+            Evaluation.call(runtime, {
+              ...(write ? { dispatch: record } : {}),
+              realm,
+              functionDeclaration: fn.toString(),
+              arguments: args,
+              result: "value",
+              userActivation: false,
+              page: Option.some(entry),
+              at,
+              id: record.id
+            })
+          const args = yield* Evaluation.toLocal([html, waitUntil, key], realm)
+          const keyed = yield* Evaluation.toLocal([key], realm)
+          return yield* record.bound(
+            Effect.gen(function*() {
+              yield* entry.input.withPermit(call(
+                (html: string, waitUntil: string, key: string) => {
+                  document.open()
+                  if (waitUntil !== "commit") {
+                    const target = waitUntil === "load" ? window : document
+                    const event = waitUntil === "load" ? "load" : "DOMContentLoaded"
+                    let finish!: () => void
+                    const ready = new Promise<void>((resolve) => {
+                      finish = () => {
+                        target.removeEventListener(event, finish)
+                        resolve()
+                      }
+                      target.addEventListener(event, finish, { once: true })
+                    })
+                    Reflect.set(globalThis, key, { ready, finish })
+                  }
+                  document.write(html)
+                  document.close()
+                },
+                args,
+                true
+              ))
+              if (waitUntil !== "commit") {
+                // Await in the same realm: a later navigation cannot satisfy this replacement's readiness.
+                yield* call((key: string) => Reflect.get(globalThis, key).ready, keyed, false)
+              }
+            }).pipe(Effect.ensuring(
+              waitUntil === "commit" ? Effect.void : Operation.detached(Effect.gen(function*() {
+                const at = yield* BrowserClock.after(1000)
+                const cleaned = yield* call(
+                  (key: string) => {
+                    const pending = Reflect.get(globalThis, key)
+                    if (pending !== undefined) {
+                      pending.finish()
+                      Reflect.deleteProperty(globalThis, key)
+                    }
+                  },
+                  keyed,
+                  false,
+                  at
+                ).pipe(Effect.exit)
+                record.noteCleanup(
+                  Exit.isSuccess(cleaned) ||
+                    Option.exists(Exit.findErrorOption(cleaned), (error) => error._tag === "Gone")
+                    ? { _tag: "Completed" }
+                    : { _tag: "Failed", cause: Exit.isFailure(cleaned) ? Cause.pretty(cleaned.cause) : "" }
+                )
+              }))
+            ))
+          )
+        }).pipe(Effect.mapError((failure) =>
+          failure._tag === "Timeout" ? failure : failure._tag === "Gone" ? failure.error : failure._tag === "Deadline"
+            ? record.timeout(
+              Option.some(
+                "The document did not finish replacement and readiness before the deadline; scripts and requests may still be running"
+              )
+            )
+            : pageError("Page.setContent", failure.reason, record.id)
+        ))
+      }).pipe(
+        Effect.raceFirst(Runtime.pageEnded(entry)),
+        Operation.named("Page.setContent", {
+          attributes: { "browser.page.id": entry.id, "browser.document.wait_until": options?.waitUntil ?? "load" }
+        })
+      ),
     reload: (options) =>
       navigate(
         "Page.reload",
@@ -456,7 +573,7 @@ export const make = (owner: PageOwner): Page.Page => {
       conflicting: () =>
         Clock.isInstalled(runtime.timelines, entry.contextEntry) ? Option.some("UserContext.clock") : Option.none()
     }, entry),
-    route: <E, R, P extends Route.Phase = "request">(
+    route: (<E, R, P extends Route.Phase = "request">(
       pattern: Url.Pattern | string,
       handler: Route.Handler<E, R, P>,
       options?: Route.Options<P>
@@ -472,7 +589,7 @@ export const make = (owner: PageOwner): Page.Page => {
         pattern,
         handler,
         (options?.phase ?? "request") as P
-      ),
+      )) as Page.Page["route"],
     addInitScript: (script, options) =>
       InitScripts.add({ runtime, scope: declared, operation: "Page.addInitScript" }, entry.context, script, options),
     emulate: (settings) => Emulation.emulate({ runtime, scope: declared, operation: "Page.emulate" }, settings),

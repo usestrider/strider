@@ -1,12 +1,15 @@
 /**
  * Routes intercept a page's or context's requests, and a route's handler decides what happens to each one.
  *
- * A route works at one phase: before the request is sent (the default), when its response starts or at an
+ * A route works at one phase: before the request is sent (the default), when its response starts, or at an
  * authentication challenge. Its handler returns an Effect that produces a `Decision` valid at that phase. A
- * handler that fails, is interrupted, runs out of time or returns a decision the backend can't apply gets the
+ * handler that fails, is interrupted, runs out of time, or returns a decision the backend can't apply gets the
  * default, `continue`, and
  * its failure is logged. A fulfilled response is an `HttpServerResponse`, and a change to a request is a function
  * of `HttpClientRequest`. The page's routes are asked before its context's, the most recent first.
+ * A route is in force for requests that start after its declaration returns. On Chromium, a request already
+ * underway without response interception may miss a later response route. Existing response pauses select
+ * the current routes by precedence.
  *
  * **Gotchas**
  *
@@ -42,7 +45,7 @@ import type * as Watchable from "./Watchable.ts"
 const DecisionTypeId = RouteDecision.TypeId
 
 /**
- * Where a request is paused: before it's sent, when its response starts or at an authentication challenge.
+ * Where a request is paused: before it's sent, when its response starts, or at an authentication challenge.
  *
  * @stability unstable
  * @category models
@@ -200,14 +203,20 @@ export interface AuthPhase extends Paused {
  * @category models
  * @since 0.1.0
  */
-export type Intercepted<P extends Phase = Phase> = Extract<RequestPhase | ResponsePhase | AuthPhase, { phase: P }>
+export type Intercepted<P extends Phase = Phase> = {
+  readonly request: RequestPhase
+  readonly response: ResponsePhase
+  readonly auth: AuthPhase
+}[P]
 
 /**
  * A route handler: decides what happens to each request paused at its phase.
  *
  * **Details**
  *
- * A failure `E` is logged, and the default decision, `continue`, applies.
+ * A failure `E` is logged, and the default decision, `continue`, applies. A handler valid at more phases
+ * can be used where fewer phases are selected: it accepts all of their inputs and returns decisions valid
+ * at every selected phase.
  *
  * @stability unstable
  * @category models
@@ -226,7 +235,8 @@ export type Handler<E, R, P extends Phase = "request"> = (
  */
 export interface Options<P extends Phase = "request"> {
   /**
-   * Which phase the route sees.
+   * Which phase the route sees. Response-only handlers require an explicit `"response"`, and authentication
+   * handlers require an explicit `"auth"`. If this may be omitted, the handler must also handle `"request"`.
    *
    * @default "request"
    */

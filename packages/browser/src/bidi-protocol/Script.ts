@@ -2505,7 +2505,23 @@ export const callFunction: Protocol.CommandDef<"script.callFunction", CallFuncti
     "script.callFunction",
     CallFunctionParameters,
     CallFunctionResult,
-    { status: "stable" }
+    {
+      status: "stable",
+      createsResource: true,
+      release: [{
+        method: "script.disown",
+        param: "handles",
+        from: "/result/handle",
+        list: true,
+        paramsFrom: { "/target/realm": "/realm" }
+      }, {
+        method: "script.disown",
+        param: "handles",
+        from: "/exceptionDetails/exception/handle",
+        list: true,
+        paramsFrom: { "/target/realm": "/realm" }
+      }]
+    }
   )
 
 /**
@@ -2534,7 +2550,23 @@ export const evaluate: Protocol.CommandDef<"script.evaluate", EvaluateParameters
     "script.evaluate",
     EvaluateParameters,
     EvaluateResult,
-    { status: "stable" }
+    {
+      status: "stable",
+      createsResource: true,
+      release: [{
+        method: "script.disown",
+        param: "handles",
+        from: "/result/handle",
+        list: true,
+        paramsFrom: { "/target/realm": "/realm" }
+      }, {
+        method: "script.disown",
+        param: "handles",
+        from: "/exceptionDetails/exception/handle",
+        list: true,
+        paramsFrom: { "/target/realm": "/realm" }
+      }]
+    }
   )
 
 /**

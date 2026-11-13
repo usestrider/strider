@@ -13,11 +13,13 @@
  *   The page and the routes are gone when the context is returned.
  */
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
+import * as Scope from "effect/Scope"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as CookieJar from "../CookieJar.ts"
 import * as Deadline from "../Deadline.ts"
@@ -29,11 +31,15 @@ import * as StorageState from "../StorageState.ts"
 import * as Target from "../Target.ts"
 import * as Url from "../Url.ts"
 import * as UserContext from "../UserContext.ts"
+import type * as Adapter from "./adapter.ts"
+import type * as Engine from "./engine.ts"
 import * as Evaluation from "./evaluation.ts"
 import * as Handles from "./handles.ts"
+import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import * as Runtime from "./runtime.ts"
 import * as Storage from "./storage.ts"
+import * as WebAuthn from "./webauthn.ts"
 
 // ── In the page ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -349,22 +355,18 @@ const contextError = (reason: UserContext.UserContextErrorReason, id: Diagnostic
   new UserContext.UserContextError({ operation, reason, diagnostics: Operation.diagnostics(id) })
 
 /** An evaluation's failure, as a context's. */
-const evaluationFailure = (operation: string, id: Diagnostics.OperationId) => (failure: Evaluation.Failure) =>
-  contextError(
-    failure._tag === "Gone"
-      ? new Reason.BackendFailure({ kind: "Rejected", method: operation, hint: failure.error.message })
-      : failure._tag === "Deadline"
-      ? new Reason.BackendFailure({
-        kind: "Rejected",
-        method: operation,
-        hint: "The page didn't answer before the deadline"
-      })
-      : failure.reason._tag === "Unsupported" || failure.reason._tag === "BackendFailure"
-      ? failure.reason
-      : new Reason.BackendFailure({ kind: "Rejected", method: operation, hint: failure.reason.message }),
-    id,
-    operation
-  )
+const evaluationFailure = (operation: string, record: Operation.Record) => (failure: Evaluation.Failure) =>
+  failure._tag === "Deadline"
+    ? failure.error ?? record.timeout(Option.some("The page didn't answer before the deadline"))
+    : contextError(
+      failure._tag === "Gone"
+        ? new Reason.BackendFailure({ kind: "Rejected", method: operation, hint: failure.error.message })
+        : failure.reason._tag === "Unsupported" || failure.reason._tag === "BackendFailure"
+        ? failure.reason
+        : new Reason.BackendFailure({ kind: "Rejected", method: operation, hint: failure.reason.message }),
+      record.id,
+      operation
+    )
 
 // ── Export ────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -427,12 +429,13 @@ const sourcesOf = Effect.fnUntraced(function*(
 export const exportState = (runtime: Runtime.Runtime, context: UserContext.Id, hosts?: ReadonlyArray<string>) =>
   Effect.gen(function*() {
     const operation = "UserContext.exportStorageState"
-    const { id } = yield* Operation.record
+    const record = yield* Operation.record
+    const { id } = record
     const budget = yield* Operation.budget
     const cookies = yield* runtime.model.adapter.cookies(context).pipe(
       Effect.mapError((error) => {
         const mapped = Operation.fromAdapter(error, id, runtime.backend)
-        return contextError(
+        return mapped._tag === "Timeout" ? mapped.error : contextError(
           mapped._tag === "Reason"
             ? mapped.reason
             : new Reason.BackendFailure({
@@ -469,7 +472,7 @@ export const exportState = (runtime: Runtime.Runtime, context: UserContext.Id, h
         Effect.map(Option.some),
         // A document that ended since it was listed has nothing to read: its origin is read elsewhere or not at all
         Effect.catchIf((failure) => failure._tag === "Gone", () => Effect.succeedNone),
-        Effect.mapError(evaluationFailure(operation, id))
+        Effect.mapError(evaluationFailure(operation, record))
       )
       if (Option.isNone(text)) continue
       const answer = yield* Schema.decodeUnknownEffect(ReadAnswer)(text.value).pipe(
@@ -573,10 +576,11 @@ export const applyState = (
   runtime: Runtime.Runtime,
   context: UserContext.UserContext,
   state: StorageState.StorageState,
-  id: Diagnostics.OperationId
+  id: Diagnostics.OperationId,
+  replacement?: { readonly chains: ReadonlyArray<ReadonlyArray<string>>; readonly phase: "clear" | "write" } | undefined
 ) =>
   Effect.gen(function*() {
-    const operation = "Browser.newContext"
+    const operation = replacement === undefined ? "Browser.newContext" : "UserContext.setStorageState"
     const record = yield* Operation.record
     const budget = record.budget
     const adapterFailure = (error: Parameters<typeof Operation.fromAdapter>[0]) => {
@@ -599,102 +603,142 @@ export const applyState = (
         Effect.mapError(adapterFailure)
       )
     }
-    const origins = state.origins.filter((origin) => origin.localStorage.length > 0 || origin.indexedDb.length > 0)
+    const origins = replacement === undefined
+      ? state.origins.filter((origin) => origin.localStorage.length > 0 || origin.indexedDb.length > 0)
+      : state.origins
     if (origins.length === 0) return
-    yield* Effect.scoped(Effect.gen(function*() {
-      // The context's own setup: a target that went fails it, as BackendFailure
-      const reasonOf = (error: Route.RouteError | Page.PageError | Target.TargetGone) =>
-        Target.isTargetGone(error) ? error : error.reason
-      const routeFailure = (error: Route.RouteError | Target.TargetGone | Deadline.Timeout) =>
-        Deadline.isTimeout(error) ? error : contextError(asReason(reasonOf(error), operation), id, operation)
-      const page = yield* context.newPage.pipe(
-        Effect.mapError((error) =>
+    yield* Effect.acquireUseRelease(Scope.make(), (scope) =>
+      Effect.gen(function*() {
+        // The context's own setup: a target that went fails it, as BackendFailure
+        const reasonOf = (error: Route.RouteError | Page.PageError | Target.TargetGone) =>
+          Target.isTargetGone(error) ? error : error.reason
+        const routeFailure = (error: Route.RouteError | Target.TargetGone | Deadline.Timeout) =>
           Deadline.isTimeout(error) ? error : contextError(asReason(reasonOf(error), operation), id, operation)
+        const page = yield* context.newPage.pipe(
+          Effect.mapError((error) =>
+            Deadline.isTimeout(error) ? error : contextError(asReason(reasonOf(error), operation), id, operation)
+          )
         )
-      )
-      const { entry } = Handles.page(page)
-      const html = (body: string) => Route.fulfill(HttpServerResponse.text(body, { contentType: "text/html" }))
-      for (const [index, origin] of origins.entries()) {
-        const seed = `${origin.origin}${seedPath}/${index}`
-        yield* context.route(seed, () => html("<!DOCTYPE html><title>storage state</title>")).pipe(
-          Effect.mapError(routeFailure)
-        )
-        // The deadline is the operation's Timeout; anything else fails the write
-        const write = (failure: unknown) =>
-          Deadline.isTimeout(failure)
-            ? failure
-            : Predicate.isTagged(failure, "Deadline")
-            ? record.timeout(Option.some(`The page didn't write ${origin.origin}'s storage before the deadline`))
-            : contextError(
-              new Reason.BackendFailure({
-                kind: "Rejected",
-                method: operation,
-                hint: `Writing ${origin.origin}'s storage failed: ${
-                  String((failure as { message?: string }).message ?? failure)
-                }`
-              }),
-              id,
-              operation
-            )
-        const data = JSON.stringify(toRead(origin))
-        let document: Target.DocumentId
-        if (origin.partition._tag === "Unpartitioned") {
-          yield* page.goto(seed, { waitUntil: "load" }).pipe(Effect.mapError(write))
-          const state = (yield* entry.state.get).status
-          if (state._tag !== "Open") return yield* Effect.fail(write(new Error("the page closed")))
-          document = state.document.id
-        } else {
-          // A partition is written from a frame of a page at its top-level site
-          // At the top-level origin it was read under, or, saved without one, its site's default port
-          const top = `${origin.topLevelOrigin ?? origin.partition.topLevelSite}${seedPath}/${index}/top`
-          yield* context.route(
-            top,
-            () => html(`<!DOCTYPE html><title>storage state</title><iframe src="${seed}"></iframe>`)
-          ).pipe(
+        const { entry } = Handles.page(page)
+        const html = (body: string) => Route.fulfill(HttpServerResponse.text(body, { contentType: "text/html" }))
+        for (const [index, origin] of origins.entries()) {
+          const seed = `${origin.origin}${seedPath}/${index}`
+          yield* page.route(seed, () => html("<!DOCTYPE html><title>storage state</title>")).pipe(
             Effect.mapError(routeFailure)
           )
-          yield* page.goto(top, { waitUntil: "load" }).pipe(Effect.mapError(write))
-          const found = yield* Runtime.element(
-            runtime,
-            entry,
-            [
-              { _tag: "Css", selector: "iframe" },
-              { _tag: "Frame" },
-              { _tag: "Css", selector: "html" }
-            ],
-            id,
-            budget.at
-          ).pipe(Effect.mapError(write))
-          if (found._tag !== "Found") return yield* Effect.fail(write(new Error("the frame has no document")))
-          document = found.routed.document
+          // The deadline is the operation's Timeout; anything else fails the write
+          const write = (failure: unknown) =>
+            Deadline.isTimeout(failure)
+              ? failure
+              : Predicate.isTagged(failure, "Deadline")
+              ? record.timeout(Option.some(`The page didn't write ${origin.origin}'s storage before the deadline`))
+              : contextError(
+                new Reason.BackendFailure({
+                  kind: "Rejected",
+                  method: operation,
+                  hint: `Writing ${origin.origin}'s storage failed: ${
+                    String((failure as { message?: string }).message ?? failure)
+                  }`
+                }),
+                id,
+                operation
+              )
+          const data = JSON.stringify(toRead(origin))
+          let document: Target.DocumentId
+          const chain = replacement?.chains[index]
+          if (chain !== undefined && chain.length > 1) {
+            const urls = chain.map((origin, depth) => `${origin}${seedPath}/${index}/ancestor/${depth}`)
+            for (let depth = 0; depth < urls.length; depth++) {
+              const child = urls[depth + 1]
+              yield* page.route(urls[depth]!, () =>
+                html(
+                  child === undefined
+                    ? "<!DOCTYPE html><title>storage state</title>"
+                    : `<!DOCTYPE html><iframe src="${child}"></iframe>`
+                )).pipe(Effect.mapError(routeFailure))
+            }
+            yield* page.goto(urls[0]!, { waitUntil: "load" }).pipe(Effect.mapError(write))
+            const steps: Array<Engine.Step> = []
+            for (let depth = 1; depth < urls.length; depth++) {
+              steps.push({ _tag: "Css", selector: "iframe" }, { _tag: "Frame" })
+            }
+            steps.push({ _tag: "Css", selector: "html" })
+            const found = yield* Runtime.element(runtime, entry, steps, id, budget.at).pipe(Effect.mapError(write))
+            if (found._tag !== "Found") return yield* Effect.fail(write(new Error("the frame has no document")))
+            document = found.routed.document
+          } else if (origin.partition._tag === "Unpartitioned") {
+            yield* page.goto(seed, { waitUntil: "load" }).pipe(Effect.mapError(write))
+            const state = (yield* entry.state.get).status
+            if (state._tag !== "Open") return yield* Effect.fail(write(new Error("the page closed")))
+            document = state.document.id
+          } else {
+            // A partition is written from a frame of a page at its top-level site
+            // At the top-level origin it was read under, or, saved without one, its site's default port
+            const top = `${origin.topLevelOrigin ?? origin.partition.topLevelSite}${seedPath}/${index}/top`
+            yield* page.route(
+              top,
+              () => html(`<!DOCTYPE html><title>storage state</title><iframe src="${seed}"></iframe>`)
+            ).pipe(
+              Effect.mapError(routeFailure)
+            )
+            yield* page.goto(top, { waitUntil: "load" }).pipe(Effect.mapError(write))
+            const found = yield* Runtime.element(
+              runtime,
+              entry,
+              [
+                { _tag: "Css", selector: "iframe" },
+                { _tag: "Frame" },
+                { _tag: "Css", selector: "html" }
+              ],
+              id,
+              budget.at
+            ).pipe(Effect.mapError(write))
+            if (found._tag !== "Found") return yield* Effect.fail(write(new Error("the frame has no document")))
+            document = found.routed.document
+          }
+          yield* Effect.gen(function*() {
+            const realm = yield* Evaluation.documentRealm(
+              runtime,
+              document,
+              yield* Runtime.ownWorld(runtime, Evaluation.isolatedWorld),
+              id
+            )
+            if (replacement?.phase === "clear") {
+              yield* Evaluation.call(runtime, {
+                dispatch: record,
+                realm,
+                functionDeclaration: clearOrigin.toString(),
+                arguments: [],
+                result: "value",
+                userActivation: false,
+                page: Option.some(entry),
+                at: budget.at,
+                id
+              })
+            }
+            if (replacement?.phase !== "clear") {
+              yield* Evaluation.call(runtime, {
+                dispatch: record,
+                realm,
+                functionDeclaration: writeOrigin.toString(),
+                arguments: [{ _tag: "Value", value: { type: "string", value: data } }],
+                result: "value",
+                userActivation: false,
+                page: Option.some(entry),
+                at: budget.at,
+                id
+              })
+            }
+          }).pipe(Effect.mapError((failure) => write(failure._tag === "Reason" ? failure.reason : failure)))
+          yield* Effect.annotateCurrentSpan(`browser.storage_state.origin.${index}`, origin.origin)
         }
-        yield* Effect.gen(function*() {
-          const realm = yield* Evaluation.documentRealm(
-            runtime,
-            document,
-            yield* Runtime.ownWorld(runtime, Evaluation.isolatedWorld),
-            id
+        // Closed and confirmed before the context is returned: Firefox fails a tab created while one closes (QUIRKS.md)
+        yield* page.close().pipe(
+          Effect.mapError((error) =>
+            Deadline.isTimeout(error) ? error : contextError(asReason(error, operation), id, operation)
           )
-          yield* Evaluation.call(runtime, {
-            realm,
-            functionDeclaration: writeOrigin.toString(),
-            arguments: [{ _tag: "Value", value: { type: "string", value: data } }],
-            result: "value",
-            userActivation: false,
-            page: Option.some(entry),
-            at: budget.at,
-            id
-          })
-        }).pipe(Effect.mapError((failure) => write(failure._tag === "Reason" ? failure.reason : failure)))
-        yield* Effect.annotateCurrentSpan(`browser.storage_state.origin.${index}`, origin.origin)
-      }
-      // Closed and confirmed before the context is returned: Firefox fails a tab created while one closes (QUIRKS.md)
-      yield* page.close().pipe(
-        Effect.mapError((error) =>
-          Deadline.isTimeout(error) ? error : contextError(asReason(error, operation), id, operation)
         )
-      )
-    }))
+      }).pipe(Scope.provide(scope)), (scope) => Scope.close(scope, Exit.void).pipe(Operation.detached))
   }).pipe(Operation.named("StorageState.apply", { attributes: { "browser.context.id": context.id } }))
 
 /** A page's or route's failure reason, as a context's. */
@@ -703,3 +747,304 @@ const asReason = (reason: { readonly _tag: string; readonly message: string }, o
     reason._tag === "BackendFailure"
     ? reason as UserContext.UserContextErrorReason
     : new Reason.BackendFailure({ kind: "Rejected", method: operation, hint: reason.message })
+
+/** Deletes origin data without silently leaving blocked databases behind. Evaluated in the browser. */
+export async function clearOrigin(): Promise<void> {
+  for (const database of await indexedDB.databases()) {
+    if (database.name === undefined) continue
+    await new Promise<void>((resolve, reject) => {
+      const deletion = indexedDB.deleteDatabase(database.name!)
+      deletion.onsuccess = () => resolve()
+      deletion.onerror = () => reject(deletion.error)
+      deletion.onblocked = () =>
+        reject(new Error("IndexedDB deletion is blocked by an open connection; it may complete later"))
+    })
+  }
+  localStorage.clear()
+  const storage = navigator.storage as StorageManager & { getDirectory?: () => Promise<FileSystemDirectoryHandle> }
+  if (isSecureContext && storage?.getDirectory !== undefined) {
+    const directory = await storage.getDirectory()
+    // Firefox Xrays do not expose Symbol.asyncIterator; drive the WebIDL iterator directly.
+    const iterator = (directory as FileSystemDirectoryHandle & { keys: () => AsyncIterator<string> }).keys()
+    while (true) {
+      const entry = await iterator.next()
+      if (entry.done) break
+      await directory.removeEntry(entry.value, { recursive: true })
+    }
+  }
+}
+
+interface History {
+  readonly origins: Map<string, ReadonlyArray<string>>
+  readonly cookieOrigins: Set<string>
+  unsupportedHistory: boolean
+}
+const histories = new WeakMap<Model.ContextEntry, History>()
+
+/** A native partition is reproduced by its ancestor origins, including their ports and cross-site ancestors. */
+const remember = (history: History, chain: ReadonlyArray<string>) => {
+  const leaf = chain[chain.length - 1]
+  if (leaf === undefined || URL.parse(leaf) === null) return
+  if (!chain.every((origin) => /^https?:\/\//.test(origin))) {
+    history.unsupportedHistory = true
+    return
+  }
+  history.origins.set(JSON.stringify(chain), chain)
+  // Storage-access grants can expose the first-party area from a partitioned frame.
+  const firstParty = [chain[chain.length - 1]!]
+  history.origins.set(JSON.stringify(firstParty), firstParty)
+}
+
+const rememberCookie = (history: History, domain: string) => {
+  const raw = domain.replace(/^\./, "")
+  let host = URL.parse(`https://${raw}`)?.hostname ?? raw.toLowerCase()
+  while (host !== "") {
+    history.cookieOrigins.add(`https://${host}`)
+    // Domain cookies can be set on parent domains. IP addresses have no parent domain.
+    if (/^[\d.]+$/.test(host) || host.startsWith("[")) break
+    const dot = host.indexOf(".")
+    if (dot < 0) break
+    host = host.slice(dot + 1)
+  }
+}
+const rememberCookieUrl = (history: History, origin: string) => {
+  const url = URL.parse(origin)
+  if (url !== null && (url.protocol === "http:" || url.protocol === "https:")) {
+    rememberCookie(history, url.hostname)
+  }
+}
+
+/** Cookie domains set explicitly need no document or network request to create their cookies. */
+export const cookieRecorder = (entry: Model.ContextEntry): ((cookie: Adapter.Cookie) => void) | undefined => {
+  const history = histories.get(entry)
+  return history === undefined ? undefined : (cookie) => rememberCookie(history, cookie.domain)
+}
+
+const chainOf = (origin: typeof StorageState.OriginState.Type): ReadonlyArray<string> =>
+  origin.partition._tag === "Unpartitioned"
+    ? [origin.origin]
+    : [origin.topLevelOrigin ?? origin.partition.topLevelSite, origin.origin]
+
+/** Installs history only for a context that requested it, before import or the first user page. */
+export const track = Effect.fnUntraced(
+  function*(runtime: Runtime.Runtime, entry: Model.ContextEntry, state?: StorageState.StorageState) {
+    const history: History = {
+      origins: new Map(),
+      cookieOrigins: new Set(),
+      unsupportedHistory: false
+    }
+    for (const origin of state?.origins ?? []) remember(history, chainOf(origin))
+    for (const cookie of state?.cookies ?? []) rememberCookie(history, cookie.domain)
+    histories.set(entry, history)
+    yield* Effect.addFinalizer(() => Effect.sync(() => histories.delete(entry)))
+    yield* runtime.model.observeStorageSources(entry, (origins, cookieOnly) => {
+      for (const origin of origins) rememberCookieUrl(history, origin)
+      if (!cookieOnly) remember(history, origins)
+    })
+  }
+)
+
+export const replaceState = (
+  runtime: Runtime.Runtime,
+  context: UserContext.UserContext,
+  entry: Model.ContextEntry,
+  state: StorageState.StorageState,
+  options?: { readonly recovered?: boolean | undefined }
+) =>
+  Effect.gen(function*() {
+    const operation = "UserContext.setStorageState"
+    const { id } = yield* Operation.record
+    const history = histories.get(entry)
+    const refuse = (hint: string) => contextError(new Reason.NotPermitted({ required: "control", hint }), id, operation)
+    if (Option.isSome((yield* entry.state.get).closed)) {
+      return yield* Effect.fail(refuse("The context is closed"))
+    }
+    if (history === undefined || options?.recovered === true) {
+      return yield* Effect.fail(
+        refuse(
+          options?.recovered === true
+            ? "Recovered or reclaimed contexts cannot track prior storage history for replacement"
+            : "Create the context with storageStateTracking: true before replacing its storage"
+        )
+      )
+    }
+    yield* Effect.acquireUseRelease(
+      Effect.suspend(() => {
+        if (entry.storageReplacing) return Effect.fail(refuse("Another storage replacement is in progress"))
+        entry.storageReplacing = true
+        return Effect.void
+      }),
+      () =>
+        Effect.gen(function*() {
+          if ((yield* entry.state.get).pages.some(WebAuthn.isHeld)) {
+            return yield* Effect.fail(
+              refuse("Release acquired virtual authenticators before replacing storage")
+            )
+          }
+          if (history.unsupportedHistory) {
+            return yield* Effect.fail(contextError(
+              new Reason.Unsupported({
+                capability: "storageState.history",
+                backend: runtime.backend,
+                hint: "Visited non-HTTP(S) storage or an opaque ancestor partition cannot be reproduced"
+              }),
+              id,
+              operation
+            ))
+          }
+          const partitions = yield* unsupportedPartitions(runtime, state)
+          if (partitions.length > 0) {
+            return yield* Effect.fail(
+              contextError(
+                new StorageState.Incompatible({
+                  partitions,
+                  hint: "The backend cannot restore these cookie partitions"
+                }),
+                id,
+                operation
+              )
+            )
+          }
+          for (const origin of state.origins) {
+            if (!chainOf(origin).every((part) => /^https?:\/\//.test(part))) {
+              return yield* Effect.fail(contextError(
+                new Reason.Unsupported({
+                  capability: "storageState.origin",
+                  backend: runtime.backend,
+                  hint: "Replacement requires HTTP(S) origins and partition ancestors"
+                }),
+                id,
+                operation
+              ))
+            }
+            if (origin.partition._tag === "Partitioned") {
+              const site = new URL(origin.partition.topLevelSite)
+              const top = new URL(origin.topLevelOrigin ?? origin.partition.topLevelSite)
+              const child = new URL(origin.origin)
+              const within = (host: string) => host === site.hostname || host.endsWith(`.${site.hostname}`)
+              if (
+                top.protocol !== site.protocol || !within(top.hostname) ||
+                (child.protocol === site.protocol && within(child.hostname))
+              ) {
+                return yield* Effect.fail(contextError(
+                  new Reason.Unsupported({
+                    capability: "storageState.partition",
+                    backend: runtime.backend,
+                    hint:
+                      "The top-level origin must match its declared site, and a same-site partition needs an ancestor chain the saved format does not carry"
+                  }),
+                  id,
+                  operation
+                ))
+              }
+            }
+            if (
+              origin.partition._tag === "Partitioned" && Option.isSome(origin.partition.crossSiteAncestor) &&
+              !origin.partition.crossSiteAncestor.value
+            ) {
+              return yield* Effect.fail(
+                contextError(
+                  new Reason.Unsupported({
+                    capability: "storageState.partition",
+                    backend: runtime.backend,
+                    hint: "A partition with crossSiteAncestor: false cannot be reproduced by a cross-site seed frame"
+                  }),
+                  id,
+                  operation
+                )
+              )
+            }
+          }
+          for (const cookie of state.cookies) rememberCookie(history, cookie.domain)
+          const incoming = new Map(state.origins.map((origin) => [JSON.stringify(chainOf(origin)), origin]))
+          for (const origin of state.origins) remember(history, chainOf(origin))
+          const chains = [...history.origins.values()]
+          const origins = chains.map((chain): typeof StorageState.OriginState.Type =>
+            incoming.get(JSON.stringify(chain)) ?? {
+              origin: Url.Origin.make(chain[chain.length - 1]!),
+              partition: { _tag: "Unpartitioned" },
+              localStorage: [],
+              indexedDb: []
+            }
+          )
+          yield* Effect.gen(function*() {
+            yield* applyState(runtime, context, new StorageState.StorageState({ cookies: [], origins }), id, {
+              chains,
+              phase: "clear"
+            })
+            const capabilities = yield* SubscriptionRef.get(runtime.model.adapter.capabilities)
+            const partialCookies = capabilities.entries.some((entry) =>
+              entry.name === "cookies" && entry.status === "partial"
+            )
+            yield* Effect.acquireUseRelease(Scope.make(), (scope) =>
+              Effect.gen(function*() {
+                const page = partialCookies
+                  ? yield* context.newPage.pipe(Effect.mapError((error) =>
+                    Deadline.isTimeout(error)
+                      ? error
+                      : contextError(
+                        asReason(Target.isTargetGone(error) ? error : error.reason, operation),
+                        id,
+                        operation
+                      )
+                  ))
+                  : undefined
+                const clear = () =>
+                  runtime.model.adapter.clearCookies(entry.id, page === undefined ? undefined : { page: page.id })
+                    .pipe(Effect.mapError((error) => {
+                      const mapped = Operation.fromAdapter(error, id, runtime.backend)
+                      return mapped._tag === "Timeout" ? mapped.error : contextError(
+                        new Reason.BackendFailure({
+                          kind: "Rejected",
+                          method: operation,
+                          hint: `Storage replacement may be partial: clearing cookies failed (${error.message})`
+                        }),
+                        id,
+                        operation
+                      )
+                    }))
+                if (page === undefined) yield* clear()
+                else {
+                  // Stock WebKit deletes all paths for a hostname through Automation; visit every possible cookie host.
+                  for (const [index, origin] of [...history.cookieOrigins].entries()) {
+                    const url = `${origin}${seedPath}/cookies/${index}`
+                    yield* page.route(
+                      url,
+                      () => Route.fulfill(HttpServerResponse.text("<!DOCTYPE html>", { contentType: "text/html" }))
+                    ).pipe(
+                      Effect.mapError((error) =>
+                        Deadline.isTimeout(error)
+                          ? error
+                          : contextError(
+                            asReason(Target.isTargetGone(error) ? error : error.reason, operation),
+                            id,
+                            operation
+                          )
+                      )
+                    )
+                    yield* page.goto(url, { waitUntil: "load" }).pipe(Effect.mapError((error) =>
+                      Deadline.isTimeout(error)
+                        ? error
+                        : contextError(
+                          asReason(Target.isTargetGone(error) ? error : error.reason, operation),
+                          id,
+                          operation
+                        )
+                    ))
+                    yield* clear()
+                  }
+                }
+              }).pipe(Scope.provide(scope)), (scope) => Scope.close(scope, Exit.void).pipe(Operation.detached))
+            yield* applyState(runtime, context, state, id, { chains: state.origins.map(chainOf), phase: "write" })
+          }).pipe(Effect.mapError((error) =>
+            Deadline.isTimeout(error)
+              ? error
+              : contextError(new StorageState.PartiallyApplied({ hint: error.message }), id, operation)
+          ))
+        }),
+      () =>
+        Effect.sync(() => {
+          entry.storageReplacing = false
+        })
+    )
+  }).pipe(Operation.named("UserContext.setStorageState", { attributes: { "browser.context.id": entry.id } }))

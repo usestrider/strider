@@ -14,12 +14,15 @@ import * as Network from "../../webkit-stock-protocol/Network.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import type * as ProtocolClient from "../protocolClient.ts"
+import * as Sizes from "../requestSizes.ts"
+import * as Timing from "../requestTiming.ts"
 import * as Urls from "../urls.ts"
 import {
   type Event,
   frameKey,
   loaderKey,
   type NavigationEntry,
+  type PageEntry,
   placement,
   type RequestEntry,
   requestKey,
@@ -129,6 +132,10 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       const key = requestKey(session, params.requestId)
       let request = state.requests.get(key)
       if (request !== undefined && params.redirectResponse !== undefined) {
+        request.frame?.page.context.requestTiming?.get(request.hop)?.response(params.redirectResponse.timing)
+        request.frame?.page.context.requestTiming?.get(request.hop)?.finish(params.timestamp)
+        request.frame?.page.context.requestTiming?.delete(request.hop)
+        request.frame?.page.context.requestSizes?.delete(request.hop)
         emitResponse(state, request, params.redirectResponse)
         state.buffer.emit({ _tag: "RequestFinished", hop: request.hop, encodedBytes: 0, at: Adapter.now() })
         // The earlier hop's id stays, so a body read for it says it was a redirect (QUIRKS.md, Q39)
@@ -159,6 +166,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
           id,
           session: session,
           requestId: params.requestId,
+          loaderId: loader,
           redirects: 0,
           hop: state.ids.hop(id, 0),
           responded: undefined,
@@ -175,6 +183,22 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         }
         state.requests.set(key, request)
         state.hops.set(request.hop, request)
+      }
+      if (request.frame?.page.context.requestSizes !== undefined) {
+        Sizes.keep(request.frame.page.context.requestSizes, request.hop, request.frame.id)
+      }
+      if (request.frame?.page.context.requestTiming !== undefined) {
+        const hop = request.hop
+        Timing.keep(
+          request.frame.page.context.requestTiming,
+          hop,
+          Timing.collector(
+            Timing.webkit,
+            { timestamp: params.timestamp, wallTime: params.walltime },
+            (timing) => state.buffer.emit({ _tag: "HopTiming", hop, timing }),
+            request.frame.id
+          )
+        )
       }
       if (request.navigation !== undefined) request.navigation.documentHop = request.hop
       state.buffer.emit({
@@ -200,11 +224,23 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     })
     .on(Network.responseReceived, (params, { state, session }) => {
       const request = state.requests.get(requestKey(session, params.requestId))
-      if (request !== undefined) emitResponse(state, request, params.response)
+      if (request !== undefined) {
+        const sizes = request.frame?.page.context.requestSizes?.get(request.hop)
+        if (sizes !== undefined) {
+          sizes.network = servedBy(request, params.response) === "network" && params.response.status !== 304
+        }
+        request.frame?.page.context.requestTiming?.get(request.hop)?.response(params.response.timing)
+        emitResponse(state, request, params.response)
+      }
     })
     .on(Network.loadingFinished, (params, { state, session }) => {
       const request = state.requests.get(requestKey(session, params.requestId))
       if (request === undefined) return
+      const sizes = request.frame?.page.context.requestSizes?.get(request.hop)
+      if (sizes?.network) state.buffer.emit({ _tag: "HopSizes", hop: request.hop, sizes: Sizes.webkit(params.metrics) })
+      request.frame?.page.context.requestTiming?.get(request.hop)?.finish(params.timestamp)
+      request.frame?.page.context.requestTiming?.delete(request.hop)
+      request.frame?.page.context.requestSizes?.delete(request.hop)
       state.buffer.emit({
         _tag: "RequestFinished",
         hop: request.hop,
@@ -216,9 +252,17 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         request.resourceType === "document" && request.frame !== undefined &&
         Option.isSome(state.registry.bodyLimit(placement(request.frame.page), "response"))
       ) {
+        const page = request.frame.page
         const kept = Deferred.makeUnsafe<Uint8Array, Adapter.AdapterError>()
         request.kept = kept
-        state.buffer.later(Deferred.into(readBody(request), kept))
+        page.retaining.add(request)
+        state.buffer.later(
+          Deferred.into(readBody(request), kept).pipe(
+            Effect.ensuring(state.buffer.run(() => {
+              page.retaining.delete(request)
+            }))
+          )
+        )
       }
       Deferred.doneUnsafe(request.finished, Effect.void)
       state.retire(requestKey(session, params.requestId))
@@ -233,6 +277,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         id,
         session: session,
         requestId: params.requestId,
+        loaderId: undefined,
         redirects: 0,
         hop: state.ids.hop(id, 0),
         responded: undefined,
@@ -290,6 +335,8 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     .on(Network.loadingFailed, (params, { state, session }) => {
       const request = state.requests.get(requestKey(session, params.requestId))
       if (request === undefined) return
+      request.frame?.page.context.requestTiming?.delete(request.hop)
+      request.frame?.page.context.requestSizes?.delete(request.hop)
       state.buffer.emit({
         _tag: "RequestFailed",
         hop: request.hop,
@@ -377,3 +424,46 @@ export const responseBody = Effect.fnUntraced(function*(state: State, hop: Netwo
   )
   return yield* request.kept === undefined ? readBody(request) : Deferred.await(request.kept)
 })
+
+/** Selects a retention wait in the running navigation; collection off selects no Effect to yield. */
+export const beforeNavigation = (state: State, page: PageEntry) => {
+  if (Option.isNone(state.registry.bodyLimit(placement(page), "response"))) return undefined
+  return state.buffer.waitFor(() => {
+    if (page.ended || Option.isNone(state.registry.bodyLimit(placement(page), "response"))) return true
+    if (page.retaining.size > 0) return undefined
+    const main = page.main
+    const document = main.document
+    if (main.removed || document === undefined) return true
+    for (const request of state.requests.values()) {
+      if (
+        request.resourceType !== "document" || request.frame !== main ||
+        request.loaderId !== document.loaderId || request.responded !== request.hop
+      ) continue
+      if (!Deferred.isDoneUnsafe(request.finished)) return undefined
+    }
+    return true
+  })
+}
+
+/** Stock WebKit supplies decoded text, with no lossless way back to the original bytes (Q221). */
+export const captureRequestBody = Effect.fnUntraced(
+  function*(
+    state: State,
+    snapshot: NetworkRequest.NetworkRequest,
+    limit: number
+  ): Effect.fn.Return<Adapter.RequestBody, Adapter.AdapterError> {
+    const request = yield* hopOf(state, snapshot.hop)
+    const page = request.frame?.page ?? request.worker?.target.page
+    if (page === undefined || Option.isNone(state.registry.bodyLimit(placement(page), "request"))) {
+      return { _tag: "Unavailable", why: "notCollected" }
+    }
+    // Multipart reports may silently omit files (Q184); the protocol cannot establish completeness.
+    if (/^multipart\//i.test(snapshot.headers["content-type"] ?? "")) return { _tag: "Incomplete" }
+    const text = request.postData[state.ids.redirectsOf(snapshot.hop)]
+    // Blob/File-backed parts can produce an empty report. A missing field supplies no
+    // affirmative absence signal either; neither report establishes completeness.
+    if (text === undefined || text === "") return { _tag: "Unavailable", why: "unavailable" }
+    if (new TextEncoder().encode(text).length > limit) return { _tag: "OverLimit" }
+    return { _tag: "ReportedText", text }
+  }
+)

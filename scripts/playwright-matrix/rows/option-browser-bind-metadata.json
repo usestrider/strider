@@ -1,0 +1,12 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "capabilities": [],
+  "id": "option-browser-bind-metadata",
+  "upstream": [
+    "method:Browser.bind"
+  ],
+  "option": "metadata",
+  "requirements": []
+}

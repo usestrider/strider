@@ -1,0 +1,11 @@
+{
+  "id": "method-disposable-dispose",
+  "upstream": [
+    "method:Disposable.dispose"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public Strider capability for this member.",
+  "capabilities": [],
+  "requirements": []
+}

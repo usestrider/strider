@@ -1,0 +1,65 @@
+{
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toBeVisible",
+      "url": "/docs/api/browser/Expect#toBeVisible"
+    },
+    {
+      "module": "Expect",
+      "symbol": "toBeHidden",
+      "url": "/docs/api/browser/Expect#toBeHidden"
+    },
+    {
+      "module": "Expect",
+      "symbol": "toHaveCount",
+      "url": "/docs/api/browser/Expect#toHaveCount"
+    },
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.count",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.count"
+    },
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator.first",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator.first"
+    }
+  ],
+  "notes": "visible: Expect.toBeVisible; hidden: Expect.toBeHidden (also succeeds for no matches). Use locator.first for non-strict selector visible/hidden waits, and the full locator for strict waits. attached: Expect.toHaveCount(1) on locator.first; detached: Expect.toHaveCount(0) on the full locator. These expectations retry until the condition holds; Locator.count alone is an immediate read, not a wait. For a strict single-match attached wait, use toHaveCount(1) on the full locator, but it retries multiple matches instead of immediately throwing Playwright strict-mode errors. Hidden/count expectations also do not reproduce every strict-mode failure. Non-strict selector waits can select the first match; disappearance waits require zero matches, not merely a hidden first match. Compositions return no retained ElementHandle: lazy locators re-resolve, so fixed element/subtree identity and handle-return semantics are not provided.",
+  "capabilities": [],
+  "id": "option-locator-waitfor-state",
+  "upstream": [
+    "method:Locator.waitFor"
+  ],
+  "option": "state",
+  "requirements": [],
+  "valueCoverage": [
+    {
+      "value": "attached",
+      "status": "has"
+    },
+    {
+      "value": "detached",
+      "status": "has"
+    },
+    {
+      "value": "hidden",
+      "status": "has"
+    },
+    {
+      "value": "visible",
+      "status": "has"
+    }
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Expect.ts",
+      "packages/browser/src/Locator.ts",
+      "packages/browser/src/internal/expect.ts",
+      "packages/browser/src/internal/engine.ts"
+    ],
+    "scope": "Pinned params.md wait-for-selector-state and class-locator.md waitFor compared with engine Visible, Hidden and Count expectations. Count expectations provide presence/absence waits; no exact strict-error or retained-handle equivalence is claimed."
+  }
+}

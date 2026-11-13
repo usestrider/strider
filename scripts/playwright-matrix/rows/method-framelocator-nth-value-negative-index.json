@@ -1,0 +1,13 @@
+{
+  "id": "method-framelocator-nth-value-negative-index",
+  "upstream": [
+    "method:FrameLocator.nth"
+  ],
+  "parent": "method-framelocator-nth",
+  "value": "negative index",
+  "status": "missing",
+  "api": [],
+  "notes": "Select a nonnegative iframe index before entering it; negative nth indexes match nothing. Use last for the final iframe.",
+  "capabilities": [],
+  "requirements": []
+}

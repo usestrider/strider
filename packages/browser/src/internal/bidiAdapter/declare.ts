@@ -1,10 +1,13 @@
 /**
- * Declarations on BiDi, which scopes them natively, by context or user context: init scripts as preload scripts,
- * overrides as `emulation` and `browsingContext` commands, intercepts, body collections as data collectors, and
- * downloads. What Firefox can't do is refused before anything is declared.
+ * Declarations on BiDi: native scopes for preload scripts, emulation, intercepts, data collectors and downloads.
+ * Viewport precedence is resolved through the declaration registry rather than native scope layering.
+ * What Firefox cannot do is refused before anything is declared.
  */
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
+import * as Scope from "effect/Scope"
+import * as Semaphore from "effect/Semaphore"
 import * as BrowserBidi from "../../bidi-protocol/Browser.ts"
 import * as BrowsingContext from "../../bidi-protocol/BrowsingContext.ts"
 import * as Emulation from "../../bidi-protocol/Emulation.ts"
@@ -13,18 +16,42 @@ import * as Script from "../../bidi-protocol/Script.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as DeclarationCleanup from "../declarationCleanup.ts"
 import * as Declarations from "../declarations.ts"
+import * as Operation from "../operation.ts"
+import * as ProtocolClient from "../protocolClient.ts"
+import * as Cleanup from "./cleanup.ts"
 import { bidiHeaders, coveringPattern } from "./mapping.ts"
-import { scopeParams, type State } from "./state.ts"
+import { placement, scopeParams, type State } from "./state.ts"
+import * as WebSocketBridge from "./webSocketBridge.ts"
 
 /** Where a document's preload scripts keep which of them ran. */
 const ranKey = "@usestrider/browser/initScripts/ran"
+
+let scriptLocks: WeakMap<State, Semaphore.Semaphore> | undefined
+
+const removePreloads = Effect.fnUntraced(function*(state: State, scripts: State["preloads"]) {
+  const retained: Array<State["preloads"][number]> = []
+  // One budget for the whole loop: a stalled browser cannot hold an operation five seconds per preload.
+  const exits = yield* Cleanup.boundedEach(
+    scripts,
+    (script) => state.send(Script.removePreloadScript({ script: script.script }))
+  )
+  for (const [index, exit] of exits.entries()) {
+    if (Exit.isSuccess(exit)) continue
+    retained.push(scripts[index]!)
+    yield* Cleanup.report(Effect.failCause(exit.cause), "BiDi preload cleanup could not confirm removal").pipe(
+      Effect.catchCause((cause) => Effect.logWarning("BiDi preload cleanup failed", cause))
+    )
+  }
+  return retained
+})
 
 /**
  * Registers the preload scripts for the scopes in order, environment phase first and broader scopes first. Any
  * change registers them all again, which only affects documents created after it.
  */
-const applyScripts = Effect.fnUntraced(function*(state: State) {
+const reconcileScripts = Effect.fnUntraced(function*(state: State) {
   const entries = state.registry.all()
     .filter((
       entry
@@ -45,32 +72,104 @@ const applyScripts = Effect.fnUntraced(function*(state: State) {
       a.sequence - b.sequence
     )
   const previous = state.preloads
-  const next: Array<Script.PreloadScript> = []
-  for (const entry of entries) {
-    // Each script is a preload of its own, so what ran is kept where the next can look: a script runs only
-    // after what it comes after ran without throwing
-    const ran = `(globalThis[Symbol.for(${JSON.stringify(ranKey)})] ??= new Set())`
-    const body = `try { ${entry.declaration.source}\n;${ran}.add(${JSON.stringify(entry.id)}) } catch (error) { ` +
-      `typeof reportError === "function" ? reportError(error) : console.error(error) }`
-    const gated = entry.declaration.after.length === 0
-      ? body
-      : `if (${JSON.stringify(entry.declaration.after)}.every((id) => ${ran}.has(id))) { ${body} }`
-    const { script } = yield* state.send(Script.addPreloadScript({
-      functionDeclaration: `() => { ${gated} }`,
-      ...(entry.declaration.world._tag === "Isolated" ? { sandbox: entry.declaration.world.name } : {}),
-      ...scopeParams(state, entry.scope)
-    }))
-    next.push(script)
+  const next: Array<State["preloads"][number]> = []
+  const installed = yield* Effect.gen(function*() {
+    for (const entry of entries) {
+      // Each script is a preload of its own, so what ran is kept where the next can look: a script runs only
+      // after what it comes after ran without throwing
+      const ran = `(globalThis[Symbol.for(${JSON.stringify(ranKey)})] ??= new Set())`
+      const body = `try { ${entry.declaration.source}\n;${ran}.add(${JSON.stringify(entry.id)}) } catch (error) { ` +
+        `typeof reportError === "function" ? reportError(error) : console.error(error) }`
+      const gated = entry.declaration.after.length === 0
+        ? body
+        : `if (${JSON.stringify(entry.declaration.after)}.every((id) => ${ran}.has(id))) { ${body} }`
+      const { script } = yield* state.send(Script.addPreloadScript({
+        functionDeclaration: entry.declaration.webSocket === undefined ?
+          `() => { ${gated} }` :
+          `(send) => { globalThis[${JSON.stringify(entry.declaration.webSocket.name)}] = send; ${gated} }`,
+        ...(entry.declaration.webSocket === undefined
+          ? {}
+          : { arguments: [WebSocketBridge.channel(entry.declaration.webSocket)] }),
+        ...(entry.declaration.world._tag === "Isolated" ? { sandbox: entry.declaration.world.name } : {}),
+        ...scopeParams(state, entry.scope)
+      }))
+      next.push({ script, declaration: entry.id })
+    }
+  }).pipe(Effect.exit)
+  if (Exit.isFailure(installed)) {
+    // A failed addition must preserve old survivors, but never preserve a removed declaration.
+    const desired = new Set(state.registry.all().map((entry) => entry.id))
+    const retained = previous.filter((script) => desired.has(script.declaration))
+    const obsolete = previous.filter((script) => !desired.has(script.declaration))
+    state.preloads = [...retained, ...yield* removePreloads(state, [...next, ...obsolete])]
+    return yield* Effect.failCause(installed.cause)
   }
-  state.preloads = next
-  yield* Effect.forEach(
-    previous,
-    (script) => state.send(Script.removePreloadScript({ script })).pipe(Effect.ignore),
-    { discard: true }
-  )
+  state.preloads = [...next, ...yield* removePreloads(state, previous)]
+}, Effect.uninterruptible)
+
+const applyScripts = Effect.fnUntraced(function*(state: State) {
+  scriptLocks ??= new WeakMap()
+  let lock = scriptLocks.get(state)
+  if (lock === undefined) {
+    lock = Semaphore.makeUnsafe(1)
+    scriptLocks.set(state, lock)
+  }
+  // Snapshot the registry only after preceding native replacements have completed.
+  yield* lock.withPermits(1)(reconcileScripts(state))
 })
 
-/** Sets the value a scope declares for one kind of override, or clears it; BiDi layers scopes itself. */
+/**
+ * Updates viewport defaults for future pages, then resolves existing pages through the registry. BiDi's user
+ * context command overwrites existing page settings, and clearing a page restores the browser default rather
+ * than a surrounding declaration.
+ */
+const applyViewport = Effect.fnUntraced(function*<E>(
+  state: State,
+  scope: Adapter.DeclarationScope,
+  apply: (
+    command: Effect.Effect<unknown, Protocol.ProtocolError>,
+    target: Parameters<typeof BrowsingContext.setViewport>[0]
+  ) => Effect.Effect<unknown, E>
+) {
+  const set = (target: Parameters<typeof BrowsingContext.setViewport>[0], override: Adapter.Override | undefined) =>
+    apply(
+      state.send(BrowsingContext.setViewport({
+        ...target,
+        viewport: override?._tag === "Viewport" ? { width: override.width, height: override.height } : null,
+        devicePixelRatio: override?._tag === "Viewport" ? override.deviceScaleFactor : null
+      })),
+      target
+    )
+  if (scope._tag !== "Page") {
+    for (const context of state.contexts.values()) {
+      if (context.removing || (scope._tag === "UserContext" && scope.context !== context.id)) continue
+      yield* set({ userContexts: [context.bidi] }, state.registry.overrides({ context: context.id }).get("Viewport"))
+    }
+  }
+  for (const page of state.navigables.values()) {
+    if (
+      page.parent !== undefined || page.removed || page.closing !== undefined || page.context.removing ||
+      !Declarations.covers(scope, placement(page))
+    ) continue
+    const effective = state.registry.overrides(placement(page)).get("Viewport")
+    // The user-context command already applied defaults. Only page overrides need restoring after it.
+    if (scope._tag !== "Page" && effective === state.registry.overrides({ context: page.context.id }).get("Viewport")) {
+      continue
+    }
+    yield* set({ context: page.bidi }, effective)
+  }
+})
+
+/** Reconciles surviving resources after a close/removal failed, independently for each native target. */
+export const recoverViewport = (state: State, scope: Adapter.DeclarationScope) =>
+  Cleanup.owned(
+    applyViewport(state, scope, (command, target) =>
+      Cleanup.report(Cleanup.bounded(command), `BiDi viewport recovery could not restore ${JSON.stringify(target)}`))
+      .pipe(Operation.detached, Effect.provideService(ProtocolClient.CommandDeadline, Option.none())),
+    state.cleanupScope
+  )
+
+/** Sets or clears a kind at its scope; viewport precedence is resolved by the registry. */
 export const applyKind = (
   state: State,
   kind: Adapter.Override["_tag"],
@@ -85,20 +184,8 @@ export const applyKind = (
   const override = latest?.declaration._tag === "Override" ? latest.declaration.override : undefined
   const where = scopeParams(state, scope)
   switch (kind) {
-    case "Viewport": {
-      const viewport = override?._tag === "Viewport" ? { width: override.width, height: override.height } : null
-      const ratio = override?._tag === "Viewport" ? override.deviceScaleFactor : null
-      const targets = scope._tag === "Page"
-        ? [{ context: state.navigablesById.get(scope.page)?.bidi }]
-        : scope._tag === "UserContext"
-        ? [where]
-        : [{ userContexts: [...state.contexts.values()].map((context) => context.bidi) }]
-      return Effect.forEach(
-        targets,
-        (target) => state.send(BrowsingContext.setViewport({ ...target, viewport, devicePixelRatio: ratio })),
-        { discard: true }
-      )
-    }
+    case "Viewport":
+      return applyViewport(state, scope, (command) => command)
     case "UserAgent":
       return state.send(Emulation.setUserAgentOverride({
         userAgent: override?._tag === "UserAgent" ? override.userAgent : null,
@@ -241,19 +328,24 @@ export const applyDownloads = (state: State, scope: Adapter.DeclarationScope) =>
 }
 
 /** Removes what a declaration added, once its scope closes. */
-const undeclare = (
+const releaseDeclaration = (
   state: State,
   id: Adapter.RegistrationId,
   scope: Adapter.DeclarationScope,
   declaration: Adapter.Declaration
 ): Effect.Effect<void> =>
   Effect.suspend(() => {
-    state.registry.remove(id)
     switch (declaration._tag) {
       case "InitScript":
         return applyScripts(state).pipe(Effect.ignore)
       case "Override":
-        return applyKind(state, declaration.override._tag, scope).pipe(Effect.ignore)
+        return declaration.override._tag === "Viewport"
+          ? applyViewport(state, scope, (command, target) =>
+            Cleanup.report(
+              Cleanup.bounded(command),
+              `BiDi viewport release could not restore ${JSON.stringify(target)}`
+            ))
+          : applyKind(state, declaration.override._tag, scope).pipe(Effect.ignore)
       case "Intercept":
       case "Challenges": {
         const intercept = state.intercepts.get(id)
@@ -287,9 +379,32 @@ export const declare = Effect.fnUntraced(
   function*(state: State, scope: Adapter.DeclarationScope, declaration: Adapter.Declaration) {
     const refused = refusal(declaration)
     if (refused !== undefined) return yield* Effect.fail(refused)
+    if (declaration._tag === "InitScript" && declaration.webSocket !== undefined) {
+      yield* WebSocketBridge.prepare(state, scope, declaration.webSocket)
+    }
     const id = state.ids.registration()
     state.registry.add(scope, declaration, id)
-    yield* Effect.addFinalizer(() => undeclare(state, id, scope, declaration))
+    const registrationContext = yield* Effect.context<never>()
+    yield* Scope.addFinalizer(
+      yield* Effect.scope,
+      Effect.gen(function*() {
+        // Recompute from the registry immediately, even if the caller cannot wait for native cleanup.
+        state.registry.remove(id)
+        const release = releaseDeclaration(state, id, scope, declaration)
+        if (declaration._tag !== "Override" || declaration.override._tag !== "Viewport") {
+          return yield* release.pipe(Effect.provideContext(registrationContext))
+        }
+        const unconfirmed = yield* DeclarationCleanup.Unconfirmed
+        const work = release.pipe(
+          Operation.detached,
+          Effect.provideService(ProtocolClient.CommandDeadline, Option.none()),
+          Effect.provideContext(registrationContext),
+          Effect.provideService(DeclarationCleanup.Unconfirmed, unconfirmed),
+          Effect.interruptible
+        )
+        yield* Cleanup.owned(work, state.cleanupScope)
+      })
+    )
     switch (declaration._tag) {
       case "InitScript":
         yield* Kit.protocol(applyScripts(state))
@@ -317,7 +432,10 @@ export const declare = Effect.fnUntraced(
       case "BodyCollection": {
         const { collector } = yield* Kit.protocol(state.send(Network.addDataCollector({
           dataTypes: [...declaration.bodies],
-          maxEncodedDataSize: declaration.maxBytes,
+          // Request binary data can be counted as base64 by Firefox; L1 enforces the decoded byte limit.
+          maxEncodedDataSize: declaration.decodedRequestBytes === true
+            ? Math.ceil(declaration.maxBytes / 3) * 4
+            : declaration.maxBytes,
           ...scopeParams(state, scope)
         })))
         state.collectors.set(id, collector)

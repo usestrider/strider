@@ -1,0 +1,12 @@
+{
+  "id": "option-page-pdf-tagged",
+  "upstream": [
+    "method:Page.pdf"
+  ],
+  "option": "tagged",
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public option; the parent row does not imply option parity.",
+  "capabilities": [],
+  "requirements": []
+}

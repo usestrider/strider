@@ -1,0 +1,12 @@
+{
+  "ffmpeg": {
+    "version": "9.0",
+    "url": "https://ffmpeg.martin-riedl.de/download/macos/arm64/1785863997_9.0/ffmpeg.zip",
+    "sha256": "5267ef149ee0d208057a1b316aac079b661b0476574dee5da7d225769773c603"
+  },
+  "ffprobe": {
+    "version": "9.0",
+    "url": "https://ffmpeg.martin-riedl.de/download/macos/arm64/1785863997_9.0/ffprobe.zip",
+    "sha256": "7778fbb533fb60d3336cbd9a9e51eced71658f020b570c7203590c1c41d42f50"
+  }
+}

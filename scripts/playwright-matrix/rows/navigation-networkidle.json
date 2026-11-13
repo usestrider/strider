@@ -1,0 +1,20 @@
+{
+  "id": "navigation-networkidle",
+  "upstream": [
+    "method:Page.goto"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "networkidle is not a load state; observe explicit application readiness.",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [],
+  "parent": "option-page-goto-waituntil",
+  "value": "networkidle",
+  "option": "waitUntil"
+}

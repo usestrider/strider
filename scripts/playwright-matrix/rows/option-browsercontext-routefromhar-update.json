@@ -1,0 +1,12 @@
+{
+  "status": "missing",
+  "api": [],
+  "notes": "No corresponding public option for this contract.",
+  "capabilities": [],
+  "id": "option-browsercontext-routefromhar-update",
+  "upstream": [
+    "method:BrowserContext.routeFromHAR"
+  ],
+  "option": "update",
+  "requirements": []
+}

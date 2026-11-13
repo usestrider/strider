@@ -1,0 +1,11 @@
+{
+  "id": "method-apiresponse-ok",
+  "upstream": [
+    "method:APIResponse.ok"
+  ],
+  "status": "missing",
+  "api": [],
+  "notes": "No built-in API testing response object; browser responses are NetworkResponse events.",
+  "capabilities": [],
+  "requirements": []
+}

@@ -1,0 +1,20 @@
+{
+  "id": "option-page-pdf-path",
+  "upstream": [
+    "method:Page.pdf"
+  ],
+  "option": "path",
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "ReadonlyPage.pdf",
+      "url": "/docs/api/browser/Page#ReadonlyPage.pdf"
+    }
+  ],
+  "notes": "Returns bytes; write them with Effect FileSystem.",
+  "capabilities": [
+    "pdf"
+  ],
+  "requirements": []
+}

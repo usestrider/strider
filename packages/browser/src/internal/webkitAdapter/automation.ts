@@ -18,6 +18,7 @@ import * as Kit from "../adapterKit.ts"
 import * as BrowserClock from "../browserClock.ts"
 import type * as WebKitAutomation from "../webkitAutomation.ts"
 import { navigateByScript } from "./navigation.ts"
+import { beforeNavigation } from "./network.ts"
 import { promptClosed, promptOpened } from "./obligations.ts"
 import { type ContextEntry, contextOf, frameById, type PageEntry, pageOf, placement, type State } from "./state.ts"
 import { withoutFragment } from "./tree.ts"
@@ -244,17 +245,22 @@ export const resizeWindow = (
 
 export const createUserContextLaunched = Effect.fnUntraced(
   function*(state: State, options: Adapter.UserContextOptions) {
-    if (Option.isSome(options.proxy)) {
+    if (Option.isSome(options.proxy) && options.proxy.value.credentials !== undefined) {
       return yield* Effect.fail(
-        Kit.unsupported("userContexts.proxy", "stock WebKit's automation session takes no proxy")
+        Kit.unsupported("userContexts.proxy.credentials", "Stock WebKit does not support proxy credentials")
       )
     }
-    const process = yield* state.automation!.launch({ acceptInsecureCerts: options.acceptInsecureCerts }).pipe(
+    const process = yield* state.automation!.launch({
+      acceptInsecureCerts: options.acceptInsecureCerts,
+      proxy: Option.getOrUndefined(options.proxy)
+    }).pipe(
       Effect.mapError((error) =>
         new Adapter.AdapterError({ reason: { _tag: "Unsupported", capability: "userContexts", hint: error.message } })
       )
     )
     const entry: ContextEntry = {
+      ...(options.requestTiming ? { requestTiming: new Map() } : {}),
+      ...(options.requestSizes ? { requestSizes: new Map() } : {}),
       id: state.ids.userContext(),
       browserContextId: process.key,
       isDefault: false,
@@ -262,7 +268,15 @@ export const createUserContextLaunched = Effect.fnUntraced(
     }
     state.contexts.set(entry.id, entry)
     state.contextsByWk.set(process.key, entry)
-    yield* state.buffer.run(() => state.buffer.emit({ _tag: "UserContextAdded", context: entry.id, isDefault: false }))
+    yield* state.buffer.run(() =>
+      state.buffer.emit({
+        _tag: "UserContextAdded",
+        context: entry.id,
+        isDefault: false,
+        ...(options.requestTiming ? { requestTiming: true } : {}),
+        ...(options.requestSizes ? { requestSizes: true } : {})
+      })
+    )
     return entry.id
   }
 )
@@ -433,6 +447,8 @@ export const navigateLaunched = Effect.fnUntraced(function*(
     )
   }
   yield* Deferred.await(frame.page.ready)
+  const retention = beforeNavigation(state, frame.page)
+  if (retention !== undefined) yield* retention
   const document = frame.document
   if (document !== undefined && url.includes("#") && withoutFragment(url) === withoutFragment(document.url)) {
     return yield* Effect.fail(

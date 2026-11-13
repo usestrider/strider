@@ -1,0 +1,23 @@
+{
+  "id": "method-page-url",
+  "upstream": [
+    "method:Page.url"
+  ],
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "ObservedPage.url",
+      "url": "/docs/api/browser/Page#ObservedPage.url"
+    }
+  ],
+  "notes": "",
+  "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": []
+}

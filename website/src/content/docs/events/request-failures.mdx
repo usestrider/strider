@@ -1,0 +1,64 @@
+---
+title: Request failures
+description: Finding out why a request didn't complete.
+order: 4
+---
+
+`NetworkRequest.failure` reads whether a request's transfer has failed so far, with the browser's reason, without
+waiting for the request to end. An HTTP error, such as a 404, isn't a failure but a response.
+
+```ts
+import { NetworkRequest, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const inspectNavigation = Effect.fn("inspectNavigation")(function*(page: Page.Page) {
+  const url = "https://app.example.com/orders"
+  const sent = yield* NetworkRequest.next(page, { url })
+  yield* page.goto(url).pipe(Effect.exit)
+  return yield* NetworkRequest.failure(page, yield* sent)
+})
+```
+
+The result is an `Option`: `None` means the request is still in flight or finished successfully, including an
+HTTP 404 or 503 and a completed redirect hop. `Some` contains the browser's `errorText`, even when response
+headers arrived before the transfer failed. This immediate read does not subscribe to future failure events.
+
+The failure's `canceled` is also an `Option`. Chromium and WebKit return their reported cancellation flag as
+`Some(true)` or `Some(false)`. BiDi has no cancellation flag and returns `None`; words in its error text do not
+establish cancellation. Error text varies by browser and is not a portable error code. The capability table
+reports this limitation under `network.failure`.
+
+## Observation lifetime
+
+Pass the original request object and the page or context that observed it. The connection's existing index keeps
+at most 1000 request hops, dropping completed hops first; this read adds no retention or browser instrumentation.
+
+An observation that is missing, evicted, copied, or decoded fails with `RequestError`, whose reason is
+`RequestUnavailable` with `why: "notRetained"`. Another page or context gives `"foreignTarget"`. Loss of the
+request's page, context, frame, worker, or browser connection gives `"ownerLost"`, even if it previously failed.
+Save a returned failure value before that owner closes if it must outlive the owner. Unavailable observations
+are not evidence of network failure:
+
+```ts
+import { NetworkRequest, Page } from "@usestrider/browser"
+import { Effect, Option } from "effect"
+
+const readFailure = Effect.fn("readFailure")(function*(
+  page: Page.ObservedPage,
+  request: NetworkRequest.NetworkRequest
+) {
+  return yield* NetworkRequest.failure(page, request).pipe(
+    Effect.map((failure) => ({ available: true as const, failure })),
+    Effect.catchReason(
+      "RequestError",
+      "RequestUnavailable",
+      (reason) =>
+        Effect.succeed({
+          available: false as const,
+          why: reason.why,
+          failure: Option.none()
+        })
+    )
+  )
+})
+```

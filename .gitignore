@@ -17,3 +17,7 @@ dist/
 
 # nix build
 /result
+
+# Generated API indexes; reference/build/prepack recreate these from source
+/packages/browser/INDEX.md
+/packages/vitest/INDEX.md
