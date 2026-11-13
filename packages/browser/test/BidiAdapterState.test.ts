@@ -1374,7 +1374,8 @@ describe("BidiAdapter state", () => {
             download: "download",
             suggestedFilename: "file.txt"
           })
-        } else event("browsingContext.navigationCommitted", info("B", 13))
+        } else if (outcome === "Failed") event("network.fetchError", { ...params, errorText: "connection refused" })
+        else event("browsingContext.navigationCommitted", info("B", 13))
         yield* Deferred.succeed(release, undefined)
         yield* Fiber.join(running)
         event("browsingContext.navigationFailed", info("B", 14))
@@ -1385,6 +1386,10 @@ describe("BidiAdapter state", () => {
           })
         }
         yield* state.buffer.flush
+        if (outcome === "Failed") {
+          const document = facts.filter((fact) => fact._tag === "DocumentCommitted").at(-1)!
+          assert.deepStrictEqual(document.createdBy, { _tag: "ErrorPage", navigation: reserved })
+        }
         const ends = facts.filter((fact) => fact._tag === "NavigationEnded").filter((fact) =>
           fact.navigation === reserved
         )
