@@ -134,6 +134,70 @@ const errorNavigation = (
 }
 
 describe("BidiAdapter state", () => {
+  it.effect("keeps the active document usable after prospective realms are destroyed without commit", () =>
+    Effect.gen(function*() {
+      const { document, page, realm, state } = yield* withPage({
+        "script.evaluate": { type: "success", realm: "active-tools", result: { type: "number", value: 0 } }
+      })
+      const handlers = Evaluation.register(Navigation.register(Kit.handlers<State.Event>()))
+      const created = (id: string, sandbox?: string) =>
+        handlers.apply("script.realmCreated", {
+          realm: id,
+          context: page.bidi,
+          type: "window",
+          origin: "null",
+          sandbox
+        }, { state })
+      const navigation = { context: page.bidi, navigation: "aborted", url: "http://next.example/", timestamp: 1 }
+      handlers.apply("browsingContext.navigationStarted", navigation, { state })
+      // A lifecycle boundary probe, not a replay of the recorded navigation.
+      created("prospective-main")
+      created("prospective-tools", "tools")
+      handlers.apply("script.realmDestroyed", { realm: "prospective-main" }, { state })
+      handlers.apply("script.realmDestroyed", { realm: "prospective-tools" }, { state })
+      handlers.apply("browsingContext.navigationAborted", navigation, { state })
+      created("active-tools", "tools")
+      yield* state.buffer.flush
+      assert.strictEqual(page.document, document)
+      assert.isEmpty(page.pendingRealms)
+      assert.strictEqual(yield* Evaluation.realm(state, document.id, { _tag: "Main" }), realm.id)
+      assert.strictEqual(
+        yield* Evaluation.realm(state, document.id, { _tag: "Isolated", name: "tools" }),
+        state.realms.get("active-tools")!.id
+      )
+    }))
+
+  it.effect("closing a replaced page preserves another page's current and pending realms", () =>
+    Effect.gen(function*() {
+      const { page, state } = yield* withPage()
+      const sibling = Tree.addNavigable(state, {
+        context: "sibling" as BrowsingContext.BrowsingContext,
+        userContext: "default",
+        originalOpener: page.bidi,
+        url: "about:blank"
+      }, false)!
+      const handlers = Evaluation.register(Kit.handlers<State.Event>())
+      for (
+        const [context, realm] of [
+          [page.bidi, "replacement"],
+          [sibling.bidi, "sibling-main"],
+          [sibling.bidi, "sibling-pending"]
+        ]
+      ) {
+        handlers.apply("script.realmCreated", { context, realm, type: "window", origin: "null" }, { state })
+      }
+      Tree.commit(state, page, "http://next.example/", "http://next.example", { _tag: "InitialBlank" }, "next", "test")
+      Tree.removeNavigable(state, page, new Target.PageClosed({ by: "command" }), "test")
+      yield* state.buffer.flush
+      assert.deepStrictEqual([...state.realms.keys()], ["sibling-main", "sibling-pending"])
+      assert.isFalse(state.realms.get("sibling-pending")!.ended)
+      assert.strictEqual(
+        yield* Evaluation.realm(state, sibling.document!.id, { _tag: "Main" }),
+        state.realms.get("sibling-main")!.id
+      )
+      assert.strictEqual(sibling.pendingRealms[0], state.realms.get("sibling-pending"))
+    }))
+
   it.effect("selects the destination main realm when the initial realm survives past commit", () =>
     Effect.gen(function*() {
       const url = "http://127.0.0.1:50796/cookie"
