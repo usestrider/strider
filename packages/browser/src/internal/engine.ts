@@ -3448,11 +3448,16 @@ export function engine(render: (root: SnapNode) => string) {
 /** The key the engine is installed under in a realm's global: a symbol, out of the way of anything else. */
 export const installKey = "@usestrider/browser/engine/1"
 
+/** Drops the indentation of function source, which no line of it depends on, to stay within inspector packet limits. */
+const compact = (source: string): string => source.replace(/^[ \t]+/gm, "")
+
 /** Installs the engine in a realm, once: a function declaration for `evaluate`. */
 export const install = `function() {
   const key = Symbol.for(${JSON.stringify(installKey)});
   if (globalThis[key] === undefined) {
-    Object.defineProperty(globalThis, key, { value: (${engine.toString()})(${renderText.toString()}), enumerable: false });
+    Object.defineProperty(globalThis, key, { value: (${compact(engine.toString())})(${
+  compact(renderText.toString())
+}), enumerable: false });
   }
   return "installed";
 }`
