@@ -806,7 +806,12 @@ export const make: (
         settle(entry, incoming._tag === "Reply" ? "success" : "failure")
         if (incoming._tag === "ErrorReply") {
           if (entry.late === undefined) {
-            Deferred.doneUnsafe(entry.reply, Effect.fail(failure(classify(wire.errors, entry.method, incoming.error, targetKinds.get(entry.session.handle)))))
+            Deferred.doneUnsafe(
+              entry.reply,
+              Effect.fail(
+                failure(classify(wire.errors, entry.method, incoming.error, targetKinds.get(entry.session.handle)))
+              )
+            )
           }
           return
         }

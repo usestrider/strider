@@ -1826,7 +1826,7 @@ describe("Chromium empty screenshot errors", () => {
         assert.strictEqual(error.operation, "Page.screenshot")
         assert.strictEqual(error.reason.kind, "Rejected")
         assert.strictEqual(error.reason.method, command.method)
-        const nativeMessage = `${command.method} rejected: Unrecognized (${description})`
+        const nativeMessage = `${command.method} rejected on the page target: Unrecognized (${description})`
         const expected = variant === "empty" || variant === "replacementAfter"
           ? "Chromium returned an empty image"
           : nativeMessage
@@ -1840,7 +1840,8 @@ describe("Chromium empty screenshot errors", () => {
               method: command.method,
               reason: "Unrecognized",
               code,
-              description
+              description,
+              target: "page"
             })
           )
         }

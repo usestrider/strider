@@ -716,7 +716,9 @@ export class Rejected extends Schema.Error<Rejected>("@usestrider/browser/protoc
   target: Schema.optional(Schema.String)
 }) {
   override get message(): string {
-    return `${this.method} rejected${this.target === undefined ? "" : ` on the ${this.target} target`}: ${this.reason} (${this.description})`
+    return `${this.method} rejected${
+      this.target === undefined ? "" : ` on the ${this.target} target`
+    }: ${this.reason} (${this.description})`
   }
 }
 
