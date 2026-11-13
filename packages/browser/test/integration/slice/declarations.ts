@@ -26,6 +26,7 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
+import type * as Scope from "effect/Scope"
 import * as fs from "node:fs"
 import * as http from "node:http"
 import type * as net from "node:net"
@@ -50,6 +51,39 @@ const run = Effect.fnUntraced(function*(page: Page.Page, origin: string, code: s
   const out = page.locator("#out")
   yield* Expect.that(out.readText, Condition.make("finished", (text: string) => text !== "pending"))
   return JSON.parse(yield* out.readText) as unknown
+})
+
+const frameBody =
+  `<script>parent.postMessage(JSON.stringify([innerWidth, innerHeight, document.title, window.__tag ?? null]), '*')</script>`
+
+/**
+ * A page with a cross-site iframe 300 by 200 pixels. Chromium gives such a frame a target of its own, which declarations
+ * reach too, so each kind is declared on the context and on the page, the page loaded, then released: the page's
+ * declarations first, then the context's.
+ */
+const crossSiteFrame = Effect.fnUntraced(function*(
+  declare: (target: Page.Page | UserContext.UserContext) => Effect.Effect<unknown, unknown, Scope.Scope>,
+  expected: (report: Array<unknown>) => void,
+  frameSource = fixtureUrl
+) {
+  const { crossSite, origin } = yield* site
+  yield* Effect.scoped(Effect.gen(function*() {
+    const context = yield* Browser.newContext()
+    yield* declare(context)
+    const page = yield* context.newPage
+    yield* Effect.scoped(Effect.gen(function*() {
+      yield* declare(page)
+      yield* page.goto(fixtureUrl(
+        origin,
+        `<title>parent</title><pre id="out">pending</pre><script>addEventListener('message', (e) => { document.getElementById('out').textContent = e.data })</script><iframe style="width:300px;height:200px;border:0" src="${
+          frameSource(crossSite, frameBody)
+        }"></iframe>`
+      ))
+      const out = page.locator("#out")
+      yield* Expect.that(out.readText, Condition.make("reported", (text: string) => text !== "pending"))
+      expected(JSON.parse(yield* out.readText) as Array<unknown>)
+    }))
+  }))
 })
 
 const json = (value: unknown) => HttpServerResponse.jsonUnsafe(value)
@@ -688,6 +722,70 @@ export const declarations = (
             assert(Route.isRouteError(error) && error.reason._tag === "InvalidInput", String(error))
           }))
         }), timeout)
+
+      // ── Declarations on a page with a cross-site iframe ──
+
+      it.effect("applies a viewport to a page with a cross-site iframe, which follows its frame, and releases it", () =>
+        Effect.gen(function*() {
+          if (!(yield* supports("emulation.viewport"))) {
+            return
+          }
+          yield* crossSiteFrame(
+            (target) =>
+              target.emulate({ viewport: { width: 640, height: 480 } }),
+            ([width, height]) =>
+              assert.deepStrictEqual([width, height], [300, 200])
+          )
+        }), timeout)
+
+      it.effect("applies the other emulation overrides to a page with a cross-site iframe and releases them", () =>
+        Effect.gen(function*() {
+          const settings: Parameters<Page.Page["emulate"]>[0] = {
+            ...((yield* supports("emulation.userAgent")) ? { userAgent: "strider-oopif/1" } : {}),
+            ...((yield* supports("emulation.locale")) ? { locale: "de-DE" } : {}),
+            ...((yield* supports("emulation.timezone")) ? { timezone: "Europe/Berlin" } : {}),
+            ...((yield* supports("emulation.media")) ? { media: { colorScheme: "dark" as const } } : {})
+          }
+          yield* crossSiteFrame(
+            (target) =>
+              target.emulate(settings),
+            ([width, height]) =>
+              assert.deepStrictEqual([width, height], [300, 200])
+          )
+        }), timeout)
+
+      it.effect("applies extra headers to a page with a cross-site iframe and releases them", () =>
+        Effect.gen(function*() {
+          if (!(yield* supports("emulation.extraHTTPHeaders"))) {
+            return
+          }
+          yield* crossSiteFrame(
+            (target) =>
+              target.emulate({ extraHTTPHeaders: { "x-oopif": "1" } }),
+            ([width, height]) =>
+              assert.deepStrictEqual([width, height], [300, 200])
+          )
+        }), timeout)
+
+      it.effect("routes a page with a cross-site iframe and releases the routes", () =>
+        Effect.gen(function*() {
+          const { crossSite } = yield* site
+          yield* crossSiteFrame(
+            (target) =>
+              target.route(`${crossSite}/fixture*`, () =>
+                Route.fulfill(HttpServerResponse.html(`<script>window.__tag = 'routed'</script>${frameBody}`))),
+            ([, , , tag]) =>
+              assert.strictEqual(tag, "routed")
+          )
+        }), timeout)
+
+      it.effect("runs init scripts in a page with a cross-site iframe and releases them", () =>
+        crossSiteFrame(
+          (target) =>
+            target.addInitScript({ source: "window.__tag = 'init'" }),
+          ([, , , tag]) =>
+            assert.strictEqual(tag, "init")
+        ), timeout)
 
       // ── Init scripts ──
 
