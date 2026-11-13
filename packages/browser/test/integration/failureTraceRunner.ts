@@ -12,8 +12,15 @@ import { installTransfer, TransferScope } from "./traceTransfer.ts"
 
 const directory = path.resolve(import.meta.dirname, "../../../../.data/integration-failures")
 const workerDiagnostics = process.env.STRIDER_MACOS_WORKER_DIAGNOSTICS === "1"
-const diagnosticFile = (task: RunnerTask) => workerDiagnostics && path.basename(task.file.filepath) === "Chromium.slice.test.ts"
-const diagnosticTest = (task: RunnerTask) => diagnosticFile(task) && task.name === "hands out a page's worker, evaluates in it where the backend can, and sees it end"
+const nativeDiagnostics = process.platform === "darwin" && Boolean(process.env.STRIDER_MACOS_CRASH_DATABASE)
+const diagnosticFile = (task: RunnerTask) =>
+  (workerDiagnostics && path.basename(task.file.filepath) === "Chromium.slice.test.ts") ||
+  (nativeDiagnostics && path.basename(task.file.filepath) === "ChromiumIdentity.test.ts")
+const diagnosticTest = (task: RunnerTask) =>
+  diagnosticFile(task) && (
+    task.name === "hands out a page's worker, evaluates in it where the backend can, and sees it end" ||
+    task.name === "crash (direct page attachment)"
+  )
 const retainPasses = process.env.STRIDER_TRACE_RETAIN_PASSES === "1"
 // Per file, across all passing tests and shared context; failed scopes retain their ordinary budgets.
 let passScopesOmitted = 0
@@ -260,9 +267,13 @@ export default class FailureTraceRunner extends TestRunner {
     transfers.delete(task.id)
     active.delete(task.id)
     const failed = task.result?.state === "fail"
-    const file = failed || retainPasses || diagnosticTest(task) ? save(filename(task, "test"), running.trace, task.name, !failed) : undefined
+    const file = failed || retainPasses || diagnosticTest(task)
+      ? save(filename(task, "test"), running.trace, task.name, !failed && !diagnosticTest(task))
+      : undefined
     const sequence = running.trace.entries().at(-1)?.sequence ?? 0
-    if (file !== undefined && failed) completed.set(task.id, { file, sequence, bytes: 0, overflow: false })
+    if (file !== undefined && (failed || diagnosticTest(task))) {
+      completed.set(task.id, { file, sequence, bytes: 0, overflow: false })
+    }
     running.trace.clear()
   }
   override async onAfterRunSuite(suite: RunnerTestSuite) {
@@ -274,7 +285,7 @@ export default class FailureTraceRunner extends TestRunner {
         filename(suite, "shared"),
         shared,
         "Shared setup/teardown and unattributed concurrent traffic; not assigned to an individual test",
-        suite.result?.state !== "fail"
+        suite.result?.state !== "fail" && !diagnosticFile(suite)
       )
     }
     shared.clear()

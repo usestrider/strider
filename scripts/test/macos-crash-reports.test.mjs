@@ -105,3 +105,28 @@ test("retains recent OS fallback reports and excludes unrelated or old system fi
     assert.equal(result.reports.length, 1)
     assert.equal(result.verification.state, "not-observed")
   }))
+
+test("omits oversized native files and marks directory enumeration limits", () =>
+  fixture(async ({ output, database, system }) => {
+    const large = path.join(database, "completed", "large.dmp")
+    await writeFile(large, "")
+    const { truncate } = await import("node:fs/promises")
+    await truncate(large, 17 * 1024 * 1024)
+    await Promise.all(Array.from({ length: 513 }, (_, i) => writeFile(path.join(system, `unrelated-${i}`), "")))
+    await collect(output, [system], database)
+    const result = await status(output)
+    assert.equal(result.copiedBytes, 0)
+    assert.equal(result.nativeReports, "absent")
+    assert.match(result.reports[0].omitted, /byte limit/)
+    assert.equal(result.directoryLimits.length, 1)
+  }))
+
+test("records setup failure instead of losing collection status", () =>
+  fixture(async ({ output, database, system }) => {
+    await rm(path.join(output, "capture-status.json"))
+    await collect(output, [system], database)
+    const result = await status(output)
+    assert.match(result.setupError, /ENOENT/)
+    assert.equal(result.nativeReports, "absent")
+    assert.equal(result.verification.state, "not-observed")
+  }))
