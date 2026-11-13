@@ -4,7 +4,7 @@
  * Integration failures name their bounded protocol traces in `.data/integration-failures/`; CI keeps them with
  * `integration.log`. Each NDJSON file records both directions, connection IDs, sequence numbers and timestamps,
  * with explicit payload truncation and history overflow. Shared setup/teardown context has its own file. Passing
- * tests discard their buffers. Each active test and the shared context independently retain 2 MiB of serialized
+ * tests discard their buffers, except the two macOS-job scopes below. Each active test and the shared context independently retain 2 MiB of serialized
  * UTF-16 parent history and 2 MiB of child history: 4 MiB per scope, including entry metadata. Child replay never
  * consumes the parent budget. Parent eviction follows observation order; child eviction follows origin timestamps,
  * with PID then process-local sequence as deterministic equal-timestamp tie breakers, regardless of slot replay order.
@@ -34,8 +34,13 @@
  * The existing Node preload applies the same interception in supported children, with origin PID/local sequence;
  * the child/runtime capture exclusions below still apply. No production source or ordinary execution is instrumented.
  *
+ * In macOS jobs the Chromium worker test and the deliberate-crash identity test (`ChromiumIdentity.test.ts`, crash
+ * with direct page attachment), plus their files' shared scopes, keep their full ordinary bounded history, raw traffic
+ * and late cleanup on a pass, independent of the 16 MiB passing quota below; `scripts/integration-macos.md` says when
+ * this applies.
+ *
  * STRIDER_TRACE_RETAIN_PASSES=1 additionally saves host/engine diagnostic entries (plus overflow/attribution)
- * from passing scopes for an investigation; passing raw protocol traffic is discarded. Existing per-scope memory,
+ * from passing scopes for an investigation; passing raw protocol traffic is discarded, except for those scopes. Existing per-scope memory,
  * child spool and payload bounds remain in force. Passing artifacts together consume at most 16 MiB UTF-8 per test
  * file, charging the actual serialized UTF-8 bytes of headers, entries and omission markers. Empty and
  * connection-only passing scopes produce no artifact and cost nothing. Ownership entries accompany retained
@@ -44,7 +49,7 @@
  * process-local connection metadata and the parent transfer's ownership. A marker's exact bytes are reserved
  * until exhaustion; a partially retained scope and
  * subsequent omitted evidence scopes are counted as omissions. Exhaustion is marked in the last passing artifact
- * and logged. Failed scopes retain their ordinary independent budgets. Passing late cleanup is not retained. This is a per-file disk bound, so
+ * and logged. Failed scopes retain their ordinary independent budgets. Passing late cleanup is not retained, except for those scopes. This is a per-file disk bound, so
  * total retained data also depends on the finite selected suite; CI expires artifacts after 14 days.
  *
  * On Chromium, `pointerRecipients.ts` also records which document receives each trusted pointer event

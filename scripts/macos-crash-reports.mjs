@@ -93,10 +93,15 @@ export const collect = async (directory, roots, database) => {
           const info = await lstat(file)
           if (!info.isFile() || info.mtimeMs < Date.parse(status.started)) continue
           const report = { source: file, kind, bytes: info.size, modified: info.mtime.toISOString() }
-          if (copied >= limits.reports || info.size > limits.perReportBytes || bytes + info.size > limits.totalBytes) {
+          const data = copied >= limits.reports || info.size > limits.perReportBytes ||
+              bytes + info.size > limits.totalBytes
+            ? undefined
+            : await boundedRead(file, limits.perReportBytes)
+          if (data === undefined || bytes + data.length > limits.totalBytes) {
             report.omitted = "Report count or byte limit exceeded"
+            if (data !== undefined) report.bytes = data.length
           } else {
-            const data = await boundedRead(file, limits.perReportBytes)
+            report.bytes = data.length
             report.artifact = `${status.reports.length}-${name}`
             await writeFile(path.join(directory, report.artifact), data)
             bytes += data.length
