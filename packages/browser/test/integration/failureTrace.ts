@@ -52,6 +52,20 @@
  * and logged. Failed scopes retain their ordinary independent budgets. Passing late cleanup is not retained, except for those scopes. This is a per-file disk bound, so
  * total retained data also depends on the finite selected suite; CI expires artifacts after 14 days.
  *
+ * Chromium's recorder-only `viewportProbe.ts` also records `viewport-*` entries at page attachment, before/after
+ * debugger resume and before/after each metrics clear. Each sample correlates target/session, the native window
+ * ID and outer bounds (Browser.getWindowForTarget) and the CSS layout viewport (Page.getLayoutMetrics); the outer
+ * size minus the layout size shows browser UI taking page area. The probe sends only these two browser-side
+ * commands: it runs no page code and creates no execution world, so no realm or context event follows from it.
+ * Setup baseline requests/replies are identified separately. Queries are asynchronous and do not gate adapter
+ * operations. A request with no reply remains pending, not a measurement; protocol errors and detach are marked
+ * unavailable. At most 512 queries are pending at once; once full, further measurements are recorded as
+ * unavailable until replies arrive or the connection ends. Measurements within a sample are separate browser
+ * commands, not an atomic snapshot. Native outer bounds are not content dimensions. Extra queries can perturb
+ * timing; a passing probe cannot establish the cause of an earlier failure.
+ * Passing retention includes these records with STRIDER_TRACE_RETAIN_PASSES=1 and the same bounds described above.
+ * No shipped source changes; the recorder's Transport tap alone issues these diagnostic queries.
+ *
  * On Chromium, `pointerRecipients.ts` also records which document receives each trusted pointer event
  * (`pointer-*` entries, kept from passing scopes with STRIDER_TRACE_RETAIN_PASSES=1). When a page or frame target
  * attaches, the Transport instrumentation sends extra commands on its session: a binding and a capture-phase,
@@ -175,6 +189,29 @@
  * are protected; parent and later page-creation preludes can be evicted. Shared-artifact links identify context
  * files but do not guarantee their complete prelude survives eviction. No real abnormal-loss probe has validated
  * browser kill or malformed-frame capture end to end. Traces assist investigation without guaranteeing a complete loss cause.
+ *
+ * Chromium iframe native capture (`iframeNativeProbe.ts`, `nativeInputCapture.ts`): only the Chromium adapter case
+ * "names an iframe's frame, passes a node across worlds, and sends input into a frame" records Chromium's own trace of
+ * where it routed its input. It exists because that case fails in some macOS nightlies with the press reaching the
+ * parent `iframe` element, and the protocol and the pointer recipients cannot say whether the child's hit-test
+ * region was published before the press. Every run of that case, passing or failing, writes
+ * `.data/integration-failures/iframe-native-<pid>-<uuid>/`, which CI uploads with the other failure traces
+ * (Linux: every job, always; macOS: every run, passing ones included, as the upload step runs `if: always()`):
+ * `trace.json` (a CDP `Tracing` JSON trace, categories `input`, `latencyInfo`, `viz.hit_testing_flow`,
+ * `disabled-by-default-viz.hit_testing_flow`, `viz` and `devtools`, no argument filtering), `browser.stderr.log`
+ * (the browser's complete stderr, from `--enable-logging=stderr`, the only extra launch flag), `metadata.json`
+ * (outcome, `dataLossOccurred`, trace and stderr EOF, byte counts and any capture errors), `protocol.ndjson` (every
+ * adapter packet, written to disk from before bootstrap and frozen before the trace is drained),
+ * `cleanup-protocol.ndjson`, `capture-protocol.ndjson` and a `*-before-native-drain.ndjson` recorder checkpoint with
+ * the pointer recipients. Bounds: the trace buffer is 64 MiB in `recordUntilFull` mode (the start is kept, and Chromium
+ * reports data loss in the metadata); the start, drain and stream-close waits have 5, 10 and 2 second budgets, and
+ * their failures are recorded in the metadata, never replacing the case's own outcome; the test's deadlines are
+ * unchanged. Limits: the routing and hit-test events carry no frame-sink, widget or command IDs, so they join to the
+ * protocol by time and coordinates only, on separate clocks, and show order, not identity. The `devtools` category does
+ * record each DevTools command's call ID and method. Chromium's routing and hit-test sources have no
+ * verbose logging, so `--v` and `--vmodule` add nothing. Cost: about 5 seconds more for the case (draining the trace
+ * after the gesture) and about 0.6 MB of artifact per run; the tracing itself runs inside the browser and may change
+ * timing, which the protocol timestamps cannot show. The capture attaches before the test creates its page.
  */
 import { Buffer } from "node:buffer"
 export interface Origin {
@@ -302,6 +339,7 @@ export class TraceBuffer {
 }
 
 interface Sink {
+  checkpoint?(label: string): string | undefined
   connection(label: string): Record
 }
 const key = Symbol.for("strider.integration.failureTrace")
@@ -311,3 +349,7 @@ export const install = (sink: Sink) => {
 /** Used only by the integration configuration's source instrumentation. */
 export const connection = (label: string): Record =>
   (globalThis as typeof globalThis & { [key]?: Sink })[key]?.connection(label) ?? (() => {})
+
+/** Saves an independent recorder checkpoint before a diagnostic stream can displace its bounded tail. */
+export const checkpoint = (label: string): string | undefined =>
+  (globalThis as typeof globalThis & { [key]?: Sink })[key]?.checkpoint?.(label)
