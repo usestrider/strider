@@ -107,9 +107,9 @@ const withPage = Effect.fnUntraced(function*(protocolSession = session, requestT
 })
 
 describe("CDP viewport diagnostics", () => {
-  it.effect("does not publish the recorder's isolated world as an adapter realm", () =>
+  it.effect("creates no execution world, so no realm appears in the adapter", () =>
     Effect.gen(function*() {
-      const { state, target } = yield* withPage()
+      const { state } = yield* withPage()
       const frame = state.frames.get("T1")!
       const document = Tree.commit(
         state,
@@ -126,22 +126,17 @@ describe("CDP viewport diagnostics", () => {
         method: "Target.attachedToTarget",
         params: { sessionId: "S1", targetInfo: { targetId: "T1", type: "page" }, waitingForDebugger: false }
       }))
-      const world = writes.find((command) => command.method === "Page.createIsolatedWorld")
-      assert.isDefined(world)
-      const params = {
-        context: {
-          id: 7 as CdpRuntime.ExecutionContextId,
-          uniqueId: "probe-context",
-          origin: "://",
-          name: world.params.worldName,
-          auxData: { frameId: "T1", isDefault: false, type: "isolated" }
-        }
+      tap.send(JSON.stringify({ id: 1, sessionId: "S1", method: "Emulation.clearDeviceMetricsOverride" }))
+      tap.receive(JSON.stringify({ id: 1, result: {}, sessionId: "S1" }))
+      assert.isAbove(writes.length, 0)
+      // A world exists only if the probe asks for one or runs page code, which would announce a context.
+      for (const command of writes) {
+        assert.isFalse(
+          command.method === "Page.createIsolatedWorld" || command.method.startsWith("Runtime."),
+          command.method
+        )
       }
-      // As in Transport instrumentation, every event not consumed by the tap reaches the adapter.
-      if (!tap.receive(JSON.stringify({ method: "Runtime.executionContextCreated", sessionId: "S1", params }))) {
-        Evaluation.contextCreated(params, target.event)
-      }
-      assert.strictEqual(document.realms.size, 0, "recorder-only worlds must not change the document's realm list")
+      assert.strictEqual(document.realms.size, 0)
       assert.strictEqual(state.realms.size, 0)
     }).pipe(Effect.scoped))
 })

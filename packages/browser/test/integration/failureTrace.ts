@@ -48,15 +48,16 @@
  * total retained data also depends on the finite selected suite; CI expires artifacts after 14 days.
  *
  * Chromium's recorder-only `viewportProbe.ts` also records `viewport-*` entries at page attachment, before/after
- * debugger resume and before/after each metrics clear. Each sample correlates target/session, native window ID
- * and bounds (Browser.getWindowForTarget), CSS layout metrics and renderer inner/outer dimensions and pixel ratio.
- * Setup baseline requests/replies are identified separately. Paused renderer evaluation is explicitly unavailable;
- * it must never block resume. Queries are asynchronous and do not gate adapter operations. A request with no reply
- * remains pending, not a measurement; protocol/renderer errors and detach are marked unavailable. Renderer reads
- * run in an isolated world of the target's main frame, so page code never runs. At most 512 queries are pending
- * at once; once full, further measurements are recorded as unavailable until replies arrive or the connection ends. Measurements
- * within a sample are separate browser commands, not an atomic snapshot. Native outer bounds are not content
- * dimensions. Extra queries can perturb timing; a passing probe cannot establish the cause of an earlier failure.
+ * debugger resume and before/after each metrics clear. Each sample correlates target/session, the native window
+ * ID and outer bounds (Browser.getWindowForTarget) and the CSS layout viewport (Page.getLayoutMetrics); the outer
+ * size minus the layout size shows browser UI taking page area. The probe sends only these two browser-side
+ * commands: it runs no page code and creates no execution world, so no realm or context event follows from it.
+ * Setup baseline requests/replies are identified separately. Queries are asynchronous and do not gate adapter
+ * operations. A request with no reply remains pending, not a measurement; protocol errors and detach are marked
+ * unavailable. At most 512 queries are pending at once; once full, further measurements are recorded as
+ * unavailable until replies arrive or the connection ends. Measurements within a sample are separate browser
+ * commands, not an atomic snapshot. Native outer bounds are not content dimensions. Extra queries can perturb
+ * timing; a passing probe cannot establish the cause of an earlier failure.
  * Passing retention includes these records with STRIDER_TRACE_RETAIN_PASSES=1 and the same bounds described above.
  * No shipped source changes; the recorder's Transport tap alone issues these diagnostic queries.
  *
