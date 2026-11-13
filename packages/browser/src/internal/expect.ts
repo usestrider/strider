@@ -361,7 +361,10 @@ export const polling = Operation.fn("Expect.that")(
         Effect.map(Option.flatten)
       )
       if (Option.isNone(checked)) {
-        Operation.appendObservation(history, { error: "a check was still running at the deadline" })
+        // A check cut off at the deadline is the observation only when no check completed
+        if (history.length === 0) {
+          Operation.appendObservation(history, { error: "a check was still running at the deadline" })
+        }
         return yield* Effect.fail(failed())
       }
       Operation.appendObservation(history, checked.value)
@@ -371,6 +374,8 @@ export const polling = Operation.fn("Expect.that")(
       triggers.add("interval")
       // On the browser's clock: Effect's would stop under TestClock (QUIRKS.md, Q235)
       yield* record.clock.sleep(Math.min(interval, left))
+      // Never start a check with no time left: the last completed one is the observation
+      if (record.left() <= 0) return yield* Effect.fail(failed())
     }
   }
 )

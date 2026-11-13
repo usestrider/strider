@@ -119,7 +119,8 @@ const explain = (reason: Engine.NotReady, frames: number, emulatesFocus: boolean
     case "Disabled":
       return "The element is disabled"
     case "Inert":
-      return "The element is inert"
+      return `The element is inert: ${reason.by} has the inert attribute` +
+        (reason.dialog === undefined ? "" : `, and a modal dialog, ${reason.dialog}, is open`)
     case "BlockedByModal":
       return `A modal dialog, ${reason.dialog}, blocks the element`
     case "OutsideViewport":

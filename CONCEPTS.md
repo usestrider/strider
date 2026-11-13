@@ -666,7 +666,7 @@ Each predicate yields `Ready`, `NotReady{reason}`, or an observation error. A re
 | Stable | rect unchanged across *k* native rendering updates, independent of the application clock. *k* is a per-backend default measured by probe 10 (initially 2, or 6 on WebKit/Windows). It is shown in the action's span and in any error ("waited for 2 stable frames"), and can be overridden per call | `NotStable` |
 | Enabled | ARIA-disabled semantics: `disabled`, `fieldset` inheritance, `aria-disabled` | — |
 | Editable | enabled, not `readonly`/`aria-readonly`, and an editable element type | `NotEditableType` |
-| NotInert | not inside an inert subtree | `BlockedByModal{dialog}` |
+| NotInert | not inside an inert subtree | `Inert{by, dialog?}` (the element with the `inert` attribute, and the open modal dialog, native or `aria-modal`, outside the target), `BlockedByModal{dialog}` |
 | InViewport | a nonempty client rectangle remains after viewport and parent-frame clipping; scrolling is an action policy | `OutsideViewport` |
 | ReceivesPointer | at the action point, the composed-tree hit test (per shadow root, through iframes) lands on the target or a descendant; checked before dispatch *and* guarded on the first trusted event. The guard is capture-phase listeners on the window for the gesture's pointer, mouse, touch, and click events, armed under the input permit just before dispatch: the first trusted one decides, and if it lands outside the target, it and the rest of the gesture are stopped (`preventDefault`, `stopImmediatePropagation`). Moves aren't guarded, so hover effects still happen | `Covered{by}` |
 | Unique | exactly one match (hidden matches count); actions fail immediately on ambiguity, with no retry window | `Ambiguous{candidates, visibleCount}` |

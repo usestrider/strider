@@ -94,7 +94,8 @@ export const NotReady = Schema.Union([
   Schema.TaggedStruct("NotVisible", {}),
   Schema.TaggedStruct("Disabled", {}),
   Schema.TaggedStruct("ReadOnly", {}),
-  Schema.TaggedStruct("Inert", {}),
+  /** `by` is the element with the `inert` attribute; `dialog` the open modal dialog outside the target, when there is one. */
+  Schema.TaggedStruct("Inert", { by: Schema.String, dialog: Schema.optional(Schema.String) }),
   Schema.TaggedStruct("BlockedByModal", { dialog: Schema.String }),
   Schema.TaggedStruct("OutsideViewport", {}),
   Schema.TaggedStruct("NotStable", {}),
@@ -1705,7 +1706,16 @@ export function engine(render: (root: SnapNode) => string) {
 
   const inertReason = (element: Element): NotReady | null => {
     for (let current: Element | null = element; current !== null; current = composedParent(current)) {
-      if (current.hasAttribute("inert")) return { _tag: "Inert" }
+      if (current.hasAttribute("inert")) {
+        // An open modal outside the target: a native one, or an `aria-modal` dialog that isn't inert itself
+        const modal = Array.from(document.querySelectorAll("dialog,[aria-modal=true]")).find((d) =>
+          !composedContains(d, element) &&
+          (d instanceof HTMLDialogElement
+            ? d.matches(":modal")
+            : /dialog$/.test(d.getAttribute("role") ?? "") && !d.closest("[inert]"))
+        )
+        return { _tag: "Inert", by: describe(current), dialog: modal && describe(modal) }
+      }
     }
     const modal = Array.from(document.querySelectorAll("dialog")).find((dialog) => dialog.matches(":modal"))
     return modal !== undefined && !composedContains(modal, element)

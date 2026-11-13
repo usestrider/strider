@@ -192,7 +192,9 @@ const TimeoutTypeId = "~@usestrider/browser/Deadline/Timeout"
  * - `"waitingForEvent"`: an event wait (`next`) saw no matching event.
  *
  * `history` is what the operation observed, with consecutive repeats dropped, and `last` is the latest of it.
- * `hint` explains common causes, such as a download that started before `Download.next` subscribed.
+ * `hint` explains common causes, such as a download that started before `Download.next` subscribed, or an element
+ * that is inert because of an ancestor with the `inert` attribute and a modal dialog that's open. The message ends
+ * with the hint when there is one, so the failure says what the operation waited on wherever it's printed.
  *
  * **Example** (Recovering when a click may have happened)
  *
@@ -233,7 +235,8 @@ export class Timeout extends Schema.TaggedError<Timeout>(TimeoutTypeId)("Timeout
 }) {
   readonly [TimeoutTypeId] = TimeoutTypeId
   override get message(): string {
-    return `${this.operation} timed out while ${this.phase}`
+    const base = `${this.operation} timed out while ${this.phase}`
+    return Option.isSome(this.hint) ? `${base}: ${this.hint.value}` : base
   }
 }
 

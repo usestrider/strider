@@ -1977,7 +1977,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             assert(Deadline.isTimeout(error), String(error))
             const text = JSON.stringify(error.last) + JSON.stringify(error.hint) + error.message
             assert.include(text, "div#app")
-            assert.include(text, "dialog")
+            assert.include(text, `a modal dialog, div "Pick one", is open`)
           })),
         timeout
       )

@@ -1014,7 +1014,7 @@ describe("strider", () => {
           assert.strictEqual(clicked.code, 12, clicked.err)
           assert.include(clicked.err, "inert")
           assert.include(clicked.err, "div#app")
-          assert.include(clicked.err, "dialog")
+          assert.include(clicked.err, `a modal dialog, div "Pick one", is open`)
         } finally {
           yield* run("-s", "inert", "stop")
         }

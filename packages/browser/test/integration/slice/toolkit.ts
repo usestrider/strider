@@ -618,7 +618,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               const message = String(clicked.value.message)
               assert.include(message, "inert")
               assert.include(message, "div#app")
-              assert.include(message, "dialog")
+              assert.include(message, `a modal dialog, div "Pick one", is open`)
             }))
           }),
         timeout
