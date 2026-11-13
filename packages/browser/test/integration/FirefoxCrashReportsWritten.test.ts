@@ -7,43 +7,57 @@ import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, layer } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import { execFileSync } from "node:child_process"
 import * as fs from "node:fs"
-import * as os from "node:os"
 import * as path from "node:path"
 import * as FirefoxLauncher from "../../src/internal/firefoxLauncher.ts"
 import { firefox } from "./browsers.ts"
 import * as FirefoxCrashReports from "./firefoxCrashReports.ts"
 
-const walk = (dir: string, depth: number): Array<string> => {
-  if (depth > 6) return []
-  try {
-    return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-      const full = path.join(dir, entry.name)
-      return /Crash Reports|minidumps|\.extra$|\.dmp$/.test(entry.name)
-        ? [full]
-        : entry.isDirectory()
-        ? walk(full, depth + 1)
-        : []
-    })
-  } catch {
-    return []
+/** The command lines of a process's descendants, by pid. */
+const descendants = (root: number): Map<number, string> => {
+  const rows = execFileSync("ps", ["-A", "-o", "pid=,ppid=,args="], { encoding: "utf8" }).split("\n")
+    .map((line) => line.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/))
+    .filter((match) => match !== null)
+    .map((match) => ({ pid: Number(match[1]), ppid: Number(match[2]), args: match[3]! }))
+  const found = new Map<number, string>()
+  const parents = new Set([root])
+  for (let grew = true; grew;) {
+    grew = false
+    for (const row of rows) {
+      if (parents.has(row.ppid) && !parents.has(row.pid)) {
+        parents.add(row.pid)
+        found.set(row.pid, row.args)
+        grew = true
+      }
+    }
   }
+  return found
 }
+
+const listing = (directory: string): string =>
+  fs.existsSync(directory) ? fs.readdirSync(directory).join(", ") : "absent"
 
 const services = Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor)
 
 layer(services, { excludeTestServices: true })((it) => {
   it.effect(
-    "writes a crash report with its annotations for a content process that crashes",
+    "writes the crash report of a content process that aborts where the harness keeps it from",
     () =>
       Effect.gen(function*() {
         const pending = FirefoxCrashReports.pendingDirectory()
         const started = Date.now()
-        // Firefox's own page that crashes its content process, opened as a start page
-        const { launched } = yield* FirefoxLauncher.launch({
-          executablePath: firefox.executable,
-          args: ["about:crashcontent"]
-        })
+        const { launched } = yield* FirefoxLauncher.launch({ executablePath: firefox.executable })
+        // A web content process, which Firefox may start through a fork server on Linux
+        let tab: number | undefined
+        for (let attempt = 0; attempt < 100 && tab === undefined; attempt++) {
+          tab = [...descendants(Number(launched.handle.pid))]
+            .find(([, args]) => args.includes("-contentproc") && args.includes("-isForBrowser"))?.[0]
+          if (tab === undefined) yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 100)))
+        }
+        assert.isDefined(tab, "Firefox started no web content process")
+        // An abort, which Firefox's exception handler reports as a crash of that process
+        process.kill(tab!, "SIGABRT")
         let ids: ReadonlyArray<string> = []
         for (let attempt = 0; attempt < 100 && ids.length === 0; attempt++) {
           yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 100)))
@@ -52,7 +66,7 @@ layer(services, { excludeTestServices: true })((it) => {
         assert.isAbove(
           ids.length,
           0,
-          `no .extra in ${pending}; pid ${launched.handle.pid}; found ${walk(os.tmpdir(), 0).join(" ")}`
+          `no report in ${pending} (it holds: ${listing(pending)}; its parent: ${listing(path.dirname(pending))})`
         )
         const extra = fs.readFileSync(path.join(pending, `${ids[0]}.extra`), "utf8")
         assert.include(extra, "ProcessType")
