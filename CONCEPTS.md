@@ -586,7 +586,39 @@ Declarations are init scripts, HTTP and WebSocket routes, overrides, emulation, 
 
 ### Queries
 
-A locator is data: a list of steps (a query, then `filter`, `and`, `or`, `nth`) that one engine of ours interprets, the same on every backend. So a locator means the same thing in every browser, and a test of it on one backend speaks for all three. The engine is a self-contained function in our source, installed in each document's utility world on first use, as WebKit's evaluation helper is, and sent requests as JSON. It isn't the browser's accessibility tree: the three engines' trees differ at the edges, WebKit's protocol can't query its tree, and an action needs the element in the utility world anyway to check it. When a request's document ends under it, the request goes again to the page's new document, within the deadline; the engine dispatches nothing, so sending again is always safe. Where it is installed is a `Cache` the runtime keeps per document: concurrent requests to one document share one install, which runs apart from the operation that asked first while each waits until its own deadline; a failed install isn't kept, and a request that finds the realm gone or the engine missing invalidates the entry and installs again. Its answers are decoded with a schema, never cast: where the engine shares the page's world (stock WebKit), a page's script can answer in its place, and an answer the engine doesn't give fails as `BackendFailure{IncompatibleResponse}`.
+A locator is data: a list of steps (a query, then `filter`, `and`, `or`, `nth`) that one engine of ours interprets, the same on every backend. So a locator means the same thing in every browser, and a test of it on one backend speaks for all three. The engine is a self-contained function in our source, installed in each document's utility world on first use, as WebKit's evaluation helper is, and sent requests as JSON. It isn't the browser's accessibility tree: the three engines' trees differ at the edges, WebKit's protocol can't query its tree, and an action needs the element in the utility world anyway to check it. When a request's document ends under it, the request goes again to the page's new document, within the deadline; a request that only reads is sent again safely; one that applies input in its own round (a fill, a select, a focus) is not replayed once it may have been applied, and its answer says whether it was. Where it is installed is a `Cache` the runtime keeps per document: concurrent requests to one document share one install, which runs apart from the operation that asked first while each waits until its own deadline; a failed install isn't kept, and a request that finds the realm gone or the engine missing invalidates the entry and installs again. Its answers are decoded with a schema, never cast: where the engine shares the page's world (stock WebKit), a page's script can answer in its place, and an answer the engine doesn't give fails as `BackendFailure{IncompatibleResponse}`.
+
+The internal cooperative driver is a separate, explicitly invoked execution path for work that must run before
+readiness or assertion checks. It installs its implementation only on use, sharing the ordinary engine's check
+helpers. A session names its document and operation; each yielded token authorizes one check and is consumed
+before resuming. The host probes triggers through their own frame routes while the target is paused, then verifies
+the target's document chain before resuming. These probes are not an atomic snapshot across frames. A final check,
+including a trial under the input permit, can restart without applying anything so the caller can release the
+permit. Invalidation discards resolved elements, stability evidence and coordinates; cancellation, deadline,
+completion and page departure dispose session resources. Viewport checks share the ordinary native intersection
+sampler, but a cooperative session owns each individual pending observation and rendering wait. A failed or
+invalidated sample yields to the host before retrying; a target that gains or loses its rendered box during an asynchronous
+observation is sampled again after that yield. Moving an existing box does not require stable geometry. Each observation is published to the session before timeout
+construction, including a synchronous missing-match result. Expiry retains only a serialized timeout answer for
+single-use delivery: at most 64 answers, one MiB of estimated UTF-16 string storage (including ownership keys),
+and 30 seconds. Oldest answers are evicted first; oversized answers are not retained. A shared retention timer
+and departure listener remain only while this bounded cache holds answers. Consumption, cancellation, departure
+and retention expiry release them. The host can finish a session under a bounded cleanup deadline to collect
+failed-check evidence without another check or application; a missing answer is reported explicitly rather than
+silently starting another round on the same document. A waiting evaluation reports departure separately, even before the host receives the new
+document commit. That reply, or a changed target or ancestor document route after disposal, causes rerouting
+under the original deadline; the old continuation is cancelled, never replayed.
+Page-scoped locator handlers activate this driver only on their page. The mutable page dispatch replaces ordinary
+action/assertion execution, including for previously created locators and effects. A page semaphore serializes
+callbacks; inherited suppression lets callback actions run ordinarily without recursion. Final checks restart
+before application so the host releases the input permit before invoking a handler. Explicit removal disables
+selection; scope closure also interrupts selected work and waits for its finalizers before releasing captured
+services. A callback closing its own registration scope interrupts itself without a self-join. Default dispatch returns only after the last registration
+and all outstanding invocations and hidden waits drain. Callback services are captured while the triggering
+operation, deadline, clock and suppression remain inherited. URL assertions retain their model-only watcher
+on ordinary pages; opted-in pages use cooperative URL checks with the same failure/evidence loop as locator
+matchers. Hash and history events wake active URL checks without installing listeners on unused pages. Original typed callback errors remain unknown-valued
+in process; serialized diagnostics do not promise lossless arbitrary-error transport.
 
 - **The tree** is the document's composed tree, in tree order: open shadow roots are searched, a shadow root's elements right after its host, and closed ones aren't. Iframes are entered only through `frame()`.
 - **Frames.** A frame locator is a boundary in the steps. L1 splits them at each boundary; the engine of each document on the way finds its iframe, which must be one match and an iframe, and the adapter names the frame the iframe holds (`contentFrame`: CDP's `DOM.describeNode`, a window proxy's `context` on BiDi, WebKit's `contentFrameId`). The last part goes to the engine of the frame's current document. A frame not there yet is a request that matches nothing, in a round of at most 100 ms, so the next round looks for the frame again. Same-origin and cross-site frames go the same way. Role/filter combinations are validated from the whole query at the first frame lookup, so a missing frame cannot hide an invalid combination.

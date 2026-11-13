@@ -3,15 +3,35 @@
   "upstream": [
     "method:Page.removeLocatorHandler"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding Page operation/event. Generic main-world evaluation is available, but does not implement this named contract and its waiting/lifetime guarantees.",
+  "status": "different",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "Page.addLocatorHandler",
+      "url": "/docs/api/browser/Page#Page.addLocatorHandler"
+    },
+    {
+      "module": "Declaration",
+      "symbol": "Registration.remove",
+      "url": "/docs/api/browser/Declaration#Registration.remove"
+    }
+  ],
+  "notes": "Scoped Effect registration with idempotent removal, exact same-page grants, serial nonrecursive callbacks and one action/assertion deadline. Removal is by registration, not locator identity. Callback typed errors retain their value in process; timeouts use normal enclosing-operation attribution.",
   "capabilities": [],
   "audit": {
     "sources": [
-      "packages/browser/src/Page.ts"
+      "packages/browser/src/Page.ts",
+      "packages/browser/src/internal/locatorHandlers.ts",
+      "packages/browser/test/integration/slice/locatorHandlers.ts",
+      "packages/browser/test/LocatorHandler.test.ts"
     ],
     "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
   },
-  "requirements": []
+  "requirements": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "scoped-overlay-dispatch",
+    "quote": "explicit removal prevents new selections, while scope release interrupts selected work.",
+    "revision": "4ca4efce6322c63e58e7a6fccb9374bdcdd2c38a"
+  }
 }
