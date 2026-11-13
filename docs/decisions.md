@@ -533,6 +533,18 @@ correlation is released on completion or interruption, and all correlation state
 The one retained completed failure is not a live reservation and is cleared when its document arrives or a normal
 commit supersedes it after outstanding correlation finishes. No public operation or policy is added.
 
+BiDi wire navigation identities do not alone prove logical supersession. A delayed load whose timestamp predates
+an active start and whose URL belongs to the current document can cause Firefox to allocate another identity.
+With an existing document request, the same destination and no competing reservation, correlate that next start
+with the active logical navigation. A distinct document request for the new identity separates the navigations;
+command reservations always retain their separate ownership. This keeps request, commit and terminal outcome
+consistent without delaying observations. Starts older than an observed start or commit cannot supersede it.
+Release live aliases with their navigation's terminal correlation; document readiness keeps the correlated start
+bounds for the document's lifetime, and the retained completed failure keeps its identities until attribution.
+Rejected: treating every new wire identity as
+supersession, matching destinations alone, and using response status, retries or longer deadlines to hide the error.
+
+
 
 ## Chromium viewport restoration as bounded cleanup
 
