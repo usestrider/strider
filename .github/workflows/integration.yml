@@ -8,10 +8,6 @@ on:
     - cron: "17 3 * * *"
   workflow_dispatch:
     inputs:
-      macos-diagnostics:
-        description: Run macOS only and retain worker crash diagnostics
-        type: boolean
-        default: false
       retain_diagnostics:
         description: Run macOS only and keep bounded diagnostic traces even on success
         type: boolean
@@ -31,7 +27,7 @@ concurrency:
 
 jobs:
   integration:
-    if: ${{ !inputs.retain_diagnostics && !inputs.macos-diagnostics }}
+    if: ${{ !inputs.retain_diagnostics }}
     name: integration (${{ matrix.job }})
     strategy:
       fail-fast: false
@@ -99,7 +95,7 @@ jobs:
 
   integration-macos:
     # Run independently of Linux; respect workflow cancellation. Every scheduled run includes macOS.
-    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.macos || inputs.retain_diagnostics || inputs.macos-diagnostics) }}
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.macos || inputs.retain_diagnostics) }}
     runs-on: macos-15
     timeout-minutes: 60
     defaults:
