@@ -674,7 +674,7 @@ Each predicate yields `Ready`, `NotReady{reason}`, or an observation error. A re
 
 An action needs its element reachable; visible means a person can see it. Actions accept an element with `opacity: 0` on itself or any ancestor. For that element, `isVisible` returns false, `Expect.toBeVisible` waits, and `filter({ visible: true })` excludes that element; `filter({ visible: false })` includes it. Opacity alone does not make an action wait for a fade-in.
 
-An action's `visible` check requires CSS visibility, content visibility, and a nonempty box. Pointer actions require their action point to receive the pointer, so a covering element blocks them. Non-pointer actions accept transparency without a pointer hit test: `fill` and `clear` require enabled, editable, and not inert; `focus`, `press`, and `pressSequentially` require not inert; `selectOption` requires enabled; `scrollIntoView` requires stability. `setInputFiles` runs no readiness checks.
+An action's `visible` check requires CSS visibility, content visibility, and a nonempty box. Pointer actions require their action point to receive the pointer, so a covering element blocks them. Non-pointer actions accept transparency without a pointer hit test: `fill` and `clear` require enabled, editable, and not inert; `focus`, `press`, and `pressSequentially` require not inert; `selectOption` requires enabled, the chosen options included; `scrollIntoView` requires stability. `setInputFiles` runs no readiness checks.
 
 There are no time-window predicates such as network idle or DOM quiet: waiting for T ms of silence is a heuristic (rule 23). Compatible instantaneous checks are batched in one injected evaluation. No batch is an atomic guarantee that covers the input that follows it.
 

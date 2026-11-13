@@ -3722,6 +3722,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 Effect.flip
               )
               assert(Deadline.isTimeout(error), String(error))
+              assert.include(String(error.hint.pipe(Option.getOrUndefined)), `value "${value}"`)
               assert.strictEqual(yield* select.readValue, "a")
             }
           })),

@@ -1107,16 +1107,16 @@ export interface PressOptions extends ActionOptions, Keyboard.PressOptions {}
 export interface TypeOptions extends ActionOptions, Keyboard.TypeOptions {}
 
 /**
- * Which option of a `<select>` to choose, by its value, its label, or its index; the object names which.
+ * Which option of a `<select>` to choose, by its value, its label, or its index; the object names exactly one.
  *
  * @stability unstable
  * @category models
  * @since 0.1.0
  */
 export type SelectOption =
-  | { readonly value: string }
-  | { readonly label: string }
-  | { readonly index: number }
+  | { readonly value: string; readonly label?: never; readonly index?: never }
+  | { readonly label: string; readonly value?: never; readonly index?: never }
+  | { readonly index: number; readonly value?: never; readonly label?: never }
 
 type ActionEffect = Effect.Effect<void, LocatorError | Target.TargetGone | Deadline.Timeout>
 
@@ -1616,7 +1616,9 @@ export interface Locator extends ReadonlyLocator {
    * **Details**
    *
    * The options are chosen from an isolated world of Strider's, with `input` and `change` dispatched as for a
-   * user's choice. An option that isn't there yet is waited for, and a timeout reports it as `NoSuchOption`. Any
+   * user's choice. An option that isn't there yet is waited for, and a timeout reports it as `NoSuchOption`. Enabled
+   * covers the chosen options too: while a chosen option, or its `<optgroup>`, is disabled the action waits, and a
+   * timeout reports it as `DisabledOption`; `checks.enabled: false` skips this. Any
    * element but a `<select>` fails at once with `WrongElement`.
    *
    * **Example** (Choosing a country)
