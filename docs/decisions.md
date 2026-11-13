@@ -1528,3 +1528,7 @@ before queueing and parameter decoding. All adapter state changes and fact appli
 the scope again before decoding queued events. This keeps disabled contexts from paying for optional chunk
 collection while preserving per-session isolation. Rejected: queueing every optional event for a worker-side check,
 which charges disabled contexts, and a browser-wide enabled switch, which charges unrelated contexts.
+
+## Malformed browser-reported URLs
+
+Convert malformed browser-reported URLs to `about:blank` across adapters, including network and obligation events, so one unparseable string cannot end the connection's event fold. Show the reported string according to Diagnostics.CurrentPreset (REDACTED under default strict, exact under local) in a warning and an event on its own short-lived span, using the ingestion context's tracer and respecting tracing suppression. Reject throwing as an adapter defect at this boundary: browser data is outside the adapter's control. Use the same span naming and suppression settings as operations, with browser.operation identifying the original operation or diagnostic name. Keep the warning visible when tracing is suppressed. Reject raw malformed strings under strict because they may contain secrets. Keep empty and colon placeholders silent and optional script locations absent when unparseable.

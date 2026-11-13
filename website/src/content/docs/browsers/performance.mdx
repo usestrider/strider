@@ -163,6 +163,13 @@ const dismissBanners = Effect.fn("dismissBanners")(
 A matched operation has no span, so a slow or failed one is missing from your tracer. Its failure still carries its
 [`diagnostics`](/docs/errors#diagnostics), and a [trace](/docs/tools/recordings#traces) still includes it as a step.
 
+The same predicate also sees `browser.url.malformed` with a Browser target: a short diagnostic span containing an
+event for a malformed browser-reported URL. Matching that name suppresses its span and event while keeping its
+warning visible. Its `browser.operation` attribute is the diagnostic name, just as operation spans carry their
+operation's original name. The reported URL follows the diagnostics preset: `REDACTED` under default strict and
+the exact string under local. See [diagnostic spans and their settings](/docs/tools/recordings#spans) for naming,
+preset and suppression examples. These settings are captured when the connection opens.
+
 ## Opt-in features
 
 Request timings, request sizes, storage tracking, response bodies, and WebSocket routes collect nothing until you ask

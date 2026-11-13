@@ -14,6 +14,14 @@
  * protocol command. `SpanNameGenerator` and `TracerDisabledWhen` rename or suppress spans, as their namesakes do
  * for Effect's `HttpClient`.
  *
+ * An unparseable browser-reported URL becomes `about:blank` and emits a warning plus a
+ * `browser.url.malformed` event on its own short-lived span. It uses the logger, tracer and settings captured
+ * when the connection opens, even after its setup span ends. The naming and suppression functions receive
+ * `name: "browser.url.malformed"` with a Browser target. Suppression leaves the warning visible.
+ * `browser.operation` holds the original operation or diagnostic name, regardless of the generated span name.
+ * The warning, span attribute and event carry `browser.url.reported`: `REDACTED` under the default strict
+ * diagnostics preset, or the exact reported string under local.
+ *
  * @stability unstable
  * @since 0.1.0
  */
@@ -424,7 +432,11 @@ export const layerTest = (timeline: string): Layer.Layer<Browser> =>
   ))
 
 /**
- * What a span is about, as given to `SpanNameGenerator` and `TracerDisabledWhen`.
+ * What an operation or diagnostic span is about, as given to `SpanNameGenerator` and `TracerDisabledWhen`.
+ *
+ * **Details**
+ *
+ * Malformed browser-reported URLs use `name: "browser.url.malformed"` and a Browser target.
  *
  * @stability unstable
  * @category models
@@ -432,14 +444,14 @@ export const layerTest = (timeline: string): Layer.Layer<Browser> =>
  */
 export interface Operation extends Tracing.Operation {
   /**
-   * The operation, such as `Locator.click` or `Download.next`.
+   * The operation, such as `Locator.click` or `Download.next`, or the diagnostic `browser.url.malformed`.
    */
   readonly name: string
   readonly target: Target.Description
 }
 
 /**
- * Reference to the function that names each operation's span; by default the operation's name, such as
+ * Reference to the function that names operation and diagnostic spans; by default their name, such as
  * `Locator.click`.
  *
  * **Details**
@@ -447,6 +459,11 @@ export interface Operation extends Tracing.Operation {
  * Every operation opens one span. Its attributes are `browser.operation`, the id of what it acts on
  * (`browser.page.id`, `browser.context.id`, or `browser.realm.id`), attributes of its own, such as
  * `browser.locator`, and a URL as `url.full`, shown as `Diagnostics.CurrentPreset` allows.
+ * The short-lived malformed-URL diagnostic also passes through this function with
+ * `name: "browser.url.malformed"` and a Browser target. `browser.operation` holds the original operation or
+ * diagnostic name, independent of the generated span name. Its `browser.url.reported` attribute and event follow
+ * `Diagnostics.CurrentPreset`: `REDACTED` under strict (the default), or the exact browser string under local.
+ * Set this reference around building the browser layer so its connection captures it.
  *
  * **Example** (Prefixing every span with the service's name)
  *
@@ -471,7 +488,14 @@ export interface Operation extends Tracing.Operation {
 export const SpanNameGenerator: Context.Reference<(operation: Operation) => string> = Tracing.SpanNameGenerator
 
 /**
- * Reference to a predicate that suppresses an operation's span when it returns `true`.
+ * Reference to a predicate that suppresses an operation or diagnostic span when it returns `true`.
+ *
+ * **Details**
+ *
+ * Malformed-URL diagnostics pass `name: "browser.url.malformed"` with a Browser target. Suppressing the diagnostic
+ * leaves its warning visible, with `browser.url.reported` redacted under strict or shown in full under local,
+ * as `Diagnostics.CurrentPreset` allows. The diagnostic never adds its event to an inherited span.
+ * Set this reference around building the browser layer so its connection captures it.
  *
  * **Example** (Leaving visibility checks out of traces)
  *
