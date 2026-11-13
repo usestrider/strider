@@ -2,7 +2,7 @@
 import { spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import { createReadStream } from "node:fs"
-import { mkdtemp, readFile, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import * as path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -56,9 +56,15 @@ try {
   } finally {
     run("hdiutil", ["detach", mount])
   }
+  const crashDatabase = process.env.STRIDER_MACOS_CRASH_DATABASE
+  if (crashDatabase) await mkdir(crashDatabase, { recursive: true })
+  // BREAKPAD_DUMP_LOCATION overrides DIR_CRASH_DUMPS on macOS. It is independent of --user-data-dir.
+  // CHROME_HEADLESS marks an unattended bot, disabling uploads even if user consent is present.
+  // No Chromium flags or test deadlines change. The workflow collects the database after profile cleanup.
   // Headed Chromium uses the runner's native WindowServer, never Xvfb. Browser profiles remain scope-owned.
   run("pnpm", ["exec", "vitest", "--run", "--config", "vitest.integration.macos.config.ts", ...process.argv.slice(2)], {
     ...process.env,
+    ...(crashDatabase ? { BREAKPAD_DUMP_LOCATION: crashDatabase, CHROME_HEADLESS: "1" } : {}),
     STRIDER_ENVIRONMENT: "macos-integration",
     STRIDER_CHROMIUM: path.join(
       directory,
