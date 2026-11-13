@@ -1,7 +1,41 @@
+import * as vm from "node:vm"
 import { describe, expect, it } from "vitest"
 import { viewportTap } from "./integration/viewportProbe.ts"
 
 describe("viewport failure trace probe", () => {
+  it("does not run page-owned dimension getters while observing a resumed page", () => {
+    let reads = 0
+    const page = vm.createContext({
+      get innerWidth() {
+        reads++
+        return 123
+      },
+      innerHeight: 456,
+      outerWidth: 800,
+      outerHeight: 600,
+      devicePixelRatio: 1
+    })
+    const tap = viewportTap(() => {})
+    tap.inject = (message) => {
+      const command = JSON.parse(message)
+      // CDP evaluates without an explicit context in the page's main world.
+      if (command.method === "Runtime.evaluate" && command.params.contextId === undefined) {
+        vm.runInContext(command.params.expression, page)
+      }
+    }
+    tap.receive(JSON.stringify({
+      method: "Target.attachedToTarget",
+      params: {
+        sessionId: "session",
+        targetInfo: { targetId: "target", type: "page" },
+        waitingForDebugger: true
+      }
+    }))
+    tap.send(JSON.stringify({ id: 1, sessionId: "session", method: "Runtime.runIfWaitingForDebugger" }))
+    tap.receive(JSON.stringify({ id: 1, result: {} }))
+    expect(reads, "diagnostic measurements must not invoke author code").toBe(0)
+  })
+
   it("never evaluates a paused renderer and correlates measurements across resume and clear", () => {
     const records: Array<{ kind: string; payload: any }> = []
     const writes: Array<any> = []
