@@ -110,7 +110,8 @@ describe("Expect page-round scheduling", () => {
       const { error, caps, installs } = yield* scenario(300)
       assertObserved(error)
       assert.strictEqual(installs, 1)
-      assert.strictEqual(caps[0], 100)
+      assert.strictEqual(caps[0], 0)
+      assert.strictEqual(caps[1], 100)
     }))
 
   it.effect("retains timely observations with no cold-setup cost", () =>
@@ -118,7 +119,8 @@ describe("Expect page-round scheduling", () => {
       const { error, caps, installs } = yield* scenario(0)
       assertObserved(error)
       assert.strictEqual(installs, 1)
-      assert.strictEqual(caps[0], 250)
+      assert.strictEqual(caps[0], 0)
+      assert.strictEqual(caps[1], 250)
     }))
 
   it.effect("has empty history and absent last when setup exhausts the deadline", () =>

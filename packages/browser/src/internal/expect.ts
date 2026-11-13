@@ -230,7 +230,7 @@ const expectUsing = (
       const left = record.left()
       if (left <= 0 && checks > 0) return yield* failed()
       checks++
-      const response = yield* execute(Runtime.roundCap(left), record).pipe(
+      const response = yield* execute(checks === 1 ? 0 : Runtime.roundCap(left), record).pipe(
         Effect.map((response): Engine.Response | { readonly error: string; readonly final: boolean } => response),
         Effect.catch((
           failure

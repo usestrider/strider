@@ -1875,10 +1875,13 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         )
       // A round that reached the deadline is the action's own Timeout, with what the record saw
       const attempts = Effect.gen({ self: this }, function*() {
+        let firstObservation = true
         while (true) {
           const left = record.left()
           if (left <= 0) return yield* Effect.fail(timedOut())
-          const first = yield* round(Runtime.roundCap(left), false, reuseStability ? "capture" : undefined).pipe(
+          const cap = firstObservation ? 0 : Runtime.roundCap(left)
+          firstObservation = false
+          const first = yield* round(cap, false, reuseStability ? "capture" : undefined).pipe(
             Effect.flatMap(settle)
           )
           if (Option.isNone(first)) continue

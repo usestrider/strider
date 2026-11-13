@@ -192,6 +192,8 @@ const TimeoutTypeId = "~@usestrider/browser/Deadline/Timeout"
  * - `"waitingForEvent"`: an event wait (`next`) saw no matching event.
  *
  * `history` is what the operation observed, with consecutive repeats dropped, and `last` is the latest of it.
+ * Locator actions return their first readiness observation without waiting in the page. Replies must arrive
+ * before the deadline to enter history; if none arrives, history can be empty. Late replies cannot change it.
  * `hint` explains common causes, such as a download that started before `Download.next` subscribed.
  *
  * **Example** (Recovering when a click may have happened)
