@@ -161,9 +161,21 @@ describe("BidiAdapter state", () => {
 
   it.effect("keeps a stray tab excluded when the browser tree is reconciled", () =>
     Effect.gen(function*() {
-      const { page, state } = yield* withPage()
+      const { state } = yield* withPage()
       state.adopting = false
-      state.pageWindows.set("owned-window", page)
+      state.creating.push("owned-user")
+      const handlers = Contexts.register(Kit.handlers<State.Event>())
+      const owned = {
+        context: "owned-page",
+        clientWindow: "owned-window",
+        userContext: "owned-user",
+        parent: null,
+        originalOpener: null,
+        url: "about:blank",
+        children: null
+      }
+      handlers.apply("browsingContext.contextCreated", owned, { state })
+      state.creating.length = 0
       const info = {
         context: "stray" as BrowsingContext.BrowsingContext,
         clientWindow: "owned-window",
@@ -173,11 +185,11 @@ describe("BidiAdapter state", () => {
         url: "about:blank",
         children: null
       }
-      Contexts.register(Kit.handlers<State.Event>()).apply("browsingContext.contextCreated", info, { state })
+      handlers.apply("browsingContext.contextCreated", info, { state })
       assert.isFalse(state.navigables.has(info.context))
       Tree.reconcile(state, {
         contexts: [
-          { ...info, context: page.bidi, userContext: "default" },
+          owned,
           info
         ]
       } as unknown as BrowsingContext.GetTreeResult)
@@ -194,7 +206,7 @@ describe("BidiAdapter state", () => {
           yield* Deferred.await(release)
           return yield* Effect.fail(
             new Protocol.ProtocolError({
-              reason: new Protocol.SessionEnded({ why: "targetDestroyed" })
+              reason: new Protocol.Unsupported({ method: "browsingContext.create" })
             })
           )
         })
@@ -226,7 +238,16 @@ describe("BidiAdapter state", () => {
         "browsingContext.create": Effect.gen(function*() {
           yield* Deferred.succeed(entered, undefined)
           yield* Deferred.await(release)
-          return { context: "C1" }
+          Contexts.register(Kit.handlers<State.Event>()).apply("browsingContext.contextCreated", {
+            context: "created-page",
+            clientWindow: "created-window",
+            userContext: "default",
+            parent: null,
+            originalOpener: null,
+            url: "about:blank",
+            children: null
+          }, { state })
+          return { context: "created-page" }
         })
       })
       state.adopting = false
