@@ -699,7 +699,7 @@ export const conformance = (backend: Backend) =>
                 result: "value",
                 userActivation: false
               }),
-              (result) => result._tag === "Value" && json(result.value) === true ? Effect.void : Effect.fail("not yet")
+              (result) => result._tag === "Value" && json(result.value) === true ? Effect.void : Effect.fail("iframe child loaded message was not received")
             )
             yield* loaded.pipe(Effect.retry({ times: 50, schedule: Schedule.spaced("100 millis") }))
             const iframe = yield* world.adapter.evaluate(realm, {
@@ -754,7 +754,7 @@ export const conformance = (backend: Backend) =>
                 result: "value",
                 userActivation: false
               }),
-              (result) => result._tag === "Value" && json(result.value) === true ? Effect.void : Effect.fail("not yet")
+              (result) => result._tag === "Value" && json(result.value) === true ? Effect.void : Effect.fail("iframe button clicked message was not received")
             )
             yield* clicked.pipe(Effect.retry({ times: 30, schedule: Schedule.spaced("100 millis") }))
           }), timeout)
