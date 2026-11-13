@@ -8,7 +8,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
-import * as Browser from "@usestrider/browser/bidi-protocol/Browser"
+import { Browser as StriderBrowser } from "@usestrider/browser"
 import * as BrowsingContext from "@usestrider/browser/bidi-protocol/BrowsingContext"
 import * as Script from "@usestrider/browser/bidi-protocol/Script"
 import * as Session from "@usestrider/browser/bidi-protocol/Session"
@@ -18,7 +18,9 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Stream from "effect/Stream"
+import * as BidiAdapter from "../../src/internal/bidiAdapter.ts"
 import * as BidiWire from "../../src/internal/bidiWire.ts"
+import * as BrowserImpl from "../../src/internal/browser.ts"
 import * as FirefoxLauncher from "../../src/internal/firefoxLauncher.ts"
 import * as ProtocolClient from "../../src/internal/protocolClient.ts"
 import { assertPinned, firefox } from "./browsers.ts"
@@ -58,37 +60,65 @@ describe("Firefox over WebDriver BiDi", () => {
         }), timeout)
 
       it.effect(
-        "renders a window's page at full rate after another tab opens in the same window",
+        "keeps a page visible, and the default context empty, when Firefox adds a tab to the page's window",
         () =>
           Effect.gen(function*() {
-            const { transport } = yield* FirefoxLauncher.launch({ executablePath: executable })
-            const bidi = yield* BidiConnection.make(transport)
-            const on = Protocol.on(bidi.session)
-            yield* Session.new_({ capabilities: {} }).pipe(on)
-            const { userContext } = yield* Browser.createUserContext({}).pipe(on)
-            // The page Strider makes: a window of a user context of its own
-            const { context } = yield* BrowsingContext.create({ type: "window", userContext }).pipe(on)
-            yield* BrowsingContext.navigate({ context, url: "data:text/html,<title>page</title>", wait: "complete" })
-              .pipe(on)
-            // A second tab in the page's window, as the macOS runs show Firefox adding (about:newtab, unrequested)
-            yield* BrowsingContext.create({ type: "tab", referenceContext: context, background: false }).pipe(on)
-            const frames = yield* Script.evaluate({
-              expression: `new Promise((resolve) => {
-              let frames = 0
-              const end = performance.now() + 2000
-              const tick = () => performance.now() < end ? (frames++, requestAnimationFrame(tick)) : resolve(
-                document.visibilityState + ":" + frames
+            const replies = new Map<number, Deferred.Deferred<any>>()
+            let next = 1_000_000
+            let raw!: (method: string, params: object) => Effect.Effect<any>
+            const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
+              const { transport } = yield* FirefoxLauncher.launch({ executablePath: executable })
+              // Commands of the test's own, sent over Strider's connection, with replies kept from its client
+              raw = Effect.fnUntraced(function*(method: string, params: object) {
+                const id = next++
+                const reply = yield* Deferred.make<any>()
+                replies.set(id, reply)
+                yield* transport.send(JSON.stringify({ id, method, params }))
+                return yield* Deferred.await(reply)
+              })
+              return yield* BidiAdapter.connect({
+                ...transport,
+                messages: transport.messages.pipe(Stream.filter((message) => {
+                  const wire = JSON.parse(message)
+                  const reply = replies.get(wire.id)
+                  if (reply === undefined) return true
+                  Deferred.doneUnsafe(reply, Effect.succeed(wire))
+                  return false
+                }))
+              }, { sink, ownership: "launched" })
+            }))
+            yield* Effect.gen(function*() {
+              const browser = yield* StriderBrowser.Browser
+              const page = yield* StriderBrowser.newPage()
+              yield* page.goto("data:text/html,<title>page</title>")
+              const tree = yield* raw("browsingContext.getTree", {})
+              const mine = tree.result.contexts.find((info: any) => info.userContext !== "default")
+              // A tab in the default user context, in the page's window, as the macOS runs show Firefox adding
+              const added = yield* raw("browsingContext.create", {
+                type: "tab",
+                referenceContext: mine.context,
+                userContext: "default",
+                background: false
+              })
+              assert.isUndefined(added.error, JSON.stringify(added))
+              yield* Effect.sleep("1 second")
+              const outcome = yield* page.evaluate(() =>
+                new Promise<string>((resolve) => {
+                  let frames = 0
+                  const end = performance.now() + 2000
+                  const tick = () =>
+                    performance.now() < end
+                      ? (frames++, requestAnimationFrame(tick))
+                      : resolve(document.visibilityState + ":" + frames)
+                  requestAnimationFrame(tick)
+                })
               )
-              requestAnimationFrame(tick)
-            })`,
-              target: { context },
-              awaitPromise: true
-            }).pipe(on)
-            assert(frames.type === "success")
-            const [visibility, count] = String((frames.result as { value: unknown }).value).split(":")
-            // A tab behind another renders about once a second (QUIRKS.md, Q71): 2 frames in 2 s, not about 120
-            assert.strictEqual(visibility, "visible")
-            assert.isAbove(Number(count), 30)
+              const [visibility, count] = outcome.split(":")
+              // A tab behind another renders about once a second: 2 frames in 2 s, not about 120
+              assert.strictEqual(visibility, "visible")
+              assert.isAbove(Number(count), 30)
+              assert.deepStrictEqual(yield* browser.defaultContext.pages, [])
+            }).pipe(Effect.provide(backend))
           }),
         timeout
       )
