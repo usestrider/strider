@@ -9,6 +9,7 @@ import { WebKit } from "@usestrider/browser/webkit"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Logger from "effect/Logger"
 import * as Stream from "effect/Stream"
 import { site } from "./adapter/harness.ts"
 import { chromium, firefox, webkitgtk } from "./browsers.ts"
@@ -226,6 +227,12 @@ for (const [name, backend] of backends) {
         "keeps other contexts native, restores overlap precedence and removes loaded-document shims",
         () =>
           Effect.gen(function*() {
+            const failures: Array<unknown> = []
+            const loggers = yield* Logger.CurrentLoggers
+            const logger = Logger.make((entry) => {
+              if (entry.logLevel === "Error") failures.push(entry.message)
+              for (const existing of loggers) existing.log(entry)
+            })
             const served = yield* site
             const page = yield* Browser.newPage()
             const sibling = yield* Browser.newPage()
@@ -237,7 +244,7 @@ for (const [name, backend] of backends) {
               page.context.routeWebSocket("**/socket", (socket) =>
                 socket.open({
                   fromPage: (_, endpoint) => endpoint.send({ _tag: "Text", data: text })
-                }), options)
+                }), options).pipe(Effect.provideService(Logger.CurrentLoggers, new Set([logger])))
             const first = yield* register("old")
             assert.strictEqual(yield* sibling.evaluateInMainWorld(() => WebSocket.name), "WebSocket")
             const inspect = () =>
@@ -267,6 +274,7 @@ for (const [name, backend] of backends) {
             const again = yield* register("again")
             assert.strictEqual(yield* inspect(), "again")
             yield* again.remove
+            assert.deepStrictEqual(failures, [], "navigation must retire sockets without reporting a handler failure")
           }),
         60_000
       )
