@@ -49,13 +49,21 @@ export const endNavigation = (
         id: navigation.id,
         url: navigation.url,
         initiatedAs: "crossDocument",
-        bidi: navigation.bidi
+        bidi: navigation.bidi,
+        aliases: new Set(
+          [...navigation.navigable.navigations].filter(([, entry]) => entry === navigation).map(([bidi]) => bidi)
+        )
       }
     }
+    navigation.starts.clear()
+    navigation.staleLoad = undefined
     // Outstanding commands and their unresolved terminal correlations still need this identity.
     if (navigation.navigable.navigationCommands.size > 0 || navigation.navigable.pendingTerminals.length > 0) return
-    navigation.navigable.navigations.delete(navigation.bidi)
-    if (state.navigations.get(navigation.bidi) === navigation) state.navigations.delete(navigation.bidi)
+    for (const [bidi, entry] of navigation.navigable.navigations) {
+      if (entry !== navigation) continue
+      navigation.navigable.navigations.delete(bidi)
+      if (state.navigations.get(bidi) === navigation) state.navigations.delete(bidi)
+    }
   })
 
 /**
@@ -81,6 +89,8 @@ export const removeNavigable = (
     navigable.expected.list.length = 0
     for (const [bidi, navigation] of navigable.navigations) {
       navigation.ended = true
+      navigation.starts.clear()
+      navigation.staleLoad = undefined
       if (state.navigations.get(bidi) === navigation) state.navigations.delete(bidi)
     }
     navigable.navigations.clear()
@@ -186,6 +196,7 @@ export const startNavigation = (
   const initiatedAs = expected?.initiatedAs ?? type
   const navigation: NavigationEntry = {
     id: expected?.id ?? state.ids.navigation(),
+    starts: new Map(),
     bidi,
     navigable,
     url,

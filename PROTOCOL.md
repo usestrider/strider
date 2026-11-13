@@ -331,7 +331,17 @@ Adapter responsibilities:
 - **Correlation.** Keep L1 ids stable across protocol churn:
   - CDP: out-of-process-iframe swaps (`frameDetached{swap}` followed by an iframe target), while prerender activation and its document/realm transfer are not implemented.
   - WebKit: provisional pages (`didCommitProvisionalTarget`).
-  - BiDi: route events to sessions client-side, because the wire carries no subscription id.
+  - BiDi: route events to sessions client-side, because the wire carries no subscription id. Navigation identities
+    are evidence, not logical navigation ids. Firefox can assign a delayed load to a newer start and then issue a
+    replacement start without a second document request. Correlate the replacement only when that load's timestamp
+    predates the active start, its URL identifies the current document, the active navigation has a document request,
+    and no competing command reservation exists. The destination URL must also agree, but cannot establish
+    continuity alone. A distinct document request for the replacement identity establishes competition and splits
+    it into a new logical navigation. Preserve the original request and single outcome across correlated identities;
+    reject starts older than an observed newer start or commit. Clear aliases and stale-load evidence when their
+    navigation and outstanding command correlation end, and on context removal. A committed document retains the
+    correlated start bounds for readiness until it is replaced; the retained completed failure keeps its identities
+    until error-document attribution is settled.
 - **The initialization gate** (a `Latch`). Configure a target before its scripts run, then publish it as Ready:
   - **CDP:** `setAutoAttach{flatten, waitForDebuggerOnStart}`, applied recursively. For paused pages, write domain enablement, the frame snapshot, Runtime replay, recursive attachment, and required declarations before `runIfWaitingForDebugger`, then collect their replies. Network events, navigation starts, and Fetch decisions run during this initial sync so a first routed request can produce the renderer; frame and realm events wait for the snapshot. Resume also runs on failure, without a second resume after success. Iframe targets and unpaused pages retain snapshot-first initialization.
   - **WebKit:** `Target.resume`.
