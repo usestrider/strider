@@ -9,7 +9,7 @@
  * - `dom.ipc.tabs.createKillHardCrashReports` is true. It is read once, at startup, and defaults to false on release
  *   builds (`modules/libpref/init/StaticPrefList.yaml`: `@IS_NOT_RELEASE_OR_BETA@`), which the pinned Firefox is.
  * Without `MOZ_CRASHREPORTER_NO_REPORT` the report waits in `Crash Reports/pending` of the user's application data
- * directory, under the home directory, where a profile's removal doesn't reach it (with it set, it would stay in the
+ * directory, under the home directory (`~/.config/mozilla/firefox` on Linux from Firefox 147, `~/Library/Application Support/Firefox` on macOS), where a profile's removal doesn't reach it (with it set, it would stay in the
  * profile's `minidumps/`, which is deleted with it); nothing is submitted, because that needs the reporter's
  * settings, which the tests never turn on.
  *
@@ -36,11 +36,18 @@ export const maxTotalBytes = 32 * 1024 * 1024
 /** Where Firefox waits with the reports of its crashes, for a home directory. */
 export const pendingDirectory = (
   home: string = os.homedir(),
-  platform: string = process.platform
+  platform: string = process.platform,
+  configHome: string | undefined = process.env["XDG_CONFIG_HOME"]
 ): string =>
   platform === "darwin"
     ? path.join(home, "Library", "Application Support", "Firefox", "Crash Reports", "pending")
-    : path.join(home, ".mozilla", "firefox", "Crash Reports", "pending")
+    : path.join(
+      configHome === undefined || configHome === "" ? path.join(home, ".config") : configHome,
+      "mozilla",
+      "firefox",
+      "Crash Reports",
+      "pending"
+    )
 
 /** The ids of the reports in `pending` written at or after `since` (epoch milliseconds), oldest first. */
 export const reportsSince = (pending: string, since: number): ReadonlyArray<string> => {

@@ -79,7 +79,14 @@ describe("FirefoxCrashReports", () => {
   })
 
   it("looks where Firefox writes on each platform", () => {
-    assert.strictEqual(FirefoxCrashReports.pendingDirectory("/h", "linux"), "/h/.mozilla/firefox/Crash Reports/pending")
+    assert.strictEqual(
+      FirefoxCrashReports.pendingDirectory("/h", "linux"),
+      "/h/.config/mozilla/firefox/Crash Reports/pending"
+    )
+    assert.strictEqual(
+      FirefoxCrashReports.pendingDirectory("/h", "linux", "/x"),
+      "/x/mozilla/firefox/Crash Reports/pending"
+    )
     assert.strictEqual(
       FirefoxCrashReports.pendingDirectory("/h", "darwin"),
       "/h/Library/Application Support/Firefox/Crash Reports/pending"
