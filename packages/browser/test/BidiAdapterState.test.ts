@@ -1379,6 +1379,10 @@ describe("BidiAdapter state", () => {
         yield* Deferred.succeed(release, undefined)
         yield* Fiber.join(running)
         event("browsingContext.navigationFailed", info("B", 14))
+        if (outcome === "Committed" || outcome === "nightly") {
+          event("browsingContext.load", info("A", 9))
+          event("browsingContext.load", info("A", 16))
+        }
         if (outcome === "Failed") {
           event("browsingContext.navigationCommitted", {
             ...info("B", 15),
@@ -1398,6 +1402,9 @@ describe("BidiAdapter state", () => {
         assert.strictEqual(state.requests.get("request")!.navigation!.id, reserved)
         if (ends[0]!.outcome._tag === "Committed") {
           assert.deepStrictEqual(ends[0]!.outcome.response, Option.some(state.requests.get("request")!.hop))
+          const readiness = facts.filter((fact) => fact._tag === "DocumentReadiness")
+          assert.lengthOf(readiness, 1)
+          assert.strictEqual(readiness[0]!.document, ends[0]!.outcome.document)
         }
         assert.isEmpty(page.navigations)
         assert.isEmpty(state.navigations)
