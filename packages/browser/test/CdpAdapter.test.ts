@@ -3171,3 +3171,127 @@ describe("Chromium screencast renderer readiness", () => {
       }).pipe(onTestClock))
   }
 })
+
+describe("CDP owned Chromium shutdown", () => {
+  for (
+    const mode of [
+      "order",
+      "no reply",
+      "disconnect before exit",
+      "hung child",
+      "signal exit",
+      "interrupted caller",
+      "expired deadline",
+      "failed handshake",
+      "attached"
+    ] as const
+  ) {
+    it.effect(mode, () =>
+      withProtocolScheduler((drain) =>
+        Effect.gen(function*() {
+          const browser = yield* makeBrowser
+          const exited = yield* Deferred.make<void, string>()
+          const closeSent = yield* Deferred.make<void>()
+          const scope = yield* Scope.make()
+          const commands: Array<string> = []
+          let fallback = false
+          yield* Scope.addFinalizer(
+            scope,
+            Effect.sync(() => {
+              fallback = true
+            })
+          )
+          yield* Effect.gen(function*() {
+            while (true) {
+              const command = yield* browser.next
+              commands.push(command.method)
+              if (command.method === "Browser.close") {
+                assert.strictEqual(fallback, false)
+                yield* Deferred.succeed(closeSent, undefined)
+                // Deliberately never reply: process exit, not a response, ends shutdown.
+                continue
+              }
+              if (mode === "failed handshake") {
+                yield* browser.receive({ id: command.id, error: { code: -1, message: "handshake rejected" } })
+                continue
+              }
+              const result = command.method === "Browser.getVersion"
+                ? {
+                  protocolVersion: "1.3",
+                  product: "Chrome/155",
+                  revision: "test",
+                  userAgent: "HeadlessChrome",
+                  jsVersion: "test"
+                }
+                : command.method === "Target.getBrowserContexts"
+                ? { browserContextIds: [] }
+                : {}
+              yield* browser.receive({ id: command.id, result })
+            }
+          }).pipe(Effect.forkScoped)
+          const options = {
+            ownership: mode === "attached" ? "attached" as const : "launched" as const,
+            sink: () => Effect.void,
+            exited: Deferred.await(exited)
+          }
+          const acquisition = yield* Effect.exit(
+            CdpAdapter.connect(browser.transport, options).pipe(Scope.provide(scope))
+          )
+          assert.strictEqual(Exit.isFailure(acquisition), mode === "failed handshake")
+          if (mode === "attached" || mode === "failed handshake") {
+            yield* Scope.close(scope, Exit.void)
+            assert.strictEqual(commands.includes("Browser.close"), false)
+            assert.strictEqual(fallback, true)
+            return
+          }
+          assert(Exit.isSuccess(acquisition))
+          let connectionLost = false
+          yield* acquisition.value.closed.pipe(
+            Effect.tap(() =>
+              Effect.sync(() => {
+                connectionLost = true
+              })
+            ),
+            Effect.forkScoped
+          )
+          const closing = yield* (mode === "interrupted caller"
+            ? Effect.gen(function*() {
+              yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))
+              return yield* Effect.never
+            }).pipe(Effect.scoped, Effect.forkChild)
+            : Scope.close(scope, Exit.void).pipe(
+              mode === "expired deadline" ? Deadline.within("0 millis") : (self) => self,
+              Effect.forkChild
+            ))
+          yield* drain
+          const interrupted = mode === "interrupted caller"
+            ? yield* Fiber.interrupt(closing).pipe(Effect.forkChild)
+            : undefined
+          // Drain all runnable protocol work without relying on a wall-clock delay.
+          yield* drain
+          assert.strictEqual(commands.includes("Browser.close"), true)
+          yield* Deferred.await(closeSent)
+          assert.strictEqual(connectionLost, false)
+          if (mode === "disconnect before exit") {
+            yield* browser.lose("closed before process exit")
+            yield* drain
+            assert.strictEqual(fallback, false)
+          }
+          if (mode === "hung child" || mode === "expired deadline") {
+            yield* TestClock.adjust("4999 millis")
+            assert.strictEqual(fallback, false)
+            yield* TestClock.adjust("1 millis")
+          } else if (mode === "signal exit") {
+            yield* Deferred.fail(exited, "SIGTERM")
+          } else {
+            yield* Deferred.succeed(exited, undefined)
+          }
+          if (interrupted !== undefined) yield* Fiber.join(interrupted)
+          else yield* Fiber.join(closing)
+          yield* drain
+          assert.strictEqual(connectionLost, true)
+          assert.strictEqual(fallback, true)
+        }).pipe(onTestClock)
+      ))
+  }
+})

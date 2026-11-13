@@ -332,7 +332,8 @@ export interface LaunchOptions {
   readonly profile?: LaunchProfile.LaunchProfile | undefined
   /**
    * A profile directory you own, never deleted. Chromium and Firefox lock it while they run, so two browsers can't
-   * share one. On WebKit, it's the default context's only.
+   * share one. On WebKit, it's the default context's only. Closing `Chromium.layer` closes the browser it
+   * launched cleanly to preserve recent writes to this profile, stopping it if it does not exit within five seconds.
    *
    * @default a temporary profile, deleted after the browser exits
    */
