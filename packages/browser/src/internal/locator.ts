@@ -1696,7 +1696,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       // These actions happen in the round that applies them: once it is sent, the action may have happened, and
       // its answer says whether it did
       const inRound = Engine.appliesInRound(action)
-      const round = (cap: number, apply: boolean, stability?: string, final = false) =>
+      const round = (cap: number, apply: boolean, stability?: string, final = false, sample = false) =>
         Effect.suspend(() => {
           return owner.page.execution.action(
             owner.runtime,
@@ -1708,6 +1708,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
               cap,
               action,
               apply,
+              ...(sample ? { sample: true } : {}),
               ...(stability === undefined ? {} : { stability })
             },
             id,
@@ -1879,9 +1880,15 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         while (true) {
           const left = record.left()
           if (left <= 0) return yield* Effect.fail(timedOut())
-          const cap = firstObservation ? 0 : Runtime.roundCap(left)
+          const sample = firstObservation
           firstObservation = false
-          const first = yield* round(cap, false, reuseStability ? "capture" : undefined).pipe(
+          const first = yield* round(
+            Runtime.roundCap(left),
+            false,
+            reuseStability ? "capture" : undefined,
+            false,
+            sample
+          ).pipe(
             Effect.flatMap(settle)
           )
           if (Option.isNone(first)) continue

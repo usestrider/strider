@@ -290,6 +290,8 @@ export type Request =
     readonly clip?: Clip
     /** Milliseconds this round may wait for the checks to pass. */
     readonly cap: number
+    /** Return after the first permitted readiness sample, retaining rendering requirements. */
+    readonly sample?: boolean
     readonly action: Action
     /**
      * Whether to do what `action` asks once the checks pass: only under the page's input permit. Without it, the
@@ -2036,7 +2038,8 @@ export function engine(render: (root: SnapNode) => string) {
     reason: state.last,
     history: state.history,
     scrolled: state.scrolled,
-    checked: state.history.length > 0 || (!request.checks.rendered && state.sampled)
+    checked: (request.sample === true && state.sampled) || state.history.length > 0 ||
+      (!request.checks.rendered && state.sampled)
   })
 
   const actionFrameTimeout = (request: Extract<Request, { op: "act" }>, state: ActionState): Response => {
@@ -2202,6 +2205,7 @@ export function engine(render: (root: SnapNode) => string) {
       state.sampled = true
       const response = checkAction(request, state)
       if (response !== undefined) return response
+      if (request.sample === true) return actionTimeout(request, state)
     }
   }
 
@@ -3590,6 +3594,8 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
         for (const type of events) addEventListener(type, changed, true)
       }
     })
+  const singleSample = (request: CooperativeRequest): boolean =>
+    request.op === "act" ? request.sample === true : request.cap <= 0
   const run = async (command: CooperativeCommand): Promise<CooperativeResponse> => {
     sweepTerminals()
     if (command.command === "start") {
@@ -3603,7 +3609,8 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
         session: command.session,
         request: command.request,
         final: command.final === true || command.request.op === "act" && command.request.apply,
-        end: now() + Math.max(0, Math.min(command.budget, command.request.cap)),
+        end: now() +
+          Math.max(0, singleSample(command.request) ? command.budget : Math.min(command.budget, command.request.cap)),
         token: undefined,
         state: command.request.op === "act" ? helpers.createAction(command.request) : undefined,
         observed: null,
@@ -3688,6 +3695,7 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
         session.state!.sampled = true
         const response = helpers.checkAction(session.request, session.state!)
         if (response !== undefined) return finished(session, response)
+        if (singleSample(session.request)) return expired(session)
         if (!(await wait(session, false))) return stopped(session)
       } else {
         helpers.clearTreeCaches()
@@ -3718,10 +3726,10 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
             )
           })
           if (!ready || session.disposed) return stopped(session)
-          if (passed) {
+          if (passed || singleSample(session.request)) {
             return finished(session, {
               _tag: "Expected",
-              passed: true,
+              passed,
               observed: session.observed,
               changed: session.changed
             })
@@ -3734,10 +3742,10 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
           ? { passed: helpers.matchesValue(expectation.expected, location.href), observed: location.href }
           : helpers.evaluate(session.request.steps, expectation)
         session.observed = result.observed
-        if (result.passed) {
+        if (result.passed || singleSample(session.request)) {
           return finished(session, {
             _tag: "Expected",
-            passed: true,
+            passed: result.passed,
             observed: result.observed,
             changed: session.changed
           })

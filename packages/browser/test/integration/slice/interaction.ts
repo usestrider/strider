@@ -3390,11 +3390,17 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   assert(box instanceof LocatorImpl)
                   const rounds = yield* observeChecks(box)
                   yield* box[action]({ checks: { stable: stable === false ? false : { frames: stable } } })
-                  assert.strictEqual(rounds.length, 3)
-                  const initial = rounds.shift()!
-                  assert.strictEqual(initial.request.cap, 0)
-                  assert.strictEqual(initial.response._tag, "NotReady")
-                  assert.strictEqual(initial.frames, 0)
+                  if (stable !== false) {
+                    assert.strictEqual(rounds.length, 3)
+                    const initial = rounds.shift()!
+                    assert.strictEqual(initial.request.sample, true)
+                    assert(initial.request.cap > 0)
+                    assert(initial.response._tag === "NotReady")
+                    assert.deepStrictEqual(initial.response.reason, { _tag: "NotStable" })
+                    assert.strictEqual(initial.response.checked, true)
+                    assert.strictEqual(initial.frames, 0)
+                  }
+                  assert.strictEqual(rounds.length, 2)
                   assert.strictEqual(rounds[0]!.request.checks.stable, stable === false ? 0 : stable)
                   if (stable === false) {
                     assert.strictEqual(rounds[0]!.request.stability, undefined)
@@ -3453,8 +3459,11 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               yield* box[action]({ trial: true })
               assert.strictEqual(rounds.length, 3)
               const initial = rounds.shift()!
-              assert.strictEqual(initial.request.cap, 0)
-              assert.strictEqual(initial.response._tag, "NotReady")
+              assert.strictEqual(initial.request.sample, true)
+              assert(initial.request.cap > 0)
+              assert(initial.response._tag === "NotReady")
+              assert.deepStrictEqual(initial.response.reason, { _tag: "NotStable" })
+              assert.strictEqual(initial.response.checked, true)
               assert.strictEqual(initial.frames, 0)
               const first = rounds[0]!.response
               assert(first._tag === "Ready" && typeof first.stability === "string")
@@ -3505,8 +3514,11 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               yield* box[action]()
               assert.strictEqual(rounds.length, 3)
               const initial = rounds.shift()!
-              assert.strictEqual(initial.request.cap, 0)
-              assert.strictEqual(initial.response._tag, "NotReady")
+              assert.strictEqual(initial.request.sample, true)
+              assert(initial.request.cap > 0)
+              assert(initial.response._tag === "NotReady")
+              assert.deepStrictEqual(initial.response.reason, { _tag: "NotStable" })
+              assert.strictEqual(initial.response.checked, true)
               assert.strictEqual(initial.frames, 0)
               assert.strictEqual(rounds[0]!.request.stability, "capture")
               assert.strictEqual(typeof rounds[1]!.request.stability, "string")

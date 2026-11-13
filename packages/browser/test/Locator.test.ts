@@ -416,7 +416,9 @@ describe("checked-action Disabled deadline evidence", () => {
                 assert.strictEqual(request.action.checked, true)
                 assert.strictEqual(request.checks.enabled, true)
                 rounds++
-                if (observed && rounds === 1 && (observed !== "immediate" || request.cap === 0)) return remote(disabled)
+                if (observed && rounds === 1 && (observed !== "immediate" || request.sample === true)) {
+                  return remote(disabled)
+                }
                 // The second request proves L1 already consumed the first Disabled reply.
                 // Otherwise this is the first reply, which the browser delivers only after expiry.
                 const late = yield* Deferred.await(release).pipe(
