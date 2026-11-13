@@ -226,6 +226,7 @@ for (const [name, backend] of backends) {
         "keeps other contexts native, restores overlap precedence and removes loaded-document shims",
         () =>
           Effect.gen(function*() {
+            const served = yield* site
             const page = yield* Browser.newPage()
             const sibling = yield* Browser.newPage()
             const options = {
@@ -254,7 +255,12 @@ for (const [name, backend] of backends) {
             assert.strictEqual(yield* inspect(), "old")
             const newest = yield* register("new")
             assert.strictEqual(yield* inspect(), "new")
+            // Future documents share the same shim too; navigation retires the previous realm's reference.
+            yield* page.goto(`${served.origin}/empty`)
+            assert.strictEqual(yield* inspect(), "new")
             yield* newest.remove
+            assert.strictEqual(yield* inspect(), "old")
+            yield* page.goto(`${served.origin}/empty`)
             assert.strictEqual(yield* inspect(), "old")
             yield* first.remove
             assert.strictEqual(yield* page.evaluateInMainWorld(() => WebSocket.name), "WebSocket")

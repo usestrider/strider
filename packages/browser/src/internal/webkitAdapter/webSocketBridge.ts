@@ -48,6 +48,24 @@ export const prepare: (
       worker: WorkerEntry | undefined,
       target: TargetEntry
     ): boolean => {
+      const captureMarker = message.parameters?.[0]?.value
+      const capturing = bridges.find((b) => "__striderWebSocketCapture:" + b.token === captureMarker)
+      const capture = message.parameters?.[1]
+      if (capturing !== undefined && capture?.objectId !== undefined) {
+        const contextId = (JSON.parse(capture.objectId) as { injectedScriptId: number }).injectedScriptId
+        const realm = worker?.realm ?? base.realmsByContext.get(contextKey(target, contextId))
+        const session = worker?.session ?? target.session
+        if (realm === undefined || realm.ended) {
+          base.buffer.later(
+            Runtime.releaseObject({ objectId: capture.objectId }).pipe(Protocol.on(session), Effect.ignore)
+          )
+        } else {
+          const handle = base.ids.handle()
+          base.handles.set(handle, { session, realm: realm.id, objectId: capture.objectId, group: undefined })
+          base.buffer.later(capturing.captured(realm.id, handle, () => !realm.ended))
+        }
+        return true
+      }
       const object = message.parameters?.find((argument) =>
         argument.objectId !== undefined &&
         argument.preview?.properties?.some((property) =>

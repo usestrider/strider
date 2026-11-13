@@ -32,6 +32,16 @@ import * as Admission from "./webSocketAdmission.ts"
 import * as Allocation from "./webSocketAllocation.ts"
 import * as Shim from "./webSocketShim.ts"
 
+// A context shares one constructor shim per realm across registrations.
+const installationLocks = new WeakMap<Model.ContextEntry, Semaphore.Semaphore>()
+const installations = new WeakMap<
+  Model.ContextEntry,
+  Map<Target.RealmId, {
+    handle: Adapter.HandleId
+    users: Set<string>
+  }>
+>()
+
 const MiB = Allocation.messageBytes
 const WireMessage = Schema.Union([
   Schema.TaggedStruct("Text", { data: Schema.String }),
@@ -129,11 +139,41 @@ export const register = <E, R>(
     // Unrelated to the token: the page can see the binding's name until the shim captures it.
     const name = `__strider_ws_${crypto.randomUUID().replaceAll("-", "")}`
     const transport = adapter.info.protocol === "webkit" ? "console" : "binding"
-    const source = Shim.source(name, token, pattern, transport)
+    const source = Shim.source(name, token, pattern, transport, adapter.info.protocol === "bidi")
     const allocation = Allocation.make()
     const accounting = allocation.budget
     const connections = new Map<string, Connection>()
     const realms = new Set<Target.RealmId>()
+    let holders = installations.get(entry)
+    if (holders === undefined) {
+      holders = new Map()
+      installations.set(entry, holders)
+    }
+    const shared = holders
+    let installationLock = installationLocks.get(entry)
+    if (installationLock === undefined) {
+      installationLock = Semaphore.makeUnsafe(1)
+      installationLocks.set(entry, installationLock)
+    }
+    const installLock = installationLock
+    const captured = new Map<Target.RealmId, Deferred.Deferred<void>>()
+    const reference = (realm: Target.RealmId) => {
+      let ready = captured.get(realm)
+      if (ready === undefined) {
+        ready = Deferred.makeUnsafe<void>()
+        captured.set(realm, ready)
+      }
+      return ready
+    }
+    const release = (realm: Target.RealmId) => {
+      captured.delete(realm)
+      const holder = shared.get(realm)
+      if (holder === undefined) return Effect.void
+      holder.users.delete(token)
+      if (holder.users.size > 0) return Effect.void
+      shared.delete(realm)
+      return adapter.releaseHandles([holder.handle])
+    }
     const unconfirmed = new Map<Target.RealmId, Array<Admission.Lease>>()
     type Incoming = {
       realm: Target.RealmId
@@ -161,14 +201,26 @@ export const register = <E, R>(
         : failure.error
     }
     const evaluate = (realm: Target.RealmId, functionDeclaration: string) =>
-      adapter.evaluate(realm, {
-        functionDeclaration,
-        arguments: [],
-        awaitPromise: true,
-        result: "value",
-        userActivation: false
+      Effect.suspend(() => {
+        const holder = shared.get(realm)
+        return holder === undefined || !holder.users.has(token)
+          ? Effect.fail(
+            fail(
+              new Reason.BackendFailure({
+                kind: "Rejected",
+                method: "WebSocketRoute.dispatch",
+                hint: "Installation reference is unavailable"
+              })
+            )
+          )
+          : adapter.evaluate(realm, {
+            functionDeclaration,
+            arguments: [{ _tag: "Handle", handle: holder.handle }],
+            awaitPromise: true,
+            result: "value",
+            userActivation: false
+          }).pipe(Effect.mapError(mapped))
       }).pipe(
-        Effect.mapError(mapped),
         Effect.flatMap((result) =>
           result._tag === "Exception"
             ? Effect.fail(
@@ -578,6 +630,25 @@ export const register = <E, R>(
       name,
       token,
       scope: bridgeScope,
+      captured: (realm, handle, isAlive) =>
+        Effect.suspend(() => {
+          if (!live || destroying.has(realm) || isAlive?.() === false) {
+            return adapter.releaseHandles([handle])
+          }
+          const previous = shared.get(realm)
+          if (previous === undefined) shared.set(realm, { handle, users: new Set([token]) })
+          else {
+            previous.users.add(token)
+            const duplicate = handle
+            handle = previous.handle
+            realms.add(realm)
+            Deferred.doneUnsafe(reference(realm), Effect.void)
+            return duplicate === handle ? Effect.void : adapter.releaseHandles([duplicate])
+          }
+          realms.add(realm)
+          Deferred.doneUnsafe(reference(realm), Effect.void)
+          return Effect.void
+        }),
       receive: (realm, payload, origin, ownership) => {
         if (!live || blocked.has(realm) || destroying.has(realm) || !ownership.isAlive()) return false
         // Include objects already pulled into a Stream chunk in the admission bound.
@@ -588,7 +659,7 @@ export const register = <E, R>(
         let released = false
         const item: Incoming = {
           realm,
-          payload,
+          payload: Deferred.await(reference(realm)).pipe(Effect.andThen(payload)),
           origin,
           destroyed: false,
           alive: () => !item.destroyed && ownership.isAlive(),
@@ -626,6 +697,7 @@ export const register = <E, R>(
         }
         if (!known) return
         destroying.add(realm)
+        Deferred.doneUnsafe(reference(realm), Effect.void)
         realms.delete(realm)
         Queue.offerUnsafe(faults, { realm, destroyed: true })
       }
@@ -683,6 +755,7 @@ export const register = <E, R>(
             blocked.delete(event.realm)
             destroying.delete(event.realm)
             realms.delete(event.realm)
+            yield* release(event.realm)
           }
         })
       ),
@@ -712,6 +785,7 @@ export const register = <E, R>(
       Effect.ensuring(
         Scope.close(bridgeScope, Exit.void).pipe(
           Effect.catchCause((cause) => Handlers.report("WebSocket bridge teardown failed", cause)),
+          Effect.ensuring(Effect.suspend(() => Effect.forEach([...captured.keys()], release, { discard: true }))),
           Effect.ensuring(
             Scope.close(scope, Exit.void).pipe(
               Effect.catchCause((cause) => Handlers.report("WebSocket consumer teardown failed", cause))
@@ -765,8 +839,38 @@ export const register = <E, R>(
           yield* adapter.realm(document, { _tag: "Main" }).pipe(
             Effect.mapError(mapped),
             Effect.flatMap((realm) => {
-              realms.add(realm)
-              return evaluate(realm, `() => { ${source} }`)
+              return installLock.withPermits(1)(Effect.suspend(() => {
+                const old = shared.get(realm)
+                return adapter.evaluate(realm, {
+                  functionDeclaration: `(old) => {
+                  const holder = old ?? (${Shim.install.toString()})();
+                  holder.add(${JSON.stringify(name)}, ${JSON.stringify(token)}, ${JSON.stringify(pattern)}, ${
+                    JSON.stringify(transport)
+                  });
+                  return holder;
+                }`,
+                  arguments: old === undefined ? [] : [{ _tag: "Handle", handle: old.handle }],
+                  awaitPromise: false,
+                  result: "handle",
+                  userActivation: false
+                }).pipe(
+                  Effect.mapError(mapped),
+                  Effect.flatMap((result) => {
+                    if (result._tag === "Value" && "handle" in result.value && result.value.handle !== undefined) {
+                      return bridge.captured(realm, result.value.handle)
+                    }
+                    return Effect.fail(
+                      fail(
+                        new Reason.BackendFailure({
+                          kind: "Rejected",
+                          method: "WebSocketRoute.install",
+                          hint: "Installation did not return a handle"
+                        })
+                      )
+                    )
+                  })
+                )
+              }))
             }),
             Effect.catch((error) => error._tag === "TargetGone" ? Effect.void : Effect.fail(error))
           )

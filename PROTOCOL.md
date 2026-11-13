@@ -366,6 +366,14 @@ Adapter responsibilities:
   Dedicated-worker bindings are armed before its existing before-script breakpoint. A paused empty-URL popup batches Page/Runtime enablement, bindings, and preloads
   before resuming; captured execution contexts are checked for liveness before publication. At most 64 early
   binding envelopes per target wait for their model realm; overflow fails its routing closed. BiDi uses channel-valued arguments of scoped preloads and immediate realm calls.
+  Installation returns a frozen routing holder rather than publishing one on the page global. Current-document
+  evaluations retain that result as a remote handle; preloads transfer the holder to the opted-in backend bridge
+  (CDP/WebKit console arguments, BiDi root-owned channel values). Early CDP captures wait with binding envelopes
+  for their exact live realm, including popup replay. Intake waits for capture under its browser-clock budget.
+  Commands and route additions use only the captured handle, never a global lookup. Registrations share the
+  holder per context/realm; duplicate handles are released, and the retained handle is released after the final
+  registration drains or the realm ends. Preload bundles share a lexical holder. BiDi groups a context's routing
+  preloads into one closure and tracks every declaration owner when rolling back replacements.
   Shared BiDi preload reconciliation is serialized: it reads the current registry under that serialization,
   installs replacements before retiring predecessors, and rolls back staged additions on failure. Native preload
   IDs retain their declaration owner, so failed replacement preserves old survivors without retaining a removed

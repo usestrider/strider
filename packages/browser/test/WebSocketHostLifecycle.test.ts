@@ -114,6 +114,7 @@ it.effect("rejects a queued constructor after its realm destruction has complete
         bridge.ended(realm)
         // The fault consumer is serial: reaching the following faultRealm
         // command proves the preceding destroyed event has finished.
+        yield* bridge.captured(faultSentinel, "sentinel" as import("../src/internal/adapter.ts").HandleId)
         bridge.failed(faultSentinel)
         yield* Deferred.await(faultsFinished)
         yield* Deferred.succeed(fetchRelease, undefined)

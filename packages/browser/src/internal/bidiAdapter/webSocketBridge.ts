@@ -11,7 +11,7 @@ import { placement, type State } from "./state.ts"
 
 export const channel = (bridge: Adapter.WebSocketBridge): Script.ChannelValue => ({
   type: "channel",
-  value: { channel: bridge.name as Script.Channel }
+  value: { channel: bridge.name as Script.Channel, ownership: "root" }
 })
 export const prepare = Effect.fnUntraced(
   function*(state: State, scope: Adapter.DeclarationScope, bridge: Adapter.WebSocketBridge) {
@@ -20,12 +20,18 @@ export const prepare = Effect.fnUntraced(
     yield* messages.pipe(
       Stream.runForEach((event) =>
         Effect.sync(() => {
-          if (event.channel !== bridge.name || event.data.type !== "string") return
+          if (event.channel !== bridge.name) return
           const realm = state.realms.get(event.source.realm)
           if (realm === undefined || realm.ended) {
             return
           }
           known.set(event.source.realm, realm.id)
+          if (event.data.type === "object" && event.data.handle !== undefined) {
+            const handle = state.ids.handle()
+            state.handles.set(handle, { handle: event.data.handle, realm: realm.bidi })
+            return bridge.captured(realm.id, handle, () => !realm.ended)
+          }
+          if (event.data.type !== "string") return
           bridge.receive(
             realm.id,
             Effect.succeed(event.data.value),
@@ -34,7 +40,7 @@ export const prepare = Effect.fnUntraced(
               : { _tag: "Frame", page: realm.navigable.page.id, frame: realm.navigable.id },
             { isAlive: () => !realm.ended }
           )
-        })
+        }).pipe(Effect.flatMap((captured) => captured ?? Effect.void))
       ),
       Effect.onExit((exit) =>
         Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause) ? Effect.void : Effect.sync(() => {
