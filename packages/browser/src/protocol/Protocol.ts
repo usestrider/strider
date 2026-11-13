@@ -700,7 +700,8 @@ export type RejectReason = "NoSuchTarget" | "NoSuchFrame" | "NoSuchNode" | "Inva
  * **Details**
  *
  * Each backend's error table maps the reply onto `reason`; a reply that nothing matches is `Unrecognized`,
- * never a guess. `code` and `description` are the browser's own code and message, as it sent them.
+ * never a guess. `code` and `description` are the browser's own code and message, as it sent them. `target`
+ * is the kind of target the command went to (`page`, `iframe` or `worker`), when the backend attaches targets.
  *
  * @stability experimental
  * @category reasons
@@ -711,10 +712,11 @@ export class Rejected extends Schema.Error<Rejected>("@usestrider/browser/protoc
   method: Schema.String,
   reason: Schema.Literals(["NoSuchTarget", "NoSuchFrame", "NoSuchNode", "InvalidArgument", "Unrecognized"]),
   code: Schema.Union([Schema.Number, Schema.String]),
-  description: Schema.String
+  description: Schema.String,
+  target: Schema.optional(Schema.String)
 }) {
   override get message(): string {
-    return `${this.method} rejected: ${this.reason} (${this.description})`
+    return `${this.method} rejected${this.target === undefined ? "" : ` on the ${this.target} target`}: ${this.reason} (${this.description})`
   }
 }
 

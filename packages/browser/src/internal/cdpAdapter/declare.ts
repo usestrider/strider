@@ -106,6 +106,9 @@ const viewport = (
   target: TargetEntry,
   effective: ReadonlyMap<Adapter.Override["_tag"], Adapter.Override>
 ) => {
+  // Chromium accepts the viewport commands, and a measurement that would precede them, on top-level targets only:
+  // an out-of-process iframe takes its size from its frame in the parent page.
+  if (target.kind !== "page") return Effect.void
   const lock = target.viewportLock ??= Semaphore.makeUnsafe(1)
   return lock.withPermits(1)(Effect.suspend(() => {
     const override = (target.page === undefined ? effective : state.registry.overrides(placement(target.page))).get(
