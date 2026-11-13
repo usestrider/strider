@@ -19,7 +19,8 @@ const scenario = Effect.fnUntraced(
   function*(
     setup: number,
     matcher: Expect.Matcher<Locator.ReadonlyLocator> = Expect.toBeVisible,
-    value: unknown = observed
+    value: unknown = observed,
+    stallWaitingRound = false
   ) {
     const clock = BrowserClock.fromClock(yield* Effect.service(Clock.Clock))
     const caps: Array<number> = []
@@ -53,7 +54,7 @@ const scenario = Effect.fnUntraced(
             )
             caps.push(request.cap)
             // Simulate the page's never-passing round, using the actual transmitted cap.
-            yield* clock.sleep(request.cap)
+            yield* clock.sleep(stallWaitingRound && request.cap > 0 ? 2000 : request.cap)
             return {
               _tag: "Value",
               value: {
@@ -96,6 +97,14 @@ const assertObserved = (error: Expect.ExpectationFailed) => {
 }
 
 describe("Expect page-round scheduling", () => {
+  it.effect("retains the immediate observation when a waiting round stalls past the deadline", () =>
+    Effect.gen(function*() {
+      const { error, caps } = yield* scenario(0, Expect.toBeVisible, observed, true)
+      assertObserved(error)
+      assert.strictEqual(caps[0], 0)
+      assert(caps[1]! > 0)
+    }))
+
   it.effect("receives an observation after 300 ms cold setup within the 500 ms deadline", () =>
     Effect.gen(function*() {
       const { error, caps, installs } = yield* scenario(300)

@@ -5290,12 +5290,19 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* newPage
               yield* page.goto(url)
-              // The page stalls, as a loaded browser does, 150 ms into the expectation, for longer than its deadline
+              // Warm the engine, then schedule the stall only after the failing check samples CSS.
+              yield* page.locator("#css").pipe(Expect.toHaveCSS("color", "rgb(12, 34, 56)"))
               yield* page.evaluate(() => {
-                setTimeout(() => {
-                  const end = Date.now() + 2500
-                  while (Date.now() < end);
-                }, 150)
+                const original = window.getComputedStyle
+                window.getComputedStyle = function(...args) {
+                  const result = original.apply(this, args)
+                  window.getComputedStyle = original
+                  setTimeout(() => {
+                    const end = Date.now() + 2500
+                    while (Date.now() < end);
+                  }, 0)
+                  return result
+                }
               })
               const error = yield* page.locator("#css").pipe(
                 Expect.toHaveCSS("color", "red"),
