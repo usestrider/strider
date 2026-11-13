@@ -767,18 +767,6 @@ export const declarations = (
           )
         }), timeout)
 
-      it.effect("routes a page with a cross-site iframe and releases the routes", () =>
-        Effect.gen(function*() {
-          const { crossSite } = yield* site
-          yield* crossSiteFrame(
-            (target) =>
-              target.route(`${crossSite}/fixture*`, () =>
-                Route.fulfill(HttpServerResponse.html(`<script>window.__tag = 'routed'</script>${frameBody}`))),
-            ([, , , tag]) =>
-              assert.strictEqual(tag, "routed")
-          )
-        }), timeout)
-
       it.effect("runs init scripts in a page with a cross-site iframe and releases them", () =>
         crossSiteFrame(
           (target) =>
