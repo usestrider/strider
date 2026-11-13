@@ -208,6 +208,20 @@ describe("BidiAdapter state", () => {
       assert.strictEqual(document.realms.size, 2)
     }))
 
+  it.effect("releases delayed old-document realms when their page closes", () =>
+    Effect.gen(function*() {
+      const { page, realm, state } = yield* withPage()
+      const handlers = Evaluation.register(Kit.handlers<State.Event>())
+      handlers.apply("script.realmCreated", {
+        realm: "next", context: page.bidi, type: "window", origin: "http://next.example"
+      }, { state })
+      Tree.commit(state, page, "http://next.example/", "http://next.example",
+        { _tag: "InitialBlank" }, "next", "test")
+      Tree.removeNavigable(state, page, new Target.PageClosed({ by: "command" }), "test")
+      assert.isTrue(realm.ended)
+      assert.isEmpty([...state.realms.values()])
+    }))
+
   it.effect("transfers genuinely reused realms and reports their new document", () =>
     Effect.gen(function*() {
       const { facts, page, realm, state } = yield* withPage()
@@ -523,7 +537,7 @@ describe("BidiAdapter state", () => {
         const handlers = Evaluation.register(Navigation.register(Kit.handlers<State.Event>()))
         // Synthetic ordering, not captured Firefox traffic: no navigationStarted or commit is sent.
         // The adapter already supports this unannounced restoration when the realm precedes the reply.
-        handlers.apply("script.realmDestroyed", { realm: realm.bidi }, { state })
+        // Keep the old realm live: restoration must not publish it in the restored document.
         const arrived = () =>
           handlers.apply("script.realmCreated", {
             realm: "R2",
@@ -556,6 +570,9 @@ describe("BidiAdapter state", () => {
           response: Option.none()
         })
         assert.strictEqual(page.document!.url, url)
+        assert.isFalse(realm.ended)
+        assert.deepStrictEqual([...page.document!.realms].map((entry) => entry.bidi), ["R2"])
+        assert.isFalse(facts.some((fact) => fact._tag === "RealmDocumentAdded" && fact.document === page.document!.id))
         assert.lengthOf(page.pendingRealms, 0)
       }))
   }
