@@ -12,9 +12,7 @@ import { NativeInputCapture } from "./nativeInputCapture.ts"
 import { selectProcessCapture } from "./nativeInputProcess.ts"
 
 const testName = "names an iframe's frame, passes a node across worlds, and sends input into a frame"
-/** Off for the control runs: the iframe case runs as on main. Revert the commit that set this to turn the capture on. */
-const enabled = false
-export const selected = () => enabled && TestRunner.getCurrentTest<RunnerTestCase | undefined>()?.name === testName
+export const selected = () => TestRunner.getCurrentTest<RunnerTestCase | undefined>()?.name === testName
 
 export const prepare = Effect.fnUntraced(function*() {
   const capture = yield* Effect.sync(() => {
