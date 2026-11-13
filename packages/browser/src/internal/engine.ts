@@ -383,9 +383,8 @@ export const Response = Schema.Union([
     history: Schema.Array(NotReady),
     scrolled: Schema.Boolean,
     /**
-     * Whether the round saw a reason worth reporting: one the deadline cut before its first frame, or while a rect
-     * was still settling, saw nothing wrong, `reason` included. With rendered disabled, a sampled stability
-     * wait is reported even without a frame, since no rendering hint will replace it.
+     * Whether the round recorded reportable evidence in history. An incomplete stability baseline adds none,
+     * even with rendered disabled; an observed blocker or established instability does.
      */
     checked: Schema.Boolean
   }),
@@ -2033,13 +2032,13 @@ export function engine(render: (root: SnapNode) => string) {
     }
     state.last = reason
   }
-  const actionTimeout = (request: Extract<Request, { op: "act" }>, state: ActionState): Response => ({
+  const actionTimeout = (_request: Extract<Request, { op: "act" }>, state: ActionState): Response => ({
     _tag: "NotReady",
     reason: state.last,
     history: state.history,
     scrolled: state.scrolled,
-    checked: (request.sample === true && state.sampled) || state.history.length > 0 ||
-      (!request.checks.rendered && state.sampled)
+    // Sampling a stability baseline is progress, not failure evidence. Only noteAction records evidence.
+    checked: state.history.length > 0
   })
 
   const actionFrameTimeout = (request: Extract<Request, { op: "act" }>, state: ActionState): Response => {

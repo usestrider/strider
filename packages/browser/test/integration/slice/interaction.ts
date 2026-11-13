@@ -1262,7 +1262,8 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                     const result = yield* original(realm, call)
                     if (hold) {
                       stalled = true
-                      return yield* Effect.never
+                      yield* Effect.interruptible(Effect.sleep("1500 millis"))
+                      return result
                     }
                     if (engine && result._tag === "Value" && result.value.type === "string") {
                       const decoded = JSON.parse(result.value.value)
@@ -1273,8 +1274,9 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                     }
                     return result
                   })
+                  const bounded = BoundedAdapter.make({ evaluate } as unknown as Adapter.AdapterConnection)
                   yield* Effect.acquireRelease(
-                    Effect.sync(() => Object.assign(adapter, { evaluate })),
+                    Effect.sync(() => Object.assign(adapter, { evaluate: bounded.evaluate })),
                     () =>
                       Effect.sync(() => {
                         Object.assign(adapter, { evaluate: original })
@@ -3482,7 +3484,8 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                     assert(initial.request.cap > 0)
                     assert(initial.response._tag === "NotReady")
                     assert.deepStrictEqual(initial.response.reason, { _tag: "NotStable" })
-                    assert.strictEqual(initial.response.checked, true)
+                    assert.deepStrictEqual(initial.response.history, [])
+                    assert.strictEqual(initial.response.checked, false)
                     assert.strictEqual(initial.frames, 0)
                   }
                   assert.strictEqual(rounds.length, 2)
@@ -3548,7 +3551,8 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               assert(initial.request.cap > 0)
               assert(initial.response._tag === "NotReady")
               assert.deepStrictEqual(initial.response.reason, { _tag: "NotStable" })
-              assert.strictEqual(initial.response.checked, true)
+              assert.deepStrictEqual(initial.response.history, [])
+              assert.strictEqual(initial.response.checked, false)
               assert.strictEqual(initial.frames, 0)
               const first = rounds[0]!.response
               assert(first._tag === "Ready" && typeof first.stability === "string")
@@ -3603,7 +3607,8 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               assert(initial.request.cap > 0)
               assert(initial.response._tag === "NotReady")
               assert.deepStrictEqual(initial.response.reason, { _tag: "NotStable" })
-              assert.strictEqual(initial.response.checked, true)
+              assert.deepStrictEqual(initial.response.history, [])
+              assert.strictEqual(initial.response.checked, false)
               assert.strictEqual(initial.frames, 0)
               assert.strictEqual(rounds[0]!.request.stability, "capture")
               assert.strictEqual(typeof rounds[1]!.request.stability, "string")

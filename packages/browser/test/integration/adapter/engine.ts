@@ -1836,7 +1836,23 @@ export const engine = (backend: Backend) =>
             )
           }), timeout)
 
-        it.effect("retains the stability reason with rendered off when frames never arrive", () =>
+        it.effect("retains established instability as reportable evidence", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              "<button id=\"go\">Go</button>",
+              countFrames(
+                "document.getElementById(\"go\").style.marginLeft = (globalThis.engineTestFrames % 2 ? 10 : 20) + \"px\""
+              )
+            )
+            const response = yield* send(point(2))
+            assert(response._tag === "NotReady")
+            assert.strictEqual(response.checked, true)
+            assert.deepStrictEqual(response.reason, { _tag: "NotStable" })
+            assert.deepStrictEqual(response.history, [{ _tag: "NotStable" }])
+          }), timeout)
+
+        it.effect("does not report a stability baseline with rendered off when frames never arrive", () =>
           Effect.gen(function*() {
             const { send } = yield* open(
               backend,
@@ -1847,7 +1863,8 @@ export const engine = (backend: Backend) =>
             const response = yield* send({ ...request, cap: 100, checks: { ...request.checks, rendered: false } })
             assert(response._tag === "NotReady", JSON.stringify(response))
             assert.strictEqual(response.reason._tag, "NotStable")
-            assert.isTrue(response.checked)
+            assert.isFalse(response.checked)
+            assert.deepStrictEqual(response.history, [])
             assert(
               !response.history.some((reason) =>
                 reason._tag === "NoRenderingOpportunity"
