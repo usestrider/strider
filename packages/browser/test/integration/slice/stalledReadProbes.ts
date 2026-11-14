@@ -29,8 +29,13 @@ export const stalledReadProbes = <E>(name: string, backend: Layer.Layer<Browser.
             const records: Array<{ kind: string; payload: any }> = []
             const notes: Array<string> = []
             // A context whose storage read is a page call that never answers, so that its deadline passes
+            let captured: unknown
             const stalled = Object.create(context, {
-              exportStorageState: { value: page.evaluate(() => new Promise<never>(() => {})) }
+              exportStorageState: {
+                value: page.evaluate(() => new Promise<never>(() => {})).pipe(
+                  Effect.tapError((error) => Effect.sync(() => void (captured = error)))
+                )
+              }
             })
             yield* readStorage(
               (found) => Effect.sync(() => void notes.push(...found)),
@@ -50,10 +55,10 @@ export const stalledReadProbes = <E>(name: string, backend: Layer.Layer<Browser.
               assert.isNumber(payload.millis)
             }
             assert.strictEqual(notes.length, 1)
-            const failure = yield* (stalled.exportStorageState as Effect.Effect<unknown, Error>).pipe(
-              Deadline.within("200 millis"),
-              Effect.flip
-            )
+            // The note quotes the error the read failed with, whichever phase its deadline passed in
+            assert.instanceOf(captured, Deadline.Timeout)
+            const failure = captured as Deadline.Timeout
+            assert.strictEqual(failure.operation, "Page.evaluate")
             assert.strictEqual(notes[0], `storage that couldn't be read: ${failure.message}`)
           })),
         60_000

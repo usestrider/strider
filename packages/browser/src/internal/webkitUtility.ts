@@ -7,6 +7,13 @@
  *   either as the value itself (for a handle) or as WebDriver BiDi's `RemoteValue`, as JSON text.
  * - Nodes in a serialized value are kept in a batch the adapter takes next (`takeNodes`), for their object ids:
  *   WebKit's handle on a node is its remote object.
+ * - A function whose declaration takes over 96 KiB once JSON-encoded twice arrives in parts (`stage`), which
+ *   `compile` joins and compiles with the page's `eval` as of the helper's install, one more of the intrinsics the
+ *   helper takes from the page. WebKit allows eval for the length of an inspector call, even where the page's
+ *   Content-Security-Policy forbids it, and the compile runs inside one. A page's wrapper that passes the text on to
+ *   the browser's `eval` works, since an indirect eval compiles in global scope. `compile` refuses a replacement that
+ *   compiles different text, checking that it made a function whose source is the joined text; one that returns a
+ *   function with the same source isn't detected.
  *
  * The helper captures the intrinsics it uses when it is installed, so a page that later replaces
  * `JSON.stringify` or `Array.prototype` doesn't change what it returns; a page that replaced them before can.
@@ -37,7 +44,12 @@ export const source = String.raw`(() => {
   const ErrorType = Error
   const MapType = Map
   const SetType = Set
+  const join = Array.prototype.join
+  const trim = String.prototype.trim
+  const functionSource = Function.prototype.toString
+  const compile = eval
   const batches = new Map()
+  const staged = new Map()
   let batchId = 0
 
   const tag = (value) => apply(toStringTag, value, []).slice(8, -1)
@@ -168,6 +180,23 @@ export const source = String.raw`(() => {
       const nodes = batches.get(id) || []
       batches.delete(id)
       return nodes
+    },
+    stage(key, index, text) {
+      let parts = staged.get(key)
+      if (parts === undefined) staged.set(key, parts = [])
+      parts[index] = text
+    },
+    compile(key) {
+      const parts = staged.get(key) || []
+      staged.delete(key)
+      const text = apply(trim, apply(join, parts, [""]), [])
+      const fn = compile("(" + text + ")")
+      if (typeof fn !== "function" || apply(functionSource, fn, []) !== text) {
+        throw new ErrorType(
+          "The page's eval, as of Strider's helper's install, didn't compile the function staged in parts"
+        )
+      }
+      return fn
     }
   }
 })()`
@@ -192,3 +221,72 @@ export const callBeside = (fn: string, mode: "value" | "handle", awaitResult: bo
 
 /** The function declaration that takes a batch of nodes, as an array. */
 export const takeNodes = "function(id) { return this.takeNodes(id) }"
+
+/** The most bytes a part's text takes in a message once JSON-encoded twice, half of libsoup's 128 KiB limit. */
+const partBytes = 64 * 1024
+
+/** The most bytes a declaration takes once JSON-encoded twice and still goes in one message, as it is. */
+const wholeBytes = 96 * 1024
+
+/**
+ * What a UTF-16 code unit outside a surrogate pair takes once JSON-encoded twice: a quote or backslash becomes
+ * four bytes (`\\\"`), a control character three or seven (`\\n`, `\\u0001`), a lone surrogate seven, and any other its
+ * UTF-8 bytes.
+ */
+const encodedBytes = (code: number): number => {
+  if (code === 0x22 || code === 0x5c) return 4
+  if (code === 0x08 || code === 0x09 || code === 0x0a || code === 0x0c || code === 0x0d) return 3
+  if (code < 0x20) return 7
+  if (code < 0x80) return 1
+  if (code < 0x800) return 2
+  if (code >= 0xd800 && code < 0xe000) return 7
+  return 3
+}
+
+/**
+ * A function declaration's parts, for the helper to stage (`stage`) when it takes over 96 KiB once JSON-encoded
+ * twice, or `undefined` when it doesn't. The attached inspector carries a page's command as a JSON string inside
+ * `Target.sendMessageToTarget`, so a declaration is JSON-encoded twice, and libsoup closes a socket whose incoming
+ * message is over 128 KiB. A declaration that takes at most 96 KiB once encoded goes in one message, leaving room for
+ * its arguments and wrapping; a larger one is staged in parts of at most 64 KiB each, never splitting a surrogate
+ * pair.
+ */
+export const parts = (fn: string): ReadonlyArray<string> | undefined => {
+  // At most seven bytes a code unit: a declaration this short fits without measuring it
+  if (fn.length * 7 <= wholeBytes) return undefined
+  const found: Array<string> = []
+  let start = 0
+  let bytes = 0
+  let total = 0
+  for (let i = 0; i < fn.length;) {
+    const code = fn.charCodeAt(i)
+    const next = fn.charCodeAt(i + 1)
+    const pair = code >= 0xd800 && code < 0xdc00 && next >= 0xdc00 && next < 0xe000
+    const cost = pair ? 4 : encodedBytes(code)
+    if (bytes + cost > partBytes) {
+      found.push(fn.slice(start, i))
+      start = i
+      bytes = 0
+    }
+    bytes += cost
+    total += cost
+    i += pair ? 2 : 1
+  }
+  found.push(fn.slice(start))
+  return total <= wholeBytes ? undefined : found
+}
+
+/** The function declaration that stages a part of a function, called on the helper with its key, index and text. */
+export const stage = "function(key, index, text) { this.stage(key, index, text) }"
+
+/** As `call`, for a function staged in parts, called with its key before the argument kinds. */
+export const callStaged = (mode: "value" | "handle", awaitResult: boolean): string =>
+  `function(key, kinds, ...args) { return this.run(this.compile(key), kinds, args, ${
+    JSON.stringify(mode)
+  }, ${awaitResult}) }`
+
+/** As `callBeside`, for a function staged in parts, called with the helper, then its key, before the kinds. */
+export const callStagedBeside = (mode: "value" | "handle", awaitResult: boolean): string =>
+  `function(helper, key, kinds, ...args) { return helper.run(helper.compile(key), kinds, args, ${
+    JSON.stringify(mode)
+  }, ${awaitResult}) }`

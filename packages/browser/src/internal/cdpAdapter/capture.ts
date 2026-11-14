@@ -522,7 +522,7 @@ const screencastDeliveries = Effect.fnUntraced(function*(state: State, id: L1Tar
             owner.stopAtDispatch = owners.stops
             owners.pending.add(owner)
             return Kit.protocol(
-              Page.startScreencast({ format: "jpeg" }).pipe(
+              Page.startScreencast({ format: "jpeg", quality: 90 }).pipe(
                 on,
                 Effect.provideService(ProtocolClient.ReplyOutcome, (outcome) => {
                   owners.pending.delete(owner)

@@ -8,6 +8,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
+import { Browser as StriderBrowser } from "@usestrider/browser"
 import * as BrowsingContext from "@usestrider/browser/bidi-protocol/BrowsingContext"
 import * as Script from "@usestrider/browser/bidi-protocol/Script"
 import * as Session from "@usestrider/browser/bidi-protocol/Session"
@@ -17,11 +18,14 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Stream from "effect/Stream"
+import * as BidiAdapter from "../../src/internal/bidiAdapter.ts"
 import * as BidiWire from "../../src/internal/bidiWire.ts"
+import * as BrowserImpl from "../../src/internal/browser.ts"
 import * as FirefoxLauncher from "../../src/internal/firefoxLauncher.ts"
 import * as ProtocolClient from "../../src/internal/protocolClient.ts"
 import { assertPinned, firefox } from "./browsers.ts"
 import { fixtures, record } from "./record.ts"
+import { useXvfb } from "./stockWebKit.ts"
 
 const executable = firefox.executable
 const timeout = 60_000
@@ -55,6 +59,47 @@ describe("Firefox over WebDriver BiDi", () => {
           assert(title.type === "success")
           assert.deepStrictEqual(title.result, { type: "string", value: "Strider" })
         }), timeout)
+
+      it.effect(
+        "reports no default-context top-level context in the window of a page opened in a visible window",
+        () =>
+          Effect.gen(function*() {
+            yield* useXvfb()
+            const created: Array<
+              { at: number; context: string; userContext: string; clientWindow: string; url: string }
+            > = []
+            const started = Date.now()
+            const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
+              const { transport } = yield* FirefoxLauncher.launch({ executablePath: executable, headless: false })
+              return yield* BidiAdapter.connect({
+                ...transport,
+                messages: transport.messages.pipe(Stream.tap((message) =>
+                  Effect.sync(() => {
+                    const wire = JSON.parse(message)
+                    if (wire.method === "browsingContext.contextCreated" && wire.params.parent == null) {
+                      created.push({ at: Date.now() - started, ...wire.params })
+                    }
+                  })
+                ))
+              }, { sink, ownership: "launched" })
+            }))
+            yield* Effect.gen(function*() {
+              const page = yield* StriderBrowser.newPage()
+              yield* page.goto("data:text/html,<title>page</title>")
+              // Firefox preloads about:newtab into a browser of a visible window; it was announced 0.1 s after the
+              // page's window on Linux, and 0.1 to 2 s after it on macOS
+              yield* Effect.sleep("4 seconds")
+              const mine = created.find((info) => info.userContext !== "default")
+              assert(mine !== undefined)
+              assert.deepStrictEqual(
+                created.filter((info) => info.userContext === "default" && info.clientWindow === mine.clientWindow)
+                  .map((info) => info.url),
+                []
+              )
+            }).pipe(Effect.provide(backend))
+          }),
+        timeout
+      )
 
       it.effect("keeps the preferences a profile directory of the caller's sets", () =>
         Effect.gen(function*() {

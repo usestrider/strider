@@ -1482,6 +1482,90 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             assert.strictEqual(error, undefined, String(error))
             assert.strictEqual(yield* frame.locator("#out").readText, "true")
           })),
+      for (const handlers of [false, true]) {
+        for (
+          const [attribute, reason] of [["disabled", "Disabled"], ["readonly", "ReadOnly"], ["inert", "Inert"]] as const
+        ) {
+          it.effect(
+            `retains initial ${reason} when a later reply stalls with handlers=${handlers}`,
+            () =>
+              Effect.gen(function*() {
+                const { url } = yield* fixture(() => `<input id="go" value="old" ${attribute}>`)
+                yield* Effect.scoped(Effect.gen(function*() {
+                  const page = yield* newPage
+                  yield* page.goto(url)
+                  const locator = page.locator("#go")
+                  assert(locator instanceof LocatorImpl)
+                  yield* locator.isVisible
+                  if (handlers) yield* page.addLocatorHandler(page.locator("#absent"), () => Effect.void)
+                  const adapter = locator.owner.runtime.model.adapter
+                  const original = adapter.evaluate
+                  let observed = false
+                  let stalled = false
+                  const evaluate: typeof original = Effect.fnUntraced(function*(realm, call) {
+                    const argument = call.arguments[0]
+                    const engine = call.functionDeclaration === Engine.run ||
+                      call.functionDeclaration === Engine.cooperate
+                    const request = engine && argument?._tag === "Value" && argument.value.type === "string"
+                      ? JSON.parse(argument.value.value) :
+                      undefined
+                    const hold = observed &&
+                      (request?.op === "act" || request?.command === "start" || request?.command === "resume")
+                    const result = yield* original(realm, call)
+                    if (hold) {
+                      stalled = true
+                      yield* Effect.interruptible(Effect.sleep("1500 millis"))
+                      return result
+                    }
+                    if (engine && result._tag === "Value" && result.value.type === "string") {
+                      const decoded = JSON.parse(result.value.value)
+                      const response = decoded._tag === "Done" ? decoded.response : decoded
+                      if (
+                        response._tag === "NotReady" && response.checked && response.reason._tag === reason
+                      ) observed = true
+                    }
+                    return result
+                  })
+                  const bounded = BoundedAdapter.make({ evaluate } as unknown as Adapter.AdapterConnection)
+                  yield* Effect.acquireRelease(
+                    Effect.sync(() => Object.assign(adapter, { evaluate: bounded.evaluate })),
+                    () =>
+                      Effect.sync(() => {
+                        Object.assign(adapter, { evaluate: original })
+                      })
+                  )
+                  const error = yield* locator.fill("new").pipe(Deadline.within("1 second"), Effect.flip)
+                  assert(Deadline.isTimeout(error), String(error))
+                  assert.strictEqual(observed, true)
+                  assert.strictEqual(stalled, true)
+                  assert.deepStrictEqual(error.history.map((entry) => (entry.value as { _tag: string })._tag), [reason])
+                  assert.strictEqual(yield* locator.readValue, "old")
+                }))
+              }),
+            timeout
+          )
+        }
+      }
+
+      it.effect(
+        "reports no NotStable for a still element whose click times out while covered",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<!doctype html><style>body{margin:0}#go{position:absolute;left:20px;top:20px;width:100px;height:40px}#cover{position:absolute;left:0;top:0;width:300px;height:200px}</style><button id="go">Go</button><div id="cover"></div>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              const error = yield* page.locator("#go").click().pipe(Deadline.within("1 second"), Effect.flip)
+              assert(Deadline.isTimeout(error), String(error))
+              // The button never moves, so its unsettled baseline sample is not evidence that it was unstable
+              assert.deepStrictEqual(
+                error.history.map((entry) => (entry.value as { _tag: string })._tag),
+                ["Covered"]
+              )
+            }))
+          }),
         timeout
       )
 
@@ -3703,6 +3787,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               const rounds = yield* observeChecks(box)
               yield* box[action]({ trial: true })
               assert.strictEqual(rounds.length, 2)
+              assert.strictEqual(rounds[0]!.request.sample, true)
               const first = rounds[0]!.response
               assert(first._tag === "Ready" && typeof first.stability === "string")
               assert.strictEqual(rounds[1]!.request.stability, first.stability)
@@ -3751,6 +3836,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               )
               yield* box[action]()
               assert.strictEqual(rounds.length, 2)
+              assert.strictEqual(rounds[0]!.request.sample, true)
               assert.strictEqual(rounds[0]!.request.stability, "capture")
               assert.strictEqual(typeof rounds[1]!.request.stability, "string")
               assert.isAtLeast(rounds[1]!.frames, 2)
@@ -3960,6 +4046,66 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             }))
           }), timeout)
       }
+
+      it.effect(
+        "selectOption waits while the chosen option or its optgroup is disabled",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<select id="s"><option value="a">Ay</option><option value="off" disabled>Off</option><optgroup label="G" disabled><option value="grouped">Grouped</option></optgroup></select>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            const select = page.locator("#s")
+            for (const value of ["off", "grouped"]) {
+              const error = yield* select.selectOption({ value }).pipe(
+                Deadline.within("1 second"),
+                Effect.flip
+              )
+              assert(Deadline.isTimeout(error), String(error))
+              const hint = String(error.hint.pipe(Option.getOrUndefined))
+              assert.include(hint, `value "${value}"`)
+              assert.include(hint, "is disabled")
+              assert.strictEqual(yield* select.readValue, "a")
+            }
+          })),
+        timeout
+      )
+
+      it.effect(
+        "selectOption chooses a disabled option once it is enabled, or when enabled isn't checked",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<select id="s" onchange="window.changes = (window.changes ?? []).concat(this.value)"><option value="a">Ay</option><option value="off" disabled>Off</option><optgroup id="g" label="G" disabled><option value="grouped">Grouped</option></optgroup><option value="forced" disabled>Forced</option></select>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            const select = page.locator("#s")
+            for (const [value, enable] of [["off", "#s [value=off]"], ["grouped", "#g"]] as const) {
+              const pending = yield* select.selectOption({ value }).pipe(
+                Deadline.within("5 seconds"),
+                Effect.forkScoped
+              )
+              const early = yield* select.selectOption({ value }).pipe(Deadline.within("300 millis"), Effect.flip)
+              assert(Deadline.isTimeout(early), String(early))
+              yield* page.evaluateInMainWorld((selector: string) => {
+                document.querySelector(selector)!.removeAttribute("disabled")
+              }, enable)
+              yield* Fiber.join(pending)
+              assert.strictEqual(yield* select.readValue, value)
+            }
+            yield* select.selectOption({ value: "forced" }, { checks: { enabled: false } }).pipe(
+              Deadline.within("2 seconds")
+            )
+            assert.strictEqual(yield* select.readValue, "forced")
+            assert.deepStrictEqual(
+              yield* page.evaluateInMainWorld(() => (window as unknown as { changes: Array<string> }).changes),
+              ["off", "grouped", "forced"]
+            )
+          })),
+        timeout
+      )
 
       it.effect("chooses options, checks boxes and sets files", () =>
         Effect.gen(function*() {
@@ -5532,6 +5678,70 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               assert(Expect.isExpectationFailed(error), String(error))
               assert.deepStrictEqual(error.history.map((entry) => entry.value), ["rgb(12, 34, 56)"])
               assert.deepStrictEqual(error.last, Option.some(error.history[0]!))
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "keeps the first observation of an expectation whose round's reply comes after the deadline",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() => `<p id="css" style="color: rgb(12, 34, 56)">CSS</p>`)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              const locator = page.locator("#css") as LocatorImpl
+              const adapter = locator.owner.runtime.model.adapter
+              const original = adapter.evaluate
+              let instrumented = false
+              yield* Effect.acquireRelease(
+                Effect.sync(() => {
+                  const evaluate: typeof original = (realm, call) => {
+                    const argument = call.arguments[0]
+                    if (
+                      instrumented || call.functionDeclaration !== Engine.run ||
+                      argument?._tag !== "Value" || argument.value.type !== "string" ||
+                      (JSON.parse(argument.value.value) as Engine.Request).op !== "expect"
+                    ) {
+                      return original(realm, call)
+                    }
+                    instrumented = true
+                    return original(realm, {
+                      ...call,
+                      functionDeclaration: `async function(request) {
+                        const original = globalThis.getComputedStyle;
+                        globalThis.getComputedStyle = function(...args) {
+                          const result = original.apply(this, args);
+                          globalThis.getComputedStyle = original;
+                          setTimeout(() => {
+                            const end = Date.now() + 2500;
+                            while (Date.now() < end) {}
+                            document.documentElement.dataset.stalled = "yes";
+                          }, 50);
+                          return result;
+                        };
+                        try { return await (${Engine.run})(request); }
+                        finally { globalThis.getComputedStyle = original; }
+                      }`
+                    })
+                  }
+                  Object.assign(adapter, { evaluate })
+                }),
+                () =>
+                  Effect.sync(() => {
+                    Object.assign(adapter, { evaluate: original })
+                  })
+              )
+              const error = yield* page.locator("#css").pipe(
+                Expect.toHaveCSS("color", "red"),
+                Deadline.within("1500 millis"),
+                Effect.flip
+              )
+              assert(Expect.isExpectationFailed(error), String(error))
+              assert.deepStrictEqual(error.history.map((entry) => entry.value), ["rgb(12, 34, 56)"])
+              assert.strictEqual(instrumented, true)
+              assert.deepStrictEqual(yield* page.locator("html").readAttribute("data-stalled"), Option.some("yes"))
             }))
           }),
         timeout
