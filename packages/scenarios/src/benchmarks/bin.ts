@@ -14,14 +14,27 @@ import * as os from "node:os"
 import * as path from "node:path"
 import { chromium } from "playwright-core"
 import { start } from "../site.ts"
-import { captureCases, cases as ordinaryCases, viewport } from "./cases.ts"
+import {
+  captureCases,
+  cases as ordinaryCases,
+  handlerMeasurementNames,
+  viewport,
+  viewportMeasurementNames
+} from "./cases.ts"
 import { compare, elapsed, measure, options } from "./measure.ts"
 
 const cases = [...ordinaryCases, ...captureCases]
 const config = options(process.argv.slice(2))
 const lifecycleNames = ["launch-first-page", "launch", "first-page", "shutdown", "page-lifecycle", "repeated-lifecycle"]
 const networkNames = ["navigate", "resources", "response-body-small", "response-body-large"]
-const names = ["network", "lifecycle", ...lifecycleNames, ...cases.map((entry) => entry.name)]
+const names = [
+  "network",
+  "lifecycle",
+  "handler-default-path",
+  "viewport-install",
+  ...lifecycleNames,
+  ...cases.map((entry) => entry.name)
+]
 if (config.help) {
   process.stdout.write(`Usage: pnpm bench [options]
   --runs N          measured pairs per case (default 20)
@@ -138,7 +151,9 @@ const save = () => {
 
 const chosen = (name: string) =>
   config.only === undefined || config.only === name || (config.only === "lifecycle" && lifecycleNames.includes(name)) ||
-  (config.only === "network" && networkNames.includes(name))
+  (config.only === "network" && networkNames.includes(name)) ||
+  (config.only === "handler-default-path" && handlerMeasurementNames.includes(name)) ||
+  (config.only === "viewport-install" && viewportMeasurementNames.includes(name))
 const record = async (
   name: string,
   description: string,
@@ -466,17 +481,23 @@ try {
                 }))),
               playwright: async () => {
                 const context = await browser.newContext({ viewport, deviceScaleFactor: 1 })
+                let page: Awaited<ReturnType<typeof context.newPage>> | undefined
                 try {
+                  page = await context.newPage()
                   context.setDefaultTimeout(30_000)
                   context.setDefaultNavigationTimeout(30_000)
-                  const page = await context.newPage()
                   await page.goto(`${site.origin}${entry.fixture ?? "/benchmark"}`, { waitUntil: "load" })
                   if (entry.preparePlaywright) await entry.preparePlaywright(page)
-                  const sample = await elapsed(() => entry.playwright(page, site.origin))
+                  const measuredPage = page
+                  const sample = await elapsed(() => entry.playwright(measuredPage, site.origin))
                   entry.verify(sample.value)
                   return sample.ms
                 } finally {
-                  await context.close()
+                  try {
+                    if (page && entry.cleanupPlaywright) await entry.cleanupPlaywright(page)
+                  } finally {
+                    await context.close()
+                  }
                 }
               }
             })

@@ -97,6 +97,10 @@ export interface BrowserWorker extends ObservedBrowserWorker {
    *
    * Workers have no isolated world, so evaluating in one needs control of its owner.
    *
+   * On Chromium, an evaluation in a dedicated worker that has just started waits until the worker's script has
+   * loaded and any init scripts for it have run, then goes ahead; if the worker ends first, it fails with the
+   * worker's end. The wait counts against the evaluation's deadline.
+   *
    * **Example** (Reading each worker's user agent)
    *
    * ```ts import.meta.vitest

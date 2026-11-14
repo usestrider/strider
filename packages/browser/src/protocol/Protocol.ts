@@ -728,6 +728,10 @@ export type RejectReason =
  * Each backend's error table maps the reply onto `reason`; a reply that nothing matches is `Unrecognized`,
  * never a guess. `code` and `description` are the browser's own code and message, as it sent them.
  *
+ * `target` names the kind of target the command was sent to, on CDP: `page`, `iframe`, `worker`,
+ * `service_worker`, `shared_worker`, or `other`. It is absent for a command sent to the browser's own session,
+ * and on the other backends.
+ *
  * **Example** (Reading why a command was rejected)
  *
  * ```ts import.meta.vitest
@@ -740,6 +744,27 @@ export type RejectReason =
  *     return error.reason._tag === "Rejected" && error.reason.reason === "NoSuchObject"
  *   }
  * )
+ * ```
+ *
+ * **Example** (Saying where a command was refused)
+ *
+ * ```ts import.meta.vitest
+ * import { Emulation } from "@usestrider/browser/cdp"
+ * import { Protocol } from "@usestrider/browser/protocol"
+ * import { Effect } from "effect"
+ *
+ * const clear = (session: Protocol.ProtocolSession) =>
+ *   Emulation.clearDeviceMetricsOverride().pipe(
+ *     Protocol.on(session),
+ *     Effect.catchReason(
+ *       "ProtocolError",
+ *       "Rejected",
+ *       (rejected) =>
+ *         Effect.logWarning(
+ *           `refused on ${rejected.target ?? "the browser"}: ${rejected.description}`
+ *         )
+ *     )
+ *   )
  * ```
  *
  * @stability experimental
@@ -758,10 +783,13 @@ export class Rejected extends Schema.Error<Rejected>("@usestrider/browser/protoc
     "Unrecognized"
   ]),
   code: Schema.Union([Schema.Number, Schema.String]),
-  description: Schema.String
+  description: Schema.String,
+  target: Schema.optional(Schema.String)
 }) {
   override get message(): string {
-    return `${this.method} rejected: ${this.reason} (${this.description})`
+    return `${this.method} rejected${
+      this.target === undefined ? "" : ` on the ${this.target} target`
+    }: ${this.reason} (${this.description})`
   }
 }
 

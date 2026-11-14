@@ -103,6 +103,8 @@ export const NotReady = Schema.Union([
   /** The guard stopped the gesture: its first trusted event landed on another element. */
   Schema.TaggedStruct("Intercepted", { by: Schema.String }),
   Schema.TaggedStruct("NoSuchOption", { option: Schema.String }),
+  /** A chosen option, or its optgroup, is disabled. */
+  Schema.TaggedStruct("DisabledOption", { option: Schema.String }),
   /** A different text control held focus before preparing the target for insertion. */
   Schema.TaggedStruct("PreparingFocus", { from: Schema.String })
 ])
@@ -110,9 +112,9 @@ export type NotReady = typeof NotReady.Type
 
 /** An option of a `<select>`, by value, label or index. */
 export type Choice =
-  | { readonly value: string }
-  | { readonly label: string }
-  | { readonly index: number }
+  | { readonly value: string; readonly label?: never; readonly index?: never }
+  | { readonly label: string; readonly value?: never; readonly index?: never }
+  | { readonly index: number; readonly value?: never; readonly label?: never }
 
 /**
  * What an action does in the page once its checks pass: answer the action point, and
@@ -123,6 +125,7 @@ export type Action =
     readonly _tag: "Point"
     readonly position: { readonly x: number; readonly y: number } | null
     readonly guard: boolean
+    readonly checked?: boolean | undefined
   }
   | { readonly _tag: "Focus" }
   | { readonly _tag: "SelectText" }
@@ -289,6 +292,11 @@ export type Request =
     readonly clip?: Clip
     /** Milliseconds this round may wait for the checks to pass. */
     readonly cap: number
+    /**
+     * Return after the first permitted readiness sample only when that sample recorded a blocker. Otherwise the
+     * round waits like any other, retaining rendering requirements.
+     */
+    readonly sample?: boolean
     readonly action: Action
     /**
      * Whether to do what `action` asks once the checks pass: only under the page's input permit. Without it, the
@@ -380,9 +388,8 @@ export const Response = Schema.Union([
     history: Schema.Array(NotReady),
     scrolled: Schema.Boolean,
     /**
-     * Whether the round saw a reason worth reporting: one the deadline cut before its first frame, or while a rect
-     * was still settling, saw nothing wrong, `reason` included. With rendered disabled, a sampled stability
-     * wait is reported even without a frame, since no rendering hint will replace it.
+     * Whether the round recorded reportable evidence in history. An incomplete stability baseline adds none,
+     * even with rendered disabled; an observed blocker or established instability does.
      */
     checked: Schema.Boolean
   }),
@@ -473,8 +480,7 @@ export function renderText(root: SnapNode): string {
 
 /** The engine. Self-contained: its source is evaluated in the page, with `renderText`'s. */
 export function engine(render: (root: SnapNode) => string) {
-  // ── Time ──────────────────────────────────────────────────────────────────────────────────────────────
-
+  // Time
   // The page's own timers and frames, never a page clock's (`clock.ts`): where the engine shares the page's world,
   // a clock installed first leaves the real ones under this symbol, and one installed later finds these taken
   const realTimers = (globalThis as any)[Symbol.for("@usestrider/browser/clock/real")] as
@@ -489,13 +495,16 @@ export function engine(render: (root: SnapNode) => string) {
   const setTimer = realTimers?.setTimeout ?? globalThis.setTimeout.bind(globalThis)
   const clearTimer = realTimers?.clearTimeout ?? globalThis.clearTimeout.bind(globalThis)
   const onFrame = realTimers?.requestAnimationFrame ?? globalThis.requestAnimationFrame.bind(globalThis)
+  const cancelFrame = realTimers?.cancelAnimationFrame ?? globalThis.cancelAnimationFrame.bind(globalThis)
   const now = realTimers?.now ?? performance.now.bind(performance)
 
-  // ── The tree ──────────────────────────────────────────────────────────────────────────────────────────
-
+  // The tree
   const SKIPPED = new Set(["script", "style", "noscript", "template"])
 
-  /** Every element under `root`, in tree order, with each open shadow root's elements after its host. */
+  /**
+   * Every element under `root`, in tree order, with each open shadow root's elements after its host. An element
+   * root's own open shadow root counts as under it, before its light children.
+   */
   const elementsUnder = (root: Document | Element | ShadowRoot): Array<Element> => {
     const out: Array<Element> = []
     const visit = (node: Document | Element | ShadowRoot) => {
@@ -505,6 +514,7 @@ export function engine(render: (root: SnapNode) => string) {
         visit(child)
       }
     }
+    if (root instanceof Element && root.shadowRoot !== null) visit(root.shadowRoot)
     visit(root)
     return out
   }
@@ -551,8 +561,7 @@ export function engine(render: (root: SnapNode) => string) {
     return false
   }
 
-  // ── Text ──────────────────────────────────────────────────────────────────────────────────────────────
-
+  // Text
   const collapse = (text: string): string => text.replace(/\s+/g, " ").trim()
 
   const buttonLikeInput = (element: Element): element is HTMLInputElement =>
@@ -581,8 +590,7 @@ export function engine(render: (root: SnapNode) => string) {
     return matcher.exact ? text === expected : text.toLowerCase().includes(expected.toLowerCase())
   }
 
-  // ── Roles ─────────────────────────────────────────────────────────────────────────────────────────────
-
+  // Roles
   const KNOWN_ROLES = new Set([
     "alert",
     "alertdialog",
@@ -998,8 +1006,7 @@ export function engine(render: (root: SnapNode) => string) {
     return role
   }
 
-  // ── Hidden, visible ───────────────────────────────────────────────────────────────────────────────────
-
+  // Hidden, visible
   /** Excluded from the accessibility tree: `aria-hidden`, `display: none`, `visibility: hidden`. */
   const hiddenFromAccessibility = (element: Element): boolean => {
     for (let current: Element | null = element; current !== null; current = composedParent(current)) {
@@ -1022,8 +1029,7 @@ export function engine(render: (root: SnapNode) => string) {
 
   const visible = (element: Element): boolean => rendered(element, true)
 
-  // ── Accessible names (accname 1.2) ────────────────────────────────────────────────────────────────────
-
+  // Accessible names (accname 1.2)
   interface NameContext {
     readonly visited: Set<Element>
     /** Inside an `aria-labelledby` traversal, which includes hidden referenced nodes. */
@@ -1214,8 +1220,7 @@ export function engine(render: (root: SnapNode) => string) {
     return name
   }
 
-  // ── Queries ───────────────────────────────────────────────────────────────────────────────────────────
-
+  // Queries
   interface InvalidSelector {
     readonly invalidSelector: true
     readonly kind?: "role" | undefined
@@ -1232,8 +1237,7 @@ export function engine(render: (root: SnapNode) => string) {
   const isStale = (error: unknown): error is StaleMarker =>
     typeof error === "object" && error !== null && "staleRef" in error
 
-  // ── Refs ──────────────────────────────────────────────────────────────────────────────────────────────
-
+  // Refs
   /** This engine's ref table: a ref names one node while the document lives, and this number names the table. */
   const generation = Math.floor(Math.random() * 2 ** 31)
   let refCount = 0
@@ -1293,6 +1297,7 @@ export function engine(render: (root: SnapNode) => string) {
     switch (step._tag) {
       case "Css": {
         const roots: Array<Document | Element | ShadowRoot> = [scope]
+        if (scope instanceof Element && scope.shadowRoot !== null) roots.push(scope.shadowRoot)
         for (const element of under) if (element.shadowRoot !== null) roots.push(element.shadowRoot)
         const found = new Set<Element>()
         for (const root of roots) {
@@ -1443,8 +1448,7 @@ export function engine(render: (root: SnapNode) => string) {
     return current.filter((scope): scope is Element => scope instanceof Element)
   }
 
-  // ── Actionability ─────────────────────────────────────────────────────────────────────────────────────
-
+  // Actionability
   /** A short description of an element for errors: `button#buy.primary "Add to cart"`. */
   const describe = (element: Element): string => {
     let out = element.localName
@@ -1843,17 +1847,16 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   const optionMatches = (option: HTMLOptionElement, index: number, choice: Choice) =>
-    "value" in choice ? option.value === choice.value : "label" in choice
+    choice.value !== undefined ? option.value === choice.value : choice.label !== undefined
       ? option.label === choice.label || collapse(option.textContent ?? "") === choice.label
       : index === choice.index
 
   const describeChoice = (choice: Choice) =>
-    "value" in choice ? `value ${JSON.stringify(choice.value)}` : "label" in choice
+    choice.value !== undefined ? `value ${JSON.stringify(choice.value)}` : choice.label !== undefined
       ? `label ${JSON.stringify(choice.label)}`
       : `index ${choice.index}`
 
-  // ── The guard on the first trusted event ──
-
+  // The guard on the first trusted event
   /** The gesture's events a guard watches, on the window, capturing. */
   const GUARDED = [
     "pointerdown",
@@ -2004,8 +2007,7 @@ export function engine(render: (root: SnapNode) => string) {
     return { _tag: "FillGuard" as const, blocked: current.blocked, unsafe: false, accepted: false }
   }
 
-  // ── Actions ──
-
+  // Actions
   let stabilitySequence = 0
   let stability: {
     readonly token: string
@@ -2014,184 +2016,217 @@ export function engine(render: (root: SnapNode) => string) {
     readonly frames: number
   } | null = null
 
-  const act = async (request: Extract<Request, { op: "act" }>): Promise<Response> => {
-    // Evidence is single-use and lasts only until the next rendering update. Another attempt supersedes it.
-    let previous = stability !== null && request.stability === stability.token ? stability : null
+  /** State shared by ordinary and opted-in rounds; no continuation exists on the ordinary path. */
+  const createAction = (request: Extract<Request, { op: "act" }>) => {
+    const previous = stability !== null && request.stability === stability.token ? stability : null
     stability = null
-    const end = now() + request.cap
-    const history: Array<NotReady> = []
-    const seen = new Set<string>()
-    let last: NotReady = { _tag: "NoMatch" }
-    const note = (reason: NotReady) => {
-      const key = JSON.stringify(reason)
-      if (!seen.has(key)) {
-        seen.add(key)
-        history.push(reason)
-      }
-      last = reason
+    return {
+      previous,
+      end: now() + request.cap,
+      history: [] as Array<NotReady>,
+      seen: new Set<string>(),
+      last: { _tag: "NoMatch" } as NotReady,
+      scrolled: false,
+      frames: 0,
+      sampled: false,
+      tracked: null as Element | null,
+      rects: [] as Array<DOMRect>
     }
-    let scrolled = false
-    let frames = 0
-    let sampled = false
-    // The rects of one element across frames, for the stable check
-    let tracked: Element | null = null
-    let rects: Array<DOMRect> = []
+  }
+  type ActionState = ReturnType<typeof createAction>
+  const noteAction = (state: ActionState, reason: NotReady) => {
+    const key = JSON.stringify(reason)
+    if (!state.seen.has(key)) {
+      state.seen.add(key)
+      state.history.push(reason)
+    }
+    state.last = reason
+  }
+  const actionTimeout = (_request: Extract<Request, { op: "act" }>, state: ActionState): Response => ({
+    _tag: "NotReady",
+    reason: state.last,
+    history: state.history,
+    scrolled: state.scrolled,
+    // Sampling a stability baseline is progress, not failure evidence. Only noteAction records evidence.
+    checked: state.history.length > 0
+  })
+
+  const actionFrameTimeout = (request: Extract<Request, { op: "act" }>, state: ActionState): Response => {
+    if (request.checks.rendered && state.frames === 0 && request.cap >= 100) {
+      noteAction(state, { _tag: "NoRenderingOpportunity" })
+    }
+    return actionTimeout(request, state)
+  }
+
+  /** Resolves fresh DOM and runs exactly one readiness/application check. */
+  const checkAction = (request: Extract<Request, { op: "act" }>, state: ActionState): Response | undefined => {
     const action = request.action
-    while (true) {
-      const left = end - now()
-      if (left <= 0) {
+    clearTreeCaches()
+    const found = resolve(request.steps)
+    if (found.length > 1) return strict(found)
+    const element = found[0]
+    if (element !== state.tracked) {
+      state.tracked = element ?? null
+      state.rects = []
+    }
+    // What no waiting mends fails at once
+    if (element !== undefined) {
+      if (request.checks.editable && !editableKind(element)) {
+        return { _tag: "Final", final: { _tag: "NotEditable", element: describe(element) } }
+      }
+      if (
+        (action._tag === "Checked" && checkedOf(element) === null) ||
+        (action._tag === "Point" && action.checked === true && checkableForAction(element) === null)
+      ) {
         return {
-          _tag: "NotReady",
-          reason: last,
-          history,
-          scrolled,
-          checked: history.length > 0 || (!request.checks.rendered && sampled)
-        }
-      }
-      // The current rectangle is the baseline; k rendering updates still have to agree with it. Waiting for
-      // a frame just to take that baseline adds a frame to both the preliminary check and the check under the
-      // input permit. Without stability, only the rendered check waits before checking current layout.
-      // Retry waits remain frame-based even when rendered is disabled.
-      if (sampled || (request.checks.rendered && !(request.checks.stable > 0))) {
-        if (!(await nextFrame(left))) {
-          // A round the deadline cut too short for any page to render says nothing about rendering
-          if (request.checks.rendered && frames === 0 && request.cap >= 100) note({ _tag: "NoRenderingOpportunity" })
-          return {
-            _tag: "NotReady",
-            reason: last,
-            history,
-            scrolled,
-            checked: history.length > 0 || (!request.checks.rendered && sampled)
-          }
-        }
-        frames++
-      }
-      sampled = true
-      clearTreeCaches()
-      const found = resolve(request.steps)
-      if (found.length > 1) return strict(found)
-      const element = found[0]
-      if (element !== tracked) {
-        tracked = element ?? null
-        rects = []
-      }
-      // What no waiting mends fails at once
-      if (element !== undefined) {
-        if (request.checks.editable && !editableKind(element)) {
-          return { _tag: "Final", final: { _tag: "NotEditable", element: describe(element) } }
-        }
-        if (action._tag === "Checked" && checkedOf(element) === null) {
-          return {
-            _tag: "Final",
-            final: {
-              _tag: "WrongElement",
-              expected: "a checkbox, a radio, or an ARIA checkable",
-              element: describe(element)
-            }
-          }
-        }
-        if (action._tag === "Select" && !(element instanceof HTMLSelectElement)) {
-          return { _tag: "Final", final: { _tag: "WrongElement", expected: "a <select>", element: describe(element) } }
-        }
-        if (action._tag === "FileInput" && !(element instanceof HTMLInputElement && element.type === "file")) {
-          return {
-            _tag: "Final",
-            final: { _tag: "WrongElement", expected: "a file input", element: describe(element) }
+          _tag: "Final",
+          final: {
+            _tag: "WrongElement",
+            expected: "a checkbox, a radio, or an ARIA checkable",
+            element: describe(element)
           }
         }
       }
-      const checks = request.checks
-      const evidence = previous
-      previous = null
-      let reason: NotReady | null = null
-      if (element === undefined) reason = { _tag: "NoMatch" }
-      else if (checks.visible && !rendered(element, false)) reason = { _tag: "NotVisible" }
-      else if (checks.enabled && !enabled(element)) reason = { _tag: "Disabled" }
-      else if (checks.editable && readOnly(element)) reason = { _tag: "ReadOnly" }
-      else if (checks.notInert && inertReason(element) !== null) reason = inertReason(element)
-      else if (checks.inViewport && visibleFragment(element, request.clip) === null) {
-        reason = { _tag: "OutsideViewport" }
-        if (!scrolled) {
-          scrollToFragments(element, request.clip)
-          scrolled = true
-        }
-      } else if (checks.stable > 0) {
-        const rect = element.getBoundingClientRect()
-        rects.push(rect)
-        if (rects.length > checks.stable + 1) rects.shift()
-        const unchanged = evidence !== null && evidence.element === element && evidence.frames === checks.stable &&
-          sameRect(evidence.rect, rect)
-        if (!unchanged && (rects.length < checks.stable + 1 || !rects.every((rect) => sameRect(rect, rects[0]!)))) {
-          reason = { _tag: "NotStable" }
+      if (action._tag === "Select" && !(element instanceof HTMLSelectElement)) {
+        return { _tag: "Final", final: { _tag: "WrongElement", expected: "a <select>", element: describe(element) } }
+      }
+      if (action._tag === "FileInput" && !(element instanceof HTMLInputElement && element.type === "file")) {
+        return {
+          _tag: "Final",
+          final: { _tag: "WrongElement", expected: "a file input", element: describe(element) }
         }
       }
-      const position = action._tag === "Point" ? action.position : null
-      const points = reason === null && element !== undefined && (action._tag === "Point" || checks.receivesPointer)
-        ? actionPoints(element, position, request.clip, checks.receivesPointer)
-        : []
-      const point = points[0] ?? null
-      if (reason === null && element !== undefined && (action._tag === "Point" || checks.receivesPointer)) {
-        if (point === null) reason = { _tag: "OutsideViewport" }
-        else if (checks.receivesPointer) {
-          const hit = hitTarget(point.x, point.y)
-          if (hit === null || !composedContains(element, hit)) {
-            reason = { _tag: "Covered", by: hit === null ? "nothing at that point" : describe(hit) }
-          }
+    }
+    const checks = request.checks
+    const evidence = state.previous
+    state.previous = null
+    let reason: NotReady | null = null
+    if (element === undefined) reason = { _tag: "NoMatch" }
+    else if (checks.visible && !rendered(element, false)) reason = { _tag: "NotVisible" }
+    else if (
+      checks.enabled && (
+        !enabled(element) || (action._tag === "Point" && action.checked === true &&
+          !enabled(checkableForAction(element) ?? element))
+      )
+    ) reason = { _tag: "Disabled" }
+    else if (checks.editable && readOnly(element)) reason = { _tag: "ReadOnly" }
+    else if (checks.notInert && inertReason(element) !== null) reason = inertReason(element)
+    else if (checks.inViewport && visibleFragment(element, request.clip) === null) {
+      reason = { _tag: "OutsideViewport" }
+      if (!state.scrolled) {
+        scrollToFragments(element, request.clip)
+        state.scrolled = true
+      }
+    } else if (checks.stable > 0) {
+      const rect = element.getBoundingClientRect()
+      state.rects.push(rect)
+      if (state.rects.length > checks.stable + 1) state.rects.shift()
+      const unchanged = evidence !== null && evidence.element === element && evidence.frames === checks.stable &&
+        sameRect(evidence.rect, rect)
+      if (
+        !unchanged &&
+        (state.rects.length < checks.stable + 1 || !state.rects.every((rect) => sameRect(rect, state.rects[0]!)))
+      ) {
+        reason = { _tag: "NotStable" }
+      }
+    }
+    const position = action._tag === "Point" ? action.position : null
+    const points = reason === null && element !== undefined && (action._tag === "Point" || checks.receivesPointer)
+      ? actionPoints(element, position, request.clip, checks.receivesPointer)
+      : []
+    const point = points[0] ?? null
+    if (reason === null && element !== undefined && (action._tag === "Point" || checks.receivesPointer)) {
+      if (point === null) reason = { _tag: "OutsideViewport" }
+      else if (checks.receivesPointer) {
+        const hit = hitTarget(point.x, point.y)
+        if (hit === null || !composedContains(element, hit)) {
+          reason = { _tag: "Covered", by: hit === null ? "nothing at that point" : describe(hit) }
         }
       }
-      if (reason === null && element !== undefined && action._tag === "Select") {
-        const options = Array.from(element instanceof HTMLSelectElement ? element.options : [])
-        const missing = action.choices.find((choice) =>
-          !options.some((option, index) => optionMatches(option, index, choice))
+    }
+    if (reason === null && element !== undefined && action._tag === "Select") {
+      const options = Array.from(element instanceof HTMLSelectElement ? element.options : [])
+      const missing = action.choices.find((choice) =>
+        !options.some((option, index) => optionMatches(option, index, choice))
+      )
+      if (missing !== undefined) reason = { _tag: "NoSuchOption", option: describeChoice(missing) }
+      else if (checks.enabled) {
+        // The native rule, as the role filters use it: :disabled differs between browsers for options.
+        const off = action.choices.find((choice) =>
+          options.some((option, index) =>
+            optionMatches(option, index, choice) && (option.disabled || option.closest("optgroup[disabled]") !== null)
+          )
         )
-        if (missing !== undefined) reason = { _tag: "NoSuchOption", option: describeChoice(missing) }
+        if (off !== undefined) reason = { _tag: "DisabledOption", option: describeChoice(off) }
       }
-      if (reason === null && element !== undefined) {
+    }
+    if (reason === null && element !== undefined) {
+      if (
+        request.apply && action._tag === "Fill" && document.designMode === "on" &&
+        !(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)
+      ) {
+        const active = deepActive()
+        if (active !== element && (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement)) {
+          noteAction(state, { _tag: "PreparingFocus", from: describe(active) })
+          active.blur()
+          // Blur handlers can replace the target or change any effective check. Resolve and check again
+          // through the ordinary wait loop before selecting a range or allowing native insertion.
+          state.rects = []
+          return
+        }
+      }
+      let response = ready(element, action, request.apply, state.scrolled, point, checks)
+      if (response._tag === "Retry") {
+        reason = response.reason
+      } else {
         if (
-          request.apply && action._tag === "Fill" && document.designMode === "on" &&
-          !(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)
+          response._tag === "Ready" && action._tag === "Point" && action.position === null &&
+          checks.receivesPointer && request.clip !== undefined && points.length > 1
         ) {
-          const active = deepActive()
-          if (active !== element && (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement)) {
-            note({ _tag: "PreparingFocus", from: describe(active) })
-            active.blur()
-            // Blur handlers can replace the target or change any effective check. Resolve and check again
-            // through the ordinary wait loop before selecting a range or allowing native insertion.
-            rects = []
-            continue
-          }
+          response = { ...response, candidates: points }
         }
-        let response = ready(element, action, request.apply, scrolled, point, checks)
-        if (response._tag === "Retry") {
-          reason = response.reason
-        } else {
-          if (
-            response._tag === "Ready" && action._tag === "Point" && action.position === null &&
-            checks.receivesPointer && request.clip !== undefined && points.length > 1
-          ) {
-            response = { ...response, candidates: points }
+        if (request.stability === "capture" && checks.stable > 0 && !request.apply && response._tag === "Ready") {
+          const captured = {
+            token: `${generation}:${++stabilitySequence}`,
+            element,
+            rect: state.rects[state.rects.length - 1]!,
+            frames: checks.stable
           }
-          if (request.stability === "capture" && checks.stable > 0 && !request.apply && response._tag === "Ready") {
-            const captured = {
-              token: `${generation}:${++stabilitySequence}`,
-              element,
-              rect: rects[rects.length - 1]!,
-              frames: checks.stable
-            }
-            stability = captured
-            const token = captured.token
-            onFrame(() => {
-              if (stability?.token === token) stability = null
-            })
-            return { ...response, stability: captured.token }
-          }
-          return response
+          stability = captured
+          const token = captured.token
+          onFrame(() => {
+            if (stability?.token === token) stability = null
+          })
+          return { ...response, stability: captured.token }
         }
+        return response
       }
-      if (reason!._tag !== "NotStable") rects = []
-      // A rect still settling within its first frames is the check working, not a reason to report
-      if (reason!._tag !== "NotStable" || rects.length === checks.stable + 1) note(reason!)
-      else if (history.length === 0) last = reason!
+    }
+    if (reason!._tag !== "NotStable") state.rects = []
+    // A rect still settling within its first frames is the check working, not a reason to report
+    if (reason!._tag !== "NotStable" || state.rects.length === checks.stable + 1) noteAction(state, reason!)
+    else if (state.history.length === 0) state.last = reason!
+  }
+
+  const act = async (request: Extract<Request, { op: "act" }>): Promise<Response> => {
+    const state = createAction(request)
+    while (true) {
+      const left = state.end - now()
+      if (left <= 0) return actionTimeout(request, state)
+      // The baseline is immediate; later samples and the independent rendered check wait for a frame.
+      if (state.sampled || (request.checks.rendered && !(request.checks.stable > 0))) {
+        if (!(await nextFrame(left))) {
+          return actionFrameTimeout(request, state)
+        }
+        state.frames++
+      }
+      const first = !state.sampled
+      state.sampled = true
+      const response = checkAction(request, state)
+      if (response !== undefined) return response
+      // The first round returns early only when its first sample observed a blocker; after a stability
+      // baseline it keeps waiting like any round, through later samples too.
+      if (request.sample === true && first && state.history.length > 0) return actionTimeout(request, state)
     }
   }
 
@@ -2325,8 +2360,7 @@ export function engine(render: (root: SnapNode) => string) {
     }
   }
 
-  // ── Reads ──
-
+  // Reads
   const read = (request: Extract<Request, { op: "read" }>): Response => {
     const found = resolve(request.steps)
     if (found.length > 1) return strict(found)
@@ -2372,8 +2406,7 @@ export function engine(render: (root: SnapNode) => string) {
     }
   }
 
-  // ── Expectations, waiting in the page ──
-
+  // Expectations, waiting in the page
   const expected = (matcher: TextMatcher, text: string): boolean =>
     matcher._tag === "RegExp" ? new RegExp(matcher.source, matcher.flags).test(text) : text === collapse(matcher.value)
 
@@ -2546,25 +2579,84 @@ export function engine(render: (root: SnapNode) => string) {
   // Allocated only while a viewport expectation owns observations in this document.
   let viewportRounds: Map<string, () => void> | undefined
 
+  // One native sample; its caller owns retries, cancellation and provisional evidence.
+  const sampleViewport = (
+    steps: ReadonlyArray<Step>,
+    expectation: Extract<Expectation, { _tag: "Viewport" }>,
+    publish: (result: { passed: boolean; observed: unknown }, provisional?: boolean) => void,
+    complete: (error?: unknown) => void,
+    requireUnchangedRendering = false
+  ): () => void => {
+    let active = true
+    let observer: IntersectionObserver | undefined
+    let frame: number | undefined
+    const cancel = () => {
+      active = false
+      observer?.disconnect()
+      if (frame !== undefined) {
+        cancelFrame(frame)
+      }
+    }
+    const finish = (error?: unknown) => {
+      if (!active) return
+      cancel()
+      complete(error)
+    }
+    clearTreeCaches()
+    try {
+      const found = resolve(steps)
+      if (found.length !== 1) {
+        publish({ passed: found.length === 0 && !expectation.inViewport, observed: { matches: found.length } })
+        finish()
+      } else {
+        publish({ passed: false, observed: { matches: 1 } }, true)
+        const element = found[0]!
+        const rendered = requireUnchangedRendering ? element.getClientRects().length > 0 : undefined
+        observer = new IntersectionObserver((entries) => {
+          if (!active) return
+          clearTreeCaches()
+          try {
+            const current = resolve(steps)
+            // A new box needs a host check; moving an existing box needs no stability gate.
+            if (
+              current.length === 1 && current[0] === element &&
+              (rendered === undefined || rendered === (element.getClientRects().length > 0))
+            ) {
+              const ratio = entries[0]!.intersectionRatio
+              const intersects = ratio > 0 && ratio > expectation.ratio - 1e-9
+              publish({ passed: intersects === expectation.inViewport, observed: { matches: 1, ratio } })
+            }
+            finish()
+          } catch (error) {
+            finish(error)
+          }
+        })
+        observer.observe(element)
+        // Firefox needs a rendering opportunity to deliver intersection observations.
+        frame = onFrame(() => {})
+      }
+    } catch (error) {
+      finish(error)
+    }
+    return cancel
+  }
+
   const expectViewport = (request: Extract<Request, { op: "expect" }>): Promise<Response> =>
     new Promise((resume, reject) => {
       const expectation = request.expectation
       if (expectation._tag !== "Viewport") return
       let done = false
-      let observer: IntersectionObserver | undefined
+      let cancelObservation: (() => void) | undefined
       let frame: number | undefined
-      const next = (callback: () => void) => {
-        frame = onFrame(callback)
-      }
       let last: { passed: boolean; observed: unknown } = { passed: false, observed: null }
       let changed = false
       let samples = 0
       const finish = (error?: unknown) => {
         if (done) return
         done = true
-        observer?.disconnect()
+        cancelObservation?.()
         if (frame !== undefined) {
-          ;(realTimers?.cancelAnimationFrame ?? globalThis.cancelAnimationFrame.bind(globalThis))(frame)
+          cancelFrame(frame)
         }
         clearTimer(timer)
         if (request.token !== undefined) {
@@ -2577,53 +2669,17 @@ export function engine(render: (root: SnapNode) => string) {
       const sample = () => {
         if (done) return
         changed = samples++ > 0
-        observer?.disconnect()
-        clearTreeCaches()
-        let found: ReadonlyArray<Element>
-        try {
-          found = resolve(request.steps)
-        } catch (error) {
-          finish(error)
-          return
-        }
-        if (found.length !== 1) {
-          last = {
-            passed: found.length === 0 && !expectation.inViewport,
-            observed: { matches: found.length }
-          }
-          if (last.passed) finish()
-          else next(sample)
-          return
-        }
-        if (last.observed === null) last = { passed: false, observed: { matches: 1 } }
-        const element = found[0]!
-        observer = new IntersectionObserver((entries) => {
-          if (done) return
-          observer?.disconnect()
-          // Re-resolve after the asynchronous observation: a detached or replaced match is not evidence.
-          clearTreeCaches()
-          try {
-            const current = resolve(request.steps)
-            if (current.length !== 1 || current[0] !== element) {
-              next(sample)
-              return
-            }
-          } catch (error) {
-            finish(error)
-            return
-          }
-          const ratio = entries[0]!.intersectionRatio
-          const intersects = ratio > 0 && ratio > expectation.ratio - 1e-9
-          last = { passed: intersects === expectation.inViewport, observed: { matches: 1, ratio } }
-          if (last.passed) finish()
+        cancelObservation = sampleViewport(request.steps, expectation, (result, provisional) => {
+          // Keep the previous complete observation while a new native observation is pending.
+          if (!provisional || last.observed === null) last = result
+        }, (error) => {
+          if (error !== undefined) finish(error)
+          else if (last.passed) finish()
           else {
-            changed = true
-            next(sample)
+            if (last.observed !== null && typeof last.observed === "object" && "ratio" in last.observed) changed = true
+            frame = onFrame(sample)
           }
         })
-        observer.observe(element)
-        // Firefox needs a rendering opportunity to deliver intersection observations.
-        next(() => {})
       }
       const timer = setTimer(finish, Math.max(0, request.cap))
       if (request.token !== undefined) (viewportRounds ??= new Map()).set(request.token, finish)
@@ -2677,8 +2733,7 @@ export function engine(render: (root: SnapNode) => string) {
     })
   }
 
-  // ── Snapshots ─────────────────────────────────────────────────────────────────────────────────────────
-
+  // Snapshots
   const INTERACTIVE = new Set([
     "button",
     "checkbox",
@@ -3290,22 +3345,39 @@ export function engine(render: (root: SnapNode) => string) {
           )
       }
     } catch (error) {
-      if (isInvalidSelector(error)) {
-        return JSON.stringify(
-          {
-            _tag: "InvalidSelector",
-            selector: error.selector,
-            message: error.message,
-            ...(error.kind === undefined ? {} : { kind: error.kind })
-          } satisfies Response
-        )
-      }
-      if (isStale(error)) return JSON.stringify({ _tag: "StaleRef", why: error.why } satisfies Response)
-      throw error
+      return JSON.stringify(failureResponse(error))
     }
   }
+  const failureResponse = (error: unknown): Response => {
+    if (isInvalidSelector(error)) {
+      return {
+        _tag: "InvalidSelector",
+        selector: error.selector,
+        message: error.message,
+        ...(error.kind === undefined ? {} : { kind: error.kind })
+      } satisfies Response
+    }
+    if (isStale(error)) return { _tag: "StaleRef", why: error.why } satisfies Response
+    throw error
+  }
 
-  return { run, element }
+  const cooperativeHelpers = () => ({
+    createAction,
+    checkAction,
+    actionTimeout,
+    actionFrameTimeout,
+    evaluate,
+    sampleViewport,
+    matchesValue: classMatches,
+    clearTreeCaches,
+    failureResponse,
+    now,
+    setTimer,
+    clearTimer,
+    onFrame,
+    cancelFrame
+  })
+  return { run, element, cooperativeHelpers }
 }
 
 /** The key the engine is installed under in a realm's global: a symbol, out of the way of anything else. */
@@ -3337,3 +3409,388 @@ export const element = `function(request) {
 
 /** What `run` answers when the realm has no engine yet. */
 export const missing = "\u0000missing"
+
+/** A check that may be driven by the opted-in host handshake. */
+export type CooperativeURLRequest = Omit<Extract<Request, { readonly op: "expect" }>, "expectation"> & {
+  readonly expectation: { readonly _tag: "URL"; readonly expected: TextMatcher }
+}
+export type CooperativeRequest = Extract<Request, { readonly op: "act" | "expect" }> | CooperativeURLRequest
+
+/** All commands name both the actual document and the triggering operation. */
+export type CooperativeCommand =
+  & {
+    readonly document: string
+    readonly operation: string
+    readonly session: string
+  }
+  & (
+    | {
+      readonly command: "start"
+      readonly request: CooperativeRequest
+      readonly budget: number
+      readonly final?: boolean
+    }
+    | {
+      readonly command: "resume"
+      readonly token: string
+      readonly left: number
+      readonly decision: "continue" | "invalidate" | "restart"
+      readonly clip?: Clip
+    }
+    | { readonly command: "cancel" }
+    | { readonly command: "finish" }
+  )
+
+/** The ordinary response is nested so cooperative control messages cannot reach ordinary callers. */
+export const CooperativeResponse = Schema.Union([
+  Schema.TaggedStruct("Check", { token: Schema.String, final: Schema.Boolean }),
+  Schema.TaggedStruct("Done", { response: Response, retained: Schema.optional(Schema.Boolean) }),
+  Schema.TaggedStruct("Restart", {}),
+  Schema.TaggedStruct("Departed", {}),
+  Schema.TaggedStruct("Disposed", {})
+])
+export type CooperativeResponse = typeof CooperativeResponse.Type
+export const decodeCooperativeResponse = Schema.decodeUnknownEffect(Schema.fromJsonString(CooperativeResponse))
+
+/**
+ * Installed separately on first use. This source is deliberately absent from the ordinary engine installation.
+ * Each session owns its timers, frame callbacks, observer and references to action state.
+ */
+function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooperativeHelpers"]>) {
+  const { now, setTimer, clearTimer, onFrame, cancelFrame } = helpers
+  type ActionState = ReturnType<typeof helpers.createAction>
+  interface Session {
+    readonly document: string
+    readonly operation: string
+    readonly session: string
+    request: CooperativeRequest
+    readonly final: boolean
+    end: number
+    token: string | undefined
+    state: ActionState | undefined
+    observed: unknown
+    terminal: Response | undefined
+    changed: boolean
+    disposed: boolean
+    departed: boolean
+    timer: number
+    stopWaiting: (() => void) | undefined
+    expireEvidence: (() => void) | undefined
+  }
+  interface Terminal {
+    readonly document: string
+    readonly operation: string
+    readonly token: string | undefined
+    readonly text: string
+    readonly expires: number
+    readonly bytes: number
+  }
+  const sessions = new Map<string, Session>()
+  // Only serialized data survives expiry. Count, UTF-16 storage and age are independently bounded.
+  const terminals = new Map<string, Terminal>()
+  const terminalLimit = 64
+  const terminalByteLimit = 1024 * 1024
+  const terminalRetention = 30_000
+  let terminalBytes = 0
+  let terminalTimer: number | undefined
+  let listening = false
+  let sequence = 0
+  const epoch = Math.random().toString(36).slice(2)
+  const disposed = { _tag: "Disposed" } as const
+  const lifecycle = () => {
+    const needed = sessions.size > 0 || terminals.size > 0
+    if (needed && !listening) addEventListener("pagehide", navigated)
+    else if (!needed && listening) removeEventListener("pagehide", navigated)
+    listening = needed
+  }
+  const forgetTerminal = (key: string) => {
+    const terminal = terminals.get(key)
+    if (terminal === undefined) return
+    terminalBytes -= terminal.bytes
+    terminals.delete(key)
+  }
+  const sweepTerminals = () => {
+    if (terminalTimer !== undefined) clearTimer(terminalTimer)
+    terminalTimer = undefined
+    let next = Infinity
+    const time = now()
+    for (const [key, terminal] of terminals) {
+      if (terminal.expires <= time) forgetTerminal(key)
+      else next = Math.min(next, terminal.expires)
+    }
+    if (next !== Infinity) terminalTimer = setTimer(sweepTerminals, Math.max(0, next - now()))
+    lifecycle()
+  }
+  const retainTerminal = (session: Session, response: Response, token: string | undefined) => {
+    const text = JSON.stringify(response)
+    const bytes = 2 * (text.length + session.session.length + session.document.length +
+      session.operation.length + (token?.length ?? 0))
+    if (bytes > terminalByteLimit) return
+    while (terminals.size >= terminalLimit || terminalBytes + bytes > terminalByteLimit) {
+      forgetTerminal(terminals.keys().next().value!)
+    }
+    terminals.set(session.session, {
+      document: session.document,
+      operation: session.operation,
+      token,
+      text,
+      expires: now() + terminalRetention,
+      bytes
+    })
+    terminalBytes += bytes
+    sweepTerminals()
+  }
+  const remove = (session: Session) => {
+    if (session.disposed) return
+    session.disposed = true
+    session.token = undefined
+    sessions.delete(session.session)
+    clearTimer(session.timer)
+    session.stopWaiting?.()
+    session.expireEvidence?.()
+    session.state = undefined
+    lifecycle()
+  }
+  const navigated = () => {
+    for (const session of sessions.values()) {
+      session.departed = true
+      remove(session)
+    }
+    terminals.clear()
+    terminalBytes = 0
+    sweepTerminals()
+  }
+  const check = (session: Session): CooperativeResponse => {
+    if (session.disposed) return disposed
+    session.token = `${epoch}:${++sequence}`
+    return { _tag: "Check", token: session.token, final: session.final }
+  }
+  const finished = (session: Session, response: Response): CooperativeResponse => {
+    remove(session)
+    return { _tag: "Done", response }
+  }
+  const timeoutResponse = (session: Session): Response =>
+    session.request.op === "act"
+      ? helpers.actionTimeout(session.request, session.state!)
+      : { _tag: "Expected", passed: false, observed: session.observed, changed: session.changed }
+  const expired = (session: Session): CooperativeResponse => finished(session, timeoutResponse(session))
+  const expire = (session: Session) => {
+    if (session.disposed) return
+    session.terminal = session.request.op === "act" && session.stopWaiting !== undefined
+      ? helpers.actionFrameTimeout(session.request, session.state!)
+      : timeoutResponse(session)
+    const token = session.token
+    remove(session)
+    retainTerminal(session, session.terminal, token)
+  }
+  const stopped = (session: Session): CooperativeResponse =>
+    session.terminal === undefined
+      ? session.departed ? { _tag: "Departed" } : disposed
+      : { _tag: "Done", response: session.terminal, retained: terminals.has(session.session) }
+  // A cooperative wait only announces that another check is due. It never evaluates/asserts/applies DOM.
+  const wait = (session: Session, mutations: boolean): Promise<boolean> =>
+    new Promise((resume) => {
+      let done = false
+      let frame: number | undefined
+      let observer: MutationObserver | undefined
+      const events = ["input", "change", "focusin", "focusout", "hashchange", "popstate"]
+      const finish = (ready: boolean) => {
+        if (done) return
+        done = true
+        if (frame !== undefined) cancelFrame(frame)
+        observer?.disconnect()
+        if (mutations) { for (const type of events) removeEventListener(type, changed, true) }
+        session.stopWaiting = undefined
+        resume(ready)
+      }
+      const changed = () => finish(true)
+      session.stopWaiting = () => finish(false)
+      frame = onFrame(() => {
+        if (session.state !== undefined) session.state.frames++
+        finish(true)
+      })
+      if (mutations) {
+        observer = new MutationObserver(changed)
+        observer.observe(document, { subtree: true, childList: true, attributes: true, characterData: true })
+        for (const type of events) addEventListener(type, changed, true)
+      }
+    })
+  // An expectation's cap-0 round samples once; an action's first round ends early only on recorded evidence.
+  const singleSample = (request: CooperativeRequest): boolean => request.op !== "act" && request.cap <= 0
+  const run = async (command: CooperativeCommand): Promise<CooperativeResponse> => {
+    sweepTerminals()
+    if (command.command === "start") {
+      if (sessions.has(command.session) || terminals.has(command.session)) return disposed
+      if (!Number.isFinite(command.budget) || command.budget <= 0 || !Number.isFinite(command.request.cap)) {
+        return disposed
+      }
+      const session: Session = {
+        document: command.document,
+        operation: command.operation,
+        session: command.session,
+        request: command.request,
+        final: command.final === true || command.request.op === "act" && command.request.apply,
+        end: now() +
+          Math.max(0, singleSample(command.request) ? command.budget : Math.min(command.budget, command.request.cap)),
+        token: undefined,
+        state: command.request.op === "act" ? helpers.createAction(command.request) : undefined,
+        observed: null,
+        terminal: undefined,
+        changed: false,
+        disposed: false,
+        departed: false,
+        timer: 0,
+        stopWaiting: undefined,
+        expireEvidence: undefined
+      }
+      sessions.set(session.session, session)
+      lifecycle()
+      session.timer = setTimer(() => expire(session), Math.max(0, session.end - now()))
+      // Captured final-check evidence expires at the next rendering update, even while the host probes.
+      if (session.state?.previous !== null && session.state !== undefined) {
+        const frame = onFrame(() => {
+          if (session.state !== undefined) session.state.previous = null
+        })
+        session.expireEvidence = () => cancelFrame(frame)
+      }
+      if (command.request.op === "act" && command.request.checks.rendered && command.request.checks.stable === 0) {
+        if (!(await wait(session, false))) return stopped(session)
+      }
+      return check(session)
+    }
+    const terminal = terminals.get(command.session)
+    if (terminal !== undefined) {
+      if (terminal.document !== command.document || terminal.operation !== command.operation) return disposed
+      if (command.command === "cancel") {
+        forgetTerminal(command.session)
+        sweepTerminals()
+        return disposed
+      }
+      if (
+        command.command === "resume" &&
+        (terminal.token === undefined || typeof command.token !== "string" || command.token !== terminal.token)
+      ) return disposed
+      forgetTerminal(command.session)
+      sweepTerminals()
+      return command.command === "finish" || Number.isFinite(command.left)
+        ? { _tag: "Done", response: JSON.parse(terminal.text) as Response }
+        : disposed
+    }
+    const session = sessions.get(command.session)
+    if (session === undefined || session.document !== command.document || session.operation !== command.operation) {
+      return disposed
+    }
+    if (command.command === "cancel") {
+      remove(session)
+      return disposed
+    }
+    // Finishing only returns timeout evidence; it never authorizes a check or application.
+    if (command.command === "finish") return expired(session)
+    if (session.token === undefined || session.token !== command.token) return disposed
+    // Consume before any await. Concurrent/replayed resumes cannot evaluate the same check twice.
+    session.token = undefined
+    if (!Number.isFinite(command.left)) {
+      remove(session)
+      return disposed
+    }
+    session.end = Math.min(session.end, now() + Math.max(0, command.left))
+    clearTimer(session.timer)
+    session.timer = setTimer(() => expire(session), Math.max(0, session.end - now()))
+    if (command.decision === "restart") {
+      remove(session)
+      return { _tag: "Restart" }
+    }
+    if (session.end <= now()) return expired(session)
+    if (command.decision === "invalidate" && session.request.op === "act") {
+      // Do not consume a stale shared capture token when a callback has changed DOM/focus/scroll.
+      const { stability: _capture, ...fresh } = session.request
+      session.request = command.clip === undefined ? fresh : { ...fresh, clip: command.clip }
+      session.state = helpers.createAction(session.request)
+      if (session.request.checks.rendered && session.request.checks.stable === 0) {
+        if (!(await wait(session, false))) return stopped(session)
+        return check(session)
+      }
+    }
+    try {
+      if (session.request.op === "act") {
+        const first = !session.state!.sampled
+        session.state!.sampled = true
+        const response = helpers.checkAction(session.request, session.state!)
+        if (response !== undefined) return finished(session, response)
+        if (session.request.sample === true && first && session.state!.history.length > 0) return expired(session)
+        if (!(await wait(session, false))) return stopped(session)
+      } else {
+        helpers.clearTreeCaches()
+        const expectation = session.request.expectation
+        if (expectation._tag === "Viewport") {
+          let passed = false
+          const ready = await new Promise<boolean>((resume, reject) => {
+            let cancelObservation: (() => void) | undefined
+            let done = false
+            const finish = (ready: boolean, error?: unknown) => {
+              if (done) return
+              done = true
+              cancelObservation?.()
+              session.stopWaiting = undefined
+              if (error !== undefined) reject(error)
+              else resume(ready)
+            }
+            session.stopWaiting = () => finish(false)
+            cancelObservation = helpers.sampleViewport(
+              session.request.steps,
+              expectation,
+              (result, provisional) => {
+                if (!provisional || session.observed === null) session.observed = result.observed
+                passed = result.passed
+              },
+              (error) => finish(true, error),
+              true
+            )
+          })
+          if (!ready || session.disposed) return stopped(session)
+          if (passed || singleSample(session.request)) {
+            return finished(session, {
+              _tag: "Expected",
+              passed,
+              observed: session.observed,
+              changed: session.changed
+            })
+          }
+          if (!(await wait(session, false))) return stopped(session)
+          session.changed = true
+          return check(session)
+        }
+        const result = expectation._tag === "URL"
+          ? { passed: helpers.matchesValue(expectation.expected, location.href), observed: location.href }
+          : helpers.evaluate(session.request.steps, expectation)
+        session.observed = result.observed
+        if (result.passed || singleSample(session.request)) {
+          return finished(session, {
+            _tag: "Expected",
+            passed: result.passed,
+            observed: result.observed,
+            changed: session.changed
+          })
+        }
+        if (!(await wait(session, true))) return stopped(session)
+        session.changed = true
+      }
+      return check(session)
+    } catch (error) {
+      remove(session)
+      return { _tag: "Done", response: helpers.failureResponse(error) }
+    }
+  }
+  return async (text: string): Promise<string> => JSON.stringify(await run(JSON.parse(text) as CooperativeCommand))
+}
+
+/** Runs the separate cooperative protocol; ordinary engine requests never call or install this function. */
+export const cooperate = `function(command) {
+  const key = Symbol.for("@usestrider/browser/engine/cooperative/1");
+  const engine = globalThis[Symbol.for(${JSON.stringify(installKey)})];
+  if (engine === undefined) return "\\u0000missing";
+  if (globalThis[key] === undefined) {
+    Object.defineProperty(globalThis, key, { value: (${cooperativeEngine.toString()})(engine.cooperativeHelpers()), enumerable: false });
+  }
+  return globalThis[key](command);
+}`

@@ -1107,16 +1107,34 @@ export interface PressOptions extends ActionOptions, Keyboard.PressOptions {}
 export interface TypeOptions extends ActionOptions, Keyboard.TypeOptions {}
 
 /**
- * Which option of a `<select>` to choose, by its value, its label, or its index; the object names which.
+ * Which option of a `<select>` to choose, by its value, its label, or its index; the object names exactly one.
+ *
+ * **Example** (Choosing by value, label, and index)
+ *
+ * ```ts import.meta.vitest
+ * import { Locator, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const byValue: Locator.SelectOption = { value: "pt" }
+ * const byLabel: Locator.SelectOption = { label: "Portugal" }
+ * const byIndex: Locator.SelectOption = { index: 2 }
+ *
+ * const chooseEach = Effect.fn("chooseEach")(function*(page: Page.Page) {
+ *   const country = page.getByLabel("Country")
+ *   yield* country.selectOption(byValue)
+ *   yield* country.selectOption(byLabel)
+ *   yield* country.selectOption(byIndex)
+ * })
+ * ```
  *
  * @stability unstable
  * @category models
  * @since 0.1.0
  */
 export type SelectOption =
-  | { readonly value: string }
-  | { readonly label: string }
-  | { readonly index: number }
+  | { readonly value: string; readonly label?: never; readonly index?: never }
+  | { readonly label: string; readonly value?: never; readonly index?: never }
+  | { readonly index: number; readonly value?: never; readonly label?: never }
 
 type ActionEffect = Effect.Effect<void, LocatorError | Target.TargetGone | Deadline.Timeout>
 
@@ -1312,6 +1330,11 @@ export interface Locator extends ReadonlyLocator {
    * didn't check it fails with `StateUnchanged{expected: "checked"}`. The selected element's own checked
    * state takes precedence. Otherwise a selected label, or an ordinary descendant's nearest DOM label,
    * supplies its associated control. The selected element remains the click target and position origin.
+   * When input is needed, the enabled check applies to both the selected element and that control,
+   * using native disabled, fieldset and ARIA-disabled state. If that control stays disabled, the action
+   * fails with `Timeout`, its history showing `Disabled`, and no input is sent.
+   * Set `checks: { enabled: false }` to skip this check.
+   * Trial actions check readiness without input; already-correct state still succeeds immediately.
    *
    * Association follows DOM parents without crossing a shadow root and uses only the label's control,
    * never the ancestor label's ARIA state. Descendant fallback checks the selected node, its DOM
@@ -1356,7 +1379,11 @@ export interface Locator extends ReadonlyLocator {
    * click target and position origin. If already unchecked, nothing is sent. A checked native radio
    * fails with `WrongElement` before input, including with `trial: true`; check another radio in its
    * group instead. Page-managed ARIA radios can be unchecked. Otherwise it clicks and reads the state
-   * again, failing with `StateUnchanged{expected: "unchecked"}` if the state stays checked.
+   * again, failing with `StateUnchanged{expected: "unchecked"}` if the state stays checked. When input is
+   * needed, the enabled check applies to both the selected element and its associated control, including
+   * native, fieldset and ARIA-disabled state. If that control stays disabled, the action fails with
+   * `Timeout`, its history showing `Disabled`, and no input is sent.
+   * `checks: { enabled: false }` skips this check; trial checks the same readiness without input.
    *
    * Association follows DOM parents without crossing a shadow root and uses only the label's control,
    * never the ancestor label's ARIA state. Descendant fallback checks the selected node, its DOM
@@ -1607,7 +1634,9 @@ export interface Locator extends ReadonlyLocator {
    * **Details**
    *
    * The options are chosen from an isolated world of Strider's, with `input` and `change` dispatched as for a
-   * user's choice. An option that isn't there yet is waited for, and a timeout reports it as `NoSuchOption`. Any
+   * user's choice. An option that isn't there yet is waited for, and a timeout reports it as `NoSuchOption`. Enabled
+   * covers the chosen options too: while a chosen option, or its `<optgroup>`, is disabled the action waits, and a
+   * timeout reports it as `DisabledOption`; `checks.enabled: false` skips this. Any
    * element but a `<select>` fails at once with `WrongElement`.
    *
    * **Example** (Choosing a country)
@@ -2000,7 +2029,8 @@ export const LocatorErrorReason = Schema.Union([
   Reason.NotPermitted,
   Reason.Unsupported,
   Reason.BackendFailure,
-  Reason.PromptBlocking
+  Reason.PromptBlocking,
+  Reason.LocatorHandlerFailed
 ])
 
 /**

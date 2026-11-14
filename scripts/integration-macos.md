@@ -54,9 +54,9 @@ Updating these pins requires downloading and hashing both archives and validatin
   pixel and layout differences are findings to investigate. This does not promise Linux's hermetic machine.
 - `STRIDER_RECORD` is rejected by the entry point, environment setup and recording wrapper on macOS. The drift
   test is not selected, and Linux's traffic fixtures and names remain unchanged.
-- The existing trace plugin and runner retain failed tests' protocol and owned-process traces. The proposed
-  job uploads `.data/integration-failures/` with `integration-macos.log` for 14 days on failure, separately from
-  Linux's artifact. Bash pipefail keeps test failures visible through `tee`.
+- The existing trace plugin and runner retain failed tests' protocol and owned-process traces. The job uploads
+  these with `integration-macos.log` for 14 days, separately from Linux's artifact. Native crash evidence and two
+  passing protocol scopes are retained as described below. Bash pipefail keeps test failures visible through `tee`.
 
 The real macOS run must verify mounting/copying the Firefox app, Gatekeeper behavior, native headed browser
 launches, TLS fixtures with Homebrew OpenSSL 3, and the full adapter/slice outcomes. Investigate failures with the
@@ -72,3 +72,48 @@ in the last passing artifact and logged; the retained tail
 is not a complete traffic history. `packages/browser/test/integration/failureTrace.ts` documents clock domains,
 unavailable observations and supported child-process capture. This mode changes retention and observation only;
 it adds no browser waits and changes no test deadlines or assertions.
+
+## Native Chromium crash evidence
+
+Every hosted macOS run sets `STRIDER_MACOS_CRASH_DATABASE` to a run-owned directory in `runner.temp`.
+The entry point passes `BREAKPAD_DUMP_LOCATION` to Chromium, keeping Crashpad's database outside both the
+downloaded app and scope-owned profiles. No launch flag, assertion or deadline changes. `CHROME_HEADLESS=1`
+marks an unattended bot so Chromium disables uploads in the absence of enforced policy.
+
+In the pinned Chromium source, [ChromeCrashReporterClient::Create](https://github.com/chromium/chromium/blob/155.0.8059.79/chrome/app/chrome_crash_reporter_client.cc)
+overrides `DIR_CRASH_DUMPS` from `BREAKPAD_DUMP_LOCATION`, and
+[Crashpad initialization](https://github.com/chromium/chromium/blob/155.0.8059.79/components/crash/core/app/crashpad.cc)
+enables dumping unconditionally on macOS, irrespective of the legacy `--disable-breakpad` flag.
+The [default database path](https://github.com/chromium/chromium/blob/155.0.8059.79/chrome/common/chrome_paths.cc)
+is based on the default user-data directory, not `--user-data-dir`. The earlier system-report snapshot did not
+inspect this database. Crashpad can intercept a crash without leaving an OS diagnostic report.
+
+An `always()` collector copies native files before the artifact upload, even when the suite fails. It scans
+Crashpad's `pending`, `completed` and `new` directories, then the user's and system's `DiagnosticReports`
+directories and their `Retired` subdirectories. Native copies have a combined 64 MiB limit: at most 32 reports,
+each at most 16 MiB. Each source directory has a 512-entry inspection limit. Files are read one at a time without
+following symlinks; omissions, partial/invalid minidumps and filesystem errors appear in `capture-status.json`.
+The live database remains Crashpad-managed: its default pruning target is 128 MiB, not a hard filesystem quota.
+A single report or reports written between pruning passes can exceed it. The database lives only on that runner;
+only the bounded copies are uploaded. Delayed reports and abrupt runner termination can still prevent capture.
+
+`integration-macos-log` retains the log, bounded failure traces, `.data/macos-crash-reports/`, and investigation
+metadata when requested, for 14 days on success, failure or cancellation. Capture status includes pinned browser
+version/archive hash, run/commit identity, time, report hashes, dump process/thread/exception IDs and header time.
+`launches.ndjson` records browser root PIDs and arguments, capped at 256 KiB; individual identity records are capped
+at 64 KiB. Metadata write errors are logged and saved separately when possible.
+
+The existing `ChromiumIdentity.test.ts` deliberate renderer-crash case records its target/session, browser version,
+browser PID, renderer PIDs from `SystemInfo.getProcessInfo`, and the interval between requesting `Page.crash` and
+observing `Inspector.targetCrashed`. The collector verifies an exception minidump only when its PID is in that
+isolated browser's renderer list and its header time falls within that interval (rounded down at the start to
+match the header's one-second precision). `verification.state` is `verified`, `missing` or `not-observed`;
+`nativeReports` separately states whether any native files were retained. A successful suite with unverified
+capture fails the collector step after writing metadata. An already failing suite keeps its result and the
+explicit verification status. No extra crash, browser retry, polling or delay is introduced.
+
+The worker test and deliberate-crash test, plus both files' shared contexts, retain their ordinary bounded
+protocol/process histories on passing runs too. These four scopes are independent of the optional 16 MiB
+passing-diagnostics budget. Match native dump time/PID against these traces and the deliberate-crash marker;
+a filename alone does not identify the worker failure. The raw minidumps retain native stacks and modules for
+later symbolization; the collector's small identity parser does not diagnose or symbolize a crash.

@@ -40,7 +40,8 @@ const LikeAUser = Chromium.layer({
 - Don't put a URL in `args`: headless Chromium opens one page only.
 - `LaunchProfile.automation`, the default, turns off first-run pages, sync, updates, and background networking,
   and enables `CDPScreenshotNewSurface` to request repaint on a new surface for captures. Capture can drive
-  rendering and is not guaranteed to be unobservable to the page.
+  rendering and is not guaranteed to be unobservable to the page. It also hides infobars: Chrome for Testing adds an
+  "automated testing only" one to each new window, which shrinks the page area after the window opens.
   [`LaunchProfile.concurrent`](/docs/tools/testing#concurrent-pages) includes those settings and also stops throttling
   background pages, which pages can tell. `LaunchProfile.stock` adds nothing, to run Chromium as a person does,
   first-run pages, sync, and updates included.
@@ -48,6 +49,9 @@ const LikeAUser = Chromium.layer({
   [`emulation: { userAgent }`](/docs/pages/contexts#settings-for-a-contexts-life) to change it.
 - With `userDataDir`, the profile's logins are in the default context, not the new one `Browser.newPage()` makes:
   open the page there, as [Logging in once](/docs/pages/contexts#logging-in-once) shows.
+
+Closing `Chromium.layer` closes the browser it launched cleanly to preserve recent writes to a supplied
+`userDataDir`. If the browser does not exit within five seconds, Strider stops it.
 
 On the tested Chromium build, capturing a minimized window temporarily produced visible/hidden visibility events
 and animation-frame callbacks while the native window stayed minimized. Both the old and new capture paths did
@@ -238,7 +242,8 @@ const loadMetrics = Effect.fn("loadMetrics")(function*(port: number, url: string
   for each command Strider sends.
 
 A raw command Chromium rejects fails with a `ProtocolError` whose reason, `Rejected`, has Chromium's `code` and
-`description`, and a `reason` read from them: `NoSuchTarget`, `NoSuchFrame`, `NoSuchNode`, `InvalidArgument`, or
+`description`, a `target` naming the kind of target it went to (`page`, `iframe`, `worker`, `service_worker`,
+`shared_worker`, or `other`; absent for a command sent to the browser's own session), and a `reason` read from them: `NoSuchTarget`, `NoSuchFrame`, `NoSuchNode`, `InvalidArgument`, or
 `Unrecognized` for any other. A command Strider sends fails its operation with
 [`BackendFailure`](/docs/errors#three-kinds-of-failure), the `ProtocolError` as its `cause`. A raw step can recover
 from a rejection it expects, such as a tab that closed before it attached:

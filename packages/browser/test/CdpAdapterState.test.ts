@@ -46,6 +46,7 @@ import * as Serialization from "../src/internal/serialization.ts"
 import * as Request from "../src/NetworkRequest.ts"
 import * as Protocol from "../src/protocol/Protocol.ts"
 import * as Target from "../src/Target.ts"
+import { viewportTap } from "./integration/viewportProbe.ts"
 import { makeBrowser } from "./utils/FakeBrowser.ts"
 
 const session = { key: "S1", send: () => Effect.succeed({}) } as unknown as ProtocolClient.Session
@@ -103,6 +104,41 @@ const withPage = Effect.fnUntraced(function*(protocolSession = session, requestT
   state.frames.set("T1", main)
   state.navigables.set(page.id, main)
   return { state, page, target, facts }
+})
+
+describe("CDP viewport diagnostics", () => {
+  it.effect("creates no execution world, so no realm appears in the adapter", () =>
+    Effect.gen(function*() {
+      const { state } = yield* withPage()
+      const frame = state.frames.get("T1")!
+      const document = Tree.commit(
+        state,
+        frame,
+        { loaderId: "initial", url: "about:blank", origin: "://" },
+        () => ({ _tag: "InitialBlank" }),
+        undefined,
+        "test"
+      )
+      const writes: Array<any> = []
+      const tap = viewportTap(() => {})
+      tap.inject = (message) => writes.push(JSON.parse(message))
+      tap.receive(JSON.stringify({
+        method: "Target.attachedToTarget",
+        params: { sessionId: "S1", targetInfo: { targetId: "T1", type: "page" }, waitingForDebugger: false }
+      }))
+      tap.send(JSON.stringify({ id: 1, sessionId: "S1", method: "Emulation.clearDeviceMetricsOverride" }))
+      tap.receive(JSON.stringify({ id: 1, result: {}, sessionId: "S1" }))
+      assert.isAbove(writes.length, 0)
+      // A world exists only if the probe asks for one or runs page code, which would announce a context.
+      for (const command of writes) {
+        assert.isFalse(
+          command.method === "Page.createIsolatedWorld" || command.method.startsWith("Runtime."),
+          command.method
+        )
+      }
+      assert.strictEqual(document.realms.size, 0)
+      assert.strictEqual(state.realms.size, 0)
+    }).pipe(Effect.scoped))
 })
 
 describe("CDP click cleanup", () => {
@@ -874,6 +910,49 @@ describe("CDP declaration release", () => {
         assert.strictEqual(warnings.length, reason._tag === "SessionEnded" ? 0 : 1)
       }))
   }
+})
+
+describe("CDP viewport on child targets", () => {
+  it.effect("sends the viewport, its measurement and its clear to the top-level page only", () =>
+    Effect.gen(function*() {
+      const { state, target, page } = yield* withPage()
+      const sent = { page: [] as Array<string>, iframe: [] as Array<string> }
+      const mockFor = (kind: "page" | "iframe") =>
+        ({
+          ...session,
+          key: kind,
+          subscribe: () => Effect.succeed(Stream.never),
+          send: (command: { readonly method: string }) => {
+            sent[kind].push(command.method)
+            if (kind === "iframe" && command.method.endsWith("DeviceMetricsOverride")) {
+              return Effect.fail(
+                new Protocol.ProtocolError({
+                  reason: new Protocol.Rejected({
+                    method: command.method,
+                    reason: "Unrecognized",
+                    code: -32000,
+                    description: "Command can only be executed on top-level targets"
+                  })
+                })
+              )
+            }
+            return Effect.succeed({ executionContextId: 1, result: { value: [780, 493] } })
+          }
+        }) as unknown as ProtocolClient.Session
+      const top = mockFor("page")
+      const child = mockFor("iframe")
+      state.targets.set(top, { ...target, session: top, page })
+      state.targets.set(child, { ...target, targetId: "T2", kind: "iframe", session: child, page })
+      yield* Effect.scoped(Declare.declare(state, { _tag: "Page", page: page.id }, {
+        _tag: "Override",
+        override: { _tag: "Viewport", width: 640, height: 480, deviceScaleFactor: 1, mobile: false }
+      }))
+      const viewportCommands = (methods: Array<string>) =>
+        methods.filter((method) => /DeviceMetricsOverride$|createIsolatedWorld$/.test(method))
+      assert.deepStrictEqual(viewportCommands(sent.iframe), [])
+      assert.include(sent.page, "Emulation.setDeviceMetricsOverride")
+      assert.include(sent.page, "Emulation.clearDeviceMetricsOverride")
+    }))
 })
 
 describe("CDP restoration cleanup", () => {
@@ -3273,3 +3352,25 @@ it.effect("rejects an isolated realm created in a replacement document while acq
       }
     }
   }).pipe(Effect.scoped))
+
+it.effect("falls back for malformed network and paused request URLs", () =>
+  Effect.gen(function*() {
+    const { state, target, facts } = yield* withPage()
+    const handlers = Obligations.register(Network.register(Kit.handlers<State.Event>()))
+    handlers.apply("Network.requestWillBeSent", sent("not a URL"), { state, target })
+    // An unattributed worker pause is surfaced without a page route registration.
+    handlers.apply("Fetch.requestPaused", {
+      requestId: "malformed",
+      resourceType: "Fetch",
+      request: sent("also not a URL").request
+    }, { state, target: { ...target, page: undefined, kind: "worker" } })
+    yield* state.buffer.flush
+    const request = facts.find((fact) => fact._tag === "RequestSent")
+    assert.isDefined(request)
+    if (request?._tag === "RequestSent") assert.strictEqual(request.request.url, "about:blank")
+    const obligation = facts.find((fact) => fact._tag === "ObligationOpened")
+    assert.isDefined(obligation)
+    if (obligation?._tag === "ObligationOpened" && obligation.subject._tag === "PausedRequest") {
+      assert.strictEqual(obligation.subject.request.url, "about:blank")
+    } else assert.fail("expected a paused request")
+  }))

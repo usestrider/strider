@@ -134,6 +134,242 @@ const errorNavigation = (
 }
 
 describe("BidiAdapter state", () => {
+  it.effect("keeps the active document usable after prospective realms are destroyed without commit", () =>
+    Effect.gen(function*() {
+      const { document, page, realm, state } = yield* withPage({
+        "script.evaluate": { type: "success", realm: "active-tools", result: { type: "number", value: 0 } }
+      })
+      const handlers = Evaluation.register(Navigation.register(Kit.handlers<State.Event>()))
+      const created = (id: string, sandbox?: string) =>
+        handlers.apply("script.realmCreated", {
+          realm: id,
+          context: page.bidi,
+          type: "window",
+          origin: "null",
+          sandbox
+        }, { state })
+      const navigation = { context: page.bidi, navigation: "aborted", url: "http://next.example/", timestamp: 1 }
+      handlers.apply("browsingContext.navigationStarted", navigation, { state })
+      // A lifecycle boundary probe, not a replay of the recorded navigation.
+      created("prospective-main")
+      created("prospective-tools", "tools")
+      handlers.apply("script.realmDestroyed", { realm: "prospective-main" }, { state })
+      handlers.apply("script.realmDestroyed", { realm: "prospective-tools" }, { state })
+      handlers.apply("browsingContext.navigationAborted", navigation, { state })
+      created("active-tools", "tools")
+      yield* state.buffer.flush
+      assert.strictEqual(page.document, document)
+      assert.isEmpty(page.pendingRealms)
+      assert.strictEqual(yield* Evaluation.realm(state, document.id, { _tag: "Main" }), realm.id)
+      assert.strictEqual(
+        yield* Evaluation.realm(state, document.id, { _tag: "Isolated", name: "tools" }),
+        state.realms.get("active-tools")!.id
+      )
+    }))
+
+  it.effect("closing a replaced page preserves another page's current and pending realms", () =>
+    Effect.gen(function*() {
+      const { page, state } = yield* withPage()
+      const sibling = Tree.addNavigable(state, {
+        context: "sibling" as BrowsingContext.BrowsingContext,
+        userContext: "default",
+        originalOpener: page.bidi,
+        url: "about:blank"
+      }, false)!
+      const handlers = Evaluation.register(Kit.handlers<State.Event>())
+      for (
+        const [context, realm] of [
+          [page.bidi, "replacement"],
+          [sibling.bidi, "sibling-main"],
+          [sibling.bidi, "sibling-pending"]
+        ]
+      ) {
+        handlers.apply("script.realmCreated", { context, realm, type: "window", origin: "null" }, { state })
+      }
+      Tree.commit(state, page, "http://next.example/", "http://next.example", { _tag: "InitialBlank" }, "next", "test")
+      Tree.removeNavigable(state, page, new Target.PageClosed({ by: "command" }), "test")
+      yield* state.buffer.flush
+      assert.deepStrictEqual([...state.realms.keys()], ["sibling-main", "sibling-pending"])
+      assert.isFalse(state.realms.get("sibling-pending")!.ended)
+      assert.strictEqual(
+        yield* Evaluation.realm(state, sibling.document!.id, { _tag: "Main" }),
+        state.realms.get("sibling-main")!.id
+      )
+      assert.strictEqual(sibling.pendingRealms[0], state.realms.get("sibling-pending"))
+    }))
+
+  it.effect("selects the destination main realm when the initial realm survives past commit", () =>
+    Effect.gen(function*() {
+      const url = "http://127.0.0.1:50796/cookie"
+      const { page, realm: initial, state } = yield* withPage({
+        "browsingContext.navigate": { navigation: "N1", url }
+      })
+      const handlers = Evaluation.register(Navigation.register(Kit.handlers<State.Event>()))
+      yield* Navigation.navigate(state, page.id, url, { referrer: Option.none() })
+      const navigation = { context: page.bidi, navigation: "N1", url, timestamp: 0 }
+      handlers.apply("browsingContext.navigationStarted", navigation, { state })
+      // Captured Firefox 158 macOS ordering: a transient null-origin realm is replaced before
+      // commit, while the original about:blank realm is not destroyed until after evaluation.
+      handlers.apply("script.realmCreated", {
+        realm: "transient",
+        context: page.bidi,
+        type: "window",
+        origin: "null"
+      }, { state })
+      handlers.apply("script.realmDestroyed", { realm: "transient" }, { state })
+      handlers.apply("script.realmCreated", {
+        realm: "destination",
+        context: page.bidi,
+        type: "window",
+        origin: "http://127.0.0.1:50796"
+      }, { state })
+      handlers.apply("browsingContext.navigationCommitted", navigation, { state })
+      yield* state.buffer.flush
+      assert.isFalse(initial.ended)
+      const selected = yield* Evaluation.realm(state, page.document!.id, { _tag: "Main" })
+      assert.strictEqual(selected, state.realms.get("destination")!.id)
+    }))
+
+  it.effect("publishes only replacement realms at commit, including pending isolated worlds", () =>
+    Effect.gen(function*() {
+      const { facts, page, realm: initial, state } = yield* withPage()
+      const handlers = Evaluation.register(Kit.handlers<State.Event>())
+      const created = (realm: string, sandbox?: string) =>
+        handlers.apply("script.realmCreated", {
+          realm,
+          context: page.bidi,
+          type: "window",
+          origin: "http://next.example",
+          sandbox
+        }, { state })
+      created("old-isolated", "tools")
+      const oldIsolated = state.realms.get("old-isolated")!
+      // A duplicate sandbox can precede the replacement main realm; a new sandbox can follow it.
+      created("next-isolated", "tools")
+      created("next-main")
+      created("next-extra", "extra")
+      yield* state.buffer.flush
+      assert.isFalse(facts.some((fact) =>
+        fact._tag === "RealmAdded" &&
+        fact.realm === state.realms.get("next-isolated")!.id
+      ))
+      const document = Tree.commit(
+        state,
+        page,
+        "http://next.example/",
+        "http://next.example",
+        { _tag: "InitialBlank" },
+        "next",
+        "test"
+      )
+      yield* state.buffer.flush
+      assert.deepStrictEqual([...document.realms].map((realm) => realm.bidi), [
+        "next-isolated",
+        "next-main",
+        "next-extra"
+      ])
+      assert.isFalse(facts.some((fact) => fact._tag === "RealmDocumentAdded" && fact.document === document.id))
+      assert.strictEqual(
+        yield* Evaluation.realm(state, document.id, { _tag: "Isolated", name: "tools" }),
+        state.realms.get("next-isolated")!.id
+      )
+      handlers.apply("script.realmDestroyed", { realm: initial.bidi }, { state })
+      handlers.apply("script.realmDestroyed", { realm: oldIsolated.bidi }, { state })
+      assert.strictEqual(document.realms.size, 3)
+    }))
+
+  it.effect("uses sandbox replacement evidence when the main realm arrives after commit", () =>
+    Effect.gen(function*() {
+      const { facts, page, realm: initial, state } = yield* withPage()
+      const handlers = Evaluation.register(Kit.handlers<State.Event>())
+      const created = (realm: string, sandbox?: string) =>
+        handlers.apply("script.realmCreated", {
+          realm,
+          context: page.bidi,
+          type: "window",
+          origin: "http://next.example",
+          sandbox
+        }, { state })
+      created("old-tools", "tools")
+      created("new-tools", "tools")
+      const document = Tree.commit(
+        state,
+        page,
+        "http://next.example/",
+        "http://next.example",
+        { _tag: "InitialBlank" },
+        "next",
+        "test"
+      )
+      created("late-main")
+      yield* state.buffer.flush
+      assert.isFalse(initial.ended)
+      assert.deepStrictEqual([...document.realms].map((realm) => realm.bidi), ["new-tools", "late-main"])
+      assert.strictEqual(
+        yield* Evaluation.realm(state, document.id, { _tag: "Main" }),
+        state.realms.get("late-main")!.id
+      )
+      assert.isEmpty(page.pendingRealms)
+      assert.isFalse(facts.some((fact) => fact._tag === "RealmDocumentAdded" && fact.document === document.id))
+    }))
+
+  it.effect("releases delayed old-document realms when their page closes", () =>
+    Effect.gen(function*() {
+      const { page, realm, state } = yield* withPage()
+      const handlers = Evaluation.register(Kit.handlers<State.Event>())
+      handlers.apply("script.realmCreated", {
+        realm: "next",
+        context: page.bidi,
+        type: "window",
+        origin: "http://next.example"
+      }, { state })
+      Tree.commit(state, page, "http://next.example/", "http://next.example", { _tag: "InitialBlank" }, "next", "test")
+      Tree.removeNavigable(state, page, new Target.PageClosed({ by: "command" }), "test")
+      assert.isTrue(realm.ended)
+      assert.isEmpty([...state.realms.values()])
+    }))
+
+  it.effect("transfers genuinely reused realms and reports their new document", () =>
+    Effect.gen(function*() {
+      const { facts, page, realm, state } = yield* withPage()
+      const document = Tree.commit(state, page, "about:blank", "null", { _tag: "InitialBlank" }, "next", "test")
+      yield* state.buffer.flush
+      assert.deepStrictEqual([...document.realms], [realm])
+      assert.deepStrictEqual(facts.filter((fact) => fact._tag === "RealmDocumentAdded"), [
+        { _tag: "RealmDocumentAdded", realm: realm.id, document: document.id }
+      ])
+      assert.strictEqual(yield* Evaluation.realm(state, document.id, { _tag: "Main" }), realm.id)
+    }))
+
+  it.effect("publishes a late main realm directly when no realm survived commit", () =>
+    Effect.gen(function*() {
+      const { facts, page, realm, state } = yield* withPage()
+      const handlers = Evaluation.register(Kit.handlers<State.Event>())
+      handlers.apply("script.realmDestroyed", { realm: realm.bidi }, { state })
+      const document = Tree.commit(
+        state,
+        page,
+        "http://next.example/",
+        "http://next.example",
+        { _tag: "InitialBlank" },
+        "next",
+        "test"
+      )
+      handlers.apply("script.realmCreated", {
+        realm: "late",
+        context: page.bidi,
+        type: "window",
+        origin: "http://next.example"
+      }, { state })
+      yield* state.buffer.flush
+      assert.strictEqual(yield* Evaluation.realm(state, document.id, { _tag: "Main" }), state.realms.get("late")!.id)
+      assert.isEmpty(page.pendingRealms)
+      assert.isTrue(facts.some((fact) =>
+        fact._tag === "RealmAdded" && fact.realm === state.realms.get("late")!.id &&
+        fact.kind._tag === "Window" && fact.kind.document === document.id
+      ))
+    }))
+
   for (
     const boundary of [
       "event-before-reply",
@@ -408,7 +644,7 @@ describe("BidiAdapter state", () => {
         const handlers = Evaluation.register(Navigation.register(Kit.handlers<State.Event>()))
         // Synthetic ordering, not captured Firefox traffic: no navigationStarted or commit is sent.
         // The adapter already supports this unannounced restoration when the realm precedes the reply.
-        handlers.apply("script.realmDestroyed", { realm: realm.bidi }, { state })
+        // Keep the old realm live: restoration must not publish it in the restored document.
         const arrived = () =>
           handlers.apply("script.realmCreated", {
             realm: "R2",
@@ -441,6 +677,9 @@ describe("BidiAdapter state", () => {
           response: Option.none()
         })
         assert.strictEqual(page.document!.url, url)
+        assert.isFalse(realm.ended)
+        assert.deepStrictEqual([...page.document!.realms].map((entry) => entry.bidi), ["R2"])
+        assert.isFalse(facts.some((fact) => fact._tag === "RealmDocumentAdded" && fact.document === page.document!.id))
         assert.lengthOf(page.pendingRealms, 0)
       }))
   }
@@ -1304,6 +1543,201 @@ describe("BidiAdapter state", () => {
       assert.include(facts.map((fact) => fact._tag as string), "ErrorDocumentAttributed")
       assert.deepInclude(facts, { _tag: "ErrorDocumentAttributed", document, navigation: prior })
       assert.isEmpty(page.pendingTerminals)
+    }))
+
+  // Reduced from Firefox 158's recorded 204, download, HAR and November nightly traffic.
+  // The load predates A's start although Firefox assigns it A; B has no document request.
+  for (const outcome of ["NoContent", "Download", "Committed", "nightly", "Failed"] as const) {
+    it.effect(`correlates Firefox's stale load and replacement identity for ${outcome}`, () =>
+      Effect.gen(function*() {
+        const url = "http://example.test/fixture"
+        const entered = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const { facts, page, state } = yield* withPage({
+          "browsingContext.navigate": Effect.gen(function*() {
+            yield* Deferred.succeed(entered, undefined)
+            yield* Deferred.await(release)
+            if (outcome === "NoContent" || outcome === "Download") {
+              return yield* Effect.fail(
+                new Protocol.ProtocolError({
+                  reason: new Protocol.Rejected({
+                    method: "browsingContext.navigate",
+                    reason: "Unrecognized",
+                    code: "unknown error",
+                    description: "NS_BINDING_ABORTED"
+                  })
+                })
+              )
+            }
+            return { navigation: "A", url }
+          })
+        })
+        const handlers = Contexts.register(Network.register(Navigation.register(Kit.handlers<State.Event>())))
+        const event = (method: string, params: unknown) => handlers.apply(method, params, { state })
+        const info = (navigation: string, timestamp: number) => ({ context: "C1", navigation, url, timestamp })
+        // The complete nightly trace has an earlier successful command, then a second command.
+        // Its initial "failure" names the already committed first navigation, not the second one.
+        if (outcome === "nightly") {
+          event("browsingContext.navigationStarted", info("prior", 1))
+          event("browsingContext.navigationCommitted", info("prior", 2))
+        }
+        const running = yield* Effect.forkChild(Navigation.navigate(state, page.id, url, { referrer: Option.none() }))
+        yield* Deferred.await(entered)
+        const reserved = page.expected.list[0]!.id
+        if (outcome === "nightly") event("browsingContext.navigationFailed", info("prior", 9))
+        event("browsingContext.navigationStarted", info("A", 10))
+        const params = {
+          ...info("A", 11),
+          redirectCount: 0,
+          isBlocked: false,
+          request: { request: "request", url, method: "GET", headers: [], destination: "document", bodySize: 0 }
+        }
+        event("network.beforeRequestSent", params)
+        event("browsingContext.load", { ...info("A", 9), url: outcome === "nightly" ? url : "about:blank" })
+        event("browsingContext.navigationStarted", info("B", 12))
+        event("network.responseStarted", {
+          ...params,
+          response: {
+            url,
+            status: outcome === "NoContent" ? 204 : 200,
+            statusText: "",
+            protocol: "HTTP/1.1",
+            headers: [],
+            fromCache: false
+          }
+        })
+        if (outcome === "NoContent") event("network.fetchError", { ...params, errorText: "NS_BINDING_ABORTED" })
+        else if (outcome === "Download") {
+          event("browsingContext.downloadWillBegin", {
+            ...info("A", 13),
+            download: "download",
+            suggestedFilename: "file.txt"
+          })
+        } else if (outcome === "Failed") event("network.fetchError", { ...params, errorText: "connection refused" })
+        else event("browsingContext.navigationCommitted", info("B", 13))
+        yield* Deferred.succeed(release, undefined)
+        yield* Fiber.join(running)
+        event("browsingContext.navigationFailed", info("B", 14))
+        if (outcome === "Committed" || outcome === "nightly") {
+          event("browsingContext.load", info("A", 9))
+          event("browsingContext.load", info("A", 16))
+        }
+        if (outcome === "Failed") {
+          event("browsingContext.navigationCommitted", {
+            ...info("B", 15),
+            url: "about:neterror?e=connectionFailure&u=" + encodeURIComponent(url)
+          })
+        }
+        yield* state.buffer.flush
+        if (outcome === "Failed") {
+          const document = facts.filter((fact) => fact._tag === "DocumentCommitted").at(-1)!
+          assert.deepStrictEqual(document.createdBy, { _tag: "ErrorPage", navigation: reserved })
+        }
+        const ends = facts.filter((fact) => fact._tag === "NavigationEnded").filter((fact) =>
+          fact.navigation === reserved
+        )
+        assert.lengthOf(ends, 1)
+        assert.strictEqual(ends[0]!.outcome._tag, outcome === "nightly" ? "Committed" : outcome)
+        assert.strictEqual(state.requests.get("request")!.navigation!.id, reserved)
+        if (ends[0]!.outcome._tag === "Committed") {
+          assert.deepStrictEqual(ends[0]!.outcome.response, Option.some(state.requests.get("request")!.hop))
+          const readiness = facts.filter((fact) => fact._tag === "DocumentReadiness")
+          assert.lengthOf(readiness, 1)
+          assert.strictEqual(readiness[0]!.document, ends[0]!.outcome.document)
+        }
+        assert.isEmpty(page.navigations)
+        assert.isEmpty(state.navigations)
+        assert.isEmpty(page.expected.list)
+        assert.isEmpty(page.commandNavigations)
+        assert.isEmpty(page.pendingTerminals)
+      }))
+  }
+
+  for (
+    const competition of ["same-URL command", "page request", "fresh load", "other context", "no request"] as const
+  ) {
+    it.effect(`preserves supersession after a stale load with ${competition}`, () =>
+      Effect.gen(function*() {
+        const { facts, page, state } = yield* withPage()
+        const url = "http://example.test/fixture"
+        const handlers = Network.register(Navigation.register(Kit.handlers<State.Event>()))
+        const event = (method: string, params: unknown) => handlers.apply(method, params, { state })
+        const info = (navigation: string, timestamp: number) => ({ context: "C1", navigation, url, timestamp })
+        const reserved = Kit.expect(state.ids, page.expected, url)
+        event("browsingContext.navigationStarted", info("A", 10))
+        const request = (navigation: string, id: string) => ({
+          ...info(navigation, 11),
+          redirectCount: 0,
+          isBlocked: false,
+          request: { request: id, url, method: "GET", headers: [], destination: "document", bodySize: 0 }
+        })
+        if (competition !== "no request") event("network.beforeRequestSent", request("A", "first"))
+        event("browsingContext.load", {
+          ...info("A", competition === "fresh load" ? 11 : 9),
+          context: competition === "other context" ? "other" : "C1",
+          url: "about:blank"
+        })
+        const second = competition === "same-URL command" ? Kit.expect(state.ids, page.expected, url) : undefined
+        event("browsingContext.navigationStarted", info("B", 12))
+        if (competition === "page request") event("network.beforeRequestSent", request("B", "second"))
+        event("browsingContext.navigationCommitted", info("B", 13))
+        event("browsingContext.navigationFailed", info("A", 14))
+        yield* state.buffer.flush
+        const ended = facts.filter((fact) => fact._tag === "NavigationEnded").filter((fact) =>
+          fact.navigation === reserved
+        )
+        assert.lengthOf(ended, 1)
+        assert.strictEqual(ended[0]!.outcome._tag, "Superseded")
+        if (second !== undefined && ended[0]!.outcome._tag === "Superseded") {
+          assert.strictEqual(ended[0]!.outcome.by, second)
+        }
+        assert.isEmpty(page.navigations)
+        assert.isEmpty(state.navigations)
+      }))
+  }
+
+  it.effect("ignores a delayed start older than the active navigation and clears its stale-load evidence", () =>
+    Effect.gen(function*() {
+      const { facts, page, state } = yield* withPage()
+      const handlers = Navigation.register(Kit.handlers<State.Event>())
+      const event = (method: string, navigation: string, timestamp: number) =>
+        handlers.apply(method, { context: "C1", navigation, url: "http://example.test/", timestamp }, { state })
+      event("browsingContext.navigationStarted", "current", 20)
+      const current = state.navigations.get("current")!
+      event("browsingContext.navigationStarted", "old", 10)
+      assert.isFalse(current.ended)
+      assert.isFalse(state.navigations.has("old"))
+      event("browsingContext.navigationCommitted", "current", 30)
+      event("browsingContext.navigationStarted", "old", 10)
+      yield* state.buffer.flush
+      assert.lengthOf(facts.filter((fact) => fact._tag === "NavigationStarted"), 1)
+      assert.isEmpty(state.navigations)
+      assert.isEmpty(current.starts)
+      assert.isUndefined(current.staleLoad)
+      assert.isEmpty(page.navigations)
+    }))
+
+  it.effect("releases navigation identity evidence when its context is removed", () =>
+    Effect.gen(function*() {
+      const { page, state } = yield* withPage()
+      const handlers = Navigation.register(Kit.handlers<State.Event>())
+      handlers.apply("browsingContext.navigationStarted", {
+        context: "C1",
+        navigation: "active",
+        url: "http://example.test/",
+        timestamp: 10
+      }, { state })
+      const navigation = state.navigations.get("active")!
+      handlers.apply("browsingContext.load", {
+        context: "C1",
+        navigation: "active",
+        url: "about:blank",
+        timestamp: 9
+      }, { state })
+      Tree.removeNavigable(state, page, new Target.PageClosed({ by: "command" }), "test")
+      assert.isEmpty(navigation.starts)
+      assert.isUndefined(navigation.staleLoad)
+      assert.isEmpty(state.navigations)
     }))
 
   for (const status of [204, 205, 500]) {

@@ -39,7 +39,7 @@ const AdasFirefox = Firefox.layer({
   [`ProcessExited`](/docs/api/browser/Browser#ProcessExited) if Firefox exited.
 - On Firefox, a launch profile is the preferences it writes to the profile's `user.js`; its Chromium switches are
   ignored. `LaunchProfile.automation`, the default, writes: no first-run page,
-  no updates, no telemetry, the JSON viewer off, and popups opened as windows.
+  no updates, no telemetry, the JSON viewer and new-tab preloading off, and popups opened as windows.
 - `LaunchProfile.stock` sets nothing, for Firefox as a person's install shows it, with its first-run page, JSON
   viewer, and popups in tabs. [`LaunchProfile.concurrent`](/docs/tools/testing#concurrent-pages) also turns off
   background timer throttling, for pages that run side by side.
@@ -114,6 +114,10 @@ Supported, with a caveat:
 What changes when attached:
 
 <BrowserLimits browser="firefox" when="attached" />
+
+## Memory in long sessions
+
+Measured on Firefox 158.0, a session that opens and closes many pages grew by about 10 MB per page in Firefox's main process, because Firefox keeps part of every closed window. About half was freed after roughly 30 seconds idle, and a busy session never idles that long. Restarting the browser releases it, so a session that opens thousands of pages should relaunch Firefox now and then, between tasks.
 
 ## Differences
 

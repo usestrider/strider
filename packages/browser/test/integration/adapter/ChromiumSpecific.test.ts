@@ -5,10 +5,11 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser, Deadline, Expect, Ledger } from "@usestrider/browser"
+import { Browser, BrowserWorker, Deadline, Expect, Ledger } from "@usestrider/browser"
 import * as BrowserCdp from "@usestrider/browser/cdp/Browser"
 import * as Page from "@usestrider/browser/cdp/Page"
 import * as Target from "@usestrider/browser/cdp/Target"
+import { Chromium } from "@usestrider/browser/chromium"
 import { CdpConnection, Protocol, Transport } from "@usestrider/browser/protocol"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -264,6 +265,38 @@ describe("Chromium adapter, CDP only", () => {
         )
       }
 
+      it.effect(
+        "persists immediate localStorage writes in a supplied profile when the browser layer closes before the page scope",
+        () =>
+          Effect.gen(function*() {
+            const fs = yield* FileSystem.FileSystem
+            const served = yield* site
+            const directory = yield* fs.makeTempDirectoryScoped({ prefix: "strider-profile-storage-test-" })
+            // Keep the page alive until the browser layer shuts down; closing it first can flush storage.
+            for (const round of [0, 1]) {
+              yield* Effect.scoped(
+                Effect.gen(function*() {
+                  const browser = yield* Browser.Browser
+                  assertPinned("Chromium", browser.info.version, chromium.version)
+                  const context = yield* browser.defaultContext.control
+                  const page = yield* context.newPage
+                  yield* page.goto(`${served.origin}/hello`)
+                  if (round === 0) {
+                    yield* page.evaluateInMainWorld(() => localStorage.setItem("scope-shutdown", "kept"))
+                  } else {
+                    assert.strictEqual(
+                      yield* page.evaluateInMainWorld(() => localStorage.getItem("scope-shutdown")),
+                      "kept"
+                    )
+                  }
+                }).pipe(Effect.provide(Chromium.layer({ executablePath: executable, userDataDir: directory })))
+              )
+              assert.isTrue(yield* fs.exists(directory))
+            }
+          }),
+        timeout
+      )
+
       for (const candidate of [false, true]) {
         it.effect(
           `reads persisted storage and preserves a supplied profile on ${candidate ? "windowless" : "ordinary"} launch`,
@@ -302,8 +335,8 @@ describe("Chromium adapter, CDP only", () => {
                     yield* page.goto(`${served.origin}/hello`)
                     if (round === 0) {
                       yield* page.evaluateInMainWorld(() => localStorage.setItem("windowless", "kept"))
-                      // Seed durable browser data with Chromium's graceful close. Scope shutdown is a signal,
-                      // which does not guarantee flushing newly written localStorage on either launch mode.
+                      // These raw-launcher controls seed with explicit graceful close; unlike Chromium.layer,
+                      // raw launcher scope release still terminates by signal on either launch mode.
                       yield* gracefulClose
                       yield* child!.handle.exitCode
                     } else {
@@ -406,6 +439,139 @@ describe("Chromium adapter, CDP only", () => {
             assert.deepStrictEqual(result.value, { type: "string", value: "{\"hello\":\"world\"}" })
             assert.isFalse(served.served.some((request) => request.path === "/r-start"))
             assert.isTrue(served.served.some((request) => request.path === "/json"))
+          }),
+        timeout
+      )
+
+      // A Chromium layer that logs, in order, each message sent and received with its session.
+      const loggedBackend = (log: Array<{ readonly sent: boolean; readonly wire: any }>) =>
+        BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
+          const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
+          return yield* CdpAdapter.connect({
+            ...transport,
+            send: (message: string) =>
+              Effect.suspend(() => {
+                log.push({ sent: true, wire: JSON.parse(message) })
+                return transport.send(message)
+              }),
+            messages: transport.messages.pipe(Stream.map((message) => {
+              log.push({ sent: false, wire: JSON.parse(message) })
+              return message
+            }))
+          }, { sink, ownership: "launched" })
+        }))
+
+      const workerPage = (served: { readonly origin: string }, script = "/slow-worker.js") =>
+        `${served.origin}/fixture?html=${
+          encodeURIComponent(
+            `<button id="start" onclick="window.w = new Worker('${script}')">Start</button>` +
+              `<button id="stop" onclick="window.w.terminate()">Stop</button>`
+          )
+        }`
+
+      it.effect(
+        "evaluates in a dedicated worker only once its script has loaded",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const log: Array<{ readonly sent: boolean; readonly wire: any }> = []
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(workerPage(served))
+              const started = yield* BrowserWorker.next(page)
+              yield* page.locator("#start").click()
+              const worker = yield* started
+              const value = yield* worker.evaluate((n: number) => [self.location.pathname, n * 2], 21).pipe(
+                Deadline.within("10 seconds")
+              )
+              assert.deepStrictEqual(value, ["/slow-worker.js", 42])
+            })).pipe(Effect.provide(loggedBackend(log)))
+            const attached = log.find(({ sent, wire }) =>
+              !sent && wire.method === "Target.attachedToTarget" && wire.params.targetInfo.type === "worker"
+            )
+            assert.isDefined(attached)
+            const session = attached!.wire.params.sessionId
+            const loaded = log.findIndex(({ sent, wire }) =>
+              !sent && wire.sessionId === session && wire.method === "Inspector.workerScriptLoaded"
+            )
+            const evaluated = log.findIndex(({ sent, wire }) =>
+              sent && wire.sessionId === session && wire.method === "Runtime.callFunctionOn"
+            )
+            assert.notStrictEqual(loaded, -1, "the worker's script never reported loaded")
+            assert.notStrictEqual(evaluated, -1, "no evaluation went to the worker")
+            assert.isAbove(evaluated, loaded, "the evaluation went to the worker before its script loaded")
+          }),
+        timeout
+      )
+
+      it.effect(
+        "evaluates in a dedicated worker with init scripts once they have run and the worker resumed",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const log: Array<{ readonly sent: boolean; readonly wire: any }> = []
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.addInitScript({ source: "self.__marked = 'yes'" }, { workers: true })
+              yield* page.goto(workerPage(served))
+              const started = yield* BrowserWorker.next(page)
+              yield* page.locator("#start").click()
+              const worker = yield* started
+              const value = yield* worker.evaluate(() => (self as any).__marked).pipe(Deadline.within("10 seconds"))
+              assert.strictEqual(value, "yes")
+            })).pipe(Effect.provide(loggedBackend(log)))
+            const attached = log.find(({ sent, wire }) =>
+              !sent && wire.method === "Target.attachedToTarget" && wire.params.targetInfo.type === "worker"
+            )
+            assert.isDefined(attached)
+            const session = attached!.wire.params.sessionId
+            const resumed = log.findIndex(({ sent, wire }) =>
+              sent && wire.sessionId === session && wire.method === "Debugger.resume"
+            )
+            const evaluated = log.findIndex(({ sent, wire }) =>
+              sent && wire.sessionId === session && wire.method === "Runtime.callFunctionOn"
+            )
+            assert.notStrictEqual(resumed, -1, "the worker never paused for its init scripts")
+            assert.isAbove(evaluated, resumed, "the evaluation went to the worker before it resumed")
+          }),
+        timeout
+      )
+
+      it.effect(
+        "ends an evaluation held for a worker's script when the worker ends first",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const log: Array<{ readonly sent: boolean; readonly wire: any }> = []
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(workerPage(served, "/stalled-worker.js"))
+              const started = yield* BrowserWorker.next(page)
+              yield* page.locator("#start").click()
+              const worker = yield* started
+              const pending = yield* worker.evaluate(() => 1).pipe(
+                Deadline.within("20 seconds"),
+                Effect.match({ onFailure: (error) => error, onSuccess: () => undefined }),
+                Effect.forkScoped
+              )
+              const begun = Date.now()
+              // The server stalls the script's body, so the worker ends before its script loads.
+              yield* page.locator("#stop").click()
+              const error = yield* Fiber.join(pending)
+              assert.isDefined(error, "the evaluation ran before the worker's script loaded")
+              assert.isFalse(Deadline.isTimeout(error), String(error))
+              assert.isBelow(Date.now() - begun, 5_000)
+            })).pipe(Effect.provide(loggedBackend(log)))
+            const attached = log.find(({ sent, wire }) =>
+              !sent && wire.method === "Target.attachedToTarget" && wire.params.targetInfo.type === "worker"
+            )
+            const session = attached?.wire.params.sessionId
+            assert.isFalse(
+              log.some(({ sent, wire }) =>
+                !sent && wire.sessionId === session && wire.method === "Inspector.workerScriptLoaded"
+              ),
+              "the worker's script loaded before it ended"
+            )
           }),
         timeout
       )

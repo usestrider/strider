@@ -1,7 +1,7 @@
 /**
  * The navigable tree as BiDi reports it: user contexts, navigables, documents, realms and navigations, added and
  * ended, with the facts each change makes. Firefox creates a new document's realm before `navigationCommitted`, so
- * a second main-world realm for a document is held, pending, for the next commit.
+ * a replacement main realm and its sandboxes are held for the next commit, which excludes the old realms.
  */
 import * as Option from "effect/Option"
 import type * as BrowsingContext from "../../bidi-protocol/BrowsingContext.ts"
@@ -49,13 +49,21 @@ export const endNavigation = (
         id: navigation.id,
         url: navigation.url,
         initiatedAs: "crossDocument",
-        bidi: navigation.bidi
+        bidi: navigation.bidi,
+        aliases: new Set(
+          [...navigation.navigable.navigations].filter(([, entry]) => entry === navigation).map(([bidi]) => bidi)
+        )
       }
     }
+    navigation.starts.clear()
+    navigation.staleLoad = undefined
     // Outstanding commands and their unresolved terminal correlations still need this identity.
     if (navigation.navigable.navigationCommands.size > 0 || navigation.navigable.pendingTerminals.length > 0) return
-    navigation.navigable.navigations.delete(navigation.bidi)
-    if (state.navigations.get(navigation.bidi) === navigation) state.navigations.delete(navigation.bidi)
+    for (const [bidi, entry] of navigation.navigable.navigations) {
+      if (entry !== navigation) continue
+      navigation.navigable.navigations.delete(bidi)
+      if (state.navigations.get(bidi) === navigation) state.navigations.delete(bidi)
+    }
   })
 
 /**
@@ -81,6 +89,8 @@ export const removeNavigable = (
     navigable.expected.list.length = 0
     for (const [bidi, navigation] of navigable.navigations) {
       navigation.ended = true
+      navigation.starts.clear()
+      navigation.staleLoad = undefined
       if (state.navigations.get(bidi) === navigation) state.navigations.delete(bidi)
     }
     navigable.navigations.clear()
@@ -90,8 +100,10 @@ export const removeNavigable = (
       for (const realm of Array.from(navigable.document.realms)) removeRealm(state, realm, reason)
       state.documents.delete(navigable.document.id)
     }
-    // Realms created for a next document that never committed: still in the tables, though never reported
-    for (const realm of Array.from(navigable.pendingRealms)) removeRealm(state, realm, reason)
+    // Include pending realms and old-document realms whose destruction was delayed past replacement.
+    for (const realm of Array.from(state.realms.values())) {
+      if (realm.navigable === navigable) removeRealm(state, realm, reason)
+    }
     if (navigable.parent !== undefined) return
     state.endedPages.set(navigable.id, reason)
     for (const [id, obligation] of state.obligations) {
@@ -141,9 +153,11 @@ export const commit = (
   if (old !== undefined) {
     state.documents.delete(old.id)
     navigable.past.set(old.url, old.id)
-    // A realm that survived the commit hosts the new document: the initial about:blank's (probe 2)
+    // Pending realms prove replacement: old realms may remain live until after commit.
+    // Without replacement evidence Firefox can reuse the initial about:blank's realms (probe 2).
+    const replacement = navigable.pendingRealms.some((realm) => !realm.ended)
     for (const realm of old.realms) {
-      if (realm.ended) continue
+      if (realm.ended || replacement) continue
       document.realms.add(realm)
       if (realm.world._tag === "Main") document.hadMainRealm = true
       state.buffer.emit({ _tag: "RealmDocumentAdded", realm: realm.id, document: document.id })
@@ -186,6 +200,7 @@ export const startNavigation = (
   const initiatedAs = expected?.initiatedAs ?? type
   const navigation: NavigationEntry = {
     id: expected?.id ?? state.ids.navigation(),
+    starts: new Map(),
     bidi,
     navigable,
     url,

@@ -50,6 +50,18 @@ const reasonOf = <A, E>(exit: Exit.Exit<A, E>) => {
     | undefined
 }
 
+/** A page whose Content-Security-Policy forbids eval and its inline script. */
+const cspPage = "<title>Policy</title><h1>Policy</h1><script>document.title = 'Ran'</script>"
+
+/**
+ * A function whose declaration is over 128 KiB once JSON-encoded twice, as the attached inspector sends it: a string
+ * of quotes, backslashes, newlines and non-ASCII text, whose length it returns.
+ */
+const large = (() => {
+  const text = "\"\\\né漢😀".repeat(20_000)
+  return { fn: new Function(`return ${JSON.stringify(text)}.length`) as () => number, length: text.length }
+})()
+
 /** The MiniBrowser launched for an effect, on an X server of the effect's own. */
 const launched = Effect.fnUntraced(function*<A, E, R>(effect: Effect.Effect<A, E, R>) {
   yield* useXvfb()
@@ -623,6 +635,24 @@ describe("Stock WebKit, launched in automation mode", () => {
           yield* page.locator("#out").pipe(Expect.toHaveText("note.txt:3"))
         }))
       })), timeout)
+
+    it.effect(
+      "queries a page whose policy forbids eval, and evaluates a function over the message limit",
+      () =>
+        launched(Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(`${origin}/csp?html=${encodeURIComponent(cspPage)}`)
+            // The policy holds: the page's inline script never ran
+            assert.strictEqual(yield* page.evaluateInMainWorld(() => document.title), "Policy")
+            // The engine's install is larger than one message, so it's compiled in the page in parts
+            assert.strictEqual(yield* page.getByRole("heading").readText, "Policy")
+            assert.strictEqual(yield* page.evaluateInMainWorld(large.fn), large.length)
+          }))
+        })),
+      timeout
+    )
 
     it.effect("refuses what stock WebKit can't do, saying so", () =>
       launched(Effect.gen(function*() {

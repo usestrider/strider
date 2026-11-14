@@ -79,7 +79,7 @@ const ChromiumLive = Chromium.layer({
 
 | Profile      | Chromium                                                                                                           | Firefox                                                                                       |
 | ------------ | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
-| `automation` | no first-run, sync, update, or crash-report prompts, no background traffic, and no component extensions as targets | no update, first-run, or data-reporting prompts; the JSON viewer off; popups open as windows |
+| `automation` | no first-run, sync, update, or crash-report prompts, no background traffic, no component extensions as targets, and no infobars, so a new window's page area keeps its size | no update, first-run, or data-reporting prompts; the JSON viewer off; popups open as windows |
 | `concurrent` | `automation`, and background timers, covered windows, and background renderers aren't throttled                    | `automation`, and timers aren't throttled to a budget                                          |
 
 A page can tell `concurrent` apart, such as by its timers' cadence, so it's for runs with many pages at once, as in
@@ -162,6 +162,13 @@ const dismissBanners = Effect.fn("dismissBanners")(
 
 A matched operation has no span, so a slow or failed one is missing from your tracer. Its failure still carries its
 [`diagnostics`](/docs/errors#diagnostics), and a [trace](/docs/tools/recordings#traces) still includes it as a step.
+
+The same predicate also sees `browser.url.malformed` with a Browser target: a short diagnostic span containing an
+event for a malformed browser-reported URL. Matching that name suppresses its span and event while keeping its
+warning visible. Its `browser.operation` attribute is the diagnostic name, just as operation spans carry their
+operation's original name. The reported URL follows the diagnostics preset: `REDACTED` under default strict and
+the exact string under local. See [diagnostic spans and their settings](/docs/tools/recordings#spans) for naming,
+preset and suppression examples. These settings are captured when the connection opens.
 
 ## Opt-in features
 

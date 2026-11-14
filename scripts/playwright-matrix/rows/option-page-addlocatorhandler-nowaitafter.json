@@ -1,12 +1,24 @@
 {
-  "status": "missing",
-  "api": [],
-  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "status": "different",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "Page.addLocatorHandler",
+      "url": "/docs/api/browser/Page#Page.addLocatorHandler"
+    }
+  ],
+  "notes": "Scoped Effect registration with idempotent removal, exact same-page grants, serial nonrecursive callbacks and one action/assertion deadline. Removal is by registration, not locator identity. Callback typed errors retain their value in process; timeouts use normal enclosing-operation attribution.",
   "capabilities": [],
   "id": "option-page-addlocatorhandler-nowaitafter",
   "upstream": [
     "method:Page.addLocatorHandler"
   ],
   "option": "noWaitAfter",
-  "requirements": []
+  "requirements": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "scoped-overlay-dispatch",
+    "quote": "explicit removal prevents new selections, while scope release interrupts selected work.",
+    "revision": "4ca4efce6322c63e58e7a6fccb9374bdcdd2c38a"
+  }
 }

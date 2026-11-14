@@ -105,10 +105,12 @@ const dismissToast = Effect.fn("dismissToast")(function*(page: Page.Page) {
 
 ## Failed expectations
 
-`ExpectationFailed` says whether an expectation that ran out of time saw the wrong thing or found nothing at all.
-Its message is the locator and its `condition`:
+`ExpectationFailed` reports an unmet condition when its deadline expires, or an immediate locator-handler callback
+failure. For an unmet condition, its message is the locator and its `condition`:
 `Expected page.getByRole("main").getByRole("heading", { name: "Order placed" }) to be visible`. `last` is the last
-value seen, and `history` every value seen. When the locator matched nothing, `nearest` is an accessibility
+value seen, and `history` every value seen. When a handler fails, the message describes that failure instead, and
+`handlerFailure.error` retains the original callback error for recovery. A callback `Timeout` or `TargetGone`
+passes through as itself instead of becoming `ExpectationFailed`. When the locator matched nothing, `nearest` is an accessibility
 snapshot of what its first steps found, up to the step that matched nothing. When the locator ends with a
 `getByRole` and a name, `suggestions` are locators for elements with that role and a similar name:
 
@@ -130,6 +132,26 @@ const expectPlaced = Effect.fn("expectPlaced")(function*(page: Page.Page) {
   yield* placed.pipe(
     Expect.toBeVisible,
     Effect.tapErrorTag("ExpectationFailed", reportMissing)
+  )
+})
+```
+
+To recover an assertion's original callback error, check `handlerFailure`:
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const checkReady = Effect.fn("checkReady")(function*(page: Page.Page) {
+  yield* page.getByRole("status").pipe(
+    Expect.toBeVisible,
+    Effect.catchTag(
+      "ExpectationFailed",
+      (failure) =>
+        failure.handlerFailure === undefined
+          ? Effect.fail(failure)
+          : Effect.logWarning("handler failed", failure.handlerFailure.error)
+    )
   )
 })
 ```

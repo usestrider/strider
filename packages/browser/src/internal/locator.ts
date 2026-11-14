@@ -34,13 +34,14 @@ import type * as Mouse from "../Mouse.ts"
 import * as Protocol from "../protocol/Protocol.ts"
 import * as Reason from "../Reason.ts"
 import type * as Snapshot from "../Snapshot.ts"
-import type * as Target from "../Target.ts"
+import * as Target from "../Target.ts"
 import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
 import * as BrowserClock from "./browserClock.ts"
 import * as Devices from "./devices.ts"
 import * as Engine from "./engine.ts"
 import * as Evaluation from "./evaluation.ts"
+import type * as Execution from "./execution.ts"
 import * as FileInputImpl from "./fileInput.ts"
 import * as Filters from "./filters.ts"
 import * as Geometry from "./geometry.ts"
@@ -138,6 +139,8 @@ const explain = (reason: Engine.NotReady, frames: number, emulatesFocus: boolean
       return "The element is read-only"
     case "NoSuchOption":
       return `The select has no option with that ${reason.option}`
+    case "DisabledOption":
+      return `The select's option with that ${reason.option}, or its optgroup, is disabled`
     case "PreparingFocus":
       return `Focus was being moved from ${reason.from} before filling the target`
   }
@@ -1194,8 +1197,11 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
   }
 
   /** Maps a failure to send a request onto the operation's errors: a deadline as the record's `Timeout`. */
-  sendFailure(operation: string, failure: Runtime.SendFailure, record: Operation.Record) {
+  sendFailure(operation: string, failure: Execution.Failure, record: Operation.Record) {
     switch (failure._tag) {
+      case "Timeout":
+      case "TargetGone":
+        return failure
       case "Gone":
         return failure.error
       case "Reason":
@@ -1293,7 +1299,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       // A drag's target, found inside the drag: its record, and its deadline
       const record = yield* Operation.record
       const id = record.id
-      const answer = yield* Runtime.sendRouted(
+      const answer = yield* this.owner.page.execution.action(
         this.owner.runtime,
         this.owner.page,
         {
@@ -1309,8 +1315,10 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
           apply: false
         },
         id,
-        record.budget.at
+        record.budget.at,
+        true
       ).pipe(Effect.mapError((failure) => this.sendFailure("Locator.dragTo", failure, record)))
+      if ("_tag" in answer) return Option.none()
       const response = answer.response
       if (response._tag !== "Ready" || response.point === null) return Option.none()
       if (answer.routed.hops.length === 0) return Option.some(response.point)
@@ -1342,7 +1350,8 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       yield* this.pointer(
         operation,
         options,
-        (state, point) => Input.click(state, point, "left", 1, options?.modifiers ?? [])
+        (state, point) => Input.click(state, point, "left", 1, options?.modifiers ?? []),
+        { checked: true }
       )
       if (options?.trial === true) return
       const after = yield* this.readOne(operation, { _tag: "Checked", followLabel: true }, (value) => value as boolean)
@@ -1411,6 +1420,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     ) => ReadonlyArray<Adapter.InputEvent>,
     extra: {
       readonly guard?: boolean
+      readonly checked?: boolean
       readonly target?: Effect.Effect<Option.Option<{ readonly x: number; readonly y: number }>, unknown>
       /** For an HTML drag: send the gesture, or say it was done another way. */
       readonly draggable?: (
@@ -1428,7 +1438,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       operation,
       options,
       pointerChecks,
-      { _tag: "Point", position, guard },
+      { _tag: "Point", position, guard, checked: extra.checked },
       (ready, io, record) =>
         Effect.gen({ self: this }, function*() {
           const state = owner.page.inputState
@@ -1441,9 +1451,16 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
           }
           let target: { readonly x: number; readonly y: number } | undefined
           if (extra.target !== undefined) {
-            const point = yield* extra.target.pipe(Effect.orElseSucceed(() => Option.none()))
+            const point = yield* extra.target.pipe(Effect.catch((failure) =>
+              Deadline.isTimeout(failure) || Target.isTargetGone(failure) ||
+                Locator.isLocatorError(failure) && failure.reason._tag === "LocatorHandlerFailed" ?
+                Effect.fail(failure) :
+                Effect.succeed(Option.none())
+            ))
             if (Option.isNone(point)) {
-              if (guard) yield* io.disarm
+              if (guard) {
+                yield* io.disarm
+              }
               return { retry: { _tag: "NoMatch" } } as const
             }
             target = point.value
@@ -1453,15 +1470,21 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
           const last = events.filter((event): event is Extract<Adapter.InputEvent, { _tag: "Mouse" }> =>
             event._tag === "Mouse"
           ).at(-1)
-          if (last !== undefined) state.position = { x: last.x, y: last.y }
-          if (!guard) return "done" as const
+          if (last !== undefined) {
+            state.position = { x: last.x, y: last.y }
+          }
+          if (!guard) {
+            return "done" as const
+          }
           const blocked = yield* io.disarm
           return Option.isSome(blocked)
             ? { retry: { _tag: "Intercepted", by: blocked.value } as Engine.NotReady }
             : "done" as const
         }).pipe(
           // A guard left armed would stop the page's next gesture: any failure after arming it removes it
-          Effect.onError(() => guard ? Effect.ignore(io.disarm) : Effect.void)
+          Effect.onError(() =>
+            guard ? Effect.ignore(io.disarm) : Effect.void
+          )
         )
     )
   }
@@ -1675,9 +1698,9 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       // These actions happen in the round that applies them: once it is sent, the action may have happened, and
       // its answer says whether it did
       const inRound = Engine.appliesInRound(action)
-      const round = (cap: number, apply: boolean, stability?: string) =>
+      const round = (cap: number, apply: boolean, stability?: string, final = false, sample = false) =>
         Effect.suspend(() => {
-          return Runtime.sendRouted(
+          return owner.page.execution.action(
             owner.runtime,
             owner.page,
             {
@@ -1687,10 +1710,12 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
               cap,
               action,
               apply,
+              ...(sample ? { sample: true } : {}),
               ...(stability === undefined ? {} : { stability })
             },
             id,
-            budget.at
+            budget.at,
+            final
           )
         }).pipe(
           Effect.tap((answer) =>
@@ -1699,7 +1724,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
                 // A native fill's Ready response confirms only preparation; its input is still unsent.
                 // Until this response arrives, the applying round may itself have changed the value.
                 if (
-                  answer.response._tag === "Ready" &&
+                  !("_tag" in answer) && answer.response._tag === "Ready" &&
                   (action._tag !== "Fill" || answer.response.fill === "set")
                 ) record.markConfirmed()
                 else record.markNotSent()
@@ -1746,8 +1771,9 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         return Option.none<Ready>()
       }
       /** A round's answer: ready, with its point in the page's viewport, or not yet. */
-      const settle = (answer: Runtime.Answer) =>
+      const settle = (answer: Runtime.Answer | { readonly _tag: "Restart" }) =>
         Effect.gen({ self: this }, function*() {
+          if ("_tag" in answer) return Option.none<Ready>()
           const response = answer.response
           switch (response._tag) {
             case "Strict":
@@ -1852,17 +1878,30 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         )
       // A round that reached the deadline is the action's own Timeout, with what the record saw
       const attempts = Effect.gen({ self: this }, function*() {
+        let firstObservation = true
         while (true) {
           const left = record.left()
           if (left <= 0) return yield* Effect.fail(timedOut())
-          const first = yield* round(Runtime.roundCap(left), false, reuseStability ? "capture" : undefined).pipe(
+          const sample = firstObservation
+          firstObservation = false
+          const first = yield* round(
+            Runtime.roundCap(left),
+            false,
+            reuseStability ? "capture" : undefined,
+            false,
+            sample
+          ).pipe(
             Effect.flatMap(settle)
           )
           if (Option.isNone(first)) continue
           // Input to a page is serialized; acquiring the permit takes from the deadline, and the checks run again
           const underPermit = Effect.fnUntraced(function*(this: LocatorImpl, stability?: string) {
             const apply = options?.trial !== true
-            const answer = yield* round(Runtime.roundCap(record.left()), apply, stability)
+            const answer = yield* round(Runtime.roundCap(record.left()), apply, stability, true)
+            if ("_tag" in answer) {
+              record.markNotSent()
+              return "again" as const
+            }
             const disarm = this.disarm(answer.routed.document, id)
             const again = yield* settle(answer).pipe(
               // A guard the round armed comes off when the point outside its frame wasn't ready

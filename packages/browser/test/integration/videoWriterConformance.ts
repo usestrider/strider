@@ -10,12 +10,16 @@ import { execFileSync } from "node:child_process"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
+import { fileURLToPath } from "node:url"
 import { deflateSync } from "node:zlib"
 import * as BrowserClock from "../../src/internal/browserClock.ts"
 import * as Video from "../../src/internal/video.ts"
 import { lastVideoFrame } from "./videoFrames.ts"
 
-const png = (width: number, height: number, color: readonly number[]) => {
+const png = (width: number, height: number, color: readonly number[]) =>
+  pngFromRows(width, height, () => Buffer.from(Array.from({ length: width }, () => color).flat()))
+
+const pngFromRows = (width: number, height: number, rowAt: (y: number) => Buffer) => {
   const chunk = (kind: string, data: Buffer) => {
     const body = Buffer.concat([Buffer.from(kind), data])
     let crc = 0xffffffff
@@ -34,13 +38,48 @@ const png = (width: number, height: number, color: readonly number[]) => {
   header.writeUInt32BE(height, 4)
   header[8] = 8
   header[9] = 2
-  const row = Buffer.concat([Buffer.from([0]), Buffer.from(Array.from({ length: width }, () => color).flat())])
   return Buffer.concat([
     Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
     chunk("IHDR", header),
-    chunk("IDAT", deflateSync(Buffer.concat(Array.from({ length: height }, () => row)))),
+    chunk(
+      "IDAT",
+      deflateSync(
+        Buffer.concat(Array.from({ length: height }, (_, y) => Buffer.concat([Buffer.from([0]), rowAt(y)])))
+      )
+    ),
     chunk("IEND", Buffer.alloc(0))
   ])
+}
+
+const textWidth = 1280
+const textHeight = 720
+
+/**
+ * A page of small text: `fixtures/smallText.png`, Chromium's 1280 by 800 headless screenshot of 12 px DejaVu Sans
+ * paragraphs, decoded once. A page scrolled by `scroll` pixels is the 720 rows from that offset.
+ */
+const textPage = (() => {
+  let rendered: Buffer | undefined
+  return (scroll: number) => {
+    rendered ??= execFileSync(process.env["STRIDER_FFMPEG"]!, [
+      "-v",
+      "error",
+      "-i",
+      fileURLToPath(new URL("../fixtures/smallText.png", import.meta.url)),
+      "-f",
+      "rawvideo",
+      "-pix_fmt",
+      "rgb24",
+      "pipe:1"
+    ], { maxBuffer: 1 << 24 })
+    return Buffer.from(rendered.subarray(scroll * textWidth * 3, (scroll + textHeight) * textWidth * 3))
+  }
+})()
+
+const psnr = (a: Buffer, b: Buffer) => {
+  let error = 0
+  for (let i = 0; i < a.length; i++) error += (a[i]! - b[i]!) ** 2
+  return error === 0 ? 100 : 10 * Math.log10((255 * 255) / (error / a.length))
 }
 
 export const writerConformance = (
@@ -290,6 +329,59 @@ export const writerConformance = (
           }
         }),
       60_000
+    )
+
+    it.effect(
+      `${name} keeps small text legible at desktop size`,
+      () =>
+        Effect.gen(function*() {
+          const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-writer-quality-"))
+          yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
+          const encoder = yield* VideoWriter.VideoWriter
+          const scrolls = [0, 0, 5, 11, 17, 17, 29, 40]
+          const sources = scrolls.map(textPage)
+          const started = Date.now()
+          const file = yield* encoder.write(
+            Stream.fromIterable(sources).pipe(Stream.map((pixels, index) => ({
+              at: index * 150e6,
+              format: "png" as const,
+              width: textWidth,
+              height: textHeight,
+              data: pngFromRows(
+                textWidth,
+                textHeight,
+                (y) => pixels.subarray(y * textWidth * 3, (y + 1) * textWidth * 3)
+              )
+            }))),
+            { path: path.join(directory, "quality.webm"), width: textWidth, height: textHeight }
+          )
+          const elapsed = Date.now() - started
+          const decoded = execFileSync(process.env["STRIDER_FFMPEG"]!, [
+            "-v",
+            "error",
+            "-i",
+            file,
+            "-fps_mode",
+            "passthrough",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgb24",
+            "pipe:1"
+          ], { maxBuffer: 1 << 28 })
+          const frameBytes = textWidth * textHeight * 3
+          assert.strictEqual(decoded.length, frameBytes * sources.length)
+          const scores = sources.map((source, index) =>
+            psnr(source, decoded.subarray(index * frameBytes, (index + 1) * frameBytes))
+          )
+          const worst = Math.min(...scores)
+          console.log(
+            `video quality ${name}: encode ${elapsed} ms, ${fs.statSync(file).size} bytes, ` +
+              `PSNR worst ${worst.toFixed(2)} dB, per frame ${scores.map((score) => score.toFixed(1)).join(" ")}`
+          )
+          assert.isAbove(worst, 30, "every decoded frame is close to its source")
+        }),
+      120_000
     )
   })
 }

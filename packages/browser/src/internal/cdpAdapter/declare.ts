@@ -106,6 +106,10 @@ const viewport = (
   target: TargetEntry,
   effective: ReadonlyMap<Adapter.Override["_tag"], Adapter.Override>
 ) => {
+  // Chromium refuses the device-metrics commands on any target that isn't top-level: an out-of-process iframe takes
+  // its size from its frame in the parent page.
+  // Measuring needs a running renderer too, and an iframe waiting for the debugger has none until its setup ends.
+  if (target.kind !== "page") return Effect.void
   const lock = target.viewportLock ??= Semaphore.makeUnsafe(1)
   return lock.withPermits(1)(Effect.suspend(() => {
     const override = (target.page === undefined ? effective : state.registry.overrides(placement(target.page))).get(

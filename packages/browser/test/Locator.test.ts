@@ -365,6 +365,110 @@ describe("Locator.check refusal deadlines", () => {
   }
 })
 
+describe("checked-action Disabled deadline evidence", () => {
+  for (const action of ["check", "uncheck"] as const) {
+    for (const observed of [true, false, "immediate"] as const) {
+      it.effect(`${action} ${observed === "immediate" ? "samples Disabled before waiting" : observed ? "retains observed Disabled" : "does not invent history for a late Disabled reply"} at its deadline`, () =>
+        Effect.gen(function*() {
+          const clock = BrowserClock.fromClock(yield* Effect.service(Clock.Clock))
+          const waiting = yield* Deferred.make<void>()
+          const release = yield* Deferred.make<void>()
+          const responseFiber = yield* Deferred.make<Fiber.Fiber<Adapter.RemoteResult>>()
+          const scope = yield* Scope.Scope
+          let rounds = 0
+          let inputs = 0
+          const disabled: Engine.Response = {
+            _tag: "NotReady",
+            reason: { _tag: "Disabled" },
+            history: [{ _tag: "Disabled" }],
+            scrolled: false,
+            checked: true
+          }
+          const remote = (response: Engine.Response): Adapter.RemoteResult => ({
+            _tag: "Value",
+            value: { type: "string", value: JSON.stringify(response) }
+          })
+          const layer = BrowserImpl.layer((sink) =>
+            Fake.connect([], {
+              info: new Browser.Info(Fake.info),
+              capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+            })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
+              ...adapter,
+              realm: () => Effect.succeed("checked-deadline-realm" as Target.RealmId),
+              dispatchInput: () =>
+                Effect.sync(() => {
+                  inputs++
+                }),
+              evaluate: Effect.fnUntraced(function*(_realm, call) {
+                if (call.functionDeclaration === Engine.install) {
+                  return { _tag: "Value", value: { type: "string", value: "installed" } } as const
+                }
+                const argument = call.arguments[0]
+                assert(argument?._tag === "Value" && argument.value.type === "string")
+                const request = JSON.parse(argument.value.value) as Engine.Request
+                if (request.op === "read") {
+                  assert(request.read._tag === "Checked")
+                  assert.strictEqual(request.read.followLabel, true)
+                  assert.strictEqual(request.read.uncheck, action === "uncheck")
+                  return remote({ _tag: "Read", value: action === "uncheck" })
+                }
+                assert(request.op === "act" && request.action._tag === "Point")
+                assert.strictEqual(request.action.checked, true)
+                assert.strictEqual(request.checks.enabled, true)
+                rounds++
+                if (observed && rounds === 1 && (observed !== "immediate" || request.sample === true)) {
+                  return remote(disabled)
+                }
+                // The second request proves L1 already consumed the first Disabled reply.
+                // Otherwise this is the first reply, which the browser delivers only after expiry.
+                const late = yield* Deferred.await(release).pipe(
+                  Effect.as(remote(disabled)),
+                  Effect.forkDetach
+                )
+                yield* Scope.addFinalizer(scope, Fiber.interrupt(late))
+                yield* Deferred.succeed(responseFiber, late)
+                yield* Deferred.succeed(waiting, undefined)
+                return yield* Fiber.join(late)
+              })
+            })))
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const running = yield* page.locator("#label")[action]().pipe(
+              Deadline.within("200 millis"),
+              Effect.flip,
+              Effect.forkChild
+            )
+            yield* Deferred.await(waiting)
+            yield* TestClock.adjust("200 millis")
+            const error = yield* Fiber.join(running)
+            assert(Deadline.isTimeout(error), String(error))
+            assert.strictEqual(error.operation, `Locator.${action}`)
+            assert.strictEqual(error.diagnostics.dispatch._tag, "NotSent")
+            if (observed) {
+              assert(error.history.some((entry) => (entry.value as { _tag: string })._tag === "Disabled"))
+              assert(Option.isSome(error.last))
+              assert.deepStrictEqual(error.last.value.value, { _tag: "Disabled" })
+            } else {
+              assert.deepStrictEqual(error.history, [])
+              assert(Option.isNone(error.last))
+            }
+            assert.strictEqual(inputs, 0)
+            const history = [...error.history]
+            yield* Deferred.succeed(release, undefined)
+            const reply = yield* Fiber.join(yield* Deferred.await(responseFiber))
+            assert.deepStrictEqual(reply, remote(disabled))
+            // A late page observation cannot retroactively change the error already returned.
+            assert.strictEqual(yield* Fiber.join(running), error)
+            assert.deepStrictEqual(error.history, history)
+            assert.strictEqual(error.diagnostics.dispatch._tag, "NotSent")
+            assert.strictEqual(inputs, 0)
+          })).pipe(Effect.provide(layer), Effect.provideService(BrowserClock.CurrentClock, clock))
+        }).pipe(Effect.scoped))
+    }
+  }
+})
+
 describe("Locator.boundingBox", () => {
   for (const mode of ["success", "refusal", "deadline", "installation deadline", "document handoff"] as const) {
     it.effect(

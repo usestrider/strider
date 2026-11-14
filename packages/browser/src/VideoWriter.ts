@@ -138,6 +138,11 @@ const failure = (hint: string) =>
  * Requires `ChildProcessSpawner`. The output has no audio and preserves variable frame times to millisecond
  * precision; images are scaled proportionally and padded with black to the recording's original dimensions. Closing the input finishes the file.
  *
+ * Quality is fixed: libvpx encodes in real-time mode with `-cpu-used 8`, at constrained quality (CRF 8, quantizer 0 to
+ * 50) and a target of 4 Mbit/s, so small text stays legible at desktop size. The target is an average, not a cap: a
+ * scroll or a page change can burst well above it, and a file's size follows what the page shows. For another
+ * trade-off, provide your own `VideoWriter`.
+ *
  * **Example** (Enabling Chromium video)
  *
  * ```ts import.meta.vitest
@@ -183,6 +188,14 @@ export const layerFfmpeg = (
             "realtime",
             "-cpu-used",
             "8",
+            "-crf",
+            "8",
+            "-b:v",
+            "4M",
+            "-qmin",
+            "0",
+            "-qmax",
+            "50",
             "-pix_fmt",
             "yuv420p",
             "-fps_mode",

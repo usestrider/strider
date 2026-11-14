@@ -533,6 +533,18 @@ correlation is released on completion or interruption, and all correlation state
 The one retained completed failure is not a live reservation and is cleared when its document arrives or a normal
 commit supersedes it after outstanding correlation finishes. No public operation or policy is added.
 
+BiDi wire navigation identities do not alone prove logical supersession. A delayed load whose timestamp predates
+an active start and whose URL belongs to the current document can cause Firefox to allocate another identity.
+With an existing document request, the same destination and no competing reservation, correlate that next start
+with the active logical navigation. A distinct document request for the new identity separates the navigations;
+command reservations always retain their separate ownership. This keeps request, commit and terminal outcome
+consistent without delaying observations. Starts older than an observed start or commit cannot supersede it.
+Release live aliases with their navigation's terminal correlation; document readiness keeps the correlated start
+bounds for the document's lifetime, and the retained completed failure keeps its identities until attribution.
+Rejected: treating every new wire identity as
+supersession, matching destinations alone, and using response status, retries or longer deadlines to hide the error.
+
+
 
 ## Chromium viewport restoration as bounded cleanup
 
@@ -544,7 +556,11 @@ and replacement registrations retain those dimensions until the last override ha
 While an override remains, release reapplies the current effective override. Per-target serialization recomputes
 that effective override when the command runs, including when registrations are released out of order.
 
-Measure in the named `__strider_viewport` isolated world for the target's main frame (or its own frame for an iframe),
+The viewport is applied, measured and cleared on top-level page targets only. Chromium refuses the commands on an
+out-of-process iframe's target, whose size comes from its frame in the parent page, and an iframe waiting for the debugger
+resumes only after its setup, so a measurement there waits for a reply the paused renderer can't send.
+
+Measure in the named `__strider_viewport` isolated world for the target's main frame,
 passing the returned execution context id explicitly to `Runtime.evaluate`. Create or retrieve that world for each
 measurement rather than caching an execution context across navigation. Main-world lexical bindings and numeric
 or nonnumeric shadows must not supply the baseline. Missing, rejected, or nonfinite measurements do not prevent
@@ -1020,7 +1036,11 @@ observability contract require a minor release under the release policy, includi
 Check and uncheck prefer the selected element's own checked state. When it has none, a directly selected label
 or an ordinary descendant's nearest DOM label supplies the associated control. Pointer input and relative positions
 remain on the selected element; already-correct state sends nothing, and post-click verification uses the same
-checked-state lookup. Public isChecked and checked expectations continue to read only the selected element.
+checked-state lookup. When input is needed, Enabled applies to both the selected target and its current
+checked-state source, resolved on every readiness pass including under the input permit. This uses the existing
+native, fieldset and ARIA predicate and honors the explicit enabled-check override. Reject checking only the
+pointer target: a label can receive trusted input while its disabled control cannot change state.
+Public isChecked and checked expectations continue to read only the selected element.
 
 Association follows only DOM parents, without crossing a shadow root. It uses the label's control, never the
 ancestor label's own ARIA state. A selected element inside a shadow root cannot borrow an outside label.
@@ -1070,20 +1090,29 @@ An attached browser may be local, but always transferring there makes remote fil
 connection classification. Copying every launched upload was rejected because it adds many commands and browser
 storage to the common native-path case.
 
-Attached Local and Bytes share a sequential transfer. Local descriptors open in a scope and use open-file stat
+Transferred selections consisting entirely of Bytes with a combined raw size of at most 64 KiB (including an
+empty selection) encode the complete files as base64 and construct and assign the Files in one evaluation call.
+This library-owned function reuses the engine's utility world rather than creating another isolated world;
+stock WebKit uses the page world where an isolated world is unavailable. This bounded exception avoids collector
+setup and serial acknowledgements for small in-memory uploads without changing selection validation or deadlines.
+Using it for larger files was rejected because it would construct unbounded encoded files and messages.
+
+All other transferred selections, including any Attached Local file, use a sequential collector transfer in the
+isolated world (or the page world on stock WebKit). Local descriptors open in a scope and use open-file stat
 metadata followed by reads of at most 64 KiB. Bytes use views of their existing input. Each chunk is independently
-base64 encoded, sent, and acknowledged before the next is read; no complete encoded file or message is constructed.
-A remote collector holds chunk parts and completed Files through an owned handle. The upload scope closes local
-files, clears the collector, and releases the handle on success, failure, or interruption; remote cleanup has its
-own bounded budget. Browser backing storage grows with the files. There is no arbitrary library size cap or
-constant browser-memory promise: browser resource limits still apply. A disk sink and hard quota were rejected
+base64 encoded, sent, and acknowledged before the next is read; this path constructs no complete encoded file or
+message. A remote collector holds chunk parts and completed Files through an owned handle. The upload scope closes
+local files, clears the collector, and releases the handle on success, failure, or interruption; remote cleanup
+has its own bounded budget. Browser backing storage grows with the files. There is no arbitrary library size cap
+or constant browser-memory promise: browser resource limits still apply. A disk sink and hard quota were rejected
 as new capability and compatibility contracts without an established requirement.
 
 Native paths and transferred files cannot coexist in one selection, because their two setters each replace it.
 Preparation rejects such mixtures before any selection changes. Attached Local therefore combines with Bytes,
 while launched Local combines with Remote. Empty lists use page-side construction: Chromium can retain synthetic
 files after an empty native-path command. The collector validates live input type and cardinality before transfer
-and again before final assignment; it never mutates selection or dispatches events during transfer. Locator native
+and again before final assignment. The one-call Bytes path validates before constructing and assigning Files.
+Neither path mutates selection or dispatches events before validation and construction succeed. Locator native
 selections also check live cardinality before dispatch, since native backends do not uniformly refuse several
 files on a single-file input. Detached
 chooser inputs remain valid when the backend identifies them. No WebKit adapter behavior is changed here: stock
@@ -1159,7 +1188,7 @@ session cookie, while closing that startup page first exposed the same loss. Iso
 session cookies. This is an observed boundary while the browser remains alive, not a traced Chromium cause or
 a claim about other session-only state. It affects default contexts with temporary as well as supplied profile
 directories, so preserving the window only for `userDataDir` would leave part of the behavior change in place.
-It is distinct from whether signal-based browser shutdown flushes newly written storage to disk.
+It is distinct from shutdown of a connected Chromium layer, which now attempts graceful close before signals.
 
 Without a startup window, initial `strider tabs` and the `tabs` tool return empty listings. Existing callers
 would have to create a page explicitly. Retain the current initial-page behavior and the session-cookie guard;
@@ -1169,6 +1198,17 @@ Rejected: enabling the flag in automation and concurrent for a once-per-browser 
 silently changing session-cookie lifetime and initial tab listings; enabling it only without a supplied profile,
 which still changes temporary default contexts; and treating the saving as evidence that the startup page has
 no behavioral role. Caller opt-in keeps that trade explicit.
+
+## Owned Chromium attempts graceful close before termination
+
+A successfully connected, owned Chromium launch sends Browser.close while the protocol client is alive and waits
+for actual process exit for up to five seconds on the browser clock, independently of the caller's deadline.
+The existing signal termination and five-second force-kill fallback follow, so a hung process can take roughly
+ten seconds plus process-group cleanup. This best effort helps preserve recent supplied-profile storage without
+promising durability on crashes or forced termination. Signal-only teardown was rejected because the reproduced
+normal shutdown lost a recent write; an unbounded wait could hang scope closure, and a caller-configurable budget
+would add public configuration for a bounded internal cleanup policy. Attached browsers and failed connections
+retain their existing release behavior.
 
 ## Chromium screencast ownership belongs to the session
 
@@ -1238,7 +1278,7 @@ Firefox never reads it. `layerFfmpeg({ path })` requires `ChildProcessSpawner`, 
 PATH. The video consumer keeps source timestamps relative to recording start, prepends the first picture at zero when its normalized capture time is later, and sends the last picture once more at stop time so a still ending lasts until stop. The zero-time copy gives files a picture from recording start and avoids FFmpeg end-relative seeks adding a nonzero start offset. It belongs in the core so custom writers and polled WebKit receive the same timeline. An already-zero or cached first capture needs no additional copy. Both boundary copies reuse their image without another source acknowledgement. Shifting every capture timestamp to the first capture is rejected because it loses recording-relative trace alignment; changing only the ffmpeg writer leaves other writers with different timelines. Each native Chromium stream anchors its first timestamp to local monotonic receipt time and maps subsequent browser timestamp differences, capped at each frame’s local receipt time; a missing timestamp uses local receipt time without changing the anchor. The core holds backward times at the preceding frame time, including transitions from receipt fallback, until source time catches up. This preserves later timestamps without asking ffmpeg to repair decreasing input. Initial capture/transport latency cannot be measured from these events and is included in the first-frame alignment. Capping at receipt prevents a forward browser-clock jump from extending the recording past stop. Since the anchor includes the first delivery’s latency, ordinary decreasing delivery latency can also reach the cap and shorten source intervals. A backward clock jump can flatten frames until source time catches up; heuristic re-anchoring is rejected because the events do not distinguish clock corrections from delivery latency and no threshold is required by the recording contract. Mapping browser epoch time through the client epoch is rejected because connected browsers can have different host clocks. WebKit uses its sample completion time. `layerFfmpeg` streams Matroska images with millisecond timestamps and encodes VP8 with timestamp passthrough. Fixed 25fps pacing is rejected because idle copies spend CPU and file space and delay a paint by up to 40ms. Strider fixes
 the initial output dimensions in `Destination`; the writer must output every frame at exactly those dimensions,
 scaled to fit, centred, and padded black. The writer owns pixel fitting because it has the codec; Strider owns
-that policy, timestamps, acknowledgements, and lifetimes. Reusable writer conformance checks decode changing and odd-sized
+that policy, timestamps, acknowledgements, and lifetimes. `layerFfmpeg`'s quality is fixed rather than an option: constrained-quality VP8 (CRF 8, quantizer 0 to 50, a 4 Mbit/s average target that bursts allow exceeding) in real-time mode with `-cpu-used 8` keeps small text legible at desktop size, where libvpx's 256 kbit/s default does not; Chromium's screencast asks for JPEG quality 90, which also enlarges native trace frames. An option is rejected for now because a caller with another trade-off can provide a `VideoWriter`, and adding one later is additive. Reusable writer conformance checks decode changing and odd-sized
 inputs to verify output dimensions and padding. Its file lives in the context's downloads directory on Chromium,
 or the explicitly named output directory on WebKit. Scope closure
 or normal source termination ends input and allows five seconds on the browser clock to finish a started writer,
@@ -1394,6 +1434,24 @@ never request a feature gain no interception, injected instrumentation, per-acti
 state for it. Additions must include paired default-path benchmarks so review can assess their cost. Reject
 always-on preparation for optional features: unused capabilities must not slow existing automation.
 
+## Cooperative readiness checks
+
+Opted-in checks use a separate document- and operation-bound execution protocol, sharing the ordinary readiness
+and evaluation helpers, following [Pay for what you use](#pay-for-what-you-use). Single-use continuations yield to
+the host before checking; callbacks invalidate samples and final checks can restart before application. Sessions
+own and dispose their timers, observers and DOM references on every exit. Expired answers are serialized separately
+for single-use delivery, bounded by 64 entries, one MiB of estimated UTF-16 string storage and a 30-second retention
+period; cancellation, consumption and navigation clear them earlier. The host reports unavailable evidence rather
+than silently restarting after eviction on the same document. An in-flight wait reports departure separately from disposal; no departure cache is retained. Otherwise,
+disposal triggers rerouting only when resolving the target and ancestor chain proves movement, always under
+the original deadline. A bounded read-only finish handoff can collect timeout evidence after the
+operation deadline without applying anything. Rejected: retaining live sessions for delivery, which keeps DOM state
+and wait resources alive, and discarding an expired answer immediately, which loses observations while the host
+holds the continuation. Ordinary loops have no handler branches or continuations. Rejected: host preflight around a whole waiting round, which misses its internal retries; racing
+an observer against an already-running check, which cannot prevent that check from passing or applying; and
+always-on hooks in ordinary loops, which charge unused contexts for the feature. Cross-frame host probes remain
+sequential observations, not an atomic browser snapshot.
+
 ## Request failure observations
 
 Request failure reads inspect the existing bounded hop index immediately, using the original request instance
@@ -1444,6 +1502,16 @@ context headers. This matches BiDi's native header merging and Playwright's cont
 whole inherited map, which BiDi cannot implement natively; interception solely to remove inherited headers,
 which adds unnecessary request handling. Unset configuration adds no header commands or request state,
 following [Pay for what you use](#pay-for-what-you-use).
+
+## Scoped overlay dispatch
+
+Locator handlers replace execution dispatch on their page, following [Pay for what you use](#pay-for-what-you-use),
+so existing locators observe activation without a registry probe on ordinary pages. A page-local semaphore and
+inherited suppression serialize callbacks without recursion. Final checks restart before input; explicit removal
+prevents new selections, while scope release interrupts selected work. Dispatch restores only after outstanding
+invocations and hidden waits drain, including the last finite invocation. Rejected: a global registry lookup on
+every action, which charges unused pages; and restoring immediately at the last selection, which lets concurrent
+actions bypass its callback or disappearance wait.
 
 ## Bounded redirect evidence
 
@@ -1516,3 +1584,15 @@ before queueing and parameter decoding. All adapter state changes and fact appli
 the scope again before decoding queued events. This keeps disabled contexts from paying for optional chunk
 collection while preserving per-session isolation. Rejected: queueing every optional event for a worker-side check,
 which charges disabled contexts, and a browser-wide enabled switch, which charges unrelated contexts.
+
+## Malformed browser-reported URLs
+
+Convert malformed browser-reported URLs to `about:blank` across adapters, including network and obligation events, so one unparseable string cannot end the connection's event fold. Show the reported string according to Diagnostics.CurrentPreset (REDACTED under default strict, exact under local) in a warning and an event on its own short-lived span, using the ingestion context's tracer and respecting tracing suppression. Reject throwing as an adapter defect at this boundary: browser data is outside the adapter's control. Use the same span naming and suppression settings as operations, with browser.operation identifying the original operation or diagnostic name. Keep the warning visible when tracing is suppressed. Reject raw malformed strings under strict because they may contain secrets. Keep empty and colon placeholders silent and optional script locations absent when unparseable.
+
+## Disable Firefox new-tab preloading in the automation profile
+
+Firefox's automation profile disables new-tab preloading with `browser.newtab.preload: false`. Firefox can announce its hidden preload as a top-level BiDi context even though its tab tree omits that browser. Preventing the preload avoids both that unusable context and its background load. Re-selecting a page was rejected because the preload is not a tab hiding it; closing or suppressing contexts by user-context/window identity was rejected because that can affect real tabs. Stock and caller-created launch profiles keep their own preferences.
+
+## Large WebKit evaluations are sent in bounded parts
+
+On stock WebKit, a function whose declaration takes over 96 KiB once JSON-encoded twice, as the attached inspector carries it inside `Target.sendMessageToTarget`, is staged in the realm's helper in parts of at most 64 KiB, then joined and compiled there inside the inspector call, which WebKit allows even under a Content-Security-Policy that forbids eval, with the page's `eval` as of the helper's install. That joins the intrinsics the helper already takes from the page, whose replacement before the install can already change what an evaluation returns: the inspector compiles only what arrives in one message, and a page can't supply a compiler it can't tamper with. A page's wrapper that passes the text on to the browser's `eval` works. A replacement that compiles different text is refused, by checking the compiled function's source against the joined text; one that returns a function with the same source isn't detected. The 96 KiB threshold leaves room in the last call's message for the arguments and wrapping. Capturing `eval` before the page's scripts run was rejected: it covers new documents, not those already open when Strider attaches. libsoup closes the socket on an incoming message over 128 KiB, and the page engine's install is sent this way, so the engine's size no longer has a cap, in any build form. Smaller declarations go in one call, so other backends and ordinary evaluations are unchanged, and the arguments, which go in the last call, keep their own limit; the engine's install costs one more round trip per document. Minifying the engine at generation time was rejected: it still goes in one message, so it only moves the cap, and adds a generated artifact. Splitting the engine into separately installed functions was rejected: a large refactor of one closure, with each part still capped.
