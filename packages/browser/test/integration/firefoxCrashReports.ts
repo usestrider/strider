@@ -9,18 +9,23 @@
  * - `dom.ipc.tabs.createKillHardCrashReports` is true. It is read once, at startup, and defaults to false on release
  *   builds (`modules/libpref/init/StaticPrefList.yaml`: `@IS_NOT_RELEASE_OR_BETA@`), which the pinned Firefox is.
  *
- * Nothing is shown or submitted: `MOZ_CRASHREPORTER_NO_REPORT=1` keeps a parent-process crash from launching the
- * crash reporter client (`ShouldReport` in `toolkit/crashreporter/nsExceptionHandler.cpp`), and
- * `browser.tabs.crashReporting.sendReport` false leaves the tab-crashed page's send box unticked. With
- * `MOZ_CRASHREPORTER_NO_REPORT` set, Firefox keeps every report in the profile's `minidumps/`, and no setting moves
- * it, so the harness moves them out before the profile is deleted: `install` wraps the ledger every launch records
- * its browser in (`Ledger.CurrentLedger`), and when a browser is forgotten, after it exits and before its temporary
- * profile is removed, its reports move to `outbox`. `sweep` moves those of browsers still running, such as a
- * suite's shared Firefox, at the end of each test. A launch given a ledger of its own isn't followed.
+ * No crash reporter window opens and nothing is submitted: `MOZ_CRASHREPORTER_NO_REPORT=1` keeps a parent-process
+ * crash from launching the crash reporter client (`ShouldReport` in `toolkit/crashreporter/nsExceptionHandler.cpp`),
+ * and `browser.tabs.crashReporting.sendReport` false leaves the crashed tab's page with its send box unticked.
+ * With `MOZ_CRASHREPORTER_NO_REPORT` set, Firefox keeps every report in the profile's `minidumps/`, and no setting
+ * moves it. A running Firefox still owns those files, so the harness takes them only once it has exited: `wrap` (and
+ * `install`, for the default ledger) hooks the ledger every launch records its browser in (`Ledger.CurrentLedger`),
+ * and when a Firefox is forgotten, after it exits and before its temporary profile is removed, moves its reports to
+ * `outbox`, a directory every copy of this module computes alike for the process.
  *
- * After each test the runner (`failureTraceRunner.ts`) sweeps, then `keep` copies what the outbox holds to
- * `.data/integration-failures/<test file>-<test id>-<pid>-firefox-crash/` when the test failed, and empties it either
- * way, so a passing test keeps nothing.
+ * The runner (`failureTraceRunner.ts`) then keeps what the outbox holds:
+ * - after each test, the reports that arrived while it ran, from a browser started for that test, in
+ *   `.data/integration-failures/<test file>-<test id>-<pid>-firefox-crash/` when it failed;
+ * - at the file's end, once its shared scope has closed, those of a browser shared by the file's tests, in
+ *   `<test file>-<file id>-<pid>-shared-firefox-crash/` beside the shared trace when any test in the file failed.
+ *   A report's `.extra` records its crash time, which places it against the test traces' timestamps.
+ * Otherwise they are discarded, so a file whose tests pass keeps nothing. A collection that fails is logged and
+ * changes neither the test's result nor its trace.
  */
 import * as Effect from "effect/Effect"
 import * as fs from "node:fs"
@@ -49,57 +54,68 @@ export const maxTotalBytes = 32 * 1024 * 1024
 /** Where this test process gathers the reports moved out of its browsers' profiles. */
 export const outbox = path.join(os.tmpdir(), `strider-firefox-crash-reports-${process.pid}`)
 
-/** The profiles of the browsers running now, which `sweep` moves reports out of. */
-const live = new Set<string>()
+const logged = (what: string, file: string, error: unknown): void => {
+  // A file Firefox removed while finalizing a report is expected; anything else is worth knowing
+  if ((error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") return
+  console.error(`Couldn't ${what} Firefox's crash report ${file}`, error)
+}
 
-/** Moves the files of `<profile>/minidumps/` into `into`; a file that vanishes or can't be moved stays or is skipped. */
+/**
+ * Moves the reports in `<profile>/minidumps/` into `into`. Run only once the browser has exited, since a running
+ * Firefox still writes them. A file is removed only once its copy is made; a failure is logged and leaves it.
+ */
 export const collect = (profile: string, into: string = outbox): void => {
   const minidumps = path.join(profile, "minidumps")
   let names: Array<string>
   try {
     names = fs.readdirSync(minidumps)
-  } catch {
+  } catch (error) {
+    logged("list", minidumps, error)
     return
   }
   for (const name of names) {
     if (!name.endsWith(".extra") && !name.endsWith(".dmp")) continue
+    const file = path.join(minidumps, name)
     try {
       fs.mkdirSync(into, { recursive: true })
-      fs.copyFileSync(path.join(minidumps, name), path.join(into, name))
-      fs.rmSync(path.join(minidumps, name), { force: true })
-    } catch {
-      // Gone, or not movable: Firefox may still be finalizing it, and a later sweep takes it
+      fs.copyFileSync(file, path.join(into, name))
+    } catch (error) {
+      logged("copy", file, error)
+      continue
+    }
+    try {
+      fs.rmSync(file, { force: true })
+    } catch (error) {
+      logged("remove", file, error)
     }
   }
 }
 
-/** The profiles of the browsers running now. */
-export const liveProfiles = (): ReadonlyArray<string> => [...live]
+/** Whether a ledger item is a Firefox the tests launched: its executable is Firefox's own, on Linux and macOS. */
+export const isFirefox = (item: Ledger.Item): item is Extract<Ledger.Item, { _tag: "Browser" }> =>
+  item._tag === "Browser" && /^firefox/i.test(path.basename(item.executable))
 
-/** Moves the reports of every browser still running into `outbox`. */
-export const sweep = (): void => {
-  for (const profile of live) collect(profile)
-}
+/**
+ * A ledger that does what `ledger` does and, when a Firefox is forgotten, after it exits and before its temporary
+ * profile is removed, moves its reports to `outbox`. Other browsers and items are passed through untouched.
+ */
+export const wrap = (ledger: Ledger.Ledger): Ledger.Ledger => ({
+  add: ledger.add,
+  remove: (item) =>
+    Effect.suspend(() => {
+      if (isFirefox(item)) collect(item.profile)
+      return ledger.remove(item)
+    })
+})
 
-/** Follows every launch made under the default ledger, moving its browser's reports out before the profile goes. */
+/** Wraps the default ledger in place, so every launch that isn't given a ledger of its own is followed. */
 export const install = (): void => {
   const ledger = Effect.runSync(Effect.gen(function*() {
     return yield* Ledger.CurrentLedger
   })) as { add: Ledger.Ledger["add"]; remove: Ledger.Ledger["remove"] }
-  const { add, remove } = ledger
-  ledger.add = (item) =>
-    Effect.suspend(() => {
-      if (item._tag === "Browser") live.add(item.profile)
-      return add(item)
-    })
-  ledger.remove = (item) =>
-    Effect.suspend(() => {
-      if (item._tag === "Browser") {
-        collect(item.profile)
-        live.delete(item.profile)
-      }
-      return remove(item)
-    })
+  const wrapped = wrap({ add: ledger.add, remove: ledger.remove })
+  ledger.add = wrapped.add
+  ledger.remove = wrapped.remove
 }
 
 const mtime = (file: string): number | undefined => {

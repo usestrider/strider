@@ -12,6 +12,7 @@ import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
 import * as FirefoxLauncher from "../../../src/internal/firefoxLauncher.ts"
+import * as Ledger from "../../../src/Ledger.ts"
 import { firefox } from "../browsers.ts"
 import * as FirefoxCrashReports from "../firefoxCrashReports.ts"
 
@@ -62,6 +63,23 @@ const descendants = (root: number): Map<number, string> => {
 const listing = (directory: string): string =>
   fs.existsSync(directory) ? fs.readdirSync(directory).join(", ") : "absent"
 
+/** The id of a report in `directory` whose `.extra` is whole: JSON with its `ProcessType`. */
+const complete = (directory: string): string | undefined => {
+  let names: Array<string>
+  try {
+    names = fs.readdirSync(directory)
+  } catch {
+    return undefined
+  }
+  return names.filter((name) => name.endsWith(".extra")).find((name) => {
+    try {
+      return typeof JSON.parse(fs.readFileSync(path.join(directory, name), "utf8")).ProcessType === "string"
+    } catch {
+      return false
+    }
+  })?.slice(0, -".extra".length)
+}
+
 const services = Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor)
 
 layer(services, { excludeTestServices: true })((it) => {
@@ -71,46 +89,55 @@ layer(services, { excludeTestServices: true })((it) => {
       Effect.gen(function*() {
         const outbox = FirefoxCrashReports.outbox
         const started = Date.now()
-        const { launched } = yield* FirefoxLauncher.launch({ executablePath: firefox.executable })
-        // A web content process: Firefox's own binary with `-contentproc` on Linux, which may start it through a
-        // fork server, and `plugin-container` on macOS; `-isForBrowser` marks it on both
-        let processes = new Map<number, string>()
-        let tab: number | undefined
-        for (let attempt = 0; attempt < 100 && tab === undefined; attempt++) {
-          processes = descendants(Number(launched.handle.pid))
-          tab = [...processes].find(([, args]) => args.includes("-isForBrowser"))?.[0]
-          if (tab === undefined) yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 100)))
-        }
-        assert.isDefined(
-          tab,
-          `Firefox started no web content process; its descendants: ${
-            [...processes].map(([pid, args]) => `${pid} ${args}`).join("; ") || "none"
-          }`
+        // The launch's ledger item names its profile; the wrapped ledger moves its reports once it exits
+        const items: Array<Ledger.Item> = []
+        const ledger = FirefoxCrashReports.wrap({
+          add: (item) => Effect.sync(() => void items.push(item)),
+          remove: () => Effect.void
+        })
+        const written = yield* Effect.scoped(Effect.gen(function*() {
+          const { launched } = yield* FirefoxLauncher.launch({ executablePath: firefox.executable })
+          const profile = items.find(FirefoxCrashReports.isFirefox)?.profile
+          assert.isDefined(profile, "the launch recorded no Firefox")
+          const minidumps = path.join(profile!, "minidumps")
+          // A web content process: Firefox's own binary with `-contentproc` on Linux, which may start it through
+          // a fork server, and `plugin-container` on macOS; `-isForBrowser` marks it on both
+          let processes = new Map<number, string>()
+          let tab: number | undefined
+          for (let attempt = 0; attempt < 100 && tab === undefined; attempt++) {
+            processes = descendants(Number(launched.handle.pid))
+            tab = [...processes].find(([, args]) => args.includes("-isForBrowser"))?.[0]
+            if (tab === undefined) yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 100)))
+          }
+          assert.isDefined(
+            tab,
+            `Firefox started no web content process; its descendants: ${
+              [...processes].map(([pid, args]) => `${pid} ${args}`).join("; ") || "none"
+            }`
+          )
+          // An abort, which Firefox's exception handler reports as a crash of that process, in the profile. The
+          // running Firefox still owns the files, so they're only read until one is complete
+          process.kill(tab!, "SIGABRT")
+          let id: string | undefined
+          for (let attempt = 0; attempt < 100 && id === undefined; attempt++) {
+            yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 100)))
+            id = complete(minidumps)
+          }
+          assert.isDefined(id, `no complete report in ${minidumps} (it holds: ${listing(minidumps)})`)
+          return id!
+        })).pipe(Effect.provideService(Ledger.CurrentLedger, ledger))
+        // The browser has exited and its profile is gone: the report waits in the outbox
+        assert.include(
+          FirefoxCrashReports.reportsSince(outbox, started),
+          written,
+          `the outbox holds: ${listing(outbox)}`
         )
-        // An abort, which Firefox's exception handler reports as a crash of that process, in the profile
-        process.kill(tab!, "SIGABRT")
-        let ids: ReadonlyArray<string> = []
-        for (let attempt = 0; attempt < 100 && ids.length === 0; attempt++) {
-          yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 100)))
-          FirefoxCrashReports.sweep()
-          ids = FirefoxCrashReports.reportsSince(outbox, started)
-        }
-        assert.isAbove(
-          ids.length,
-          0,
-          `no report in ${outbox} (it holds: ${listing(outbox)}; ${
-            FirefoxCrashReports.liveProfiles().map((profile) =>
-              `${profile}/minidumps holds: ${listing(path.join(profile, "minidumps"))}`
-            ).join("; ") || "no browser followed"
-          })`
-        )
-        const extra = fs.readFileSync(path.join(outbox, `${ids[0]}.extra`), "utf8")
-        assert.include(extra, "ProcessType")
+        assert.property(JSON.parse(fs.readFileSync(path.join(outbox, `${written}.extra`), "utf8")), "ProcessType")
         // A failed test keeps the report beside its trace, and a passing one discards it
         const destination = fs.mkdtempSync(path.join(os.tmpdir(), "strider-kept-"))
         try {
           assert.strictEqual(FirefoxCrashReports.keep(outbox, destination, started, true), destination)
-          assert.isTrue(fs.existsSync(path.join(destination, `${ids[0]}.extra`)))
+          assert.isTrue(fs.existsSync(path.join(destination, `${written}.extra`)))
           assert.deepStrictEqual(FirefoxCrashReports.reportsSince(outbox, started), [])
         } finally {
           fs.rmSync(destination, { recursive: true, force: true })

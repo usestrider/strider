@@ -17,7 +17,6 @@ it("leaves another browser's minidumps in its profile", () => {
   fs.writeFileSync(extra, "other browser evidence")
   try {
     Effect.runSync(ledger.add(item))
-    Reports.sweep()
     Effect.runSync(ledger.remove(item))
     expect(fs.existsSync(extra)).toBe(true)
   } finally {
@@ -35,8 +34,9 @@ it("keeps the final annotations when a shared Firefox still has its report open"
   fs.writeSync(fd, "{\"ProductID\":\"firefox\",")
   Effect.runSync(ledger.add(item))
   try {
-    // A shared browser remains alive after a test ends. Its writer still owns this descriptor.
-    Reports.sweep()
+    // A shared browser remains alive after a test ends, and its writer still owns this descriptor: nothing is taken
+    // until the browser is forgotten.
+    expect(fs.existsSync(path.join(Reports.outbox, "live-report.extra"))).toBe(false)
     fs.writeSync(fd, "\"ProcessType\":\"tab\",\"ipc_channel_error\":\"PWindowGlobal::Msg_PDocAccessibleConstructor\"}")
     fs.closeSync(fd)
     Effect.runSync(ledger.remove(item))
@@ -58,14 +58,13 @@ it("collects a Firefox launched under a suite's custom ledger", () => {
   const extra = path.join(profile, "minidumps", "custom-report.extra")
   fs.mkdirSync(path.dirname(extra))
   fs.writeFileSync(extra, "{\"ipc_channel_error\":\"PWindowGlobal::Msg_PDocAccessibleConstructor\"}")
-  const custom: Ledger.Ledger = { add: () => Effect.void, remove: () => Effect.void }
+  const custom = Reports.wrap({ add: () => Effect.void, remove: () => Effect.void })
   try {
     Effect.runSync(
-      Effect.flatMap(Ledger.CurrentLedger, (current) => current.add(item)).pipe(
+      Effect.flatMap(Ledger.CurrentLedger, (current) => Effect.andThen(current.add(item), current.remove(item))).pipe(
         Effect.provideService(Ledger.CurrentLedger, custom)
       )
     )
-    Reports.sweep()
     expect(fs.existsSync(path.join(Reports.outbox, "custom-report.extra"))).toBe(true)
   } finally {
     fs.rmSync(profile, { recursive: true, force: true })

@@ -39,6 +39,7 @@ installTransfer(() => {
 })
 const active = new Map<string, { trace: TraceBuffer; inBody: boolean; started: number }>()
 let sharedFile = ""
+let fileStarted = Date.now()
 const completed = new Map<string, { file?: string | undefined; sequence: number; bytes: number; overflow: boolean }>()
 let nextConnection = 0
 const serialize = (value: unknown): string =>
@@ -230,6 +231,7 @@ install({
 export default class FailureTraceRunner extends TestRunner {
   override onCollectStart(file: RunnerTestFile) {
     super.onCollectStart(file)
+    fileStarted = Date.now()
     sharedFile = filename(file, "shared")
     sharedTransfer = new TransferScope(() => connection("child-transfer"))
     shared.clear()
@@ -276,10 +278,9 @@ export default class FailureTraceRunner extends TestRunner {
     transfers.delete(task.id)
     active.delete(task.id)
     const failed = task.result?.state === "fail"
-    // Firefox's crash reports from this test: kept beside its trace when it failed, discarded when it passed. A
+    // Firefox's crash reports from a browser started for this test: kept beside its trace when it failed. A
     // collection that fails is logged, and never keeps the trace from being saved or replaces the test's failure.
     try {
-      FirefoxCrashReports.sweep()
       FirefoxCrashReports.keep(
         FirefoxCrashReports.outbox,
         path.join(directory, `${path.basename(task.file.filepath)}-${task.id}-${process.pid}-firefox-crash`),
@@ -309,6 +310,18 @@ export default class FailureTraceRunner extends TestRunner {
         "Shared setup/teardown and unattributed concurrent traffic; not assigned to an individual test",
         suite.result?.state !== "fail" && !diagnosticFile(suite)
       )
+    }
+    // A browser the file's tests shared has closed with the shared scope: its reports are kept beside the shared
+    // trace when any test in the file failed. A collection that fails is logged and changes nothing else.
+    try {
+      FirefoxCrashReports.keep(
+        FirefoxCrashReports.outbox,
+        path.join(directory, `${path.basename(suite.file.filepath)}-${suite.id}-${process.pid}-shared-firefox-crash`),
+        fileStarted,
+        suite.result?.state === "fail"
+      )
+    } catch (error) {
+      console.error("Couldn't keep Firefox's crash reports", error)
     }
     shared.clear()
   }

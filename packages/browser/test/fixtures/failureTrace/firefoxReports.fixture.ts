@@ -17,8 +17,8 @@ beforeAll(() => {
 })
 afterAll(() => {
   Effect.runSync(ledger.remove(item))
+  // The outbox is the runner's to empty, once the file's shared scope has closed
   fs.rmSync(profile, { recursive: true, force: true })
-  fs.rmSync(Reports.outbox, { recursive: true, force: true })
 })
 
 for (const failed of [false, true]) {

@@ -1001,7 +1001,7 @@ describe("pointer recipient capture", () => {
   })
 })
 
-it("keeps the failed shared Firefox test's report beside its trace and discards the passing report", async () => {
+it("keeps a shared Firefox's reports beside the shared trace of a file with a failed test", async () => {
   const { spawnSync } = await import("node:child_process")
   const run = spawnSync("pnpm", [
     "exec",
@@ -1018,24 +1018,27 @@ it("keeps the failed shared Firefox test's report beside its trace and discards 
   expect(run.status, run.stdout + run.stderr).toBe(1)
   const files = [...run.stderr.matchAll(/Integration failure trace: (.+\.ndjson)/g)].map((match) => match[1]!)
   const traces = files.filter((file) => file.endsWith("-test.ndjson"))
-  const reports = traces.map((file) => file.replace(/-test\.ndjson$/, "-firefox-crash"))
+  const shared = files.filter((file) => file.endsWith("-shared.ndjson"))
+  const reports = [...traces, ...shared].map((file) => file.replace(/\.ndjson$/, "-firefox-crash"))
   try {
     expect(traces).toHaveLength(1)
+    expect(shared).toHaveLength(1)
     const text = fs.readFileSync(traces[0]!, "utf8")
     expect(text).toContain("failed Firefox print")
     expect(text).toContain("PDocAccessibleConstructor")
     expect(text).toContain("NS_ERROR_UNEXPECTED")
-    expect(fs.readdirSync(reports[0]!).sort()).toEqual(["failed-report.dmp", "failed-report.extra"])
-    expect(JSON.parse(fs.readFileSync(path.join(reports[0]!, "failed-report.extra"), "utf8")))
+    // The shared browser was still running when the test ended, so nothing is kept for the test itself
+    expect(fs.existsSync(reports[0]!)).toBe(false)
+    // It closed with the file's shared scope: both its reports go beside the shared trace, since a test failed
+    const kept = shared[0]!.replace(/\.ndjson$/, "-firefox-crash")
+    expect(fs.readdirSync(kept).sort()).toEqual([
+      "failed-report.dmp",
+      "failed-report.extra",
+      "passing-report.dmp",
+      "passing-report.extra"
+    ])
+    expect(JSON.parse(fs.readFileSync(path.join(kept, "failed-report.extra"), "utf8")))
       .toHaveProperty("ipc_channel_error", "PWindowGlobal::Msg_PDocAccessibleConstructor")
-    const prefix = path.basename(traces[0]!).replace(/-[^-]+-\d+-test\.ndjson$/, "")
-    // Inspect only this subprocess's artifacts, not another run's files.
-    const pid = path.basename(traces[0]!).match(/-(\d+)-test\.ndjson$/)![1]
-    expect(
-      fs.readdirSync(path.dirname(traces[0]!)).filter((name) =>
-        name.startsWith(prefix) && name.endsWith(`-${pid}-firefox-crash`)
-      )
-    ).toHaveLength(1)
   } finally {
     for (const file of [...files, ...reports]) fs.rmSync(file, { recursive: true, force: true })
   }
