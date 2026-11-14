@@ -9,7 +9,9 @@
  *   WebKit's handle on a node is its remote object.
  * - A function too large for one inspector message arrives in parts (`stage`), which `compile` joins and compiles
  *   with the `eval` captured at install. WebKit allows eval for the length of an inspector call, even where the
- *   page's Content-Security-Policy forbids it, and the compile runs inside one.
+ *   page's Content-Security-Policy forbids it, and the compile runs inside one. A page that replaced `eval` before
+ *   the helper was installed could compile something else, so `compile` checks that it made a function whose
+ *   source is the text it joined, and throws otherwise.
  *
  * The helper captures the intrinsics it uses when it is installed, so a page that later replaces
  * `JSON.stringify` or `Array.prototype` doesn't change what it returns; a page that replaced them before can.
@@ -41,6 +43,8 @@ export const source = String.raw`(() => {
   const MapType = Map
   const SetType = Set
   const join = Array.prototype.join
+  const trim = String.prototype.trim
+  const functionSource = Function.prototype.toString
   const compile = eval
   const batches = new Map()
   const staged = new Map()
@@ -183,7 +187,14 @@ export const source = String.raw`(() => {
     compile(key) {
       const parts = staged.get(key) || []
       staged.delete(key)
-      return compile("(" + apply(join, parts, [""]) + ")")
+      const text = apply(trim, apply(join, parts, [""]), [])
+      const fn = compile("(" + text + ")")
+      if (typeof fn !== "function" || apply(functionSource, fn, []) !== text) {
+        throw new ErrorType(
+          "The page replaced eval before Strider's helper was installed, so a function too large for one inspector message can't be compiled there"
+        )
+      }
+      return fn
     }
   }
 })()`
@@ -212,6 +223,9 @@ export const takeNodes = "function(id) { return this.takeNodes(id) }"
 /** The most bytes a part's text takes in a message once JSON-encoded twice, half of libsoup's 128 KiB limit. */
 const partBytes = 64 * 1024
 
+/** The most bytes a declaration takes once JSON-encoded twice and still goes in one message, as it is. */
+const wholeBytes = 96 * 1024
+
 /**
  * What a UTF-16 code unit outside a surrogate pair takes once JSON-encoded twice: a quote or backslash becomes
  * four bytes (`\\\"`), a control character three or seven (`\\n`, `\\u0001`), a lone surrogate seven, and any other its
@@ -231,14 +245,17 @@ const encodedBytes = (code: number): number => {
  * A function declaration's parts, for the helper to stage (`stage`) when it is too large to send in one message,
  * or `undefined` when it isn't. The attached inspector carries a page's command as a JSON string inside
  * `Target.sendMessageToTarget`, so a declaration is JSON-encoded twice, and libsoup closes a socket whose incoming
- * message is over 128 KiB. Each part takes at most 64 KiB once encoded, and never splits a surrogate pair.
+ * message is over 128 KiB. A declaration that takes at most 96 KiB once encoded goes in one message, so the page's
+ * own `eval` never compiles it; a larger one is staged in parts of at most 64 KiB each, never splitting a surrogate
+ * pair.
  */
 export const parts = (fn: string): ReadonlyArray<string> | undefined => {
   // At most seven bytes a code unit: a declaration this short fits without measuring it
-  if (fn.length * 7 <= partBytes) return undefined
+  if (fn.length * 7 <= wholeBytes) return undefined
   const found: Array<string> = []
   let start = 0
   let bytes = 0
+  let total = 0
   for (let i = 0; i < fn.length;) {
     const code = fn.charCodeAt(i)
     const next = fn.charCodeAt(i + 1)
@@ -250,10 +267,11 @@ export const parts = (fn: string): ReadonlyArray<string> | undefined => {
       bytes = 0
     }
     bytes += cost
+    total += cost
     i += pair ? 2 : 1
   }
   found.push(fn.slice(start))
-  return found.length === 1 ? undefined : found
+  return total <= wholeBytes ? undefined : found
 }
 
 /** The function declaration that stages a part of a function, called on the helper with its key, index and text. */
