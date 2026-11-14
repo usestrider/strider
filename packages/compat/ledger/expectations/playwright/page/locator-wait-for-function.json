@@ -1,0 +1,38 @@
+[
+  {
+    "tests": ["LO-185"],
+    "status": "needsFeature",
+    "matrix": "method-locator-waitforfunction",
+    "reason": "Passes an ElementHandle to the predicate as an argument. Strider has no Locator.waitForFunction, and its waits take an Effect observation and a Condition, with no element or handle argument"
+  },
+  {
+    "tests": ["LO-186"],
+    "status": "needsFeature",
+    "matrix": "method-locator-waitforfunction",
+    "reason": "Passes the predicate to Locator.waitForFunction as JavaScript source text, a form of the method Strider doesn't have. A matcher over a read would not exercise that form"
+  },
+  {
+    "tests": ["LO-187"],
+    "status": "needsFeature",
+    "matrix": "method-locator-waitforfunction",
+    "reason": "Checks that Locator.waitForFunction awaits a promise its element predicate returns. Strider has no such method; a matcher over a read would not exercise a predicate's promise"
+  },
+  {
+    "tests": ["LO-189"],
+    "status": "needsFeature",
+    "matrix": "method-locator-waitforfunction",
+    "reason": "Expects an error thrown by the predicate, run on the locator's element, to reach the caller. Strider has no predicate on an element. Its page-level equivalent is ported in page-wait-for-function, which evaluates in the main world; the element form needs Locator.waitForFunction"
+  },
+  {
+    "tests": ["LO-190"],
+    "status": "needsFeature",
+    "matrix": "method-locator-waitforfunction",
+    "reason": "Checks that Locator.waitForFunction resolves its locator strictly and fails on two matches before the predicate runs. Strider has no such method, and a strict read such as readText would test a different operation"
+  },
+  {
+    "tests": ["LO-191", "LO-192"],
+    "status": "needsFeature",
+    "matrix": "option-locator-waitforfunction-signal",
+    "reason": "Aborts the wait through an AbortSignal and expects an AbortError whose cause is the signal's reason. Strider has no signal option for a wait; interrupting its Effect doesn't produce that error. The matrix row option-locator-waitforfunction-timeout also covers the timeout: 0 these tests pass"
+  }
+]

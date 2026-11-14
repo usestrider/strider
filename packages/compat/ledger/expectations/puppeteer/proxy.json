@@ -1,0 +1,17 @@
+[
+  {
+    "tests": [
+      "[proxy.test] request proxy should proxy requests when configured",
+      "[proxy.test] request proxy should respect proxy bypass list",
+      "[proxy.test] request proxy in incognito browser context should proxy requests when configured at browser level",
+      "[proxy.test] request proxy in incognito browser context should respect proxy bypass list when configured at browser level",
+      "[proxy.test] request proxy in incognito browser context should proxy requests when configured at context level",
+      "[proxy.test] request proxy in incognito browser context should respect proxy bypass list when configured at context level"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "notApplicable",
+    "reason": "Puppeteer skips this test on Firefox (\"Chrome-specific test\"), so the port runs it on Chromium and stock WebKit only"
+  }
+]

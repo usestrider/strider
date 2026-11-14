@@ -1,0 +1,30 @@
+[
+  {
+    "tests": [
+      "SE-072",
+      "SE-073"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-selectors-settestidattribute",
+    "reason": "Playwright's selectors.setTestIdAttribute chooses the attribute that getByTestId reads, for the page and for the test's later queries. Strider's getByTestId reads data-testid only, and it has no setting for the attribute, so a page's custom test-id attribute can't be read, nor a list of attributes that matches any of them"
+  },
+  {
+    "tests": [
+      "SE-075"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-getbytestid-value-regexp-test-id",
+    "reason": "Playwright's getByTestId takes a regular expression, which matches the test id's text. Strider's getByTestId takes a string, and matches data-testid exactly"
+  },
+  {
+    "tests": [
+      "SE-093",
+      "SE-094",
+      "SE-095",
+      "SE-096"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-getbyrole-description",
+    "reason": "Playwright's getByRole takes a description option, matched against the element's accessible description (aria-describedby, or the title fallback), by substring, exactly, or as a regular expression. Strider's RoleOptions has name and state filters but no description, so these checks have no Strider call to make"
+  }
+]

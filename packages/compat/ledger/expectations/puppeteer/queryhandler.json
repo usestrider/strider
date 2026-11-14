@@ -1,0 +1,39 @@
+[
+  {
+    "tests": [
+      "[queryhandler.test] Query handler tests XPath selectors in Page should query existing element",
+      "[queryhandler.test] Query handler tests XPath selectors in Page should return empty array for non-existing element",
+      "[queryhandler.test] Query handler tests XPath selectors in Page should return first element",
+      "[queryhandler.test] Query handler tests XPath selectors in Page should return multiple elements",
+      "[queryhandler.test] Query handler tests P selectors should work XPath selectors"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-locator-value-xpath-and-playwright-selector-dsl",
+    "reason": "Finds elements with Puppeteer's `xpath/` prefix or `::-p-xpath(...)`. Strider's page locators take CSS only, and XPath is planned for 1.0 in the matrix row, not built, so every XPath query of the test is missing"
+  },
+  {
+    "tests": [
+      "[queryhandler.test] Query handler tests XPath selectors in ElementHandles should query existing element",
+      "[queryhandler.test] Query handler tests XPath selectors in ElementHandles should return null for non-existing element"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locator-locator-value-xpath-and-playwright-selector-dsl",
+    "reason": "Finds a span inside an element with the `xpath/` prefix on an element handle. Strider's locators take CSS only, and XPath is planned for 1.0 in the matrix row, not built, so the query has no form"
+  },
+  {
+    "tests": [
+      "[queryhandler.test] Query handler tests P selectors should work for ARIA selectors in multiple isolated worlds"
+    ],
+    "status": "notApplicable",
+    "reason": "Checks that a waited-for `::-p-aria` query still resolves after an ElementHandle query installs the handler in the main world. Puppeteer installs its query handlers into each isolated world itself; Strider has no handler registration, so no query can interfere with another's world"
+  },
+  {
+    "tests": [
+      "[queryhandler.test] Query handler tests P selectors should work with custom selectors",
+      "[queryhandler.test] Query handler tests P selectors should work with custom selectors with args"
+    ],
+    "status": "needsFeature",
+    "reason": "Registers a custom query handler (`Puppeteer.registerCustomQueryHandler`) and queries through it with `::-p-div`. Strider has no custom selector engines, the matrix row `method-selectors-register`, and its locators take CSS only",
+    "matrix": "method-selectors-register"
+  }
+]

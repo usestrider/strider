@@ -1,0 +1,52 @@
+[
+  {
+    "tests": [
+      "EV-113",
+      "EV-114",
+      "EV-115",
+      "EV-116",
+      "EV-117",
+      "EV-118",
+      "EV-119",
+      "EV-120",
+      "EV-121",
+      "EV-122",
+      "EV-132",
+      "EV-133",
+      "EV-134"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-evaluate-exposefunctions",
+    "reason": "Passing a function the page calls back, through the evaluation's exposeFunctions option. Strider's evaluation arguments cross by value, and a function inside an argument is left out (one on its own is refused as NotSerializable), so the page has no callback to call; Strider has no exposeFunction or exposeBinding either"
+  },
+  {
+    "tests": ["EV-123"],
+    "status": "needsFeature",
+    "matrix": "option-page-evaluatehandle-exposefunctions",
+    "reason": "Passing a function the page calls back to page.evaluateHandle, through exposeFunctions, which Strider's evaluateHandle doesn't take: its arguments cross by value, and a function inside an argument is left out, and one on its own is refused"
+  },
+  {
+    "tests": ["EV-124", "EV-125"],
+    "status": "needsFeature",
+    "matrix": "option-frame-evaluate-exposefunctions",
+    "reason": "Passing a function the frame's script calls back, through exposeFunctions on Frame.evaluate. Strider has no frame-level evaluation with a callback, and a function inside an evaluation's argument is left out (one on its own is refused as NotSerializable)"
+  },
+  {
+    "tests": ["EV-126"],
+    "status": "needsFeature",
+    "matrix": "option-jshandle-evaluate-exposefunctions",
+    "reason": "Passing a function the page calls back to a handle's evaluate, through exposeFunctions. Strider's handle evaluate takes by-value arguments only, and a function inside an argument is left out (one on its own is refused as NotSerializable)"
+  },
+  {
+    "tests": ["EV-127", "EV-128", "EV-129", "EV-131"],
+    "status": "needsFeature",
+    "matrix": "option-locator-evaluate-exposefunctions",
+    "reason": "Passing a function the element's script calls back, through exposeFunctions on Locator.evaluate. Strider's locator evaluate takes by-value arguments only, and a function inside an argument is left out (one on its own is refused as NotSerializable)"
+  },
+  {
+    "tests": ["EV-130"],
+    "status": "needsFeature",
+    "matrix": "option-locator-evaluatehandle-exposefunctions",
+    "reason": "Passing a function the element's script calls back to a locator's evaluateHandle, through exposeFunctions. Strider's locator evaluateHandle takes by-value arguments only, and a function inside an argument is left out (one on its own is refused as NotSerializable)"
+  }
+]

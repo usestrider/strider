@@ -1,0 +1,12 @@
+[
+  {
+    "tests": [
+      "EE-001",
+      "EE-002",
+      "EE-003"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-removealllisteners-behavior",
+    "reason": "Removes a page's console listeners with a behavior (`ignoreErrors` or `wait`) and checks how a failing listener is handled. Strider's events are streams whose lifetime is their scope, so there is no listener to remove, and the behavior option has no counterpart (the matrix row for it is missing)"
+  }
+]

@@ -1,0 +1,78 @@
+[
+  {
+    "tests": [
+      "HA-019",
+      "HA-047"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-ignorehttpserrors",
+    "reason": "The context accepts the fixture's self-signed certificate, which Chromium refuses per context (acceptInsecureCerts is Unsupported there)"
+  },
+  {
+    "tests": [
+      "HA-024"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright's deprecated `omitContent: true` flag; Strider has one `content` option, and HA-023 ports the same check with `content: \"omit\"`"
+  },
+  {
+    "tests": [
+      "HA-027"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-tracing-starthar-urlfilter",
+    "reason": "Filtering a recording by a regular expression; Strider's `url` takes a glob or a URLPattern string"
+  },
+  {
+    "tests": [
+      "HA-042",
+      "HA-050",
+      "HA-051",
+      "HA-052",
+      "HA-053",
+      "HA-054"
+    ],
+    "status": "needsFeature",
+    "issue": "ROOK-370",
+    "reason": "The requests of an APIRequestContext (`context.request` or `page.request`), which Strider has no counterpart of, are recorded or excluded here"
+  },
+  {
+    "tests": [
+      "HA-061",
+      "HA-063",
+      "HA-064",
+      "HA-065"
+    ],
+    "status": "needsFeature",
+    "issue": "ROOK-370",
+    "reason": "A standalone request context whose requests are recorded to a HAR, which Strider doesn't have"
+  },
+  {
+    "tests": [
+      "HA-045"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-response-serveraddr",
+    "reason": "A response's server address, which NetworkResponse doesn't expose"
+  },
+  {
+    "tests": [
+      "HA-046"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-response-securitydetails",
+    "reason": "A response's TLS security details, which NetworkResponse doesn't expose"
+  },
+  {
+    "tests": [
+      "HA-066",
+      "HA-067"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-tracing-starthar-resourcesdir",
+    "reason": "Writing a recording's bodies to a directory of their own, which Strider's attached zip doesn't offer"
+  }
+]

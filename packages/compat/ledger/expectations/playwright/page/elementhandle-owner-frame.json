@@ -1,0 +1,16 @@
+[
+  {
+    "tests": [
+      "EH-055",
+      "EH-056",
+      "EH-057",
+      "EH-058",
+      "EH-059",
+      "EH-060",
+      "EH-061"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "`elementHandle.ownerFrame()` gives the frame whose document holds a fixed element, and follows the element as it moves between documents (EH-061) or is removed from the DOM (EH-060). Strider has no ElementHandle: its locators re-resolve on each use and hold no node, and the handles it has come from `evaluateHandle` on the page, which doesn't reach a frame's realm (`method-frame-evaluatehandle`), so no read returns the owning frame"
+  }
+]

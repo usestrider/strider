@@ -1,0 +1,17 @@
+[
+  {
+    "tests": [
+      "AU-017",
+      "AU-018",
+      "AU-019",
+      "AU-020",
+      "AU-021",
+      "AU-022",
+      "AU-023",
+      "AU-024"
+    ],
+    "status": "differentByDesign",
+    "decision": "Native passkey testing",
+    "reason": "Every test seeds, captures, or shares credentials across a browser context through `context.credentials`, `install()`, or `storageState({ credentials })`. Strider's virtual authenticators belong to one page and are shared only by an explicit export and import into another page, so there is no context-wide credential store to test. The page-scoped authenticator is what Strider offers in its place (`Capability.VirtualAuthenticator`)"
+  }
+]

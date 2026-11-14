@@ -1,0 +1,41 @@
+[
+  {
+    "tests": [
+      "EX-004",
+      "EX-005",
+      "EX-011"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-locatorassertions-tobechecked-indeterminate",
+    "reason": "Expects a checkbox's indeterminate state with `toBeChecked({ indeterminate: true })`, and rejects combining it with `checked`. Strider's `toBeChecked` takes no options, and its `isChecked` reads a mixed state as false, so there is no way to wait for an indeterminate checkbox"
+  },
+  {
+    "tests": [
+      "EX-066",
+      "EX-067",
+      "EX-068",
+      "EX-069",
+      "EX-070",
+      "EX-071",
+      "EX-072"
+    ],
+    "status": "needsFeature",
+    "issue": "ROOK-370",
+    "reason": "Asserts `toBeOK` on the response of `page.request.get`, and on the error text it prints for a failing response, including its text body. Strider has no API request client or response object, and no response matcher; a browser's responses are network events"
+  },
+  {
+    "tests": [
+      "EX-022"
+    ],
+    "status": "differentByDesign",
+    "decision": "Editability reads share editing rules",
+    "reason": "Expects `toBeEditable` on a button to throw at once, naming the unsupported element kind. Strider's editability predicate returns false for an unsupported kind, so `toBeEditable` waits for the deadline and then fails as an `ExpectationFailed` whose last observation is \"not editable\""
+  },
+  {
+    "tests": [
+      "EX-064"
+    ],
+    "status": "notApplicable",
+    "reason": "Tests the error message of Playwright's selector-string parser for an unknown engine name (`row=\"row\"`), reported as `Unknown engine`; Strider's `page.locator` takes a CSS string and has no engine names"
+  }
+]

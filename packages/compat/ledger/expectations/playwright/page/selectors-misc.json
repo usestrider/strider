@@ -1,0 +1,21 @@
+[
+  {
+    "tests": [
+      "SE-141"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "Playwright's layout selectors (`div:right-of(#id6)`, `:left-of`, `:above`, `:below`, `:near`, and their distance argument) pick elements by their boxes relative to another element. Strider's locator takes CSS, and its filters are `visible`, `has`, `hasNot`, `hasText`, and `hasNotText`, none of which compares positions. Rebuilding the comparison from `boundingBox` reads would test the port's own geometry, not the engine, so the test is left unported"
+  },
+  {
+    "tests": [
+      "SE-142",
+      "SE-143",
+      "SE-144",
+      "SE-145"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-locator-value-xpath-and-playwright-selector-dsl",
+    "reason": "XPath: `label >> xpath=.. >> input` climbs to a parent, `xpath=./*` and `//*` are relative and absolute paths, `//a|//b` is a union, and a malformed XPath's error prints the original expression. Strider's locator takes CSS only, and XPath is planned for 1.0 (the matrix row), so there's no XPath engine to run these against"
+  }
+]

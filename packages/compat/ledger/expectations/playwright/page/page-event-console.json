@@ -1,0 +1,60 @@
+[
+  {
+    "tests": [
+      "CM-001"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-consolemessage-args",
+    "reason": "Reads each argument of a console message as a JSHandle (`args()[n].jsonValue()`); a `ConsoleMessage` carries the formatted text, level, and location, not the arguments"
+  },
+  {
+    "tests": [
+      "CM-003"
+    ],
+    "status": "notApplicable",
+    "reason": "Inspects a console message with Node's `util.inspect`, which prints the text because Playwright's message defines an inspect hook; Strider's message is a Schema value with no hook, and its text is the `text` field"
+  },
+  {
+    "tests": [
+      "CM-004",
+      "CM-005"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-consolemessage-type",
+    "reason": "Checks a message's `type()` as timeEnd, trace, dir, timeLog, and so on; Strider's level has five values (debug, log, info, warning, error), so those types have no name. The matrix row says the type is present, which covers only the five levels"
+  },
+  {
+    "tests": [
+      "CM-014",
+      "CM-015",
+      "CM-016"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-consolemessage-timestamp",
+    "reason": "Checks a message's wall-clock timestamp against the test's clock (CM-014, CM-016), or that the timestamps of successive messages don't decrease (CM-015); a `ConsoleMessage`'s `at` is when Strider received the message, a monotonic instant, not the browser's time of the call, and there is no timestamp"
+  },
+  {
+    "tests": [
+      "CM-018"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-clearconsolemessages",
+    "reason": "Clears a page's console messages so that later reads start from the clear; Strider's history is read but not cleared"
+  },
+  {
+    "tests": [
+      "CM-019"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-consolemessages-filter",
+    "reason": "Reads a page's console messages either since its last navigation or all of them; `ConsoleMessage.history` has no navigation filter"
+  },
+  {
+    "tests": [
+      "CM-020"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-pageerrors-filter",
+    "reason": "Reads a page's uncaught exceptions either since its last navigation or all of them; `UncaughtException.history` has no navigation filter"
+  }
+]

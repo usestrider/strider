@@ -1,0 +1,35 @@
+[
+  {
+    "tests": [
+      "[extensions.test] extensions should drop the previous service_worker target when re-installing an extension",
+      "[extensions.test] extensions should list extensions and their properties",
+      "[extensions.test] extensions should trigger extension action",
+      "[extensions.test] extensions should remove extension from list after uninstall"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsertype-launchpersistentcontext",
+    "reason": "Installs, re-installs, lists, triggers, or uninstalls an extension while the browser runs (`browser.installExtension`, `uninstallExtension`, `extensions()`, `triggerExtensionAction`). Strider loads an extension only at launch through `launch.args`, and has no extension management, so the tests' points (the replaced worker's target is dropped, the listed properties, the action, the list after uninstall) have nothing to run on. No matrix row covers extension management; the nearest is launching with an extension"
+  },
+  {
+    "tests": [
+      "[extensions.test] extensions should list extension workers",
+      "[extensions.test] extensions should list extension pages",
+      "[extensions.test] extensions should capture console logs from extension pages"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-serviceworkers",
+    "reason": "Triggers the extension's action at run time and then reads an extension's workers or pages (`extension.workers()`, `extension.pages()`, the popup target as a page), which Strider can't: it has no extension object, no trigger, and no listing of an extension's pages. No matrix row covers extension pages; the nearest is the context's service workers"
+  },
+  {
+    "tests": ["[extensions.test] extensions should capture console logs from extension workers"],
+    "status": "needsFeature",
+    "matrix": "event-worker-console",
+    "reason": "Reads the console messages a service worker logs (`worker.on('console')`); a worker's console is missing from `BrowserWorker`. The test also triggers the extension's action at run time, which Strider can't"
+  },
+  {
+    "tests": ["[extensions.test] extensions should be available in Incognito profiles if enabledInIncognito is true"],
+    "status": "needsFeature",
+    "matrix": "method-frame-evaluate",
+    "reason": "Installs the extension with `enabledInIncognito`, lists the page's extension realms (`page.extensionRealms()`), finds the content script of the installed extension, and evaluates in its isolated world. Strider has no listing of a page's extension realms, and its evaluation in an isolated world is only a frame locator's; the nearest matrix row is frame evaluation"
+  }
+]

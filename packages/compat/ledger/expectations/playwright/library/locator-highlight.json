@@ -1,0 +1,33 @@
+[
+  {
+    "tests": [
+      "LO-193",
+      "LO-194"
+    ],
+    "status": "notApplicable",
+    "reason": "Strider won't draw overlays, action captions, or highlights into a page or its recording: they change what the page and its captures show, for a presentation feature. Highlighting an element with a style, which `locator.highlight` would take. Strider has no highlight overlay"
+  },
+  {
+    "tests": [
+      "LO-195"
+    ],
+    "status": "notApplicable",
+    "reason": "Strider won't draw overlays, action captions, or highlights into a page or its recording: they change what the page and its captures show, for a presentation feature. Removing a locator's highlight with `locator.hideHighlight`. Strider has no highlight overlay"
+  },
+  {
+    "tests": [
+      "LO-196",
+      "LO-198",
+      "LO-199"
+    ],
+    "status": "notApplicable",
+    "reason": "Strider won't draw overlays, action captions, or highlights into a page or its recording: they change what the page and its captures show, for a presentation feature. Highlighting a locator with `locator.highlight`, which survives navigation (LO-196), works with a registered selector engine (LO-198, which also needs `playwright.selectors.register`), and resolves in the locator's frame (LO-199). Strider has no highlight overlay"
+  },
+  {
+    "tests": [
+      "LO-197"
+    ],
+    "status": "notApplicable",
+    "reason": "Strider won't draw overlays, action captions, or highlights into a page or its recording: they change what the page and its captures show, for a presentation feature. Clearing every locator highlight with `page.hideHighlight`. Strider has no highlight overlay"
+  }
+]

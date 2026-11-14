@@ -1,0 +1,45 @@
+[
+  {
+    "tests": [
+      "[keyboard.test] Keyboard should trigger commands of keyboard shortcuts"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-keyboard-press",
+    "reason": "Presses Control+A, Control+C and Control+V with `commands` (SelectAll, Copy, Paste), which the browser runs as editing commands along with the key. Strider's press takes modifiers only, so the commands can't be sent and the shortcuts' effects are not requested"
+  },
+  {
+    "tests": [
+      "[keyboard.test] Keyboard should send the Enter code for Enter",
+      "[keyboard.test] Keyboard should specify location"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-keyboard-press",
+    "reason": "Names keys by their physical code and reads each key's `location`: `Enter`, `NumpadEnter`, `Digit5`, `ControlLeft`, `ControlRight`, and `NumpadSubtract`, with `event.location` values 0 to 3. Strider's key values name the key a layout types, with a left-hand Control, Shift, Alt and Meta only, and no numpad keys or `location`, so these checks have no Strider counterpart"
+  },
+  {
+    "tests": [
+      "[keyboard.test] Keyboard should send a character with sendCharacter",
+      "[keyboard.test] Keyboard should send a character with sendCharacter in iframe"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-keyboard-inserttext",
+    "reason": "Inserts text with no key events and expects no keydown. Strider's insertText types each character as a key on Firefox (its JSDoc says so), so the keydown count the original checks is one, not zero; Chromium inserts the text without key events, as the original does"
+  },
+  {
+    "tests": [
+      "[keyboard.test] Keyboard ElementHandle.press should not support |text| option"
+    ],
+    "status": "notApplicable",
+    "reason": "Checks that Puppeteer's `ElementHandle.press` ignores its `text` option, so the 'ё' it names isn't typed. Strider's press has no `text` option at all, so there is nothing for it to ignore, and the key pressed is the one the call names"
+  },
+  {
+    "tests": [
+      "[keyboard.test] Keyboard should press the meta key"
+    ],
+    "status": "notApplicable",
+    "reason": "Runs only on macOS in the original (it returns at once on other platforms, `os.platform() !== 'darwin'`), so it does nothing on Linux and isn't ported. The harness runs on Linux"
+  }
+]

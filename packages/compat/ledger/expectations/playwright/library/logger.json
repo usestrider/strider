@@ -1,0 +1,18 @@
+[
+  {
+    "tests": [
+      "LG-001"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browsertype-launch-logger",
+    "reason": "Passes a `logger` to `browserType.launch` and checks the browser and context calls it records. Strider has no logger option (the matrix row for it is missing), and its operations report through spans, not a logger callback"
+  },
+  {
+    "tests": [
+      "LG-002"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-logger",
+    "reason": "Passes a `logger` to a context and checks the page calls it records. Strider has no logger option (the matrix row for it is missing), and its operations report through spans, not a logger callback"
+  }
+]

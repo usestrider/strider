@@ -1,0 +1,16 @@
+[
+  {
+    "tests": [
+      "RO-110",
+      "RO-112",
+      "RO-117"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-route-fetch",
+    "reason": "The port fulfills the page's own paused response at the response phase, which Strider does on Chromium only: Firefox can't fulfill at that phase (interception.responseFulfill), and WebKit can't read a paused response's body (interception.responseBody, CDP only) nor change its headers (interception.responseHeaders). Playwright's route.fetch works on every browser"
+  }
+]

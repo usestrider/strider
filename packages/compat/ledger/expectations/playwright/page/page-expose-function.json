@@ -1,0 +1,37 @@
+[
+  {
+    "tests": [
+      "EF-001",
+      "EF-016",
+      "EF-017",
+      "EF-021"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-exposebinding",
+    "reason": "Page.exposeBinding registers a function the page can call, which receives the caller's source and returns a value to it; Strider has no operation that registers one, so every test here has nothing to call"
+  },
+  {
+    "tests": [
+      "EF-002",
+      "EF-003",
+      "EF-004",
+      "EF-005",
+      "EF-006",
+      "EF-007",
+      "EF-008",
+      "EF-009",
+      "EF-010",
+      "EF-011",
+      "EF-012",
+      "EF-013",
+      "EF-014",
+      "EF-015",
+      "EF-018",
+      "EF-019",
+      "EF-020"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-exposefunction",
+    "reason": "Page.exposeFunction registers a function the page can call and awaits its result; Strider has no operation that registers one, so every test here has nothing to call"
+  }
+]

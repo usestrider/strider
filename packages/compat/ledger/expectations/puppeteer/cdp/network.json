@@ -1,0 +1,12 @@
+[
+  {
+    "tests": [
+      "[network.test] network Page.setRequestInterception should work with internal redirects not paused by Fetch.requestPaused"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "notApplicable",
+    "reason": "Puppeteer skips this test on Firefox (\"Chrome-specific test\"), so the port runs it on Chromium and stock WebKit only"
+  }
+]

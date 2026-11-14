@@ -1,0 +1,8 @@
+[
+  {
+    "tests": ["WM-015"],
+    "status": "needsFeature",
+    "matrix": "method-webmcp-tools",
+    "reason": "page.webmcp.tools() throws \"WebMCP is not enabled\" when the browser was launched without WebMCP, naming the flag to launch with. Strider has no WebMCP discovery API to throw it"
+  }
+]

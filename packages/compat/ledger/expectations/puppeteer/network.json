@@ -1,0 +1,100 @@
+[
+  {
+    "tests": [
+      "[network.test] network Request.initiator should return the initiator"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-request-frame",
+    "reason": "Reads each request's initiator as Puppeteer's `request.initiator()`: a `parser`, `script`, or `other` type, with the initiating URL and a script stack. Strider's `Initiator` names only a document (its navigable and navigation), a worker's realm, or nothing, so the parser and script details have no counterpart. No matrix row covers Request.initiator; `method-request-frame` is the nearest"
+  },
+  {
+    "tests": [
+      "[network.test] network Request.fetchPostData should work for intercepted form submissions in cooperative mode"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "Two request handlers both see each form POST: the first continues it with Puppeteer's cooperative priority (`continue({}, 0)`), so the second still runs. Strider's route handler returns one decision per request, and no matrix row covers cooperative interception"
+  },
+  {
+    "tests": [
+      "[network.test] network Response.stream should stream the body while it is loading"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-response-body",
+    "reason": "Reads the body's chunks as the server writes them. Strider collects a response's body before its decoder runs, so chunks aren't delivered while the response loads, and a body that doesn't finish within the default budget fails as streaming"
+  },
+  {
+    "tests": [
+      "[network.test] network Request.content should work with binary post data",
+      "[network.test] network Response.buffer should work",
+      "[network.test] network Response.buffer should work with compression"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-response-body",
+    "reason": "Reads exact bytes with `arrayBuffer`. Stock WebKit supplies only the text its protocol reports, and its decoders refuse exact-byte reads (NetworkRequest.BodyDecoder's gotchas). Predicted from that documented behavior; not yet run on stock WebKit"
+  },
+  {
+    "tests": [
+      "[network.test] network Response.stream should return the whole body if loading has finished",
+      "[network.test] network Response.stream should error the stream if loading fails",
+      "[network.test] network Response.stream should stop listening when the stream is cancelled"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-response-body",
+    "reason": "Reads a response's body as a stream: `response.stream()` yields its chunks, and errors the stream when loading fails. Strider's body decoders (`text`, `json`, `arrayBuffer`) collect the whole body first, and the subscription has no stream, so the chunks and the cancellation of a listener have no counterpart. The nearest row is method-response-body, whose decoders are the closest Strider form"
+  },
+  {
+    "tests": [
+      "[network.test] network Response.remoteAddress should work",
+      "[network.test] network Response.remoteAddress should support redirects"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-response-serveraddr",
+    "reason": "Reads the IP address and port of the server that answered a response. Strider's NetworkResponse carries no server address, so neither the address nor the port of a redirect hop is readable. The nearest row is method-response-serveraddr, the Playwright counterpart (`response.serverAddr()`), which is also missing"
+  },
+  {
+    "tests": [
+      "[network.test] network Page.setBypassServiceWorker bypass for network"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-serviceworkers",
+    "reason": "Bypasses a page's service worker for its network requests, toggled on a live page, and reports whether it's bypassed. Strider has no service-worker bypass, and its context option only decides whether service workers are allowed at all. No matrix row covers the live bypass; option-browser-newcontext-serviceworkers is the nearest, and it is missing too"
+  },
+  {
+    "tests": [
+      "[network.test] network Page.setExtraHTTPHeaders should work with a Headers instance"
+    ],
+    "status": "notApplicable",
+    "reason": "Passes the extra headers as a Headers object, where Puppeteer accepts either a Headers instance or a plain record. Strider's extraHTTPHeaders is a record of strings, typed as such (Emulation.ts), so the instance is a second spelling of the same input; the record form is what the port of 'should work' covers"
+  },
+  {
+    "tests": [
+      "[network.test] network Page.authenticate should work",
+      "[network.test] network Page.authenticate should work with interception",
+      "[network.test] network Page.authenticate should error if authentication is required but not enabled",
+      "[network.test] network Page.authenticate should fail if wrong credentials",
+      "[network.test] network Page.authenticate should allow disable authentication",
+      "[network.test] network Page.authenticate should not disable caching for ${type}"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-sethttpcredentials",
+    "reason": "Answers HTTP authentication challenges with the page's credentials through an auth-phase route. Stock WebKit answers challenges only from credentials set in advance (interception.auth), so its auth-phase routes fail with Unsupported, as Route.provideCredentials documents"
+  },
+  {
+    "tests": [
+      "[network.test] network raw network headers Cross-origin set-cookie"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-ignorehttpserrors",
+    "reason": "Accepting a self-signed HTTPS certificate in a context (acceptInsecureCerts). Chromium refuses it per context with Unsupported, because its certificate override applies to the whole browser, so the context that the test's TLS server needs can't be made there"
+  }
+]

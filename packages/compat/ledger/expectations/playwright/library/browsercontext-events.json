@@ -1,0 +1,86 @@
+[
+  {
+    "tests": [
+      "BC-033"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-consolemessage-args",
+    "reason": "Reads the element handle a console message's argument refers to, and clicks it; Strider's ConsoleMessage has no arguments"
+  },
+  {
+    "tests": [
+      "BC-037",
+      "BC-039",
+      "BC-040",
+      "BC-041",
+      "BC-042"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-browsercontext-dialog",
+    "reason": "Waits for a dialog on the context, as well as on the page; Dialog.next and Dialog.stream take a page only, so a dialog can't be watched from its context. The matrix row says the context event is had, which the Dialog API doesn't show"
+  },
+  {
+    "tests": [
+      "BC-038"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-page-dialogclosed",
+    "reason": "Waits for a dialog's close, however it was decided; Strider reports a dialog as it opens, not as it closes"
+  },
+  {
+    "tests": [
+      "BC-044"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-weberror-location",
+    "reason": "Reads the script location an uncaught error was thrown from (url, line, column); Strider's UncaughtException has no location"
+  },
+  {
+    "tests": [
+      "BC-045"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-browsercontext-pageload",
+    "reason": "Waits for a page's load on the context; Strider has no context-level load event"
+  },
+  {
+    "tests": [
+      "BC-046"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-browsercontext-framenavigated",
+    "reason": "Waits for a frame's navigation on the context; Strider has no context-level frame navigation event"
+  },
+  {
+    "tests": [
+      "BC-047"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-browsercontext-pageclose",
+    "reason": "Waits for a page's close on the context; Strider reports a page's close on the page (closed), not on the context"
+  },
+  {
+    "tests": [
+      "BC-048"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-browsercontext-frameattached",
+    "reason": "Waits for a frame's attachment on the context; Strider has no context-level frame attached event"
+  },
+  {
+    "tests": [
+      "BC-049"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-browsercontext-framedetached",
+    "reason": "Waits for a frame's detachment on the context; Strider has no context-level frame detached event"
+  },
+  {
+    "tests": [
+      "BC-050"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-download-page",
+    "reason": "Reads the page a download came from; Strider's Download doesn't name its originating page"
+  }
+]

@@ -1,0 +1,17 @@
+[
+  {
+    "tests": [
+      "SE-160",
+      "SE-161",
+      "SE-162",
+      "SE-163",
+      "SE-164",
+      "SE-165",
+      "SE-166",
+      "SE-167"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-selectors-register",
+    "reason": "Registering custom selector engines, by source or path, in the page's main or isolated world, and selecting with `engine=value`; Strider has no selector-engine registry, so none of these tests can be written against it"
+  }
+]

@@ -1,0 +1,14 @@
+[
+  {
+    "tests": ["DC-007"],
+    "status": "needsFeature",
+    "matrix": "option-browsertype-launchpersistentcontext-bypasscsp",
+    "reason": "Bypassing the page's Content Security Policy (`bypassCSP`) for a persistent context's launch. Strider's launch doesn't take it, and its controlled default context has no declaration for it"
+  },
+  {
+    "tests": ["DC-009"],
+    "status": "needsFeature",
+    "matrix": "option-browsertype-launchpersistentcontext-httpcredentials",
+    "reason": "Website credentials (`httpCredentials`) for a persistent context's launch. Strider's controlled default context has no declaration for them, so the page's 401 challenge is not answered with them"
+  }
+]

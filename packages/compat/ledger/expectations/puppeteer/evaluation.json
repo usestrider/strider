@@ -1,0 +1,40 @@
+[
+  {
+    "tests": [
+      "[evaluation.test] Evaluation specs Page.evaluate should work from-inside an exposed function"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-exposefunction",
+    "reason": "Exposes a function the page calls back into Node with `page.exposeFunction`, which Strider doesn't have; the test calls `page.evaluate` from inside it. The matrix row is `missing`, and Strider's evaluation arguments can't carry a callback"
+  },
+  {
+    "tests": [
+      "[evaluation.test] Evaluation specs Page.evaluate should accept a string",
+      "[evaluation.test] Evaluation specs Page.evaluate should accept a string with semi colons",
+      "[evaluation.test] Evaluation specs Page.evaluate should accept a string with comments"
+    ],
+    "status": "differentByDesign",
+    "decision": "Evaluation takes a function, never a string of source",
+    "reason": "Passes a string expression to `page.evaluate`, which Puppeteer runs as source and Strider's `evaluate` doesn't accept: it takes a function. The matrix row says `has` for the function form, and no row covers a string expression"
+  },
+  {
+    "tests": [
+      "[evaluation.test] Evaluation specs Page.evaluate should throw if elementHandles are from other frames"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-frame-evaluatehandle",
+    "reason": "Takes a handle to a frame's `body` with `frame.$`, which Strider's frame locator doesn't give: it has no evaluation-handle operation, so the handle the test passes into the page's evaluation can't be made. The matrix row is `missing`"
+  },
+  {
+    "tests": [
+      "[evaluation.test] Evaluation specs Page.evaluate should accept element handle as an argument",
+      "[evaluation.test] Evaluation specs Page.evaluate should throw if underlying element was disposed"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-evaluatehandle",
+    "reason": "Creates a handle with `page.evaluateHandle`, and passes it back into `page.evaluate`, which runs in the isolated world. Stock WebKit has no isolated worlds (`isolatedWorlds` is unsupported), so it fails `Unsupported` there"
+  }
+]

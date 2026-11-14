@@ -1,0 +1,30 @@
+[
+  {
+    "tests": [
+      "CD-040"
+    ],
+    "status": "notApplicable",
+    "reason": "Checks that `context.newCDPSession` rejects an argument that isn't a Page or Frame, which is Playwright's own argument validation. A Strider session is attached to a target id the caller names, with no page object to mistake"
+  },
+  {
+    "tests": [
+      "CD-041"
+    ],
+    "status": "notApplicable",
+    "reason": "Strider won't collect coverage from a browser run (ROOK-385, ROOK-386): build-time instrumentation, read back with evaluate, works on every browser. Starts and stops JS coverage (`page.coverage.startJSCoverage` and `stopJSCoverage`) between a session's own `Debugger.enable` and the `scriptParsed` event it waits for, to check that coverage's use of the Debugger domain leaves the session's enabled. Strider has no JS coverage"
+  },
+  {
+    "tests": [
+      "CD-044"
+    ],
+    "status": "notApplicable",
+    "reason": "Passes `page.mainFrame()` where CD-037 passes the page, to check that Playwright accepts a main frame as the target of `newCDPSession`. A Strider session is attached to a target, which a main frame is the page of, so there is no second form to take"
+  },
+  {
+    "tests": [
+      "CD-045"
+    ],
+    "status": "notApplicable",
+    "reason": "Checks Playwright's refusal of `newCDPSession` for a same-process child frame, \"This frame does not have a separate CDP session\". Strider attaches to targets, which a same-process frame isn't, so no call names it to refuse"
+  }
+]

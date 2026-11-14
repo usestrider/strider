@@ -1,0 +1,40 @@
+[
+  {
+    "tests": [
+      "[followSymlinks.test] followSymlinks when followSymlinks is false should reject addScriptTag with a symlinked path",
+      "[followSymlinks.test] followSymlinks when followSymlinks is false should reject addStyleTag with a symlinked path",
+      "[followSymlinks.test] followSymlinks when followSymlinks is false should reject screenshot to an existing symlink path",
+      "[followSymlinks.test] followSymlinks when followSymlinks is false should reject pdf to an existing symlink path",
+      "[followSymlinks.test] followSymlinks when followSymlinks is false should reject screencast to an existing symlink path",
+      "[followSymlinks.test] followSymlinks when followSymlinks is true (default) should allow screenshot to a symlink path"
+    ],
+    "status": "notApplicable",
+    "reason": "Tests Puppeteer's process-wide `setFollowSymlinks`, which patches Node's file system calls that Puppeteer makes for its own file reads and writes (`node-env-setup.ts`). Strider has no such setting and makes no file calls of its own for these: a screenshot or PDF returns its bytes, and the caller writes them with Effect's FileSystem, which the setting never reaches. The symlink refusal, with its ELOOP, is therefore not Strider's behavior to check"
+  },
+  {
+    "tests": [
+      "[followSymlinks.test] followSymlinks when followSymlinks is false should allow addScriptTag with a regular file path",
+      "[followSymlinks.test] followSymlinks when followSymlinks is true (default) should allow addScriptTag with a symlinked path"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-frame-addscripttag",
+    "reason": "Adds a script tag from a file path (`page.addScriptTag({ path })`) and reads a global the script sets. Strider has no retained frame operation that adds a script tag, and option-frame-addscripttag-path is missing"
+  },
+  {
+    "tests": [
+      "[followSymlinks.test] followSymlinks when followSymlinks is false should allow addStyleTag with a regular file path",
+      "[followSymlinks.test] followSymlinks when followSymlinks is true (default) should allow addStyleTag with a symlinked path"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-frame-addstyletag",
+    "reason": "Adds a style tag from a file path (`page.addStyleTag({ path })`) and reads the body's computed background color. Strider has no retained frame operation that adds a style tag, and option-frame-addstyletag-path is missing"
+  },
+  {
+    "tests": [
+      "[followSymlinks.test] followSymlinks when followSymlinks is false should reject screencast when overwrite is false and file exists"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-screencast-start-path",
+    "reason": "Starts a screencast to a path with `overwrite: false` and expects EEXIST for an existing file. Strider's screencast takes a path, but has no overwrite option to refuse with; the nearest matrix row is the screencast path"
+  }
+]

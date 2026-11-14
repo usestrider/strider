@@ -1,0 +1,102 @@
+[
+  {
+    "tests": [
+      "SC-001",
+      "SC-003",
+      "SC-005"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-screencast-start-size",
+    "reason": "Playwright's `size` option scales each frame to fit it, and reports the viewport's size with each frame (SC-001 and SC-003 check both). Strider's frames are JPEGs at the page's device pixels, with no scaling option, and they carry no viewport size. SC-005 restarts with a different `size`"
+  },
+  {
+    "tests": [
+      "SC-009",
+      "SC-010"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-screencast-start-fps",
+    "reason": "Playwright's `fps` option sets a recording's frame rate, and rejects one that isn't positive (SC-010). Strider's video has no frame rate to request: it is variable-rate, with each source frame's time"
+  },
+  {
+    "tests": [
+      "SC-002",
+      "SC-006"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-screencast-start",
+    "reason": "Strider's native frame stream is Chromium's alone; Firefox and stock WebKit refuse Capability.Screencast"
+  },
+  {
+    "tests": [
+      "SC-004"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-screencast-start",
+    "reason": "Strider's native frame stream is Chromium's alone; Firefox and stock WebKit refuse Capability.Screencast, so there is no second acquisition to refuse"
+  },
+  {
+    "tests": [
+      "SC-007",
+      "SC-013",
+      "SC-014",
+      "SC-015"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-screencast-start-path",
+    "reason": "Stock WebKit's video needs explicit polling options and a VideoWriter, which the harness doesn't give its browser layer, so acquiring Capability.Video is Unsupported there"
+  },
+  {
+    "tests": [
+      "SC-008"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright's `recordVideo` context option starts a recording automatically and writes it to `recordVideo.dir`, alongside a manual screencast. Strider has no automatic recording: a recording is a capability the caller acquires in a scope (`Capability.Video`), so there is no option whose coexistence with another recording the test could check. VI-002 has the same shape"
+  },
+  {
+    "tests": [
+      "SC-012"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright's `screencast.stop()` is a method that ends the running screencast, and does nothing when none runs. Strider has no stop method: a screencast or recording ends when its scope closes, and there is no call to make when nothing is running"
+  },
+  {
+    "tests": [
+      "SC-004"
+    ],
+    "status": "differentByDesign",
+    "decision": "Chromium screencast ownership belongs to the session",
+    "reason": "Playwright refuses a second `screencast.start` while one runs, with `Screencast is already started`. Strider's stream belongs to the session and is shared by its acquisitions, so a second acquisition joins the stream and succeeds, and each one's scope releases only its own use"
+  },
+  {
+    "tests": [
+      "SC-011"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-screencast-start",
+    "reason": "Strider's native frame stream is Chromium's alone; Firefox and stock WebKit refuse Capability.Screencast, so there is no second acquisition to refuse"
+  },
+  {
+    "tests": [
+      "SC-011"
+    ],
+    "status": "differentByDesign",
+    "decision": "Chromium screencast ownership belongs to the session",
+    "reason": "Playwright refuses a second `screencast.start` while a recording runs, with `Screencast is already started`. Strider shares the session's stream between acquisitions, so a second recording joins it and succeeds"
+  }
+]

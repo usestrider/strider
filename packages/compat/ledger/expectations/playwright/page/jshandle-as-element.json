@@ -1,0 +1,13 @@
+[
+  {
+    "tests": [
+      "JH-001",
+      "JH-002",
+      "JH-003",
+      "JH-004"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "Casts a JSHandle to an ElementHandle with asElement, which is null for a non-element and an element handle for a node, including a text node. Strider's JSHandle has evaluate, evaluateHandle, read and release and no cast, so each test's first step has no counterpart"
+  }
+]

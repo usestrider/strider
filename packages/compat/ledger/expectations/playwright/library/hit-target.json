@@ -1,0 +1,44 @@
+[
+  {
+    "tests": [
+      "HT-014"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-frames",
+    "reason": "Clicks inside an iframe that sits in a closed shadow root, reached through `page.frames()[1]`. The matrix row says Strider has page frames, but `page.frames` is a FrameTree of ids and URLs with no frame to locate or act on, so there is no frame to click into. The iframe is also in a closed shadow root, which Strider's engine can't see (CONCEPTS.md §8)"
+  },
+  {
+    "tests": [
+      "HT-015"
+    ],
+    "status": "needsFeature",
+    "reason": "Clicks an element in a closed shadow root through the handle `page.evaluateHandle('window.__target')` returns, the only way to reach it: Strider's locators don't search closed shadow roots (CONCEPTS.md §8), and `evaluateHandle` makes isolated-world handles only, with no click (method-elementhandle-click, whose notes say raw handle identity isn't preserved)",
+    "matrix": "method-page-evaluatehandle-value-main-world-handles"
+  },
+  {
+    "tests": [
+      "HT-022"
+    ],
+    "status": "needsFeature",
+    "reason": "Clicks an element in nested closed shadow roots through the handle `page.evaluateHandle('window.__target')` returns, the only way to reach it: Strider's locators don't search closed shadow roots (CONCEPTS.md §8), and `evaluateHandle` makes isolated-world handles only, with no click (method-elementhandle-click)",
+    "matrix": "method-page-evaluatehandle-value-main-world-handles"
+  },
+  {
+    "tests": [
+      "HT-012",
+      "HT-013",
+      "HT-017"
+    ],
+    "status": "fails",
+    "issue": "ROOK-513",
+    "reason": "A timed-out action's message names only its operation and phase, not the element covering the target"
+  },
+  {
+    "tests": [
+      "HT-016"
+    ],
+    "status": "fails",
+    "issue": "ROOK-518",
+    "reason": "A locator scoped to a shadow host doesn't search the host's own shadow root"
+  }
+]

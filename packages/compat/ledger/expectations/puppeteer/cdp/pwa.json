@@ -1,0 +1,12 @@
+[
+  {
+    "tests": [
+      "[pwa.test] PWA installs and uninstalls a PWA",
+      "[pwa.test] PWA launches an installed PWA and returns its Page",
+      "[pwa.test] PWA launches an installed PWA at an explicit url",
+      "[pwa.test] PWA installs a PWA with a standalone display mode"
+    ],
+    "status": "notApplicable",
+    "reason": "Strider won't add an API to install, launch, or uninstall progressive web apps. Installs, launches, and uninstalls a progressive web app through the browser's PWA CDP domain (installPWA, launchPWA, getPWAState, uninstallPWA). Strider has none of that API; the matrix row is the nearest, a browser-level CDP session, and says nothing of apps"
+  }
+]

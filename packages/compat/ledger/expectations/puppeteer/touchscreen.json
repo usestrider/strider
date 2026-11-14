@@ -1,0 +1,27 @@
+[
+  {
+    "tests": [
+      "[touchscreen.test] Touchscreen Touchscreen.prototype.touchMove should work",
+      "[touchscreen.test] Touchscreen Touchscreen.prototype.touchMove should work with two touches",
+      "[touchscreen.test] Touchscreen Touchscreen.prototype.touchMove should work when moving touches separately",
+      "[touchscreen.test] Touchscreen Touchscreen.prototype.touchMove should work with three touches",
+      "[touchscreen.test] Touchscreen Touchscreen.prototype.touchMove should throw if no touch was started",
+      "[touchscreen.test] Touchscreen Touchscreen.prototype.touchEnd should throw when ending touch through Touchscreeen that was already ended",
+      "[touchscreen.test] Touchscreen Touchscreen.prototype.tap should work if another touch is already active"
+    ],
+    "status": "needsFeature",
+    "matrix": "property-page-touchscreen",
+    "reason": "Drives the touchscreen directly: `page.touchscreen.touchStart`, `touchMove`, and `touchEnd`, and the touch handles they return. Strider has no touchscreen; its only touch input is `Locator.tap`, which sends one tap and can't hold a touch down or move it"
+  },
+  {
+    "tests": [
+      "[touchscreen.test] Touchscreen Touchscreen.prototype.tap should work"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-touchscreen-tap",
+    "reason": "Taps the button, which needs touch input. Stock WebKit's automation builds without touch (`input.touch`), so `Locator.tap` fails with Unsupported before anything is sent"
+  }
+]

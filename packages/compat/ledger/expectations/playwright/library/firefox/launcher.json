@@ -1,0 +1,20 @@
+[
+  {
+    "tests": [
+      "FF-001",
+      "FF-002",
+      "FF-004"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browsertype-launch-firefoxuserprefs",
+    "reason": "Passes Firefox user preferences at launch (a proxy that refuses the connection, and a device scale factor for the viewport). Strider's launch options have no Firefox preferences, so the launch can't be set up as the original sets it up; FF-002 is the same option on a persistent context"
+  },
+  {
+    "tests": [
+      "FF-003"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browsertype-launch-env",
+    "reason": "Loads a Firefox enterprise policies file through the PLAYWRIGHT_FIREFOX_POLICIES_JSON environment variable at launch. Strider has neither a per-launch environment nor a Firefox policies option, and no matrix row names the policies file"
+  }
+]

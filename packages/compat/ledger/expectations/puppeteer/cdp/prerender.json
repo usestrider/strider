@@ -1,0 +1,10 @@
+[
+  {
+    "tests": [
+      "[prerender.test] Prerender can screencast"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-screencast-start-size",
+    "reason": "Puppeteer's `page.screencast` takes `scale`, `crop`, and `speed`, which shape the file it writes; Strider's `Capability.Video` takes none of them, so a port would record a different file. The nearest matrix row is option-screencast-start-size, which has the sizing options"
+  }
+]

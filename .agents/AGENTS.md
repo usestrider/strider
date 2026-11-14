@@ -62,6 +62,11 @@ and stock WebKit, and every member the API declares is built. One declared befor
   per-case timings in `.data/upstream/runs/`; `pnpm benchmark:compare <before> <after>` compares saved generations.
   `--output` keeps a run outside the worktree. The larger diagnostic suites expose known failures; only the validated Vite
   and Astro cases also run in `pnpm test:integration`. Keep failures visible, and track findings as issues.
+- `packages/compat`: private, never published: other projects' browser tests ported to Strider (Playwright's and
+  Puppeteer's so far), with a ledger of every upstream test and what Strider expects of it (`ledger/`). It finds
+  bugs and gates nothing: `pnpm compat <filter>` runs ports in the integration environment, and full runs go to
+  `.github/workflows/compat.yml`, dispatched by hand. `pnpm compat:ledger` indexes a pinned checkout, vendors its
+  assets, and reports a run. Its README says how to port a file.
 - `packages/tools/docs`: the JSDoc checker (vendored from Effect; don't edit it), the example check, which checks
   the guides' TypeScript too, `INDEX.md` and the API reference dataset, with what TypeScript reads in every example
   and guide block (`code.json`).
@@ -109,6 +114,7 @@ Use the narrowest check that covers the change:
 | The model, engine, locators or pages                                              | `pnpm test:integration packages/browser/test/integration/adapter packages/browser/test/integration/slice`                                |
 | The `strider` command                                                             | `pnpm test --run packages/browser/test/Browsers.test.ts`, `pnpm test:integration packages/browser/test/integration/Cli.test.ts`          |
 | Uploads or file transfer (including `setInputFiles` and the upload transfer path) | `pnpm test:integration:heavy`, in addition to the ordinary relevant checks                                                               |
+| A compat port or the ledger                                                       | `pnpm compat:ledger check`, then `clutch lock browser -- pnpm compat <the port file>`                                                    |
 | Access rules or other type behavior                                               | `pnpm test-types`                                                                                                                        |
 | JSDoc text, categories or links                                                   | `pnpm jsdocs`                                                                                                                            |
 | JSDoc examples                                                                    | `pnpm lint-fix`, which formats them, then `pnpm jsdocs` and `pnpm examples`                                                              |

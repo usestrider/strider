@@ -1,0 +1,14 @@
+[
+  {
+    "tests": [
+      "[stacktrace.test] Stack trace should work with handles",
+      "[stacktrace.test] Stack trace should work with contiguous evaluation"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-evaluatehandle",
+    "reason": "page.evaluateHandle runs in the isolated world, which stock WebKit doesn't have, so it is Unsupported there (the matrix row is the nearest: its handle is the evaluation's result, which these tests throw from)"
+  }
+]

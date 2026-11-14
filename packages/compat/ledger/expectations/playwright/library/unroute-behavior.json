@@ -1,0 +1,20 @@
+[
+  {
+    "tests": [
+      "RO-188",
+      "RO-201"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browsercontext-unrouteall-behavior",
+    "reason": "Playwright's `unrouteAll({ behavior })` waits for, or ignores the errors of, the handlers still running. Strider has no behavior option: removing a route's registration, or closing its scope, interrupts a running handler, so the request continues by default and nothing waits for it"
+  },
+  {
+    "tests": [
+      "RO-194",
+      "RO-200"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-unrouteall-behavior",
+    "reason": "Playwright's `page.unrouteAll({ behavior })` waits for, or ignores the errors of, the handlers still running. Strider has no behavior option: removing a route's registration, or closing its scope, interrupts a running handler, so the request continues by default and nothing waits for it"
+  }
+]

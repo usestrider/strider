@@ -1,0 +1,40 @@
+[
+  {
+    "tests": [
+      "BR-001"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browser-browsertype",
+    "reason": "Checks that browser.browserType() returns the browser type that launched the browser. Strider's Browser has info, capabilities, pages, newContext, newPage, and defaultContext, with no browserType member"
+  },
+  {
+    "tests": [
+      "BR-002"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browser-contexts",
+    "reason": "Counts browser.contexts() as pages open and close. Strider's Browser has no list of its contexts, and its pages count is not the context count the original checks"
+  },
+  {
+    "tests": [
+      "BR-003"
+    ],
+    "status": "notApplicable",
+    "reason": "Checks that Playwright refuses newPage on the context of a page that browser.newPage made, with the message 'Please use browser.newContext()'. Strider has no such refusal: a context is owned and takes any number of pages (API.md, 'Browser.newPage() is newContext() followed by newPage'), so the page's context's newPage succeeds where Playwright's throws"
+  },
+  {
+    "tests": [
+      "BR-006"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-browser-context",
+    "reason": "Records the browser's context event, which fires for each context made. Strider's Browser has no such event stream: a context is the caller's own, from newContext"
+  },
+  {
+    "tests": [
+      "BR-007"
+    ],
+    "status": "notApplicable",
+    "reason": "Its only failure is Playwright's internal test hook __testHookBeforeSetStorageState, which makes newContext fail before it sets storage state. Strider has no such hook, and no public option makes newContext fail that way without a second failure in the test"
+  }
+]

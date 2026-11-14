@@ -1,0 +1,13 @@
+[
+  {
+    "tests": [
+      "FO-006"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright runs this only on macOS WebKit, where the setting that makes Tab reach every link is on by default; Chromium and Firefox are skipped upstream for that reason, and the port runs on WebKit alone"
+  }
+]

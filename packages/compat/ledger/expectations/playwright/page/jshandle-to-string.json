@@ -1,0 +1,8 @@
+[
+  {
+    "tests": ["JH-018", "JH-019", "JH-021", "JH-022", "JH-023"],
+    "status": "needsFeature",
+    "matrix": "method-locator-tostring",
+    "reason": "Asserts the text a JS handle's `toString()` gives for what it holds (`2`, `Window`, `Promise`, `JSHandle@<body></body>`, a function, a subtype's name). Strider's JSHandle has no string preview: it reads its value with `read` and evaluates with `evaluate`. No matrix row covers a handle's string form; `method-locator-tostring`, the same preview missing on a locator, is the nearest"
+  }
+]

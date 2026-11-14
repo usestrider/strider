@@ -1,0 +1,16 @@
+[
+  {
+    "tests": [
+      "DD-021",
+      "DD-022",
+      "DD-023",
+      "DD-024",
+      "DD-025",
+      "DD-026",
+      "DD-027"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locator-drop",
+    "reason": "Dropping files or data onto an element, which Playwright's locator.drop sends as drag events carrying a DataTransfer. Strider has no drop: dragTo moves a drag from one element to another, and dispatchEvent can't carry a DataTransfer, since its init crosses by value"
+  }
+]

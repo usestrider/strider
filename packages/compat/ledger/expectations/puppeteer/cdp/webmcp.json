@@ -1,0 +1,23 @@
+[
+  {
+    "tests": [
+      "[webmcp.test] Page.webmcp should list tools",
+      "[webmcp.test] Page.webmcp should fire toolsadded events",
+      "[webmcp.test] Page.webmcp should fire toolsremoved events",
+      "[webmcp.test] Page.webmcp should remove tools on frame navigation",
+      "[webmcp.test] Page.webmcp should handle multiple navigations and report tools correctly",
+      "[webmcp.test] Page.webmcp should not reset tools on same-document navigation",
+      "[webmcp.test] Page.webmcp should fire toolinvoked events",
+      "[webmcp.test] Page.webmcp should fire toolresponded event with success",
+      "[webmcp.test] Page.webmcp should fire toolresponded event with exception",
+      "[webmcp.test] Page.webmcp should fire toolresponded event with errorText",
+      "[webmcp.test] Page.webmcp should invoke tool",
+      "[webmcp.test] Page.webmcp should cancel tool execution",
+      "[webmcp.test] Page.webmcp should cancel tool execution with already aborted signal",
+      "[webmcp.test] Page.webmcp should emit issue event from WebMCP form missing tooldescription"
+    ],
+    "status": "needsFeature",
+    "matrix": "property-page-webmcp",
+    "reason": "Tests Puppeteer's `page.webmcp`: the WebMCP tools a page registers, their added and removed events, and calls to them. Strider has no WebMCP API. The raw CDP WebMCP domain is there, but these tests are about the API built over it, which the port would have to rebuild. No matrix row names a WebMCP event; this cites the Page property, the nearest row"
+  }
+]

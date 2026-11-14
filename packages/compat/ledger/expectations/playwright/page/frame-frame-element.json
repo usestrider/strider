@@ -1,0 +1,28 @@
+[
+  {
+    "tests": [
+      "FR-014",
+      "FR-015",
+      "FR-017"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-frame-frameelement",
+    "reason": "Each asks a frame for its element: `frameElement()`, which FR-015 turns back into the frame with `contentFrame()`, and which FR-017 expects to fail once the frame is gone. Strider's frames are tree nodes with an id and a URL, and a frame entered by an element has only that element as its `owner`, so no read goes from a frame to its element and a port could only read back the locator it wrote"
+  },
+  {
+    "tests": [
+      "FR-016"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-frame-frameelement",
+    "reason": "Enters a `<frame>` of a frameset with `contentFrame()` and reads its `frameElement()` back. Strider has no `frameElement`, and `page.frame` takes an iframe: a `<frame>` or any other element fails with `WrongElement` (API.md, \"A frame is a boundary in a locator's steps\"), though the frameset's frames are in the frame tree, which FR-030 checks"
+  },
+  {
+    "tests": [
+      "FR-018"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-frame-frameelement",
+    "reason": "Finds an iframe inside a closed shadow root from its frame. Strider's locators don't reach into a closed shadow root, so there's no locator to enter the frame with, and no `frameElement` read to give the element"
+  }
+]

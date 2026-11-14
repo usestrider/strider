@@ -1,0 +1,22 @@
+[
+  {
+    "tests": [
+      "NE-086",
+      "NE-090",
+      "NE-143"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-page-requestfailed",
+    "reason": "Each test waits for or counts the page's requestfailed event, which Strider has no counterpart of: a failed request is read with NetworkRequest.failure, but nothing reports it as it happens"
+  },
+  {
+    "tests": [
+      "NE-087",
+      "NE-088",
+      "NE-089"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-page-requestfinished",
+    "reason": "Each test waits for or records the page's requestfinished event, which Strider has no counterpart of. NE-089 also records requestfailed, so its redirect's expected events include both DONE and FAIL entries, and NE-088 orders its events with requestfinished last"
+  }
+]

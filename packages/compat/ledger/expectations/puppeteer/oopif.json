@@ -1,0 +1,37 @@
+[
+  {
+    "tests": [
+      "[oopif.test] OOPIF should support frames within OOP iframes"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-frame-goto",
+    "reason": "Calls frame.goto on a frame inside an out-of-process iframe; Strider has no navigation operation on a frame locator"
+  },
+  {
+    "tests": [
+      "[oopif.test] OOPIF should exposeFunction on a page with a PDF viewer",
+      "[oopif.test] OOPIF should exposeFunction when an OOP iframe goes away mid-call",
+      "[oopif.test] OOPIF should support exposeFunction",
+      "[oopif.test] OOPIF should support removing exposed function"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-exposefunction",
+    "reason": "Page.exposeFunction has no Strider operation; Strider has no function bridge from the page's main world to the test"
+  },
+  {
+    "tests": [
+      "[oopif.test] OOPIF should report console messages from OOP iframes to the browser and context"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-browsercontext-console",
+    "reason": "Waits for the console message on the browser as well as the context; Strider has no browser-level console event, and the nearest matrix row is the context's"
+  },
+  {
+    "tests": [
+      "[oopif.test] OOPIF should report requests from OOP iframes to the browser and context"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-browsercontext-request",
+    "reason": "Waits for the request on the browser as well as the context; Strider has no browser-level request event, and the nearest matrix row is the context's"
+  }
+]

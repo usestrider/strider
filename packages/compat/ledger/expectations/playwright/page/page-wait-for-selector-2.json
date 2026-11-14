@@ -1,0 +1,37 @@
+[
+  {
+    "tests": [
+      "WA-058",
+      "WA-059",
+      "WA-060",
+      "WA-061"
+    ],
+    "status": "notApplicable",
+    "reason": "Checks Playwright's runtime refusal of a string `state` option (`expected one of (attached|detached|visible|hidden)`) and of a `visibility` option, with its migration hint. Strider has no state option: each state is its own matcher (`Expect.toBeAttached`, `toBeDetached`, `toBeVisible`, `toBeHidden`), so a wrong state doesn't compile, and there is no string to refuse at run time"
+  },
+  {
+    "tests": [
+      "WA-072",
+      "WA-073"
+    ],
+    "status": "notApplicable",
+    "reason": "Uses Playwright's internal `__testHookBeforeAdoptNode`, which runs between finding a node and adopting it into the page's world, and its `mode` fixture, which these tests skip outside the default mode. Strider has no adoption step to hook"
+  },
+  {
+    "tests": [
+      "WA-074"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "Waits for a selector inside a handle whose element is then removed, and expects the wait to throw 'Element is not attached to the DOM'. Strider has no handle bound to one element: a locator inside a button re-resolves on each attempt, so when the button is removed the wait keeps looking rather than throwing"
+  },
+  {
+    "tests": [
+      "WA-065",
+      "WA-070"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-locator-value-xpath-and-playwright-selector-dsl",
+    "reason": "Waits for an XPath selector whose evaluation is the point: WA-065 selects a paragraph by `normalize-space(.)`, and WA-070 an element by an absolute path with a single slash, `//html/body/div`. Strider's locators take CSS, not XPath, so a CSS selector for the same element would pass without testing either. XPath is planned for 1.0"
+  }
+]

@@ -1,0 +1,19 @@
+[
+  {
+    "tests": [
+      "[devtools.test] DevTools target.page() should return a DevTools page if custom isPageTarget is provided",
+      "[devtools.test] DevTools browser.pages() should return a DevTools page if handleDevToolsAsPage is provided in connect()",
+      "[devtools.test] DevTools browser.pages() should return a DevTools page if handleDevToolsAsPage is provided in launch()",
+      "[devtools.test] DevTools target.page() should return Page when calling asPage on DevTools target",
+      "[devtools.test] DevTools should open devtools when \"devtools: true\" option is given",
+      "[devtools.test] DevTools should expose DevTools as a page",
+      "[devtools.test] DevTools should support opening DevTools on a page",
+      "[devtools.test] DevTools should return same object when calling openDevTools twice",
+      "[devtools.test] DevTools hasDevTools should report correctly after DevTools is opened",
+      "[devtools.test] DevTools hasDevTools should report when DevTools is attached by default",
+      "[devtools.test] DevTools hasDevTools should report when DevTools has been attached to a page with devtools:false"
+    ],
+    "status": "notApplicable",
+    "reason": "Strider won't treat Chromium's DevTools windows as pages: they are a debugging aid, and a launch can already open them through its LaunchProfile's arguments. Needs Chromium's DevTools windows as targets: Puppeteer's `devtools: true` opens DevTools for each tab, and the tests wait for the `devtools://` target, take it as a page (`page()`, `asPage()`, `handleDevToolsAsPage`), or call `openDevTools()` and `hasDevTools()`. A headed launch with `--auto-open-devtools-for-tabs` is possible (the harness gives a headed browser an Xvfb), but Strider has no browser-level target listing or wait, no way to take a non-page target as a page, no DevTools option, and no `openDevTools` or `hasDevTools`. No matrix row covers DevTools; the nearest is the launch"
+  }
+]

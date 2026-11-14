@@ -1,0 +1,14 @@
+[
+  {
+    "tests": [
+      "CS-001",
+      "CS-002",
+      "CS-003",
+      "CS-004",
+      "CS-005"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-bypasscsp",
+    "reason": "Bypassing the page's Content-Security-Policy in a context (`bypassCSP`). Each test runs its page's inline script and `addScriptTag` both with the policy and with the bypass, so none can be written without the option. Strider has an internal bypass override, but no public option for it"
+  }
+]

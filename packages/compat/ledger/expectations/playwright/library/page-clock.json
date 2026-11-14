@@ -1,0 +1,42 @@
+[
+  {
+    "tests": [
+      "CK-033"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-clock-fastforward",
+    "reason": "Moving a fixed clock: Playwright's fastForward advances a fixed clock's timers while its wall time stays put. Strider's adjust refuses a fixed clock (WrongMode), and its setTime changes a fixed clock's wall time, so a fixed clock can't be moved without changing the time it shows. The matrix row says fastForward is present as setTime, which holds for controlled clocks only"
+  },
+  {
+    "tests": [
+      "CK-034"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-clock-runfor",
+    "reason": "Running timers under a fixed clock: Playwright's runFor(0) fires the timers set under a fixed time. Strider's adjust refuses a fixed clock (WrongMode), and a fixed clock's timers are real ones that run in real time, so the test can't be expressed. The matrix row says runFor is present, which holds for controlled clocks only"
+  },
+  {
+    "tests": [
+      "CK-036"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-clock-runfor",
+    "reason": "runFor on a clock that runs in real time: Playwright's runFor advances a flowing clock, which then keeps flowing. Strider's adjust refuses a clock that runs in real time (WrongMode), and resume is one way, so a controlled clock from 0 would give exactly 10000 without the running time the test bounds. The matrix row says runFor is present, which holds for controlled clocks only"
+  },
+  {
+    "tests": [
+      "CK-037"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-clock-fastforward",
+    "reason": "fastForward on a clock that runs in real time: Playwright's fastForward jumps a flowing clock, which then keeps flowing. Strider's setTime refuses a clock that runs in real time (WrongMode), and resume is one way, so a controlled clock from 0 would give exactly 10000 without the running time the test bounds. The matrix row says fastForward is present as setTime, which holds for controlled and fixed clocks only"
+  },
+  {
+    "tests": [
+      "CK-038"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-clock-pauseat",
+    "reason": "Pausing a clock that runs in real time: Playwright's pauseAt stops a flowing clock at a time. Strider's resume turns a clock into a real-time one for good, and a controlled clock never runs, so there is no running clock to pause; a controlled clock that stays put would pass the test without ever having run"
+  }
+]

@@ -1,0 +1,10 @@
+[
+  {
+    "tests": [
+      "CK-055",
+      "CK-056"
+    ],
+    "status": "notApplicable",
+    "reason": "Runs only when Playwright's own PW_CLOCK run mode is set (tests/config/browserTest.ts installs a frozen or real-time clock on every test's context through its fixture). Strider has no run mode that sets a clock for every test, and the tests skip unless the variable is set"
+  }
+]

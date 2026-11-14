@@ -1,0 +1,8 @@
+[
+  {
+    "tests": ["CO-016"],
+    "browsers": ["chromium"],
+    "status": "notApplicable",
+    "reason": "Tests `document.requestStorageAccess`, which Chromium doesn't have: the original skips it there"
+  }
+]

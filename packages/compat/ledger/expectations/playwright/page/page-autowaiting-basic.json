@@ -1,0 +1,10 @@
+[
+  {
+    "tests": [
+      "AW-010"
+    ],
+    "status": "differentByDesign",
+    "decision": "Outcomes come from evidence, never from a guess or a timer",
+    "reason": "Playwright's click waits for scheduled navigations to finish before it reports a timeout, and its log names the navigation it was waiting on. Strider's actions wait for nothing after they dispatch, so a click that starts a navigation reports its outcome without a settling wait. The test also depends on Playwright's `__testHookAfterPointerAction` and its `mode` fixture"
+  }
+]

@@ -1,0 +1,18 @@
+[
+  {
+    "tests": [
+      "AR-098"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-ariasnapshotjson",
+    "reason": "Playwright's snapshot gives a link's `url` and a textbox's `value` as fields of the node. Strider's snapshot node carries neither, so the test's point, which is those two fields, can't be expressed. No matrix row names the node's url or value"
+  },
+  {
+    "tests": [
+      "AR-105"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-ariasnapshotjson-boxes",
+    "reason": "Playwright's `boxes: true` adds each node's bounding box to the snapshot. Strider's snapshot node has no box, and no option asks for one"
+  }
+]

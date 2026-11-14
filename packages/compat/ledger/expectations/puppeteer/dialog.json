@@ -1,0 +1,10 @@
+[
+  {
+    "tests": [
+      "[dialog.test] Page.Events.Dialog should see dialogs handled by other connections"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-page-dialogclosed",
+    "reason": "Two connections see one dialog, and the test checks each dialog's handled flag once the other connection accepts it. Strider has no dialogclosed (event-page-dialogclosed is missing), so a dialog's handled state isn't reported"
+  }
+]

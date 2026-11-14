@@ -1,0 +1,19 @@
+[
+  {
+    "tests": ["RO-153", "RO-154"],
+    "status": "notApplicable",
+    "reason": "Tests Playwright's internal glob compiler and URL matcher (`iso.globToRegexPattern` and `iso.urlMatches`) called directly, and their error text; Strider's Url.Pattern is a different grammar, with no matcher export to call. Strider's rejection of an invalid pattern is RO-155"
+  },
+  {
+    "tests": ["RO-160", "RO-161"],
+    "status": "needsFeature",
+    "matrix": "method-page-route",
+    "reason": "Page.route takes a string pattern (Url.Pattern | string), so a RegExp URL, including one from another realm or with the g flag, has no form; a glob that matches the same requests would test something else"
+  },
+  {
+    "tests": ["RO-164"],
+    "browsers": ["chromium", "firefox"],
+    "status": "notApplicable",
+    "reason": "Playwright's it.skip runs this only on WebKit, where it intercepts a blob URL's fetch"
+  }
+]

@@ -1,0 +1,31 @@
+[
+  {
+    "tests": ["LH-001", "LH-002", "LH-003", "LH-004", "LH-005", "LH-006", "LH-007", "LH-009", "LH-011", "LH-012"],
+    "status": "needsFeature",
+    "matrix": "method-page-addlocatorhandler",
+    "reason": "Strider has no locator handler: an overlay that covers a target is answered by a handler the page registers, and the action waits for the handler to finish, which Strider has no form for"
+  },
+  {
+    "tests": ["LH-008"],
+    "status": "notApplicable",
+    "reason": "A toHaveScreenshot golden comparison, against images made with Playwright's browser builds and fonts, which Strider's pinned browsers don't match; the test checks nothing else"
+  },
+  {
+    "tests": ["LH-010"],
+    "status": "needsFeature",
+    "matrix": "option-page-addlocatorhandler-times",
+    "reason": "The times option limits how often a locator handler runs, and Strider has no locator handler to limit"
+  },
+  {
+    "tests": ["LH-013"],
+    "status": "needsFeature",
+    "matrix": "option-page-addlocatorhandler-nowaitafter",
+    "reason": "The noWaitAfter option lets a locator handler run without the action waiting for it to finish, and Strider has no locator handler to set it on"
+  },
+  {
+    "tests": ["LH-014"],
+    "status": "needsFeature",
+    "matrix": "method-page-removelocatorhandler",
+    "reason": "Removing a locator handler by its locator, and no longer answering that locator, needs the locator handler that Strider doesn't have"
+  }
+]

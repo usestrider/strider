@@ -1,0 +1,21 @@
+[
+  {
+    "tests": [
+      "IS-025"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-exposefunction",
+    "reason": "Exposing a function to a context's pages, which the init script calls before the page's own script reads its result. Strider has no exposeFunction or binding: an init script runs in the page's world and can't call a Node-side function, so the script's call to the test's callback can't be ported"
+  },
+  {
+    "tests": [
+      "IS-031",
+      "IS-032",
+      "IS-033",
+      "IS-034"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browsercontext-addinitscript-exposefunctions",
+    "reason": "Passing functions with an init script's argument and exposeFunctions option, so the script can call the test's functions from the page, in later navigations and popups. Strider's addInitScript takes a source with no argument and no exposeFunctions option, and each test calls or removes a Node-side function from the page, so inlining the function would not check the option. The matrix's addInitScript rows say Strider has the method but don't mention that its argument is missing"
+  }
+]

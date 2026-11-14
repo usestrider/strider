@@ -1,0 +1,35 @@
+[
+  {
+    "tests": [
+      "HA-076"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-route-fallback-url",
+    "reason": "Passing a request to the routes below with its URL changed, so a HAR route answers the new URL. Strider's `continueWith` sends the changed request to the network, and `fallthrough` passes the request on unchanged"
+  },
+  {
+    "tests": [
+      "HA-077"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browsercontext-routefromhar-url",
+    "reason": "A URL filter that is a regular expression. Strider's route patterns are globs or URLPatterns, not regular expressions"
+  },
+  {
+    "tests": [
+      "HA-084",
+      "HA-087"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-tracing-starthar-resourcesdir",
+    "reason": "Replaying a HAR whose bodies are files beside it, as an extracted archive or a `_file` next to a plain HAR. Strider reads bodies only from the zip that `content: \"attach\"` writes, so these replay with empty bodies"
+  },
+  {
+    "tests": [
+      "HA-090"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-routefromhar",
+    "reason": "Telling recorded requests apart by their headers. Strider's replay matches by method, URL, and body, so requests that differ only by a header get the latest recording of that URL and body; its row says routeFromHAR is covered"
+  }
+]

@@ -1,0 +1,26 @@
+[
+  {
+    "tests": [
+      "CL-110"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright's own test seams, __testHookBeforePointerAction and __testHookBeforeHitTarget, which pause its actionability loop before input, and a `mode` check that skips them outside its default mode; Strider has no seam to pause between its checks and its input"
+  },
+  {
+    "tests": [
+      "CL-111"
+    ],
+    "status": "fails",
+    "issue": "ROOK-517",
+    "reason": "A click on an element inside a disabled button succeeds without clicking, where it should wait for the button to be enabled"
+  },
+  {
+    "tests": [
+      "CL-112",
+      "CL-113"
+    ],
+    "status": "fails",
+    "issue": "ROOK-513",
+    "reason": "A timed-out action's message names only its operation and phase, not the reason it observed"
+  }
+]

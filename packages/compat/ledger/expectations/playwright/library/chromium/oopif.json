@@ -1,0 +1,78 @@
+[
+  {
+    "tests": [
+      "OO-007",
+      "OO-025"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-exposefunction",
+    "reason": "Exposing a Node function to the page's main world"
+  },
+  {
+    "tests": [
+      "OO-015"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-exposefunction",
+    "reason": "Exposing a Node function to a context's pages"
+  },
+  {
+    "tests": [
+      "OO-022"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-newcdpsession",
+    "reason": "A raw CDP session on a frame's target"
+  },
+  {
+    "tests": [
+      "OO-027"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-frame-goto",
+    "reason": "Navigating a frame from the client, as frame.goto does"
+  },
+  {
+    "tests": [
+      "OO-012"
+    ],
+    "status": "notApplicable",
+    "reason": "Compares against a golden image made with Playwright's own Chromium build and fonts"
+  },
+  {
+    "tests": [
+      "OO-018"
+    ],
+    "status": "notApplicable",
+    "reason": "Needs the live google.com and a headed browser"
+  },
+  {
+    "tests": [
+      "OO-001",
+      "OO-002",
+      "OO-003",
+      "OO-004",
+      "OO-005",
+      "OO-006",
+      "OO-008",
+      "OO-009",
+      "OO-010",
+      "OO-011",
+      "OO-013",
+      "OO-016",
+      "OO-017",
+      "OO-019",
+      "OO-020",
+      "OO-021",
+      "OO-023",
+      "OO-024",
+      "OO-026"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "issue": "ROOK-150",
+    "reason": "With a viewport declared, a cross-site iframe never loads, so goto's load wait and the frame's onload time out"
+  }
+]

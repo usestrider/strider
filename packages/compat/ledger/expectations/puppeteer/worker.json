@@ -1,0 +1,64 @@
+[
+  {
+    "tests": [
+      "[worker.test] Workers should report network requests as failed when the worker is terminated"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-page-requestfailed",
+    "reason": "Waits for the requestfailed event of a request whose worker is terminated, then reads its failure. Strider has no counterpart of the event, and NetworkRequest.failure fails with RequestUnavailable (ownerLost) once the worker that sent the request is gone"
+  },
+  {
+    "tests": [
+      "[worker.test] Workers when the worker script does not load evaluateHandle should reject if the script is not found",
+      "[worker.test] Workers waitForFunction should work with JSHandle as an argument"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-worker-evaluatehandle",
+    "reason": "Needs a handle to a value in the worker's global (`worker.evaluateHandle`), which can be passed back into the worker or read after it is destroyed. BrowserWorker.evaluate returns only values, so there is no handle to hold"
+  },
+  {
+    "tests": [
+      "[worker.test] Workers should emit exception events on the worker and the page",
+      "[worker.test] Workers should expose the remote exception via a moved handle"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-page-pageerror",
+    "reason": "Puppeteer's `exception` events carry the thrown RemoteException, with its text and a handle to the thrown value, and a worker emits its own. Strider reports uncaught errors as UncaughtException on the page only, without the thrown object or a worker event"
+  },
+  {
+    "tests": [
+      "[worker.test] Workers can be closed",
+      "[worker.test] Workers when the worker script does not load close should not hang if the script is not found"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-worker-close",
+    "reason": "Calls worker.close(), which ends the worker from the test. BrowserWorker has `closed`, which reports the end of a worker (what the matrix row names), but no operation that ends one; Playwright has no Worker.close() method, so no matrix row covers it"
+  },
+  {
+    "tests": [
+      "[worker.test] Workers should work with waitForNetworkIdle"
+    ],
+    "status": "differentByDesign",
+    "decision": "Outcomes come from evidence, never from a guess or a timer",
+    "reason": "Waits for network idle, through `waitForNetworkIdle`. Strider has no networkidle readiness state"
+  },
+  {
+    "tests": [
+      "[worker.test] Workers should work with console logs",
+      "[worker.test] Workers console should work",
+      "[worker.test] Workers console should return remote objects",
+      "[worker.test] Workers console should not dispose handles when worker has listeners"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-consolemessage-args",
+    "reason": "Reads a console message's arguments as values or handles, with their count, `jsonValue`, and properties. A ConsoleMessage carries the formatted text, level, and location, not its arguments"
+  },
+  {
+    "tests": [
+      "[worker.test] Workers console should have location and stack trace for console API calls"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-consolemessage-location",
+    "reason": "Reads the message's stack trace, which a ConsoleMessage doesn't carry. Its location is one frame's URL, line, and column"
+  }
+]

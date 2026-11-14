@@ -1,0 +1,79 @@
+[
+  {
+    "tests": [
+      "CD-003"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-opener",
+    "reason": "Reads a popup's opener after the opener's renderer crashed; Strider's Page has no opener"
+  },
+  {
+    "tests": [
+      "CD-006"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-newcdpsession",
+    "reason": "Sends a raw CDP command on a context's page and expects it to reject when the browser is killed; Strider has no CDP session"
+  },
+  {
+    "tests": [
+      "CD-008"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-download-page",
+    "reason": "Asserts the download's page is the page that was clicked, and Strider's Download doesn't name its originating page"
+  },
+  {
+    "tests": [
+      "CD-019"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-browser",
+    "reason": "Asserts that a context's browser is the connected browser; Strider's contexts don't name their browser"
+  },
+  {
+    "tests": [
+      "CD-053"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browser-newbrowsercdpsession",
+    "reason": "Opens a browser-level CDP session, discovers and attaches to a shared worker, and reads it from a second connection; Strider has no browser-level CDP session"
+  },
+  {
+    "tests": [
+      "CD-005",
+      "CD-007"
+    ],
+    "status": "notApplicable",
+    "reason": "Tests Playwright's artifactsDir option: the directory its client owns, removes on disconnect and writes its trace chunks into. Strider has no client-owned artifacts directory (option-browsertype-connectovercdp-artifactsdir)"
+  },
+  {
+    "tests": [
+      "CD-034",
+      "CD-035"
+    ],
+    "status": "notApplicable",
+    "reason": "Tests Playwright's noDefaults option, which skips the client's own overrides on connect: CD-034 that its download override isn't sent, CD-035 that new contexts still get its focus emulation. Strider's connection makes no overrides and has no option for them (option-browsertype-connectovercdp-nodefaults); its focus emulation is a context option (focus: \"emulated\"), which EM-013 covers"
+  },
+  {
+    "tests": [
+      "CD-030"
+    ],
+    "status": "notApplicable",
+    "reason": "Tests Playwright's isLocal option and its internal _isBrowserCollocatedWithServer flag, which choose how the client transfers files. Strider transfers an attached browser's local files through its FileSystem (FileInput.local) and has no such choice"
+  },
+  {
+    "tests": [
+      "CD-036"
+    ],
+    "status": "notApplicable",
+    "reason": "Connects with a ConnectionTransport object that Playwright's in-process client builds. Strider connects by endpoint only, so there is no transport to pass"
+  },
+  {
+    "tests": [
+      "CD-016"
+    ],
+    "status": "notApplicable",
+    "reason": "Asserts that the WebSocket handshake carries Playwright's own User-Agent string (its getUserAgent(): Playwright's name and version). Strider sets no identity of its own: the handshake carries what the WebSocket constructor in context sends, Node's `node`, so there is no Strider string to assert. The headers option that CD-013 covers is how a program sets one"
+  }
+]

@@ -1,0 +1,27 @@
+[
+  {
+    "tests": [
+      "FR-003",
+      "FR-004"
+    ],
+    "status": "notApplicable",
+    "reason": "Counts Playwright's own execution contexts through its internal delegate (`toImpl(page)` and `delegate._mainFrameSession` or `_contextIdToContext`). Strider keeps no execution-context registry a test can count, and its isolated worlds aren't a public surface."
+  },
+  {
+    "tests": [
+      "FR-006"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-frame-evaluate",
+    "reason": "Reads a frame's main-world global (`window['__foo']`) and passes a handle made in the page into that frame's evaluation, which rejects it. Strider's frame evaluation runs in the isolated world only, and a handle crosses only into its own realm."
+  },
+  {
+    "tests": [
+      "FR-007",
+      "FR-008"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-frame-evaluatehandle",
+    "reason": "Takes a frame's element handle (`frame.$('body')`) and passes it into the page's evaluation, which adopts it across frames (FR-007), or refuses it when the frames don't script each other (FR-008). Strider's frame locators re-resolve on use rather than retaining element handles, so there's no frame handle to pass."
+  }
+]

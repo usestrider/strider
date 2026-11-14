@@ -1,0 +1,107 @@
+[
+  {
+    "tests": [
+      "BC-001"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browser-contexts",
+    "reason": "Listing the contexts a browser has made, and reading a context's browser, which Strider has no collection for: Browser has pages and defaultContext, but no list of the contexts made through it, so the original's browser.contexts() can't be read. The whole test is those assertions"
+  },
+  {
+    "tests": [
+      "BC-009",
+      "BC-010"
+    ],
+    "status": "notApplicable",
+    "reason": "Creating a context with a null viewport, which Playwright uses to size pages to the window, and the validation errors for a device scale factor or a mobile flag given without one. Strider has no null: a context with no viewport option has no viewport declaration (its viewportSize is None), and a Viewport always holds a width and height, so those two settings can't be given without a size and the type refuses the combination before anything runs"
+  },
+  {
+    "tests": [
+      "BC-013"
+    ],
+    "status": "notApplicable",
+    "reason": "Calling close() a second time. Strider has no close method: a context ends when its scope closes, and closing a scope again is Effect's behavior, not Strider's"
+  },
+  {
+    "tests": [
+      "BC-030"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright's default user agent, read through its persistent-context `mode` fixture and its internal `_channel.defaultUserAgentForTest` hook"
+  },
+  {
+    "tests": [
+      "BC-008"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-devicescalefactor",
+    "reason": "A device scale factor other than 1 for a context's viewport, which stock WebKit refuses with Unsupported (emulation.viewport.mobile and its scale), so the context can't be made there"
+  },
+  {
+    "tests": [
+      "BC-018",
+      "BC-019",
+      "BC-020",
+      "BC-021",
+      "BC-022"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-javascriptenabled",
+    "reason": "Disabling JavaScript in a context, which Firefox can't emulate (emulation.javaScript), so the context can't be made with JavaScript off there"
+  },
+  {
+    "tests": [
+      "BC-023",
+      "BC-024",
+      "BC-025",
+      "BC-026",
+      "BC-027"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-setoffline",
+    "reason": "Taking a context offline, which stock WebKit can't emulate (emulation.network.offline), so the context can't be taken offline there"
+  },
+  {
+    "tests": [
+      "BC-029"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-colorscheme",
+    "reason": "Emulating a color scheme in a context, which Firefox can't emulate (emulation.media), so the context's media can't be set there"
+  },
+  {
+    "tests": [
+      "BC-004",
+      "BC-028"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-page-popup",
+    "reason": "Reading the popup a page opens, which stock WebKit can't report (popups.opener): Popup.next fails there, as WebKit can't say which page opened another"
+  },
+  {
+    "tests": [
+      "BC-028"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-colorscheme",
+    "reason": "Emulating a color scheme in a context, which Firefox can't emulate (emulation.media), so the context's media can't be set there"
+  }
+]

@@ -1,0 +1,67 @@
+[
+  {
+    "tests": [
+      "[network_restrictions.test] Network Restrictions blocklist validation should block page.goto when the destination is in the blocklist",
+      "[network_restrictions.test] Network Restrictions blocklist validation should block window.location.href navigation to URLs in the blocklist",
+      "[network_restrictions.test] Network Restrictions blocklist validation should fail fetch requests to URLs in the blocklist",
+      "[network_restrictions.test] Network Restrictions blocklist validation should fail service worker registration for blocklisted script URLs",
+      "[network_restrictions.test] Network Restrictions blocklist validation should fail fetch requests forwarded by a service worker to URLs in the blocklist",
+      "[network_restrictions.test] Network Restrictions blocklist validation should fail fetch requests made by a service worker during install to URLs in the blocklist",
+      "[network_restrictions.test] Network Restrictions blocklist validation should fail fetch requests from within a service worker to URLs in the blocklist",
+      "[network_restrictions.test] Network Restrictions blocklist validation should prevent loading of blocklisted subresources (e.g., images)",
+      "[network_restrictions.test] Network Restrictions blocklist validation should block frame.goto when the destination is in the blocklist",
+      "[network_restrictions.test] Network Restrictions blocklist validation should block OOPIF frame.goto when the destination is in the blocklist",
+      "[network_restrictions.test] Network Restrictions blocklist validation should block CDP standard emulation reset when blocklist is active",
+      "[network_restrictions.test] Network Restrictions blocklist validation should block page.emulateNetworkConditions reset when blocklist is active",
+      "[network_restrictions.test] Network Restrictions blocklist validation should block fetch requests from within local iframes to URLs in the blocklist",
+      "[network_restrictions.test] Network Restrictions blocklist validation should block fetch requests from within OOPIFs to URLs in the blocklist",
+      "[network_restrictions.test] Network Restrictions blocklist validation should block iframe content from loading if the iframe URL is in the blocklist",
+      "[network_restrictions.test] Network Restrictions blocklist validation should block out-of-process iframe (OOPIF) content from loading if the iframe URL is in the blocklist",
+      "[network_restrictions.test] Network Restrictions allowlist validation should only allow navigation to URLs in the allowlist",
+      "[network_restrictions.test] Network Restrictions allowlist validation should block window.location.href navigation to URLs not in the allowlist",
+      "[network_restrictions.test] Network Restrictions allowlist validation should fail fetch requests to URLs not in the allowlist",
+      "[network_restrictions.test] Network Restrictions allowlist validation should fail service worker registration for script URLs not in the allowlist",
+      "[network_restrictions.test] Network Restrictions allowlist validation should prevent loading of subresources not in the allowlist (e.g., images)",
+      "[network_restrictions.test] Network Restrictions allowlist validation should block OOPIF frame.goto when the destination is not in the allowlist",
+      "[network_restrictions.test] Network Restrictions allowlist validation should block fetch requests from within OOPIFs to URLs not in the allowlist",
+      "[network_restrictions.test] Network Restrictions allowlist validation should block iframe content from loading if the iframe URL is not in the allowlist",
+      "[network_restrictions.test] Network Restrictions allowlist validation should block out-of-process iframe (OOPIF) content from loading if the iframe URL is not in the allowlist",
+      "[network_restrictions.test] Network Restrictions allowlist validation should block CDP standard emulation reset when allowlist is active",
+      "[network_restrictions.test] Network Restrictions allowlist validation should block page.emulateNetworkConditions reset when allowlist is active",
+      "[network_restrictions.test] Network Restrictions allowlist validation with service workers should fail fetch requests forwarded by a service worker to URLs not in the allowlist",
+      "[network_restrictions.test] Network Restrictions allowlist validation with service workers should fail fetch requests made by a service worker during install to URLs not in the allowlist",
+      "[network_restrictions.test] Network Restrictions should detach from targets violating blocklist when connecting to a running browser",
+      "[network_restrictions.test] Network Restrictions should detach from targets violating allowlist when connecting to a running browser",
+      "[network_restrictions.test] Network Restrictions should throw an error when both blocklist and allowlist are specified",
+      "[network_restrictions.test] Network Restrictions should throw an error for an invalid pattern",
+      "[network_restrictions.test] Network Restrictions should block chrome://version/ when it matches blocklist"
+    ],
+    "status": "notApplicable",
+    "reason": "Strider won't add Puppeteer's browser-wide URL blocklist or allowlist: routes already block or allow a context's requests, and Chromium's own rule list would save only the interception round trip per blocked request. Launches the browser with Puppeteer's URL `blocklist` or `allowlist` (applied to every request, navigation, frame, and target), checks what such a list blocks, or checks the error a launch with both lists or an invalid pattern raises. Strider has no launch option for URL blocklists or allowlists, and its network emulation (`emulation.network.offline`, `emulation.network.throttling`) is not a rule list. The nearest matrix row is the launch's options, where such a list would be given."
+  },
+  {
+    "tests": [
+      "[network_restrictions.test] Network Restrictions dynamic restrictions can set blocklist dynamically",
+      "[network_restrictions.test] Network Restrictions dynamic restrictions can set allowlist dynamically",
+      "[network_restrictions.test] Network Restrictions dynamic restrictions can switch directly from blocklist to allowlist",
+      "[network_restrictions.test] Network Restrictions dynamic restrictions blocks page.emulateNetworkConditions after restrictNetwork is called",
+      "[network_restrictions.test] Network Restrictions dynamic restrictions does not mutate state when restrictNetwork fails with an invalid pattern",
+      "[network_restrictions.test] Network Restrictions dynamic restrictions allows empty arrays alongside a populated or empty list",
+      "[network_restrictions.test] Network Restrictions dynamic restrictions applies restrictions to a worker target",
+      "[network_restrictions.test] Network Restrictions dynamic restrictions applies and clears restrictions on an already-running worker",
+      "[network_restrictions.test] Network Restrictions dynamic restrictions applies and clears restrictions on an already-running service worker",
+      "[network_restrictions.test] Network Restrictions dynamic restrictions applies and clears restrictions on fetches forwarded by an already-running controlling service worker",
+      "[network_restrictions.test] Network Restrictions clearing launch-time lists can clear launch-time lists"
+    ],
+    "status": "notApplicable",
+    "reason": "Strider won't add Puppeteer's browser-wide URL blocklist or allowlist: routes already block or allow a context's requests, and Chromium's own rule list would save only the interception round trip per blocked request. Sets, replaces, or clears a browser-wide restriction list with `browser.restrictNetwork` on a running browser, then checks it applies to pages, frames, workers, and service workers. Strider has no restriction API to set or clear on a running browser. The nearest matrix row is the context's request routing, which blocks by URL pattern but is per context and is not the browser-wide list, so porting these would test a different mechanism."
+  },
+  {
+    "tests": [
+      "[network_restrictions.test] Network Restrictions PWA validation blocklist should throw when calling PWA APIs",
+      "[network_restrictions.test] Network Restrictions PWA validation allowlist should throw when calling PWA APIs"
+    ],
+    "status": "notApplicable",
+    "reason": "Strider won't add Puppeteer's browser-wide URL blocklist or allowlist: routes already block or allow a context's requests, and Chromium's own rule list would save only the interception round trip per blocked request. Calls `browser.installPWA`, `launchPWA`, `uninstallPWA`, and `getPWAState` under a restriction list and checks they throw. Strider has no PWA API, and no matrix row covers PWA; the nearest is the launch row, where the list is given."
+  }
+]

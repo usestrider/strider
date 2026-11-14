@@ -1,0 +1,17 @@
+[
+  {
+    "tests": [
+      "AT-013",
+      "AT-014",
+      "AT-015",
+      "AT-016",
+      "AT-017",
+      "AT-018",
+      "AT-019",
+      "AT-020"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-addstyletag",
+    "reason": "Adding a style tag to a page from a url, a path, or content, and returning its handle; Strider has no addStyleTag, and inserting the tag from the test would test the browser rather than Strider"
+  }
+]

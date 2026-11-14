@@ -1,0 +1,20 @@
+[
+  {
+    "tests": [
+      "FR-020",
+      "FR-021",
+      "FR-023"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-frame-goto",
+    "reason": "Each navigates a frame from the client with `frame.goto` and checks what that call returns or does: its response and the frame it belongs to (FR-020), its rejection when the frame detaches (FR-021), and that concurrent calls on three frames get their own responses back (FR-023). Strider has no navigation on a frame, and setting the iframe's `src` is the page's navigation of its frame, not a call with its own result, so a port of it would check `PageNavigation` and pass or fail whatever `frame.goto` did"
+  },
+  {
+    "tests": [
+      "FR-022"
+    ],
+    "status": "differentByDesign",
+    "decision": "Outcomes come from evidence, never from a guess or a timer",
+    "reason": "`page.goto` with `waitUntil: \"networkidle\"` on a page whose child frame redirects, expecting the goto to time out with its message. Strider's load states are `commit`, `domContentLoaded`, and `load`; there is no network-idle state to wait for"
+  }
+]

@@ -1,0 +1,56 @@
+[
+  {
+    "tests": [
+      "[CDPSession.test] Target.createCDPSession should not report created targets for custom CDP sessions"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-newcdpsession",
+    "reason": "Creates a CDP session from inside a context's `targetcreated` handler and checks the handler is called once. Strider has no session object to create from a context, and no context target-created event to hang one on; the nearest matrix row is the context's session row"
+  },
+  {
+    "tests": [
+      "[CDPSession.test] Target.createCDPSession should not send extra events"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-cdpsession-event",
+    "reason": "Listens to every event on a session with `client.on('*')` and checks that only the `Network` domain's events arrive. Strider's session subscriptions are per event, with no listener for all events; the nearest matrix row is the session's event row"
+  },
+  {
+    "tests": [
+      "[CDPSession.test] Target.createCDPSession should enable and disable domains independently"
+    ],
+    "status": "notApplicable",
+    "reason": "Strider won't collect coverage from a browser run (ROOK-385, ROOK-386): build-time instrumentation, read back with evaluate, works on every browser. Starts and stops JS coverage (`page.coverage.startJSCoverage` and `stopJSCoverage`) between a session's own `Debugger.enable` and the `scriptParsed` event it waits for. Strider has no JS coverage"
+  },
+  {
+    "tests": [
+      "[CDPSession.test] Target.createCDPSession should expose the underlying connection"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-cdpsession-send",
+    "reason": "Reads `client.connection()`, the Puppeteer connection object a session belongs to. Strider has no session object; the nearest matrix row is the session's send, which the port covers through the protocol layer"
+  },
+  {
+    "tests": [
+      "[CDPSession.test] Target.createCDPSession should keep the underlying connection after being detached"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-cdpsession-detach",
+    "reason": "Reads `client.connection()` before and after `client.detach()` and checks it is the same object. Strider has no session object to detach or to hold a connection on; the nearest matrix row is the session's detach"
+  },
+  {
+    "tests": [
+      "[CDPSession.test] Target.createCDPSession should expose detached state"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-cdpsession-detach",
+    "reason": "Reads `client.detached`, false before and true after `client.detach()`. Strider has no session object with a detached flag; the nearest matrix row is the session's detach, and the port checks the ended session's reason instead"
+  },
+  {
+    "tests": [
+      "[CDPSession.test] Target.createCDPSession should handle session callbacks when Chrome sends error without sessionId"
+    ],
+    "status": "notApplicable",
+    "reason": "Builds Puppeteer's own `CdpCDPSession` class and inserts it into the connection's private session map, then checks how the session handles an error Chrome sends without a session id. This tests Puppeteer's internal bookkeeping; Strider's protocol client has no session map to put a session in"
+  }
+]

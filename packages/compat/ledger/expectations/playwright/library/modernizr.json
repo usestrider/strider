@@ -1,0 +1,25 @@
+[
+  {
+    "tests": [
+      "CA-030",
+      "CA-031"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "notApplicable",
+    "reason": "The original runs only on WebKit: its Modernizr expectation is Safari's, and the other browsers have their own features. The test's `it.skip` for them is the original's"
+  },
+  {
+    "tests": [
+      "CA-031"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-ismobile",
+    "reason": "Emulates an iPhone 12, a mobile viewport with touch, which stock WebKit refuses (API.md, \"Emulation\"; QUIRKS.md, Q99). The matrix row says the option is present on every browser, which holds only for Chromium"
+  }
+]

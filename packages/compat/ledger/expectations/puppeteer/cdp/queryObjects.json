@@ -1,0 +1,13 @@
+[
+  {
+    "tests": [
+      "[queryObjects.test] page.queryObjects should work",
+      "[queryObjects.test] page.queryObjects should work for non-trivial page",
+      "[queryObjects.test] page.queryObjects should fail for disposed handles",
+      "[queryObjects.test] page.queryObjects should fail primitive values as prototypes"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-evaluatehandle",
+    "reason": "page.queryObjects returns the live instances of a prototype as a handle, and refuses a disposed or primitive prototype. Strider has no queryObjects; the matrix row is the nearest, page handles, and doesn't cover finding instances"
+  }
+]

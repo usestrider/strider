@@ -1,0 +1,30 @@
+[
+  {
+    "tests": [
+      "[screencast.test] Screencasts Page.screencast should work"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-screencast-start-size",
+    "reason": "Puppeteer's recording scales its frames (scale), crops them (crop), and changes the playback speed (speed). Strider's video has none of those options; the matrix row is the nearest, the frame size, and the speed has no row"
+  },
+  {
+    "tests": [
+      "[screencast.test] Screencasts Page.screencast should validate options"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-screencast-start-fps",
+    "reason": "Puppeteer's recording validates its options: scale, crop, speed, format, fps, loop, delay, quality, colors, the path's extension, overwrite, and ffmpegPath. Strider's video takes none of them and has no frame rate to reject; the matrix row is the nearest"
+  },
+  {
+    "tests": [
+      "[screencast.test] Screencasts Page.screencast should work concurrently",
+      "[screencast.test] Screencasts Page.screencast should work with a fractional device scale factor"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-screencast-start-path",
+    "reason": "Stock WebKit's video needs explicit polling options and a VideoWriter, which the harness doesn't give its browser layer, so acquiring Capability.Video is Unsupported there"
+  }
+]

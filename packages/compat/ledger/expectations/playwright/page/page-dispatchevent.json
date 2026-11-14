@@ -1,0 +1,26 @@
+[
+  {
+    "tests": [
+      "DE-009"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-selectors-register",
+    "reason": "Registers a custom selector engine and dispatches to an element it returns, checking that the dispatch is atomic when the engine clears the element's handler in a microtask. Strider has no custom selector engine registry"
+  },
+  {
+    "tests": [
+      "DE-010",
+      "DE-011"
+    ],
+    "status": "differentByDesign",
+    "decision": "Explicit DOM event constructors",
+    "reason": "Passes one DataTransfer object as the init of two dispatched drag events, so the second drop reads what the first dragstart wrote. Strider's event init crosses by value and carries no nested handle, so the shared DataTransfer can't be passed"
+  },
+  {
+    "tests": [
+      "DE-017"
+    ],
+    "status": "notApplicable",
+    "reason": "Passes a DataTransfer created in one frame's JavaScript context as the init of an event dispatched in another frame, and expects Playwright's error that a handle is only usable in its own context. Strider's event init crosses by value and cannot carry a handle at all, so there is no cross-context handle to refuse"
+  }
+]

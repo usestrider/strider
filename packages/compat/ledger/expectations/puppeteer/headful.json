@@ -1,0 +1,13 @@
+[
+  {
+    "tests": [
+      "[headful.test] headful tests HEADFUL headless should be able to read cookies written by headful"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browsertype-launch-headless",
+    "reason": "Launches a headless browser on a profile a headed one wrote. Stock WebKit has no headless mode: its headless launch fails with `InvalidInput`, so the port runs the test on Chromium and Firefox"
+  }
+]

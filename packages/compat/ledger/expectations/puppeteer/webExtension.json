@@ -1,0 +1,10 @@
+[
+  {
+    "tests": [
+      "[webExtension.test] webExtension can install and uninstall an extension"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browsertype-launch-args",
+    "reason": "Installs and uninstalls an unpacked extension (`browser.installExtension`). Strider has no extension install or uninstall; the nearest matrix row is the launch arguments, which can pass a flag but don't load an extension"
+  }
+]

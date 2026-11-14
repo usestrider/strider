@@ -1,0 +1,9 @@
+[
+  {
+    "tests": [
+      "[TargetManager.test] TargetManager should handle targets"
+    ],
+    "status": "notApplicable",
+    "reason": "Reads Puppeteer's internal target manager over CDP (`_targetManager()`): the set of targets, including prerender ones, after each step. Strider has no target list; its pages and frames are read through `browser.pages` and `page.frames`"
+  }
+]

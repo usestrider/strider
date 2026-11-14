@@ -1,0 +1,29 @@
+[
+  {
+    "tests": [
+      "DV-011",
+      "DV-012",
+      "DV-013",
+      "DV-014",
+      "DV-015",
+      "DV-016",
+      "DV-017",
+      "DV-018",
+      "DV-019",
+      "DV-020",
+      "DV-021",
+      "DV-022",
+      "DV-023",
+      "DV-024",
+      "DV-025",
+      "DV-026"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-ismobile",
+    "reason": "Every test here emulates a mobile viewport or touch. Firefox has no mobile viewport flag and no touch emulation, and stock WebKit refuses both with Unsupported (API.md, \"Emulation\"; QUIRKS.md, Q99 and Q100). The matrix row says the option is present on every browser, which holds only for Chromium"
+  }
+]

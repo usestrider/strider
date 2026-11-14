@@ -1,0 +1,19 @@
+[
+  {
+    "tests": [
+      "FR-024",
+      "FR-032"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-frame-name",
+    "reason": "Asserts frames' names (the `name` attribute, as `frame.name()` reports it, with the tree's nesting). Strider's frame tree has a `name` field, but no backend reports a frame's name, so it is always `None`. The matrix row says `has`, which holds only for the tree, not for names"
+  },
+  {
+    "tests": [
+      "FR-036"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-frame-page",
+    "reason": "`frame.page()` returns the page a frame belongs to. Strider's frame locators are entered from a page but carry no reference back to it, so there's no read that returns the page"
+  }
+]

@@ -1,0 +1,53 @@
+[
+  {
+    "tests": [
+      "BT-005"
+    ],
+    "status": "notApplicable",
+    "reason": "Checks that Playwright refuses `userDataDir` on `browserType.launch` and sends the caller to its separate `launchPersistentContext`. Strider has one launch, whose `userDataDir` is a profile directory the caller owns (Browser.LaunchOptions), so there's no refusal to check: method-browsertype-launchpersistentcontext is `has`"
+  },
+  {
+    "tests": [
+      "BT-006"
+    ],
+    "status": "notApplicable",
+    "reason": "Checks that Playwright refuses a profile flag (`--user-data-dir`, `--profile`) in launch arguments, because it manages profiles through `launchPersistentContext`. Strider has no such split, and its launch arguments go to the browser verbatim after the profile's own: nothing refuses them, so there's nothing to check"
+  },
+  {
+    "tests": [
+      "BT-007",
+      "BT-008"
+    ],
+    "status": "notApplicable",
+    "reason": "Checks that a `port` option is refused unless the browser is launched as a server, which is Playwright's remote browser server. Strider has no port option on its launch and no launch server (method-browsertype-launchserver is missing), so the refusal has no counterpart"
+  },
+  {
+    "tests": [
+      "BT-009"
+    ],
+    "status": "notApplicable",
+    "reason": "Checks that Playwright refuses a page URL among the launch arguments, because Playwright opens its own pages. Strider's arguments are the browser's, verbatim, and Strider opens no page from them, so there's no refusal to check"
+  },
+  {
+    "tests": [
+      "BT-012",
+      "BT-013"
+    ],
+    "status": "notApplicable",
+    "reason": "Launches through Playwright's internal test hook `__testHookBeforeCreateBrowser`, which runs before the browser is created, to check its timeout and its launch log. Strider has no such hook, and its launch's readiness timeout isn't a public option (Browser.LaunchOptions has none), so a launch can't be given a short deadline to time out; its failure reasons are checked by the launch tests that do run (BT-010, BT-011)"
+  },
+  {
+    "tests": [
+      "BT-016"
+    ],
+    "status": "notApplicable",
+    "reason": "Calling `browser.close()` a second time, concurrently. Strider has no close method: a browser ends when its layer's scope closes, and closing a scope again is Effect's behavior, not Strider's (as BC-013 notes)"
+  },
+  {
+    "tests": [
+      "BT-017"
+    ],
+    "status": "notApplicable",
+    "reason": "Checks that Playwright's browser, context and page implement `Symbol.asyncDispose`, so `await using` closes them in turn and reports the closed context's cookies as target-closed and the browser as disconnected. Strider's resources are Effect scopes, whose closes BT-004 and BT-015 and the scope tests in download.test.ts exercise, and it has no `isConnected`"
+  }
+]

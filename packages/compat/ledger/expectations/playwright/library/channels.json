@@ -1,0 +1,43 @@
+[
+  {
+    "tests": [
+      "CN-001",
+      "CN-003",
+      "CN-004"
+    ],
+    "status": "notApplicable",
+    "reason": "Asserts the state of Playwright's client-server object tree (its `_debugScopeState` dispatchers for each browser, context, page, frame and request). Strider has no such tree: its handles are values scoped by their owners, and nothing of their scope is observable as a tree"
+  },
+  {
+    "tests": [
+      "CN-005"
+    ],
+    "status": "notApplicable",
+    "reason": "Checks that Playwright's client survives a WebSocket error emitted under Node's `domain` module. Strider has no client that routes errors through `domain`; its WebSocket errors are events, which the websocket event rows cover"
+  },
+  {
+    "tests": [
+      "CN-006"
+    ],
+    "status": "notApplicable",
+    "reason": "Asserts that exposeFunction leaves no dispatcher behind in Playwright's client-server object tree (`_debugScopeState`), which is Playwright's internal object model. Strider has no such tree to leak into"
+  },
+  {
+    "tests": [
+      "CN-002"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "Upstream skips this test on every browser but Chromium: CDP sessions are Chromium's"
+  },
+  {
+    "tests": [
+      "CN-002"
+    ],
+    "status": "notApplicable",
+    "reason": "Asserts the dispatchers Playwright creates for a CDPSession it hands out, in its client-server object tree, which Strider doesn't have. Strider's CDP access is not a session object whose scope is observable"
+  }
+]

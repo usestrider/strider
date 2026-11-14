@@ -1,0 +1,13 @@
+[
+  {
+    "tests": ["HA-104", "HA-105"],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-recordhar",
+    "reason": "Playwright's content \"attach\" writes a WebSocket's frames to a .jsonl file beside the HAR, named by _file, and leaves _webSocketMessages out. Strider's HAR writes the frames embedded on the handshake's entry (_webSocketMessages) whatever content says, so there is no attached frame file to read. No matrix row names attached WebSocket frames; this row is the closest recording row"
+  },
+  {
+    "tests": ["HA-112"],
+    "status": "notApplicable",
+    "reason": "Tests Playwright's environment variable PLAYWRIGHT_HAR_NO_WEBSOCKET_FRAMES, which switches frame recording off for every HAR of the process. Strider has no environment switch; frame recording is the recording's webSocketFrames option, default off, which the ported HA-101 to HA-111 set on"
+  }
+]

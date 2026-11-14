@@ -1,0 +1,21 @@
+[
+  {
+    "tests": ["DO-039", "DO-041", "DO-042"],
+    "browsers": ["webkit"],
+    "status": "needsFeature",
+    "matrix": "event-page-download",
+    "reason": "Stock WebKit reports no downloads (the `downloads` capability): the context's `downloads` option fails on it with `Unsupported`, so no download is reported. The matrix row for the page's download event says `has` with no WebKit requirement"
+  },
+  {
+    "tests": ["DO-040", "DO-044"],
+    "status": "needsFeature",
+    "matrix": "method-download-path",
+    "reason": "Deleting a download's file when its context closes, checked by the file's path, which Strider's download doesn't expose (`Download` has no path). Strider does delete a temporary download when its context closes, but a test can't see the file to check it is gone"
+  },
+  {
+    "tests": ["DO-043"],
+    "status": "needsFeature",
+    "matrix": "option-browsertype-launchpersistentcontext-downloadspath",
+    "reason": "A `downloadsPath` on a persistent context, which Strider's persistent contexts (a browser on a `userDataDir`, with its default context) don't take: a context's `downloads` option applies only to the contexts the library creates"
+  }
+]

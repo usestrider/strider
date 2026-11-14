@@ -1,0 +1,45 @@
+[
+  {
+    "tests": [
+      "[cookies.test] Cookie specs Page.setCookie should set secure same-site cookies from a frame"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-ignorehttpserrors",
+    "reason": "The test accepts the fixture's self-signed certificate with `acceptInsecureCerts`, which Chromium refuses per context, since its certificate override applies to the whole browser (as browsercontext-cookies-third-party's CO-052 does)"
+  },
+  {
+    "tests": [
+      "[cookies.test] Cookie specs Page.setCookie should set secure same-site cookies from a frame"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-frame-evaluate",
+    "reason": "The test reads the cross-site frame's `document.cookie` through the frame's isolated world, which stock WebKit doesn't have (`isolatedWorlds` is unsupported)"
+  },
+  {
+    "tests": [
+      "[cookies.test] Cookie specs Page.setCookie should set a cookie with a partitionKey",
+      "[cookies.test] Cookie specs Page.deleteCookie should only delete cookie from the default partition if partitionkey is not specified"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-addcookies",
+    "reason": "Sets a partitioned cookie, which Firefox and stock WebKit can't do (`cookies.partitioned` is unsupported there, as Firefox doesn't say which partition a cookie is in). No matrix row names partitioned cookies, so this cites addCookies, the nearest row, which claims Strider has them"
+  },
+  {
+    "tests": [
+      "[cookies.test] Cookie specs Page.deleteCookie should delete cookie with partition key if partition key is specified"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-clearcookies",
+    "reason": "Removes a cookie in one partition by its partition key. Strider's `CookieJar.remove` takes a name, domain and path, with no partition key, and removes the cookie in every partition, so the test's partitioned removal can't be written. No matrix row names a partition option for removal; this cites clearCookies, the nearest row"
+  }
+]

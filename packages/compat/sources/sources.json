@@ -1,0 +1,86 @@
+{
+  "sources": [
+    {
+      "name": "playwright",
+      "status": "indexed",
+      "repository": "https://github.com/microsoft/playwright",
+      "revision": "deb7e86201e26cb4a8e25191fce5ef2f7a28aa87",
+      "license": "Apache-2.0",
+      "include": ["tests/page/**/*.spec.ts", "tests/library/**/*.spec.ts"],
+      "ids": "prefixed",
+      "assets": "tests/assets",
+      "why": "The broadest suite of automation edge cases. Its Firefox and WebKit results come from Playwright's patched builds, so its per-browser annotations say little about stock browsers."
+    },
+    {
+      "name": "puppeteer",
+      "status": "indexed",
+      "repository": "https://github.com/puppeteer/puppeteer",
+      "revision": "1eb68c114dcf92947681b51b2d3e669cd060af19",
+      "license": "Apache-2.0",
+      "include": ["test/src/**/*.test.ts"],
+      "ids": "mocha",
+      "assets": "test/assets",
+      "expectations": "test/TestExpectations.json",
+      "why": "Drives Firefox over WebDriver BiDi, as Strider does, and keeps a ledger of expected failures per browser and protocol with their Bugzilla links. Also CDP target, out-of-process iframe, and worker behavior."
+    },
+    {
+      "name": "cypress",
+      "status": "planned",
+      "repository": "https://github.com/cypress-io/cypress",
+      "license": "MIT",
+      "paths": [
+        "packages/driver/cypress/e2e/commands/actions",
+        "packages/driver/cypress/e2e/commands/assertions.cy.js"
+      ],
+      "why": "Waiting: its driver tests pin down retry-ability and actionability (covered, detached, animating, disabled, or scrolled away) with assertions on how long and how often a command retries, which is what an optimal wait has to get right."
+    },
+    {
+      "name": "foldkit-examples",
+      "status": "planned",
+      "repository": "https://github.com/foldkit/foldkit",
+      "license": "MIT",
+      "paths": ["packages/examples-e2e/e2e", "examples"],
+      "why": "Real apps: 120 Playwright tests over 33 example applications, a ready-made suite of an app's own end-to-end tests to run with Strider."
+    },
+    {
+      "name": "wpt-accessibility",
+      "status": "planned",
+      "repository": "https://github.com/web-platform-tests/wpt",
+      "license": "BSD-3-Clause",
+      "paths": ["accname", "html-aam", "wai-aria", "core-aam"],
+      "why": "Role and accessible-name computation, which getByRole and snapshots depend on. Playwright's role-utils.spec.ts runs some of these."
+    },
+    {
+      "name": "wpt-input",
+      "status": "planned",
+      "repository": "https://github.com/web-platform-tests/wpt",
+      "license": "BSD-3-Clause",
+      "paths": ["uievents", "pointerevents", "html/interaction/focus"],
+      "why": "Event sequences real input must produce (pointer, mouse, focus, and key), written against testdriver's actions, which a port can drive with Strider's input instead."
+    },
+    {
+      "name": "wpt-webdriver-bidi",
+      "status": "planned",
+      "repository": "https://github.com/web-platform-tests/wpt",
+      "license": "BSD-3-Clause",
+      "paths": ["webdriver/tests/bidi"],
+      "why": "Tests the browser, not the client: evidence for whether an oddity is a Firefox or Safari bug, and for the BiDi capability tables. Not ported to run; read when a Firefox finding needs its cause."
+    },
+    {
+      "name": "testing-library",
+      "status": "planned",
+      "repository": "https://github.com/testing-library/dom-testing-library",
+      "license": "MIT",
+      "paths": ["src/__tests__"],
+      "why": "What users expect getByRole, getByLabelText, and getByText to match, from the library most of them learned queries from."
+    },
+    {
+      "name": "chromedp",
+      "status": "planned",
+      "repository": "https://github.com/chromedp/chromedp",
+      "license": "MIT",
+      "paths": ["."],
+      "why": "A CDP client in Go: its tests cover target attachment, out-of-process iframes, and frame lifecycles from the protocol's side."
+    }
+  ]
+}

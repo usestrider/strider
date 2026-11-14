@@ -1,0 +1,21 @@
+[
+  {
+    "tests": [
+      "UA-007"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-route-fetch",
+    "reason": "Fulfilling a route with `route.fetch()`, the response of a request the page sent through the route's own client, with the custom user agent in it. Strider has no `Route.fetch` request client"
+  },
+  {
+    "tests": [
+      "UA-006"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "The original skips every browser but Chromium: `navigator.userAgentData` and the `sec-ch-ua` headers are Chromium's"
+  }
+]

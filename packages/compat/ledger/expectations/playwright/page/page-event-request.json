@@ -1,0 +1,49 @@
+[
+  {
+    "tests": [
+      "NE-100"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "Upstream skips this test outside Chromium: it checks the Chromium race between a request being intercepted and its failure"
+  },
+  {
+    "tests": [
+      "NE-100"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-page-requestfailed",
+    "reason": "Counts ten `requestfailed` events from iframes whose requests are aborted by a stalled route, checking each request goes from `request` to `requestfailed` once. Strider has no request-failure event, and the Chromium race it checks depends on that event"
+  },
+  {
+    "tests": [
+      "NE-095",
+      "NE-096",
+      "NE-097",
+      "NE-098",
+      "NE-103"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-page-requestfailed",
+    "reason": "Waits for a page's `requestfailed` event, the failed request as it fails, with its `failure()` and `serviceWorker()`. Strider has no request-failure event: `NetworkRequest.failure` reads a failure immediately and does not wait, so a request that fails later can't be waited for"
+  },
+  {
+    "tests": [
+      "NE-102"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-page-requestfinished",
+    "reason": "Races a 204 fetch's `requestfinished` against its `requestfailed`, and expects `requestfinished`. Strider has no request-finish or request-failure event to race, and `NetworkRequest.failure` reads without waiting"
+  },
+  {
+    "tests": [
+      "NE-107"
+    ],
+    "status": "differentByDesign",
+    "decision": "Pay for what you use",
+    "reason": "Reads the last requests of a page with `page.requests()` and each one's response text, long after they were sent. Strider keeps no response body unless a subscription declares a body decoder before the request, so a history entry's body can't be read later"
+  }
+]

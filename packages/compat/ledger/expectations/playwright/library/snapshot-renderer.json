@@ -1,0 +1,22 @@
+[
+  {
+    "tests": [
+      "TV-123",
+      "TV-124",
+      "TV-125",
+      "TV-126",
+      "TV-127",
+      "TV-128",
+      "TV-129",
+      "TV-130",
+      "TV-131",
+      "TV-132",
+      "TV-133",
+      "TV-134",
+      "TV-135",
+      "TV-136"
+    ],
+    "status": "notApplicable",
+    "reason": "Each test drives Playwright's trace viewer internals directly, with no browser: `SnapshotRenderer` (the viewer's DOM snapshot renderer, with its escaping and its nonce), `LRUCache`, and `stripAnsiEscapes`. Strider exports traces that Playwright's viewer reads and has no renderer of its own to test, so the viewer's escaping (TV-123 to TV-133), its screencast frame choice (TV-136), and its ANSI helper (TV-134, TV-135) are the viewer's, not Strider's"
+  }
+]

@@ -1,0 +1,44 @@
+[
+  {
+    "tests": [
+      "EX-313",
+      "EX-314"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locator-ariasnapshot",
+    "reason": "Strider's ExpectationFailed doesn't attach the accessibility subtree of an element a containment matcher checked (toHaveText, toContainText) that matched; its nearest snapshot is set only when the locator matches nothing"
+  },
+  {
+    "tests": [
+      "EX-315",
+      "EX-316",
+      "EX-317",
+      "EX-318",
+      "EX-319"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locator-ariasnapshot",
+    "reason": "Strider's ExpectationFailed doesn't attach a snapshot of the element a property matcher (toBeChecked, toHaveAttribute, toHaveRole, toHaveValue, toHaveCSS) checked, so there is no element line or clipped subtree to read"
+  },
+  {
+    "tests": [
+      "EX-320",
+      "EX-321",
+      "EX-322",
+      "EX-323"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-ariasnapshot",
+    "reason": "Strider's nearest snapshot is set only for a chain whose earlier step matched, so a single-step locator that matches nothing gets no page snapshot, and a page's title failure (toHaveTitle) carries no snapshot at all"
+  },
+  {
+    "tests": [
+      "EX-324",
+      "EX-325",
+      "EX-326"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locator-ariasnapshot",
+    "reason": "These check that a failed toHaveCount, toHaveText with an array, or toMatchAriaSnapshot attaches no aria snapshot, as a control for the matchers that do (EX-313 to EX-323). Strider's ExpectationFailed attaches no matcher snapshot of a matched element, so asserting that `nearest` is none would hold for every matcher, with or without the feature"
+  }
+]

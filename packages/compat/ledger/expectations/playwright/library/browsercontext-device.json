@@ -1,0 +1,27 @@
+[
+  {
+    "tests": [
+      "DV-001",
+      "DV-002",
+      "DV-003",
+      "DV-004",
+      "DV-005",
+      "DV-006"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-ismobile",
+    "reason": "Every test here emulates a phone's viewport, which is a mobile viewport with touch. Firefox has no mobile viewport flag, and stock WebKit refuses the mobile flag (API.md, \"Emulation\"; QUIRKS.md, Q99). The matrix row says the option is present on every browser, which holds only for Chromium"
+  },
+  {
+    "tests": [
+      "DV-007"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-screen",
+    "reason": "The device's screen is 390 by 844 while its viewport is 390 by 664; Strider's emulation has a viewport but no separate screen size, so the screen assertion can't be made"
+  }
+]

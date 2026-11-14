@@ -1,0 +1,30 @@
+[
+  {
+    "tests": [
+      "QS-001"
+    ],
+    "status": "notApplicable",
+    "reason": "A locator is a value built by a typed call, not a selector string parsed at run time, so there is no selector argument of the wrong type to pass; Playwright's error is for its string argument"
+  },
+  {
+    "tests": [
+      "QS-004",
+      "QS-006",
+      "QS-007",
+      "QS-014",
+      "QS-015",
+      "QS-016"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-locator-value-xpath-and-playwright-selector-dsl",
+    "reason": "XPath selectors: Strider's locators take CSS only, and XPath is planned for 1.0"
+  },
+  {
+    "tests": [
+      "QS-008"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-locator-value-xpath-and-playwright-selector-dsl",
+    "reason": "A selector that steps to a parent (`..`) is an XPath step, and Strider's locators search only descendants"
+  }
+]

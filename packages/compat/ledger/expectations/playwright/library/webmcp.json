@@ -1,0 +1,26 @@
+[
+  {
+    "tests": ["WM-001", "WM-002", "WM-008", "WM-009", "WM-011", "WM-012", "WM-014"],
+    "status": "needsFeature",
+    "matrix": "method-webmcp-tools",
+    "reason": "page.webmcp.tools() lists the tools a page or frame registers. Strider has no WebMCP discovery API, and reading the page's own registrations would test the script rather than Strider"
+  },
+  {
+    "tests": ["WM-003", "WM-004", "WM-005", "WM-006", "WM-007", "WM-010", "WM-011", "WM-012", "WM-013", "WM-014"],
+    "status": "needsFeature",
+    "matrix": "method-webmcp-calltool",
+    "reason": "page.webmcp.callTool(name, input) calls a registered tool and returns its result, or throws the error the browser reports. Strider has no WebMCP tool-call API"
+  },
+  {
+    "tests": ["WM-007", "WM-011"],
+    "status": "needsFeature",
+    "matrix": "option-webmcp-calltool-timeout",
+    "reason": "callTool's timeout option, which bounds a tool that does not settle (WM-007) or a declarative tool waiting for a submit (WM-011), and whose Timeout error names the bound. Strider has no WebMCP tool-call API to take it"
+  },
+  {
+    "tests": ["WM-012", "WM-013", "WM-014"],
+    "status": "needsFeature",
+    "matrix": "property-frame-webmcp",
+    "reason": "A frame's own webmcp property, which lists and calls the tools its frame registers. Strider's frames have no WebMCP operation, though `page.frame(locator)` can enter a frame"
+  }
+]

@@ -1,0 +1,11 @@
+[
+  {
+    "tests": [
+      "EV-135",
+      "EV-136",
+      "EV-137"
+    ],
+    "status": "notApplicable",
+    "reason": "Calls Playwright's internal `nonStallingRawEvaluateInExistingMainContext` through its `toImpl` hook, which evaluates while a navigation is pending. That is a test hook on the implementation, not a public operation, and Strider has no equivalent to call"
+  }
+]

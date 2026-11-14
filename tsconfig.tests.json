@@ -9,6 +9,8 @@
     "./packages/scenarios/src/**/*.ts",
     "./packages/scenarios/benchmark/**/*.ts",
     "./packages/scenarios/upstream/sources.json",
+    "./packages/compat/src/**/*.ts",
+    "./packages/compat/ports/**/*.ts",
     "./packages/browser/test/integration/browsers.json",
     "./packages/tools/*/test/**/*.ts",
     "./packages/tools/docs/src/matrix-evidence.ts",

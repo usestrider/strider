@@ -1,0 +1,31 @@
+[
+  {
+    "tests": [
+      "[connect.test] Puppeteer.connect should be able to connect using browserUrl, with and without trailing slash"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "notApplicable",
+    "reason": "Connects with Puppeteer's `browserURL`, Chromium's HTTP DevTools endpoint, from which Puppeteer reads the WebSocket URL. Firefox's connect takes its WebSocket endpoint directly, so there's no `browserURL` to test on Firefox"
+  },
+  {
+    "tests": [
+      "[connect.test] Puppeteer.connect should be able to connect using browserUrl, with and without trailing slash",
+      "[connect.test] Puppeteer.connect should throw when trying to connect to non-existing browser"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsertype-connect",
+    "reason": "Connects a client to the running browser. Stock WebKit's layer has no connect; Chromium and Firefox connect with their own layers, so the port runs them there"
+  },
+  {
+    "tests": [
+      "[connect.test] Puppeteer.connect should throw when using both browserWSEndpoint and browserURL"
+    ],
+    "status": "notApplicable",
+    "reason": "Passes both `browserWSEndpoint` and `browserURL` and checks Puppeteer's refusal to choose between them. Strider's connect takes one endpoint, so the combination can't be written"
+  }
+]

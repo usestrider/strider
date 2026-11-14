@@ -1,0 +1,11 @@
+[
+  {
+    "tests": [
+      "RO-149",
+      "RO-150"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-requestgc",
+    "reason": "Calls `page.requestGC()` and checks which objects a WeakRef still holds. Strider has no garbage-collection request, and generic evaluation doesn't implement its waiting and lifetime guarantees (the matrix row for it is missing)"
+  }
+]

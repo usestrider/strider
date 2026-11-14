@@ -1,0 +1,62 @@
+[
+  {
+    "tests": [
+      "[frame.test] Frame specs Frame.evaluateHandle should work"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-evaluatehandle",
+    "reason": "page.evaluateHandle makes isolated-world handles, and stock WebKit has no isolated worlds (isolatedWorlds is unsupported), so it fails Unsupported there"
+  },
+  {
+    "tests": [
+      "[frame.test] Frame specs Frame.evaluate should throw for detached frames"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-frame-evaluate",
+    "reason": "A frame is evaluated in through its locator in the isolated world, and stock WebKit has no isolated worlds (isolatedWorlds is unsupported): the evaluate fails Unsupported before it looks for the detached frame, so the NoMatch the test expects is never reached"
+  },
+  {
+    "tests": [
+      "[frame.test] Frame specs Frame Management should send \"framenavigated\" when navigating on anchor URLs",
+      "[frame.test] Frame specs Frame Management should send \"framenavigatedsamedocument\" when navigating on anchor URLs",
+      "[frame.test] Frame specs Frame Management should send \"framenavigatedsamedocument\" on history.${method}"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-page-framenavigated",
+    "reason": "Each waits for a same-document navigation (a fragment, pushState or replaceState), which stock WebKit's inspector never reports (navigation.sameDocument is unsupported; PageNavigation.stream sees none, and goto to a fragment of the current document fails Unsupported). The matrix row doesn't mention the WebKit limit"
+  },
+  {
+    "tests": [
+      "[frame.test] Frame specs Frame.page should retrieve the page from a frame"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-frame-page",
+    "reason": "Calls frame.page() to get the page a Frame object belongs to; Strider has no retained Frame object, so there is no page-of-frame read"
+  },
+  {
+    "tests": [
+      "[frame.test] Frame specs Frame.prototype.frameElement should work",
+      "[frame.test] Frame specs Frame.prototype.frameElement should handle shadow roots",
+      "[frame.test] Frame specs Frame.prototype.frameElement should return ElementHandle in the correct world"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-frame-frameelement",
+    "reason": "Gets a frame's iframe element as an ElementHandle and evaluates in it; Strider has no frame-to-element handle, and frames are entered by their element locator"
+  },
+  {
+    "tests": [
+      "[frame.test] Frame specs Frame.client should return the client instance"
+    ],
+    "status": "notApplicable",
+    "reason": "Checks that Puppeteer's frame.client is its CDPSession class; Strider exposes no session on a frame, and raw CDP is a separate connection (ports/playwright/library/chromium/session.test.ts)"
+  }
+]

@@ -1,0 +1,17 @@
+[
+  {
+    "tests": [
+      "ER-009"
+    ],
+    "status": "notApplicable",
+    "reason": "Removing a listener of Playwright's EventEmitter, for a listener that was never added. Strider has no listener registry: a subscription to uncaught exceptions ends with its scope, so there is nothing to remove"
+  },
+  {
+    "tests": [
+      "ER-012"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-clearpageerrors",
+    "reason": "Clearing a page's recorded errors, after which the history is empty and a new error is the only one in it; Strider's UncaughtException.history reads the log and has no clear"
+  }
+]

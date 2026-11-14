@@ -1,0 +1,22 @@
+[
+  {
+    "tests": [
+      "ES-029"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-locator-value-xpath-and-playwright-selector-dsl",
+    "reason": "The test is the xpath engine: Strider's locators take CSS only, and XPath is planned for 1.0"
+  },
+  {
+    "tests": [
+      "ES-034",
+      "ES-035"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locator-evaluateall",
+    "reason": "Locator.evaluateAll runs in the isolated world, which stock WebKit doesn't have, so it fails Unsupported there before it calls its function (the isolatedWorlds capability)"
+  }
+]

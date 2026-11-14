@@ -1,0 +1,12 @@
+[
+  {
+    "tests": [
+      "BC-069",
+      "BC-071",
+      "BC-072"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-opener",
+    "reason": "Reading the page that opened a popup, which Strider has no accessor for: these tests check the popup's opener (popup.opener()) after the page opened it, and a shift- or ctrl-click's popup has no opener in the original's check. Strider's Popup.next gives the popup to its opener's subscription, but there is no call that returns the opener of a page"
+  }
+]

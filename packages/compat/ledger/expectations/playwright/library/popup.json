@@ -1,0 +1,82 @@
+[
+  {
+    "tests": [
+      "PO-014"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-useragent",
+    "reason": "Setting a context's user agent, which stock WebKit refuses with Unsupported (emulation.userAgent), so the context can't be made and the popup's user agent can't be read"
+  },
+  {
+    "tests": [
+      "PO-018"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-httpcredentials",
+    "reason": "Giving a context website credentials, which stock WebKit refuses with Unsupported, so the context can't be made"
+  },
+  {
+    "tests": [
+      "PO-019"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-hastouch",
+    "reason": "Emulating touch in a context, which Chromium supports and Firefox and stock WebKit don't (emulation.touch), so the popup's touch support can't be set there"
+  },
+  {
+    "tests": [
+      "PO-017"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-setoffline",
+    "reason": "Taking a context offline, which stock WebKit refuses with Unsupported (emulation.network.offline), so the popup can't inherit it"
+  },
+  {
+    "tests": [
+      "PO-014",
+      "PO-015",
+      "PO-018",
+      "PO-021",
+      "PO-022",
+      "PO-024",
+      "PO-027",
+      "PO-028",
+      "PO-029"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-page-popup",
+    "reason": "Subscribing to a page's popups, which stock WebKit doesn't support because it doesn't say which page opened another (popups.opener), so Popup.next fails with Unsupported"
+  },
+  {
+    "tests": [
+      "PO-025"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-exposefunction",
+    "reason": "Exposing a function to every page of a context, which the page calls from a popup's script; Strider has no exposeFunction"
+  },
+  {
+    "tests": [
+      "PO-026"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-exposebinding",
+    "reason": "Exposing a binding to a context, which a closed popup's script calls and whose source page is reported; Strider has no exposeBinding"
+  }
+]

@@ -1,0 +1,10 @@
+[
+  {
+    "tests": [
+      "EH-021"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-frame-evaluatehandle",
+    "reason": "Evaluates inside a frame to get an element of the top document, then asks for that element's content frame. A frame has no `evaluateHandle` in Strider, and a handle can't cross from one frame's realm to another, so the frame's element can't be reached from inside it"
+  }
+]

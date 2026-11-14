@@ -1,0 +1,64 @@
+[
+  {
+    "tests": [
+      "[browsercontext.test] BrowserContext should not be able to close default context"
+    ],
+    "status": "notApplicable",
+    "reason": "Calling close() on the default context and expecting it to be refused. Strider has no close on a context at all: a context ends when its scope does, and the library never ends the default one, so there is no call that could be refused"
+  },
+  {
+    "tests": [
+      "[browsercontext.test] BrowserContext should have default context",
+      "[browsercontext.test] BrowserContext should create new context",
+      "[browsercontext.test] BrowserContext should work across sessions",
+      "[browsercontext.test] BrowserContext should provide a context id"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browser-contexts",
+    "reason": "Counts the browser's contexts: that there is at least one by default, and the count before and after making one and closing it, and a second connection's count. Strider's Browser has no collection of the contexts it has made, so browserContexts() can't be read; the first test is only that count, so a defined defaultContext would pass whatever the count was"
+  },
+  {
+    "tests": [
+      "[browsercontext.test] BrowserContext should fire target events"
+    ],
+    "status": "needsFeature",
+    "reason": "Listens for a context's target created, changed, and destroyed events and checks their order and URLs. Strider has no such events: a context's pages are the context.pages watchable and each page's url and closed, which don't give the ordered sequence of created, changed, and destroyed that the test checks. The nearest matrix row is the context's page event, which covers creation only",
+    "matrix": "event-browsercontext-page"
+  },
+  {
+    "tests": [
+      "[browsercontext.test] BrowserContext BrowserContext.overridePermissions should deny permission when not listed",
+      "[browsercontext.test] BrowserContext BrowserContext.overridePermissions should trigger permission onchange",
+      "[browsercontext.test] BrowserContext BrowserContext.overridePermissions should isolate permissions between browser contexts",
+      "[browsercontext.test] BrowserContext BrowserContext.setPermission should set permission",
+      "[browsercontext.test] BrowserContext BrowserContext.setPermission should support * as origin",
+      "[browsercontext.test] BrowserContext BrowserContext.setPermission should support multiple permissions",
+      "[browsercontext.test] BrowserContext BrowserContext.setPermission should be reset by clearPermissionOverrides"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-grantpermissions",
+    "reason": "Sets a permission to denied or prompt for an origin, not only granted. Strider's grant adds a grant for its scope and has no denied state to set, so the test's denied reads can't be produced. A grant without an origin, as the '*' origin uses, is also refused by Firefox (permissions.anyOrigin)"
+  },
+  {
+    "tests": [
+      "[browsercontext.test] BrowserContext BrowserContext.overridePermissions should fail when bad permission is given",
+      "[browsercontext.test] BrowserContext BrowserContext.overridePermissions should grant permission when listed",
+      "[browsercontext.test] BrowserContext BrowserContext.overridePermissions should reset permissions",
+      "[browsercontext.test] BrowserContext BrowserContext.overridePermissions should grant persistent-storage"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-grantpermissions",
+    "reason": "Stock WebKit has no permission grants: its adapter refuses grant as Unsupported, so the grants these tests make fail there. The matrix row says Strider grants permissions, with no WebKit limit"
+  },
+  {
+    "tests": [
+      "[browsercontext.test] BrowserContext BrowserContext network events should only report network events from its own pages"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-browsercontext-requestfinished",
+    "reason": "Reads a context's response, requestfinished, requestfailed, and requestservedfromcache events for its own pages. Strider has no requestfinished or requestservedfromcache event, and its requestfailed is read from the request (NetworkRequest.failure) rather than as an event, so the requestfinished and cache counts can't be read"
+  }
+]

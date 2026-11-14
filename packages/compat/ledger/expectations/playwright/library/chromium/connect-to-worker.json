@@ -1,0 +1,10 @@
+[
+  {
+    "tests": [
+      "CR-043",
+      "CR-044"
+    ],
+    "status": "notApplicable",
+    "reason": "Connects to a Node process's inspector through Playwright's private `_connectToWorker`, to evaluate in it and receive its console. Strider debugs browsers and their pages, not Node processes, so it has no worker connection to make"
+  }
+]

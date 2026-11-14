@@ -1,0 +1,42 @@
+[
+  {
+    "tests": [
+      "CL-016"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-locator-click-clickcount",
+    "reason": "Triple-clicking a textarea to select its text is a click with `clickCount: 3`. Strider's locator click has no click count, and the matrix row says there is no corresponding public option. Its `dblclick` is the only multi-click, with a count of 2"
+  },
+  {
+    "tests": [
+      "CL-059",
+      "CL-060"
+    ],
+    "status": "notApplicable",
+    "reason": "These click a pinned ElementHandle and expect the click to fail when its element is removed from the DOM (\"Element is not attached to the DOM\"). Strider has no ElementHandle (matrix row method-elementhandle-click: \"Raw ElementHandle identity is not preserved\"), and a locator finds its element again on each attempt, so a click on a removed element waits for a match, as CL-061 tests"
+  },
+  {
+    "tests": [
+      "CL-067",
+      "CL-068",
+      "CL-069"
+    ],
+    "status": "notApplicable",
+    "reason": "These drive Playwright's internal `__testHookBeforeStable` hook, which navigates or detaches a frame between its actionability checks, and are skipped unless the test's `mode` is `default`. Strider has no such hook, and its click checks don't run a separate hook step"
+  },
+  {
+    "tests": [
+      "CL-076"
+    ],
+    "status": "notApplicable",
+    "reason": "Asks Playwright's test-only `page.requestGC()` to collect garbage, then checks whether a removed iframe is still reachable. Strider has no `requestGC`, and page memory retention is not a public behavior it offers"
+  },
+  {
+    "tests": [
+      "CL-091",
+      "CL-093"
+    ],
+    "status": "notApplicable",
+    "reason": "Both abort a click with an `AbortSignal` whose reason is a string, and check that Playwright wraps it in an `AbortError` with the string as its `cause`. Strider cancels by interrupting the fiber (matrix row option-locator-click-signal), which carries no reason to wrap. The behavior they share with CL-090 and CL-092, that an aborted click stops, is ported there"
+  }
+]

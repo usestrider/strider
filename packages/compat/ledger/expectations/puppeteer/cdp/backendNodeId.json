@@ -1,0 +1,9 @@
+[
+  {
+    "tests": [
+      "[backendNodeId.test] ElementHandle.backendNodeId should work"
+    ],
+    "status": "notApplicable",
+    "reason": "Reads an element handle's CDP backend node ID, which Chromium assigns to DOM nodes. Strider doesn't expose backend node IDs; its JSHandle and locators don't carry one"
+  }
+]

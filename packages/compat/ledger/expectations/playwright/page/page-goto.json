@@ -1,0 +1,33 @@
+[
+  {
+    "tests": [
+      "NA-031",
+      "NA-032",
+      "NA-033",
+      "NA-034",
+      "NA-035"
+    ],
+    "status": "differentByDesign",
+    "decision": "An operation keeps its own deadline",
+    "reason": "These set Playwright's mutable default navigation and context timeouts and check which one a goto reports. Strider has no mutable defaults: a navigation's deadline is `Deadline.within` around its call, or `Deadline.DefaultBudget` when nothing encloses it, so there is no default to set or to take precedence"
+  },
+  {
+    "tests": [
+      "NA-027"
+    ],
+    "status": "differentByDesign",
+    "decision": "Outcomes come from evidence, never from a guess or a timer",
+    "reason": "Playwright's undocumented `networkidle0` alias for `waitUntil`, which the call must accept. Strider's load states are commit, domContentLoaded, and load, with no network-idle state"
+  },
+  {
+    "tests": [
+      "NA-052",
+      "NA-053",
+      "NA-054",
+      "NA-055"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-goto-referer",
+    "reason": "Each passes a `referer` to `goto` (NA-054 with extra headers that already set one) and checks the request's referer, or the policy that overrides it. Strider's `GotoOptions` has no referer option"
+  }
+]

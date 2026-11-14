@@ -1,0 +1,31 @@
+[
+  {
+    "tests": [
+      "NA-089"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-baseurl",
+    "reason": "A context whose pages resolve relative URLs against a baseURL option; Strider's Browser.newContext has no baseURL"
+  },
+  {
+    "tests": [
+      "NA-090",
+      "NA-092",
+      "NA-093",
+      "NA-094",
+      "NA-095",
+      "NA-096"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newpage-baseurl",
+    "reason": "A page whose goto resolves relative URLs against a baseURL option; Strider's Browser.newPage has no baseURL, so each of these tests would only check URLs it set itself"
+  },
+  {
+    "tests": [
+      "NA-091"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browsertype-launchpersistentcontext-baseurl",
+    "reason": "A persistent context whose pages resolve relative URLs against a baseURL option; Strider's persistent launch has no baseURL"
+  }
+]

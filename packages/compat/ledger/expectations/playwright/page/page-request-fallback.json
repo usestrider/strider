@@ -1,0 +1,52 @@
+[
+  {
+    "tests": [
+      "RO-125"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright's handler passes `route.fulfill` an invalid response (`{}`), which throws, and the test's catch falls back. Strider's Route.fulfill takes a typed response, so the invalid argument can't be passed; and a Strider handler that fails is logged with the default continuing, not with the fallback the original takes"
+  },
+  {
+    "tests": [
+      "RO-126"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-route-times",
+    "reason": "A route registered with `times` runs for that many requests, then is removed; Strider's route has no `times` option (the matrix row option-page-route-times is missing), so the first route's single fulfill and the second's single fallback can't be stated"
+  },
+  {
+    "tests": [
+      "RO-127",
+      "RO-128"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-route-fallback-headers",
+    "reason": "`route.fallback({ headers })` sets the headers the request continues with, and a header set to undefined is removed. Route.fallthrough takes no changes, and the matrix row option-route-fallback-headers is missing; the continue form (Route.continueWith) applies to a route's own decision, so it isn't a substitute for the fallback's override"
+  },
+  {
+    "tests": [
+      "RO-129"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-route-fallback-method",
+    "reason": "`route.fallback({ method })` sends the request with another method. Route.fallthrough takes no changes, and the matrix row option-route-fallback-method is missing"
+  },
+  {
+    "tests": [
+      "RO-130"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-route-fallback-url",
+    "reason": "`route.fallback({ url })` continues the request to another URL. Route.fallthrough takes no changes, and the matrix row option-route-fallback-url is missing; Firefox also refuses a continued URL (option-route-continue-url, see page-request-continue's ledger)"
+  },
+  {
+    "tests": [
+      "RO-131",
+      "RO-132",
+      "RO-133"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-route-fallback-postdata",
+    "reason": "`route.fallback({ postData })` sends the request with a replaced body, as a string, bytes or a JSON value. Route.fallthrough takes no changes, and the matrix row option-route-fallback-postdata is missing"
+  }
+]

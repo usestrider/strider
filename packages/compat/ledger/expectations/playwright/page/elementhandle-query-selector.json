@@ -1,0 +1,8 @@
+[
+  {
+    "tests": ["EH-072", "EH-073"],
+    "status": "needsFeature",
+    "matrix": "method-page-locator-value-xpath-and-playwright-selector-dsl",
+    "reason": "Finds elements by an XPath selector (`xpath=`) inside an element. Strider's locators take CSS, roles, text and test ids, not XPath"
+  }
+]

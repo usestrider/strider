@@ -1,0 +1,70 @@
+[
+  {
+    "tests": [
+      "[locator.test] Locator Locator.click should work with element handles"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "Clicks through an ElementHandle's `asLocator()`, the locator of the element the handle holds. Strider's JSHandle has no conversion to a locator, and a locator re-finds its element rather than keeping the one a handle holds. `method-elementhandle-click` is the nearest row, the handle's click, which is missing as well"
+  },
+  {
+    "tests": [
+      "[locator.test] Locator Locator.scroll should work"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locator-scrollintoviewifneeded",
+    "reason": "Scrolls an element to a `scrollTop` and `scrollLeft` offset, then reads the element's scroll position. Strider's locators scroll an element into view and have no offset scroll; `method-locator-scrollintoviewifneeded` is the nearest row, which covers scrolling into view only"
+  },
+  {
+    "tests": [
+      "[locator.test] Locator Locator.fill should work with a custom typing threshold"
+    ],
+    "status": "notApplicable",
+    "reason": "Passes Puppeteer's `typingThreshold` to `fill`, which chooses between typing the text one key at a time and setting the value directly, and checks that the value is right on either side of the threshold. The choice is a strategy of Puppeteer's fill, not behavior a Strider caller can observe or set: Strider's fill has one mechanism and no option for it"
+  },
+  {
+    "tests": [
+      "[locator.test] Locator Locator.prototype.map should work",
+      "[locator.test] Locator Locator.prototype.map should work with throws",
+      "[locator.test] Locator Locator.prototype.map should work with expect",
+      "[locator.test] Locator Locator.prototype.map should work with arguments"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locator-waitforfunction",
+    "reason": "Maps each match through a JS function that runs in the page, and a wait on the map resolves with the mapped value once the function produces one. Strider's locators have no mapping. `method-locator-waitforfunction` is the nearest row, which is missing too: it covers waiting on a page function's result, not turning each element into a value"
+  },
+  {
+    "tests": [
+      "[locator.test] Locator Locator.prototype.filter should resolve as soon as the predicate matches",
+      "[locator.test] Locator Locator.prototype.filter should work with arguments"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locator-waitforfunction",
+    "reason": "Keeps the matches that a JS predicate passes, and waits until the predicate passes. Strider's `filter` takes structured options only (`hasText`, `has`, `visible`), so a predicate over an attribute has no form. `method-locator-filter` is marked has for those structured options, and no row covers a predicate; `method-locator-waitforfunction` is the nearest missing row"
+  },
+  {
+    "tests": [
+      "[locator.test] Locator Locator.prototype.waitHandle should work"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "Waits for the match and returns an ElementHandle for it. Strider's locators don't return handles, and JSHandle has no conversion from a locator. `method-locator-elementhandle` is the nearest row, and it's missing as well"
+  },
+  {
+    "tests": [
+      "[locator.test] Locator FunctionLocator should work",
+      "[locator.test] Locator FunctionLocator should work with actions"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locator-waitforfunction",
+    "reason": "Locates an element with a JS function run in the page, in place of a selector or role, and waits on its result. Strider's locators have no function source. `method-locator-waitforfunction` is the nearest row, which is missing: it's a function-driven wait, not a locator whose match the function supplies"
+  },
+  {
+    "tests": [
+      "[locator.test] Locator Locator.prototype.clone should work",
+      "[locator.test] Locator Locator.prototype.clone should work internally with delegated locators"
+    ],
+    "status": "notApplicable",
+    "reason": "Copies a Puppeteer locator, which is a mutable builder: a `setTimeout` on the copy leaves the original's timeout alone, and the test reads the copy's `timeout` property. Strider's locators are immutable values with no timeout property. A call's deadline is `Deadline.within` around it, so there is nothing to copy and no property to compare"
+  }
+]

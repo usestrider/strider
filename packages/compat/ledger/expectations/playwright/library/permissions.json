@@ -1,0 +1,122 @@
+[
+  {
+    "tests": [
+      "PE-002",
+      "PE-003",
+      "PE-004",
+      "PE-005",
+      "PE-006",
+      "PE-007",
+      "PE-008",
+      "PE-009",
+      "PE-011",
+      "PE-012",
+      "PE-013",
+      "PE-014",
+      "PE-015",
+      "PE-019",
+      "PE-020",
+      "PE-022",
+      "PE-023"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-grantpermissions",
+    "reason": "Stock WebKit has no permission grants: its adapter refuses `permissions` as Unsupported, so `grant` fails there. The matrix row says Strider grants permissions, with no WebKit limit"
+  },
+  {
+    "tests": [
+      "PE-007",
+      "PE-008",
+      "PE-009",
+      "PE-014",
+      "PE-018",
+      "PE-019"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-grantpermissions",
+    "reason": "A grant without an origin is for every origin, which Firefox refuses (`permissions.anyOrigin`: Firefox's BiDi grants to one origin at a time). These tests grant without one"
+  },
+  {
+    "tests": [
+      "PE-010"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-permissions",
+    "reason": "The `permissions` option of a new context grants every origin, which Firefox and WebKit refuse as Unsupported"
+  },
+  {
+    "tests": [
+      "PE-016"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "Upstream runs it on Chromium only: the `storage-access` permission and the Storage Access API are Chromium's"
+  },
+  {
+    "tests": [
+      "PE-017"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-ignorehttpserrors",
+    "reason": "The context accepts the fixture's self-signed certificate with `acceptInsecureCerts`, which Chromium refuses per context (CDP ignores certificate errors browser-wide). The matrix row says Strider has the option, with Chromium refusing true in its notes"
+  },
+  {
+    "tests": [
+      "PE-017"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "Upstream runs it on Chromium only: the `local-fonts` permission and `queryLocalFonts` are Chromium's"
+  },
+  {
+    "tests": [
+      "PE-018"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "Upstream skips it on WebKit: WebKit has no `local-network-access` permission"
+  },
+  {
+    "tests": [
+      "PE-020",
+      "PE-021",
+      "PE-022",
+      "PE-023"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "notApplicable",
+    "reason": "Upstream runs them on WebKit only, against WebKit's mock capture devices; Chromium and Firefox need a fake device flag and have no camera or microphone permission mapping in the original"
+  },
+  {
+    "tests": [
+      "PE-016"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-frame-evaluate",
+    "reason": "The test reads a cross-origin frame's permission and calls its `document.requestStorageAccess()` in the frame's main world, which Strider can't evaluate in a frame (the matrix row says no main-world frame evaluation). A locator into the cross-origin frame doesn't resolve either: `Locator.evaluate` on its `html` element timed out while resolving, so the isolated-world route is closed too. The test isn't ported"
+  }
+]

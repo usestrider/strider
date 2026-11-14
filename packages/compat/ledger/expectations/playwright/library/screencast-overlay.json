@@ -1,0 +1,31 @@
+[
+  {
+    "tests": [
+      "SC-028",
+      "SC-029",
+      "SC-031",
+      "SC-032",
+      "SC-033",
+      "SC-034",
+      "SC-036",
+      "SC-037",
+      "SC-038"
+    ],
+    "status": "notApplicable",
+    "reason": "Strider won't draw overlays, action captions, or highlights into a page or its recording: they change what the page and its captures show, for a presentation feature. Playwright's `page.screencast.showOverlay` draws HTML over the page's recorded video and returns a disposable that removes it. Strider has no overlay: its screencast is a frame stream and its recordings are files, with no presentation layer, so there is nothing to add, remove, or sanitize, and no overlay to keep above a top-layer dialog or popover (SC-037, SC-038)"
+  },
+  {
+    "tests": [
+      "SC-030"
+    ],
+    "status": "notApplicable",
+    "reason": "Strider won't draw overlays, action captions, or highlights into a page or its recording: they change what the page and its captures show, for a presentation feature. Playwright's `hideOverlays` and `showOverlays` hide and restore the overlays a recording draws. Strider draws none, so there's nothing to hide or show"
+  },
+  {
+    "tests": [
+      "SC-035"
+    ],
+    "status": "notApplicable",
+    "reason": "Strider won't draw overlays, action captions, or highlights into a page or its recording: they change what the page and its captures show, for a presentation feature. Playwright's `showOverlay` takes a `duration` after which the overlay removes itself. Strider has no overlay to time out"
+  }
+]

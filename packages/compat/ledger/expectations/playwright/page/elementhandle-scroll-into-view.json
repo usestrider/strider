@@ -1,0 +1,10 @@
+[
+  {
+    "tests": [
+      "EH-094"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "Removes the element through its handle, then expects the scroll to throw 'Element is not attached to the DOM' at once. Strider has no handle bound to one node: a locator finds its match again on each attempt, so the scroll would wait for a new match rather than throw"
+  }
+]

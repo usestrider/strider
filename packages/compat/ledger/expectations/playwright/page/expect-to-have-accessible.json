@@ -1,0 +1,29 @@
+[
+  {
+    "tests": [
+      "EX-260"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locatorassertions-tohaveaccessibledescription",
+    "reason": "Playwright's toHaveAccessibleDescription, with its aria-description and aria-describedby computation, its ignoreCase option, and its negations. Strider has no description matcher or read"
+  },
+  {
+    "tests": [
+      "EX-261",
+      "EX-262",
+      "EX-263",
+      "EX-264",
+      "EX-265",
+      "EX-266",
+      "EX-267",
+      "EX-268",
+      "EX-269",
+      "EX-270",
+      "EX-271",
+      "EX-272"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locatorassertions-tohaveaccessibleerrormessage",
+    "reason": "Playwright's toHaveAccessibleErrorMessage, which reads aria-errormessage (and the native validity rules for aria-invalid), with its aria-invalid cases and the .not forms. Strider has no error-message matcher or read, and its matchers have no negation to approximate the .not forms with"
+  }
+]

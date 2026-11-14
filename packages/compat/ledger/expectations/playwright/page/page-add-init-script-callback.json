@@ -1,0 +1,21 @@
+[
+  {
+    "tests": [
+      "IS-012",
+      "IS-013",
+      "IS-014",
+      "IS-015",
+      "IS-016",
+      "IS-017",
+      "IS-018",
+      "IS-019",
+      "IS-020",
+      "IS-021",
+      "IS-022",
+      "IS-023"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-addinitscript-exposefunctions",
+    "reason": "Playwright's addInitScript takes an argument, which it passes into the script, and an exposeFunctions option that turns functions in that argument into callbacks the script can call back into the test. Strider's init script takes a self-contained function or source text and no argument, and has no callback exposure, so the test's callbacks have no Strider equivalent. IS-012 also needs the argument itself, which no matrix row names; this row is the closest"
+  }
+]

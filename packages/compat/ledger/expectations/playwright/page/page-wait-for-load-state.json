@@ -1,0 +1,27 @@
+[
+  {
+    "tests": [
+      "WA-080"
+    ],
+    "status": "notApplicable",
+    "reason": "Checks the message Playwright gives for a load state it doesn't know (`bad`). Strider's waits take a predicate over `page.status`, not a state name, so there is no name to reject and no runtime message to check"
+  },
+  {
+    "tests": [
+      "WA-091"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-frame-waitforloadstate",
+    "reason": "Navigates a frame with `frame.goto` (`method-frame-goto`) and waits on it with `frame.waitForLoadState`. Strider has no navigation or readiness state on a frame: `page.frame` enters a frame by its iframe for reads and actions, and a frame's `status` doesn't exist"
+  },
+  {
+    "tests": [
+      "WA-092",
+      "WA-093",
+      "WA-094"
+    ],
+    "status": "differentByDesign",
+    "decision": "Outcomes come from evidence, never from a guess or a timer",
+    "reason": "Each waits for `networkidle` after `domcontentloaded` and `load`, on a page with an iframe whose source is `javascript:`, `data:`, or `blob:`. Strider's readiness is `loading`, `interactive`, and `complete`, with no network-idle state to wait for"
+  }
+]

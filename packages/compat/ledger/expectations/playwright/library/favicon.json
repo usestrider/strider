@@ -1,0 +1,12 @@
+[
+  {
+    "tests": [
+      "FA-001"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "notApplicable",
+    "reason": "The original skips headless browsers other than Firefox, because headless Chromium doesn't request favicons. Strider's headless Chromium makes the same choice, so the test runs on Firefox and stock WebKit"
+  }
+]

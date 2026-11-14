@@ -1,0 +1,31 @@
+[
+  {
+    "tests": [
+      "SE-002",
+      "SE-023"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "SE-002 uses `css:light=`, Playwright's light-DOM-only engine, and `text=root3`, which Strider's locators have no form for; its other assertions are shadow-crossing combinators that SE-004 and its neighbors already port. SE-023 uses `:scope` at the start of a chained `>>` (`div >> :scope.target`, `#span1 >> #inner,:scope`) and `css=:scope` on a handle, which select the scope element itself. Strider's chained locator selects only descendants. No matrix row names these forms; the selector-DSL row is the nearest"
+  },
+  {
+    "tests": [
+      "SE-005",
+      "SE-006",
+      "SE-007"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "These use Playwright's capture marker `*` (`*css=section >> css=div,span` returns the section, not the div), which Strider's locators have no form for, and SE-007 also walks up with `..` and matches `text=Hello`. Strider's locators return the elements their chain selects, so a capture that returns an ancestor has nothing to return; SE-005's and SE-006's other assertions are chains of plain CSS, which the port would check, but the captured results are the test"
+  },
+  {
+    "tests": [
+      "SE-018",
+      "SE-019",
+      "SE-025"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "Playwright's `>>` continues from the previous match with a relative selector: a leading combinator (`#div3 >> ~ div`, `#div1 >> + div`, `div >> >span`, `locator('>span')`) or `:scope` as the next step (`#div3 >> :scope ~ div`). Strider's chained locator queries only the descendants of its scope, so a sibling or a relative selector can't be written as a chain. A standard CSS sibling selector would give the same elements, but the test checks the relative mechanism, so the port doesn't rewrite it. SE-025 also uses `div:has(> div)`, and checks that the relative form is absolutized"
+  }
+]

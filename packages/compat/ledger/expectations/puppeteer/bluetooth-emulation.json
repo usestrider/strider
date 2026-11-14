@@ -1,0 +1,11 @@
+[
+  {
+    "tests": [
+      "[bluetooth-emulation.test] request prompt for emulated bluetooth device can be canceled",
+      "[bluetooth-emulation.test] request prompt for emulated bluetooth device can be selected"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-page-filechooser",
+    "reason": "Emulates a Bluetooth adapter and peripheral, waits for the device prompt a page's `requestDevice` opens, and cancels or selects in it. Strider has no device prompt or Bluetooth emulation; the nearest matrix row is the file chooser, the other prompt a page opens for the program to answer"
+  }
+]

@@ -1,0 +1,13 @@
+[
+  {
+    "tests": [
+      "[binding.test] CDP binding handle disposal should release temporary handles after query*",
+      "[binding.test] CDP binding handle disposal should preserve node arguments when exposed functions *",
+      "[binding.test] CDP binding handle disposal should preserve node arguments returned by exposed functions",
+      "[binding.test] CDP binding handle disposal should preserve handles returned by exposed functions"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-exposefunction",
+    "reason": "Each test exposes a function to the page (page.exposeFunction) and checks the handles it passes and returns, through the CDP binding's handle lifetime, and the first also counts live objects with page.queryObjects. Strider has no exposeFunction or exposeBinding (method-page-exposebinding is missing too), and no queryObjects"
+  }
+]

@@ -1,0 +1,59 @@
+[
+  {
+    "tests": [
+      "FC-003",
+      "FC-005",
+      "FC-006"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright's event emitter methods (`prependListener`, `on`/`off`, `addListener`/`removeListener`), a Node-style implementation Strider doesn't have: its events are Effect streams, and a subscription ends with its scope. What these tests deliver, a chooser to a listener, is FC-002's and FC-007's"
+  },
+  {
+    "tests": [
+      "FC-015"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-waitforevent-signal",
+    "reason": "Waiting for a file chooser with an AbortSignal, which rejects with the signal's reason; Strider cancels a wait by interrupting it, which has no reason string"
+  },
+  {
+    "tests": [
+      "FC-017"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "Reading a file chooser's page() and element(), the page and the input it came from; Strider's chooser is a value with its selection decisions and multiplicity, and the port has no element to check (method-filechooser-page is missing too)"
+  },
+  {
+    "tests": [
+      "FC-001",
+      "FC-002",
+      "FC-004",
+      "FC-007",
+      "FC-008",
+      "FC-009",
+      "FC-010",
+      "FC-011",
+      "FC-012",
+      "FC-013",
+      "FC-014",
+      "FC-016",
+      "FC-019",
+      "FC-020",
+      "FC-021",
+      "FC-022",
+      "FC-023",
+      "FC-024",
+      "FC-025",
+      "FC-026",
+      "FC-027",
+      "FC-028"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Stock WebKit's Automation protocol doesn't report file choosers (the `fileChooser` capability), so `FileChooser.next`, `stream`, `history`, and `handle` fail with `SubscriptionError` or `DeclarationError`, reason `Unsupported`, and the browser cancels the chooser itself (API.md, \"Stock WebKit, launched\"). The matrix row claims `has` with no WebKit requirement",
+    "matrix": "event-page-filechooser"
+  }
+]

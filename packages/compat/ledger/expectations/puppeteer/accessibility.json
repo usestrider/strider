@@ -1,0 +1,77 @@
+[
+  {
+    "tests": [
+      "[accessibility.test] Accessibility should report uninteresting nodes",
+      "[accessibility.test] Accessibility iframes same-origin iframe (all nodes)",
+      "[accessibility.test] Accessibility filtering children of leaf nodes root option should support the interestingOnly option"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-ariasnapshotjson",
+    "reason": "Puppeteer's `interestingOnly: false` returns every node of the accessibility tree, including the generic and inline-text nodes a snapshot leaves out. Strider's snapshot has no option to keep roleless nodes, and `Snapshot.Options` has only `sources`, `depth` and `interactiveOnly`. The interestingOnly:true half of the last test is expressible and is the only part Strider has"
+  },
+  {
+    "tests": [
+      "[accessibility.test] Accessibility iframes should not include iframe data if not requested"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-ariasnapshotjson",
+    "reason": "Puppeteer's `includeIframes` (off by default) leaves a frame's tree out of the snapshot. Strider stitches every frame's tree in under its iframe, and `Snapshot.Options` has no switch for it, so the default this test checks has no Strider counterpart"
+  },
+  {
+    "tests": [
+      "[accessibility.test] Accessibility roledescription"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-ariasnapshotjson",
+    "reason": "The test's point is the node's `roledescription` (aria-roledescription, which Chromium reports only where it's valid). Strider's snapshot node carries no roledescription, so there's nothing to check"
+  },
+  {
+    "tests": [
+      "[accessibility.test] Accessibility orientation"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-ariasnapshotjson",
+    "reason": "The test's point is the node's `orientation` (aria-orientation). Strider's snapshot node carries no orientation"
+  },
+  {
+    "tests": [
+      "[accessibility.test] Accessibility autocomplete"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-ariasnapshotjson",
+    "reason": "The test's point is the node's `autocomplete` (aria-autocomplete). Strider's snapshot node carries no autocomplete"
+  },
+  {
+    "tests": [
+      "[accessibility.test] Accessibility multiselectable"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-ariasnapshotjson",
+    "reason": "The test's point is the node's `multiselectable` (aria-multiselectable). Strider's snapshot node carries no multiselectable"
+  },
+  {
+    "tests": [
+      "[accessibility.test] Accessibility keyshortcuts"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-ariasnapshotjson",
+    "reason": "The test's point is the node's `keyshortcuts` (aria-keyshortcuts). Strider's snapshot node carries no keyshortcuts"
+  },
+  {
+    "tests": [
+      "[accessibility.test] Accessibility filtering children of leaf nodes elementHandle() should get the parent ElementHandle from a text node accessibility node",
+      "[accessibility.test] Accessibility filtering children of leaf nodes elementHandle() should get the shadow host ElementHandle from a text node in a shadow root"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-ariasnapshotjson",
+    "reason": "Puppeteer's `elementHandle()` on a text node's accessibility node gives the element that holds the text. Strider's text nodes carry no ref, so a snapshot item can't be turned into a locator for its parent, and the shadow-host case fails the same way"
+  },
+  {
+    "tests": [
+      "[accessibility.test] Accessibility should capture new accessibility properties and not prune them"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-ariasnapshotjson",
+    "reason": "The test's point is that the accessibility properties of a node (busy, live, atomic, relevant, modal, roledescription, aria-invalid, errormessage, details, description) are reported and kept. Strider's snapshot node carries none of them, and its `invalid` state comes from native validation only"
+  }
+]

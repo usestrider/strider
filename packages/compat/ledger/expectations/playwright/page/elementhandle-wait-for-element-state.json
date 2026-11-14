@@ -1,0 +1,11 @@
+[
+  {
+    "tests": [
+      "EH-115",
+      "EH-119"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "Waits for a state on an element that is then removed, and expects the wait to throw 'Element is not attached to the DOM'. Strider has no handle bound to one element: a locator finds its match again on each attempt, so a removed element makes the wait keep looking for a new match rather than throw"
+  }
+]

@@ -1,0 +1,299 @@
+[
+  {
+    "tests": [
+      "[page.test] Page Page.newPage should open pages in a new window",
+      "[page.test] Page Page.newPage should open pages in a new window at the specified position",
+      "[page.test] Page Page.newPage should open pages in a new window in maximized state"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browser-newpage",
+    "reason": "Opens the page as a browser window with `type: \"window\"`, at `windowBounds`, or maximized. Strider's `newPage` takes no window type, bounds, or window state, so the window's outer size can't be set or read. The nearest matrix row is `newPage` itself, which creates a page in a context"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.newPage should create a background page"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-bringtofront",
+    "reason": "Opens a page with `background: true` and checks that its `visibilityState` is `hidden`. Strider's `newPage` has no background option. The nearest matrix row is `activate`, which brings a page to the front, the opposite of opening one in the background"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.close should run beforeunload if asked for"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-close-runbeforeunload",
+    "reason": "Closes the page with `runBeforeUnload`, which stock WebKit doesn't support: `page.close({ runBeforeUnload: true })` fails with `Unsupported` there, so the page never prompts"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.metrics should get metrics from a page"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-cdpsession-send",
+    "reason": "Reads the page's metrics (`Timestamp`, `Documents`, `Nodes`, JS heap sizes, layout and script durations, and so on) from Chromium's Performance domain. Strider has no page metrics read; the nearest matrix row is the raw CDP command, which would be a substitute for it rather than the API itself"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.metrics metrics event fired on console.timeStamp"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-cdpsession-event",
+    "reason": "Listens for a `metrics` event that Chromium sends when the page calls `console.timeStamp`, with the page's metrics and the timestamp's title. Strider has no metrics event; the nearest matrix row is the raw CDP event stream, which would be a substitute for it rather than the event itself"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.Events.error should throw when page crashes"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-page-crash",
+    "reason": "Crashes the page with `chrome://crash` or `about:crashcontent`, which stock WebKit doesn't have, and waits for the page to close with the `PageCrashed` reason. Strider has no crash API, so the test has no way to crash a WebKit page"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.waitForNetworkIdle should work",
+      "[page.test] Page Page.waitForNetworkIdle should respect timeout",
+      "[page.test] Page Page.waitForNetworkIdle should respect idleTime",
+      "[page.test] Page Page.waitForNetworkIdle should work with no timeout",
+      "[page.test] Page Page.waitForNetworkIdle should work with aborted requests",
+      "[page.test] Page Page.waitForNetworkIdle should work with delayed response",
+      "[page.test] Page Page.waitForNetworkIdle should be cancelable"
+    ],
+    "status": "differentByDesign",
+    "decision": "Outcomes come from evidence, never from a guess or a timer",
+    "reason": "Waits for the page's network to go idle (`waitForNetworkIdle`, with its `idleTime` and `timeout`, and its `signal` cancellation). Strider has no network-idle readiness: `networkidle` isn't a load state, and the matrix row says to observe an explicit application condition instead, which would be a different test. The wait is what these tests check, so none of them is ported"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.exposeFunction should work",
+      "[page.test] Page Page.exposeFunction should throw exception in page context",
+      "[page.test] Page Page.exposeFunction should support throwing \"null\"",
+      "[page.test] Page Page.exposeFunction should be callable from-inside evaluateOnNewDocument",
+      "[page.test] Page Page.exposeFunction should survive navigation",
+      "[page.test] Page Page.exposeFunction should await returned promise",
+      "[page.test] Page Page.exposeFunction should await returned if called from function",
+      "[page.test] Page Page.exposeFunction should work on frames",
+      "[page.test] Page Page.exposeFunction should work with loading frames",
+      "[page.test] Page Page.exposeFunction should work on frames before navigation",
+      "[page.test] Page Page.exposeFunction should not throw when frames detach",
+      "[page.test] Page Page.exposeFunction should work with complex objects",
+      "[page.test] Page Page.exposeFunction should fallback to default export when passed a module object",
+      "[page.test] Page Page.exposeFunction should be called once",
+      "[page.test] Page Page.exposeFunction should work after deleting exposed function from globalThis",
+      "[page.test] Page Page.removeExposedFunction should work"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-exposefunction",
+    "reason": "Exposes a Node function to the page as `window.<name>`, with its results, its rejections, its survival across navigation and frames, and its removal (`removeExposedFunction`). Strider has no exposed-function API: generic main-world evaluation runs page code, but it doesn't implement this contract, and porting these tests would test the browser's own functions rather than Strider"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.Events.Exception should fall back to the exception location for syntax errors",
+      "[page.test] Page Page.Events.Exception should expose the remote exception via a moved handle",
+      "[page.test] Page Page.Events.Exception should dispose the handle after dispatch if not moved"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-page-pageerror",
+    "reason": "Checks what Puppeteer's `exception` event adds to `pageerror`. The syntax-error test checks the location the event falls back to when the stack is empty: the script's URL, line, and column. Strider's `UncaughtException` carries the name, message, and a stack string, and for a syntax error no stack and no location, so there's nothing to read the position from. The other two take the event's remote handle, to move it and evaluate on it, and to check it is disposed after dispatch; Strider's exception holds no handle to the thrown object. The nearest matrix row is the `pageerror` event, which is the same feed without those fields"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.setUserAgent should work with platform option",
+      "[page.test] Page Page.setUserAgent should work with platform option without userAgent"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-useragent",
+    "reason": "Overrides `navigator.platform` with `setUserAgent({ platform })` and, in the second test, without a user agent. Strider's emulation sets the user agent only: it has no platform override, so the page's `navigator.platform` can't be changed. The nearest matrix row is the user agent option, which is what the port uses for the other user-agent tests"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.addScriptTag should throw an error if no options are provided",
+      "[page.test] Page Page.addScriptTag should work with a url",
+      "[page.test] Page Page.addScriptTag should work with a url and type=module",
+      "[page.test] Page Page.addScriptTag should work with a path and type=module",
+      "[page.test] Page Page.addScriptTag should work with a content and type=module",
+      "[page.test] Page Page.addScriptTag should throw an error if loading from url fail",
+      "[page.test] Page Page.addScriptTag should work with a path",
+      "[page.test] Page Page.addScriptTag should include sourcemap when path is provided",
+      "[page.test] Page Page.addScriptTag should work with content",
+      "[page.test] Page Page.addScriptTag should add id when provided",
+      "[page.test] Page Page.addScriptTag should throw when added with content to the CSP page",
+      "[page.test] Page Page.addScriptTag should throw when added with URL to the CSP page"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-addscripttag",
+    "reason": "Adds a script to the page with `addScriptTag` from a URL, a file path, or content, with a module type and an id, and checks its errors: a call with no options, a URL that fails to load, and a page whose CSP refuses the script. Strider has no `addScriptTag`. Generic main-world evaluation runs script, but doesn't implement this contract's loading, waiting and lifetime, so these tests would check the browser rather than Strider. The nearest matrix row is the page method itself, which is missing"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.addStyleTag should throw an error if no options are provided",
+      "[page.test] Page Page.addStyleTag should work with a url",
+      "[page.test] Page Page.addStyleTag should throw an error if loading from url fail",
+      "[page.test] Page Page.addStyleTag should work with a path",
+      "[page.test] Page Page.addStyleTag should work with a path when the options are reused",
+      "[page.test] Page Page.addStyleTag should include sourcemap when path is provided",
+      "[page.test] Page Page.addStyleTag should work with content",
+      "[page.test] Page Page.addStyleTag should throw when added with content to the CSP page",
+      "[page.test] Page Page.addStyleTag should throw when added with URL to the CSP page"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-addstyletag",
+    "reason": "Adds a stylesheet to the page with `addStyleTag` from a URL, a file path, or content, and checks its errors, its source map, and a page whose CSP refuses it. Strider has no `addStyleTag`, and generic main-world evaluation doesn't implement its loading or lifetime contract. The nearest matrix row is the page method itself, which is missing"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.setBypassCSP should bypass CSP meta tag",
+      "[page.test] Page Page.setBypassCSP should bypass CSP header",
+      "[page.test] Page Page.setBypassCSP should bypass after cross-process navigation",
+      "[page.test] Page Page.setBypassCSP should bypass CSP in iframes as well"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-bypasscsp",
+    "reason": "Calls `setBypassCSP(true)` so script can be added to a page whose CSP forbids it, in the page, in its iframes, and after a cross-process navigation, and reloads to apply it. Strider has no bypass-CSP option on a context, a page or a call, so the page stays under its CSP. The nearest matrix row is the context creation option, which is missing too"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.setUserAgent should work with additional userAgentMetdata"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-useragent",
+    "reason": "Sets the user agent with its client hints metadata (`architecture`, `mobile`, `model`, `platform`, `platformVersion`), then checks `navigator.userAgentData` and the request header. Strider's emulation sets the user agent string only, so the metadata can't be set. The nearest matrix row is the user agent option, which the port uses for the string form"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.setContent should remove its listeners when it times out"
+    ],
+    "status": "notApplicable",
+    "reason": "Counts the listeners Puppeteer's frame object holds for its `FrameDetached` event, before and after a `setContent` times out, to check the call removes its own. That is the bookkeeping of Puppeteer's event emitter. Strider has no such listener list: its subscriptions are scopes, and a timed-out call holds none to leak"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.setCacheEnabled should enable or disable the cache based on the state passed",
+      "[page.test] Page Page.setCacheEnabled should enable the cache when called without arguments",
+      "[page.test] Page Page.setCacheEnabled should stay disabled when toggling request interception on/off"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-reload",
+    "reason": "Turns the HTTP cache off for a page's later loads with `setCacheEnabled`, and turns it back on when called with no arguments. Strider's `reload` bypasses the cache for one reload with `bypassCache`, and there's no page-wide switch, so the later loads can't be made uncached. The nearest matrix row is `reload`, which holds the bypass to one navigation"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.pdf can print to PDF and stream the result"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-pdf",
+    "reason": "Prints the page to a stream of bytes with `createPDFStream`. Strider's `pdf` returns the whole document as one `Uint8Array`, so there's no stream to read. The nearest matrix row is `pdf` itself"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.pdf should not wait for fonts if waitForFonts is false"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-pdf",
+    "reason": "Prints without waiting for the page's fonts, with `waitForFonts: false`. Strider's `pdf` has no `waitForFonts` option. The nearest matrix row is `pdf` itself"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.pdf can print to PDF and save to file",
+      "[page.test] Page Page.pdf should accept page ranges without spaces",
+      "[page.test] Page Page.pdf should respect timeout"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-pdf",
+    "reason": "Prints the page to PDF. Stock WebKit has no print-to-PDF, so Strider's `pdf` refuses there with `Unsupported`, as the matrix row says"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.setJavaScriptEnabled should work",
+      "[page.test] Page Page.setJavaScriptEnabled setInterval should pause",
+      "[page.test] Page Page.setJavaScriptEnabled setTimeout should stop",
+      "[page.test] Page Page.setJavaScriptEnabled then should not pause"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newpage-javascriptenabled",
+    "reason": "Turns scripts off with `emulate({ javaScript: \"disabled\" })`. Firefox's WebDriver BiDi adapter refuses `emulation.javaScript`, since Firefox doesn't implement `emulation.setScriptingEnabled`, so scripts keep running there. The matrix row says `has`, which holds for Chromium only"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.record should record page"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-screencast-start",
+    "reason": "Records the page to a WebM file with `Capability.Video`. Stock WebKit needs explicit polled-video options and a writer, which the harness doesn't give it, so the acquisition is refused there. The nearest matrix row is the screencast's file recording"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.select should return [] on no matched values",
+      "[page.test] Page Page.select should return an array of matched values",
+      "[page.test] Page Page.select should return an array of one element when multiple is not set",
+      "[page.test] Page Page.select should return [] on no values"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locator-selectoption",
+    "reason": "Checks the values `page.select` returns: an empty list, the matched values, or the one value of a select without `multiple`. Strider's `selectOption` returns nothing, so these tests' only assertion has no value to read. The same gap as SO-016 to SO-019 in the Playwright ledger"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.select should throw if passed in non-strings"
+    ],
+    "status": "notApplicable",
+    "reason": "Checks Puppeteer's error for select values that aren't strings, `Values must be strings`. Strider's choices are typed as a value, a label, or an index, so a non-string value doesn't compile, and no runtime check reports it. The same as SO-024 in the Playwright ledger"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.Events.Issue when issues are disabled should be able to connect and disable issues",
+      "[page.test] Page Page.Events.Issue should emit issue event when CSP violation occurs",
+      "[page.test] Page Page.Events.Issue should emit issue event from cross-origin iframe"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-page-pageerror",
+    "reason": "Listens for Puppeteer's `issue` event, which reports the browser's own findings, such as a Content Security Policy violation, and tests whether it is emitted, including with issues disabled at launch. Strider has no issue events. The nearest matrix row is the page's error event, the other page event that reports what the browser found"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.browser should return the correct browser instance"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-browser",
+    "reason": "Returns the browser a page belongs to with `page.browser()`. Strider's page names its context, but a context doesn't name its browser, so there's no browser to compare. The nearest matrix row is `BrowserContext.browser`, the context's link to its browser, which is missing"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.client should return the client instance"
+    ],
+    "status": "notApplicable",
+    "reason": "Returns Puppeteer's `_client()`, the CDP session of its own CDP page, which is an internal of Puppeteer's implementation. Strider's page has no CDP session of its own; the raw CDP session is a separate API, which the Chromium session port covers"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.tabInfo should return the tab index and active state"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-pages",
+    "reason": "Reports a tab's index in its window, whether it is the active or a pinned tab, and its tab group. Strider has no tab model: `context.pages` lists the pages but gives no index or active state. The nearest matrix row is `BrowserContext.pages`"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.resize should resize the browser window to fit page content",
+      "[page.test] Page Page.resize should resize the browser window to fit page content when fullscreen"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-setviewportsize",
+    "reason": "Resizes the browser window to fit the page's content with `page.resize`, and sets and reads a window's bounds and fullscreen state (`setWindowBounds`, `getWindowBounds`, `windowId`). Strider has no window bounds or window state. The nearest matrix row is the viewport size, which sets the page's content size but not the window's"
+  }
+]

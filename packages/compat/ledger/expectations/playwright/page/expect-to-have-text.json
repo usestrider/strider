@@ -1,0 +1,39 @@
+[
+  {
+    "tests": [
+      "EX-274",
+      "EX-280",
+      "EX-291"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-locatorassertions-tohavetext-ignorecase",
+    "reason": "Passes `ignoreCase` to `toHaveText`: `{ ignoreCase: true }` on a string or a list, and `{ ignoreCase: false }` overriding a regular expression's `i` flag. Strider's `toHaveText` takes no options, and its string comparison is case-sensitive. The same tests also check what Strider does differently, which this entry hides until the option exists: a regular expression is tested against whitespace-collapsed text (EX-274, EX-291), and zero-width spaces and soft hyphens aren't stripped from the text before it is compared (EX-280)"
+  },
+  {
+    "tests": [
+      "EX-281",
+      "EX-300"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-locatorassertions-tocontaintext-ignorecase",
+    "reason": "Passes `ignoreCase` to `toContainText`, which Strider's `toContainText` doesn't take: its substring match is case-sensitive. EX-300 also passes a list, which is the array form listed under EX-299"
+  },
+  {
+    "tests": [
+      "EX-284",
+      "EX-285"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-locatorassertions-tohavetext-useinnertext",
+    "reason": "Passes `useInnerText: true` to `toHaveText`, which compares the element's `innerText`, the text as layout shows it. Strider's text is the text content of the element, never `innerText`, and its text matchers take no option to choose otherwise"
+  },
+  {
+    "tests": [
+      "EX-299",
+      "EX-301"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locatorassertions-tocontaintext",
+    "reason": "Passes a list to `toContainText`, which matches as many elements as the list has entries, each by its entry. Strider's `toContainText` takes one string or regular expression, so a list doesn't type-check. The matrix row for `toContainText` says Strider has the method, which holds only for the single-value form"
+  }
+]

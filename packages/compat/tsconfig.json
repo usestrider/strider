@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  // The compat package alone, for checking ports quickly: `pnpm exec tsc -p packages/compat/tsconfig.json`.
+  // The root's tsconfig.tests.json checks it too, with everything else.
+  "extends": "../../tsconfig.tests.json",
+  "compilerOptions": { "rootDir": "../..", "composite": false, "incremental": false, "declarationMap": false },
+  "references": [],
+  "include": [
+    "src/**/*.ts",
+    "ports/**/*.ts",
+    "test/**/*.ts",
+    "../../vitest.compat.config.ts"
+  ]
+}

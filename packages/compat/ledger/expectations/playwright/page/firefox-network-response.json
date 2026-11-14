@@ -1,0 +1,13 @@
+[
+  {
+    "tests": [
+      "FF-005",
+      "FF-006",
+      "FF-007",
+      "FF-008"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-response-headersarray",
+    "reason": "Checks the response's header fields as Firefox received them: repeated names, and values with commas, in order. Strider's response headers are Effect Headers, one value per name, so repeated fields (Set-Cookie, WWW-Authenticate, X-Repeat) and their order can't be read back; the matrix row says headersArray is has, but its note is the one thing that doesn't hold. FF-008 also reads response.finished(), which Strider has no form of"
+  }
+]

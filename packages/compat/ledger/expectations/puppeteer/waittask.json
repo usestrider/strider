@@ -1,0 +1,101 @@
+[
+  {
+    "tests": [
+      "[waittask.test] waittask specs Frame.waitForFunction should not poll after timing out during ${polling} poller creation",
+      "[waittask.test] waittask specs Frame.waitForFunction should poll on mutation",
+      "[waittask.test] waittask specs Frame.waitForFunction should poll on mutation async",
+      "[waittask.test] waittask specs Frame.waitForFunction should poll on raf",
+      "[waittask.test] waittask specs Frame.waitForFunction should poll on raf async"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-waitforfunction-polling",
+    "reason": "Waits on the polling mode itself: `polling: 'mutation'` or `'raf'`, or, for the first, the poller's creation under a timeout. Strider's Expect re-runs a read at Expect.CheckInterval and has no polling strategy to choose, so there is no mode for these tests to exercise; the matrix row is the nearest, as the option is missing"
+  },
+  {
+    "tests": [
+      "[waittask.test] waittask specs Frame.waitForFunction should throw negative polling interval"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-waitforfunction-polling",
+    "reason": "Checks Puppeteer's refusal of a non-positive polling interval (-10). Strider's Expect.withCheckInterval takes a duration and has no option that could be refused here; the matrix row is the nearest, as the option is missing"
+  },
+  {
+    "tests": [
+      "[waittask.test] waittask specs Frame.waitForFunction should accept a string"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-waitforfunction",
+    "reason": "Passes the predicate as a string of source, which Puppeteer runs in the page. Strider's Expect.that takes an effect and a condition, and the matrix row covers only that form; no row covers a string predicate, so the row is the nearest"
+  },
+  {
+    "tests": [
+      "[waittask.test] waittask specs Frame.waitForFunction should return the window as a success value",
+      "[waittask.test] waittask specs Frame.waitForFunction should accept ElementHandle arguments"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-evaluatehandle",
+    "reason": "The port's wait subject is a handle, `page.evaluateHandle` or a handle's `evaluate`, which runs in the isolated world that stock WebKit doesn't have, so it fails Unsupported there (the isolatedWorlds capability)"
+  },
+  {
+    "tests": [
+      "[waittask.test] waittask specs Frame.waitForFunction can start multiple tasks without node warnings"
+    ],
+    "status": "notApplicable",
+    "reason": "Checks that a wait given one AbortSignal adds its listener without Node's max-listeners warning: Puppeteer's own bookkeeping for the signal option. Strider's waits take no signal (the cancellation tests interrupt the wait's fiber instead), so there is no listener for Node to warn about"
+  },
+  {
+    "tests": [
+      "[waittask.test] waittask specs Frame.waitForSelector xpath should support some fancy xpath",
+      "[waittask.test] waittask specs Frame.waitForSelector xpath should respect timeout",
+      "[waittask.test] waittask specs Frame.waitForSelector xpath should run in specified frame",
+      "[waittask.test] waittask specs Frame.waitForSelector xpath should throw when frame is detached",
+      "[waittask.test] waittask specs Frame.waitForSelector xpath hidden should wait for display: none",
+      "[waittask.test] waittask specs Frame.waitForSelector xpath hidden should return null if the element is not found",
+      "[waittask.test] waittask specs Frame.waitForSelector xpath hidden should return an empty element handle if the element is found",
+      "[waittask.test] waittask specs Frame.waitForSelector xpath should return the element handle",
+      "[waittask.test] waittask specs Frame.waitForSelector xpath should allow you to select a text node",
+      "[waittask.test] waittask specs Frame.waitForSelector xpath should allow you to select an element with single slash"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-locator-value-xpath-and-playwright-selector-dsl",
+    "reason": "Every test in this describe selects with an XPath expression (`xpath/…`), which Strider's locator constructor doesn't accept: locators take CSS, and the matrix row lists XPath as planned for 1.0. Each test's point is the XPath match (or its text node, or the handle it returns), so none can be ported with a CSS locator in its place"
+  },
+  {
+    "tests": [
+      "[waittask.test] waittask specs Frame.waitForSelector should return the element handle"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "Reads the textContent of the element the wait returned. Strider's waits return nothing (the matrix row's notes: no returned ElementHandle), so a port would read back the element the test wrote, which the original's call doesn't return"
+  },
+  {
+    "tests": [
+      "[waittask.test] waittask specs Frame.waitForSelector should have correct stack trace for timeout"
+    ],
+    "status": "notApplicable",
+    "reason": "Checks the JavaScript stack of Puppeteer's TimeoutError, which Puppeteer's runner maps back to this test file through source maps. Strider's failure is a typed ExpectationFailed, whose stack is the library's, not the caller's; the timeout's condition and subject are asserted by the timeout tests"
+  },
+  {
+    "tests": [
+      "[waittask.test] waittask specs protocol timeout should error if underlying protocol command times out with raf polling"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-waitforfunction-polling",
+    "reason": "Waits with `polling: 'raf'` under a launch's `protocolTimeout`, which bounds each protocol command and fails the wait with a cause. Strider has neither the polling mode (Expect re-runs its read at Expect.CheckInterval) nor a protocol-command timeout launch option, so the matrix row is the nearest, as the option is missing"
+  },
+  {
+    "tests": [
+      "[waittask.test] waittask specs Frame.waitForSelector Page.waitForSelector is shortcut for main frame",
+      "[waittask.test] waittask specs Frame.waitForSelector should run in specified frame"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locator-evaluate",
+    "reason": "The port adds the element to the iframe's document through the frame's body locator's `evaluate`, which runs in the isolated world that stock WebKit doesn't have, so it fails Unsupported there (the isolatedWorlds capability)"
+  }
+]

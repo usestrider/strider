@@ -1,0 +1,50 @@
+[
+  {
+    "tests": [
+      "AR-119",
+      "AR-120",
+      "AR-121",
+      "AR-122",
+      "AR-123",
+      "AR-124",
+      "AR-132",
+      "AR-142"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locatorassertions-tomatchariasnapshot",
+    "reason": "Matches a state (`[checked]`, `[disabled]`, `[expanded]`, `[pressed]`, `[selected]`, `[invalid]`) or a heading's `[level=N]` on a node; Expect.toMatchAria's AriaPattern names a node by role, name and children only, and the snapshot node's level isn't a field a pattern can read"
+  },
+  {
+    "tests": [
+      "AR-109"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locatorassertions-tomatchariasnapshot",
+    "reason": "Asserts that a page's tree does not match a template with `expect(page).not`; Expect.toMatchAria has no negated form, and a Condition can't ask a pattern's match without a comparison written by hand"
+  },
+  {
+    "tests": [
+      "AR-135"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-ariasnapshot",
+    "reason": "Checks a link's `/url` line against a regular expression; Strider's snapshot node carries no link URL, and AriaPattern can't name one"
+  },
+  {
+    "tests": [
+      "AR-128",
+      "AR-133",
+      "AR-141"
+    ],
+    "status": "notApplicable",
+    "reason": "Tests Playwright's template syntax: its escaping of names in quotes, `/…/` literals and YAML scalars (AR-128), its indentation of template text (AR-133), and its fallback for a regular expression that doesn't compile, kept as text (AR-141); a Strider pattern takes a JavaScript string or RegExp, so there is no template text to escape, indent or fall back from"
+  },
+  {
+    "tests": [
+      "AR-129",
+      "AR-130"
+    ],
+    "status": "notApplicable",
+    "reason": "Tests the YAML parse errors and attribute-value errors of Playwright's template (a sequence without its dashes, nested compact mappings, unterminated strings and regular expressions, unsupported or malformed attributes); a Strider pattern is typed data, and there is no template to parse"
+  }
+]
