@@ -313,7 +313,7 @@ describe("Stock WebKit, attached through its remote inspector", () => {
         }).pipe(Effect.provide(attach(endpoint)))
       }))
 
-    it.effect("evaluates a large declaration when the page replaced eval before attachment", () =>
+    it.effect("evaluates a declaration one message carries when the page replaced eval, and refuses a larger one", () =>
       Effect.gen(function*() {
         const { origin } = yield* site
         const html = "<title>Custom eval</title><script>globalThis.eval = () => () => -1</script>"
@@ -323,9 +323,14 @@ describe("Stock WebKit, attached through its remote inspector", () => {
           yield* Effect.scoped(Effect.gen(function*() {
             const tab = yield* (yield* byTitle(browser, "Custom eval")).control
             assert.strictEqual(yield* tab.evaluateInMainWorld(() => 42), 42)
-            // This declaration fits the old single-packet path, but now crosses the staging threshold.
-            const fn = new Function(`/*${"x".repeat(70_000)}*/ return 42`) as () => number
-            assert.strictEqual(yield* tab.evaluateInMainWorld(fn), 42)
+            // One message still carries this declaration, so the page's eval never compiles it
+            const fits = new Function(`/*${"x".repeat(70_000)}*/ return 42`) as () => number
+            assert.strictEqual(yield* tab.evaluateInMainWorld(fits), 42)
+            // This one is compiled from parts in the page, which the page's eval can't be trusted to do
+            const staged = new Function(`/*${"x".repeat(200_000)}*/ return 42`) as () => number
+            const refused = reasonOf(yield* Effect.exit(tab.evaluateInMainWorld(staged)))
+            assert.strictEqual(refused?.reason?._tag, "Thrown")
+            assert.include(refused?.reason?.message, "replaced eval before Strider's helper was installed")
           }))
         }).pipe(Effect.provide(attach(endpoint)))
       }))

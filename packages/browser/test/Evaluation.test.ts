@@ -126,6 +126,20 @@ describe("Evaluation argument reconstruction", () => {
     assert.deepStrictEqual(Array.from(results), [42, 41])
   })
 
+  it("refuses a staged function that an eval replaced before installation compiled", () => {
+    const thrown = runInNewContext(`(() => {
+      globalThis.eval = () => () => -1
+      const helper = ${Utility.source}
+      helper.stage(1, 0, "() => 42")
+      try {
+        return helper.compile(1)()
+      } catch (error) {
+        return error.message
+      }
+    })()`)
+    assert.include(thrown, "replaced eval before Strider's helper was installed")
+  })
+
   it("constructs WebKit callbacks outside the handle-group wrapper bindings", () => {
     const call = runInNewContext(
       `(${
