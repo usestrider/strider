@@ -463,6 +463,26 @@ export const engine = (backend: Backend) =>
             assert.strictEqual(result._tag, "Done")
             assert.deepStrictEqual(result.response.observed, { matches: 1, ratio: 0 })
           }), timeout)
+        it.effect("cooperative viewport answers at its first complete observation after a provisional one", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(backend, "<div id=\"target\">Target</div>", controlledCooperativeClock)
+            const result = yield* cooperativeExercise(
+              call,
+              `
+              const first = await command({ command: "start", budget: 60000, request: {
+                op: "expect", steps: [{ _tag: "Css", selector: "#target" }],
+                expectation: { _tag: "Viewport", ratio: 0, inViewport: false }, cap: 60000, provisional: true
+              } })
+              const reply = await command({ command: "resume", token: first.token, left: 60000, decision: "continue" })
+              if (reply._tag === "Check") await command({ command: "cancel" })
+              return JSON.stringify(reply)
+            `
+            )
+            assert.deepStrictEqual(result, {
+              _tag: "Done",
+              response: { _tag: "Expected", passed: false, observed: { matches: 1, ratio: 1 }, changed: false }
+            })
+          }), timeout)
         it.effect("cooperative viewport accepts a target whose geometry keeps changing", () =>
           Effect.gen(function*() {
             const { call } = yield* open(
