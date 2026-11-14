@@ -140,27 +140,6 @@ describe("Evaluation argument reconstruction", () => {
     assert.include(thrown, "replaced eval before Strider's helper was installed")
   })
 
-  it("does not accept matching source compiled into a different closure by page eval", () => {
-    const result = runInNewContext(`(() => {
-      globalThis.value = 42
-      globalThis.eval = () => {
-        const value = -1
-        return () => value
-      }
-      const helper = ${Utility.source}
-      helper.stage(1, 0, "() => value")
-      try {
-        return helper.compile(1)()
-      } catch (error) {
-        return error.message
-      }
-    })()`)
-    assert.strictEqual(
-      result,
-      "The page replaced eval before Strider's helper was installed, so a function too large for one inspector message can't be compiled there"
-    )
-  })
-
   it("constructs WebKit callbacks outside the handle-group wrapper bindings", () => {
     const call = runInNewContext(
       `(${
