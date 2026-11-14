@@ -24,7 +24,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
-import type * as Layer from "effect/Layer"
+import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
@@ -269,6 +269,59 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
             assert.deepStrictEqual(error.reason, new Target.PageClosed({ by: "command" }))
           }))
         }), timeout)
+
+      it.effect("fails a pending evaluation with its page's reason when the page closes", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(connect)
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const evaluation = yield* page.evaluate(() => {
+              ;(window as { __pending?: boolean }).__pending = true
+              return new Promise(() => {})
+            }).pipe(Effect.forkChild)
+            // Closed only once the evaluation runs in the page
+            yield* page.evaluate(() => (window as { __pending?: boolean }).__pending === true).pipe(
+              Effect.repeat({ until: (started) => started })
+            )
+            yield* page.close()
+            const error = yield* Fiber.join(evaluation).pipe(Effect.flip, Effect.timeout("10 seconds"))
+            assert(Target.isTargetGone(error), String(error))
+            assert.deepStrictEqual(error.reason, new Target.PageClosed({ by: "command" }))
+          }))
+        }), timeout)
+
+      it.effect(
+        "ends a context and a page still held with BrowserClosed when the browser's scope closes",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(connect)
+            // Held past the browser's own scope, so only the browser closing ends them
+            const holder = yield* Scope.make()
+            const browserScope = yield* Scope.make()
+            const services = yield* Layer.buildWithScope(backend, browserScope)
+            const held = yield* Effect.gen(function*() {
+              const browser = yield* Browser.Browser
+              const defaultContext = yield* browser.defaultContext.control
+              const context = yield* Browser.newContext()
+              const page = yield* context.newPage
+              yield* page.goto(url)
+              return { defaultContext, context, page }
+            }).pipe(Scope.provide(holder), Effect.provideContext(services))
+            yield* Scope.close(browserScope, Exit.void)
+            const reasons = yield* Effect.all({
+              defaultContext: held.defaultContext.closed,
+              context: held.context.closed,
+              page: held.page.closed
+            }).pipe(Effect.timeout("10 seconds"), Effect.exit)
+            yield* Scope.close(holder, Exit.void).pipe(Effect.timeout("10 seconds"), Effect.ignore)
+            assert(Exit.isSuccess(reasons), `closed didn't resolve: ${String(reasons)}`)
+            assert.strictEqual(reasons.value.defaultContext._tag, "BrowserClosed")
+            assert.strictEqual(reasons.value.context._tag, "BrowserClosed")
+            assert.strictEqual(reasons.value.page._tag, "BrowserClosed")
+          }),
+        timeout
+      )
 
       it.effect("reports a dialog the policy decides, as a Dialog and an AutoResolution", () =>
         Effect.gen(function*() {
