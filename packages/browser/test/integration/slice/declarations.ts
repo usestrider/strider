@@ -738,13 +738,52 @@ export const declarations = (
           )
         }), timeout)
 
+      it.effect("applies and releases a viewport after a cross-site iframe has loaded", () =>
+        Effect.gen(function*() {
+          if (!(yield* supports("emulation.viewport"))) {
+            return
+          }
+          const { crossSite, origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const context = yield* Browser.newContext()
+            const page = yield* context.newPage
+            yield* page.goto(
+              fixtureUrl(
+                origin,
+                `<pre id="size"></pre><script>addEventListener('resize', () => { document.getElementById('size').textContent = innerWidth + 'x' + innerHeight })</script><pre id="out">pending</pre><script>addEventListener('message', e => { document.getElementById('out').textContent = e.data })</script><iframe style="width:300px;height:200px;border:0" src="${
+                  fixtureUrl(crossSite, frameBody)
+                }"></iframe>`
+              ),
+              { waitUntil: "load" }
+            )
+            const out = page.locator("#out")
+            yield* Expect.that(
+              out.readText,
+              Condition.make("reported", (text: string) =>
+                text !== "pending")
+            )
+            assert.deepStrictEqual(JSON.parse(yield* out.readText).slice(0, 2), [300, 200])
+            yield* Effect.scoped(Effect.gen(function*() {
+              yield* page.emulate({ viewport: { width: 640, height: 480 } })
+              yield* page.locator("#size").pipe(Expect.toHaveText("640x480"))
+            }))
+          }))
+        }), timeout)
+
       it.effect("applies the other emulation overrides to a page with a cross-site iframe and releases them", () =>
         Effect.gen(function*() {
           const settings: Parameters<Page.Page["emulate"]>[0] = {
             ...((yield* supports("emulation.userAgent")) ? { userAgent: "strider-oopif/1" } : {}),
             ...((yield* supports("emulation.locale")) ? { locale: "de-DE" } : {}),
             ...((yield* supports("emulation.timezone")) ? { timezone: "Europe/Berlin" } : {}),
-            ...((yield* supports("emulation.media")) ? { media: { colorScheme: "dark" as const } } : {})
+            ...((yield* supports("emulation.media")) ? { media: { colorScheme: "dark" as const } } : {}),
+            ...((yield* supports("emulation.geolocation")) ? { geolocation: { latitude: 52, longitude: 13 } } : {}),
+            ...((yield* supports("emulation.cpuSlowdown")) ? { cpuSlowdown: 2 } : {}),
+            ...((yield* supports("emulation.network.throttling"))
+              ? { network: { download: 1e6, upload: 1e6, latency: "10 millis" as const } }
+              : {}),
+            ...((yield* supports("emulation.touch")) ? { touch: true } : {}),
+            ...((yield* supports("emulation.javaScript")) ? { javaScript: "enabled" as const } : {})
           }
           yield* crossSiteFrame(
             (target) =>

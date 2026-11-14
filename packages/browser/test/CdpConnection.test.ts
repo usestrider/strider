@@ -48,6 +48,36 @@ const reasonOf = <A>(exit: Exit.Exit<A, Protocol.ProtocolError>) => {
 }
 
 describe("CdpConnection", () => {
+  it.effect("names an attached target in a raw command rejection", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const cdp = yield* CdpConnection.make(browser.transport)
+      yield* browser.receive({
+        method: "Target.attachedToTarget",
+        params: {
+          sessionId: "S1",
+          targetInfo: { targetId: "T1", type: "iframe", title: "", url: "about:blank", attached: true },
+          waitingForDebugger: false
+        }
+      })
+      yield* Effect.yieldNow
+      const frame = yield* cdp.session("S1" as Target.SessionID)
+      const command = yield* Emulation.clearDeviceMetricsOverride().pipe(
+        Protocol.on(frame),
+        Effect.exit,
+        Effect.forkChild
+      )
+      const sent = yield* browser.next
+      yield* browser.receive({
+        id: sent.id,
+        sessionId: "S1",
+        error: { code: -32000, message: "Command can only be executed on top-level targets" }
+      })
+      const reason = reasonOf(yield* Fiber.join(command))
+      assert.strictEqual(reason._tag, "Rejected")
+      if (reason._tag === "Rejected") assert.strictEqual(reason.target, "iframe")
+    }))
+
   it.effect("routes replies to their commands, in any order", () =>
     Effect.gen(function*() {
       const browser = yield* makeBrowser
