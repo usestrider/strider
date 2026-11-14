@@ -803,6 +803,114 @@ describe("Chromium adapter, CDP only", () => {
         timeout
       )
 
+      it.effect(
+        "recovers a rejected release in a cross-site frame that paints nothing",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            let rejected = false
+            const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
+              const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
+              return yield* CdpAdapter.connect({
+                ...transport,
+                send: Effect.fnUntraced(function*(message: string) {
+                  const wire = JSON.parse(message)
+                  if (!rejected && wire.method === "Input.dispatchMouseEvent" && wire.params.type === "mouseReleased") {
+                    rejected = true
+                    wire.params.type = "invalid-release-type"
+                    return yield* transport.send(JSON.stringify(wire))
+                  }
+                  yield* transport.send(message)
+                })
+              }, { sink, ownership: "launched" })
+            }))
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const fixture = (origin: string, html: string) => `${origin}/fixture?html=${encodeURIComponent(html)}`
+              const child = fixture(
+                served.crossSite,
+                `<body style="margin:0"><div id="target" style="width:100px;height:100px"></div><script>for(const type of ['mousedown','mouseup'])addEventListener(type, e=>top.postMessage(e.type,'*'))</script>`
+              )
+              yield* page.goto(
+                fixture(
+                  served.origin,
+                  `<body style="margin:0"><script>window.events=[];addEventListener('message',e=>events.push(e.data))</script><iframe style="border:0;width:200px;height:150px" src="${child}"></iframe><button id="next">Next</button>`
+                )
+              )
+              const frame = page.frame(page.locator("iframe"))
+              const error = yield* frame.locator("#target").click().pipe(Effect.flip)
+              assert.strictEqual(error._tag, "LocatorError")
+              yield* page.locator("#next").click()
+              yield* Effect.gen(function*() {
+                const events = yield* page.evaluateInMainWorld(() => (window as any).events)
+                if (JSON.stringify(events) !== JSON.stringify(["mousedown", "mouseup"])) {
+                  return yield* Effect.fail(`Expected mousedown, mouseup; received ${JSON.stringify(events)}`)
+                }
+              }).pipe(Effect.retry({ times: 10, schedule: Schedule.spaced("100 millis") }))
+            }).pipe(Effect.provide(backend))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "finishes an intercepted HTML drag inside a cross-site frame",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
+              const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
+              return yield* CdpAdapter.connect(transport, { sink, ownership: "launched" })
+            }))
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const fixture = (origin: string, html: string) => `${origin}/fixture?html=${encodeURIComponent(html)}`
+              const child = fixture(
+                served.crossSite,
+                `<div id="card" draggable="true" style="position:absolute;left:10px;top:10px;width:40px;height:40px;background:red">Card</div><div id="bin" style="position:absolute;left:200px;top:10px;width:60px;height:60px;background:gray" ondragover="event.preventDefault()" ondrop="event.preventDefault();this.textContent='Dropped'">Bin</div>`
+              )
+              yield* page.goto(
+                fixture(served.origin, `<iframe style="margin:30px;width:400px;height:200px" src="${child}"></iframe>`)
+              )
+              const frame = page.frame(page.locator("iframe"))
+              yield* frame.locator("#card").dragTo(frame.locator("#bin"), { steps: 5 })
+              yield* frame.locator("#bin").pipe(Expect.toHaveText("Dropped"))
+            }).pipe(Effect.provide(backend))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "clicks a cross-site child nested inside another cross-site frame",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
+              const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
+              return yield* CdpAdapter.connect(transport, { sink, ownership: "launched" })
+            }))
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const fixture = (origin: string, html: string) => `${origin}/fixture?html=${encodeURIComponent(html)}`
+              const child = fixture(
+                served.origin,
+                `<button style="margin:17px" onclick="this.textContent='Clicked'">Go</button>`
+              )
+              const wrapper = fixture(served.crossSite, `<iframe style="margin:23px" src="${child}"></iframe>`)
+              yield* page.goto(
+                fixture(
+                  served.origin,
+                  `<iframe style="margin:31px;width:500px;height:350px" src="${wrapper}"></iframe>`
+                )
+              )
+              const outer = page.frame(page.locator("iframe"))
+              const inner = outer.frame(outer.locator("iframe"))
+              yield* inner.getByRole("button").click().pipe(Deadline.within("3 seconds"))
+              yield* inner.getByRole("button").pipe(Expect.toHaveText("Clicked"))
+            }).pipe(Effect.provide(backend))
+          }),
+        timeout
+      )
+
       for (const crossSite of [false, true]) {
         it.effect(
           `keeps click acknowledgments sequential on a page with a ${crossSite ? "cross-site" : "same-site"} frame`,
