@@ -94,13 +94,18 @@ export const NotReady = Schema.Union([
   Schema.TaggedStruct("NotVisible", {}),
   Schema.TaggedStruct("Disabled", {}),
   Schema.TaggedStruct("ReadOnly", {}),
-  /** `by` is the element with the `inert` attribute; `dialog` the open modal dialog outside the target, when there is one. */
+  /**
+   * `by` is the element with the `inert` attribute; `dialog` the open modal dialog outside the target, when there is
+   * one: a native one, or a rendered `aria-modal` dialog that isn't inert itself.
+   */
   Schema.TaggedStruct("Inert", { by: Schema.String, dialog: Schema.optional(Schema.String) }),
   Schema.TaggedStruct("BlockedByModal", { dialog: Schema.String }),
   Schema.TaggedStruct("OutsideViewport", {}),
   Schema.TaggedStruct("NotStable", {}),
   Schema.TaggedStruct("NoRenderingOpportunity", {}),
   Schema.TaggedStruct("Covered", { by: Schema.String }),
+  /** The hit test skips `element`, the target or an iframe holding it, because its `pointer-events` is `none`. */
+  Schema.TaggedStruct("NoPointerEvents", { element: Schema.String }),
   /** The guard stopped the gesture: its first trusted event landed on another element. */
   Schema.TaggedStruct("Intercepted", { by: Schema.String }),
   Schema.TaggedStruct("NoSuchOption", { option: Schema.String }),
@@ -421,8 +426,8 @@ export const Response = Schema.Union([
     viewport: Clip,
     /** Whether it was scrolled into view. */
     scrolled: Schema.Boolean,
-    /** What covers the iframe at the point given, or `null` when the iframe itself is hit there. */
-    covered: Schema.NullOr(Schema.String),
+    /** Why the iframe isn't hit at the point given (`Covered` or `NoPointerEvents`), or `null` when it is. */
+    covered: Schema.NullOr(NotReady),
     /** This document's scroll offset. */
     scroll: Point
   }),
@@ -1704,15 +1709,19 @@ export function engine(render: (root: SnapNode) => string) {
       ? element.value
       : null
 
+  const missed = (element: Element, hit: Element | null): NotReady =>
+    getComputedStyle(element).pointerEvents === "none"
+      ? { _tag: "NoPointerEvents", element: describe(element) }
+      : { _tag: "Covered", by: hit === null ? "nothing at that point" : describe(hit) }
+
   const inertReason = (element: Element): NotReady | null => {
     for (let current: Element | null = element; current !== null; current = composedParent(current)) {
       if (current.hasAttribute("inert")) {
-        // An open modal outside the target: a native one, or an `aria-modal` dialog that isn't inert itself
         const modal = Array.from(document.querySelectorAll("dialog,[aria-modal=true]")).find((d) =>
           !composedContains(d, element) &&
           (d instanceof HTMLDialogElement
             ? d.matches(":modal")
-            : /dialog$/.test(d.getAttribute("role") ?? "") && !d.closest("[inert]"))
+            : /dialog$/.test(d.getAttribute("role") ?? "") && !d.closest("[inert]") && visible(d))
         )
         return { _tag: "Inert", by: describe(current), dialog: modal && describe(modal) }
       }
@@ -2137,9 +2146,7 @@ export function engine(render: (root: SnapNode) => string) {
       if (point === null) reason = { _tag: "OutsideViewport" }
       else if (checks.receivesPointer) {
         const hit = hitTarget(point.x, point.y)
-        if (hit === null || !composedContains(element, hit)) {
-          reason = { _tag: "Covered", by: hit === null ? "nothing at that point" : describe(hit) }
-        }
+        if (hit === null || !composedContains(element, hit)) reason = missed(element, hit)
       }
     }
     if (reason === null && element !== undefined && action._tag === "Select") {
@@ -3211,10 +3218,10 @@ export function engine(render: (root: SnapNode) => string) {
       x: rect.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft),
       y: rect.top + parseFloat(style.borderTopWidth) + parseFloat(style.paddingTop)
     }
-    let covered: string | null = null
+    let covered: NotReady | null = null
     if (request.point !== null) {
       const hit = hitTarget(origin.x + request.point.x, origin.y + request.point.y)
-      if (hit !== iframe) covered = hit === null ? "nothing at that point" : describe(hit)
+      if (hit !== iframe) covered = missed(iframe, hit)
     }
     const bounds = viewportBounds(request.clip)
     const viewport = {
