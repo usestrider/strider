@@ -1,9 +1,10 @@
 /** Native size accounting and context isolation through the public API. */
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser, Har, NetworkRequest, NetworkResponse, type Page } from "@usestrider/browser"
+import { Browser, Har, NetworkRequest, NetworkResponse, type Page, Route } from "@usestrider/browser"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
+import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as fs from "node:fs"
@@ -280,7 +281,12 @@ export const requestSizes = (name: string, backend: Layer.Layer<Browser.Browser,
                 const observed = history.entries.filter((r) => r.hop !== request.hop)
                 // Some memory caches omit a request event altogether. Neither absence nor source labels imply zero.
                 for (const cached of observed) {
-                  yield* ended(current, cached)
+                  const end = yield* ended(current, cached)
+                  assert.strictEqual(end._tag, "Finished")
+                  if (end._tag === "Finished") {
+                    assert.deepStrictEqual(end.transferBytes, Option.none(), "cached finish transfer")
+                    assert.deepStrictEqual(end.bodyBytes, Option.none(), "cached finish body")
+                  }
                   assert.deepStrictEqual(
                     (yield* NetworkRequest.sizes(current, cached)).responseTransferSize,
                     Option.none()
@@ -291,6 +297,26 @@ export const requestSizes = (name: string, backend: Layer.Layer<Browser.Browser,
           }).pipe(Effect.scoped),
         60_000
       )
+      it.effect(
+        "leaves route-fulfilled finish counts unavailable without size collection",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const page = yield* Browser.newPage()
+            yield* page.goto(served.origin)
+            yield* page.route("**/fulfilled", () => Route.fulfill(HttpServerResponse.text("hello")))
+            const sent = yield* NetworkRequest.next(page, { url: served.origin + "/fulfilled" })
+            yield* page.evaluateInMainWorld(() => fetch("/fulfilled").then((r) => r.text()))
+            const end = yield* ended(page, yield* sent)
+            assert.strictEqual(end._tag, "Finished")
+            if (end._tag === "Finished") {
+              assert.deepStrictEqual(end.transferBytes, Option.none(), "route finish transfer")
+              assert.deepStrictEqual(end.bodyBytes, Option.none(), "route finish body")
+            }
+          }).pipe(Effect.scoped),
+        60_000
+      )
+
       it.effect("leaves revalidated transfer accounting unavailable", () =>
         Effect.gen(function*() {
           const served = yield* site
@@ -313,6 +339,12 @@ export const requestSizes = (name: string, backend: Layer.Layer<Browser.Browser,
             if (i === 1) {
               assert.strictEqual(served.revalidated(), 1, "the server actually answered a conditional request with 304")
               assert.deepStrictEqual((yield* NetworkRequest.sizes(page, request)).responseTransferSize, Option.none())
+              const end = yield* ended(page, request)
+              assert.strictEqual(end._tag, "Finished")
+              if (end._tag === "Finished") {
+                assert.deepStrictEqual(end.transferBytes, Option.none(), "revalidated finish transfer")
+                assert.deepStrictEqual(end.bodyBytes, Option.none(), "revalidated finish body")
+              }
             }
           }
         }).pipe(Effect.scoped), 60_000)
