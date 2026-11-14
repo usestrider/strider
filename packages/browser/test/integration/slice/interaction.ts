@@ -2082,6 +2082,27 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
       )
 
       it.effect(
+        "rechecks a modal created by a fill focus callback before writing",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="field" type="date" value="2020-03-02" onfocus="if (!document.querySelector('dialog')) { const d = document.createElement('dialog'); d.textContent = 'Stop'; document.body.append(d); d.showModal(); }">`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            const result = yield* page.locator("#field").fill("2020-03-03").pipe(
+              Deadline.within("1 second"),
+              Effect.result
+            )
+            assert.deepStrictEqual({ result: result._tag, value: yield* page.locator("#field").readValue }, {
+              result: "Failure",
+              value: "2020-03-02"
+            })
+          })),
+        timeout
+      )
+
+      it.effect(
         "finds a newly attached native modal in nested shadow roots outside the query scope",
         () =>
           Effect.scoped(Effect.gen(function*() {
