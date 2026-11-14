@@ -9,6 +9,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { execFileSync } from "node:child_process"
 import * as fs from "node:fs"
+import * as os from "node:os"
 import * as path from "node:path"
 import * as FirefoxLauncher from "../../../src/internal/firefoxLauncher.ts"
 import { firefox } from "../browsers.ts"
@@ -68,37 +69,49 @@ layer(services, { excludeTestServices: true })((it) => {
     "writes the crash report of a content process that aborts where the harness keeps it from",
     () =>
       Effect.gen(function*() {
-        const pending = FirefoxCrashReports.pendingDirectory()
+        const outbox = FirefoxCrashReports.outbox
         const started = Date.now()
         const { launched } = yield* FirefoxLauncher.launch({ executablePath: firefox.executable })
-        // A web content process, which Firefox may start through a fork server on Linux
+        // A web content process: Firefox's own binary with `-contentproc` on Linux, which may start it through a
+        // fork server, and `plugin-container` on macOS; `-isForBrowser` marks it on both
+        let processes = new Map<number, string>()
         let tab: number | undefined
         for (let attempt = 0; attempt < 100 && tab === undefined; attempt++) {
-          tab = [...descendants(Number(launched.handle.pid))]
-            .find(([, args]) => args.includes("-contentproc") && args.includes("-isForBrowser"))?.[0]
+          processes = descendants(Number(launched.handle.pid))
+          tab = [...processes].find(([, args]) => args.includes("-isForBrowser"))?.[0]
           if (tab === undefined) yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 100)))
         }
-        assert.isDefined(tab, "Firefox started no web content process")
-        // An abort, which Firefox's exception handler reports as a crash of that process
+        assert.isDefined(
+          tab,
+          `Firefox started no web content process; its descendants: ${
+            [...processes].map(([pid, args]) => `${pid} ${args}`).join("; ") || "none"
+          }`
+        )
+        // An abort, which Firefox's exception handler reports as a crash of that process, in the profile
         process.kill(tab!, "SIGABRT")
         let ids: ReadonlyArray<string> = []
         for (let attempt = 0; attempt < 100 && ids.length === 0; attempt++) {
           yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 100)))
-          ids = FirefoxCrashReports.reportsSince(pending, started)
+          FirefoxCrashReports.sweep()
+          ids = FirefoxCrashReports.reportsSince(outbox, started)
         }
         assert.isAbove(
           ids.length,
           0,
-          `no report in ${pending} (it holds: ${listing(pending)}; its parent: ${listing(path.dirname(pending))})`
+          `no report in ${outbox} (it holds: ${listing(outbox)}; ${
+            FirefoxCrashReports.liveProfiles().map((profile) =>
+              `${profile}/minidumps holds: ${listing(path.join(profile, "minidumps"))}`
+            ).join("; ") || "no browser followed"
+          })`
         )
-        const extra = fs.readFileSync(path.join(pending, `${ids[0]}.extra`), "utf8")
+        const extra = fs.readFileSync(path.join(outbox, `${ids[0]}.extra`), "utf8")
         assert.include(extra, "ProcessType")
         // A failed test keeps the report beside its trace, and a passing one discards it
-        const destination = fs.mkdtempSync(path.join(path.dirname(pending), "kept-"))
+        const destination = fs.mkdtempSync(path.join(os.tmpdir(), "strider-kept-"))
         try {
-          assert.strictEqual(FirefoxCrashReports.keep(pending, destination, started, true), destination)
+          assert.strictEqual(FirefoxCrashReports.keep(outbox, destination, started, true), destination)
           assert.isTrue(fs.existsSync(path.join(destination, `${ids[0]}.extra`)))
-          assert.deepStrictEqual(FirefoxCrashReports.reportsSince(pending, started), [])
+          assert.deepStrictEqual(FirefoxCrashReports.reportsSince(outbox, started), [])
         } finally {
           fs.rmSync(destination, { recursive: true, force: true })
         }

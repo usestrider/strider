@@ -7,3 +7,5 @@ integrationEnvironment(process.platform, process.env)
 // Every Firefox the tests launch writes the crash reports of a content process it kills (`firefoxCrashReports.ts`)
 Object.assign(process.env, FirefoxCrashReports.environment)
 for (const prefs of Object.values(firefoxPrefs)) Object.assign(prefs, FirefoxCrashReports.prefs)
+// and keeps them out of its profile, which the launcher deletes
+FirefoxCrashReports.install()

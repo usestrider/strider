@@ -22,8 +22,7 @@ const printError = JSON.stringify({
 
 const scratch = () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "strider-crash-reports-"))
-  const home = path.join(root, "home")
-  const pending = FirefoxCrashReports.pendingDirectory(home)
+  const pending = path.join(root, "outbox")
   fs.mkdirSync(pending, { recursive: true })
   return { root, pending, destination: path.join(root, "kept") }
 }
@@ -42,7 +41,7 @@ const write = (pending: string, id: string, dump: number) => {
 describe("FirefoxCrashReports", () => {
   it("enables the reports a killed content process writes", () => {
     assert.strictEqual(FirefoxCrashReports.environment["MOZ_CRASHREPORTER"], "1")
-    assert.isUndefined(FirefoxCrashReports.environment["MOZ_CRASHREPORTER_NO_REPORT"])
+    assert.strictEqual(FirefoxCrashReports.environment["MOZ_CRASHREPORTER_NO_REPORT"], "1")
     assert.strictEqual(FirefoxCrashReports.prefs["dom.ipc.tabs.createKillHardCrashReports"], true)
   })
 
@@ -81,19 +80,16 @@ describe("FirefoxCrashReports", () => {
     assert.include(fs.readFileSync(path.join(destination, "omitted.txt"), "utf8"), "0a1b.dmp")
   })
 
-  it("looks where Firefox writes on each platform", () => {
-    assert.strictEqual(
-      FirefoxCrashReports.pendingDirectory("/h", "linux"),
-      "/h/.config/mozilla/firefox/Crash Reports/pending"
-    )
-    assert.strictEqual(
-      FirefoxCrashReports.pendingDirectory("/h", "linux", "/x"),
-      "/x/mozilla/firefox/Crash Reports/pending"
-    )
-    assert.strictEqual(
-      FirefoxCrashReports.pendingDirectory("/h", "darwin"),
-      "/h/Library/Application Support/Firefox/Crash Reports/pending"
-    )
+  it("moves a profile's reports into the outbox, leaving the rest of the profile", () => {
+    const { root, pending } = scratch()
+    const profile = path.join(root, "profile")
+    fs.mkdirSync(path.join(profile, "minidumps"), { recursive: true })
+    write(path.join(profile, "minidumps"), "0a1b", 16)
+    fs.writeFileSync(path.join(profile, "minidumps", "notes.txt"), "")
+    FirefoxCrashReports.collect(profile, pending)
+    assert.deepStrictEqual(fs.readdirSync(pending).sort(), ["0a1b-browser.dmp", "0a1b.dmp", "0a1b.extra"])
+    assert.deepStrictEqual(fs.readdirSync(path.join(profile, "minidumps")), ["notes.txt"])
+    FirefoxCrashReports.collect(path.join(root, "absent"), pending)
   })
 })
 

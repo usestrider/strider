@@ -9,8 +9,13 @@
  * A failed test also keeps Firefox's crash reports from while it ran, as
  * `.data/integration-failures/<test file>-<test id>-<pid>-firefox-crash/`: each report's `.extra` annotations (with
  * `ipc_channel_error`, the reason, when the parent process killed a content process) and its minidumps, up to 8 MiB
- * each and 32 MiB per test (`omitted.txt` names the rest). A passing test keeps nothing. `firefoxCrashReports.ts`
- * says what makes Firefox write them; `adapter/FirefoxCrashReportsWritten.test.ts` checks that one is written, and `test/FirefoxCrashReports.test.ts` what is kept.
+ * each and 32 MiB per test (`omitted.txt` names the rest). A passing test keeps nothing. Firefox writes them in its
+ * profile's `minidumps/`, with no crash reporter window and nothing submitted; the harness moves them out when the
+ * browser is forgotten, before its profile is deleted, and at each test's end for a browser that outlives the test,
+ * such as a suite's shared one. A launch given a ledger of its own isn't followed. A collection that fails is logged
+ * and changes neither the test's result nor its trace. `firefoxCrashReports.ts` says what makes Firefox write them;
+ * `adapter/FirefoxCrashReportsWritten.test.ts` checks that one is written and found, and
+ * `test/FirefoxCrashReports.test.ts` what is kept.
  *
  * Integration failures name their bounded protocol traces in `.data/integration-failures/`; CI keeps them with
  * `integration.log`. Each NDJSON file records both directions, connection IDs, sequence numbers and timestamps,

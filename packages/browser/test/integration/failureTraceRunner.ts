@@ -276,13 +276,19 @@ export default class FailureTraceRunner extends TestRunner {
     transfers.delete(task.id)
     active.delete(task.id)
     const failed = task.result?.state === "fail"
-    // Firefox's crash reports from this test: kept beside its trace when it failed, discarded when it passed
-    FirefoxCrashReports.keep(
-      FirefoxCrashReports.pendingDirectory(),
-      path.join(directory, `${path.basename(task.file.filepath)}-${task.id}-${process.pid}-firefox-crash`),
-      running.started,
-      failed
-    )
+    // Firefox's crash reports from this test: kept beside its trace when it failed, discarded when it passed. A
+    // collection that fails is logged, and never keeps the trace from being saved or replaces the test's failure.
+    try {
+      FirefoxCrashReports.sweep()
+      FirefoxCrashReports.keep(
+        FirefoxCrashReports.outbox,
+        path.join(directory, `${path.basename(task.file.filepath)}-${task.id}-${process.pid}-firefox-crash`),
+        running.started,
+        failed
+      )
+    } catch (error) {
+      console.error("Couldn't keep Firefox's crash reports", error)
+    }
     const file = failed || retainPasses || diagnosticTest(task)
       ? save(filename(task, "test"), running.trace, task.name, !failed && !diagnosticTest(task))
       : undefined
