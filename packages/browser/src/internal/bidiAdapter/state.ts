@@ -50,8 +50,8 @@ export interface NavigableEntry extends Kit.NavigableNode<NavigableEntry> {
   closing: L1Target.CloseReason | undefined
   /**
    * A close that runs `beforeunload` was sent and its prompt, if any, hasn't refused it: the context's end is the
-   * command's. Kept apart from `closing`, which refuses declarations, since the page stays usable until the prompt
-   * is answered.
+   * command's, unless its context was removed, whose end stays its own. Kept apart from `closing`, which refuses
+   * declarations, since the page stays usable until the prompt is answered.
    */
   closeRequested: boolean
   document: DocumentEntry | undefined

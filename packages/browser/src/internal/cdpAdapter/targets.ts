@@ -197,10 +197,10 @@ export const ended = (state: State, session: ProtocolClient.Session, reason: Pro
         ? Kit.closed()
         : reason.why === "modelUnavailable"
         ? new L1Target.ModelUnavailable({})
-        : page.closing ?? (page.closeRequested
-          ? new L1Target.PageClosed({ by: "command" })
-          : page.context.removing
+        : page.closing ?? (page.context.removing
           ? new L1Target.PageClosed({ by: "userContextRemoved" })
+          : page.closeRequested
+          ? new L1Target.PageClosed({ by: "command" })
           : new L1Target.PageClosed({ by: "script" }))
       endPage(state, page, why, `cdp: the page's session ended (${reason.why})`)
       return

@@ -46,7 +46,6 @@ const supports = Effect.fnUntraced(function*(world: World, name: string) {
   return entry.status !== "unsupported"
 })
 
-/** The realm of a page's current document in a world, waiting for it if it isn't there yet. */
 // A beforeunload prompt needs the page to have been interacted with: a real click, once the page has
 // rendered a frame, since a busy browser drops input that comes before one
 const activate = Effect.fnUntraced(function*(world: World, page: Target.NavigableId) {
@@ -62,6 +61,7 @@ const activate = Effect.fnUntraced(function*(world: World, page: Target.Navigabl
   )
 })
 
+/** The realm of a page's current document in a world, waiting for it if it isn't there yet. */
 const mainRealm = Effect.fnUntraced(function*(world: World, navigable: Target.NavigableId) {
   const committed = world.facts.all("DocumentCommitted").filter((fact) => fact.navigable === navigable).at(-1)
   assert.isDefined(committed, `no document committed in ${navigable}`)
