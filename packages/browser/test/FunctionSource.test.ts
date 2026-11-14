@@ -78,6 +78,40 @@ describe("FunctionSource.declaration", () => {
     assert.strictEqual(helper.compile("method")(), 42)
   })
 
+  it("keeps a method's modifiers and drops its key, whatever the key is named", async () => {
+    const methods = {
+      async *pairs() {
+        yield await Promise.resolve(1)
+      },
+      async() {
+        return "async"
+      },
+      get() {
+        return "get"
+      },
+      "a(b"(value: number) {
+        return value
+      }
+    }
+    const pairs: Array<number> = []
+    for await (const value of call(methods.pairs) as AsyncIterable<number>) pairs.push(value)
+    assert.deepStrictEqual(pairs, [1])
+    assert.strictEqual(FunctionSource.declaration(methods.async), `function ${methods.async.toString().slice(5)}`)
+    assert.deepStrictEqual([call(methods.async), call(methods.get), call(methods["a(b"], 3)], ["async", "get", 3])
+  })
+
+  it("sends a method that uses super as it is", () => {
+    // No function expression can hold `super`: the browser's SyntaxError is the evaluation's failure
+    const base = { name: () => "base" }
+    const derived = {
+      __proto__: base,
+      name() {
+        return super.name()
+      }
+    }
+    assert.strictEqual(FunctionSource.declaration(derived.name), derived.name.toString())
+  })
+
   it("sends a source that isn't a function as it is", () => {
     // A native function's source isn't JavaScript: the browser's SyntaxError is the evaluation's failure
     assert.strictEqual(FunctionSource.declaration(Math.max), Math.max.toString())
