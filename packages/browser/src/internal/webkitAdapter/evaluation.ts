@@ -279,6 +279,9 @@ export const forgetRealm = (state: State, id: L1Target.RealmId) =>
 
 // ── Evaluation ────────────────────────────────────────────────────────────────────────────────────────────
 
+/** The last key a function staged in parts was given: unique across realms, so concurrent stagings never meet. */
+let staged = 0
+
 export const evaluate = Effect.fnUntraced(function*(
   state: State,
   id: L1Target.RealmId,
@@ -309,13 +312,29 @@ export const evaluate = Effect.fnUntraced(function*(
           },
           node: (node) => ({ objectId: node.binding as Runtime.RemoteObjectId })
         }))
+      // A declaration too large for one inspector message is staged in the helper in parts, then compiled there
+      const parts = Utility.parts(call.functionDeclaration)
+      const key = parts === undefined ? undefined : ++staged
+      if (parts !== undefined) {
+        yield* Effect.forEach(parts, (text, index) =>
+          Runtime.callFunctionOn({
+            objectId: helper as Runtime.RemoteObjectId,
+            functionDeclaration: Utility.stage,
+            arguments: [{ value: key }, { value: index }, { value: text }]
+          }).pipe(on), { concurrency: "unbounded", discard: true })
+      }
       const reply = yield* Runtime.callFunctionOn({
         objectId: (anchor ?? helper) as Runtime.RemoteObjectId,
-        functionDeclaration: anchor === undefined
+        functionDeclaration: key !== undefined
+          ? anchor === undefined
+            ? Utility.callStaged(call.result, call.awaitPromise)
+            : Utility.callStagedBeside(call.result, call.awaitPromise)
+          : anchor === undefined
           ? Utility.call(call.functionDeclaration, call.result, call.awaitPromise)
           : Utility.callBeside(call.functionDeclaration, call.result, call.awaitPromise),
         arguments: [
           ...(anchor === undefined ? [] : [{ objectId: helper as Runtime.RemoteObjectId }]),
+          ...(key === undefined ? [] : [{ value: key }]),
           { value: call.arguments.map((argument) => argument._tag === "Value" ? "v" : "h") },
           ...args
         ],
