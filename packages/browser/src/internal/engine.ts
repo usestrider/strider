@@ -103,6 +103,8 @@ export const NotReady = Schema.Union([
   /** The guard stopped the gesture: its first trusted event landed on another element. */
   Schema.TaggedStruct("Intercepted", { by: Schema.String }),
   Schema.TaggedStruct("NoSuchOption", { option: Schema.String }),
+  /** A chosen option, or its optgroup, is disabled. */
+  Schema.TaggedStruct("DisabledOption", { option: Schema.String }),
   /** A different text control held focus before preparing the target for insertion. */
   Schema.TaggedStruct("PreparingFocus", { from: Schema.String })
 ])
@@ -110,9 +112,9 @@ export type NotReady = typeof NotReady.Type
 
 /** An option of a `<select>`, by value, label or index. */
 export type Choice =
-  | { readonly value: string }
-  | { readonly label: string }
-  | { readonly index: number }
+  | { readonly value: string; readonly label?: never; readonly index?: never }
+  | { readonly label: string; readonly value?: never; readonly index?: never }
+  | { readonly index: number; readonly value?: never; readonly label?: never }
 
 /**
  * What an action does in the page once its checks pass: answer the action point, and
@@ -1845,12 +1847,12 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   const optionMatches = (option: HTMLOptionElement, index: number, choice: Choice) =>
-    "value" in choice ? option.value === choice.value : "label" in choice
+    choice.value !== undefined ? option.value === choice.value : choice.label !== undefined
       ? option.label === choice.label || collapse(option.textContent ?? "") === choice.label
       : index === choice.index
 
   const describeChoice = (choice: Choice) =>
-    "value" in choice ? `value ${JSON.stringify(choice.value)}` : "label" in choice
+    choice.value !== undefined ? `value ${JSON.stringify(choice.value)}` : choice.label !== undefined
       ? `label ${JSON.stringify(choice.label)}`
       : `index ${choice.index}`
 
@@ -2148,6 +2150,15 @@ export function engine(render: (root: SnapNode) => string) {
         !options.some((option, index) => optionMatches(option, index, choice))
       )
       if (missing !== undefined) reason = { _tag: "NoSuchOption", option: describeChoice(missing) }
+      else if (checks.enabled) {
+        // The native rule, as the role filters use it: :disabled differs between browsers for options.
+        const off = action.choices.find((choice) =>
+          options.some((option, index) =>
+            optionMatches(option, index, choice) && (option.disabled || option.closest("optgroup[disabled]") !== null)
+          )
+        )
+        if (off !== undefined) reason = { _tag: "DisabledOption", option: describeChoice(off) }
+      }
     }
     if (reason === null && element !== undefined) {
       if (
