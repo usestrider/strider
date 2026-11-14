@@ -20,8 +20,9 @@ A declaration is a setting held for a scope: a route, an [init script](/docs/eve
 ## Handlers and decisions
 
 `page.route(pattern, handler)` adds a route; to only watch traffic, use
-[requests and responses](/docs/events/network) instead. Its handler returns a decision for each matching request,
-built from Effect's HTTP types in `effect/http`:
+[requests and responses](/docs/events/network) instead. A `data:` or `blob:` URL can't be routed: the browser
+answers it without the network, so no route sees it. Its handler returns a decision for each matching request, built
+from Effect's HTTP types in `effect/http`:
 
 ```ts
 import { Page, Route } from "@usestrider/browser"

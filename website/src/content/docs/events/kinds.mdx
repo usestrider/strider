@@ -30,7 +30,8 @@ const openOrders = Effect.fn("openOrders")(function*(page: Page.Page) {
 })
 ```
 
-The navigation is data: `Committed` with its response, `SameDocument` for a fragment or the History API, which
+The navigation is data: `Committed` with its response, an `Option` that is `None` for `about:blank`, `data:`, and
+`blob:` URLs, which the browser loads without the network, `SameDocument` for a fragment or the History API, which
 WebKit doesn't report, `Restored` from the back/forward cache, and the rest of
 [`PageNavigation`'s variants](/docs/api/browser/PageNavigation#PageNavigation). `waitUntil: "load"` also waits for
 the document to load.
