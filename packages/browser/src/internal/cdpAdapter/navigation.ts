@@ -149,7 +149,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     })
     .on(Page.lifecycleEvent, (params, { state }) => {
       const frame = state.frames.get(params.frameId)
-      // Whether the document has painted, for input into out-of-process frames (`undrawn` in input.ts)
+      // Whether the document has painted, for input into out-of-process frames (`frameReady` in input.ts)
       if (frame !== undefined && params.name === "init") frame.started = { loaderId: params.loaderId, painted: false }
       else if (params.name === "firstPaint" && frame?.started?.loaderId === params.loaderId) {
         frame.started.painted = true

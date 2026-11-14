@@ -390,6 +390,7 @@ export const connect: (
       evaluate: (realm, call) => Evaluation.evaluate(state, realm, call),
       releaseHandles: (list) => Evaluation.releaseHandles(state, list),
       dispatchInput: (page, events, frame) => Input.dispatchInput(state, page, events, frame),
+      frameReady: (frame) => Input.frameReady(state, frame),
       contentFrame: (node) => Input.contentFrame(state, node),
       releaseNodes: () => Effect.void,
       geometry: (node, kind) => Geometry.read(state, node, kind),

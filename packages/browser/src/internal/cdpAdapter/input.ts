@@ -68,7 +68,7 @@ const outOfProcess = (frame: FrameEntry): boolean => {
  * out-of-process frame only once the frame has been drawn; until then, input aimed into it reaches the parent's
  * iframe element. The operation's deadline ends the wait, with the frame in its history.
  */
-const undrawn = Effect.fnUntraced(function*(state: State, id: L1Target.NavigableId) {
+export const frameReady = Effect.fnUntraced(function*(state: State, id: L1Target.NavigableId) {
   const frame = yield* frameById(state, id)
   if (!outOfProcess(frame) || drawn(frame)) return
   const record = yield* Operation.current
@@ -81,7 +81,7 @@ const undrawn = Effect.fnUntraced(function*(state: State, id: L1Target.Navigable
 
 /**
  * Page coordinates reach every frame; pages with child frames keep sequential acknowledgments. Pointer input aimed
- * into a frame first waits for the frame to be drawn, when it is out of process (`undrawn`).
+ * into a frame first waits for the frame to be drawn, when it is out of process (`frameReady`).
  */
 export const dispatchInput = Effect.fnUntraced(
   function*(
@@ -93,7 +93,7 @@ export const dispatchInput = Effect.fnUntraced(
     const page = yield* pageOf(state, id)
     // Keys and text go to the focused element, with no hit testing
     if (frame !== undefined && events.some((event) => event._tag !== "Key" && event._tag !== "InsertText")) {
-      yield* undrawn(state, frame.frame)
+      yield* frameReady(state, frame.frame)
     }
     const on = Protocol.on(page.target.session)
     const click = Gestures.singleClick(events)

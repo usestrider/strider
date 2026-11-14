@@ -1017,6 +1017,13 @@ export interface AdapterConnection {
     events: ReadonlyArray<InputEvent>,
     frame?: { readonly frame: Target.NavigableId; readonly origin: { readonly x: number; readonly y: number } }
   ) => Effect.Effect<void, AdapterError>
+  /**
+   * Waits until pointer input aimed into a frame can be sent: on CDP, while the frame is out of process or inside
+   * one, until its document, or a document in a frame inside it, has reported its first paint; elsewhere, at once.
+   * Nothing is sent, so a caller that makes this call before `dispatchInput` knows a timeout in it sent no input.
+   * A document whose start wasn't reported counts as drawn. Without an operation it waits unbounded.
+   */
+  readonly frameReady: (frame: Target.NavigableId) => Effect.Effect<void, AdapterError>
   /** The frame an iframe element holds, by the element's binding; `None` while it holds none. */
   readonly contentFrame: (node: NodeBinding) => Effect.Effect<Option.Option<Target.NavigableId>, AdapterError>
   /** Geometry includes its coordinate document; native queries can cross same-process frame boundaries. */

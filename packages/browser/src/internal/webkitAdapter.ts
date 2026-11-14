@@ -190,6 +190,7 @@ export const connect: (
       evaluate: (realm, call) => Evaluation.evaluate(state, realm, call),
       releaseHandles: (list) => Evaluation.releaseHandles(state, list),
       dispatchInput: refuse("input.native", "stock WebKit's inspector protocol has no Input domain"),
+      frameReady: () => Effect.void,
       resolve: (obligation, decision) => Obligations.resolve(state, obligation, decision),
       declare: (scope, declaration) => Declare.declare(state, scope, declaration),
       screenshot: (page, options) => Capture.screenshot(state, page, options),
