@@ -313,6 +313,52 @@ export const engine = (backend: Backend) =>
         }
 
         for (const ending of ["cancel", "departure"] as const) {
+          it.effect(`cooperative clipping ${ending} stops the pending observation before scrolling`, () =>
+            Effect.gen(function*() {
+              const { call } = yield* open(
+                backend,
+                `<style>#s{height:40px;overflow:auto}#go{margin-top:120px}#tail{height:300px}</style><div id="s"><button id="go">Go</button><div id="tail"></div></div>`,
+                `() => {
+                  const Native = IntersectionObserver
+                  globalThis.clippingObservations = 0
+                  let started
+                  globalThis.clippingStarted = new Promise(resolve => { started = resolve })
+                  globalThis.IntersectionObserver = class extends Native {
+                    constructor(callback, options) {
+                      super(callback, options)
+                      globalThis.clippingObservations++
+                      if (globalThis.clippingObservations === 2) started()
+                    }
+                  }
+                }`
+              )
+              const request = point(0)
+              const result = yield* cooperativeExercise(
+                call,
+                `
+                document.querySelector('#s').scrollTop = 0
+                const first = await command({ command: "start", budget: 2000, request: ${JSON.stringify(request)} })
+                const r = document.querySelector('#go').getBoundingClientRect()
+                const geometry = { x: r.x, y: r.y, width: r.width, height: r.height, innerWidth, innerHeight }
+                const pending = command({ command: "resume", token: first.token, left: 2000, decision: "continue" })
+                await globalThis.clippingStarted
+                const observations = globalThis.clippingObservations
+                ${
+                  ending === "cancel"
+                    ? "await command({ command: \"cancel\" })"
+                    : "dispatchEvent(new Event(\"pagehide\"))"
+                }
+                const reply = await pending
+                return JSON.stringify({ geometry, observations, reply, scrollTop: document.querySelector('#s').scrollTop })
+              `
+              )
+              assert.strictEqual(result.observations, 2, JSON.stringify(result))
+              assert.strictEqual(result.reply._tag, ending === "departure" ? "Departed" : "Disposed")
+              assert.strictEqual(result.scrollTop, 0, "A stopped round must not scroll after its observation")
+            }), timeout)
+        }
+
+        for (const ending of ["cancel", "departure"] as const) {
           it.effect(`cooperative viewport ${ending} releases its pending round immediately`, () =>
             Effect.gen(function*() {
               const { call } = yield* open(backend, "<div>Missing target</div>", controlledCooperativeClock)

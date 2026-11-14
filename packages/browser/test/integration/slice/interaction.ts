@@ -1371,6 +1371,25 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         )
       }
 
+      it.effect(
+        "preserves an explicit offset at a half-pixel padding-box origin",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            // Preserve the post-scroll geometry from the Firefox failure: (20, 110.5), with offset (7, 9).
+            const { url } = yield* fixture(() =>
+              `<!doctype html><style>body{margin:0}#go{position:absolute;left:20px;top:110.5px;display:block;width:100px;height:24px}</style><a id="go" href="#">Go</a><output id="out"></output><script>go.onclick=e=>{e.preventDefault();out.textContent=JSON.stringify({trusted:e.isTrusted,x:e.offsetX,y:e.offsetY,clientY:e.clientY,top:go.getBoundingClientRect().top})}</script>`
+            )
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            yield* page.locator("#go").click({ position: { x: 7, y: 9 } })
+            const click = JSON.parse(yield* page.locator("#out").readText)
+            assert.isTrue(click.trusted)
+            assert.strictEqual(click.top, 110.5)
+            assert.deepStrictEqual({ x: click.x, y: click.y }, { x: 7, y: 9 }, JSON.stringify(click))
+          })),
+        timeout
+      )
+
       for (const clipping of ["overflow:clip", "contain:paint"] as const) {
         it.effect(`does not scroll unrelated scrollers for ${clipping}`, () =>
           Effect.scoped(Effect.gen(function*() {
