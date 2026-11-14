@@ -261,7 +261,7 @@ self.addEventListener("fetch", (event) => {
   "/beforeunload": (_request, response) =>
     html(
       response,
-      `<title>beforeunload</title><script>window.addEventListener("beforeunload", (e) => { e.preventDefault(); e.returnValue = "" })</script>`
+      `<title>beforeunload</title><script>window.stay = (e) => { e.preventDefault(); e.returnValue = "" }; window.addEventListener("beforeunload", window.stay)</script>`
     )
 }
 

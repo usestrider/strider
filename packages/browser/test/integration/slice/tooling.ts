@@ -588,7 +588,9 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               yield* staying.remove
               const leaving = yield* Dialog.handle(page, Dialog.acceptAll)
               yield* page.close({ runBeforeUnload: true })
-              assert.strictEqual((yield* page.closed)._tag, "PageClosed")
+              const closed = yield* page.closed
+              assert(closed._tag === "PageClosed", String(closed))
+              assert.strictEqual(closed.by, "command")
               yield* leaving.handled.waitFor((count) => count === 1)
             }))
           }),

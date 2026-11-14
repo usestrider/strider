@@ -47,6 +47,21 @@ const supports = Effect.fnUntraced(function*(world: World, name: string) {
 })
 
 /** The realm of a page's current document in a world, waiting for it if it isn't there yet. */
+// A beforeunload prompt needs the page to have been interacted with: a real click, once the page has
+// rendered a frame, since a busy browser drops input that comes before one
+const activate = Effect.fnUntraced(function*(world: World, page: Target.NavigableId) {
+  yield* evaluate(world, page, "() => new Promise((resolve) => requestAnimationFrame(() => resolve(true)))")
+  const none = { alt: false, control: false, meta: false, shift: false }
+  yield* world.adapter.dispatchInput(page, [
+    { _tag: "Mouse", type: "down", x: 5, y: 5, button: "left", clickCount: 1, modifiers: none, buttons: 1 },
+    { _tag: "Mouse", type: "up", x: 5, y: 5, button: "left", clickCount: 1, modifiers: none, buttons: 0 }
+  ])
+  assert.isTrue(
+    yield* evaluate(world, page, "() => navigator.userActivation.hasBeenActive"),
+    "the click activated the page"
+  )
+})
+
 const mainRealm = Effect.fnUntraced(function*(world: World, navigable: Target.NavigableId) {
   const committed = world.facts.all("DocumentCommitted").filter((fact) => fact.navigable === navigable).at(-1)
   assert.isDefined(committed, `no document committed in ${navigable}`)
@@ -1680,18 +1695,7 @@ export const conformance = (backend: Backend) =>
               assert.deepInclude(error.reason, { _tag: "Unsupported", capability: "close.runBeforeUnload" })
               return
             }
-            // A beforeunload prompt needs the page to have been interacted with: a real click, once the page has
-            // rendered a frame, since a busy browser drops input that comes before one
-            yield* evaluate(world, page, "() => new Promise((resolve) => requestAnimationFrame(() => resolve(true)))")
-            const none = { alt: false, control: false, meta: false, shift: false }
-            yield* world.adapter.dispatchInput(page, [
-              { _tag: "Mouse", type: "down", x: 5, y: 5, button: "left", clickCount: 1, modifiers: none, buttons: 1 },
-              { _tag: "Mouse", type: "up", x: 5, y: 5, button: "left", clickCount: 1, modifiers: none, buttons: 0 }
-            ])
-            assert.isTrue(
-              yield* evaluate(world, page, "() => navigator.userActivation.hasBeenActive"),
-              "the click activated the page"
-            )
+            yield* activate(world, page)
             yield* world.adapter.closePage(page, { runBeforeUnload: true })
             const opened = yield* world.facts.when("ObligationOpened", (fact) => fact.subject._tag === "Prompt")
             assert.deepInclude(opened.subject, { kind: "beforeunload" })
@@ -1701,17 +1705,86 @@ export const conformance = (backend: Backend) =>
             assert.strictEqual(yield* evaluate(world, page, "() => document.title"), "beforeunload")
           }), timeout)
 
+        it.effect("reports a close whose beforeunload prompt was accepted as the command's", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            if (!(yield* supports(world, "close.runBeforeUnload"))) {
+              return
+            }
+            const { page } = yield* newPage(world)
+            yield* goto(world, page, `${world.site.origin}/beforeunload`)
+            yield* activate(world, page)
+            yield* world.adapter.closePage(page, { runBeforeUnload: true })
+            const opened = yield* world.facts.when("ObligationOpened", (fact) =>
+              fact.subject._tag === "Prompt")
+            assert.deepInclude(opened.subject, { kind: "beforeunload" })
+            yield* world.adapter.resolve(opened.obligation, { _tag: "Accept", promptText: Option.none() })
+            const removed = yield* world.facts.when("NavigableRemoved", (fact) =>
+              fact.navigable === page)
+            assert.deepStrictEqual(removed.reason, new Target.PageClosed({ by: "command" }))
+          }), timeout)
+
+        it.effect("reports a close that ran beforeunload on a page without a listener as the command's", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            if (!(yield* supports(world, "close.runBeforeUnload"))) {
+              return
+            }
+            const { page } = yield* newPage(world)
+            yield* goto(world, page, `${world.site.origin}/hello`)
+            yield* world.adapter.closePage(page, { runBeforeUnload: true })
+            const removed = yield* world.facts.when("NavigableRemoved", (fact) =>
+              fact.navigable === page)
+            assert.deepStrictEqual(removed.reason, new Target.PageClosed({ by: "command" }))
+          }), timeout)
+
+        it.effect("reports the page's own close, after a dismissed beforeunload prompt, as the script's", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            if (!(yield* supports(world, "close.runBeforeUnload"))) {
+              return
+            }
+            // A script may close only a page a script opened, so the page is a popup
+            const { page: opener } = yield* newPage(world)
+            yield* goto(world, opener, `${world.site.origin}/hello`)
+            yield* evaluate(world, opener, `() => { window.open("/beforeunload") }`, true)
+            const { page } = yield* world.facts.when("PageAdded", (fact) =>
+              fact.origin._tag === "Opened")
+            yield* world.facts.when("DocumentCommitted", (fact) =>
+              fact.navigable === page && fact.url.endsWith("/beforeunload"))
+            yield* world.facts.when("PageReady", (fact) =>
+              fact.page === page)
+            yield* activate(world, page)
+            yield* world.adapter.closePage(page, { runBeforeUnload: true })
+            const opened = yield* world.facts.when("ObligationOpened", (fact) =>
+              fact.subject._tag === "Prompt")
+            yield* world.adapter.resolve(opened.obligation, { _tag: "Dismiss" })
+            yield* world.facts.when("PromptClosed")
+            assert.strictEqual(yield* evaluate(world, page, "() => document.title"), "beforeunload")
+            // The page closes itself, with its listener gone so nothing asks again
+            yield* evaluate(
+              world,
+              page,
+              `() => { removeEventListener("beforeunload", window.stay); setTimeout(() => window.close(), 0) }`
+            )
+            const removed = yield* world.facts.when("NavigableRemoved", (fact) =>
+              fact.navigable === page)
+            assert.deepStrictEqual(removed.reason, new Target.PageClosed({ by: "script" }))
+          }), timeout)
+
         it.effect("ends everything with ConnectionLost when the browser dies", () =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
             const { page } = yield* newPage(world)
             yield* goto(world, page, `${world.site.origin}/frames`)
-            const frame = yield* world.facts.when("FrameAdded", (fact) => fact.parent === page)
+            const frame = yield* world.facts.when("FrameAdded", (fact) =>
+              fact.parent === page)
             yield* world.kill
             const lost = yield* world.adapter.closed
             assert.strictEqual(lost.initiator, "remote")
             for (const navigable of [page, frame.frame]) {
-              const removed = yield* world.facts.when("NavigableRemoved", (fact) => fact.navigable === navigable)
+              const removed = yield* world.facts.when("NavigableRemoved", (fact) =>
+                fact.navigable === navigable)
               assert.deepStrictEqual(removed.reason, new Target.ConnectionLost({}))
             }
             const late = yield* world.adapter.createPage(world.adapter.defaultContext).pipe(Effect.flip)
