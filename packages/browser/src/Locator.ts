@@ -1031,7 +1031,9 @@ export interface PointerOptions extends ActionOptions {
    * Disabling `receivesPointer` uses the first geometric centre without coverage probes.
    * Explicit positions are never replaced by another fragment. The point stays inside its rectangle after integer rounding
    * when that rectangle contains an integer point. A target with no visible rectangle has no default point,
-   * even when actionability checks are disabled.
+   * even when actionability checks are disabled. The chosen point is sent to the browser exactly, fractions
+   * included. Firefox delivers pointer events at whole pixels, so there a fractional point lands up to half a
+   * pixel away; the capability `input.fractionalPointer` says which browsers deliver the exact point.
    *
    * @default the first reachable fragment centre, or the first geometric centre when receivesPointer is disabled
    */

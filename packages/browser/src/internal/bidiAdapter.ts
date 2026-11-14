@@ -157,6 +157,9 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
         "WebDriver BiDi has no command for it, so each character is typed as a key"
       ]),
       entry("input.pointerModifiers", "supported", ["modifiers are held as keys; a mouse event's flags are ignored"]),
+      entry("input.fractionalPointer", "partial", [
+        "Strider sends the exact point, but Firefox delivers pointer events at whole pixels, up to half a pixel away"
+      ]),
       entry("input.keyboardLayout", "partial", [
         "WebDriver BiDi sends a key as its value: the code is Firefox's for that key on a US keyboard, and there is no AltGr or dead key"
       ]),

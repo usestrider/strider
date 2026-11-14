@@ -38,7 +38,7 @@ import * as InternalOperation from "../../../src/internal/operation.ts"
 import * as Reason from "../../../src/Reason.ts"
 import { site } from "../adapter/harness.ts"
 import { type LinkGeometry, wrappedLinkHtml, wrappedLinks } from "../wrappedLinks.ts"
-import { supports } from "./capabilities.ts"
+import { fullySupports, supports } from "./capabilities.ts"
 import * as SharedContext from "./sharedContext.ts"
 import { newPage } from "./sharedContext.ts"
 
@@ -1325,7 +1325,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   mode === "escape" ? "position:fixed;left:300px;top:100px" : ""
                 }}#tail{width:600px;height:300px}</style><div id="s"><div id="inner"><a id="go" href="#">Go</a><div id="tail"></div></div></div>${
                   mode === "overlay" ? "<div style=\"position:fixed;inset:0;background:white\"></div>" : ""
-                }<output id="out"></output><script>go.onclick=e=>{e.preventDefault();out.textContent=JSON.stringify({trusted:e.isTrusted,x:e.offsetX,y:e.offsetY})}</script>`
+                }<output id="out"></output><script>go.onclick=e=>{e.preventDefault();out.textContent=JSON.stringify({trusted:e.isTrusted,x:e.offsetX,y:e.offsetY,clientY:e.clientY,top:go.getBoundingClientRect().top})}</script>`
               )
               const page = yield* Browser.newPage()
               yield* page.goto(url)
@@ -1361,9 +1361,12 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   assert.isAbove(after[1]!.y, 0)
                 }
                 if (mode === "explicit") {
-                  // The scroll leaves the link at a fractional offset on some platforms; the page rounds the click point.
-                  assert.strictEqual(click.x, 7)
-                  assert.isAtMost(Math.abs(click.y - 9), 1)
+                  if (yield* fullySupports("input.fractionalPointer")) {
+                    assert.deepStrictEqual({ x: click.x, y: click.y }, { x: 7, y: 9 })
+                  } else {
+                    // Whole-pixel delivery: the event lands within half a pixel of the point sent.
+                    assert.isAtMost(Math.abs(click.clientY - (click.top + 9)), 0.5, JSON.stringify(click))
+                  }
                 }
               }
             })),
@@ -1385,7 +1388,12 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             const click = JSON.parse(yield* page.locator("#out").readText)
             assert.isTrue(click.trusted)
             assert.strictEqual(click.top, 110.5)
-            assert.deepStrictEqual({ x: click.x, y: click.y }, { x: 7, y: 9 }, JSON.stringify(click))
+            if (yield* fullySupports("input.fractionalPointer")) {
+              assert.deepStrictEqual({ x: click.x, y: click.y }, { x: 7, y: 9 }, JSON.stringify(click))
+            } else {
+              // Whole-pixel delivery: the event lands within half a pixel of the point sent.
+              assert.isAtMost(Math.abs(click.clientY - (click.top + 9)), 0.5, JSON.stringify(click))
+            }
           })),
         timeout
       )

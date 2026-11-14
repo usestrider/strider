@@ -71,7 +71,7 @@ export const dispatchInput = Effect.fnUntraced(
         case "Mouse": {
           const actions = pointer("strider-mouse")
           const button = buttons[event.button] ?? 0
-          actions.push({ type: "pointerMove", x: Math.round(event.x - dx), y: Math.round(event.y - dy) })
+          actions.push({ type: "pointerMove", x: event.x - dx, y: event.y - dy })
           if (event.type !== "move") actions.push({ type: event.type === "down" ? "pointerDown" : "pointerUp", button })
           break
         }
