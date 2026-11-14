@@ -2555,6 +2555,11 @@ describe("Chromium screencast renderer readiness", () => {
           assert.strictEqual((yield* Queue.take(h.screenshotWork)).method, "Page.getLayoutMetrics")
           const start = yield* Queue.take(h.screenshotWork)
           assert.strictEqual(start.method, "Page.startScreencast")
+          assert.deepInclude(
+            start.params,
+            { format: "jpeg", quality: 90 },
+            "frames are asked for at a quality text survives"
+          )
           if (terminal === "interrupt") yield* Fiber.interrupt(pending)
           else {
             yield* TestClock.adjust("1 second")

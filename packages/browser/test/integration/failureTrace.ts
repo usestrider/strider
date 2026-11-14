@@ -1,4 +1,9 @@
 /*
+ * `slice/recycledBrowser.ts` (Firefox suites) writes `.data/integration-failures/recycler-held.ndjson` only with
+ * `STRIDER_TRACE_RETAIN_PASSES=1`: when a restart is refused at the page limit, a line names the handles and owned page
+ * ids that held it. A line is written only when that set changes, at most 200 lines, then one `limit` line; a failed
+ * write stops further lines and never changes the restart's result.
+ *
  * Bounded diagnostic history; independent of the optional drift fixture sampler.
  *
  * Integration failures name their bounded protocol traces in `.data/integration-failures/`; CI keeps them with

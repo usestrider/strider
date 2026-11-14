@@ -164,7 +164,7 @@ set `rendered: false` on a pointer action when your application can tolerate rou
 
 An action needs its element reachable; visible means a person can see it. Actions accept an element with `opacity: 0` on itself or any ancestor. For that element, `isVisible` returns false, `Expect.toBeVisible` waits, and `filter({ visible: true })` excludes that element; `filter({ visible: false })` includes it. Opacity alone does not make an action wait for a fade-in.
 
-An action's `visible` check requires CSS visibility, content visibility, and a nonempty box. Pointer actions require their action point to receive the pointer, so a covering element blocks them. Non-pointer actions accept transparency without a pointer hit test: `fill` and `clear` require enabled, editable, and not inert; `focus`, `press`, and `pressSequentially` require not inert; `selectOption` requires enabled; `selectText` requires only visibility; `scrollIntoView` requires stability. `setInputFiles` runs no readiness checks.
+An action's `visible` check requires CSS visibility, content visibility, and a nonempty box. Pointer actions require their action point to receive the pointer, so a covering element blocks them. Non-pointer actions accept transparency without a pointer hit test: `fill` and `clear` require enabled, editable, and not inert; `focus`, `press`, and `pressSequentially` require not inert; `selectOption` requires enabled, the chosen options included; `selectText` requires only visibility; `scrollIntoView` requires stability. `setInputFiles` runs no readiness checks.
 
 - "Stable": stopped moving. "In the viewport": scrolled there. "Receives the pointer": nothing covers the point.
   "Not inert": not under an `inert` attribute, nor outside an open modal dialog.

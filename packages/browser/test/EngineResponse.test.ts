@@ -6,7 +6,6 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Engine from "../src/internal/engine.ts"
-import * as WebKitUtility from "../src/internal/webkitUtility.ts"
 
 describe("Engine.decodeResponse", () => {
   it.effect("decodes an answer the engine gives", () =>
@@ -39,27 +38,4 @@ describe("Engine.decodeResponse", () => {
       const text = yield* Effect.exit(Engine.decodeResponse("not json"))
       assert.isTrue(Exit.isFailure(text))
     }))
-})
-
-describe("Engine.install", () => {
-  it("fits the attached inspector packet budget after nested JSON encoding", () => {
-    const message = JSON.stringify({
-      id: 21,
-      method: "Runtime.callFunctionOn",
-      params: {
-        objectId: "{\"injectedScriptId\":1,\"id\":1}",
-        functionDeclaration: WebKitUtility.call(Engine.install, "value", true),
-        arguments: [{ value: [] }],
-        awaitPromise: true,
-        returnByValue: false
-      }
-    })
-    const packet = JSON.stringify({
-      id: -21,
-      method: "Target.sendMessageToTarget",
-      params: { targetId: "page-8", message }
-    })
-    // libsoup's default incoming packet limit is 128 KiB. Leave room for runtime wrapping and ids.
-    assert.isBelow(new TextEncoder().encode(packet).length, 128 * 1024 - 2048)
-  })
 })

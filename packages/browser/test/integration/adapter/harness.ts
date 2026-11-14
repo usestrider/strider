@@ -48,6 +48,14 @@ const routes: Record<string, Route> = {
   // Any page: its HTML is the `html` parameter
   "/fixture": (request, response) =>
     html(response, new URL(request.url ?? "/", "http://site").searchParams.get("html") ?? ""),
+  // Any page, as `/fixture`, under a policy that forbids eval
+  "/csp": (request, response) => {
+    response.writeHead(200, {
+      "content-type": "text/html; charset=utf-8",
+      "content-security-policy": "script-src 'self'"
+    })
+    response.end(new URL(request.url ?? "/", "http://site").searchParams.get("html") ?? "")
+  },
   // An error page: a commit with a status of 404
   "/missing": (_request, response) => html(response, `<title>missing</title><p>No such page</p>`, 404),
   "/204": (_request, response) => {
@@ -95,6 +103,20 @@ const routes: Record<string, Route> = {
   "/worker.js": (_request, response) => {
     response.writeHead(200, { "content-type": "text/javascript" })
     response.end(`console.log("from the worker"); postMessage("ready")`)
+  },
+  // A dedicated worker's script whose body the server holds back for a second after its headers. Chromium
+  // attaches the worker, and reports its context, once the headers arrive, so the worker is handed out before
+  // its script has loaded.
+  "/slow-worker.js": (_request, response) => {
+    response.writeHead(200, { "content-type": "text/javascript" })
+    response.write(`// slow\n`)
+    setTimeout(() => response.end(`postMessage("ready")`), 1000).unref()
+  },
+  // A dedicated worker's script whose body stalls after its headers, for ten seconds.
+  "/stalled-worker.js": (_request, response) => {
+    response.writeHead(200, { "content-type": "text/javascript" })
+    response.write(`// stalled\n`)
+    setTimeout(() => response.end(`postMessage("ready")`), 10_000).unref()
   },
   "/worker": (_request, response) =>
     html(response, `<title>worker</title><script>const w = new Worker("/worker.js"); w.onmessage = () => {}</script>`),

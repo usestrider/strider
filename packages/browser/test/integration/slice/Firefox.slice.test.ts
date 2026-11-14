@@ -17,6 +17,7 @@ import { events } from "./events.ts"
 import { interaction } from "./interaction.ts"
 import { modules } from "./modules.ts"
 import { recordings } from "./recordings.ts"
+import { recycling } from "./recycledBrowser.ts"
 import { requestBodies } from "./requestBodies.ts"
 import { requestSizes } from "./requestSizes.ts"
 import { requestTiming } from "./requestTiming.ts"
@@ -27,8 +28,14 @@ import { tooling } from "./tooling.ts"
 import { toolkit } from "./toolkit.ts"
 import { webauthn } from "./webauthn.ts"
 
-const backend = Firefox.layer({ executablePath: firefox.executable }).pipe(
-  Layer.provide(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor))
+// Firefox keeps about 10 MB per window opened and closed, so a suite's browser is replaced after 100 pages when the shared context settles with nothing live (recycledBrowser.ts); suites that don't settle keep theirs.
+// STRIDER_FIREFOX_RECYCLE_PAGES=0 turns the replacement off, to measure the growth it prevents.
+const recyclePages = Number(process.env["STRIDER_FIREFOX_RECYCLE_PAGES"] ?? 100)
+const backend = recycling(
+  Firefox.layer({ executablePath: firefox.executable }).pipe(
+    Layer.provide(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor))
+  ),
+  recyclePages > 0 ? recyclePages : Number.POSITIVE_INFINITY
 )
 
 slice("Firefox", backend, (info) => assertPinned("Firefox", info.version, firefox.version))
