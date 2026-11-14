@@ -1,12 +1,15 @@
 /** Native size accounting and context isolation through the public API. */
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser, NetworkRequest, NetworkResponse, type Page } from "@usestrider/browser"
+import { Browser, Har, NetworkRequest, NetworkResponse, type Page } from "@usestrider/browser"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as fs from "node:fs"
 import * as http from "node:http"
+import * as os from "node:os"
+import * as path from "node:path"
 import { gzipSync } from "node:zlib"
 import * as Handles from "../../../src/internal/handles.ts"
 import { supports } from "./capabilities.ts"
@@ -33,6 +36,10 @@ const site = Effect.gen(function*() {
         ...(request.url === "/fixed" ? { "content-length": compressed.length } : {})
       })
       response.end(compressed)
+    } else if (request.url === "/plain") {
+      // A body the size of the limit the BodyLimit case sets, sent as it is, with headers beside it
+      response.writeHead(200, { "content-type": "text/plain", "cache-control": "no-store", "content-length": 100 })
+      response.end("y".repeat(100))
     } else if (request.url === "/empty") {
       response.writeHead(200, { "content-length": 0, "cache-control": "no-store" })
       response.end()
@@ -117,6 +124,74 @@ export const requestSizes = (name: string, backend: Layer.Layer<Browser.Browser,
                 assert.deepStrictEqual(sizes.requestBodySize, Option.some(path === "/fixed" ? 3 : 0))
               } else assert.deepStrictEqual(sizes.requestBodySize, Option.none())
             }
+          }).pipe(Effect.scoped),
+        60_000
+      )
+
+      it.effect(
+        "writes a HAR's response sizes as the request's sizes count them, with the bytes decoding saved",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const context = yield* Browser.newContext({ requestSizes: true })
+            const page = yield* context.newPage
+            yield* page.goto(served.origin)
+            const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "strider-har-sizes-")), "sizes.har")
+            const sizes = new Map<string, NetworkRequest.Sizes>()
+            yield* Effect.scoped(Effect.gen(function*() {
+              const har = yield* Har.record(page, { content: "embed", url: `${served.origin}/{fixed,chunked,empty}` })
+              for (const path of ["/fixed", "/chunked", "/empty"]) {
+                const sent = yield* NetworkRequest.next(page, { url: served.origin + path })
+                yield* page.evaluateInMainWorld((path) => fetch(path).then((r) => r.text()), path)
+                const original = yield* sent
+                yield* ended(page, original)
+                sizes.set(path, yield* NetworkRequest.sizes(context, original))
+              }
+              yield* har.entries.waitFor((count) => count === 3)
+              yield* har.exportHar(out)
+            }))
+            const entries: ReadonlyArray<{
+              readonly request: { readonly url: string }
+              readonly response: {
+                readonly bodySize: number
+                readonly _transferSize: number
+                readonly content: { readonly size: number; readonly compression?: number }
+              }
+            }> = JSON.parse(fs.readFileSync(out, "utf8")).log.entries
+            for (const [path, counted] of sizes) {
+              const entry = entries.find((entry) => entry.request.url === served.origin + path)
+              assert(entry !== undefined, path)
+              const { bodySize, _transferSize, content } = entry.response
+              // -1 where the backend doesn't count it, as HAR has it
+              assert.strictEqual(bodySize, Option.getOrElse(counted.responseBodySize, () => -1), path)
+              assert.strictEqual(_transferSize, Option.getOrElse(counted.responseTransferSize, () => -1), path)
+              assert.strictEqual(content.size, path === "/empty" ? 0 : text.length, path)
+              assert.strictEqual(content.compression, bodySize < 0 ? undefined : content.size - bodySize, path)
+            }
+          }).pipe(Effect.scoped),
+        60_000
+      )
+
+      it.effect(
+        "holds a response's body to BodyLimit without its headers",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const page = yield* Browser.newPage()
+            yield* page.goto(served.origin)
+            const read = Effect.fnUntraced(function*(limit: number) {
+              const response = yield* NetworkResponse.next(page, {
+                url: `${served.origin}/plain`,
+                body: (message) => message.text
+              }).pipe(NetworkResponse.withBodyLimit(limit))
+              yield* page.evaluateInMainWorld(() => fetch("/plain").then((r) => r.text()))
+              return yield* response
+            })
+            // The body is 100 bytes, and the response, headers and all, more than 120
+            assert.strictEqual((yield* read(120)).body, "y".repeat(100))
+            const error = yield* Effect.flip(read(99))
+            assert(NetworkResponse.isResponseError(error), String(error))
+            assert.deepInclude(error.reason, { _tag: "BodyUnavailable", why: "overLimit" })
           }).pipe(Effect.scoped),
         60_000
       )
