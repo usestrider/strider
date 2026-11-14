@@ -14,6 +14,7 @@ import * as Reason from "../Reason.ts"
 import type * as Adapter from "./adapter.ts"
 import { exception } from "./evaluation.ts"
 import * as Filters from "./filters.ts"
+import * as FunctionSource from "./functionSource.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import type * as Runtime from "./runtime.ts"
@@ -45,7 +46,7 @@ export const make = (runtime: Runtime.Runtime, entry: Model.WorkerEntry): Browse
       // The call is on its way: a deadline after it can't say the function didn't run
       record.markSent()
       const result = yield* runtime.model.adapter.evaluate(entry.realm, {
-        functionDeclaration: fn.toString(),
+        functionDeclaration: FunctionSource.declaration(fn),
         arguments: values,
         awaitPromise: true,
         result: "value",

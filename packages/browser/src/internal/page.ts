@@ -48,6 +48,7 @@ import * as Devices from "./devices.ts"
 import * as Emulation from "./emulation.ts"
 import * as Evaluation from "./evaluation.ts"
 import * as ExpectSource from "./expectSource.ts"
+import * as FunctionSource from "./functionSource.ts"
 import * as Guarded from "./guarded.ts"
 import * as Handles from "./handles.ts"
 import * as InitScripts from "./initScripts.ts"
@@ -280,7 +281,7 @@ export const make = (owner: PageOwner): Page.Page => {
         const value = yield* Evaluation.call(runtime, {
           dispatch: record,
           realm,
-          functionDeclaration: fn.toString(),
+          functionDeclaration: FunctionSource.declaration(fn),
           arguments: values,
           result,
           group,

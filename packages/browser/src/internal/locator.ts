@@ -44,6 +44,7 @@ import * as Evaluation from "./evaluation.ts"
 import type * as Execution from "./execution.ts"
 import * as FileInputImpl from "./fileInput.ts"
 import * as Filters from "./filters.ts"
+import * as FunctionSource from "./functionSource.ts"
 import * as Geometry from "./geometry.ts"
 import * as Input from "./input.ts"
 import * as Keys from "./keys.ts"
@@ -568,7 +569,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         const result = yield* Evaluation.call(owner.runtime, {
           dispatch: record,
           realm,
-          functionDeclaration: fn.toString(),
+          functionDeclaration: FunctionSource.declaration(fn),
           arguments: [{ _tag: "Node", node: found.node }, ...rest],
           result: "value",
           userActivation: false,
@@ -632,8 +633,9 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         const result = yield* Evaluation.call(owner.runtime, {
           dispatch: record,
           realm,
-          functionDeclaration:
-            `function(...values) { return (${fn.toString()})(values.slice(0, ${found.nodes.length}), ...values.slice(${found.nodes.length})); }`,
+          functionDeclaration: `function(...values) { return (${
+            FunctionSource.declaration(fn)
+          })(values.slice(0, ${found.nodes.length}), ...values.slice(${found.nodes.length})); }`,
           arguments: [...found.nodes.map((node): Adapter.LocalValue => ({ _tag: "Node", node })), ...rest],
           result: "value",
           releaseResult: true,
