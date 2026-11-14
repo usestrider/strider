@@ -9,6 +9,34 @@ const call = (fn: Function, ...args: ReadonlyArray<unknown>): unknown =>
   runInNewContext(`(${FunctionSource.declaration(fn)})`)(...args)
 
 describe("FunctionSource.declaration", () => {
+  for (
+    const [kind, source] of [
+      ["quoted", "({ \"a() { return 99 } //\"() { return 42 } })"],
+      ["computed", "({ [\"a() { return 99 } //\"]() { return 42 } })"]
+    ]
+  ) {
+    it(`does not treat function-shaped text in a ${kind} key as its parameters`, () => {
+      const methods = runInNewContext(source!)
+      const method = methods[Reflect.ownKeys(methods)[0]!]
+      const sent = runInNewContext(`(${FunctionSource.declaration(method)}\n)`)
+      assert.strictEqual(sent(), method())
+    })
+  }
+
+  for (
+    const [kind, source] of [
+      ["async method", "({ async/*comment*/read() { return 42 } }).read"],
+      ["async generator", "({ async /*comment*/ *read() { yield 42 } }).read"],
+      ["method named async", "({ async /*comment*/ () { return 42 } }).async"]
+    ]
+  ) {
+    it(`preserves the function kind of a commented ${kind}`, () => {
+      const method = runInNewContext(source!)
+      const sent = runInNewContext(`(${FunctionSource.declaration(method)})`)
+      assert.strictEqual(sent.constructor.name, method.constructor.name)
+    })
+  }
+
   it("sends a function expression's source unchanged", () => {
     const arrow = (a: number, b: number) => a + b
     function named(a: number) {

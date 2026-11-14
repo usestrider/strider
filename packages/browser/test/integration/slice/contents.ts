@@ -1204,6 +1204,10 @@ export const contents = (
             const evaluate = yield* evaluator(page)
             assert.strictEqual(yield* evaluate(methods.sum, 1, 2), 3)
             assert.strictEqual(yield* page.evaluateInMainWorld(methods.later, 4), 8)
+            const quoted = new Function(
+              `return { "a() { return 99 } //"() { return 42 } }["a() { return 99 } //"]`
+            )() as () => number
+            assert.strictEqual(yield* page.evaluateInMainWorld(quoted), 42)
             const strict = {
               receiver(this: unknown) {
                 "use strict"
