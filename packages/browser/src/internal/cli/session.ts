@@ -14,8 +14,8 @@ import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
-import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
+import * as Version from "../version.ts"
 import * as Node from "./node.ts"
 
 /** A session's name: lowercase letters, digits and dashes, short enough for a Unix socket's path. */
@@ -226,17 +226,8 @@ export const exitCodes: Readonly<Record<string, number>> = {
   NoSession: 20
 }
 
-/** The package's `package.json`, as far as the command reads it. */
-const Manifest = Schema.fromJsonString(Schema.Struct({ version: Schema.String }))
-
 /** The package's version, from its `package.json`: what `--version` prints, and the MCP server reports. */
-export const version = Effect.gen(function*() {
-  const fs = yield* FileSystem.FileSystem
-  const path = yield* Path.Path
-  // This module is three directories below the package's root, in src/ and in dist/ alike
-  const manifest = yield* path.fromFileUrl(new URL("../../../package.json", import.meta.url))
-  return (yield* Schema.decodeEffect(Manifest)(yield* fs.readFileString(manifest))).version
-}).pipe(Effect.orDie)
+export const version = Version.read
 
 /** A process, by its id and when it started, in milliseconds since the epoch, as the ledger names its owner. */
 export const Owner = Schema.Struct({ pid: Schema.Number, startedAt: Schema.Number })

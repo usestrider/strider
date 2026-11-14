@@ -163,9 +163,17 @@ export interface Recording extends Declaration.Registration {
  * - `exportHar` writes HAR 1.2, or with `content: "attach"` one zip holding `har.har` and the bodies it names.
  * - A URL's credentials, cookie values, and the `Authorization` and `Proxy-Authorization` headers are `REDACTED`
  *   unless `include` names their class.
+ * - A response's body, where it is embedded, is `text` when its MIME type is textual and its bytes are valid UTF-8,
+ *   and base64 otherwise. A `mimeType` is the `Content-Type` as sent, with parameters such as its charset.
  * - The body each request sent is recorded whatever `content` says, and written as `postData` only when
- *   `include` names `"requestBodies"`. A text body is written as `text`, with a form's `params`; any other is
- *   base64 (marked with `_encoding`) or a file beside the HAR when bodies are attached.
+ *   `include` names `"requestBodies"`. A text body that is valid UTF-8 is written as `text`, with a form's
+ *   `params`; any other is base64 (marked with `_encoding`) or a file beside the HAR when bodies are attached. A
+ *   request that sent no body has a `bodySize` of 0.
+ * - A cookie with no name, which a header writes as a value with no `=`, is listed with the name `""`, and its
+ *   value is redacted as any cookie's is. A `Set-Cookie`'s `Max-Age` gives its `expires`, counted from the
+ *   response, ahead of its `Expires`.
+ * - The log's `creator` is Strider at its package's version, which the export reads with the layer's
+ *   `FileSystem` and `Path`.
  *
  * **Gotchas**
  *
@@ -274,15 +282,22 @@ export const record = (
       exportHar: (path, exportOptions) =>
         Effect.gen(function*() {
           yield* (options.inFlightAtStop ?? "markIncomplete") === "wait" ? recorder.settle : recorder.flush
-          const { log, files } = HarImpl.logOf(recorder.entries, recorder.clock, {
-            detail: options.detail ?? "full",
-            include: new Set(exportOptions?.include ?? []),
-            bodies: options.content === "embed"
-              ? { _tag: "Embed" }
-              : options.content === "attach"
-              ? { _tag: "File", prefix: "" }
-              : { _tag: "Omit" }
-          }, { name: info.product, version: info.version })
+          const version = yield* HarImpl.creatorVersion(runtime, path)
+          const { log, files } = HarImpl.logOf(
+            recorder.entries,
+            recorder.clock,
+            {
+              detail: options.detail ?? "full",
+              include: new Set(exportOptions?.include ?? []),
+              bodies: options.content === "embed"
+                ? { _tag: "Embed" }
+                : options.content === "attach"
+                ? { _tag: "File", prefix: "" }
+                : { _tag: "Omit" }
+            },
+            { name: info.product, version: info.version },
+            version
+          )
           const text = yield* Schema.encodeEffect(HarLog.LogJson)(log).pipe(
             Effect.mapError((error): Recordings.WriteFailure => ({
               path: "",

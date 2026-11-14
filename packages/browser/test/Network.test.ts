@@ -74,7 +74,7 @@ const recorded = (sent: NetworkRequest.NetworkRequest, body: Uint8Array | undefi
   hop: Option.none(),
   end: Option.none(),
   body: Option.none(),
-  requestBody: Option.fromUndefinedOr(body),
+  requestBody: Option.some(Option.fromUndefinedOr(body)),
   frames: [],
   done: Deferred.makeUnsafe<void>()
 })
@@ -311,7 +311,7 @@ describe("A HAR an export writes", () => {
         httpVersion: Option.none()
       }),
       body: Option.some(bodies.response),
-      requestBody: Option.some(bodies.request),
+      requestBody: Option.some(Option.some(bodies.request)),
       frames: [],
       done: Deferred.makeUnsafe<void>()
     }
@@ -349,7 +349,8 @@ describe("A HAR an export writes", () => {
           include: new Set(["requestBodies", "cookies"]),
           bodies: { _tag: "Embed" }
         },
-        { name: "Chromium", version: "155" }
+        { name: "Chromium", version: "155" },
+        "0.1.0"
       )
       const text = yield* Schema.encodeEffect(HarLog.LogJson)(log)
       // The schema writes every field the entries hold, in the order they hold them
@@ -412,9 +413,9 @@ describe("A HAR an export writes", () => {
   it("writes 0 as the size of a request that sent no body, and -1 where its body wasn't read", () => {
     const get = sent("GET", "https://shop.example.com/", "text/plain", "Q1.0")
     const hop = answered(get, { status: 200, headers: {} }, { request: bytes(""), response: bytes("") })
-    assert.strictEqual(entryOf({ ...hop, requestBody: Option.some(Option.none()) } as never).request.bodySize, 0)
+    assert.strictEqual(entryOf({ ...hop, requestBody: Option.some(Option.none()) }).request.bodySize, 0)
     assert.isUndefined(
-      entryOf({ ...hop, requestBody: Option.some(Option.none()) } as never, ["requestBodies"]).request.postData
+      entryOf({ ...hop, requestBody: Option.some(Option.none()) }, ["requestBodies"]).request.postData
     )
     assert.strictEqual(entryOf({ ...hop, requestBody: Option.none() }).request.bodySize, -1)
   })

@@ -890,11 +890,18 @@ export const start = Effect.fnUntraced(function*(
     if (Option.isSome(network)) {
       const recorder = network.value
       yield* recorder.flush
-      const { files: bodies, log } = HarImpl.logOf(recorder.entries, recorder.clock, {
-        detail: "full",
-        include: new Set(),
-        bodies: { _tag: "File", prefix: "resources/" }
-      }, { name: info.product, version: info.version })
+      const version = yield* HarImpl.creatorVersion(runtime, path)
+      const { files: bodies, log } = HarImpl.logOf(
+        recorder.entries,
+        recorder.clock,
+        {
+          detail: "full",
+          include: new Set(),
+          bodies: { _tag: "File", prefix: "resources/" }
+        },
+        { name: info.product, version: info.version },
+        version
+      )
       const resources = yield* Effect.forEach(
         log.log.entries,
         (entry) => Schema.encodeEffect(ResourceSnapshot)({ type: "resource-snapshot", snapshot: entry })
