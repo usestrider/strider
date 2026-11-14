@@ -245,6 +245,35 @@ describe("Input key events", () => {
       event._tag === "Key" ? [`${event.type}:${event.key}:${event.modifiers.meta}:${event.autoRepeat}`] : []
     )
 
+  it("keeps a held modifier's flag when pressing or typing that modifier", () => {
+    const state = Input.make()
+    const meta = Keys.definition("Meta")!
+    state.keys.push(meta)
+    const expected = ["down:Meta:true:true", "up:Meta:true:false"]
+    assert.deepStrictEqual(keys(Input.press(state, meta)), expected)
+    assert.deepStrictEqual(keys(Input.type(state, "Meta", "us")), expected)
+  })
+
+  it("keeps the modifier flag when one of two holds of the same named key releases", () => {
+    const state = Input.make()
+    const first = Keys.definition("Meta")!
+    const second = Keys.definition("Meta")!
+    state.keys.push(first, second)
+    assert.deepStrictEqual(keys([Input.keyUp(state, second)]), ["up:Meta:true:false"])
+    state.keys.splice(state.keys.indexOf(second), 1)
+    assert.deepStrictEqual(keys([Input.keyUp(state, first)]), ["up:Meta:false:false"])
+  })
+
+  it("records a modifier keyup without its own flag and leaves an existing hold alone", () => {
+    const state = Input.make()
+    Input.uncertain(state, "Keyboard.press", Input.type(state, "Meta", "us")!)
+    assert.deepStrictEqual(keys(Option.getOrThrow(state.broken).release), ["up:Meta:false:false"])
+    const held = Input.make()
+    held.keys.push(Keys.definition("Meta")!)
+    Input.uncertain(held, "Keyboard.press", Input.type(held, "Meta", "us")!)
+    assert.isTrue(Option.isNone(held.broken))
+  })
+
   it("gives a modifier's keydown its own flag and its keyup none, pressed, typed or held", () => {
     const state = Input.make()
     const meta = Keys.modifier("Meta")
