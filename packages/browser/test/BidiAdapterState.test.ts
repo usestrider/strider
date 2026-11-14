@@ -1717,6 +1717,25 @@ describe("BidiAdapter state", () => {
       assert.isEmpty(page.pendingTerminals)
     }))
 
+  for (const first of ["start", "commit"] as const) {
+    it.effect(`discards a stale load kept for its start when another identity's ${first} comes first`, () =>
+      Effect.gen(function*() {
+        const { page, state } = yield* withPage()
+        const prior = "http://example.test/start"
+        const handlers = Navigation.register(Kit.handlers<State.Event>())
+        const event = (method: string, navigation: string, timestamp: number, url = "http://example.test/next") =>
+          handlers.apply(method, { context: "C1", navigation, url, timestamp }, { state })
+        event("browsingContext.navigationStarted", "prior", 1, prior)
+        event("browsingContext.navigationCommitted", "prior", 2, prior)
+        event("browsingContext.load", "A", 9, prior)
+        assert.deepStrictEqual(page.staleLoad, { bidi: "A", timestamp: 9, document: page.document!.id })
+        event(`browsingContext.navigation${first === "start" ? "Started" : "Committed"}`, "other", 10)
+        assert.isUndefined(page.staleLoad)
+        event("browsingContext.navigationStarted", "A", 11)
+        assert.isUndefined(state.navigations.get("A")!.staleLoad)
+      }))
+  }
+
   for (
     const competition of ["same-URL command", "page request", "fresh load", "other context", "no request"] as const
   ) {
