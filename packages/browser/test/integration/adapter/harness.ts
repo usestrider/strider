@@ -99,6 +99,11 @@ const routes: Record<string, Route> = {
   // A dedicated worker's script whose body the server holds back for a second after its headers. Chromium
   // attaches the worker, and reports its context, once the headers arrive, so the worker is handed out before
   // its script has loaded.
+  "/invalid-worker.js": (_request, response) => {
+    response.writeHead(200, { "content-type": "text/javascript" })
+    response.write("// the worker attaches before the script body arrives\n")
+    setTimeout(() => response.end("function {"), 1000).unref()
+  },
   "/slow-worker.js": (_request, response) => {
     response.writeHead(200, { "content-type": "text/javascript" })
     response.write(`// slow\n`)
