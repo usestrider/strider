@@ -7,11 +7,13 @@
  *   either as the value itself (for a handle) or as WebDriver BiDi's `RemoteValue`, as JSON text.
  * - Nodes in a serialized value are kept in a batch the adapter takes next (`takeNodes`), for their object ids:
  *   WebKit's handle on a node is its remote object.
- * - A function too large for one inspector message arrives in parts (`stage`), which `compile` joins and compiles
- *   with the `eval` captured at install. WebKit allows eval for the length of an inspector call, even where the
- *   page's Content-Security-Policy forbids it, and the compile runs inside one. A page that replaced `eval` before
- *   the helper was installed could compile something else, so `compile` checks that it made a function whose
- *   source is the text it joined, and throws otherwise.
+ * - A function whose declaration takes over 96 KiB once JSON-encoded twice arrives in parts (`stage`), which
+ *   `compile` joins and compiles with the page's `eval` as of the helper's install, one more of the intrinsics the
+ *   helper takes from the page. WebKit allows eval for the length of an inspector call, even where the page's
+ *   Content-Security-Policy forbids it, and the compile runs inside one. A page's wrapper that passes the text on to
+ *   the browser's `eval` works, since an indirect eval compiles in global scope. `compile` refuses a replacement that
+ *   compiles different text, checking that it made a function whose source is the joined text; one that returns a
+ *   function with the same source isn't detected.
  *
  * The helper captures the intrinsics it uses when it is installed, so a page that later replaces
  * `JSON.stringify` or `Array.prototype` doesn't change what it returns; a page that replaced them before can.
@@ -191,7 +193,7 @@ export const source = String.raw`(() => {
       const fn = compile("(" + text + ")")
       if (typeof fn !== "function" || apply(functionSource, fn, []) !== text) {
         throw new ErrorType(
-          "The page replaced eval before Strider's helper was installed, so a function too large for one inspector message can't be compiled there"
+          "The page's eval, as of Strider's helper's install, didn't compile the function staged in parts"
         )
       }
       return fn
@@ -242,11 +244,11 @@ const encodedBytes = (code: number): number => {
 }
 
 /**
- * A function declaration's parts, for the helper to stage (`stage`) when it is too large to send in one message,
- * or `undefined` when it isn't. The attached inspector carries a page's command as a JSON string inside
+ * A function declaration's parts, for the helper to stage (`stage`) when it takes over 96 KiB once JSON-encoded
+ * twice, or `undefined` when it doesn't. The attached inspector carries a page's command as a JSON string inside
  * `Target.sendMessageToTarget`, so a declaration is JSON-encoded twice, and libsoup closes a socket whose incoming
- * message is over 128 KiB. A declaration that takes at most 96 KiB once encoded goes in one message, so the page's
- * own `eval` never compiles it; a larger one is staged in parts of at most 64 KiB each, never splitting a surrogate
+ * message is over 128 KiB. A declaration that takes at most 96 KiB once encoded goes in one message, leaving room for
+ * its arguments and wrapping; a larger one is staged in parts of at most 64 KiB each, never splitting a surrogate
  * pair.
  */
 export const parts = (fn: string): ReadonlyArray<string> | undefined => {

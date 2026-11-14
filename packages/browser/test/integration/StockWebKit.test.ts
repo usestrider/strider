@@ -331,7 +331,7 @@ describe("Stock WebKit, attached through its remote inspector", () => {
             const staged = new Function(`/*${"x".repeat(200_000)}*/ return 42`) as () => number
             const refused = reasonOf(yield* Effect.exit(tab.evaluateInMainWorld(staged)))
             assert.strictEqual(refused?.reason?._tag, "EvaluationThrown")
-            assert.include(refused?.reason?.exception?.message, "replaced eval before Strider's helper was installed")
+            assert.include(refused?.reason?.exception?.message, "didn't compile the function staged in parts")
           }))
         }).pipe(Effect.provide(attach(endpoint)))
       }))

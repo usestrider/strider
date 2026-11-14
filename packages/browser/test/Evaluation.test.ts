@@ -137,7 +137,7 @@ describe("Evaluation argument reconstruction", () => {
         return error.message
       }
     })()`)
-    assert.include(thrown, "replaced eval before Strider's helper was installed")
+    assert.include(thrown, "didn't compile the function staged in parts")
   })
 
   it("constructs WebKit callbacks outside the handle-group wrapper bindings", () => {
