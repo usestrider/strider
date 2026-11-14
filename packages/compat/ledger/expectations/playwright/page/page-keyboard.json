@@ -1,0 +1,41 @@
+[
+  {
+    "tests": [
+      "KB-021",
+      "KB-022",
+      "KB-023",
+      "KB-024",
+      "KB-025"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-keyboard-press",
+    "reason": "Names keys by their physical code and reads each key's `location`: `ControlRight`, `Numpad1`, `NumpadSubtract`, `NumpadDecimal`, `NumpadEnter`, and the right-hand `location` values. Strider's key values name the key a layout types, with a left-hand Control, Shift, Alt and Meta only, and no numpad keys or `location`, so these checks have no Strider counterpart"
+  },
+  {
+    "tests": [
+      "KB-026"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-keyboard-press",
+    "reason": "Presses the audio and media keys (`AudioVolumeMute`, `AudioVolumeDown`, `AudioVolumeUp`, `MediaTrackNext`, `MediaTrackPrevious`, `MediaPlayPause`). Strider's named keys don't include them, so each press fails with `InvalidInput`"
+  },
+  {
+    "tests": [
+      "KB-037"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "notApplicable",
+    "reason": "Reads WebKit's `keyIdentifier`, which no other browser has: the original runs it on WebKit only (`it.skip(browserName !== 'webkit')`). The port runs it on WebKit"
+  },
+  {
+    "tests": [
+      "KB-033",
+      "KB-040"
+    ],
+    "status": "notApplicable",
+    "reason": "macOS shortcuts (`Shift+Control+Alt+KeyB` selects a word, `Shift+Meta+ArrowUp` selects to the document's start) that the original runs on macOS only (`it.skip(platform !== 'darwin')`, `it.skip(!isMac)`). The harness runs on Linux, where the original skips them"
+  }
+]

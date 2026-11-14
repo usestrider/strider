@@ -1,0 +1,71 @@
+[
+  {
+    "tests": [
+      "[jshandle.test] JSHandle Page.evaluateHandle should work",
+      "[jshandle.test] JSHandle Page.evaluateHandle should accept object handle as an argument",
+      "[jshandle.test] JSHandle Page.evaluateHandle should accept object handle to primitive types",
+      "[jshandle.test] JSHandle Page.evaluateHandle should warn about recursive objects",
+      "[jshandle.test] JSHandle Page.evaluateHandle should accept object handle to unserializable value",
+      "[jshandle.test] JSHandle Page.evaluateHandle should use the same JS wrappers",
+      "[jshandle.test] JSHandle JSHandle.getProperty should work",
+      "[jshandle.test] JSHandle JSHandle.jsonValue should work",
+      "[jshandle.test] JSHandle JSHandle.jsonValue works with jsonValues that are not objects",
+      "[jshandle.test] JSHandle JSHandle.jsonValue works with jsonValues that are primitives",
+      "[jshandle.test] JSHandle JSHandle.jsonValue should work with dates",
+      "[jshandle.test] JSHandle JSHandle.jsonValue should not throw for circular objects"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-evaluatehandle",
+    "reason": "Creates a handle with `page.evaluateHandle` (or `handle.evaluateHandle`, or passes one back into `page.evaluate`), which runs in the isolated world, and stock WebKit has no isolated worlds (`isolatedWorlds` is unsupported), so it fails `Unsupported` there"
+  },
+  {
+    "tests": [
+      "[jshandle.test] JSHandle Page.evaluateHandle should return the RemoteObject"
+    ],
+    "status": "notApplicable",
+    "reason": "Reads `remoteObject()`, which returns the Chrome DevTools Protocol's `Runtime.RemoteObject` for the handle, a protocol detail Strider's handles don't expose"
+  },
+  {
+    "tests": [
+      "[jshandle.test] JSHandle JSHandle.getProperties should work",
+      "[jshandle.test] JSHandle JSHandle.getProperties should return even non-own properties"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-jshandle-getproperties",
+    "reason": "Listing a handle's properties as handles with `getProperties()`, a map of them; Strider's JSHandle has `evaluate`, `evaluateHandle`, `read` and `release`, and no property enumeration"
+  },
+  {
+    "tests": [
+      "[jshandle.test] JSHandle JSHandle.asElement should work",
+      "[jshandle.test] JSHandle JSHandle.asElement should return null for non-elements",
+      "[jshandle.test] JSHandle JSHandle.asElement should return ElementHandle for TextNodes"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "Casts a JSHandle to an ElementHandle with `asElement`, which is null for a non-element and an element handle for a node, including a text node. Strider's JSHandle has no cast, so each test's first step has no counterpart"
+  },
+  {
+    "tests": [
+      "[jshandle.test] JSHandle JSHandle.toString should work for primitives",
+      "[jshandle.test] JSHandle JSHandle.toString should work for complicated objects",
+      "[jshandle.test] JSHandle JSHandle.toString should work with different subtypes",
+      "[jshandle.test] JSHandle JSHandle.toString should work with window subtypes"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locator-tostring",
+    "reason": "Asserts the text a JS handle's `toString()` gives for what it holds (`JSHandle:2`, `JSHandle@window`, `JSHandle@map`). Strider's JSHandle has no string preview: it reads its value with `read` and evaluates with `evaluate`. No matrix row covers a handle's string form; `method-locator-tostring`, the same preview missing on a locator, is the nearest"
+  },
+  {
+    "tests": [
+      "[jshandle.test] JSHandle JSHandle[Symbol.dispose] should work",
+      "[jshandle.test] JSHandle JSHandle[Symbol.asyncDispose] should work",
+      "[jshandle.test] JSHandle JSHandle.move should work"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-disposable-dispose",
+    "reason": "Disposes a handle with JavaScript's `using`, `await using`, or `move()`, which transfers it to a new handle. Strider's JSHandle has `release` and no disposal protocol, and handles are released with their scope; the matrix row for the disposal protocol is the nearest"
+  }
+]

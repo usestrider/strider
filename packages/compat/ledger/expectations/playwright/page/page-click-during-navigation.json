@@ -1,0 +1,9 @@
+[
+  {
+    "tests": [
+      "CL-109"
+    ],
+    "status": "notApplicable",
+    "reason": "Passes Playwright's internal `__testHookAfterStable` to `page.click`, which runs a navigation between the click's stability check and its dispatch. Strider has no hook at that point to call; the timing it forces is Playwright's own internal scheduling, not a behavior a Strider user can reach"
+  }
+]

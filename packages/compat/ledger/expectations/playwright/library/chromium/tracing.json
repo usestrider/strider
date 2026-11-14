@@ -1,0 +1,30 @@
+[
+  {
+    "tests": [
+      "TR-043",
+      "TR-044",
+      "TR-046",
+      "TR-048"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browser-starttracing",
+    "reason": "Recording Chromium's performance trace with `browser.startTracing` and `browser.stopTracing`. Strider's `Trace` records Playwright's trace viewer format for a context, which is a different recording"
+  },
+  {
+    "tests": [
+      "TR-045"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-starttracing-categories",
+    "reason": "Choosing the trace categories of Chromium's performance trace, which `browser.startTracing` would take"
+  },
+  {
+    "tests": [
+      "TR-047",
+      "TR-049"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-starttracing-screenshots",
+    "reason": "Recording screenshots into Chromium's performance trace, which `browser.startTracing` would take"
+  }
+]

@@ -1,0 +1,99 @@
+[
+  {
+    "tests": [
+      "[browser.test] Browser specs Browser.version should return version",
+      "[browser.test] Browser specs Browser.userAgent should include Browser engine",
+      "[browser.test] Browser specs Browser.userAgent should include Browser name"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "Puppeteer has no WebKit product: these checks name Chrome, Firefox, or Gecko, so the port runs them on Chromium and Firefox only. Stock WebKit's user agent names WebKit and no Chrome or Firefox"
+  },
+  {
+    "tests": [
+      "[browser.test] Browser specs Browser.target should return browser target"
+    ],
+    "status": "needsFeature",
+    "reason": "Reads the browser's own target, a CDP target of type browser. Strider has no member that gives a target for the browser itself; the nearest matrix row is the browser-level CDP session, and the matrix has no row for the browser target",
+    "matrix": "method-browser-newbrowsercdpsession"
+  },
+  {
+    "tests": [
+      "[browser.test] Browser specs Browser.process should return child_process instance",
+      "[browser.test] Browser specs Browser.process should not return child_process for remote browser"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browserserver-process",
+    "reason": "Reads the browser's process, with its pid, from a launched browser, and checks that a connected browser has none. Strider's Browser has no process member, so the pid and the null can't be read"
+  },
+  {
+    "tests": [
+      "[browser.test] Browser specs Browser.connected should set the browser connected state"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browser-isconnected",
+    "reason": "Checks a connected browser's connected flag, true while connected and false after disconnect. Strider's Browser has no status query; its connection ends with the scope that made it, and nothing reads whether it is connected"
+  },
+  {
+    "tests": [
+      "[browser.test] Browser specs Browser.screens should return default screen info",
+      "[browser.test] Browser specs Browser.add|removeScreen should add and remove a screen"
+    ],
+    "status": "needsFeature",
+    "reason": "Reads and changes the browser's screens, their geometry, and adds and removes a virtual screen. Strider has no screen API, so neither can be read nor set; the matrix has no row for screens, and the nearest is the viewport option",
+    "matrix": "option-browser-newcontext-viewport"
+  },
+  {
+    "tests": [
+      "[browser.test] Browser specs Browser.get|setWindowBounds should get and set browser window bounds",
+      "[browser.test] Browser specs Browser.get|setWindowBounds should set and get browser window maximized state"
+    ],
+    "status": "needsFeature",
+    "reason": "Opens a page as its own window and reads and sets the window's bounds and maximized state (and, in the second test, a screen to put it on). Strider has no window API: it sets a page's viewport, not the OS window around it. The matrix has no row for windows, and the nearest is the viewport",
+    "matrix": "method-page-setviewportsize"
+  },
+  {
+    "tests": [
+      "[browser.test] Browser specs Browser.on(\"console\") should report console messages replayed when attaching after connect"
+    ],
+    "status": "needsFeature",
+    "reason": "Registers a browser-level console listener on a second connection and expects it to receive a page's earlier message once. Strider has no browser-level console event, and the nearest matrix row is the context's; the page's earlier messages are its ConsoleMessage.history, which isn't the replay to a later connection the test checks",
+    "matrix": "event-browsercontext-console"
+  },
+  {
+    "tests": [
+      "[browser.test] Browser specs Browser.on(\"request\") should emit context events before browser events"
+    ],
+    "status": "needsFeature",
+    "reason": "Checks that a context's request event is emitted before the browser's. Strider has no browser-level request event, so there is no second emitter to order; the nearest matrix row is the context's",
+    "matrix": "event-browsercontext-request"
+  },
+  {
+    "tests": [
+      "[browser.test] Browser specs Browser network events should report finished requests from pages",
+      "[browser.test] Browser specs Browser network events should emit each event once per page event",
+      "[browser.test] Browser specs Browser network events should report responses from dedicated workers"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-browsercontext-requestfinished",
+    "reason": "Waits for a request's requestfinished event, on the browser or on a page. Strider has no requestfinished event: a request's response is read with NetworkRequest.response, which resolves once the headers arrive, not when the request finishes"
+  },
+  {
+    "tests": [
+      "[browser.test] Browser specs Browser network events should report requests served from cache"
+    ],
+    "status": "needsFeature",
+    "reason": "Waits for the browser's requestservedfromcache event for a request answered from the cache. Strider has no event for it: a request served from the cache reads the same as one from the network. The matrix has no row for the event, and the nearest is the context's requestfinished",
+    "matrix": "event-browsercontext-requestfinished"
+  },
+  {
+    "tests": [
+      "[browser.test] Browser specs Browser network events should emit context events before browser events"
+    ],
+    "status": "needsFeature",
+    "reason": "Checks that a context's response and requestfinished events come before the browser's. Strider has no browser-level network events and no requestfinished event; the nearest matrix row is the context's requestfinished",
+    "matrix": "event-browsercontext-requestfinished"
+  }
+]

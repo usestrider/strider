@@ -1,0 +1,17 @@
+[
+  {
+    "tests": [
+      "SE-062"
+    ],
+    "status": "notApplicable",
+    "reason": "Every assertion checks a parse error of Playwright's `role=` selector string: an empty role, an unknown attribute, a `level` or `checked` value of the wrong type, `~=` on a non-string value, `level` on a role it doesn't support, and an attribute with no value. Strider's `getByRole` takes typed options, so there's no selector string to parse and no parse error to raise. Each invalid value is a type error at compile time"
+  },
+  {
+    "tests": [
+      "SE-069",
+      "SE-070"
+    ],
+    "status": "notApplicable",
+    "reason": "Both set `process.env.PLAYWRIGHT_SKIP_INERT_CHECK` or `PLAYWRIGHT_SKIP_DIALOG_CHECK` and skip on every `mode` but `default`, because Playwright's in-process server reads the variable when it starts. They test that switch of Playwright's injected script, which Strider doesn't have: its `getByRole` always applies the inert and modal-dialog rules that these switches turn off"
+  }
+]

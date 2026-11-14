@@ -1,0 +1,29 @@
+[
+  {
+    "tests": [
+      "NE-136",
+      "NE-137",
+      "NE-138",
+      "NE-139",
+      "NE-140",
+      "NE-142"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-ignorehttpserrors",
+    "reason": "Accepting a self-signed HTTPS certificate in a context (`ignoreHTTPSErrors`), which these tests need for their TLS origins. Chromium refuses `acceptInsecureCerts` with Unsupported, because its certificate override applies to the whole browser (as browsercontext-add-cookies' CO-041 does)"
+  },
+  {
+    "tests": [
+      "NE-139"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-frame-evaluate",
+    "reason": "The test evaluates in the blocked iframe's isolated world, which stock WebKit lacks (`isolatedWorlds` is unsupported)"
+  }
+]

@@ -1,0 +1,70 @@
+[
+  {
+    "tests": [
+      "EV-026"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-exposefunction",
+    "reason": "Exposes a function the page calls back into Node through `page.exposeFunction`, which Strider doesn't have; the test calls `page.evaluate` from inside it"
+  },
+  {
+    "tests": [
+      "EV-057",
+      "EV-058",
+      "EV-059"
+    ],
+    "status": "differentByDesign",
+    "decision": "Evaluation takes a function, never a string of source",
+    "reason": "Passes a string expression to `page.evaluate`, which Playwright runs as source and Strider's `evaluate` doesn't accept: it takes a function. The matrix row says `has` for the function form, and no row covers a string expression"
+  },
+  {
+    "tests": [
+      "EV-093"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-frame-evaluate",
+    "reason": "Stock WebKit has no isolated world, which is the only world a frame can be evaluated in (a frame is entered by a locator for its element, and `Frame.evaluate` doesn't exist), so the pending evaluation inside a frame that this test detaches can't be made there",
+    "browsers": [
+      "webkit"
+    ]
+  },
+  {
+    "tests": [
+      "EV-037",
+      "EV-056",
+      "EV-060",
+      "EV-061",
+      "EV-083",
+      "EV-086",
+      "EV-090",
+      "EV-095"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-evaluatehandle",
+    "reason": "Stock WebKit has no isolated world, so `page.evaluateHandle`, and `page.evaluate` with a handle argument, fail with `Unsupported` there. Strider's handles are isolated-world values"
+  },
+  {
+    "tests": [
+      "EV-038"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright's `evaluate` takes one argument and rejects a second with its own \"Too many arguments\" message. Strider's `evaluate(fn, ...args)` takes any number of arguments, typed from the function's parameters, so the same call is valid and there is no such check to test"
+  },
+  {
+    "tests": [
+      "EV-075"
+    ],
+    "status": "notApplicable",
+    "reason": "Reads the `handles` global of Playwright's injected utility script, which Strider doesn't have: its engine runs in its own world and nothing of it is a page global"
+  },
+  {
+    "tests": [
+      "EV-092"
+    ],
+    "status": "notApplicable",
+    "reason": "Checks that Playwright's injected script exports nothing to the page as `pwExport`, a global of Playwright's own script, which Strider doesn't have"
+  }
+]

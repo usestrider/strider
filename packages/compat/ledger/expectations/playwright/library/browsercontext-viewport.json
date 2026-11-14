@@ -1,0 +1,25 @@
+[
+  {
+    "tests": [
+      "VP-004"
+    ],
+    "status": "needsFeature",
+    "matrix": "property-playwright-devices",
+    "reason": "Iterating Playwright's device table to check that each landscape descriptor's viewport is wider than it is tall. Strider has no device table, so there is no list of descriptors to read"
+  },
+  {
+    "tests": [
+      "VP-012"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-screen",
+    "reason": "Setting a context's screen size alongside its viewport, and reading window.screen back. Strider has no screen option, so the screen can't be set to the value the test expects"
+  },
+  {
+    "tests": [
+      "VP-015"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright's check of WebKit's minimal viewport on Windows, headed. The original skips every other browser and platform. Strider's launched WebKit is WebKitGTK's MiniBrowser (API.md, Stock WebKit, launched), not Playwright's WebKit build for Windows, and the original skips every other build, so there is no refusal of a 250x240 minimum for the test to read"
+  }
+]

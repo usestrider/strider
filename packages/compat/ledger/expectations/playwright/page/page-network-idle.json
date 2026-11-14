@@ -1,0 +1,23 @@
+[
+  {
+    "tests": [
+      "NE-070",
+      "NE-071",
+      "NE-072",
+      "NE-073",
+      "NE-074",
+      "NE-075",
+      "NE-076",
+      "NE-077",
+      "NE-078",
+      "NE-079",
+      "NE-080",
+      "NE-081",
+      "NE-082",
+      "NE-083"
+    ],
+    "status": "differentByDesign",
+    "decision": "Outcomes come from evidence, never from a guess or a timer",
+    "reason": "Every test waits for the network to go idle (networkidle), the load state Strider doesn't have: navigations, setContent, frame navigations, popups, and EventSource connections all resolve on it. Where networkidle is the point, there is no load state to substitute."
+  }
+]

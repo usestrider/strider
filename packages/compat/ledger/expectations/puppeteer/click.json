@@ -1,0 +1,69 @@
+[
+  {
+    "tests": [
+      "[click.test] Page.click should click with disabled javascript",
+      "[click.test] Page.click should scroll and click with disabled javascript"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-javascriptenabled",
+    "reason": "Turns JavaScript off with page.emulate({ javaScript: \"disabled\" }), which Firefox refuses Unsupported (emulation.javaScript; Firefox doesn't implement emulation.setScriptingEnabled)"
+  },
+  {
+    "tests": [
+      "[click.test] Page.click should click with disabled javascript",
+      "[click.test] Page.click should scroll and click with disabled javascript"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-page-framenavigated",
+    "reason": "Waits for the same-document navigation a fragment link makes with PageNavigation.next, which stock WebKit's inspector never reports (navigation.sameDocument is unsupported), so the wait would never end. The matrix row doesn't mention the WebKit limit"
+  },
+  {
+    "tests": [
+      "[click.test] Page.click should not hang with touch-enabled viewports"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-hastouch",
+    "reason": "Emulates a phone: a mobile viewport with touch, which Firefox and stock WebKit refuse Unsupported (emulation.viewport.mobile and emulation.touch)"
+  },
+  {
+    "tests": [
+      "[click.test] Page.click should click the button with deviceScaleFactor set"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-devicescalefactor",
+    "reason": "A device scale factor other than 1 for the viewport, which stock WebKit refuses Unsupported (emulation.viewport.mobile and its scale); the test also marks clicks with locator.evaluate, which needs isolated worlds"
+  },
+  {
+    "tests": [
+      "[click.test] Page.click should click the button with fixed position inside an iframe"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locator-evaluate",
+    "reason": "Styles and marks the frame's button with locator.evaluate, which runs in the isolated world, and stock WebKit has no isolated worlds (isolatedWorlds is unsupported)"
+  },
+  {
+    "tests": [
+      "[click.test] Page.click should fire back click",
+      "[click.test] Page.click should fire forward click"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-locator-click-button",
+    "reason": "Clicks with the back and forward mouse buttons; Strider's Mouse.Button is left, right and middle only, so these buttons have no Strider option. The matrix row says the option is present, which covers only the three buttons"
+  }
+]

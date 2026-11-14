@@ -1,0 +1,37 @@
+[
+  {
+    "tests": [
+      "ES-007"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-locator-value-xpath-and-playwright-selector-dsl",
+    "reason": "The test is the xpath engine: Strider's locators take CSS only, and XPath is planned for 1.0"
+  },
+  {
+    "tests": [
+      "ES-020",
+      "ES-021"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright's selector-string syntax errors: a second `*` capture in one selector, and an unknown engine (`*=div`). Strider has no selector strings, so there's no parser to reject them; its locators are CSS and the chained queries, which the port expresses instead"
+  },
+  {
+    "tests": [
+      "ES-012",
+      "ES-013",
+      "ES-014",
+      "ES-015",
+      "ES-016",
+      "ES-018",
+      "ES-019",
+      "ES-022",
+      "ES-026"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locator-evaluate",
+    "reason": "Locator.evaluate runs in the isolated world, which stock WebKit doesn't have, so it fails Unsupported there before it reads the match (the isolatedWorlds capability)"
+  }
+]

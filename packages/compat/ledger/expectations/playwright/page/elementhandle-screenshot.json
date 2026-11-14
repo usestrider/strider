@@ -1,0 +1,17 @@
+[
+  {
+    "tests": [
+      "EH-075"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-elementhandle-screenshot-type",
+    "reason": "Captures the element as WebP and decodes it to compare with the PNG. Strider's captures are PNG or JPEG (`ScreenshotFormat`), so a WebP capture can't be asked for. The matrix row marks webp as has, which is wrong"
+  },
+  {
+    "tests": [
+      "EH-090"
+    ],
+    "status": "notApplicable",
+    "reason": "Tests the `path` option, which writes the image and creates its directories. Strider returns the image's bytes and writes nothing, so writing them, with their directories and names, is the caller's own file I/O"
+  }
+]

@@ -1,0 +1,29 @@
+[
+  {
+    "tests": [
+      "[pdf.test] Page.pdf can print to PDF with accessible"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-pdf-tagged",
+    "reason": "Prints a tagged (accessible) PDF and an untagged one, and checks the tagged file is larger. Strider's PDF has no tagged option (option-page-pdf-tagged is missing)"
+  },
+  {
+    "tests": [
+      "[pdf.test] Page.pdf can print to PDF with outline"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-pdf-outline",
+    "reason": "Prints a PDF with an outline, which Strider's PDF has no option for (option-page-pdf-outline is missing)"
+  },
+  {
+    "tests": [
+      "[pdf.test] Page.pdf can print to PDF with custom mm and pt dimensions"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-pdf",
+    "reason": "Stock WebKit has no PDF output, so page.pdf is Unsupported there"
+  }
+]

@@ -1,0 +1,22 @@
+[
+  {
+    "tests": [
+      "PD-001",
+      "PD-002"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "Printing to PDF is Chromium only in the original, which skips the other browsers. Strider's PDF is Chromium's, and WebKit has no print-to-PDF"
+  },
+  {
+    "tests": [
+      "PD-002"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-pdf-outline",
+    "reason": "Passes `tagged` and `outline` to `page.pdf`, and checks that the outlined PDF is larger than the plain one. Strider's PDF options have neither (the matrix rows for both are missing), so the test can't be ported without dropping its setup"
+  }
+]

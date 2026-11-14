@@ -1,0 +1,49 @@
+[
+  {
+    "tests": [
+      "LO-177"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locator-within",
+    "reason": "`locator.within(other)` narrows a locator to the matches inside `other`, and Strider has no such operation. Every assertion of the test uses it"
+  },
+  {
+    "tests": [
+      "LO-159"
+    ],
+    "status": "notApplicable",
+    "reason": "Tests the error Playwright raises when a `*` capture marker in its selector string (`*css=div >> p`) is followed by `nth`: \"Can't query n-th element\". Strider's locators have no capture marker, and the error exists only in Playwright's selector syntax"
+  },
+  {
+    "tests": [
+      "LO-179"
+    ],
+    "status": "notApplicable",
+    "reason": "Tests Playwright's `*css=` capture marker inside a frame: a locator with a capture, placed in `locator(...)` after the frame prefix, keeps its capture, and a capture before a frame dive throws \"Can not capture the selector before diving into the frame\". Strider's locators have no capture, and a frame's locator is `page.frame(...)`"
+  },
+  {
+    "tests": [
+      "LO-180"
+    ],
+    "status": "notApplicable",
+    "reason": "Passes a locator from another frame to `has` and expects Playwright's runtime error, \"Inner \"has\" locator must belong to the same frame\". Strider's `has` takes a RelativeLocator, which has no frame, so the mistake is a type error and doesn't compile, as EX-216 does for `toHaveURL`"
+  },
+  {
+    "tests": [
+      "LO-182"
+    ],
+    "status": "notApplicable",
+    "reason": "Registers a custom selector engine (`playwright.selectors.register`) and counts through it while the page navigates. Strider's locators take CSS only and have no selector engines to register"
+  },
+  {
+    "tests": [
+      "LO-161"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locator-evaluate",
+    "reason": "The test's point is that evaluate is strict, and Locator.evaluate runs in an isolated world, which stock WebKit doesn't have"
+  }
+]

@@ -1,0 +1,11 @@
+[
+  {
+    "tests": [
+      "DI-002",
+      "DI-003"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-page-dialogclosed",
+    "reason": "Waiting for a page's dialogclosed event, which fires when a dialog closes however it was decided; Strider reports a dialog as it opens, and a dialog its policy decides as an AutoResolution, but not a close"
+  }
+]

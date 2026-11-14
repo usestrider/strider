@@ -1,0 +1,37 @@
+[
+  {
+    "tests": [
+      "EF-022",
+      "EF-027"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-exposebinding",
+    "reason": "Each test is about a binding a context exposes to its pages, and its arguments and its call from the page. Strider has no exposeBinding; a page evaluates in the main world only through evaluateInMainWorld, which exposes nothing"
+  },
+  {
+    "tests": [
+      "EF-023",
+      "EF-024",
+      "EF-025"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-exposefunction",
+    "reason": "Each test is about a function a context exposes to its pages, or a page's own exposeFunction, and its registration, disposal, or duplicate check. Strider has no exposeFunction (method-page-exposefunction is missing as well)"
+  },
+  {
+    "tests": [
+      "EF-026"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browsercontext-addinitscript-exposefunctions",
+    "reason": "Checks that an init script can call a function the context exposed, before the page's own scripts run. Strider's init scripts run in the page, but it has no exposed function for them to call"
+  },
+  {
+    "tests": [
+      "EF-028"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-exposebinding",
+    "reason": "Checks that a binding the context exposed is delivered when the page's pagehide handler calls it during a navigation away (the issue it cites is about a binding call from the old document being dropped). The binding is the point: a port whose handler writes to sessionStorage would pass whether or not binding calls survive the navigation. Strider has no exposeBinding"
+  }
+]

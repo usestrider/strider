@@ -1,0 +1,9 @@
+[
+  {
+    "tests": [
+      "CR-033"
+    ],
+    "status": "notApplicable",
+    "reason": "Expects Playwright's `launchServer` to refuse `--remote-debugging-pipe` with \"Playwright manages remote debugging connection itself\". That refusal is Playwright's argument check for its own transport. Strider has no server mode, and its launch passes caller arguments through ahead of the transport flag it adds, so there is no refusal to test"
+  }
+]

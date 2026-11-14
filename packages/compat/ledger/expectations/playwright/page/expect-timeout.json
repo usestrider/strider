@@ -1,0 +1,19 @@
+[
+  {
+    "tests": [
+      "EX-250",
+      "EX-251"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-addlocatorhandler",
+    "reason": "Waiting for Playwright's page.addLocatorHandler, which runs a handler when a locator is covered and waits for it to be hidden; Strider has no locator handler, so a check covered by an overlay can't be ported"
+  },
+  {
+    "tests": [
+      "EX-258"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-locatorassertions-tobevisible-signal",
+    "reason": "An AbortSignal that is already aborted when the expectation starts fails it at once with the signal's reason, for toBeVisible and toHaveURL alike. Strider has no signal: an expectation that is interrupted before it starts never runs, so nothing fails with a message to assert. The matrix row says Strider cancels by interruption, which has no counterpart of an already-aborted signal"
+  }
+]

@@ -1,0 +1,49 @@
+[
+  {
+    "tests": [
+      "NE-012",
+      "NE-013"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-request-postdatabuffer",
+    "reason": "Stock WebKit exposes a request's decoded text, not its original bytes (network.requestBody.bytes is unsupported there), so a 256-byte binary body can't be read back byte for byte"
+  },
+  {
+    "tests": [
+      "NE-015",
+      "NE-019"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-request-postdata",
+    "reason": "Stock WebKit refuses an empty or missing native text report, so it can't establish that a GET has no body (network.requestBody.absence is unsupported there), and the body read fails instead of giving None"
+  },
+  {
+    "tests": [
+      "NE-020"
+    ],
+    "browsers": [
+      "chromium",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-request-postdata",
+    "reason": "A multipart/form-data body can't be read on Chromium or stock WebKit: Chromium's native report can omit a file and is refused (network.requestBody.multipart is unsupported there), and WebKit refuses multipart reports whose completeness it can't establish. Firefox reads the whole body"
+  },
+  {
+    "tests": [
+      "NE-026"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-request-allheaders",
+    "reason": "WebKitGTK's network process doesn't report the Cookie header, so a request's sent headers have no cookie there (network.headersSent is partial on stock WebKit). The matrix row method-request-allheaders says Strider has the full sent headers, which WebKit doesn't give"
+  }
+]

@@ -1,0 +1,63 @@
+[
+  {
+    "tests": [
+      "[requestinterception.test] request interception Page.setRequestInterception should be abortable with custom error codes"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-route-abort",
+    "reason": "Aborts the navigation with the reason internetdisconnected and reads its errorText as net::ERR_INTERNET_DISCONNECTED. Only Chromium takes an abort reason (interception.abortReason); Firefox and WebKit report one failure for every reason, so Route.abort with a reason is refused there and the navigation loads"
+  },
+  {
+    "tests": [
+      "[requestinterception.test] request interception Page.setRequestInterception should throw if interception is not enabled"
+    ],
+    "status": "notApplicable",
+    "reason": "Asserts that `request.continue()` throws while Puppeteer's `setRequestInterception` flag is off. Strider has no such flag: a route is the interception, and a request is paused only while a route is registered, so there is no disabled state to refuse"
+  },
+  {
+    "tests": [
+      "[requestinterception.test] request interception Page.setRequestInterception should not cache ${resourceType} if cache disabled"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-reload",
+    "reason": "Turns the page's HTTP cache off (`setCacheEnabled(false)`), then reloads and expects no response served from the cache. Strider has no page-level cache switch: `page.reload` takes `bypassCache` for one reload only. The matrix has no row for a cache switch, so method-page-reload is the nearest"
+  },
+  {
+    "tests": [
+      "[requestinterception.test] request interception Request.continue should amend HTTP headers given as a Headers instance"
+    ],
+    "status": "notApplicable",
+    "reason": "Puppeteer's `request.continue` takes a `headers` argument, which may be a Web `Headers` instance as well as a record. Strider's decision is a change to the request (`Route.continueWith`) with no headers argument, so there is no second input form to pass a `Headers` to. The header change is ported as \"should amend HTTP headers\""
+  },
+  {
+    "tests": [
+      "[requestinterception.test] request interception Request.continue should fail if the header value is invalid",
+      "[requestinterception.test] request interception Request.respond should fail if the header value is invalid"
+    ],
+    "status": "differentByDesign",
+    "decision": "Handlers produce decisions through Effects",
+    "reason": "Expects the call that continues or responds to fail with the header's error, then continues the request again. A Strider handler returns its decision, and the browser refuses an invalid header only when the decision is applied, after the handler has returned, so no call of the handler's fails. The refusal is not raised to the handler"
+  },
+  {
+    "tests": [
+      "[requestinterception.test] request interception Request.respond should stringify intercepted request response headers"
+    ],
+    "status": "notApplicable",
+    "reason": "Puppeteer's `request.respond` stringifies a non-string header value (`foo: true`). Strider's header input is typed as strings and refuses other values at compile time, so there is no non-string value for the browser to receive"
+  },
+  {
+    "tests": [
+      "[requestinterception.test] request interception Request.continue should redirect in a way non-observable to page"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-route-continue-url",
+    "reason": "Continues a request to another URL, so the navigation to empty.html commits the other document (consolelog.html) and the page keeps its URL. Firefox can't continue a request with a new URL (`interception.continueUrl` is unsupported on its BiDi backend), so the redirect doesn't happen there"
+  }
+]

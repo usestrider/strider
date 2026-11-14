@@ -1,0 +1,115 @@
+[
+  {
+    "tests": [
+      "[elementhandle.test] ElementHandle specs ElementHandle.boxModel should work",
+      "[elementhandle.test] ElementHandle specs ElementHandle.boxModel should return null for invisible elements",
+      "[elementhandle.test] ElementHandle specs ElementHandle.boxModel should correctly compute box model with offsets"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-elementhandle-boundingbox",
+    "reason": "Reads the box model, four quads of content, padding, border and margin with the element's width and height. Strider's `Locator.boundingBox` gives one rectangle, and no row covers quads; `method-elementhandle-boundingbox` is the nearest, the handle's box, which is missing as well"
+  },
+  {
+    "tests": [
+      "[elementhandle.test] ElementHandle specs ElementHandle.clickablePoint should work",
+      "[elementhandle.test] ElementHandle specs ElementHandle.clickablePoint should not work if the click box is not visible",
+      "[elementhandle.test] ElementHandle specs ElementHandle.clickablePoint should not work if the click box is not visible due to the iframe",
+      "[elementhandle.test] ElementHandle specs ElementHandle.clickablePoint should work for iframes"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-elementhandle-click",
+    "reason": "Returns the point a click lands on, in page coordinates, and fails when the element's click box is outside the viewport. Strider has no point read: its clicks choose the point internally and report nothing. `method-elementhandle-click` is the nearest row, the click whose point this reads"
+  },
+  {
+    "tests": [
+      "[elementhandle.test] ElementHandle specs ElementHandle.touchStart should work",
+      "[elementhandle.test] ElementHandle specs ElementHandle.touchStart should work with the returned Touch",
+      "[elementhandle.test] ElementHandle specs ElementHandle.touchMove should work",
+      "[elementhandle.test] ElementHandle specs ElementHandle.touchMove should work with a pre-existing Touch",
+      "[elementhandle.test] ElementHandle specs ElementHandle.touchEnd should work"
+    ],
+    "status": "needsFeature",
+    "matrix": "property-page-touchscreen",
+    "reason": "Starts, moves and ends touches on an element or at points, and holds them between steps. Strider has no touchscreen: `Locator.tap` sends one tap, and nothing starts, moves or ends a touch on its own"
+  },
+  {
+    "tests": [
+      "[elementhandle.test] ElementHandle specs ElementHandle.isVisible and ElementHandle.isHidden should not throw for a detached text node with no parent element",
+      "[elementhandle.test] ElementHandle specs ElementHandle.isVisible and ElementHandle.isHidden should use the shadow host for a text node placed directly in a shadow root",
+      "[elementhandle.test] ElementHandle specs ElementHandle.click should not work for TextNodes",
+      "[elementhandle.test] ElementHandle specs ElementHandle.toElement should work"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "Targets a handle to a text node, which a locator can't select (locators select elements), and casts a handle to an element type (`toElement`). Strider's JSHandle has no cast, and `method-jshandle-aselement` is the nearest row"
+  },
+  {
+    "tests": [
+      "[elementhandle.test] ElementHandle specs Element.waitForSelector should wait correctly with waitForSelector and xpath on an element"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-locator-value-xpath-and-playwright-selector-dsl",
+    "reason": "Waits for an XPath query inside an element, `xpath/.//div`. Locators accept CSS only; XPath is planned for 1.0 and has no form yet"
+  },
+  {
+    "tests": [
+      "[elementhandle.test] ElementHandle specs Custom queries should register and unregister",
+      "[elementhandle.test] ElementHandle specs Custom queries should throw with invalid query names",
+      "[elementhandle.test] ElementHandle specs Custom queries should work for multiple elements",
+      "[elementhandle.test] ElementHandle specs Custom queries should eval correctly",
+      "[elementhandle.test] ElementHandle specs Custom queries should wait correctly with waitForSelector",
+      "[elementhandle.test] ElementHandle specs Custom queries should wait correctly with waitForSelector on an element",
+      "[elementhandle.test] ElementHandle specs Custom queries should work when both queryOne and queryAll are registered",
+      "[elementhandle.test] ElementHandle specs Custom queries should eval when both queryOne and queryAll are registered",
+      "[elementhandle.test] ElementHandle specs Custom queries should work with function shorthands"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-selectors-register",
+    "reason": "Registers named query handlers (`getById/foo`) that page.$, $$, $eval and waitForSelector then use, and unregisters them. Strider has no custom selector registry, so there is nothing to register a query with; the matrix row says so"
+  },
+  {
+    "tests": [
+      "[elementhandle.test] ElementHandle specs ElementHandle.dispose should dispose cached isolated handler"
+    ],
+    "status": "notApplicable",
+    "reason": "Tests Puppeteer's own bookkeeping: the isolated-world handle its click caches and that `dispose` then disposes (spied with sinon). Strider's handles keep no such cache; they are released with `JSHandle.release` and Effect scopes"
+  },
+  {
+    "tests": [
+      "[elementhandle.test] ElementHandle specs ElementHandle[Symbol.dispose] should work",
+      "[elementhandle.test] ElementHandle specs ElementHandle[Symbol.asyncDispose] should work",
+      "[elementhandle.test] ElementHandle specs ElementHandle.move should work"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-disposable-dispose",
+    "reason": "Disposes a handle with JavaScript's `using`, `await using`, or `move()`, which transfers it to a new handle. Strider's JSHandle has `release` and no disposal protocol, and handles are released with their scope; the matrix row for the disposal protocol is the nearest"
+  },
+  {
+    "tests": [
+      "[elementhandle.test] ElementHandle specs ElementHandle.click should work",
+      "[elementhandle.test] ElementHandle specs ElementHandle.click should return Point data",
+      "[elementhandle.test] ElementHandle specs ElementHandle.click should work for Shadow DOM v1",
+      "[elementhandle.test] ElementHandle specs ElementHandle.click should throw for detached nodes",
+      "[elementhandle.test] ElementHandle specs ElementHandle.click should throw for hidden nodes",
+      "[elementhandle.test] ElementHandle specs ElementHandle.click should throw for recursively hidden nodes",
+      "[elementhandle.test] ElementHandle specs ElementHandle.click should throw for <br> elements"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-elementhandle-click",
+    "reason": "Clicks through a locator, which needs `input.native`, and stock WebKit's inspector protocol has no Input domain (the adapter refuses it Unsupported), so the click fails before the test's own checks run"
+  },
+  {
+    "tests": [
+      "[elementhandle.test] ElementHandle specs ElementHandle.hover should work"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-elementhandle-hover",
+    "reason": "Hovers through a locator, which needs `input.native`; stock WebKit's inspector protocol has no Input domain, so the hover fails Unsupported"
+  }
+]

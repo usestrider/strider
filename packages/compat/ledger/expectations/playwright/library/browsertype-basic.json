@@ -1,0 +1,24 @@
+[
+  {
+    "tests": [
+      "BT-001"
+    ],
+    "status": "differentByDesign",
+    "decision": "A launch never picks a browser nobody named",
+    "reason": "Expects the browser's default executable to be found on disk. Strider has no installed-browser lookup: a launch takes the executable path it is given, so there is no default path to check"
+  },
+  {
+    "tests": [
+      "BT-002"
+    ],
+    "status": "notApplicable",
+    "reason": "Reads the browser type's name, the engine's id as Playwright names it. Strider's browser info names the product and version, and the backend is the launch layer the test chose, so there is no engine id to read"
+  },
+  {
+    "tests": [
+      "BT-003"
+    ],
+    "status": "notApplicable",
+    "reason": "Expects Playwright's error text for connecting over CDP to a browser that isn't Chromium or WebKit. connectOverCDP is Chromium-only in Strider too (layerConnect), and the other browsers have no CDP connection to refuse, so only Playwright's wording is tested"
+  }
+]

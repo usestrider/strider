@@ -1,0 +1,51 @@
+[
+  {
+    "tests": [
+      "ST-012",
+      "ST-013"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-serviceworkers",
+    "reason": "Stock WebKit reports no service workers (workers.service is unsupported), so a page's service worker and its controller change aren't observed; the matrix row says Strider has service workers without a WebKit override"
+  },
+  {
+    "tests": [
+      "ST-014",
+      "ST-015"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-frame-evaluate",
+    "reason": "A frame's localStorage is read in Strider's isolated world, and stock WebKit has no isolated worlds (isolatedWorlds is unsupported)"
+  },
+  {
+    "tests": [
+      "ST-005"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browsercontext-storagestate-opfs",
+    "reason": "Strider's storage state has no origin-private file (OPFS) export or import, so the test's OPFS entries can't be read or restored"
+  },
+  {
+    "tests": [
+      "ST-020",
+      "ST-021"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browsercontext-storagestate-credentials",
+    "reason": "Strider's storage state carries no WebAuthn credentials, and a context has no credentials collection: its virtual authenticator is per page"
+  },
+  {
+    "tests": [
+      "ST-009",
+      "ST-022"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright reads a storage state from a file path and names the path in its read error. Strider's state is a decoded value and reads no file: a caller reads the file and decodes it with StorageState.Json, so the path error has no Strider counterpart"
+  }
+]

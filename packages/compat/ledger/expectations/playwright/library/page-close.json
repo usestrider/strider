@@ -1,0 +1,46 @@
+[
+  {
+    "tests": [
+      "PA-041"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-addlocatorhandler",
+    "reason": "Registering a locator handler on a page, which runs when a locator's interstitial shows and is what the closed page's error reports; Strider has no addLocatorHandler"
+  },
+  {
+    "tests": [
+      "PA-047"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-opener",
+    "reason": "Reading a popup's opener(), which must be null once the opener has closed; Strider's Popup has no link back to the opener"
+  },
+  {
+    "tests": [
+      "PA-053"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-exposefunction",
+    "reason": "Exposing a function to the page, which the page calls to close the page from its own script; Strider has no exposeFunction"
+  },
+  {
+    "tests": [
+      "PA-051"
+    ],
+    "browsers": [
+      "chromium",
+      "webkit"
+    ],
+    "status": "differentByDesign",
+    "decision": "Sent-header waits end with their owner",
+    "reason": "Expects `request.allHeaders()` to reject when the page closes before the sent headers are known. Strider's `headersSent` has no failure but a timeout: when the page closes it gives the available sent headers, or the request event's headers, so it succeeds. The response half of the test passes"
+  },
+  {
+    "tests": [
+      "PA-054"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-response-finished",
+    "reason": "Waiting for a response's body to finish, which must reject when the page closes; Strider's NetworkResponse has no finished"
+  }
+]

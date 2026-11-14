@@ -1,0 +1,13 @@
+[
+  {
+    "tests": ["DB-001", "DB-002", "DB-003", "DB-007", "DB-010"],
+    "status": "needsFeature",
+    "matrix": "method-debugger-requestpause",
+    "reason": "`context.debugger` pauses the next action or a `page.pause()`, reports the paused action's details, resumes, and runs to a location. DB-007 and DB-010 check that pause (`requestPause`, `resume`, `pausedDetails`) skips internal calls and keeps working beside the api-call stream. Strider has no debugger or breakpoint API (the `method-debugger-*` rows and `property-browsercontext-debugger`), so these can't be ported"
+  },
+  {
+    "tests": ["DB-004", "DB-005", "DB-006", "DB-008", "DB-009"],
+    "status": "notApplicable",
+    "reason": "Playwright's internal debugger traffic: `_enable` streams the API calls its own dashboard shows, with the error status, the action point and the source location of calls, and `_wrapApiCall({ internal })` marks calls its dashboard makes so they're left out. Strider has no such stream or internal-call marker. DB-008 and DB-009 also pause an action to set up their state, which is the feature gap of DB-001 to DB-003"
+  }
+]

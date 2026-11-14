@@ -1,0 +1,10 @@
+[
+  {
+    "tests": [
+      "TA-010"
+    ],
+    "status": "differentByDesign",
+    "decision": "Explicit DOM event constructors",
+    "reason": "Dispatches TouchEvents whose `touches` are plain touch points that Playwright turns into Touch objects. Strider doesn't emulate touch dictionaries: an event's init crosses by value, and a missing constructor or dictionary is a typed refusal, not a stand-in"
+  }
+]

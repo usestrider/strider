@@ -1,0 +1,32 @@
+[
+  {
+    "tests": [
+      "BT-018"
+    ],
+    "status": "notApplicable",
+    "reason": "Reads the error classes Playwright exports on its package object. Strider's failures are typed errors matched by their reason, such as Deadline.Timeout, and it has no such export to check"
+  },
+  {
+    "tests": [
+      "BT-019"
+    ],
+    "status": "needsFeature",
+    "matrix": "property-playwright-devices",
+    "reason": "Reads Playwright's table of device descriptors, such as iPhone 6 and its default browser type. Strider has no device table"
+  },
+  {
+    "tests": [
+      "BT-020"
+    ],
+    "status": "notApplicable",
+    "reason": "Passes Playwright's internal test hooks to the launch, which stall its graceful close. Strider's launch takes no such hooks"
+  },
+  {
+    "tests": [
+      "BT-021"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browsertype-launch-env",
+    "reason": "Launches a headed browser with no X server, by removing DISPLAY from the browser's environment, and expects Playwright's message about xvfb-run. Strider has no per-launch environment to remove DISPLAY from, and its message is its own"
+  }
+]

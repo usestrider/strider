@@ -1,0 +1,40 @@
+[
+  {
+    "tests": [
+      "[ariaqueryhandler.test] AriaQueryHandler queryAllArray $$eval should handle many elements"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locator-evaluateall",
+    "reason": "Evaluates one function over every match with locator.evaluateAll, which runs in the isolated world, and stock WebKit has no isolated worlds (isolatedWorlds is unsupported)"
+  },
+  {
+    "tests": [
+      "[ariaqueryhandler.test] AriaQueryHandler waitForSelector (aria) Page.waitForSelector is shortcut for main frame",
+      "[ariaqueryhandler.test] AriaQueryHandler waitForSelector (aria) should run in specified frame"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-frame-evaluate",
+    "reason": "Adds an element to a frame by evaluating in its frame locator, which runs in the isolated world, and stock WebKit has no isolated worlds (isolatedWorlds is unsupported)"
+  },
+  {
+    "tests": [
+      "[ariaqueryhandler.test] AriaQueryHandler waitForSelector (aria) should work independently of `exposeFunction`"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-exposefunction",
+    "reason": "Exposes a function to the page with page.exposeFunction and calls it from the page after an aria wait, to check the query handler doesn't interfere with a binding of the user's; Strider has no exposeFunction, and page.evaluateInMainWorld can't install a binding the page calls by name"
+  },
+  {
+    "tests": [
+      "[ariaqueryhandler.test] AriaQueryHandler parseAriaSelector should find button"
+    ],
+    "status": "notApplicable",
+    "reason": "Checks Puppeteer's aria selector grammar: a role or name in brackets after the name, quoting of the bracketed values, spaces around them, and the error for an unknown aria attribute. Strider's getByRole and its options replace the grammar; which elements the selector finds by role and name is covered by the queryOne tests"
+  }
+]

@@ -1,0 +1,39 @@
+[
+  {
+    "tests": [
+      "SE-112",
+      "SE-113"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright's selector parser rejects an `internal:control=enter-frame` at the end of a selector (\"Selector cannot end with\") or at its start (\"Selector cannot start with\"). These are `>>` selector strings, which the selector-dsl decision excludes from 1.0 (scripts/playwright-matrix/metadata.json). Strider's frame is typed: `page.frame(iframe)` takes an iframe locator and returns a FrameLocator, which has no action or read that could end at the frame boundary, so the dangling and leading forms can't be written"
+  },
+  {
+    "tests": [
+      "SE-114"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright's `*css=` capture marker placed before `internal:control=enter-frame` fails with \"Can not capture the selector before diving into the frame\". Capture is part of the `>>` selector string, which the selector-dsl decision excludes from 1.0. Strider's locators have no capture, and `page.frame(iframe)` takes the iframe's locator directly, so there is no capture to misplace"
+  },
+  {
+    "tests": [
+      "SE-124",
+      "SE-125",
+      "SE-126",
+      "SE-127",
+      "SE-128",
+      "SE-130"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-framelocator",
+    "reason": "Playwright's frameLocator() with no selector (internal:control=any-frame) searches every frame in the page for its chain, the main frame included: SE-124 and SE-125 find a div and a nested button in a child frame without naming it, SE-126 that a chain can't cross frames, SE-127 that its matches in several frames are all read, SE-128 that a read fails when they fall in several frames, and SE-130 that an iframe found in any frame can be entered. Strider enters a frame only by its iframe element (page.frame(iframe)), so naming the frame would not exercise the search, and there is none to assert on. The matrix's Page.frameLocator row says has, but it maps to the iframe-element form only; no row names the selector-less form, which is the missing feature (see locator-any-frame, which waits on the same row)"
+  },
+  {
+    "tests": [
+      "SE-129",
+      "SE-131",
+      "SE-132"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright's parser errors for any-frame in the middle of a selector string, after an enter-frame, and for a dangling enter-frame after any-frame. They test the `>>` selector string's syntax, which the selector-dsl decision excludes from 1.0 (scripts/playwright-matrix/metadata.json), not the search across frames (SE-124 to SE-128 and SE-130 hold that). Strider's frame locators are built by calls that can't be put in these orders, and they can't end at a frame boundary, so no call reaches these errors"
+  }
+]

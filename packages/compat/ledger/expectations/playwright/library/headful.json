@@ -1,0 +1,36 @@
+[
+  {
+    "tests": [
+      "HE-010"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newpage-ignorehttpserrors",
+    "reason": "The page's TLS fixture uses a self-signed certificate, which a context accepts with acceptInsecureCerts. Chromium refuses acceptInsecureCerts with Unsupported, because its certificate override applies to the whole browser"
+  },
+  {
+    "tests": [
+      "HE-010",
+      "HE-011"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "The original skips WebKit for this test (\"No third party cookies in WebKit\" for HE-010, and \"Our WebKit embedder does not respect window features\" for HE-011), so the port runs it on the other browsers only"
+  },
+  {
+    "tests": [
+      "HE-015",
+      "HE-016"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browsertype-launch-headless",
+    "reason": "The test launches a second browser headless next to the headed one. WebKitGTK has no headless mode, so the second launch is refused with InvalidInput, as the matrix row's webkit.launched override says"
+  }
+]

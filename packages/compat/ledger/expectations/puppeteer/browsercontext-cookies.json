@@ -1,0 +1,43 @@
+[
+  {
+    "tests": [
+      "[browsercontext-cookies.test] BrowserContext cookies BrowserContext.cookies should find partitioned cookie"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-addcookies",
+    "reason": "Sets a partitioned cookie and reads its partition back. Firefox and stock WebKit can't set one (`cookies.partitioned` is unsupported there, and Firefox doesn't say which partition a cookie is in). No matrix row names partitioned cookies, so this cites addCookies, the nearest row, as the cookies entries do"
+  },
+  {
+    "tests": [
+      "[browsercontext-cookies.test] BrowserContext cookies BrowserContext.setCookie should set cookie with a partition key"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-ignorehttpserrors",
+    "reason": "Sets a secure partitioned cookie and loads the fixture's HTTPS page, whose certificate is self-signed, so the test accepts it with `acceptInsecureCerts`. Chromium refuses that per context, since its certificate override applies to the whole browser (as the cookies entries for the frame case do)"
+  },
+  {
+    "tests": [
+      "[browsercontext-cookies.test] BrowserContext cookies BrowserContext.setCookie should set cookie with a partition key"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-addcookies",
+    "reason": "Sets a partitioned cookie, which Firefox and stock WebKit can't do (`cookies.partitioned` is unsupported there). No matrix row names partitioned cookies, so this cites addCookies, the nearest row"
+  },
+  {
+    "tests": [
+      "[browsercontext-cookies.test] BrowserContext cookies BrowserContext.deleteMatchingCookies should only delete cookies in the matching partition",
+      "[browsercontext-cookies.test] BrowserContext cookies BrowserContext.deleteMatchingCookies should not delete unpartitioned cookies when partitionKey is given",
+      "[browsercontext-cookies.test] BrowserContext cookies BrowserContext.deleteMatchingCookies should match hasCrossSiteAncestor in partitionKey"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-clearcookies",
+    "reason": "Removes the cookies of one partition, or those matching a partition key. Strider's `CookieJar.remove` takes a name, domain and path, with no partition key, so it removes the cookie in every partition and the test's partitioned removal can't be written. No matrix row names a partition option for removal; this cites clearCookies, the nearest row, as the cookies entry for the partitioned deleteCookie does"
+  }
+]

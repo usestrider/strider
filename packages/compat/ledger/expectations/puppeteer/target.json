@@ -1,0 +1,77 @@
+[
+  {
+    "tests": [
+      "[target.test] Target Target.asPage() should return the same instance",
+      "[target.test] Target Browser.targets should return all of the targets",
+      "[target.test] Target should contain browser target"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browser-newbrowsercdpsession",
+    "reason": "Reads Puppeteer's CDP target model: a `Target` for each page, the browser itself, and workers, from `target.page()`, `target.asPage()`, `target.type()`, and `browser.targets()`. Strider has no target object or list of targets: a page is the page, and the browser's pages are `browser.pages`, which have no browser-level target. The nearest matrix row is the CDP-level browser session, which Strider doesn't expose either"
+  },
+  {
+    "tests": [
+      "[target.test] Target page should return tab target id"
+    ],
+    "status": "notApplicable",
+    "reason": "Reads `page._tabId`, a field of Puppeteer's internal CDP target model that the original's own expectations also fail on WebDriver BiDi. Strider's page has an id of its own, and the test's point is an internal of Puppeteer's"
+  },
+  {
+    "tests": [
+      "[target.test] Target should report when a service worker is created and destroyed",
+      "[target.test] Target should create a worker from a service worker"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-browsercontext-serviceworker",
+    "reason": "Subscribes to a context's service workers. Strider reports service workers on Chromium only, and asking for them on Firefox and WebKit fails with Unsupported (the `workers.service` capability)"
+  },
+  {
+    "tests": [
+      "[target.test] Target should create a worker from a shared worker"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-browsercontext-serviceworker",
+    "reason": "Subscribes to a context's shared workers. Strider reports shared workers on Chromium only, and asking for them on Firefox and WebKit fails with Unsupported (the `workers.shared` capability). The nearest matrix row is the context's service worker stream, which has the same kind of subscription"
+  },
+  {
+    "tests": [
+      "[target.test] Target should emit exceptions on a service worker but not on the page"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-worker-console",
+    "reason": "Listens for an `exception` event on a service worker. Strider's workers have no exception or console event (the worker's `closed` and by-value `evaluate` are all it has), so the worker's side of the check has nothing to listen to. The nearest matrix row is the worker console event, which is missing for the same reason"
+  },
+  {
+    "tests": [
+      "[target.test] Target should close a service worker",
+      "[target.test] Target should close a shared worker"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-worker-close",
+    "reason": "Calls `worker.close()` on a service or shared worker and waits for its destruction. Strider's BrowserWorker has no close: a worker's `closed` effect reports when it ends, and nothing in the API ends a shared or service worker on request"
+  },
+  {
+    "tests": [
+      "[target.test] Target should not report uninitialized pages"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-browsercontext-page",
+    "reason": "Listens for `targetchanged` on the context and expects none while pages are created and a popup opens. Strider has no target-changed event: a page's URL is a watchable of its own, and the context's page event (`context.pages`) reports a page's creation only, so there is nothing to count. The nearest matrix row is the context's page event"
+  },
+  {
+    "tests": [
+      "[target.test] Target should have an opener"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-opener",
+    "reason": "Reads `target.opener()` of a popup, which is the page that opened it, and of the page itself, which has none. Strider has no `Page.opener`: a popup is reported by `Popup.next` to the page that opened it (not on WebKit), but a page can't say what opened it, and nothing says a page has none. Puppeteer launches Chromium with `--disable-popup-blocking`, so the page-load `window.open` opens there; without it Chromium blocks it, but the missing opener is the test's point"
+  }
+]

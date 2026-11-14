@@ -1,0 +1,73 @@
+[
+  {
+    "tests": [
+      "DC-021"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browsertype-launchpersistentcontext-ignorehttpserrors",
+    "reason": "Accepting the fixture's self-signed certificate is a creation option of a context (`acceptInsecureCerts`), and a launched browser's default context takes no creation options. Chromium refuses the per-context form in any case"
+  },
+  {
+    "tests": [
+      "DC-029"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright refuses a page URL among a persistent context's `args`, since it opens its own page. Strider passes `args` to the browser unchanged, so a URL there opens a tab beside the one the launch opens"
+  },
+  {
+    "tests": [
+      "DC-030"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browsertype-launchpersistentcontext-ignoredefaultargs",
+    "reason": "Launching without the browser's default arguments (`ignoreDefaultArgs`), which Strider's launch doesn't offer"
+  },
+  {
+    "tests": [
+      "DC-031",
+      "DC-032"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright's internal `__testHookBeforeCreateBrowser` option, which runs before the browser is created. Strider's launch timeout is `Deadline.within` (option-browsertype-launchpersistentcontext-timeout)"
+  },
+  {
+    "tests": [
+      "DC-034"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "The original runs on Chromium only, where JavaScript coverage is Chromium's"
+  },
+  {
+    "tests": [
+      "DC-035"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-selectors-register",
+    "reason": "A custom selector engine registered with `playwright.selectors.register`, which Strider has no registry for"
+  },
+  {
+    "tests": [
+      "DC-036"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright's internal `__testHookOnConnectToBrowser` option, which delays the connection to the browser"
+  },
+  {
+    "tests": [
+      "DC-038"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright's internal channel call `defaultUserAgentForTest`, which asks the browser for its own user agent; Strider has no such call"
+  },
+  {
+    "tests": [
+      "DC-034"
+    ],
+    "status": "notApplicable",
+    "reason": "Strider won't collect coverage from a browser run (ROOK-385, ROOK-386): build-time instrumentation, read back with evaluate, works on every browser. JavaScript coverage (`page.coverage.startJSCoverage`), which Strider doesn't have"
+  }
+]

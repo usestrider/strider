@@ -1,0 +1,40 @@
+[
+  {
+    "tests": [
+      "RO-083",
+      "RO-084",
+      "RO-085",
+      "RO-086"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-route-continue-headers",
+    "reason": "Playwright re-applies a continue's header overrides to each redirect hop of the request (crNetworkManager's redirect path), so a header set on the first hop reaches the redirect's target, and a header deleted there stays deleted. Strider's change applies to the hop its route is given, and the route sees the redirect's target only if its pattern matches it; Chromium doesn't keep a Fetch header override across a redirect, so the target gets the original headers. A route whose pattern also matches the redirect's target is called for that hop and can apply the change itself, but these routes match only the first hop. RO-085 is Playwright's route.fallback({ headers }), ported as Route.continueWith, since Strider's fallthrough takes no changes (matrix row option-route-fallback-headers is missing too)"
+  },
+  {
+    "tests": [
+      "RO-090"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-route-continue-headers",
+    "reason": "The route's authorization header is set on a cross-origin redirect's first hop, and Playwright re-applies it to the redirect's target, which receives it on Chromium and Firefox; Strider doesn't carry a header change across a redirect (see RO-083). WebKit's redirect hop isn't paused, and its native behavior, which drops the header, is what the test expects there"
+  },
+  {
+    "tests": [
+      "RO-062",
+      "RO-065"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-route-continue-url",
+    "reason": "Firefox's WebDriver BiDi aborts a request continued with a new URL, so Route.continueWith(setUrl) there is refused with Unsupported (interception.continueUrl), and the request continues to its original URL"
+  }
+]

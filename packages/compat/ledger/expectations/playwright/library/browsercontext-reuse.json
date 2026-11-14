@@ -1,0 +1,19 @@
+[
+  {
+    "tests": [
+      "BC-073",
+      "BC-074",
+      "BC-075",
+      "BC-076",
+      "BC-077",
+      "BC-078",
+      "BC-079",
+      "BC-080",
+      "BC-081",
+      "BC-082",
+      "BC-083"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright's internal context-reuse path (`_newContextForReuse`, `_disconnectFromReusedContext`, and `_instrumentation`), which its test runner uses to reuse one browser context across tests and reset it between them. Strider has no reuse (property-testoptions-reusecontext is missing), and each test here gets its own context, so the reset these tests check has nothing to reset"
+  }
+]

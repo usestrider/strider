@@ -1,0 +1,24 @@
+[
+  {
+    "tests": [
+      "PA-025"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-content-includeshadow",
+    "reason": "Reads the page with `page.content({ includeShadow: true })`, which serializes open and closed shadow roots as declarative shadow DOM. Strider's `readHtml` takes no options and serializes the root's `outerHTML`, which has no shadow roots, so the test's second check has no counterpart"
+  },
+  {
+    "tests": [
+      "PA-036"
+    ],
+    "status": "notApplicable",
+    "reason": "Replaces `console.debug` in Playwright's utility world, through its internal `toImpl` and `evaluateExpression`, to block the readiness check that Playwright's own setContent runs there, then expects the call to time out. Strider has no utility world a caller can reach, and its setContent writes the HTML in the page's main world, so there is no engine step to block"
+  },
+  {
+    "tests": [
+      "PA-037"
+    ],
+    "status": "notApplicable",
+    "reason": "Replaces `document.close` in Playwright's utility world, through its internal `toImpl` and `evaluateExpression`, with a loop that never returns, then expects the call to time out. Strider has no utility world a caller can reach, and its setContent calls `document.close` in the page's main world, which the page's own scripts control, so the hook has no counterpart"
+  }
+]

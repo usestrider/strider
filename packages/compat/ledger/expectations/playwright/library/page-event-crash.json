@@ -1,0 +1,21 @@
+[
+  {
+    "tests": [
+      "ER-014",
+      "ER-015",
+      "ER-016",
+      "ER-017",
+      "ER-018",
+      "ER-019",
+      "ER-020",
+      "ER-021"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-page-crash",
+    "reason": "Crashing a page, which Strider can't cause on Firefox or stock WebKit: the public API has no crash, and the only trigger the port has is Chromium's chrome://crash navigation. The matrix row event-page-crash says Strider has the crash, but it observes a crash through the page's closed reason; it doesn't cause one"
+  }
+]

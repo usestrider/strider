@@ -1,0 +1,32 @@
+[
+  {
+    "tests": [
+      "PA-002"
+    ],
+    "status": "notApplicable",
+    "reason": "Asserts that the error from a failed goto carries Playwright Test's async stack, which names this test file; Strider's failures are typed values, and the Vitest integration records no such stack (matrix row property-testerror-stack)"
+  },
+  {
+    "tests": [
+      "PA-012"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-frame-name",
+    "reason": "Looking up a frame by its name, `page.frame({ name })`; Strider's frame tree has a `name` field, but no backend reports it, so it is always `None` (the matrix row claims `has`)"
+  },
+  {
+    "tests": [
+      "PA-003"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-opener",
+    "reason": "Waiting for a popup's opener(), the page that opened it; Strider's Popup reports the popup and its own page, with no link back to the opener"
+  },
+  {
+    "tests": [
+      "PA-019"
+    ],
+    "status": "notApplicable",
+    "reason": "Iterates the own properties of Playwright's client-side page object and asserts nothing about them; Strider's Page is an Effect service with no such object"
+  }
+]

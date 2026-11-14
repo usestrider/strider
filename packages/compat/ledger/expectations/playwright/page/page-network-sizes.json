@@ -1,0 +1,16 @@
+[
+  {
+    "tests": ["NE-058", "NE-059", "NE-060", "NE-061", "NE-062", "NE-063", "NE-064", "NE-065", "NE-067", "NE-068"],
+    "browsers": ["chromium"],
+    "status": "needsFeature",
+    "matrix": "method-request-sizes",
+    "reason": "Chromium reports None for the request's sent bytes, the response's headers, and the transferred body (NetworkRequest.Sizes' table): it gives the total and decoded body only. The test reads one of the counts Chromium doesn't give"
+  },
+  {
+    "tests": ["NE-058", "NE-059", "NE-065", "NE-067"],
+    "browsers": ["firefox"],
+    "status": "needsFeature",
+    "matrix": "method-request-sizes",
+    "reason": "Firefox reports None for the request's sent headers and body (NetworkRequest.Sizes' table), and the test reads them"
+  }
+]

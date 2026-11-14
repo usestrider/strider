@@ -1,0 +1,22 @@
+[
+  {
+    "tests": [
+      "[bfcache.test] BFCache can call a function exposed on a page restored from bfcache"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-exposefunction",
+    "reason": "The test exposes a function to the page (page.exposeFunction) and calls it from the page restored from the back/forward cache. Strider has no exposeFunction (method-page-exposebinding is missing too)"
+  },
+  {
+    "tests": [
+      "[bfcache.test] BFCache can navigate to a BFCached page",
+      "[bfcache.test] BFCache can navigate to a BFCached page containing an OOPIF and a worker"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-ignorehttpserrors",
+    "reason": "The test's HTTPS origin needs its self-signed certificate accepted in the context (acceptInsecureCerts), which Chromium refuses per context: CDP ignores certificate errors browser-wide"
+  }
+]

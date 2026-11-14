@@ -1,0 +1,14 @@
+[
+  {
+    "tests": [
+      "JH-013",
+      "JH-014",
+      "JH-015",
+      "JH-016",
+      "JH-017"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-jshandle-getproperties",
+    "reason": "Listing a handle's own enumerable properties as handles, with `getProperties()` returning a map of them; Strider's JSHandle has evaluate, evaluateHandle, read and release, and no property enumeration"
+  }
+]

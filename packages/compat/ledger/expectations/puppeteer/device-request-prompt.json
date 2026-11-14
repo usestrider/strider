@@ -1,0 +1,11 @@
+[
+  {
+    "tests": [
+      "[device-request-prompt.test] device request prompt does not crash",
+      "[device-request-prompt.test] device request prompt can be aborted"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-page-filechooser",
+    "reason": "Waits for a device request prompt (`page.waitForDevicePrompt`), with a timeout or an abort signal. Strider has no device prompt; the nearest matrix row is the file chooser, the other prompt a page opens for the program to answer"
+  }
+]

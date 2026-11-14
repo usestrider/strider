@@ -1,0 +1,14 @@
+[
+  {
+    "tests": ["EM-002", "EM-005"],
+    "status": "notApplicable",
+    "reason": "Playwright checks the media and colorScheme strings at run time and throws for another value. Strider's Emulation.Media is typed, so a value outside the union doesn't compile, and the call has no run-time error to check"
+  },
+  {
+    "tests": ["EM-001", "EM-003", "EM-004", "EM-006", "EM-007", "EM-008", "EM-009", "EM-010", "EM-011"],
+    "browsers": ["firefox"],
+    "status": "needsFeature",
+    "matrix": "option-page-emulatemedia-media",
+    "reason": "Firefox can't emulate media (Emulation's backend table), so the page's media queries keep the browser's own values. The matrix row says Strider has this; it has it on Chromium and stock WebKit only"
+  }
+]

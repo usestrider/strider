@@ -1,0 +1,62 @@
+[
+  {
+    "tests": [
+      "SS-069",
+      "SS-070",
+      "SS-071",
+      "SS-081"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-ismobile",
+    "reason": "Each test emulates a mobile viewport. WebDriver BiDi has no mobile viewport (Firefox), and stock WebKit's viewport emulation has no mobile flag and refuses `mobile: true` as Unsupported. The matrix row marks `isMobile` as present on every browser, which holds only for Chromium"
+  },
+  {
+    "tests": [
+      "SS-072",
+      "SS-073",
+      "SS-074",
+      "SS-076",
+      "SS-077",
+      "SS-082",
+      "SS-092",
+      "SS-093"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-devicescalefactor",
+    "reason": "Each test uses a device scale factor other than 1, and Strider takes that only with the mobile-viewport capability (`emulation.viewport.mobile`), which Firefox and stock WebKit lack, so the context is refused as Unsupported. SS-074, SS-076, and SS-093 also capture at CSS-pixel scale (`screenshot.cssScale`), which those browsers lack too (matrix option-page-screenshot-scale-value-css). The matrix row marks the device scale as present on every browser, which holds only for Chromium"
+  },
+  {
+    "tests": [
+      "SS-094"
+    ],
+    "status": "notApplicable",
+    "reason": "A `toHaveScreenshot` golden comparison of a transformed element at device scale, against an image made with Playwright's browser builds and fonts, which Strider's pinned browsers don't match. The test checks nothing else"
+  },
+  {
+    "tests": [
+      "SS-086",
+      "SS-087",
+      "SS-089"
+    ],
+    "status": "notApplicable",
+    "reason": "Relies on Playwright's internal `__testHookBeforeScreenshot` or `__testHookAfterScreenshot`, which throws or delays between a capture's preparation and the capture; Strider has no such hook. The viewport these tests check is the one Playwright's full-page and element captures resize, and Strider's captures don't resize it on Chromium (`cdpAdapter/capture.ts` captures beyond the viewport with a clip), so there is no restoration to test"
+  },
+  {
+    "tests": [
+      "SS-091"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright's it.skip runs this only off Chromium (playwright#9757): Chromium never answers `Page.captureScreenshot` while the page's main resource is still loading, so there is nothing for any driver to capture. Strider's capture is dispatched and ends at its deadline as `Deadline.Timeout` (`dispatchedUnconfirmed`), which reports the missing reply as it is"
+  }
+]

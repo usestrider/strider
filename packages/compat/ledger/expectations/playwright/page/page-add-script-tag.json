@@ -1,0 +1,39 @@
+[
+  {
+    "tests": [
+      "AT-008"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "The original is it.skip on WebKit, and a path option is needsFeature on the other browsers (see the next entry)"
+  },
+  {
+    "tests": [
+      "AT-001",
+      "AT-002",
+      "AT-003",
+      "AT-005",
+      "AT-006",
+      "AT-007",
+      "AT-009",
+      "AT-010",
+      "AT-011",
+      "AT-012"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-addscripttag",
+    "reason": "Strider has no addScriptTag. These assert what the call returns or raises: a handle (AT-002, AT-007, AT-009), the error for a missing options object (AT-001), for a failed load (AT-006, AT-012 with the URL in its message), or for a CSP block (AT-010, AT-011). A tag inserted in the main world has no handle, and its errors are not the call's. AT-003 and AT-005 add a module script by URL and by content: a tag the test inserts itself in the main world would test only the browser's module loading, not Strider"
+  },
+  {
+    "tests": [
+      "AT-004",
+      "AT-007",
+      "AT-008"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-addscripttag-path",
+    "reason": "addScriptTag's path option, which reads a file and inserts its content with a sourceURL; Strider has no such option, and inserting the file's text from the test would test the test's own file read"
+  }
+]

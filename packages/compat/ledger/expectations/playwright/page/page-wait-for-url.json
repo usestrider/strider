@@ -1,0 +1,10 @@
+[
+  {
+    "tests": [
+      "WA-112"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-waitforurl-waituntil",
+    "reason": "Waits for a URL with `waitUntil` set to domcontentloaded and to load, and expects the load wait to hold back until the stylesheet finishes; Strider's URL expectation takes no load state, so it resolves at the URL match"
+  }
+]

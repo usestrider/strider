@@ -1,0 +1,135 @@
+# The compat harness (packages/compat): ported upstream tests, run by hand to find bugs. Never on a schedule or a pull
+# request; nothing depends on it passing. A plan job splits each browser's port files into shards of about `target`
+# seconds by their last recorded times (packages/compat/ledger/timings.json), and a report job merges the shards'
+# results into one report against the ledger, in the run's summary.
+name: Compat
+
+on:
+  workflow_dispatch:
+    inputs:
+      browsers:
+        description: Browsers, comma-separated
+        type: string
+        default: chromium,firefox,webkit
+      files:
+        description: Port files to run, as globs relative to packages/compat, separated by spaces; empty runs them all
+        type: string
+        default: ""
+      target:
+        description: Seconds of tests per shard
+        type: string
+        default: "900"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compat-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Install
+        run: npm install --global pnpm@12.9.0 && pnpm install --frozen-lockfile
+      - name: Plan shards
+        id: plan
+        env:
+          BROWSERS: ${{ inputs.browsers }}
+          FILES: ${{ inputs.files }}
+          TARGET: ${{ inputs.target }}
+        run: |
+          args=(--browsers "$BROWSERS" --target "$TARGET")
+          for glob in $FILES; do args+=(--files "$glob"); done
+          matrix=$(node packages/compat/src/bin.ts shards "${args[@]}")
+          echo "$matrix"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  run:
+    needs: plan
+    if: ${{ fromJSON(needs.plan.outputs.matrix).include[0] != null }}
+    name: run (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # 31.11.3
+      # As in integration.yml: Chromium's and Firefox's sandboxes need unprivileged user namespaces
+      - name: Allow user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Install
+        run: nix develop --command pnpm install --frozen-lockfile
+      # Test failures are the run's findings, compared with the ledger by the report job; the exit status is kept
+      - name: Run the shard
+        env:
+          STRIDER_COMPAT_BROWSERS: ${{ matrix.browser }}
+          STRIDER_COMPAT_RUN: ${{ matrix.name }}
+          STRIDER_COMPAT_OUTPUT: ${{ github.workspace }}/compat-output
+        run: |
+          set +e
+          read -ra files <<< "${{ matrix.files }}"
+          nix develop --command pnpm compat "${files[@]}" 2>&1 | tee compat.log
+          status=${PIPESTATUS[0]}
+          mkdir -p compat-output
+          echo "$status" > compat-output/exit-status
+          mv compat.log compat-output/
+      - name: Keep the results, traces, and log
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: compat-${{ matrix.name }}
+          path: compat-output/
+          retention-days: 14
+
+  report:
+    needs: [plan, run]
+    if: ${{ always() && fromJSON(needs.plan.outputs.matrix).include[0] != null }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Install
+        run: npm install --global pnpm@12.9.0 && pnpm install --frozen-lockfile
+      - name: Download the shards' results
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "${{ github.run_id }}" --pattern 'compat-*' --dir shards
+      # A shard with no run.json never finished: its tests count as not run, and the summary names it
+      - name: Report
+        run: |
+          missing=$(for shard in shards/*; do [ -f "$shard/runs/$(basename "$shard" | sed 's/^compat-//')/run.json" ] || echo "$shard"; done)
+          runs=$(ls -d shards/*/runs/* 2>/dev/null)
+          {
+            node packages/compat/src/bin.ts report $runs --name "compat-${{ github.run_id }}"
+            if [ -n "$missing" ]; then echo; echo "Shards without results: $missing"; fi
+          } | tee -a "$GITHUB_STEP_SUMMARY" > report.md
+          node packages/compat/src/bin.ts timings $runs
+          cp packages/compat/ledger/timings.json timings.json
+      - name: Keep the report and the shards' times
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: compat-report
+          path: |
+            report.md
+            timings.json
+          retention-days: 14

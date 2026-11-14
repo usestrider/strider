@@ -1,0 +1,25 @@
+[
+  {
+    "tests": [
+      "[tracing.test] Tracing should output a trace",
+      "[tracing.test] Tracing should run with default categories",
+      "[tracing.test] Tracing should throw if tracing on two pages",
+      "[tracing.test] Tracing should return a typedArray",
+      "[tracing.test] Tracing should work without options",
+      "[tracing.test] Tracing should support bufferSize option",
+      "[tracing.test] Tracing should support a typedArray without a path",
+      "[tracing.test] Tracing should properly fail if readProtocolStream errors out"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browser-starttracing",
+    "reason": "Recording Chromium's performance trace, which `browser.startTracing` records and the test reads back as its trace events. Strider's `Trace` records Playwright's trace-viewer format for a context, which is a different recording. The nearest matrix row is method-browser-starttracing for each of these, whose options (bufferSize, a typed array, a protocol stream) have no rows of their own"
+  },
+  {
+    "tests": [
+      "[tracing.test] Tracing should run with custom categories if provided"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-starttracing-categories",
+    "reason": "Choosing the categories of Chromium's performance trace, which `browser.startTracing` would take. Strider's `Trace` records no categories"
+  }
+]

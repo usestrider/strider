@@ -1,0 +1,22 @@
+[
+  {
+    "tests": [
+      "[drag-and-drop.test] Legacy Drag n' Drop should emit a dragIntercepted event when dragged",
+      "[drag-and-drop.test] Legacy Drag n' Drop should emit a dragEnter",
+      "[drag-and-drop.test] Legacy Drag n' Drop should emit a dragOver event",
+      "[drag-and-drop.test] Legacy Drag n' Drop can be dropped",
+      "[drag-and-drop.test] Legacy Drag n' Drop can be dragged and dropped with a single function"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locator-dragto",
+    "reason": "Puppeteer's drag interception (`page.setDragInterception`) hands the dragged data to the test, which then dispatches `dragEnter`, `dragOver`, and `drop` itself, or drags with `dragAndDrop` under interception. Strider has no drag interception and no element-handle drag; the nearest matrix row is method-locator-dragto, whose `dragTo` runs the browser's own drag"
+  },
+  {
+    "tests": [
+      "[drag-and-drop.test] Drag n' Drop should release the mouse button when the drop fails"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "Drops from an element handle whose element the page replaced during the drag, and expects the drop to throw, then checks that the failed drop released the mouse button. Strider's locators find the element again rather than holding a handle to it, so no drop fails here; the nearest matrix row is method-locator-dragto"
+  }
+]

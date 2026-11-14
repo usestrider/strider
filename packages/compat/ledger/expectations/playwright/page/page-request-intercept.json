@@ -1,0 +1,26 @@
+[
+  {
+    "tests": [
+      "RO-143"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-route-fetch",
+    "reason": "Route.fetch's timeout option bounds a fetch of the route's request that Strider has no call for: the request client is missing (method-route-fetch), and Route's decisions take no fetch with a deadline. Playwright's second check, that page.goto times out, has no port of its own without the first, since the route's error is what the original's assertion reads"
+  },
+  {
+    "tests": [
+      "RO-145"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-route-fetch-url",
+    "reason": "Route.fetch's url option fetches another URL for the route to fulfill with: Strider has no Route.fetch (method-route-fetch), so the route can't send that request and answer with its response. Route.continueWith(setUrl) changes the request itself, which is a different behavior (page-request-continue's RO-062 covers it)"
+  },
+  {
+    "tests": [
+      "RO-146"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-route-fetch-postdata",
+    "reason": "Route.fetch's postData option sends the route's request with a body the route gives, whatever its method (the original's is a GET navigation), and fulfills with that response: Strider has no Route.fetch (method-route-fetch). Route.continueWith of a body on a GET navigation doesn't send it on Chromium, so it can't stand in for it"
+  }
+]

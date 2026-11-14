@@ -1,0 +1,41 @@
+[
+  {
+    "tests": [
+      "WA-002",
+      "WA-022"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-waitforfunction",
+    "reason": "Passes the predicate as a string of source, which Playwright runs in the page; Strider's waitForFunction-style wait takes a function and an Expect.that read, and the matrix row says `has` for that form only. No row covers a string predicate, as EV-057 to EV-059 note for page.evaluate"
+  },
+  {
+    "tests": [
+      "WA-006",
+      "WA-012",
+      "WA-013"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-waitforfunction-polling",
+    "reason": "Checks Playwright's refusal of a polling option it doesn't know (`mutation`, `unknown`) or a non-positive interval (-10). Strider's Expect.that has an interval (Expect.withCheckInterval) and no polling strategy, so there is no option to refuse"
+  },
+  {
+    "tests": [
+      "WA-007"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-waitforfunction-polling",
+    "reason": "Waits on requestAnimationFrame polling (`polling: 'raf'`), the mode itself. Strider's Expect re-runs an effect at Expect.CheckInterval, and rechecks on animation frames only for a locator's expectation, so an effect can't wait on frames"
+  },
+  {
+    "tests": [
+      "WA-015",
+      "WA-016"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-evaluatehandle",
+    "reason": "The port's wait subject is a handle, `page.evaluateHandle`, which runs in the isolated world that stock WebKit doesn't have, so it fails Unsupported there (the isolatedWorlds capability). WA-015's window and WA-016's element can't cross by value, and the main world offers no handle"
+  }
+]

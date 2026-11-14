@@ -1,0 +1,79 @@
+[
+  {
+    "tests": [
+      "[screenshot.test] Screenshots Page.screenshot should take fullPage screenshots without captureBeyondViewport"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-screenshot-fullpage",
+    "reason": "The test's point is the `captureBeyondViewport: false` path, which resizes the viewport to the page's height and restores it; its golden is the same 500×1000 image as the default capture's. Strider has no such option, so without it the test would repeat \"should take fullPage screenshots\". The nearest matrix row is the full-page option's"
+  },
+  {
+    "tests": [
+      "[screenshot.test] Screenshots Page.screenshot should clip clip bigger than the viewport without \"captureBeyondViewport\""
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-screenshot-clip",
+    "reason": "captureBeyondViewport: false clips the capture to the viewport (the golden is 25×25, against 25×100 for the default). Strider has no such option, and a clip is always a rectangle of the page. The nearest matrix row is the clip's"
+  },
+  {
+    "tests": [
+      "[screenshot.test] Screenshots Page.screenshot should return base64"
+    ],
+    "status": "notApplicable",
+    "reason": "Puppeteer's `encoding: 'base64'` returns a string for the caller to decode. Strider returns the image's bytes as a Uint8Array and has no encoding option, so there is no Strider behavior to test; the test's only check is the golden, decoded from base64"
+  },
+  {
+    "tests": [
+      "[screenshot.test] Screenshots Cdp should work in \"fromSurface: false\" mode"
+    ],
+    "status": "notApplicable",
+    "reason": "fromSurface selects Chromium's CDP capture path (Page.captureScreenshot), which Strider's capture doesn't expose. The test's only check is that the screenshot is defined"
+  },
+  {
+    "tests": [
+      "[screenshot.test] Screenshots ElementHandle.screenshot should use element clip"
+    ],
+    "status": "differentByDesign",
+    "decision": "Options a caller writes carry no `_tag`",
+    "reason": "An element's capture can't also take a clip: Strider's `area` is one of its values, so the element and the clip can't be given together. The nearest matrix row is the clip's"
+  },
+  {
+    "tests": [
+      "[screenshot.test] Screenshots ElementHandle.screenshot should work with webp"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-screenshot-type",
+    "reason": "Strider has no WebP capture: its format is PNG or JPEG (`ScreenshotFormat`). The test takes a page capture with `type: 'webp'`, so the page and element rows both apply; the matrix marks webp as has in `option-page-screenshot-type` and `option-elementhandle-screenshot-type`, which is wrong"
+  },
+  {
+    "tests": [
+      "[screenshot.test] Screenshots Cdp should use scale for clip"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-screenshot-scale",
+    "reason": "Puppeteer's clip `scale` multiplies the clip's pixels (a 150×100 clip at scale 2 is 300×200). Strider's `scale` is `css` or `device`, with no multiplier. The nearest matrix row is the scale's"
+  },
+  {
+    "tests": [
+      "[screenshot.test] Screenshots Cdp should render white background on jpeg file"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-screenshot-type-value-jpeg-on-stock-webkit",
+    "reason": "Stock WebKit screenshots are PNG only, so a JPEG capture is refused as Unsupported"
+  },
+  {
+    "tests": [
+      "[screenshot.test] Screenshots Cdp should allow transparency",
+      "[screenshot.test] Screenshots Cdp should render white background on jpeg file"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-screenshot-omitbackground",
+    "reason": "Firefox refuses `omitBackground` as Unsupported (`screenshot.omitBackground`), where Puppeteer's Firefox captures a transparent background. The matrix row has no per-browser entry for it"
+  }
+]

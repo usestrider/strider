@@ -1,0 +1,9 @@
+[
+  {
+    "tests": [
+      "PR-040"
+    ],
+    "status": "notApplicable",
+    "reason": "Calls Playwright's internal `parsePattern` from its core bundle, the matcher for its SOCKS proxy bypass patterns. Strider has no SOCKS proxy (it refuses SOCKS endpoints), and its bypass takes a list of hostnames rather than patterns, so there's no Strider matcher for this test to check"
+  }
+]

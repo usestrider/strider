@@ -1,0 +1,67 @@
+[
+  {
+    "tests": [
+      "PR-028"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-ignorehttpserrors",
+    "reason": "ignoreHTTPSErrors is acceptInsecureCerts in Strider, which Chromium refuses per context: CDP ignores certificate errors browser-wide"
+  },
+  {
+    "tests": [
+      "PR-032",
+      "PR-033",
+      "PR-034",
+      "PR-039"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-proxy-value-proxy-credentials",
+    "reason": "Stock WebKit has no proxy credentials: its Automation session refuses them (userContexts.proxy.credentials)"
+  },
+  {
+    "tests": [
+      "PR-022"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "differentByDesign",
+    "decision": "Context proxy routing and authentication",
+    "reason": "Chromium treats subdomain.localhost as loopback, and loopback destinations stay direct, so the request doesn't reach the proxy and the page can't load"
+  },
+  {
+    "tests": [
+      "PR-034",
+      "PR-039"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "differentByDesign",
+    "decision": "Context proxy routing and authentication",
+    "reason": "A second context's different credentials for the same proxy endpoint are refused: Firefox shares its proxy authentication cache, so each endpoint keeps one credential pair for the connection's life, and the decision rejects silently reusing another context's credentials"
+  },
+  {
+    "tests": [
+      "PR-019"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browsertype-launch-proxy",
+    "reason": "Strider has no launch-level proxy: a proxy is a context option only, so the launch proxy this test ignores has nothing to be ignored"
+  },
+  {
+    "tests": [
+      "PR-036",
+      "PR-037"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-proxy-value-socks-or-https-proxy-endpoint",
+    "reason": "SOCKS proxy endpoints are refused (userContexts.proxy.scheme); the test routes through one"
+  }
+]

@@ -1,0 +1,10 @@
+[
+  {
+    "tests": [
+      "GE-004",
+      "GE-006"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright's runtime message for a geolocation missing its latitude or longitude. Strider's Geolocation type requires both, as the original's @ts-expect-error shows, so the call doesn't compile"
+  }
+]

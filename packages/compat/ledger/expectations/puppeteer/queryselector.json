@@ -1,0 +1,79 @@
+[
+  {
+    "tests": [
+      "[queryselector.test] querySelector Page.$eval should accept ElementHandles as arguments",
+      "[queryselector.test] querySelector Page.$$eval should accept ElementHandles as arguments"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-evaluatehandle",
+    "reason": "Makes the handle argument with page.evaluateHandle (and evaluates with locator.evaluate or evaluateAll), which runs in the isolated world, and stock WebKit has no isolated worlds (isolatedWorlds is unsupported), so it fails Unsupported there"
+  },
+  {
+    "tests": [
+      "[queryselector.test] querySelector Page.$eval should work",
+      "[queryselector.test] querySelector Page.$eval should accept arguments",
+      "[queryselector.test] querySelector Page.$eval should throw error if no element is found",
+      "[queryselector.test] querySelector ElementHandle.$eval should work",
+      "[queryselector.test] querySelector ElementHandle.$eval should retrieve content from subtree",
+      "[queryselector.test] querySelector ElementHandle.$eval should throw in case of missing selector"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locator-evaluate",
+    "reason": "Evaluates with locator.evaluate (the test that expects NoMatch gets Unsupported first), which runs in the isolated world, and stock WebKit has no isolated worlds (isolatedWorlds is unsupported), so it fails Unsupported there"
+  },
+  {
+    "tests": [
+      "[queryselector.test] querySelector Page.$$eval should work",
+      "[queryselector.test] querySelector Page.$$eval should accept extra arguments",
+      "[queryselector.test] querySelector Page.$$eval should handle many elements",
+      "[queryselector.test] querySelector ElementHandle.$$eval should work",
+      "[queryselector.test] querySelector ElementHandle.$$eval should retrieve content from subtree",
+      "[queryselector.test] querySelector ElementHandle.$$eval should not throw in case of missing selector"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locator-evaluateall",
+    "reason": "Evaluates with locator.evaluateAll, which runs in the isolated world, and stock WebKit has no isolated worlds (isolatedWorlds is unsupported), so it fails Unsupported there"
+  },
+  {
+    "tests": [
+      "[queryselector.test] querySelector Page.$$ should query existing elements without isolation"
+    ],
+    "status": "notApplicable",
+    "reason": "Puppeteer's `isolate: false` option runs the query in the page's own realm, as a speed setting; its docs say the results are the same. Strider's locators have no such option, so the test's only point is an option Strider doesn't have, and a plain query would pass whatever the engine does"
+  },
+  {
+    "tests": [
+      "[queryselector.test] querySelector Page.$$ xpath should query existing element",
+      "[queryselector.test] querySelector Page.$$ xpath should return empty array for non-existing element",
+      "[queryselector.test] querySelector Page.$$ xpath should return multiple elements",
+      "[queryselector.test] querySelector ElementHandle.$$ xpath should query existing element",
+      "[queryselector.test] querySelector ElementHandle.$$ xpath should return null for non-existing element"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-locator-value-xpath-and-playwright-selector-dsl",
+    "reason": "XPath selectors (`xpath/...`): Strider's locators take CSS only, and XPath is planned for 1.0"
+  },
+  {
+    "tests": [
+      "[queryselector.test] querySelector QueryAll should have registered handler",
+      "[queryselector.test] querySelector QueryAll $$ should query existing elements",
+      "[queryselector.test] querySelector QueryAll $$ should return empty array for non-existing elements",
+      "[queryselector.test] querySelector QueryAll $$eval should work",
+      "[queryselector.test] querySelector QueryAll $$eval should accept extra arguments",
+      "[queryselector.test] querySelector QueryAll $$eval should accept ElementHandles as arguments",
+      "[queryselector.test] querySelector QueryAll $$eval should handle many elements"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-selectors-register",
+    "reason": "Puppeteer's custom query handlers (`registerCustomQueryHandler`, selectors such as `allArray/div`) run a registered page-side function as a selector engine, as Playwright's `selectors.register` does. Strider has no selector-engine registry, so none of these tests can be written against it"
+  }
+]

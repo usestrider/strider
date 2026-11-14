@@ -1,0 +1,27 @@
+[
+  {
+    "tests": [
+      "AR-042",
+      "AR-044"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-ariasnapshot-boxes",
+    "reason": "Asks for each node's bounding box in the snapshot (`boxes: true`), and for its absence by default; Strider's snapshot has no box option or box field"
+  },
+  {
+    "tests": [
+      "AR-043"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-locator-ariasnapshot-boxes",
+    "reason": "Asks a locator's snapshot for each node's bounding box (`boxes: true`); Strider's snapshot has no box option or box field"
+  },
+  {
+    "tests": [
+      "AR-036"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-ariasnapshot",
+    "reason": "Checks the snapshot's `/url: /auth?r=/` line for a link whose URL looks like a regex; Strider's snapshot node carries no link URL, and no matrix row names that field"
+  }
+]

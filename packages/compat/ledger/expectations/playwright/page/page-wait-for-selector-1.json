@@ -1,0 +1,26 @@
+[
+  {
+    "tests": [
+      "WA-027",
+      "WA-028"
+    ],
+    "status": "notApplicable",
+    "reason": "Passes Playwright's undocumented `waitFor` option to `page.waitForSelector`: WA-027 checks its runtime refusal with a hint toward `state`, and WA-028 that `waitFor: \"visible\"` is tolerated. Strider has no such option and no string state to refuse: each state is its own matcher, so an unknown option doesn't compile"
+  },
+  {
+    "tests": [
+      "WA-033"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "Waits on an element handle's `waitForSelector` and expects it to throw when the page navigates. Strider has no handle bound to one document: a locator inside an element re-resolves on each attempt, so after the navigation the wait keeps looking rather than throwing"
+  },
+  {
+    "tests": [
+      "WA-038"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "Clicks `text=Reset` where two elements match, one hidden, and expects the call's log to say it proceeds with the first. Strider's locators are strict where one element is required, so the click fails at once with the ambiguity rather than picking the first element"
+  }
+]

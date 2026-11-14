@@ -1,0 +1,12 @@
+[
+  {
+    "tests": ["LE-005", "LE-006"],
+    "status": "notApplicable",
+    "reason": "Fixture setup with no steps or assertions: each test opens a page so the heap tests that follow have one to count. There is nothing for Strider to check, and the page's use is covered by the tests that count"
+  },
+  {
+    "tests": ["LE-007", "LE-008", "LE-009", "LE-010", "LE-011", "LE-012", "LE-013"],
+    "status": "notApplicable",
+    "reason": "Counts Playwright's own V8 objects (its client's Page, BrowserContext, and Browser, its server's Page, Request, Worker, and dispatcher classes, and the 'collected to prevent unbounded heap growth' message of its response cache). Strider keeps no such objects to count, so there is no Strider behavior these tests check"
+  }
+]

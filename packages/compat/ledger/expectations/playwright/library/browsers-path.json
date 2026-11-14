@@ -1,0 +1,10 @@
+[
+  {
+    "tests": [
+      "BP-001",
+      "BP-002"
+    ],
+    "status": "notApplicable",
+    "reason": "Imports Playwright's core package while pretending to run on an unsupported platform, with `PLAYWRIGHT_BROWSERS_PATH` set. Strider's package has no browser download directory and no such environment variable, so there is no import to test"
+  }
+]

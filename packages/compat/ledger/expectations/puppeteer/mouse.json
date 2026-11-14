@@ -1,0 +1,14 @@
+[
+  {
+    "tests": [
+      "[mouse.test] Mouse should work with mobile viewports and cross process navigations"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-ismobile",
+    "reason": "Emulates a mobile viewport with `page.emulate` and clicks in it. Firefox and stock WebKit can't emulate a mobile viewport (`emulation.viewport.mobile` is unsupported there). The matrix row names the mobile option of a new context, the nearest row"
+  }
+]

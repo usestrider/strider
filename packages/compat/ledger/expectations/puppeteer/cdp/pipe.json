@@ -1,0 +1,28 @@
+[
+  {
+    "tests": [
+      "[pipe.test] Puppeteer.launch should support the pipe argument"
+    ],
+    "status": "notApplicable",
+    "reason": "Passes `--remote-debugging-pipe` as a launch argument. Strider's Chromium launch gives the browser its own pipe, so an argument the caller adds is a second copy of a flag Strider sets, and no Strider behavior depends on it"
+  },
+  {
+    "tests": [
+      "[pipe.test] Puppeteer.launch should support the pipe option"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "Puppeteer's pipe transport is Chromium's `--remote-debugging-pipe`: Firefox has no such argument (Puppeteer skips it there), and stock WebKit's inspector has no pipe. The port runs the pipe launch on Chromium only"
+  },
+  {
+    "tests": [
+      "[pipe.test] Puppeteer.launch should fire \"disconnected\" when closing with pipe"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-browser-disconnected",
+    "reason": "Waits for the browser's `disconnected` event after the browser process is killed. Strider has no browser-level disconnected event: a browser's end shows on its pages and contexts, not on the browser"
+  }
+]

@@ -1,0 +1,21 @@
+[
+  {
+    "tests": [
+      "CV-018",
+      "CV-019",
+      "CV-020",
+      "CV-021",
+      "CV-022",
+      "CV-023",
+      "CV-024",
+      "CV-025",
+      "CV-026",
+      "CV-027",
+      "CV-028",
+      "CV-029",
+      "CV-030"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright's private `_coverage` tracing option, which writes istanbul counters from the page into a trace, read back by its `parseTraceCoverage` helper. Each test drives Playwright's own mechanism: the `window.__pwCoverageTake` hook it injects, the `__pwCoverage.` localStorage stashes that survive a navigation, and the trace's coverage entry. Strider has no such option and no JavaScript or CSS coverage collection (the matrix rows method-coverage-startjscoverage and method-coverage-startcsscoverage are missing), so there's nothing of Strider's these tests check"
+  }
+]

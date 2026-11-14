@@ -1,0 +1,18 @@
+[
+  {
+    "tests": [
+      "SE-033"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "Playwright's legacy quoted text engine (`text=\"Hello\"`), which matches an element whose own text-node runs equal the string, so `text=\"Hello\"` finds a div whose child span holds the rest of its text. Strider's `getByText` with `exact`, like Playwright's own, compares an element's whole text, which has no way to ask for an element's own runs; the test turns on that"
+  },
+  {
+    "tests": [
+      "SE-045"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "Playwright's `*` capture marker (`*css=button >> text=hello >> text=world`) returns the elements of the step it marks, which are the buttons. Strider's chain returns the elements its last step selects, so a capture that returns an earlier step has nothing to return"
+  }
+]

@@ -1,0 +1,13 @@
+[
+  {
+    "tests": [
+      "NE-133"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-ignorehttpserrors",
+    "reason": "Accepting a self-signed HTTPS certificate in a context (`ignoreHTTPSErrors`), which this test needs for its TLS document. Chromium refuses `acceptInsecureCerts` with Unsupported, because its certificate override applies to the whole browser"
+  }
+]

@@ -1,0 +1,76 @@
+[
+  {
+    "tests": [
+      "RO-016"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-route-abort",
+    "reason": "Only Chromium aborts a request with a reason (interception.abortReason); Firefox and WebKit report one failure for every reason, so Route.abort(\"internetDisconnected\") there is refused and the request continues"
+  },
+  {
+    "tests": [
+      "RO-021"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-route-fallback-url",
+    "reason": "route.fallback({ url }) hands the request to the next matching route with a new URL, and chains through three routes; Route.continueWith can change the URL (interception.continueUrl) but never passes the request on to the next route"
+  },
+  {
+    "tests": [
+      "RO-030"
+    ],
+    "status": "differentByDesign",
+    "decision": "Handlers produce decisions through Effects",
+    "reason": "The original calls route.continue() after the frame was removed and checks that the call doesn't throw; a Strider handler returns its decision, which is applied after the handler returns, and a decision that can't be applied is logged, not raised to the handler"
+  },
+  {
+    "tests": [
+      "RO-033"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright's it.skip runs this only on WebKit, and it tests the exception route.fulfill throws for a redirect status, which only Playwright's WebKit refuses"
+  },
+  {
+    "tests": [
+      "RO-033"
+    ],
+    "status": "differentByDesign",
+    "decision": "Handlers produce decisions through Effects",
+    "reason": "Strider doesn't refuse a fulfilled redirect status: the handler returns its fulfilled response as a decision, so there is no call that throws the refusal"
+  },
+  {
+    "tests": [
+      "RO-045",
+      "RO-046",
+      "RO-047",
+      "RO-048"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-route-times",
+    "reason": "A route registered with times removes itself after that many requests; Strider's routes have no times option, and a route stays until its registration is removed"
+  },
+  {
+    "tests": [
+      "RO-053"
+    ],
+    "status": "differentByDesign",
+    "decision": "Handlers produce decisions through Effects",
+    "reason": "The original calls route.fulfill, route.continue, route.fallback, and route.abort a second time and checks that the second call throws \"Route is already handled!\"; a Strider handler produces one decision, so there is no second call to make"
+  },
+  {
+    "tests": [
+      "RO-056"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-route",
+    "reason": "A URLPattern with ignoreCase: Strider's URL patterns are strings, and a URLPattern string has no case-insensitive option"
+  }
+]

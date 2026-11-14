@@ -1,0 +1,25 @@
+[
+  {
+    "tests": [
+      "BU-005"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-page-dialog",
+    "reason": "Reads a beforeunload prompt's type, message, and default value, and expects the message to be empty on Chromium, 'Leave?' on WebKit, and the prompt's text on Firefox. Strider's BeforeUnload dialog carries only its id, so the message and default value aren't reported to a handler (Dialog.ts); no matrix row names that gap"
+  },
+  {
+    "tests": [
+      "BU-006",
+      "BU-009",
+      "BU-010",
+      "BU-011",
+      "BU-012"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Each closes with `runBeforeUnload`, which stock WebKit's Automation can't do: it closes a page without asking it, so Strider's `close({ runBeforeUnload: true })` fails `Unsupported` there (`close.runBeforeUnload`). The matrix row says the option is missing, but Strider has it on Chromium and Firefox; the gap is WebKit's alone",
+    "matrix": "option-page-close-runbeforeunload"
+  }
+]

@@ -1,0 +1,66 @@
+[
+  {
+    "tests": [
+      "EX-188",
+      "EX-189",
+      "EX-190",
+      "EX-191",
+      "EX-192",
+      "EX-193",
+      "EX-194",
+      "EX-195",
+      "EX-196",
+      "EX-197",
+      "EX-198",
+      "EX-199",
+      "EX-200",
+      "EX-201"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locatorassertions-tohavejsproperty",
+    "reason": "Expects `toHaveJSProperty`, which compares a JavaScript property of the locator's element with Playwright's deep equality (Dates, nested paths, `undefined`). Strider has no such matcher, and no read of a property on a locator: `locator.evaluate` runs in the isolated world, which doesn't see properties the page's own script set"
+  },
+  {
+    "tests": [
+      "EX-207",
+      "EX-208",
+      "EX-209",
+      "EX-210",
+      "EX-211"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locatorassertions-tocontainclass",
+    "reason": "Expects `toContainClass`, which checks that an element's class list contains the given classes, each matched as a whole class. Strider's `toHaveClass` compares the whole class string or a regular expression and has no containment form"
+  },
+  {
+    "tests": [
+      "EX-221"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-pageassertions-tohaveurl-ignorecase",
+    "reason": "Expects `toHaveURL` with `ignoreCase: true`. Strider's `toHaveURL` takes no options, and a predicate over `page.url` would carry its own case-folding rule, which is the matcher's behavior, not the page's"
+  },
+  {
+    "tests": [
+      "EX-228"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-locatorassertions-tohaveattribute-ignorecase",
+    "reason": "Expects `toHaveAttribute` with `ignoreCase: true`. Strider's `toHaveAttribute` takes no options"
+  },
+  {
+    "tests": [
+      "EX-243"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-close-reason",
+    "reason": "Closes the page with a reason (`page.close({ reason })`), which the failed expectation's message quotes. Strider's `page.close` takes only `runBeforeUnload`"
+  },
+  {
+    "tests": [
+      "EX-216"
+    ],
+    "status": "notApplicable",
+    "reason": "Passes an object to `toHaveURL` and expects Playwright's runtime error for it. Strider's `toHaveURL` takes a string or a RegExp by type, so the call doesn't compile. A JavaScript caller gets no such error: the object's `source` is undefined, which builds a RegExp that matches any URL"
+  }
+]

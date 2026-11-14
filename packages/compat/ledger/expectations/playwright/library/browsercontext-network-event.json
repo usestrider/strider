@@ -1,0 +1,38 @@
+[
+  {
+    "tests": [
+      "NE-123"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-browsercontext-requestfailed",
+    "reason": "Counts the context's requestfailed events for a stylesheet the server drops. Strider has no requestfailed event on a context: a failed request is read with NetworkRequest.failure, but nothing reports it as it happens"
+  },
+  {
+    "tests": [
+      "NE-124",
+      "NE-125"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-browsercontext-requestfinished",
+    "reason": "Each test waits for or records the context's requestfinished event, which Strider has no counterpart of. NE-125 checks that it arrives after the request and response"
+  },
+  {
+    "tests": [
+      "NE-126"
+    ],
+    "browsers": [
+      "chromium",
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "Upstream skips it for headless browsers other than Firefox, which don't request favicons, and for headed WebKit, which has no favicon feature; the original runs on headless Firefox only"
+  },
+  {
+    "tests": [
+      "NE-126"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-browsercontext-requestfinished",
+    "reason": "Records the context's requestfinished event as well as its request and response events, and checks that none of them names the favicon. Strider has no requestfinished event, and its own favicon request is reported (see the reference's page-network-request.test.ts), so the favicon check needs the event's filter the original applies"
+  }
+]

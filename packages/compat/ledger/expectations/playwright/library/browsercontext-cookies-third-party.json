@@ -1,0 +1,71 @@
+[
+  {
+    "tests": [
+      "CO-060"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browsertype-launchpersistentcontext-ignorehttpserrors",
+    "reason": "Accepting the fixture's self-signed certificate for a persistent context (`ignoreHTTPSErrors`). A launched default context takes no creation options, so its TLS origins can't be reached as the original reaches them (defaultbrowsercontext-2's DC-021 has the same gap)"
+  },
+  {
+    "tests": [
+      "CO-052",
+      "CO-053",
+      "CO-054",
+      "CO-055",
+      "CO-056",
+      "CO-057",
+      "CO-058",
+      "CO-059",
+      "CO-061",
+      "CO-062"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-ignorehttpserrors",
+    "reason": "Accepting a self-signed HTTPS certificate in a context (`ignoreHTTPSErrors`), which these tests need for their TLS origins. Chromium refuses `acceptInsecureCerts` with Unsupported, because its certificate override applies to the whole browser (as browsercontext-add-cookies' CO-041 does)"
+  },
+  {
+    "tests": [
+      "CO-061"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-frame-evaluate",
+    "reason": "The test writes a cookie from inside a cross-site frame, which needs the frame's `evaluate` in its isolated world. Stock WebKit has no isolated worlds (`isolatedWorlds` is unsupported)"
+  },
+  {
+    "tests": [
+      "CO-059"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "notApplicable",
+    "reason": "The original skips Firefox over BiDi, where its Total Cookie Protection blocks this third-party cookie"
+  },
+  {
+    "tests": [
+      "CO-062"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "The original skips WebKit, which has no third-party cookies"
+  },
+  {
+    "tests": [
+      "CO-055"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "The original is test.fixme for WebKit on Linux, so it states no expectation there to port"
+  }
+]

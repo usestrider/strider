@@ -1,0 +1,34 @@
+[
+  {
+    "tests": [
+      "WO-002"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-worker-evaluatehandle",
+    "reason": "Takes a handle to the worker's global (`worker.evaluateHandle('this')`), reads one of its properties after the worker is terminated, and checks the error's message; Strider's worker `evaluate` returns only values, so there's no handle to read from"
+  },
+  {
+    "tests": [
+      "WO-005"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-consolemessage-timestamp",
+    "reason": "Checks a worker's console message's wall-clock timestamp against the test's clock; a `ConsoleMessage`'s `at` is a monotonic instant, not a wall-clock time, and there is no wall-clock timestamp"
+  },
+  {
+    "tests": [
+      "WO-007"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-consolemessage-args",
+    "reason": "Reads a worker's console message's arguments as handles, including the worker's global object and its `origin`; a `ConsoleMessage` carries the formatted text, level, and location, not the arguments"
+  },
+  {
+    "tests": [
+      "WO-014"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-request-frame",
+    "reason": "Checks that a request a worker started, inside an iframe, belongs to that iframe; a request from a worker has a `Worker` initiator, which names the worker's realm and no frame, so the frame can't be read"
+  }
+]

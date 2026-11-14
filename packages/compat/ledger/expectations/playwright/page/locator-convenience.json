@@ -1,0 +1,100 @@
+[
+  {
+    "tests": [
+      "LO-057"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "Converting a locator to a string in Playwright's form, `locator('#outer').locator('#inner')`. Strider's locator prints its own `Locator(page.…)` description, and the matrix row says Strider has no toString operation. The test's JSHandle preview of a text node is Playwright's handle, which Strider doesn't have"
+  },
+  {
+    "tests": [
+      "LO-060"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locator-innerhtml",
+    "reason": "Reading a locator's innerHTML, which Strider does as `locator.evaluate` of the element's property. Evaluate runs in an isolated world, which stock WebKit doesn't have, so the read fails with Unsupported there. The matrix row names `readHtml`, which is the outer HTML"
+  },
+  {
+    "tests": [
+      "LO-061"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locator-innertext",
+    "reason": "Reading a locator's innerText, which Strider does as `locator.evaluate` of the element's property. Evaluate runs in an isolated world, which stock WebKit doesn't have, so the read fails with Unsupported there"
+  },
+  {
+    "tests": [
+      "LO-062"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locator-innertext",
+    "reason": "innerText on an element that isn't an HTMLElement throws Playwright's `Node is not an HTMLElement`. Strider reads innerText through evaluate, which returns `undefined` for an SVG element and doesn't fail, so the test's rejection isn't reproduced. The matrix row says innerText is `has`, which doesn't cover that rejection"
+  },
+  {
+    "tests": [
+      "LO-064"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locator-textcontent",
+    "reason": "Reading a locator's raw textContent, which Strider does as `locator.evaluate` of the element's property. Evaluate runs in an isolated world, which stock WebKit doesn't have, so the read fails with Unsupported there. readText collapses whitespace, so it doesn't give the raw value"
+  },
+  {
+    "tests": [
+      "LO-066"
+    ],
+    "status": "differentByDesign",
+    "decision": "Editability reads share editing rules",
+    "reason": "Playwright's isEditable throws for an unsupported kind (a button), and reads an ARIA-only textbox (`span role=textbox`) as editable. Strider's read returns false for both, since only kinds its editing actions accept qualify; the test's throw and its #span2 expectation are that difference"
+  },
+  {
+    "tests": [
+      "LO-069",
+      "LO-070"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locator-alltextcontents",
+    "reason": "Reading each match's raw textContent (allTextContents) or innerText (allInnerTexts), which Strider does as `all` followed by `evaluate` of each element. Evaluate runs in an isolated world, which stock WebKit doesn't have, so the reads fail with Unsupported there. The matrix rows for both reads name the same path"
+  },
+  {
+    "tests": [
+      "LO-071"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locator-page",
+    "reason": "Reading the page a locator belongs to, with `locator.page()`. Strider's locator has no page accessor, so the identity checks have no Strider call to make"
+  },
+  {
+    "tests": [
+      "LO-072",
+      "LO-073",
+      "LO-074",
+      "LO-075",
+      "LO-076"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locator-description",
+    "reason": "Reading a locator's description with `description()`. Strider has `describe(label)`, which sets a label but has no read, so the null and the described values have no Strider call to check"
+  },
+  {
+    "tests": [
+      "LO-077",
+      "LO-078"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "Converting a locator to a string in Playwright's form (`getByRole('button', { name: 'Submit' })`), and preferring a description in that string. Strider's locator prints its own `Locator(page.…)` description, and the matrix row says Strider has no toString operation"
+  }
+]

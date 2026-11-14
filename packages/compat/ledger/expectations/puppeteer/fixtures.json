@@ -1,0 +1,25 @@
+[
+  {
+    "tests": [
+      "[fixtures.test] Fixtures dumpio option should work with pipe option"
+    ],
+    "status": "notApplicable",
+    "reason": "Returns early unless the browser is Chrome's old headless shell, which Strider doesn't launch, so it checks nothing for Strider. It also tests `dumpio` and the pipe transport, which Strider has no options for"
+  },
+  {
+    "tests": [
+      "[fixtures.test] Fixtures should dump browser process stderr"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browsertype-launch-logger",
+    "reason": "Copies the browser's stderr to the caller's stderr (Puppeteer's `dumpio`) while the browser runs. Strider keeps the stderr of a browser that exits before it's ready, in `ProcessExited`'s `stderrTail`, and doesn't forward it; the nearest matrix row is the launch logger, a different log"
+  },
+  {
+    "tests": [
+      "[fixtures.test] Fixtures should close the browser when the node process closes"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-browser-disconnected",
+    "reason": "Connects to a browser another process launched, kills that process, and waits for the browser's `disconnected` event. Strider has no browser-level disconnected event"
+  }
+]

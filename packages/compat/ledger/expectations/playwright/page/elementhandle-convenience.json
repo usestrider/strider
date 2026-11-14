@@ -1,0 +1,14 @@
+[
+  {
+    "tests": ["EH-024", "EH-025"],
+    "status": "needsFeature",
+    "matrix": "method-locator-tostring",
+    "reason": "Playwright's JSHandle string preview (JSHandle@<div …>), which prints an element's tag and attributes, truncated, and a handle to a text node. Strider has no handle to print, and a locator's toString isn't the element's preview. The matrix has no row for JSHandle.toString, so method-locator-tostring is the nearest"
+  },
+  {
+    "tests": ["EH-032"],
+    "status": "needsFeature",
+    "matrix": "method-locator-evaluatehandle",
+    "reason": "Playwright's handle to a ShadowRoot, from evaluateHandle, with textContent and a :scope query on it. Strider's locator evaluation returns values, not handles, and a locator can't be scoped to a shadow root"
+  }
+]

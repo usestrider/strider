@@ -6,6 +6,7 @@
     "**/*.tsbuildinfo",
     "packages/tools/docs/src/jsdocs/**",
     "packages/scenarios/upstream/*/fixture/**",
+    "packages/compat/sources/*/assets/**",
     "**/.*"
   ],
   "overrides": [{

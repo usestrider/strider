@@ -1,0 +1,151 @@
+[
+  {
+    "tests": [
+      "[emulation.test] Emulation Page.viewport should support mobile emulation",
+      "[emulation.test] Emulation Page.viewport should support landscape emulation",
+      "[emulation.test] Emulation Page.emulate should work",
+      "[emulation.test] Emulation Page.emulate should work twice on about:blank"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newpage-devicescalefactor",
+    "reason": "Emulates a phone: a mobile viewport, which Firefox and stock WebKit refuse Unsupported (emulation.viewport.mobile). The matrix row says the option is present, which covers only the device scale factor"
+  },
+  {
+    "tests": [
+      "[emulation.test] Emulation Page.viewport should support touch emulation",
+      "[emulation.test] Emulation Page.viewport should be detectable by Modernizr",
+      "[emulation.test] Emulation Page.viewport should detect touch when applying viewport with touches",
+      "[emulation.test] Emulation Page.emulate should support clicking"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newpage-hastouch",
+    "reason": "Turns touch on with page.emulate({ touch: true }), which Firefox and stock WebKit refuse Unsupported (emulation.touch). The clicking test and the others also need the phone's mobile viewport"
+  },
+  {
+    "tests": [
+      "[emulation.test] Emulation Page.viewport should update media queries when resolution changes",
+      "[emulation.test] Emulation Page.viewport should load correct pictures when emulation dpr"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-devicescalefactor",
+    "reason": "A device scale factor other than 1 for the viewport, which stock WebKit refuses Unsupported (emulation.viewport.mobile and its scale)"
+  },
+  {
+    "tests": [
+      "[emulation.test] Emulation Page.emulateMediaType should work",
+      "[emulation.test] Emulation Page.emulateMediaFeatures should work with forced-colors",
+      "[emulation.test] Emulation Page.emulateMediaFeatures should work with prefers-contrast"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-emulatemedia-media",
+    "reason": "Firefox can't emulate media (Emulation's backend table: emulation.media), so the page's media queries keep the browser's own values. The matrix row says Strider has this; it has it on Chromium and stock WebKit only"
+  },
+  {
+    "tests": [
+      "[emulation.test] Emulation Page.emulateMediaType should throw in case of bad argument",
+      "[emulation.test] Emulation Page.emulateMediaFeatures should throw in case of bad argument"
+    ],
+    "status": "notApplicable",
+    "reason": "Puppeteer checks the media type and the feature name at run time and throws for another value. Strider's Emulation.Media is typed, so a value outside the union doesn't compile, and the call has no run-time error to check"
+  },
+  {
+    "tests": [
+      "[emulation.test] Emulation Page.emulateMediaFeatures should work",
+      "[emulation.test] Emulation Page.emulateMediaFeatures should work with prefers-reduced-transparency"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-emulatemedia",
+    "reason": "Sets media features Strider's Emulation.Media doesn't name: color-gamut, and prefers-reduced-transparency. Strider has reducedMotion, colorScheme, contrast, forcedColors, and the media type; the matrix row covers those"
+  },
+  {
+    "tests": [
+      "[emulation.test] Emulation Page.emulateTimezone should work",
+      "[emulation.test] Emulation Page.emulateTimezone should support timezone offset"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newpage-timezoneid",
+    "reason": "Stock WebKit takes the time zone at launch, before a context's options reach it, so page.emulate({ timezone }) is refused Unsupported (emulation.timezone)"
+  },
+  {
+    "tests": [
+      "[emulation.test] Emulation Page.emulateLocale should work"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newpage-locale",
+    "reason": "Stock WebKit's MiniBrowser takes its language from nothing it's given, so page.emulate({ locale }) is refused Unsupported (emulation.locale)"
+  },
+  {
+    "tests": [
+      "[emulation.test] Emulation Page.emulateVisionDeficiency should work",
+      "[emulation.test] Emulation Page.emulateVisionDeficiency should throw for invalid vision deficiencies"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-emulatemedia",
+    "reason": "Simulates a vision deficiency (protanopia, blurred vision, reduced contrast and the rest). Strider's emulation has no vision deficiency field, and the matrix has no row for one; the nearest row is Page.emulateMedia"
+  },
+  {
+    "tests": [
+      "[emulation.test] Emulation Page.emulateNetworkConditions should support offline",
+      "[emulation.test] Emulation Page.emulateNetworkConditions should support offline without additional parameters"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-setoffline",
+    "reason": "Takes the page offline with page.emulate({ network: \"offline\" }), which stock WebKit refuses Unsupported (emulation.network.offline; its inspector has no Emulation domain)"
+  },
+  {
+    "tests": [
+      "[emulation.test] Emulation Page.emulateNetworkConditions should change navigator.connection.effectiveType",
+      "[emulation.test] Emulation Page.emulateCPUThrottling should change the CPU throttling rate successfully"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-setoffline",
+    "reason": "Throttles the network or the CPU with page.emulate({ network } or { cpuSlowdown }), which Firefox and stock WebKit refuse Unsupported (emulation.network.throttling and emulation.cpuSlowdown). The matrix has no row for either; the nearest row is the network emulation one"
+  },
+  {
+    "tests": [
+      "[emulation.test] Emulation Page.emulateFocusedPage should emulate focus"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-bringtofront",
+    "reason": "Focus emulation (focus: \"emulated\") is Chromium's: Firefox and stock WebKit refuse it Unsupported (emulation.focus), as the Playwright emulation-focus port records"
+  },
+  {
+    "tests": [
+      "[emulation.test] Emulation Page.emulateFocusedPage should reset focus"
+    ],
+    "status": "differentByDesign",
+    "decision": "The library changes nothing the caller didn't ask for",
+    "reason": "Switches focus emulation off on a page that already has it. Strider's focus emulation is set when a page or context is made and holds for its life, and no call turns it off again"
+  }
+]

@@ -1,0 +1,29 @@
+[
+  {
+    "tests": [
+      "[console.test] console should work",
+      "[console.test] console should return remote objects",
+      "[console.test] console should not dispose handles when page has listeners"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-consolemessage-args",
+    "reason": "Reads a console message's arguments as values or handles, with their count, `jsonValue`, and properties. A ConsoleMessage carries the formatted text, level, and location, not its arguments"
+  },
+  {
+    "tests": [
+      "[console.test] console should have location and stack trace for console API calls",
+      "[console.test] console should have scriptId in stack trace for eval console API calls"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-consolemessage-location",
+    "reason": "Reads the message's stack trace, and a `scriptId` on the location and each frame. A ConsoleMessage doesn't carry a stack trace; its location is one frame's URL, line, and column"
+  },
+  {
+    "tests": [
+      "[console.test] console should report the originating frame and page for iframe logs"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-consolemessage-page",
+    "reason": "Reads the frame that wrote the message (`message.frame()`), which for an iframe's log is the iframe, not the main frame. A ConsoleMessage's origin is a page, named by its main frame's navigable, or a worker's realm: it doesn't name the frame. The row is the nearest: it lists `ConsoleMessage.page` as missing, and `frame` has none"
+  }
+]

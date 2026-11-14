@@ -1,0 +1,10 @@
+[
+  {
+    "tests": [
+      "CR-038"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browsertype-launchpersistentcontext-recordvideo",
+    "reason": "Records a video of a persistent context with `recordVideo` at launch. Strider's video is a page capability that needs a VideoWriter on Chromium, not a launch option of a persistent context"
+  }
+]

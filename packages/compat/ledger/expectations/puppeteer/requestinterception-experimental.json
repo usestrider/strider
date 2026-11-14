@@ -1,0 +1,74 @@
+[
+  {
+    "tests": [
+      "[requestinterception-experimental.test] cooperative request interception Page.setRequestInterception should cooperatively ${expectedAction} by priority"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "Ranks several handlers' votes on one request: `continue`, `abort`, or `respond` at a priority, and the highest-priority vote wins once every handler has voted. Strider's route handler returns one decision for the request and has no view of another handler's vote, so cooperative interception has no counterpart. No matrix row covers it; method-route-continue is the nearest"
+  },
+  {
+    "tests": [
+      "[requestinterception-experimental.test] cooperative request interception Page.setRequestInterception should normalize Headers instances for cooperative interception"
+    ],
+    "status": "notApplicable",
+    "reason": "Passes a `Headers` instance as the overrides of a cooperative `continue` and reads `continueRequestOverrides()` back, which is Puppeteer's own record of what a handler returned. Strider's decision is a change to the request (`Route.continueWith`) with no headers argument, so there is no second input form to pass a `Headers` to. The header change itself is ported as \"should work when header manipulation headers with redirect\""
+  },
+  {
+    "tests": [
+      "[requestinterception-experimental.test] cooperative request interception Page.setRequestInterception should be able to access the error reason"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "Reads `abortErrorReason()` in a second handler while the first handler's `abort` vote is still pending. Strider has no pending abort for a handler to read: a route handler returns one decision and has no view of another handler's. The abort reason itself is ported in \"should be abortable with custom error codes\"; method-route-abort is the nearest matrix row"
+  },
+  {
+    "tests": [
+      "[requestinterception-experimental.test] cooperative request interception Page.setRequestInterception should throw if interception is not enabled"
+    ],
+    "status": "notApplicable",
+    "reason": "Asserts that `request.continue()` throws while Puppeteer's `setRequestInterception` flag is off. Strider has no such flag: a route is the interception, and a request is paused only while a route is registered, so there is no disabled state to refuse"
+  },
+  {
+    "tests": [
+      "[requestinterception-experimental.test] cooperative request interception Page.setRequestInterception should not cache ${resourceType} if cache disabled"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-reload",
+    "reason": "Turns the page's HTTP cache off (`setCacheEnabled(false)`), then reloads and expects no response served from the cache. Strider has no page-level cache switch: `page.reload` takes `bypassCache` for one reload only. The matrix has no row for a cache switch, so method-page-reload is the nearest"
+  },
+  {
+    "tests": [
+      "[requestinterception-experimental.test] cooperative request interception Request.continue should redirect in a way non-observable to page"
+    ],
+    "status": "needsFeature",
+    "browsers": [
+      "firefox"
+    ],
+    "matrix": "option-route-continue-url",
+    "reason": "Continues a request to another URL, so the navigation to empty.html commits the other document (consolelog.html) and the page keeps its URL. Firefox can't continue a request with a new URL (`interception.continueUrl` is unsupported on its BiDi backend), so the redirect doesn't happen there"
+  },
+  {
+    "tests": [
+      "[requestinterception-experimental.test] cooperative request interception Request.respond should be able to access the response"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "Reads `responseForRequest()` in a second handler, which sees the response the first handler's `respond` vote gives. Strider has no pending response for a handler to read: a route handler returns one decision and has no view of another handler's. The response itself is ported in \"Request.respond should work\"; method-route-fulfill is the nearest matrix row"
+  },
+  {
+    "tests": [
+      "[requestinterception-experimental.test] cooperative request interception Request.respond should stringify intercepted request response headers"
+    ],
+    "status": "notApplicable",
+    "reason": "Puppeteer's `request.respond` stringifies a non-string header value (`foo: true`). Strider's header input is typed as strings and refuses other values at compile time, so there is no non-string value for the browser to receive"
+  },
+  {
+    "tests": [
+      "[requestinterception-experimental.test] cooperative request interception Request.respond should indicate already-handled if an intercept has been handled"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "Reads `isInterceptResolutionHandled()` and `interceptResolutionState()` in later handlers, to see whether an earlier handler already resolved the request and with which action (`AlreadyHandled`). Strider has no resolution state for a handler to read; method-route-continue is the nearest matrix row"
+  }
+]

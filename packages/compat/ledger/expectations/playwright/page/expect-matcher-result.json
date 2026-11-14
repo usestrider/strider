@@ -1,0 +1,18 @@
+[
+  {
+    "tests": [
+      "EX-179"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-locatorassertions-tobechecked-indeterminate",
+    "reason": "Checking for the indeterminate state of a checkbox (`toBeChecked({ indeterminate: true })`) and its inverse. Strider's `toBeChecked` takes no options, so the test can't be written against it"
+  },
+  {
+    "tests": [
+      "EX-180"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-pageassertions-tohavescreenshot-1",
+    "reason": "Screenshot comparison in an expectation (`toHaveScreenshot`), whose failure carries the actual, expected, and diff images. Strider has no screenshot expectation"
+  }
+]

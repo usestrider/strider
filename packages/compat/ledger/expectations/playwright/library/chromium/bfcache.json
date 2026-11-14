@@ -1,0 +1,10 @@
+[
+  {
+    "tests": [
+      "CR-042"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-exposefunction",
+    "reason": "Exposes a function to a page, restores the page from the back/forward cache, and calls the function again. Strider has no exposeFunction, so the binding the test is about can't be made. It also launches with `--disable-back-forward-cache` through `ignoreDefaultArgs`, which Strider's launch profiles don't have (the matrix row for it is missing); Strider keeps the cache on, so the restore is what a page sees by default"
+  }
+]

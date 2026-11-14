@@ -1,0 +1,11 @@
+[
+  {
+    "tests": [
+      "NE-128",
+      "NE-129",
+      "NE-130"
+    ],
+    "status": "notApplicable",
+    "reason": "Tests the socket timeouts and address ordering of Playwright's internal HTTP helper, which downloads browsers. Strider has no such helper, and its requests go through the browser, whose timeouts the other tests cover"
+  }
+]

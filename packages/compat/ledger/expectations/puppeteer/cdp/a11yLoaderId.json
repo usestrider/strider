@@ -1,0 +1,16 @@
+[
+  {
+    "tests": [
+      "[a11yLoaderId.test] Accessibility loaderId should match loaderId for iframes"
+    ],
+    "status": "notApplicable",
+    "reason": "Compares the `loaderId` of each node in Puppeteer's accessibility snapshot with the loader IDs Puppeteer keeps for its frames (`_loaderId`), which are CDP's. It tests Puppeteer's bookkeeping over CDP; Strider's frames have no loader ID to compare"
+  },
+  {
+    "tests": [
+      "[a11yLoaderId.test] Accessibility loaderId should not resolve an element handle after a cross-process navigation"
+    ],
+    "status": "notApplicable",
+    "reason": "Takes an element handle from an accessibility snapshot and checks it no longer resolves after a cross-process navigation. Puppeteer's handle is a backend node ID that CDP assigns, which Strider doesn't expose; a Strider locator resolves again at each action and holds no element"
+  }
+]

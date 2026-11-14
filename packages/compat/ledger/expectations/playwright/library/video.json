@@ -1,0 +1,59 @@
+[
+  {
+    "tests": [
+      "VI-003",
+      "VI-005",
+      "VI-006",
+      "VI-008",
+      "VI-009",
+      "VI-010",
+      "VI-011",
+      "VI-012",
+      "VI-013",
+      "VI-014",
+      "VI-025",
+      "VI-027",
+      "VI-028",
+      "VI-031"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-recordvideo",
+    "reason": "Stock WebKit refuses user contexts (userContexts), so each test's context is refused; and its video needs explicit polling options and a writer, which the harness doesn't give it"
+  },
+  {
+    "tests": [
+      "VI-001",
+      "VI-002",
+      "VI-007",
+      "VI-024",
+      "VI-030"
+    ],
+    "status": "notApplicable",
+    "reason": "VI-001 reads Playwright's `page.video()` accessor, which reports whether a page is recording; Strider's recording is a capability acquired in a scope, and a page without one has no handle to read. VI-002 passes Playwright's `recordVideo` option with no `dir` to `newContext`, an option shape Strider doesn't have: recording is `Capability.Video`. VI-007 calls `video.delete()`, a method of Playwright's; the Strider file is the caller's to remove, a file operation. VI-024 kills the browser process through Playwright's `killForTests`, its own test hook, and Strider has no handle to a launched browser's process. VI-030 reads Playwright's trace.zip screencast frames, and Strider's trace format is its own"
+  },
+  {
+    "tests": [
+      "VI-022"
+    ],
+    "matrix": "property-playwright-devices",
+    "status": "needsFeature",
+    "reason": "Playwright's device descriptor for iPhone 6, which sets the viewport, the mobile flag, and the user agent. Strider has no device registry, so the test's context can't be made from a device"
+  },
+  {
+    "tests": [
+      "VI-004",
+      "VI-015",
+      "VI-016",
+      "VI-017",
+      "VI-018",
+      "VI-019",
+      "VI-020"
+    ],
+    "matrix": "option-browser-newcontext-recordvideo",
+    "status": "needsFeature",
+    "reason": "Playwright's recordVideo.size (VI-004, VI-015), its default size of 800 by 800 at most, or 800 by 450, or 800 by 600 for a context with no viewport (VI-016, VI-017, VI-020), and recordVideo.fps with its validation (VI-018, VI-019). Strider's Capability.Video takes no options: its file has the size of the page's first picture in device pixels, fixed for the file, and is variable-rate, so there is no requested size to scale or pad to, no default size, and no frame rate to request or read back. The matrix row says Strider has recordVideo, and it has the recording but neither the size nor the fps"
+  }
+]

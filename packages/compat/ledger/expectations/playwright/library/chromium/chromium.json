@@ -1,0 +1,39 @@
+[
+  {
+    "tests": [
+      "CR-024"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright's `PLAYWRIGHT_DISABLE_SERVICE_WORKER_NETWORK` environment variable, which turns off the network events of its service workers. Strider has no such switch: a service worker's requests are always observed"
+  },
+  {
+    "tests": [
+      "CR-025"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-consolemessage-args",
+    "reason": "The arguments of a console message (`message.args()` and their `jsonValue()`), which `ConsoleMessage` doesn't carry: it has the text, level and location. The rest of the test differs too: Playwright also reports a service worker's message on the page, where Strider reports it on the context only, and the test asserts that the two are the same message"
+  },
+  {
+    "tests": [
+      "CR-028"
+    ],
+    "status": "notApplicable",
+    "reason": "The original runs only on the Edge channel, skipping every other channel; this run is Chromium, and Edge's InPrivate list is Edge's own"
+  },
+  {
+    "tests": [
+      "CR-031"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-newcdpsession",
+    "reason": "A raw CDP session (`newCDPSession`) to send `Page.handleJavaScriptDialog` out of band, and the page's `dialogclosed` event (`event-page-dialogclosed`), which Strider doesn't have"
+  },
+  {
+    "tests": [
+      "CR-032"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright's internal connection table (`_connection._sessions`), which counts its protocol sessions; Strider has no such table to read"
+  }
+]

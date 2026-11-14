@@ -1,0 +1,15 @@
+[
+  {
+    "tests": [
+      "SE-154",
+      "SE-155",
+      "SE-156",
+      "SE-157",
+      "SE-158",
+      "SE-159"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-selectors-register",
+    "reason": "Registering custom selector engines (`selectors.register`) and selecting with `textContent=`, `innerText=`, `innerHTML=`, `getAttribute=`, `isVisible=`, or a registered name from a source string. Strider has no selector-engine registry, so none of these tests can be written against it"
+  }
+]

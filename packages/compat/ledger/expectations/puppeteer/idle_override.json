@@ -1,0 +1,10 @@
+[
+  {
+    "tests": [
+      "[idle_override.test] Emulate idle state changing idle state emulation causes change of the IdleDetector state"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-emulatemedia",
+    "reason": "Emulates the user's idle and screen-lock state (`page.emulateIdleState`) and reads an IdleDetector's state. Strider has no idle emulation; the nearest matrix row is the page's media emulation, a different emulation"
+  }
+]

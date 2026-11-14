@@ -1,0 +1,44 @@
+[
+  {
+    "tests": [
+      "SC-016",
+      "SC-019",
+      "SC-020",
+      "SC-021",
+      "SC-023",
+      "SC-024",
+      "SC-027"
+    ],
+    "status": "notApplicable",
+    "reason": "Strider won't draw overlays, action captions, or highlights into a page or its recording: they change what the page and its captures show, for a presentation feature. Playwright's page.screencast.showActions draws an annotation over the page, with a title, a point, a highlight and an action cursor, and the tests read those elements. Strider's screencast has frames and file recording, and no action annotations, so there is no overlay to read or dispose"
+  },
+  {
+    "tests": [
+      "SC-017"
+    ],
+    "status": "notApplicable",
+    "reason": "Strider won't draw overlays, action captions, or highlights into a page or its recording: they change what the page and its captures show, for a presentation feature. The annotation's style, font size and the title's position are options of showActions, which Strider lacks; the test checks the rendered overlay's computed style"
+  },
+  {
+    "tests": [
+      "SC-018"
+    ],
+    "status": "notApplicable",
+    "reason": "Strider won't draw overlays, action captions, or highlights into a page or its recording: they change what the page and its captures show, for a presentation feature. The title's position (top, bottom and the corners) is an option of showActions, which Strider lacks"
+  },
+  {
+    "tests": [
+      "SC-025"
+    ],
+    "status": "notApplicable",
+    "reason": "Strider won't draw overlays, action captions, or highlights into a page or its recording: they change what the page and its captures show, for a presentation feature. The cursor option that suppresses the action cursor is an option of showActions, which Strider lacks"
+  },
+  {
+    "tests": [
+      "SC-022",
+      "SC-026"
+    ],
+    "status": "notApplicable",
+    "reason": "Strider won't draw overlays, action captions, or highlights into a page or its recording: they change what the page and its captures show, for a presentation feature. Playwright's page.screencast.hideActions removes the action annotations, and the tests read whether the overlay is gone; Strider has no annotations to hide"
+  }
+]

@@ -1,0 +1,51 @@
+[
+  {
+    "tests": [
+      "RO-172"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-ignorehttpserrors",
+    "reason": "The context accepts the fixture's self-signed certificate, which Chromium refuses per context (acceptInsecureCerts is Unsupported there)"
+  },
+  {
+    "tests": [
+      "RO-173",
+      "RO-174",
+      "RO-175"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browsercontext-route-times",
+    "reason": "A route that handles only its first N requests (`times`) and then stops; Strider's routes have no such option, so a handler has to count its own requests"
+  },
+  {
+    "tests": [
+      "RO-178"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-route-fallback-url",
+    "reason": "route.fallback({ url }) hands the request to the next matching route with a new URL, and chains through three routes; Route.continueWith can change the URL but never passes the request on to the next route"
+  },
+  {
+    "tests": [
+      "RO-184"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-route-fetch",
+    "reason": "The port fulfills the popup's own paused response at the response phase, which Strider does on Chromium only: Firefox can't fulfill at that phase (interception.responseFulfill), and WebKit can't read a paused response's body (interception.responseBody, CDP only) nor change its headers (interception.responseHeaders). Playwright's route.fetch works on every browser",
+    "browsers": [
+      "firefox",
+      "webkit"
+    ]
+  },
+  {
+    "tests": [
+      "RO-185"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-route",
+    "reason": "A URLPattern with ignoreCase: Strider's URL patterns are strings, and a URLPattern string has no case-insensitive option"
+  }
+]

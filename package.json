@@ -42,6 +42,8 @@
     "profile:click": "nix develop .#integration --ignore-environment --keep TERM --command node packages/scenarios/benchmark/click-profile.ts",
     "test:integration:heavy": "nix develop .#integration --ignore-environment --keep TERM --keep STRIDER_RECORD --keep STRIDER_UPSTREAM_SAMPLES --keep STRIDER_INTEGRATION_JOB --command pnpm exec vitest --run --config vitest.integration.heavy.config.ts --tagsFilter=heavy",
     "test:integration:full": "nix develop .#integration --ignore-environment --keep TERM --keep STRIDER_RECORD --keep STRIDER_UPSTREAM_SAMPLES --keep STRIDER_INTEGRATION_JOB --command pnpm exec vitest --run --config vitest.integration.full.config.ts",
+    "compat": "nix develop .#integration --ignore-environment --keep TERM --keep STRIDER_COMPAT_BROWSERS --keep STRIDER_COMPAT_RUN --keep STRIDER_COMPAT_OUTPUT --command pnpm exec vitest --run --config vitest.compat.config.ts",
+    "compat:ledger": "node packages/compat/src/bin.ts",
     "matrix:check": "node scripts/playwright-matrix.mjs",
     "matrix:compare": "node scripts/playwright-matrix-compare.mjs"
   },

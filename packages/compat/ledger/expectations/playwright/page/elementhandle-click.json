@@ -1,0 +1,18 @@
+[
+  {
+    "tests": [
+      "EH-013"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "Clicks a handle to a text node, which has no box of its own and no locator: a click on the node's text lands on the element that contains it, and Strider's locators address elements only"
+  },
+  {
+    "tests": [
+      "EH-014"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "Clicks a handle to a node the page removed, and expects the click to fail as a node that is not attached to the DOM. A Strider locator finds the element again, so a removed element is a missing match, not a detached node; the handle's own binding is what this test needs"
+  }
+]

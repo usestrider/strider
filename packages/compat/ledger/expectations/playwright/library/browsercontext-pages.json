@@ -1,0 +1,49 @@
+[
+  {
+    "tests": [
+      "BC-054"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-javascriptenabled",
+    "reason": "Disabling JavaScript in a context, which Firefox can't emulate (emulation.javaScript), so the context can't be made with JavaScript off there"
+  },
+  {
+    "tests": [
+      "BC-055"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-hastouch",
+    "reason": "Emulating a touch screen with a mobile viewport in a context, which Chromium supports and Firefox and stock WebKit don't (emulation.touch and emulation.viewport.mobile), so the context can't be made there"
+  },
+  {
+    "tests": [
+      "BC-056"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-devicescalefactor",
+    "reason": "A device scale factor other than 1 for a context's viewport, which stock WebKit refuses with Unsupported (emulation.viewport.mobile and its scale), so the context can't be made there"
+  },
+  {
+    "tests": [
+      "BC-057",
+      "BC-058"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-ismobile",
+    "reason": "A mobile viewport in a context (isMobile), which Firefox and stock WebKit refuse with Unsupported (emulation.viewport.mobile), so the context can't be made there"
+  }
+]

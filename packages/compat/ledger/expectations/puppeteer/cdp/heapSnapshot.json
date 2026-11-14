@@ -1,0 +1,10 @@
+[
+  {
+    "tests": [
+      "[heapSnapshot.test] Heap Snapshot should capture heap snapshot"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-cdpsession-send",
+    "reason": "Captures a heap snapshot to a file (`page.captureHeapSnapshot`), which Chromium's heap profiler writes over CDP. Strider has no heap snapshot operation; the nearest matrix row is a raw CDP session's send, which the port doesn't use for this"
+  }
+]

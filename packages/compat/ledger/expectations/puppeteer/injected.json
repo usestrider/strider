@@ -1,0 +1,12 @@
+[
+  {
+    "tests": [
+      "[injected.test] PuppeteerUtil tests should work",
+      "[injected.test] PuppeteerUtil tests should not start a stopped *",
+      "[injected.test] PuppeteerUtil tests should not restart a stopped *",
+      "[injected.test] PuppeteerUtil tests createFunction tests should work"
+    ],
+    "status": "notApplicable",
+    "reason": "Tests Puppeteer's injected script (its PuppeteerUtil in an isolated world: the pollers, Deferred, LazyArg, and createFunction), which is the library's own machinery. Strider's engine is internal and has no such world to read or drive"
+  }
+]

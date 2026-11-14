@@ -1,0 +1,68 @@
+[
+  {
+    "tests": [
+      "LO-002",
+      "LO-003",
+      "LO-007",
+      "LO-010",
+      "LO-013",
+      "LO-014",
+      "LO-017",
+      "LO-020",
+      "LO-030",
+      "LO-031",
+      "LO-039",
+      "LO-042",
+      "LO-046"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-framelocator",
+    "reason": "Playwright's frameLocator() with no selector searches every frame in the page for its chain, the main frame included, and fails when the chain matches in more than one frame. Strider enters a frame only by its iframe element (page.frame(iframe)), so there is no search across frames to assert on. The matrix's Page.frameLocator row says has, but it maps to the iframe-element form only; no row names the selector-less form, which is the missing feature"
+  },
+  {
+    "tests": [
+      "LO-048",
+      "LO-049",
+      "LO-050"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-framelocator",
+    "reason": "Playwright's frameLocator() with no selector searches every frame in the page, and does not wait on a frame that never finishes loading, so these tests check a click, a visibility and a count while a sibling iframe is stalled. Strider has no search across frames to stall, and naming the frame would not exercise that. Missing: the selector-less frame locator (see the other entries under this matrix row)"
+  },
+  {
+    "tests": [
+      "LO-043",
+      "LO-044"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-framelocator",
+    "reason": "Playwright's frameLocator() with no selector resolves each operand of an `or` from the frame the search found: LO-043's operand is built on `page`, which has no button in the main frame, and LO-044's is a second `frameLocator('#f')` from the main frame, which has no #f. Both only find their element because the search starts the operand in the frame it found. Strider enters a frame only by its iframe element, so naming the frame makes both operands one chain in one frame and asserts nothing about that resolution. Missing: the selector-less frame locator (see the other entries under this matrix row; the matrix's Page.frameLocator row says has, but it maps to the iframe-element form only, and no row names the selector-less form)"
+  },
+  {
+    "tests": [
+      "LO-026",
+      "LO-027",
+      "LO-028",
+      "LO-029",
+      "LO-047"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "Queries from an element handle with Playwright's internal:control=any-frame selector string, and LO-047 resolves aria-ref= selector strings. Strider has no selector strings beyond CSS, and its snapshot refs are locators, not strings. The any-frame search these rely on is also missing (see the other entries)"
+  },
+  {
+    "tests": [
+      "LO-041"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "Asserts Playwright's rendering of a locator as a string, including its frameLocator() steps. Strider's locators have no such rendering to assert on, and the selector-less frame locator it would render is missing too"
+  },
+  {
+    "tests": [
+      "LO-045"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright rejects first(), last(), and nth() on frameLocator(), its frame locator with no selector. Strider's frame locator has none of those methods: the iframe is selected on its element locator before the frame is entered (method-framelocator-first and the nth row), so there is no call to reject"
+  }
+]

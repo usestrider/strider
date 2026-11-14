@@ -1,0 +1,9 @@
+[
+  {
+    "tests": [
+      "LO-114"
+    ],
+    "status": "notApplicable",
+    "reason": "Strider won't draw overlays, action captions, or highlights into a page or its recording: they change what the page and its captures show, for a presentation feature. Highlighting a locator with `locator.highlight`, then checking the highlight's tooltip text and that its box matches the element's. Strider has no highlight overlay"
+  }
+]

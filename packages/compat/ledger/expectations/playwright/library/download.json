@@ -1,0 +1,75 @@
+[
+  {
+    "tests": [
+      "DO-012",
+      "DO-018"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-download-delete",
+    "reason": "Deleting a download's file with `download.delete()`, and the error a save after the deletion gets. Strider's download has no delete: its file goes when its context closes (DO-020 and DO-021 check that)"
+  },
+  {
+    "tests": [
+      "DO-025"
+    ],
+    "status": "notApplicable",
+    "reason": "Kills the browser process through Playwright's `_channel.killForTests`, its own test hook, to check that a download in progress fails with the target closed. Strider has no such hook; a browser that goes away is `TargetGone`, which DO-021 covers by closing the browser"
+  },
+  {
+    "tests": [
+      "DO-001",
+      "DO-002",
+      "DO-003",
+      "DO-004",
+      "DO-005",
+      "DO-006",
+      "DO-007",
+      "DO-008",
+      "DO-009",
+      "DO-010",
+      "DO-011",
+      "DO-013",
+      "DO-014",
+      "DO-015",
+      "DO-016",
+      "DO-017",
+      "DO-019",
+      "DO-020",
+      "DO-021",
+      "DO-022",
+      "DO-023",
+      "DO-024",
+      "DO-026",
+      "DO-027",
+      "DO-028",
+      "DO-029",
+      "DO-030",
+      "DO-031",
+      "DO-032",
+      "DO-033",
+      "DO-034",
+      "DO-035",
+      "DO-036",
+      "DO-037",
+      "DO-038"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-page-download",
+    "reason": "Stock WebKit reports no downloads (the `downloads` capability): `Download.next`, `stream`, and `history` fail with `SubscriptionError`, reason `Unsupported`, and the context's `downloads` option fails on it. The matrix row for the page's download event says `has` with no WebKit requirement"
+  },
+  {
+    "tests": [
+      "DO-027",
+      "DO-028"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-download-cancel",
+    "reason": "WebDriver BiDi has no command to cancel a download (`downloads.cancel`), so `download.cancel` fails with `Unsupported` on Firefox. The matrix row says `has` with the `downloads` capability alone"
+  }
+]

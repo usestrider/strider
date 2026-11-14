@@ -1,0 +1,22 @@
+[
+  {
+    "tests": [
+      "[download.test] Download Browser.createBrowserContext should download to configured location",
+      "[download.test] Download Browser.createBrowserContext should not download to location"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-acceptdownloads",
+    "reason": "Saves a context's downloads into a directory the caller names, or denies them. Stock WebKit has no downloads: a context with any `downloads` value fails with `Unsupported`, so the port runs these on Chromium and Firefox"
+  },
+  {
+    "tests": [
+      "[download.test] Download Puppeteer.launch should download to configured location in the default context"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browsertype-launch-downloadspath",
+    "reason": "Sets the downloads of the browser's default context at launch (`downloadBehavior`). Strider's default context takes no downloads option, and a launch takes none; the nearest matrix row is the launch's downloads path"
+  }
+]

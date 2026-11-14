@@ -1,0 +1,11 @@
+[
+  {
+    "tests": [
+      "CL-101",
+      "CL-104"
+    ],
+    "status": "fails",
+    "issue": "ROOK-513",
+    "reason": "A timed-out action's message names only its operation and phase, not that the element is outside the viewport"
+  }
+]

@@ -1,0 +1,92 @@
+[
+  {
+    "tests": [
+      "TR-007"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-tracing-start-snapshots",
+    "reason": "A trace with aria snapshots of each action. Trace.record has screenshots and DOM snapshots, not aria snapshots, so the matrix row's `has` covers only the options it does take"
+  },
+  {
+    "tests": [
+      "TR-011",
+      "TR-036",
+      "TR-037",
+      "TR-038"
+    ],
+    "status": "needsFeature",
+    "issue": "ROOK-370",
+    "reason": "The requests of an APIRequestContext (`context.request`, `page.request`, or a request context of the test's own), which Strider has no counterpart of, recorded in a trace of their own"
+  },
+  {
+    "tests": [
+      "TR-013"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-tracing-start-name",
+    "reason": "Naming a trace's chunks and writing them to a traces directory on disk, as `tracesDir` and `name` do; Strider exports a recording to the path given to exportTrace"
+  },
+  {
+    "tests": [
+      "TR-014",
+      "TR-030"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-tracing-startchunk",
+    "reason": "Chunks within one running trace, each exported on its own and keeping only its own resources. Strider's recordings are independent scopes, with no rollover inside one"
+  },
+  {
+    "tests": [
+      "TR-041"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-tracing-stopchunk",
+    "reason": "A wait that spans two chunks, with its end left out of the second: Strider has no chunks, so one recording holds the whole wait"
+  },
+  {
+    "tests": [
+      "TR-023"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-screencast-start-size",
+    "reason": "Frames scaled to fit, crop, or scale within a size, as Playwright's screencast does; Strider's screencast frames keep the page's own size, with no size option"
+  },
+  {
+    "tests": [
+      "TR-042"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-tracing-startchunk",
+    "reason": "Two chunks of one trace saved while a WebSocket streams, each with its own WebSocket frames (a `.jsonl` resource). Strider has no chunks, and `Trace.record` writes its network entries without WebSocket frames; the fixture server has no WebSocket endpoint either"
+  },
+  {
+    "tests": [
+      "TR-019"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright's internal stack session directory (`_stacksId`), which a failed save must release. Strider keeps no such directory: a recording's steps are in memory until its export"
+  },
+  {
+    "tests": [
+      "TR-039"
+    ],
+    "status": "notApplicable",
+    "reason": "Reads the trace file Playwright's test runner writes to its traces directory while tracing runs. Strider writes no file until an export, so there is no file to read"
+  },
+  {
+    "tests": [
+      "TR-026",
+      "TR-027"
+    ],
+    "status": "notApplicable",
+    "reason": "Stopping a trace that was never started: a Strider recording exists only once `Trace.record` has started it, so there is no stop to call before a start, and the type has no such state"
+  },
+  {
+    "tests": [
+      "TR-028",
+      "TR-029"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright's disposable returned by start and startChunk, which discards the trace so that a later stop throws. A Strider recording has no discard that makes its export fail: `remove` ends it, and `exportTrace` still writes what it recorded"
+  }
+]

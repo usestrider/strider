@@ -1,0 +1,14 @@
+[
+  {
+    "tests": ["WS-032"],
+    "status": "needsFeature",
+    "matrix": "method-page-routewebsocket",
+    "reason": "Playwright's page.routeWebSocket is a page-level route, and it takes precedence over the context's routes. Strider routes WebSockets only on a browser context (UserContext.routeWebSocket), so the page's own route, and which of the two wins, can't be expressed"
+  },
+  {
+    "tests": ["WS-037", "WS-038"],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-baseurl",
+    "reason": "A context's baseURL resolves a relative WebSocket route pattern (\"/ws\") against the page's origin; Strider's context options have no baseURL, so a relative pattern has no origin to resolve against"
+  }
+]

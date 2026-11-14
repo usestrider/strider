@@ -1,0 +1,154 @@
+[
+  {
+    "tests": [
+      "[launcher.test] Launcher specs Puppeteer Browser.close should stop the browser process when the close command fails"
+    ],
+    "status": "notApplicable",
+    "reason": "Stubs Puppeteer's own BiDi connection so its `browser.close` command rejects, then checks that the browser process exits anyway. Strider has no connection to stub: its scope closes the browser (asking it to close, then signals), and an in-process rejection of a close command is not a Strider call to make. Puppeteer runs this on Firefox's BiDi only; Strider's Firefox close path is covered by the launch tests that close browsers"
+  },
+  {
+    "tests": [
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.launch should return the default arguments",
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.launch should report the correct lastLaunchedBrowser"
+    ],
+    "status": "notApplicable",
+    "reason": "Asks Puppeteer which flags its launch would pass (`puppeteer.defaultArgs`) and which browser it last launched (`puppeteer.lastLaunchedBrowser`): its own bookkeeping, with Puppeteer's flag names. Strider's flags are the inspectable LaunchProfile values a launch records, and nothing is computed from the options without launching"
+  },
+  {
+    "tests": [
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.launch should not allow setting debuggingPort and pipe"
+    ],
+    "status": "notApplicable",
+    "reason": "Checks that Puppeteer refuses a debugging port and a pipe together. Strider has neither option (its transport is its own, and a debugging port is an argument), so the refusal has no counterpart"
+  },
+  {
+    "tests": [
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.executablePath should work",
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.executablePath returns executablePath for channel",
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.executablePath when executable path is configured its value is used"
+    ],
+    "status": "notApplicable",
+    "reason": "Puppeteer's own executable resolution: finding the browser it downloaded or its channel, and its configured path. Strider never looks up or downloads a browser (method-browsertype-executablepath is different), so there's no resolution of Puppeteer's to test"
+  },
+  {
+    "tests": [
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.launch userDataDir argument"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "Passes the profile directory as a Chromium or Firefox flag (`--user-data-dir`, `-profile`). Stock WebKit's MiniBrowser has no profile flag: its profile is the `userDataDir` option, which the userDataDir tests cover"
+  },
+  {
+    "tests": [
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.launch userDataDir argument with non-existent dir"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "Passes the profile directory as a Chromium or Firefox flag (`--user-data-dir`, `-profile`) for a directory that doesn't exist yet. Stock WebKit's MiniBrowser has no profile flag, as the userDataDir argument test says"
+  },
+  {
+    "tests": [
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.launch tmp profile should be cleaned up"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browsertype-launch-artifactsdir",
+    "reason": "Redirects where the temporary profile is created (Puppeteer's `temporaryDirectory` configuration) and checks it's removed after close. Strider has no option for the temporary profile's location, and a launch doesn't report its profile's path. The nearest matrix row is the artifacts directory, which is a different set of files"
+  },
+  {
+    "tests": [
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.launch should filter out ignored default arguments in Chrome",
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.launch should filter out ignored default argument in Firefox"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browsertype-launch-ignoredefaultargs",
+    "reason": "Drops named default arguments from a launch (`ignoreDefaultArgs`) and reads the process's spawn arguments back. Strider has no such option, and its profile's arguments are a value the caller builds; a launch doesn't expose its process's arguments either"
+  },
+  {
+    "tests": [
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.launch should set the default viewport"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newpage-viewport",
+    "reason": "A launch-wide default viewport (`defaultViewport`) for every page the browser opens. Strider's viewport is declared per page or context, and the nearest matrix row is the per-page one; the launch-wide default isn't there"
+  },
+  {
+    "tests": [
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.launch should support the AbortSignal"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsertype-launch",
+    "reason": "Stops a launch with an `AbortSignal` (`signal`) and waits for the process to exit. Strider has no signal option: cancelling a launch is interruption of the effect that builds it. The process's exit can't be observed from the browser either. The nearest matrix row is launch itself"
+  },
+  {
+    "tests": [
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.connect should support targetFilter option in puppeteer.launch"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-pages",
+    "reason": "Filters the launch's targets (`targetFilter`, with `waitForInitialPage: false`) and reads the browser's targets back. Strider has no launch-time target filter and no target list; the nearest matrix row is a context's pages, which aren't filtered at launch"
+  },
+  {
+    "tests": [
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.connect should support targetFilter option"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsercontext-pages",
+    "reason": "Filters the targets a connection sees (`targetFilter`) by URL. Strider's connection observes every page of the browser, with no filter; the nearest matrix row is a context's pages"
+  },
+  {
+    "tests": [
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.connect should be able to close remote browser",
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.connect should be able to connect to a browser with no page targets"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browser-close",
+    "reason": "Closes a browser the client connected to (`remoteBrowser.close()`), which ends the browser for every client and emits `disconnected`. Strider's connection is an attached browser: its scope ends the connection, and the browser stays open. The nearest matrix row is the launched browser's close, which the layer owns"
+  },
+  {
+    "tests": [
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.connect should support acceptInsecureCerts option"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-response-securitydetails",
+    "reason": "Connects with `acceptInsecureCerts` and reads the response's security details (the TLS protocol, which must match the server's socket). Strider has no connect-level option for certificates (its `acceptInsecureCerts` is a context option, unsupported on Chromium), and NetworkResponse has no security details"
+  },
+  {
+    "tests": [
+      "[launcher.test] Launcher specs Browser target events should work"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-browsercontext-page",
+    "reason": "Subscribes to browser-level `targetcreated`, `targetchanged`, and `targetdestroyed` events and checks the sequence of URLs. Strider has no browser-level target events, and its pages are a watchable list with no URL-change stream; the nearest matrix row is the context's page events"
+  },
+  {
+    "tests": [
+      "[launcher.test] Launcher specs Browser.Events.disconnected should be emitted when: browser gets closed, disconnected or underlying websocket gets closed"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-browser-disconnected",
+    "reason": "Counts the browser's `disconnected` events across clients, the host, and a closed socket. Strider has no browser-level disconnected event: each connection's end is its scope's, and the browser's close is observed on its context's `closed`"
+  },
+  {
+    "tests": [
+      "[launcher.test] Launcher specs Puppeteer Browser.disconnect should reject navigation when browser closes",
+      "[launcher.test] Launcher specs Puppeteer Browser.disconnect should reject waitForSelector when browser closes",
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.connect should be able to connect multiple times to the same browser",
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.connect should not modify the connect options",
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.connect should be able to reconnect to a disconnected browser",
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.connect should be able to connect to the same page simultaneously",
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.connect should be able to reconnect",
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.launch should set the debugging port",
+      "[launcher.test] Launcher specs Puppeteer Browser.close should terminate network waiters"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browsertype-connect",
+    "reason": "Connects a client to the running browser (`puppeteer.connect`), or reads the endpoint it listens on. Strider's stock WebKit layer has no connect; Chromium and Firefox connect with their own layers, so these run there"
+  }
+]

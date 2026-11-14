@@ -1,0 +1,19 @@
+[
+  {
+    "tests": [
+      "WS-005"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-websocket-close",
+    "reason": "The close event passes the socket itself to its listener, where Strider's connection closes with a reason (`closed`) and has no event dispatcher to pass the socket to; the test checks that argument"
+  },
+  {
+    "tests": [
+      "WS-007",
+      "WS-008"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-websocket-socketerror",
+    "reason": "The socketerror event, which reports a WebSocket that fails (WS-007) and checks that none fires while a working socket runs (WS-008). Strider's connections have no socketerror event, so these tests have nothing to check"
+  }
+]

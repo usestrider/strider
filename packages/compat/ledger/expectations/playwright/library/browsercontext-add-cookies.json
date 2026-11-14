@@ -1,0 +1,9 @@
+[
+  {
+    "tests": ["CO-041"],
+    "browsers": ["chromium"],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-ignorehttpserrors",
+    "reason": "Accepting a self-signed HTTPS certificate in a context (ignoreHTTPSErrors). Chromium refuses acceptInsecureCerts with Unsupported, because its certificate override applies to the whole browser, so the context that the test's TLS server needs can't be made there"
+  }
+]

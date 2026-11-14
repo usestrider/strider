@@ -1,0 +1,11 @@
+[
+  {
+    "tests": [
+      "[autofill.test] Autofill ElementHandle.autofill should fill out a credit card",
+      "[autofill.test] Autofill ElementHandle.autofill should fill out an address"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-elementhandle-fill",
+    "reason": "Fills a form from a credit card or an address profile (`ElementHandle.autofill`), which Chromium's Autofill domain does. Strider has no autofill operation; its locator fill sets one field's value, and the nearest matrix row is that fill"
+  }
+]

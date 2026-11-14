@@ -1,0 +1,13 @@
+[
+  {
+    "tests": [
+      "LE-001",
+      "LE-002",
+      "LE-003",
+      "LE-004"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-requestgc",
+    "reason": "Checks that a click, fill, expect or waitFor on removed elements leaves no element reachable: it forces garbage collection in the page's worlds and counts WeakRefs, and reads Playwright's own record of leaked JSHandles. Strider has no page-level garbage collection request, and its JSHandle records aren't observable from a test"
+  }
+]

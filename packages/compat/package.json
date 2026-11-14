@@ -1,0 +1,17 @@
+{
+  "name": "@usestrider/compat",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Other projects' browser tests ported to Strider, with a ledger of every upstream test: a harness for finding bugs, never published",
+  "devDependencies": {
+    "@babel/parser": "8.0.7",
+    "@effect/platform-node": "^4.1.2",
+    "@effect/vitest": "^4.1.2",
+    "@types/node": "^26.6.5",
+    "@usestrider/browser": "workspace:^",
+    "@usestrider/vitest": "workspace:^",
+    "effect": "^4.1.2",
+    "vitest": "5.0.5"
+  }
+}

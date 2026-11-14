@@ -1,0 +1,17 @@
+[
+  {
+    "tests": [
+      "LO-146"
+    ],
+    "status": "notApplicable",
+    "reason": "A toMatchSnapshot golden comparison of an element capture, against an image made with Playwright's browser builds and fonts, which Strider's pinned browsers don't match; the test checks nothing else. Element captures are checked by page-screenshot's SS-029"
+  },
+  {
+    "tests": [
+      "LO-154"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locator-locator",
+    "reason": "locator() and frameLocator().locator() take a CSS string only, so a Locator as the argument, which the test passes, has no form. The matrix row says the call is has, but its notes say CSS selectors only, which leaves out this argument"
+  }
+]

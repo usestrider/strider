@@ -1,0 +1,31 @@
+[
+  {
+    "tests": [
+      "EM-019"
+    ],
+    "status": "notApplicable",
+    "reason": "Compares screenshots with Playwright's golden PNG files (toMatchSnapshot), which the harness doesn't carry for Strider's output; the test checks that focus doesn't change what a screenshot shows, and isn't ported"
+  },
+  {
+    "tests": [
+      "EM-013",
+      "EM-014",
+      "EM-015",
+      "EM-016",
+      "EM-017",
+      "EM-018",
+      "EM-020",
+      "EM-021",
+      "EM-022",
+      "EM-023",
+      "EM-024"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-bringtofront",
+    "reason": "Playwright emulates focus for every page, and these tests depend on it. Strider's focus emulation (focus: \"emulated\", the emulation.focus capability) is Chromium's: Firefox and WebKit refuse it with Unsupported. The matrix has no row for emulated focus itself; the row named here is the one that mentions emulation.focus"
+  }
+]

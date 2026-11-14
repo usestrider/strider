@@ -1,0 +1,119 @@
+[
+  {
+    "source": "playwright",
+    "files": [
+      "tests/library/inspector/**"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright's inspector, recorder and code generator, which Strider doesn't have"
+  },
+  {
+    "source": "playwright",
+    "files": [
+      "tests/library/unit/**"
+    ],
+    "status": "notApplicable",
+    "reason": "Unit tests of Playwright's own modules, run without a browser"
+  },
+  {
+    "source": "playwright",
+    "files": [
+      "tests/library/events/**"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright's event emitter, a Node-style implementation Strider doesn't have: its events are Effect streams"
+  },
+  {
+    "source": "playwright",
+    "files": [
+      "tests/library/component-parser.spec.ts",
+      "tests/library/css-parser.spec.ts",
+      "tests/library/locator-parser.spec.ts"
+    ],
+    "status": "notApplicable",
+    "reason": "Parsers of Playwright's selector and locator syntax, run without a browser; Strider's locators are typed calls"
+  },
+  {
+    "source": "playwright",
+    "files": [
+      "tests/library/debug-controller.spec.ts"
+    ],
+    "status": "notApplicable",
+    "reason": "The debug controller Playwright's VS Code extension drives"
+  },
+  {
+    "source": "playwright",
+    "files": [
+      "tests/library/browsertype-launch-selenium.spec.ts"
+    ],
+    "status": "notApplicable",
+    "reason": "Launching through a Selenium Grid, which Strider doesn't do"
+  },
+  {
+    "source": "playwright",
+    "files": [
+      "tests/page/expect-builtins.spec.ts"
+    ],
+    "status": "notApplicable",
+    "reason": "@playwright/test's matchers on plain values; Strider's tests use their runner's own"
+  },
+  {
+    "source": "playwright",
+    "files": [
+      "tests/library/trace-viewer.spec.ts"
+    ],
+    "status": "notApplicable",
+    "reason": "Drives Playwright's own trace viewer app (showTraceViewer) over traces Playwright recorded; Strider has no viewer, and its traces opening in Playwright's is covered by its recordings suites"
+  },
+  {
+    "source": "playwright",
+    "files": [
+      "tests/library/browsercontext-fetch.spec.ts",
+      "tests/library/global-fetch.spec.ts",
+      "tests/library/global-fetch-cookie.spec.ts",
+      "tests/library/fetch-proxy.spec.ts",
+      "tests/library/browsercontext-fetch-algorithms.spec.ts",
+      "tests/library/browsercontext-fetch-happy-eyeballs.spec.ts"
+    ],
+    "status": "needsFeature",
+    "issue": "ROOK-370",
+    "reason": "Playwright's APIRequestContext, an HTTP client beside the browser (context.request, playwright.request.newContext); Strider has none"
+  },
+  {
+    "source": "playwright",
+    "files": [
+      "tests/library/browsertype-connect.spec.ts",
+      "tests/library/browsertype-launch-server.spec.ts",
+      "tests/library/browser-server.spec.ts"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright's own client-server wire protocol (launchServer, connect); Strider connects directly over CDP, BiDi, or the inspector"
+  },
+  {
+    "source": "playwright",
+    "files": [
+      "tests/library/selector-generator.spec.ts",
+      "tests/library/locator-generator.spec.ts"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright's code generator: its injected generateSelector and asLocator, which turn an element or selector into Playwright source; Strider has no generator"
+  },
+  {
+    "source": "playwright",
+    "files": [
+      "tests/library/client-certificates.spec.ts"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-clientcertificates",
+    "reason": "Client certificates for a context (TLS client authentication), which Strider doesn't have yet"
+  },
+  {
+    "source": "playwright",
+    "files": [
+      "tests/library/slowmo.spec.ts"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browsertype-launch-slowmo",
+    "reason": "Playwright's slowMo, a pause before each operation; Strider has no such launch option"
+  }
+]

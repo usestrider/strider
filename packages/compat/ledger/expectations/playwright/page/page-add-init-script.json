@@ -1,0 +1,9 @@
+[
+  {
+    "tests": [
+      "IS-004"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright checks at run time that an init script object carries `path` or `content`, and rejects one that carries neither. Strider's init script is a typed `Source` (a function, `{ source }`, or `{ path }`), so an object with neither doesn't type-check and no call reaches the runtime check to test"
+  }
+]

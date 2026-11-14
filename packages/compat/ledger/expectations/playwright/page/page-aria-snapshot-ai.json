@@ -1,0 +1,36 @@
+[
+  {
+    "tests": [
+      "AR-052",
+      "AR-083",
+      "AR-084"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locator-normalize",
+    "reason": "Resolves a ref to the locator string it stands for with `locator.normalize()`, and reads the owning document through `ownerDocument`; Strider has no normalize, and a ref's frame isn't readable from the snapshot"
+  },
+  {
+    "tests": [
+      "AR-070"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright's AI mode drops a generic wrapper from its output but keeps the ref of the element inside it; Strider's tree has no roleless nodes, so no node it omits has a ref to resolve"
+  },
+  {
+    "tests": [
+      "AR-072"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-page-ariasnapshot",
+    "reason": "Checks that a data: URL in a link is truncated in the snapshot's `/url` line; Strider's snapshot node carries no link URL, and no matrix row names that field"
+  },
+  {
+    "tests": [
+      "AR-091",
+      "AR-092"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-ariasnapshot-mode",
+    "reason": "Playwright's AI snapshot lists the visible content of an aria-hidden subtree and marks its top element `[aria-hidden]`; Strider's default snapshot leaves an aria-hidden subtree out and its node has no such state"
+  }
+]

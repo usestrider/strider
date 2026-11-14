@@ -1,0 +1,36 @@
+[
+  {
+    "tests": [
+      "PR-007",
+      "PR-008",
+      "PR-009"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-proxy-value-proxy-credentials",
+    "reason": "Stock WebKit has no proxy credentials: its Automation session refuses them (userContexts.proxy.credentials), so the test's proxy login can't be set on a context"
+  },
+  {
+    "tests": [
+      "PR-008"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-ignorehttpserrors",
+    "reason": "ignoreHTTPSErrors is acceptInsecureCerts in Strider, which Chromium refuses per context: CDP ignores certificate errors browser-wide"
+  },
+  {
+    "tests": [
+      "PR-012",
+      "PR-013",
+      "PR-016"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-proxy-value-socks-or-https-proxy-endpoint",
+    "reason": "SOCKS proxy endpoints are refused (userContexts.proxy.scheme), and the harness has no SOCKS server to route through; the tests route through one"
+  }
+]

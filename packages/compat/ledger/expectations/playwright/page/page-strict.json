@@ -1,0 +1,26 @@
+[
+  {
+    "tests": [
+      "SM-004"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "page.$ returns the one element as an ElementHandle, and strict mode fails it on several matches; Strider's locators return values and have no handle of an element, and page.evaluateHandle takes no selector"
+  },
+  {
+    "tests": [
+      "SM-005"
+    ],
+    "status": "differentByDesign",
+    "decision": "Retrying CSS assertion cardinality",
+    "reason": "page.waitForSelector in strict mode fails at once on several matches. Strider has no waitForSelector, and the expectation that replaces it (Expect.toBeVisible) retries several matches until the deadline"
+  },
+  {
+    "tests": [
+      "SM-009"
+    ],
+    "status": "differentByDesign",
+    "decision": "Retrying CSS assertion cardinality",
+    "reason": "A toBeVisible expectation on several matches fails at once with Playwright's strict mode error, which also renders each match's escaped tag name in a suggested locator. Strider's expectations retry several matches until the deadline, and fail with their match count there"
+  }
+]

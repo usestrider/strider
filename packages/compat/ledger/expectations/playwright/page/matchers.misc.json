@@ -1,0 +1,10 @@
+[
+  {
+    "tests": [
+      "EX-328"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locatorassertions-tohavejsproperty",
+    "reason": "Checks six matchers over a missing element, one of them `toHaveJSProperty`. Strider has no such matcher, and no read of a property on a locator: `locator.evaluate` runs in the isolated world, which doesn't see the page's own properties (the matrix row for the matcher is missing)"
+  }
+]

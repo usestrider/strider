@@ -1,0 +1,46 @@
+[
+  {
+    "tests": [
+      "[input.test] input tests Page.waitForFileChooser should be able to abort"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-waitforevent-signal",
+    "reason": "Waits for a file chooser with an AbortSignal, which rejects the wait with the signal's reason. Strider cancels a wait by interrupting it, which has no reason string (the same gap as FC-015 in page-filechooser)"
+  },
+  {
+    "tests": [
+      "[input.test] input tests FileChooser.accept should fail when accepting file chooser twice",
+      "[input.test] input tests FileChooser.cancel should fail when canceling file chooser twice"
+    ],
+    "status": "notApplicable",
+    "reason": "Checks Puppeteer's own bookkeeping for a file chooser that is accepted or canceled twice: its 'already handled' error message. Strider's handler returns one decision for each chooser, and no such error exists to check"
+  },
+  {
+    "tests": [
+      "[input.test] input tests Page.waitForFileChooser should work when file input is attached to DOM",
+      "[input.test] input tests Page.waitForFileChooser should work when file input is not attached to DOM",
+      "[input.test] input tests Page.waitForFileChooser should respect timeout",
+      "[input.test] input tests Page.waitForFileChooser should respect default timeout when there is no custom timeout",
+      "[input.test] input tests Page.waitForFileChooser should prioritize exact timeout over default timeout",
+      "[input.test] input tests Page.waitForFileChooser should work with no timeout",
+      "[input.test] input tests Page.waitForFileChooser should return the same file chooser when there are many watchdogs simultaneously",
+      "[input.test] input tests Page.waitForFileChooser should not throw unhandled rejection when file picker is opened without an input element",
+      "[input.test] input tests FileChooser.accept should accept single file",
+      "[input.test] input tests FileChooser.accept should be able to read selected file",
+      "[input.test] input tests FileChooser.accept should be able to reset selected files with empty file list",
+      "[input.test] input tests FileChooser.accept should not accept multiple files for single-file input",
+      "[input.test] input tests FileChooser.accept should succeed even for non-existent files",
+      "[input.test] input tests FileChooser.accept should error on read of non-existent files",
+      "[input.test] input tests FileChooser.cancel should cancel dialog",
+      "[input.test] input tests FileChooser.isMultiple should work for single file pick",
+      "[input.test] input tests FileChooser.isMultiple should work for \"multiple\"",
+      "[input.test] input tests FileChooser.isMultiple should work for \"webkitdirectory\""
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-page-filechooser",
+    "reason": "Stock WebKit's Automation protocol doesn't report file choosers (the `fileChooser` capability), so `FileChooser.next`, `handle`, and `history` fail with `Unsupported`, and the browser cancels the chooser itself (API.md, \"Stock WebKit, launched\"). The matrix row claims `has` with no WebKit requirement"
+  }
+]

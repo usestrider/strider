@@ -1,0 +1,12 @@
+[
+  {
+    "tests": [
+      "WO-029",
+      "WO-030",
+      "WO-031"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-serviceworkers",
+    "reason": "Blocking service worker registration in a context (`serviceWorkers: 'block'`). These tests run under the option, and WO-030 and WO-031 check that errors from the blocking don't surface, so they can't be written without it"
+  }
+]

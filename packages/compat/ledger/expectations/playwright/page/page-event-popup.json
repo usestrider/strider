@@ -1,0 +1,25 @@
+[
+  {
+    "tests": [
+      "PO-001",
+      "PO-002",
+      "PO-003",
+      "PO-004",
+      "PO-005",
+      "PO-006",
+      "PO-007",
+      "PO-008",
+      "PO-009",
+      "PO-010",
+      "PO-011",
+      "PO-012",
+      "PO-013"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "event-page-popup",
+    "reason": "Subscribing to a page's popups, which stock WebKit doesn't support because it doesn't say which page opened another (popups.opener), so Popup.next fails with Unsupported"
+  }
+]

@@ -1,0 +1,43 @@
+[
+  {
+    "tests": [
+      "CA-001"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-ignorehttpserrors",
+    "reason": "The context accepts the fixture's self-signed certificate, which Chromium refuses per context (acceptInsecureCerts is Unsupported there: CDP ignores certificate errors browser-wide). The matrix row says Strider has the option, with Chromium refusing true in its notes"
+  },
+  {
+    "tests": [
+      "CA-011"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "Upstream runs it on Chromium only: showDirectoryPicker, the File System Access API's picker, exists only in Chromium"
+  },
+  {
+    "tests": [
+      "CA-016"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "notApplicable",
+    "reason": "Upstream runs it on WebKit only: window.safari is a Safari and WebKit global that other engines don't define"
+  },
+  {
+    "tests": [
+      "CA-029"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-credentials-install",
+    "reason": "The test installs a virtual authenticator with context.credentials.install(), which Strider has no context-wide credential API for"
+  }
+]

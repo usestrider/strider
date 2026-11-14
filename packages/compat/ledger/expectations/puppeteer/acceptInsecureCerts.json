@@ -1,0 +1,37 @@
+[
+  {
+    "tests": [
+      "[acceptInsecureCerts.test] acceptInsecureCerts Response.securityDetails should work",
+      "[acceptInsecureCerts.test] acceptInsecureCerts Response.securityDetails should be |null| for non-secure requests",
+      "[acceptInsecureCerts.test] acceptInsecureCerts Response.securityDetails Network redirects should report SecurityDetails"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-response-securitydetails",
+    "reason": "Reads the security details of a response (the certificate's issuer, subject, validity, and names, and the TLS protocol), or null for a plain HTTP response. Strider's NetworkResponse has no security details"
+  },
+  {
+    "tests": [
+      "[acceptInsecureCerts.test] acceptInsecureCerts should work",
+      "[acceptInsecureCerts.test] acceptInsecureCerts should work with request interception",
+      "[acceptInsecureCerts.test] acceptInsecureCerts should work with mixed content",
+      "[acceptInsecureCerts.test] acceptInsecureCerts works for service worker"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-ignorehttpserrors",
+    "reason": "Accepting the fixture server's self-signed HTTPS certificate in a context (`acceptInsecureCerts`), which these tests need for their TLS origins. Chromium refuses `acceptInsecureCerts` with Unsupported, because its certificate override applies to the whole browser (the same gap as the Playwright ignorehttpserrors port)"
+  },
+  {
+    "tests": [
+      "[acceptInsecureCerts.test] acceptInsecureCerts should work with mixed content"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-frame-evaluate",
+    "reason": "The test evaluates in the blocked iframe's isolated world, which stock WebKit lacks (`isolatedWorlds` is unsupported), as the Playwright ignorehttpserrors port's NE-139 does"
+  }
+]

@@ -1,0 +1,21 @@
+[
+  {
+    "tests": [
+      "LO-079",
+      "LO-082"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "Getting a locator's first match as an element handle (`locator.elementHandle()`), then evaluating on it in the page. Strider's locators have no handle operation, and a `JSHandle` from `evaluateHandle` is not the same contract (actionability and handle identity are not checked)"
+  },
+  {
+    "tests": [
+      "LO-080",
+      "LO-081",
+      "LO-083"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "Getting every match of a locator as element handles (`locator.elementHandles()`), which may be empty. Strider's locators have no handle operation, so these tests can't be written against it"
+  }
+]

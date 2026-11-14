@@ -1,0 +1,18 @@
+[
+  {
+    "tests": [
+      "NE-043"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-response-headersarray",
+    "reason": "Strider's response headers are one value per name, so a repeated header's values can't be read one by one as headersArray() gives them; Chromium reports them joined in one string, and no call returns the list"
+  },
+  {
+    "tests": [
+      "NE-057"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-response-body",
+    "reason": "Strider loads and decodes a response's body before the response is delivered, so a body is never read after the page has navigated away from it. The original reads the body after the navigation and expects a readable error; Strider has no body read that a navigation can make fail, so the test has no Strider counterpart until a response body can be read after its delivery"
+  }
+]

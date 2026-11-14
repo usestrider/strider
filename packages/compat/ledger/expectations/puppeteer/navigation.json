@@ -1,0 +1,62 @@
+[
+  {
+    "tests": [
+      "[navigation.test] navigation Page.goto should return response when page replaces its state during load",
+      "[navigation.test] navigation Page.goto should navigate to empty page with networkidle0",
+      "[navigation.test] navigation Page.goto should navigate to page with iframe and networkidle0",
+      "[navigation.test] navigation Page.goto should navigate to empty page with networkidle2"
+    ],
+    "status": "differentByDesign",
+    "decision": "Outcomes come from evidence, never from a guess or a timer",
+    "reason": "Each waits with `waitUntil` set to `networkidle0` or `networkidle2`, which the call must accept. Strider's load states are commit, domContentLoaded, and load, with no network-idle state"
+  },
+  {
+    "tests": [
+      "[navigation.test] navigation Page.goto should prioritize default navigation timeout over default timeout"
+    ],
+    "status": "differentByDesign",
+    "decision": "An operation keeps its own deadline",
+    "reason": "Sets both Puppeteer's default timeout (0) and its default navigation timeout (1 ms) and checks that the navigation one wins. Strider has no mutable defaults to set or to take precedence: a navigation's deadline is `Deadline.within` around its call, or the default budget when nothing encloses it. The two timeout tests before it port the navigation default's budget with `defaultTimeout`"
+  },
+  {
+    "tests": [
+      "[navigation.test] navigation Page.goto should wait for network idle to succeed navigation"
+    ],
+    "status": "differentByDesign",
+    "decision": "Outcomes come from evidence, never from a guess or a timer",
+    "reason": "Waits with `waitUntil: 'networkidle0'`, a load state Strider doesn't have. The test holds the page's fetches open and checks that navigation waits for them to finish"
+  },
+  {
+    "tests": [
+      "[navigation.test] navigation Page.goto should send referer",
+      "[navigation.test] navigation Page.goto should send referer policy"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-goto-referer",
+    "reason": "Passes a `referer` (and a `referrerPolicy`) to `goto`, and Strider's `goto` takes neither: a navigation sends the browser's own referrer. Puppeteer's BiDi expectation names the same gap"
+  },
+  {
+    "tests": [
+      "[navigation.test] navigation Frame.goto should navigate subframes",
+      "[navigation.test] navigation Frame.goto should reject when frame detaches",
+      "[navigation.test] navigation Frame.goto should return matching responses"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-frame-goto",
+    "reason": "Navigates a subframe with `frame.goto`, which returns the subframe's response and rejects when the frame detaches. Strider has no navigation operation on a frame; a frame's navigations are observed through `PageNavigation` (the `Frame.waitForNavigation` tests are ported)"
+  },
+  {
+    "tests": [
+      "[navigation.test] navigation Page.waitForNavigation should remove the abort listener from the signal"
+    ],
+    "status": "notApplicable",
+    "reason": "Checks the `abort` listeners `waitForNavigation` leaves on the `AbortSignal` it was given, and that its `timeout: 1` rejects with `TimeoutError`. Strider takes no `AbortSignal`: cancellation is interrupting the wait, which the port's \"should be cancellable\" checks, and a deadline is `Deadline.within`, which the first half's timeout tests check"
+  },
+  {
+    "tests": [
+      "[navigation.test] with network events disabled should work"
+    ],
+    "status": "notApplicable",
+    "reason": "Puppeteer's `networkEnabled: false` is a setting of its BiDi connector, which turns off that connector's network module, so the test expects `goto` to report no response. Strider's Firefox adapter has no network-events switch, and every committed navigation reports its response"
+  }
+]

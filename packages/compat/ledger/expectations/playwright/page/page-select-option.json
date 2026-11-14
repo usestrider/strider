@@ -1,0 +1,44 @@
+[
+  {
+    "tests": [
+      "SO-006"
+    ],
+    "status": "differentByDesign",
+    "decision": "Playwright is evidence, not the template",
+    "reason": "Selecting an option by an ElementHandle. Strider's choices are a value, a label, or an index, so there is no handle to name an option by. The matrix's ElementHandle.selectOption row says has, but it maps to Locator.selectOption, which takes no handle"
+  },
+  {
+    "tests": [
+      "SO-008",
+      "SO-009"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locator-selectoption",
+    "reason": "Choosing an option by several attributes at once, which must all match the same option. Strider's choice is one attribute, and its type doesn't express two, so the test can't be written as a choice that means what Playwright's does. A `{ value, label }` object type-checks as a value choice, and the label is ignored"
+  },
+  {
+    "tests": [
+      "SO-016",
+      "SO-017",
+      "SO-018",
+      "SO-019"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-locator-selectoption",
+    "reason": "Checking the values selectOption returns: the matched values, a single value without `multiple`, or an empty list when nothing matched. Strider's selectOption returns nothing, so the test's only assertion has no value to read"
+  },
+  {
+    "tests": [
+      "SO-020"
+    ],
+    "status": "notApplicable",
+    "reason": "Checks that Playwright's protocol rejects a `null` option with its validator's message. Strider's SelectOption type has no `null`, so the type checker refuses it before a call, and no runtime validator reports an argument's shape"
+  },
+  {
+    "tests": [
+      "SO-024"
+    ],
+    "status": "notApplicable",
+    "reason": "Checks the messages of Playwright's protocol validator for choices of the wrong type: a number, a number as a value or a label, a string index. Strider's SelectOption admits only strings and integers and the type checker enforces it, so a wrongly typed choice doesn't compile, and no runtime validator reports it"
+  }
+]

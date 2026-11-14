@@ -1,0 +1,10 @@
+[
+  {
+    "tests": [
+      "PC-001"
+    ],
+    "status": "needsFeature",
+    "matrix": "method-browser-bind",
+    "reason": "Exposing a browser on a WebSocket endpoint with `browser.bind` and connecting to it from a page with Playwright's client bundle. Strider has no `Browser.bind`, so there's no endpoint for a second client to connect to"
+  }
+]

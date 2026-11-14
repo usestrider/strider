@@ -1,0 +1,9 @@
+[
+  {
+    "tests": [
+      "[debugInfo.test] DebugInfo Browser.debugInfo should work"
+    ],
+    "status": "notApplicable",
+    "reason": "Reads Puppeteer's own debug information: the protocol errors it has pending (`browser.debugInfo.pendingProtocolErrors`). Strider keeps no such list to read; a failed command fails the operation that sent it"
+  }
+]

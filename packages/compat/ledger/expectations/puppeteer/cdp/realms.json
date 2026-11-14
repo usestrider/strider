@@ -1,0 +1,12 @@
+[
+  {
+    "tests": [
+      "[realms.test] extension realms should include content script realms",
+      "[realms.test] extension realms realm should return extension that created it",
+      "[realms.test] extension realms should evaluate in content script realms"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browsertype-launch-args",
+    "reason": "Installs an extension (`browser.installExtension`) and reads the realms of its content scripts (`page.extensionRealms()`). Strider has no extension install and no extension realms; the nearest matrix row is the launch arguments, which can pass a flag but don't load an extension"
+  }
+]

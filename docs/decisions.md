@@ -448,6 +448,11 @@ maintainer: "If we add an Operation module, the user should be able to use it to
 - **Rejected:** keeping the module internal; `Deadline.fn`, since the record is more than a deadline; and a
   `step(name, effect)` combinator, since a step is an operation and `named` makes one.
 
+**Evaluation takes a function, never a string of source.** `evaluate`, `evaluateInMainWorld`, `evaluateHandle`, and
+`evaluateAll` take a function, so TypeScript checks its parameters against the arguments passed and its result against
+the value read back. A string of source has neither check, and a mistake in it surfaces only in the page. Rejected:
+accepting a string beside the function, as Playwright and Puppeteer do.
+
 **Locator positions follow Effect's collection indexes.** `nth(index)` counts from zero, and negative indexes
 are out of range, as in Effect's Array and Chunk. `last` is a separate selection so a caller can still select the
 end of a list. Both it and `first` match nothing on an empty list. Rejected: counting negative indexes from the

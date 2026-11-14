@@ -40,6 +40,14 @@ export default defineConfig({
     }, {
       extends: true,
       test: {
+        name: "compat",
+        root: "packages/compat",
+        // The ports run in the Nix environment: vitest.compat.config.ts
+        include: ["test/**/*.test.ts"]
+      }
+    }, {
+      extends: true,
+      test: {
         name: "vitest",
         root: "packages/vitest",
         include: ["test/**/*.test.ts"],

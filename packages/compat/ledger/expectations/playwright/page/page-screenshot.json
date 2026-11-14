@@ -1,0 +1,170 @@
+[
+  {
+    "tests": [
+      "SS-003",
+      "SS-004"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-locator-screenshot-caret",
+    "reason": "Strider's element capture has no caret option: the caret is never drawn in a capture of an element, so a capture that shows the blinking caret can't be asked for"
+  },
+  {
+    "tests": [
+      "SS-006"
+    ],
+    "status": "differentByDesign",
+    "decision": "Options a caller writes carry no `_tag`",
+    "reason": "A full-page capture can't also take a clip: `area` is one of its values, and a clip is `area: { clip }`, so the combination can't be written"
+  },
+  {
+    "tests": [
+      "SS-012",
+      "SS-040",
+      "SS-043",
+      "SS-044",
+      "SS-045",
+      "SS-046",
+      "SS-047",
+      "SS-048"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-screenshot-mask",
+    "reason": "Strider has no `mask` option: a capture can't hide the given elements, so these tests can't ask for a masked image"
+  },
+  {
+    "tests": [
+      "SS-041"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-locator-screenshot-mask",
+    "reason": "Strider's element capture has no `mask` option, so a locator's capture can't hide other elements"
+  },
+  {
+    "tests": [
+      "SS-042"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-elementhandle-screenshot-mask",
+    "reason": "Strider has no ElementHandle, and its element capture has no `mask` option, so a handle's capture can't hide other elements"
+  },
+  {
+    "tests": [
+      "SS-049"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-screenshot-maskcolor",
+    "reason": "Strider has no `maskColor`: with no mask option, a masked capture's color can't be chosen either"
+  },
+  {
+    "tests": [
+      "SS-050",
+      "SS-051"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-screenshot-style",
+    "reason": "Strider has no `style` option: a capture can't apply CSS for itself, so an attribute-driven hide or removal can't be asked of it"
+  },
+  {
+    "tests": [
+      "SS-052",
+      "SS-053"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-locator-screenshot-animations",
+    "reason": "Strider has no `animations` option: an element's capture can't finish or pause running CSS animations, so an infinite animation is captured as it is"
+  },
+  {
+    "tests": [
+      "SS-054",
+      "SS-056",
+      "SS-057",
+      "SS-058",
+      "SS-059",
+      "SS-060",
+      "SS-061",
+      "SS-062",
+      "SS-063"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-screenshot-animations",
+    "reason": "Strider has no `animations` option: a capture can't finish finite animations, pause infinite ones, or fire the events of that finishing, so the animation tests can't run"
+  },
+  {
+    "tests": [
+      "SS-016",
+      "SS-017",
+      "SS-018",
+      "SS-019",
+      "SS-020",
+      "SS-021"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-screenshot-type",
+    "reason": "Strider has no WebP capture: its format is PNG or JPEG (`ScreenshotFormat`). The matrix row marks webp as has, which is wrong"
+  },
+  {
+    "tests": [
+      "SS-014"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-screenshot-omitbackground",
+    "reason": "Firefox refuses `omitBackground` as Unsupported (`screenshot.omitBackground`), where Playwright's Firefox captures a transparent background. The matrix row has no per-browser entry for it"
+  },
+  {
+    "tests": [
+      "SS-015",
+      "SS-035",
+      "SS-036"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-page-screenshot-type-value-jpeg-on-stock-webkit",
+    "reason": "Stock WebKit screenshots are PNG only, so a JPEG capture is refused as Unsupported"
+  },
+  {
+    "tests": [
+      "SS-030",
+      "SS-031",
+      "SS-032"
+    ],
+    "status": "notApplicable",
+    "reason": "Tests Playwright's `path` option: where it creates directories, which format its extension picks, and which extensions it refuses. Strider returns the bytes, and writing them, with their directories and names, is the caller's own file I/O"
+  },
+  {
+    "tests": [
+      "SS-055"
+    ],
+    "status": "notApplicable",
+    "reason": "Relies on Playwright's internal `__testHookBeforeScreenshot`, which runs between a capture's preparation and its capture; Strider has no such hook"
+  },
+  {
+    "tests": [
+      "SS-066",
+      "SS-067"
+    ],
+    "status": "notApplicable",
+    "reason": "A `toHaveScreenshot` golden comparison, against images made with Playwright's browser builds and fonts, which Strider's pinned browsers don't match; the test checks nothing else"
+  },
+  {
+    "tests": [
+      "SS-033",
+      "SS-034"
+    ],
+    "status": "differentByDesign",
+    "decision": "Decision types describe where they apply",
+    "reason": "`quality` exists only for JPEG in Strider's types, so a PNG capture with a quality is a type error, not a runtime refusal"
+  },
+  {
+    "tests": [
+      "SS-064"
+    ],
+    "status": "differentByDesign",
+    "decision": "Outcomes come from evidence, never from a guess or a timer",
+    "reason": "A Strider capture never waits for fonts or for the page to load, so a stalled font doesn't make it time out; it captures what is drawn, as the API documents"
+  }
+]

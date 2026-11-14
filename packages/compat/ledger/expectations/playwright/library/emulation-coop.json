@@ -1,0 +1,10 @@
+[
+  {
+    "tests": [
+      "EM-027"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newpage-screen",
+    "reason": "Sets a `screen` size next to the mobile viewport, and the original checks the page keeps the emulation with a COOP header. Strider's emulation has no screen size (the matrix row for the option is missing), so the test can't be ported without dropping its setup"
+  }
+]

@@ -1,0 +1,45 @@
+[
+  {
+    "tests": [
+      "CO-045"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browsercontext-clearcookies-name",
+    "reason": "`context.clearCookies({ name: /coo.*1/ })` removes the cookies whose name matches a regular expression. Strider's `cookies.remove` takes an exact name, so the pattern has no form and the test can't be ported"
+  },
+  {
+    "tests": [
+      "CO-046"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browsercontext-clearcookies-domain",
+    "reason": "`context.clearCookies({ domain })` removes every cookie for a domain, whatever its name. Strider's `cookies.remove` requires a name, so a domain alone has no form, and porting it would clear by name instead"
+  },
+  {
+    "tests": [
+      "CO-047"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browsercontext-clearcookies-path",
+    "reason": "`context.clearCookies({ path })` removes every cookie for a path, whatever its name. Strider's `cookies.remove` requires a name, so a path alone has no form, and porting it would clear by name instead"
+  },
+  {
+    "tests": [
+      "CO-050"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "Upstream skips this test on every browser but Chromium: partitioned cookies (CHIPS) are Chromium-specific"
+  },
+  {
+    "tests": [
+      "CO-050"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-ignorehttpserrors",
+    "reason": "The test's context accepts the fixture's self-signed certificate (`ignoreHTTPSErrors`), which Chromium refuses per context with `acceptInsecureCerts`, as browsercontext-add-cookies' CO-041 is. Its removal by name also has no partition key in Strider's `Match`"
+  }
+]
