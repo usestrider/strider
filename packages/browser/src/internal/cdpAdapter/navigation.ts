@@ -149,11 +149,11 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     })
     .on(Page.lifecycleEvent, (params, { state }) => {
       const frame = state.frames.get(params.frameId)
-      // Chromium routes pointer input into an out-of-process frame only once its browser process has the frame's
-      // hit-test data, which follows the frame's first drawn compositor frame; `firstPaint` is the latest of those
-      // the protocol reports (`unpresented` in input.ts)
-      if (params.name === "init") frame?.unpainted.add(params.loaderId)
-      else if (params.name === "firstPaint") frame?.unpainted.delete(params.loaderId)
+      // Whether the document has painted, for input into out-of-process frames (`undrawn` in input.ts)
+      if (frame !== undefined && params.name === "init") frame.started = { loaderId: params.loaderId, painted: false }
+      else if (params.name === "firstPaint" && frame?.started?.loaderId === params.loaderId) {
+        frame.started.painted = true
+      }
       const document = frame?.document
       if (document === undefined) return
       if (document.loaderId?.startsWith("initial:") && params.name === "init") {

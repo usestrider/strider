@@ -3,7 +3,6 @@
  * every frame, out of process too; HTML drags, which headless Chromium starts none of, caught and finished with drag
  * events; and the elements input acts on by binding: an iframe's frame, a file input's files.
  */
-import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
@@ -11,9 +10,8 @@ import * as DOM from "../../cdp/DOM.ts"
 import * as Input from "../../cdp/Input.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
 import type * as L1Target from "../../Target.ts"
-import * as Adapter from "../adapter.ts"
+import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
-import * as BrowserClock from "../browserClock.ts"
 import * as Gestures from "../input.ts"
 import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
@@ -41,59 +39,49 @@ const mouseCommand = (event: Extract<Adapter.InputEvent, { _tag: "Mouse" }>) =>
     modifiers: modifierBits(event.modifiers)
   })
 
+/** Whether the frame's session reported the first paint of the frame's current document. */
+const painted = (frame: FrameEntry): boolean =>
+  frame.started !== undefined && frame.started.painted && frame.started.loaderId === frame.document?.loaderId
+
 /**
- * The outermost out-of-process frame from the page down to `frame` whose current document hasn't drawn its first
- * frame, if any. Chromium picks each pointer event's target in its browser process, from hit-test data that includes
- * an out-of-process frame only after the frame has drawn; until then, input aimed into it reaches the parent's
- * iframe element.
+ * Whether the frame's current document has been drawn: it, or a document in a frame inside it, reported its first
+ * paint. A document can't be drawn without the documents that embed it, so a painting descendant shows a document
+ * that paints nothing was drawn too. A document whose start wasn't reported counts as drawn.
  */
-const unpresented = (frame: FrameEntry): FrameEntry | undefined => {
-  let found: FrameEntry | undefined
+const drawn = (frame: FrameEntry): boolean => {
+  if (frame.started === undefined || frame.started.loaderId !== frame.document?.loaderId) return true
+  const inside = (each: FrameEntry): boolean => painted(each) || Array.from(each.children).some(inside)
+  return inside(frame)
+}
+
+/** Whether the frame is out of process, or inside a frame that is. */
+const outOfProcess = (frame: FrameEntry): boolean => {
   for (let each: FrameEntry | undefined = frame; each?.parent !== undefined; each = each.parent) {
-    const loader = each.document?.loaderId
-    if (each.owner !== each.parent.owner && loader !== undefined && each.unpainted.has(loader)) found = each
+    if (each.owner !== each.parent.owner) return true
   }
-  return found
+  return false
 }
 
 /**
- * Waits until every out-of-process frame on the way to `id` has drawn its current document, under the command's
- * deadline on the browser's clock. When it runs out, nothing has been sent, and the operation's history names the
- * frame that hasn't drawn.
+ * Waits until the frame's current document has been drawn, when the frame is out of process or inside one.
+ * Chromium picks each pointer event's target in its browser process, from hit-test data that includes an
+ * out-of-process frame only once the frame has been drawn; until then, input aimed into it reaches the parent's
+ * iframe element. The operation's deadline ends the wait, with the frame in its history.
  */
-const presented = Effect.fnUntraced(function*(state: State, id: L1Target.NavigableId) {
-  const target = yield* frameById(state, id)
-  const first = unpresented(target)
-  if (first === undefined) return
-  const deadline = yield* ProtocolClient.CommandDeadline
-  const timeout = Option.isSome(deadline)
-    ? Duration.millis(yield* BrowserClock.left(deadline.value))
-    : yield* Protocol.CommandTimeout
-  const at = Option.isSome(deadline) ? deadline.value : yield* BrowserClock.after(Duration.toMillis(timeout))
+const undrawn = Effect.fnUntraced(function*(state: State, id: L1Target.NavigableId) {
+  const frame = yield* frameById(state, id)
+  if (!outOfProcess(frame) || drawn(frame)) return
   const record = yield* Operation.current
   if (Option.isSome(record)) {
-    record.value.observe({ _tag: "FrameNotDrawn", frame: first.id, url: first.document?.url })
+    record.value.observe({ _tag: "FrameNotDrawn", frame: frame.id, url: frame.document?.url })
   }
-  const waited = yield* state.buffer.waitFor(() =>
-    target.removed || unpresented(target) === undefined ? true : undefined
-  ).pipe(BrowserClock.until(at))
-  if (Option.isNone(waited)) {
-    const pending = unpresented(target) ?? first
-    return yield* Effect.fail(Adapter.protocolError(
-      new Protocol.ProtocolError({
-        reason: new Protocol.NoReply({
-          method: `Page.lifecycleEvent firstPaint of frame ${pending.id} (${pending.document?.url}), before input`,
-          timeout
-        })
-      })
-    ))
-  }
+  yield* state.buffer.waitFor(() => frame.removed || drawn(frame) ? true : undefined)
   yield* frameById(state, id)
 })
 
 /**
  * Page coordinates reach every frame; pages with child frames keep sequential acknowledgments. Pointer input aimed
- * into a frame first waits for the out-of-process frames on its way to draw (`unpresented`).
+ * into a frame first waits for the frame to be drawn, when it is out of process (`undrawn`).
  */
 export const dispatchInput = Effect.fnUntraced(
   function*(
@@ -105,7 +93,7 @@ export const dispatchInput = Effect.fnUntraced(
     const page = yield* pageOf(state, id)
     // Keys and text go to the focused element, with no hit testing
     if (frame !== undefined && events.some((event) => event._tag !== "Key" && event._tag !== "InsertText")) {
-      yield* presented(state, frame.frame)
+      yield* undrawn(state, frame.frame)
     }
     const on = Protocol.on(page.target.session)
     const click = Gestures.singleClick(events)

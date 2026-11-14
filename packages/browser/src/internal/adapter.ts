@@ -1007,9 +1007,9 @@ export interface AdapterConnection {
   /**
    * Sends input to a page, in its viewport's coordinates. Input aimed inside a frame names it, with the frame's
    * viewport origin in the page's coordinates: a backend that can't deliver page coordinates into a frame sends
-   * the frame's own (BiDi). On CDP, pointer input that names a frame first waits, under the command's deadline,
-   * until every out-of-process frame from the page down to it has reported the first paint of its current
-   * document: Chromium routes pointer input into such a frame only once it has drawn, and sends it to the parent's
+   * the frame's own (BiDi). On CDP, pointer input that names a frame that is out of process, or inside one, first
+   * waits until the frame's document has been drawn: it, or a document in a frame inside it, has reported its first
+   * paint. Chromium routes pointer input into such a frame only once it has been drawn, and sends it to the parent's
    * iframe element before. Keys and text don't wait.
    */
   readonly dispatchInput: (
