@@ -1994,6 +1994,69 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
+      it.effect(
+        "finds a newly attached native modal in nested shadow roots outside the query scope",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<section id="scope"><button id="go">Go</button></section><div id="host"></div>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            const target = page.locator("#scope").locator("#go")
+            yield* target.click()
+            yield* page.evaluateInMainWorld(() => {
+              const root = document.querySelector("#host")!.attachShadow({ mode: "open" })
+              root.innerHTML = "<div id=\"nested\"></div>"
+              const inner = root.querySelector("div")!.attachShadow({ mode: "open" })
+              inner.innerHTML = "<dialog id=\"native\">Choose</dialog>"
+              inner.querySelector("dialog")!.showModal()
+            })
+            const error = yield* target.click().pipe(Deadline.within("1 second"), Effect.flip)
+            assert(Deadline.isTimeout(error), String(error))
+            assert.include(error.message, "A modal dialog, dialog#native \"Choose\", blocks the element")
+            yield* page.evaluateInMainWorld(() => {
+              document.querySelector("#host")!.shadowRoot!.querySelector("div")!.shadowRoot!
+                .querySelector("dialog")!.close()
+            })
+            yield* target.click()
+          })),
+        timeout
+      )
+
+      it.effect(
+        "omits field content when describing a descendant inside a textbox",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div role="textbox"><span id="private" inert>private-field-content</span></div>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            const error = yield* page.locator("#private").click().pipe(Deadline.within("1 second"), Effect.flip)
+            assert(Deadline.isTimeout(error), String(error))
+            assert.include(error.message, "span#private")
+            assert.notInclude(error.message, "private-field-content")
+          })),
+        timeout
+      )
+
+      it.effect(
+        "keeps ordinary and input button labels in element descriptions",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div id="app" inert><button id="go">Pay</button><input type="button" value="Confirm"></div>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            const error = yield* page.locator("#go").click().pipe(Deadline.within("1 second"), Effect.flip)
+            assert(Deadline.isTimeout(error), String(error))
+            assert.include(error.message, "div#app \"PayConfirm\"")
+          })),
+        timeout
+      )
+
       it.effect("names an open aria-modal dialog inside a shadow root", () =>
         Effect.scoped(Effect.gen(function*() {
           const { url } = yield* fixture(() =>
