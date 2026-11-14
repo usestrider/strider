@@ -1297,9 +1297,18 @@ export function engine(render: (root: SnapNode) => string) {
     return value !== null && matches(matcher, collapse(value))
   }
 
+  /**
+   * The whole document's elements, open shadow roots included, walked once per readiness check: `checkAction`
+   * opens a scope its queries and its dialog search share, and closes it when it returns, so nothing outlives the
+   * synchronous check, and no page code runs inside it. Outside a scope each call walks the document again.
+   */
+  let treeScope: { elements?: Array<Element> } | null = null
+  const documentElements = (): Array<Element> =>
+    treeScope === null ? elementsUnder(document) : (treeScope.elements ??= elementsUnder(document))
+
   /** The candidates of one query under `scope`, in tree order. */
   const query = (scope: Document | Element, step: Step): Array<Element> => {
-    const under = elementsUnder(scope)
+    const under = scope === document ? documentElements() : elementsUnder(scope)
     switch (step._tag) {
       case "Css": {
         const roots: Array<Document | Element | ShadowRoot> = [scope]
@@ -1362,7 +1371,7 @@ export function engine(render: (root: SnapNode) => string) {
 
   const treeOrder = (elements: Iterable<Element>): Array<Element> => {
     const set = new Set(elements)
-    return elementsUnder(document).filter((element) => set.has(element))
+    return documentElements().filter((element) => set.has(element))
   }
 
   /** Validate the whole query before searching, including branches whose scope may be empty. */
@@ -1467,13 +1476,14 @@ export function engine(render: (root: SnapNode) => string) {
 
   /**
    * A short description of an element for errors: `button#buy.primary "Add to cart"`. Its text leaves out what a
-   * field holds, such as a textarea's or an editable element's content, whatever the capture policy.
+   * field holds, such as a textarea's or an editable element's content, whatever the capture policy: a field, or
+   * an element inside one, is described with no text.
    */
   const describe = (element: Element): string => {
     let out = element.localName
     if (element.id !== "") out += `#${element.id}`
     for (const name of Array.from(element.classList).slice(0, 2)) out += `.${name}`
-    const text = collapse(describedText(element))
+    const text = withinField(element) ? "" : collapse(describedText(element))
     if (text !== "") out += ` "${text.length > 40 ? `${text.slice(0, 40)}…` : text}"`
     return out
   }
@@ -1753,7 +1763,7 @@ export function engine(render: (root: SnapNode) => string) {
   const inertReason = (element: Element): NotReady | null => {
     const inert = inertAncestor(element)
     // Dialogs outside the target, in shadow roots too
-    const dialogs = elementsUnder(document).filter((d) =>
+    const dialogs = documentElements().filter((d) =>
       (d instanceof HTMLDialogElement || d.hasAttribute("aria-modal")) && !composedContains(d, element)
     )
     if (inert !== null) {
@@ -2111,6 +2121,15 @@ export function engine(render: (root: SnapNode) => string) {
 
   /** Resolves fresh DOM and runs exactly one readiness/application check. */
   const checkAction = (request: Extract<Request, { op: "act" }>, state: ActionState): Response | undefined => {
+    treeScope = {}
+    try {
+      return checkActionIn(request, state)
+    } finally {
+      treeScope = null
+    }
+  }
+
+  const checkActionIn = (request: Extract<Request, { op: "act" }>, state: ActionState): Response | undefined => {
     const action = request.action
     clearTreeCaches()
     const found = resolve(request.steps)
@@ -2152,6 +2171,8 @@ export function engine(render: (root: SnapNode) => string) {
     const evidence = state.previous
     state.previous = null
     let reason: NotReady | null = null
+    // Computed once: its dialog search may walk the whole document
+    let inert: NotReady | null = null
     if (element === undefined) reason = { _tag: "NoMatch" }
     else if (checks.visible && !rendered(element, false)) reason = { _tag: "NotVisible" }
     else if (
@@ -2161,7 +2182,7 @@ export function engine(render: (root: SnapNode) => string) {
       )
     ) reason = { _tag: "Disabled" }
     else if (checks.editable && readOnly(element)) reason = { _tag: "ReadOnly" }
-    else if (checks.notInert && inertReason(element) !== null) reason = inertReason(element)
+    else if (checks.notInert && (inert = inertReason(element)) !== null) reason = inert
     else if (checks.inViewport && visibleFragment(element, request.clip) === null) {
       reason = { _tag: "OutsideViewport" }
       if (!state.scrolled) {
@@ -2869,8 +2890,8 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   const fieldAncestry = new Map<Node, boolean>()
-  const inField = (node: Node): boolean => {
-    if (!provenance) return false
+  /** Whether `node` is a field or inside one: through its ancestors, assigned slots and shadow hosts. */
+  const withinField = (node: Node): boolean => {
     const cached = fieldAncestry.get(node)
     if (cached !== undefined) return cached
     const path: Array<Node> = []
@@ -2891,6 +2912,8 @@ export function engine(render: (root: SnapNode) => string) {
     for (const ancestor of path) fieldAncestry.set(ancestor, field)
     return field
   }
+
+  const inField = (node: Node): boolean => provenance && withinField(node)
 
   const fieldText = new Map<Element, boolean>()
   // Follow textOf's actual flat-tree contributors. Each subtree is classified at most once per walk.
