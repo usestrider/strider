@@ -2204,7 +2204,8 @@ export function engine(render: (root: SnapNode) => string) {
       state.sampled = true
       const response = checkAction(request, state)
       if (response !== undefined) return response
-      if (request.sample === true) return actionTimeout(request, state)
+      // The first round returns early only for an observed blocker; a stability baseline keeps waiting.
+      if (request.sample === true && state.history.length > 0) return actionTimeout(request, state)
     }
   }
 
@@ -3593,8 +3594,8 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
         for (const type of events) addEventListener(type, changed, true)
       }
     })
-  const singleSample = (request: CooperativeRequest): boolean =>
-    request.op === "act" ? request.sample === true : request.cap <= 0
+  // An expectation's cap-0 round samples once; an action's first round ends early only on recorded evidence.
+  const singleSample = (request: CooperativeRequest): boolean => request.op !== "act" && request.cap <= 0
   const run = async (command: CooperativeCommand): Promise<CooperativeResponse> => {
     sweepTerminals()
     if (command.command === "start") {
@@ -3694,7 +3695,7 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
         session.state!.sampled = true
         const response = helpers.checkAction(session.request, session.state!)
         if (response !== undefined) return finished(session, response)
-        if (singleSample(session.request)) return expired(session)
+        if (session.request.sample === true && session.state!.history.length > 0) return expired(session)
         if (!(await wait(session, false))) return stopped(session)
       } else {
         helpers.clearTreeCaches()
