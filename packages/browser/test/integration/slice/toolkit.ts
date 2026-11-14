@@ -679,7 +679,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               // Failures are data, with what to do
               const bad = yield* call(tools, "click", { page: "shop", target: "button" })
               assert.isTrue(bad.failed)
-              assert.strictEqual(bad.value.error, "InvalidInput")
+              assert.strictEqual(bad.value.reason, "InvalidInput")
               const stale = yield* call(tools, "click", { page: "p1", target: ref! })
               assert.isTrue(stale.failed)
               assert.include(stale.value.message, `the ref is from shop's snapshot`)
@@ -1060,6 +1060,41 @@ for (const mode of ["open", "closed"]) {
               assert.isBelow(elapsed, 4000, "the page's busy loop must not hold the click past its 1 second deadline")
             }))
           }),
+        timeout
+      )
+
+      it.effect(
+        "presses a Modifier+Key chord with the modifier held, with and without a target",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const served = yield* site
+            const page = yield* Browser.newPage()
+            const html = `<input id="field"><script>
+              window.keys = []
+              document.addEventListener("keydown", (event) => {
+                window.keys.push(event.key + ":" + event.metaKey + ":" + (event.target.id || event.target.localName))
+              })
+            </script>`
+            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+            const tools = yield* BrowserToolkit.make({
+              context: page.context,
+              secrets: {},
+              capture: CapturePolicy.local
+            })
+            const keys = () => page.evaluateInMainWorld(() => (window as any).keys.splice(0) as Array<string>)
+            const focused = yield* call(tools, "press", { page: "p1", key: "Meta+k" })
+            assert.isFalse(focused.failed, JSON.stringify(focused.value))
+            assert.include(yield* keys(), "k:true:body")
+            const targeted = yield* call(tools, "press", { page: "p1", key: "Meta+k", target: "css=#field" })
+            assert.isFalse(targeted.failed, JSON.stringify(targeted.value))
+            assert.include(yield* keys(), "k:true:field")
+            const bad = yield* call(tools, "press", { page: "p1", key: "Ctrl+k" })
+            assert.isTrue(bad.failed, JSON.stringify(bad.value))
+            assert.strictEqual(bad.value.reason, "InvalidInput")
+            for (const modifier of ["Alt", "Control", "Meta", "Shift"]) {
+              assert.include(JSON.stringify(bad.value), modifier)
+            }
+          })),
         timeout
       )
 
