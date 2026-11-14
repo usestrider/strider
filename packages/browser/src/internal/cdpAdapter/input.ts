@@ -15,7 +15,7 @@ import * as Kit from "../adapterKit.ts"
 import * as Gestures from "../input.ts"
 import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
-import { heldButton, keyCode, modifierBits } from "./mapping.ts"
+import { heldButton, keyCode, keyLocation, modifierBits } from "./mapping.ts"
 import { documentOf, type Event, frameById, type FrameEntry, frameOf, pageOf, type State } from "./state.ts"
 
 export const register = (handlers: Kit.Handlers<Event>) =>
@@ -224,6 +224,7 @@ export const dispatchInput = Effect.fnUntraced(
               code: event.code,
               modifiers: modifierBits(event.modifiers),
               autoRepeat: event.autoRepeat,
+              location: keyLocation(event.code),
               ...(text === undefined ? {} : { text: Redacted.make(text), unmodifiedText: Redacted.make(text) }),
               ...(code === undefined ? {} : { windowsVirtualKeyCode: code, nativeVirtualKeyCode: code })
             }).pipe(on)
