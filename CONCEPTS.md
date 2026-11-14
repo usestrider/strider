@@ -403,6 +403,7 @@ contexts must not be enabled by a host until expiry cleanup is available.
     - **OnDemand:** no `Runtime.enable`; realms acquired when needed and validated on use. It has no observable realm set and no console capture, and these are absent from the types rather than failing.
   - **During a pending navigation** the active realm stays usable. A prospective replacement is tracked separately, so a canceled navigation, a 204, or a download never strands the page.
   - **Evaluation** is bounded by `within`, fails fast on known suspension or confirmed prompt blocking, and may request user activation.
+  - **A starting dedicated worker** on Chromium: its realm is added as soon as Chromium reports its context, which can be before the worker's script has loaded. An evaluation sent in that window can crash the renderer or go unanswered, so the adapter holds evaluations in a dedicated worker it caught starting until `Inspector.workerScriptLoaded`, or, for a worker that gets init scripts, where that event can't be relied on, also once they have run and the worker has resumed. The worker's end releases the hold, and the evaluation then fails with the realm's end; the wait runs within the evaluation's deadline. Handing out the worker doesn't wait.
 - **Values, handles, and channels.**
   - Evaluation transfers values by default. Handles are opt-in, owned by the caller's scope, and released in batches unless the realm already died.
     Built: a scope's handles in a realm are one object group, released in one command as the scope closes (QUIRKS.md, Q132).

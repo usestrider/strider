@@ -96,6 +96,20 @@ const routes: Record<string, Route> = {
     response.writeHead(200, { "content-type": "text/javascript" })
     response.end(`console.log("from the worker"); postMessage("ready")`)
   },
+  // A dedicated worker's script whose body the server holds back for a second after its headers. Chromium
+  // attaches the worker, and reports its context, once the headers arrive, so the worker is handed out before
+  // its script has loaded.
+  "/slow-worker.js": (_request, response) => {
+    response.writeHead(200, { "content-type": "text/javascript" })
+    response.write(`// slow\n`)
+    setTimeout(() => response.end(`postMessage("ready")`), 1000).unref()
+  },
+  // A dedicated worker's script whose body stalls after its headers, for ten seconds.
+  "/stalled-worker.js": (_request, response) => {
+    response.writeHead(200, { "content-type": "text/javascript" })
+    response.write(`// stalled\n`)
+    setTimeout(() => response.end(`postMessage("ready")`), 10_000).unref()
+  },
   "/worker": (_request, response) =>
     html(response, `<title>worker</title><script>const w = new Worker("/worker.js"); w.onmessage = () => {}</script>`),
   "/init": (_request, response) =>
