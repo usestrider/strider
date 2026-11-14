@@ -1717,6 +1717,61 @@ describe("BidiAdapter state", () => {
       assert.isEmpty(page.pendingTerminals)
     }))
 
+  for (const initial of [true, false]) {
+    it.effect(`handles an early stale load ${initial ? "on the initial document" : "followed by a known identity start"}`, () =>
+      Effect.gen(function*() {
+        const { facts, page, state } = yield* withPage()
+        const url = "http://example.test/next"
+        const handlers = Network.register(Navigation.register(Kit.handlers<State.Event>()))
+        const event = (method: string, navigation: string, timestamp: number, eventUrl = url) =>
+          handlers.apply(method, { context: "C1", navigation, url: eventUrl, timestamp }, { state })
+        if (!initial) {
+          event("browsingContext.navigationStarted", "prior", 1)
+          event("browsingContext.navigationCommitted", "prior", 2)
+          event("browsingContext.navigationStarted", "known", 3)
+        }
+        event("browsingContext.load", "A", 9, page.document!.url)
+        if (!initial) event("browsingContext.navigationStarted", "known", 3)
+        event("browsingContext.navigationStarted", "A", 10)
+        const navigation = state.navigations.get("A")!
+        handlers.apply("network.beforeRequestSent", {
+          context: "C1",
+          navigation: "A",
+          url,
+          timestamp: 11,
+          redirectCount: 0,
+          isBlocked: false,
+          request: { request: "request", url, method: "GET", headers: [], destination: "document", bodySize: 0 }
+        }, { state })
+        event("browsingContext.navigationStarted", "B", 12)
+        event("browsingContext.navigationCommitted", "B", 13)
+        yield* state.buffer.flush
+        const ends = facts.filter((fact) => fact._tag === "NavigationEnded").filter((fact) =>
+          fact.navigation === navigation.id
+        )
+        assert.deepStrictEqual(ends.map((fact) => fact.outcome._tag), [initial ? "Committed" : "Superseded"])
+      }))
+  }
+
+  it.effect("discards an early stale load when its start is older than the active navigation", () =>
+    Effect.gen(function*() {
+      const { page, state } = yield* withPage()
+      const handlers = Navigation.register(Kit.handlers<State.Event>())
+      const event = (method: string, navigation: string, timestamp: number) =>
+        handlers.apply(method, { context: "C1", navigation, url: "http://example.test/", timestamp }, { state })
+      event("browsingContext.navigationStarted", "prior", 1)
+      event("browsingContext.navigationCommitted", "prior", 2)
+      event("browsingContext.navigationStarted", "current", 20)
+      const current = state.navigations.get("current")!
+      event("browsingContext.load", "old", 9)
+      assert.isDefined(page.staleLoad)
+      event("browsingContext.navigationStarted", "old", 10)
+      assert.isUndefined(page.staleLoad)
+      assert.isFalse(state.navigations.has("old"))
+      assert.isFalse(current.ended)
+      assert.isUndefined(current.staleLoad)
+    }))
+
   for (const first of ["start", "commit"] as const) {
     it.effect(`discards a stale load kept for its start when another identity's ${first} comes first`, () =>
       Effect.gen(function*() {
