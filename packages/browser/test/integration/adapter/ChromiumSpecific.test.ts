@@ -739,6 +739,95 @@ describe("Chromium adapter, CDP only", () => {
         timeout
       )
 
+      it.effect(
+        "does not release an unsent press after waiting for a blank cross-site frame",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const sent: Array<string> = []
+            const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
+              const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
+              return yield* CdpAdapter.connect({
+                ...transport,
+                send: (message) =>
+                  Effect.suspend(() => {
+                    const wire = JSON.parse(message)
+                    if (wire.method === "Input.dispatchMouseEvent") sent.push(wire.params.type)
+                    return transport.send(message)
+                  })
+              }, { sink, ownership: "launched" })
+            }))
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const child =
+                `<body style="margin:0"><div id="target" style="width:100px;height:100px"></div><script>document.addEventListener('mouseup',()=>top.postMessage('child up','*'))</script>`
+              const childUrl = `${served.crossSite}/fixture?html=${encodeURIComponent(child)}`
+              const parent =
+                `<body style="margin:0"><script>window.events=[];addEventListener('message',e=>events.push(e.data))</script><iframe style="border:0;width:200px;height:150px" src="${childUrl}"></iframe><button id="next" onmouseup="events.push('parent up')">Next</button>`
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(parent)}`)
+              const frame = page.frame(page.locator("iframe"))
+              const error = yield* frame.locator("#target").click().pipe(
+                Deadline.within("1 second"),
+                Effect.flip
+              )
+              assert(Deadline.isTimeout(error))
+              assert.isTrue(error.history.some((entry) => (entry.value as any)._tag === "FrameNotDrawn"))
+              assert.deepStrictEqual(sent, [], "the expired gesture never sent a pointer event")
+              yield* page.locator("#next").click()
+              assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => (window as any).events), ["parent up"])
+              assert.deepStrictEqual(sent, ["mouseMoved", "mousePressed", "mouseReleased"])
+            }).pipe(Effect.provide(backend))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "clicks a same-site child inside a cross-site frame after its first paint",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const lifecycle: Array<{ sessionId: string; params: any }> = []
+            const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
+              const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
+              return yield* CdpAdapter.connect({
+                ...transport,
+                messages: transport.messages.pipe(Stream.map((message) => {
+                  const wire = JSON.parse(message)
+                  if (wire.method === "Page.lifecycleEvent") lifecycle.push(wire)
+                  return message
+                }))
+              }, { sink, ownership: "launched" })
+            }))
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const fixture = (origin: string, html: string) => `${origin}/fixture?html=${encodeURIComponent(html)}`
+              const child = fixture(served.crossSite, "<button onclick=\"this.textContent='Clicked'\">Go</button>")
+              const wrapper = fixture(served.crossSite, `<iframe src="${child}"></iframe>`)
+              yield* page.goto(fixture(served.origin, `<iframe src="${wrapper}"></iframe>`))
+              const outer = page.frame(page.locator("iframe"))
+              const inner = outer.frame(outer.locator("iframe"))
+              yield* inner.getByRole("button").click().pipe(Deadline.within("3 seconds"))
+              yield* inner.getByRole("button").pipe(Expect.toHaveText("Clicked"))
+              const painted = lifecycle.filter((event) => event.params.name === "firstPaint")
+              assert.isTrue(
+                painted.some((event) =>
+                  painted.some((other) =>
+                    other.sessionId === event.sessionId && other.params.frameId !== event.params.frameId
+                  )
+                ),
+                "the wrapper session reports first paint for both same-site documents"
+              )
+              for (const event of painted) {
+                assert.isTrue(lifecycle.some((init) =>
+                  init.params.name === "init" &&
+                  init.params.frameId === event.params.frameId && init.params.loaderId === event.params.loaderId
+                ))
+              }
+            }).pipe(Effect.provide(backend))
+          }),
+        timeout
+      )
+
       for (const crossSite of [false, true]) {
         it.effect(
           `keeps click acknowledgments sequential on a page with a ${crossSite ? "cross-site" : "same-site"} frame`,
