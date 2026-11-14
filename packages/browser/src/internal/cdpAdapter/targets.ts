@@ -164,11 +164,19 @@ const attached = (state: State, parent: TargetEntry | undefined, params: Target.
   }
 }
 
+/** Ends a dedicated worker's hold on evaluations in its realm (`workerGate`). */
+const release = (target: TargetEntry): void => {
+  if (target.scriptLoaded === undefined) return
+  Deferred.doneUnsafe(target.scriptLoaded, Effect.void)
+  target.scriptLoaded = undefined
+}
+
 /** A session ended: its target's realms end, and a page's session takes the page with it. */
 export const ended = (state: State, session: ProtocolClient.Session, reason: Protocol.SessionEnded) => {
   const target = state.targets.get(session)
   if (target === undefined || target.ended) return
   target.ended = true
+  release(target)
   target.proxyAuth?.clear()
   for (const [key, pending] of state.pendingAttribution) {
     if (pending.target === target) state.pendingAttribution.delete(key)
@@ -391,6 +399,16 @@ const workerGate = Effect.fnUntraced(function*(state: State, target: TargetEntry
   // waiting for the debugger has no timers yet (QUIRKS.md, Q187)
   const scripted = target.kind === "worker" && target.page !== undefined && waiting &&
     Option.isSome(state.registry.workerBundle(placement(target.page)))
+  // Chromium reports a dedicated worker's context as soon as its script's headers arrive, before the script has
+  // loaded. An evaluation sent in between can fail a check on the worker's thread and crash the renderer, or go
+  // unanswered, so evaluations in the worker wait until `Inspector.workerScriptLoaded` (recorded on
+  // Chromium 155). For a worker that gets init scripts, that event can't be relied on: it may come only after the
+  // resume, or not at all. Such a worker pauses at the breakpoint below once its script is fetched and parsed, so
+  // the hold also ends when the init scripts have run and the worker resumed, whichever comes first. The
+  // worker's end ends the hold too, and the evaluation then fails with the realm's end. There is no version check:
+  // Strider is tested on one Chromium, which sends the event, and a version that doesn't would hold evaluations
+  // until their deadline rather than crash. A worker attached already running has loaded its script and gets none.
+  if (target.kind === "worker" && waiting) target.scriptLoaded = Deferred.makeUnsafe<void>()
   if (scripted) {
     yield* Effect.all([
       Debugger.enable({}).pipe(on),
@@ -536,8 +554,12 @@ export const register = (handlers: Kit.Handlers<Event>) =>
           // Disabling the debugger clears its breakpoint
           Debugger.resume({}).pipe(on),
           Debugger.disable().pipe(on)
-        ], { discard: true })
+        ], { discard: true }).pipe(Effect.ensuring(Effect.sync(() => release(target))))
       )
+    })
+    // A dedicated worker's script has loaded: evaluations held for it go out
+    .on(Inspector.workerScriptLoaded, (_params, { target }) => {
+      if (target !== undefined) release(target)
     })
     .on(Target.targetCrashed, (params, { state }) => {
       const page = state.targetsById.get(params.targetId)?.page

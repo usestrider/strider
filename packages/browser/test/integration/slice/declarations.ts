@@ -857,7 +857,7 @@ export const declarations = (
             const result = yield* run(
               page,
               origin,
-              `await new Promise((resolve) => setTimeout(resolve, 500)); return [window.order, window.frames.length, ...window.messages]`,
+              `await new Promise((resolve) => { if (messages.length >= 2) return resolve(); addEventListener('message', () => messages.length >= 2 && resolve()) }); return [window.order, window.frames.length, ...window.messages]`,
               `<script>window.messages = []; addEventListener('message', (e) => messages.push(e.data))</script><iframe src="${
                 fixtureUrl(origin, child)
               }"></iframe><iframe src="${fixtureUrl(crossSite, child)}"></iframe>`

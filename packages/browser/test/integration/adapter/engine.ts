@@ -260,6 +260,128 @@ export const engine = (backend: Backend) =>
     ).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor)))
     layer(fixture, { excludeTestServices: true })(
       (it) => {
+        for (const cooperative of [false, true]) {
+          it.effect(
+            `keeps waiting after a baseline when a later blocker recovers with cooperative=${cooperative}`,
+            () =>
+              Effect.gen(function*() {
+                const { send, call } = yield* open(
+                  backend,
+                  "<button id=\"go\">Go</button>",
+                  countFrames("document.getElementById(\"go\").disabled = globalThis.engineTestFrames === 1")
+                )
+                for (const sample of [false, true]) {
+                  yield* call(
+                    "() => { globalThis.engineTestFrames = 0; document.getElementById(\"go\").disabled = false }",
+                    []
+                  )
+                  const request = { ...point(2), sample }
+                  const response = cooperative
+                    ? (yield* cooperativeExercise(
+                      call,
+                      `
+                    let reply = await command({ command: "start", budget: 2000, request: ${JSON.stringify(request)} })
+                    for (let i = 0; i < 20 && reply._tag === "Check"; i++) {
+                      reply = await command({ command: "resume", token: reply.token, left: 2000, decision: "continue" })
+                    }
+                    return JSON.stringify(reply)
+                  `
+                    )).response
+                    : yield* send(request)
+                  // The first sample sees only a stable-layout baseline. A later transient blocker must keep
+                  // waiting in that same round, just as the ordinary round above does.
+                  assert(response?._tag === "Ready", JSON.stringify({ sample, response }))
+                }
+              }),
+            timeout
+          )
+        }
+
+        for (const cooperative of [false, true]) {
+          for (const rendered of [false, true]) {
+            it.effect(
+              `waits past a stability baseline to Ready in the first round with cooperative=${cooperative} rendered=${rendered}`,
+              () =>
+                Effect.gen(function*() {
+                  const { send, call } = yield* open(backend, "<button id=\"go\">Go</button>", countFrames())
+                  const request = { ...point(2), checks: { ...point(2).checks, rendered }, sample: true }
+                  const response = cooperative
+                    ? (yield* cooperativeExercise(
+                      call,
+                      `
+                    let reply = await command({ command: "start", budget: 2000, request: ${JSON.stringify(request)} })
+                    // Each later sample asks the host to check its handlers again.
+                    for (let i = 0; i < 20 && reply._tag === "Check"; i++) {
+                      reply = await command({ command: "resume", token: reply.token, left: 2000, decision: "continue" })
+                    }
+                    return JSON.stringify(reply)
+                  `
+                    ))
+                    : { response: yield* send(request) }
+                  // A still, enabled button: the first sample only takes the stability baseline, which is not
+                  // evidence, so the round keeps waiting and comes back Ready instead of returning early.
+                  assert(response.response?._tag === "Ready", JSON.stringify(response))
+                }),
+              timeout
+            )
+          }
+        }
+
+        it.effect("returns initial action evidence before waiting for another sample", () =>
+          Effect.gen(function*() {
+            const { send, call } = yield* open(backend, "<button id=\"go\" disabled>Go</button>", countFrames())
+            const request = { ...point(2), sample: true }
+            const response = yield* send(request)
+            assert(response._tag === "NotReady")
+            assert.deepStrictEqual(response.reason, { _tag: "Disabled" })
+            assert.deepStrictEqual(response.history, [{ _tag: "Disabled" }])
+            assert.strictEqual(response.checked, true)
+            assert.strictEqual(yield* framesRead(call), 0)
+          }), timeout)
+
+        for (const kind of ["expect", "act"] as const) {
+          it.effect(`cooperative initial ${kind} samples after the host checks handlers`, () =>
+            Effect.gen(function*() {
+              const { call } = yield* open(
+                backend,
+                "<button id=\"go\" disabled>Actual</button>",
+                controlledCooperativeClock
+              )
+              const request = kind === "act"
+                ? { ...point(2), sample: true }
+                : {
+                  op: "expect",
+                  steps: [{ _tag: "Css", selector: "#go" }],
+                  cap: 0,
+                  expectation: {
+                    _tag: "Text",
+                    expected: [{ _tag: "String", value: "Expected", exact: true }],
+                    list: false
+                  }
+                }
+              const result = yield* cooperativeExercise(
+                call,
+                `
+                let reply = await command({ command: "start", budget: 500, request: ${JSON.stringify(request)} })
+                const started = reply._tag
+                globalThis.engineTestAdvance(10)
+                reply = await command({ command: "resume", token: reply.token, left: 490, decision: "continue" })
+                if (reply._tag === "Check") await command({ command: "cancel" })
+                return JSON.stringify({ started, reply })
+              `
+              )
+              assert.strictEqual(result.started, "Check")
+              assert.strictEqual(result.reply._tag, "Done")
+              if (kind === "act") {
+                assert.deepStrictEqual(result.reply.response.reason, { _tag: "Disabled" })
+                assert.strictEqual(result.reply.response.checked, true)
+              } else {
+                assert.strictEqual(result.reply.response.observed, "Actual")
+                assert.strictEqual(result.reply.response.passed, false)
+              }
+            }), timeout)
+        }
+
         for (const ending of ["cancel", "departure"] as const) {
           it.effect(`cooperative viewport ${ending} releases its pending round immediately`, () =>
             Effect.gen(function*() {
@@ -1749,7 +1871,23 @@ export const engine = (backend: Backend) =>
             )
           }), timeout)
 
-        it.effect("retains the stability reason with rendered off when frames never arrive", () =>
+        it.effect("retains established instability as reportable evidence", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              "<button id=\"go\">Go</button>",
+              countFrames(
+                "document.getElementById(\"go\").style.marginLeft = (globalThis.engineTestFrames % 2 ? 10 : 20) + \"px\""
+              )
+            )
+            const response = yield* send(point(2))
+            assert(response._tag === "NotReady")
+            assert.strictEqual(response.checked, true)
+            assert.deepStrictEqual(response.reason, { _tag: "NotStable" })
+            assert.deepStrictEqual(response.history, [{ _tag: "NotStable" }])
+          }), timeout)
+
+        it.effect("does not report a stability baseline with rendered off when frames never arrive", () =>
           Effect.gen(function*() {
             const { send } = yield* open(
               backend,
@@ -1760,7 +1898,8 @@ export const engine = (backend: Backend) =>
             const response = yield* send({ ...request, cap: 100, checks: { ...request.checks, rendered: false } })
             assert(response._tag === "NotReady", JSON.stringify(response))
             assert.strictEqual(response.reason._tag, "NotStable")
-            assert.isTrue(response.checked)
+            assert.isFalse(response.checked)
+            assert.deepStrictEqual(response.history, [])
             assert(
               !response.history.some((reason) =>
                 reason._tag === "NoRenderingOpportunity"
@@ -2242,6 +2381,53 @@ export const engine = (backend: Backend) =>
             )
             const invalid = yield* send({ op: "count", steps: [{ _tag: "Css", selector: "button[" }] })
             assert.strictEqual(invalid._tag, "InvalidSelector")
+          }), timeout)
+
+        it.effect("searches a scope's own open shadow root, and a root nested in it, with every kind of step", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<div id="host"></div><div id="outer"></div>
+<script>
+document.getElementById("host").attachShadow({ mode: "open" }).innerHTML =
+  '<button title="tip" data-testid="go">Go</button><label>Name <input placeholder="who"></label>' +
+  '<img alt="logo"><p>Hello</p><div id="inner"></div>'
+document.getElementById("host").shadowRoot.getElementById("inner").attachShadow({ mode: "open" }).innerHTML =
+  "<button>Deep</button>"
+document.getElementById("outer").attachShadow({ mode: "open" }).innerHTML =
+  "<div><span>chained</span></div>"
+</script>`
+            )
+            const host: Engine.Step = { _tag: "Css", selector: "#host" }
+            const inHost = (step: Engine.Step) =>
+              send({ op: "count", steps: [host, step] }).pipe(Effect.map(count))
+            assert.strictEqual(yield* inHost({ _tag: "Css", selector: "button" }), 2)
+            assert.strictEqual(yield* inHost(role("button", text("Go"))), 1)
+            assert.strictEqual(yield* inHost(role("button", text("Deep"))), 1)
+            assert.strictEqual(yield* inHost({ _tag: "Text", matcher: text("Hello") }), 1)
+            assert.strictEqual(yield* inHost({ _tag: "Label", matcher: text("Name") }), 1)
+            assert.strictEqual(yield* inHost({ _tag: "Placeholder", matcher: text("who") }), 1)
+            assert.strictEqual(yield* inHost({ _tag: "AltText", matcher: text("logo") }), 1)
+            assert.strictEqual(yield* inHost({ _tag: "Title", matcher: text("tip") }), 1)
+            assert.strictEqual(yield* inHost({ _tag: "TestId", id: "go" }), 1)
+            const hasDeep: Engine.Step = {
+              _tag: "Filter",
+              hasText: null,
+              hasNotText: null,
+              has: [role("button", text("Deep"))],
+              hasNot: null,
+              visible: null
+            }
+            // The host and the nested root's host both have the button under them.
+            assert.strictEqual(
+              count(yield* send({ op: "count", steps: [{ _tag: "Css", selector: "div" }, hasDeep] })),
+              2
+            )
+            const chain = [{ _tag: "Css", selector: "div" }, { _tag: "Css", selector: "div" }, {
+              _tag: "Css",
+              selector: "span"
+            }] as const
+            assert.strictEqual(count(yield* send({ op: "count", steps: chain })), 1)
           }), timeout)
 
         it.effect("checks actionability at each frame: ready, covered, disabled, scrolled into view", () =>

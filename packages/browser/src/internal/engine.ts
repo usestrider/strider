@@ -290,6 +290,11 @@ export type Request =
     readonly clip?: Clip
     /** Milliseconds this round may wait for the checks to pass. */
     readonly cap: number
+    /**
+     * Return after the first permitted readiness sample only when that sample recorded a blocker. Otherwise the
+     * round waits like any other, retaining rendering requirements.
+     */
+    readonly sample?: boolean
     readonly action: Action
     /**
      * Whether to do what `action` asks once the checks pass: only under the page's input permit. Without it, the
@@ -381,9 +386,8 @@ export const Response = Schema.Union([
     history: Schema.Array(NotReady),
     scrolled: Schema.Boolean,
     /**
-     * Whether the round saw a reason worth reporting: one the deadline cut before its first frame, or while a rect
-     * was still settling, saw nothing wrong, `reason` included. With rendered disabled, a sampled stability
-     * wait is reported even without a frame, since no rendering hint will replace it.
+     * Whether the round recorded reportable evidence in history. An incomplete stability baseline adds none,
+     * even with rendered disabled; an observed blocker or established instability does.
      */
     checked: Schema.Boolean
   }),
@@ -495,7 +499,10 @@ export function engine(render: (root: SnapNode) => string) {
   // The tree
   const SKIPPED = new Set(["script", "style", "noscript", "template"])
 
-  /** Every element under `root`, in tree order, with each open shadow root's elements after its host. */
+  /**
+   * Every element under `root`, in tree order, with each open shadow root's elements after its host. An element
+   * root's own open shadow root counts as under it, before its light children.
+   */
   const elementsUnder = (root: Document | Element | ShadowRoot): Array<Element> => {
     const out: Array<Element> = []
     const visit = (node: Document | Element | ShadowRoot) => {
@@ -505,6 +512,7 @@ export function engine(render: (root: SnapNode) => string) {
         visit(child)
       }
     }
+    if (root instanceof Element && root.shadowRoot !== null) visit(root.shadowRoot)
     visit(root)
     return out
   }
@@ -1287,6 +1295,7 @@ export function engine(render: (root: SnapNode) => string) {
     switch (step._tag) {
       case "Css": {
         const roots: Array<Document | Element | ShadowRoot> = [scope]
+        if (scope instanceof Element && scope.shadowRoot !== null) roots.push(scope.shadowRoot)
         for (const element of under) if (element.shadowRoot !== null) roots.push(element.shadowRoot)
         const found = new Set<Element>()
         for (const root of roots) {
@@ -2031,12 +2040,13 @@ export function engine(render: (root: SnapNode) => string) {
     }
     state.last = reason
   }
-  const actionTimeout = (request: Extract<Request, { op: "act" }>, state: ActionState): Response => ({
+  const actionTimeout = (_request: Extract<Request, { op: "act" }>, state: ActionState): Response => ({
     _tag: "NotReady",
     reason: state.last,
     history: state.history,
     scrolled: state.scrolled,
-    checked: state.history.length > 0 || (!request.checks.rendered && state.sampled)
+    // Sampling a stability baseline is progress, not failure evidence. Only noteAction records evidence.
+    checked: state.history.length > 0
   })
 
   const actionFrameTimeout = (request: Extract<Request, { op: "act" }>, state: ActionState): Response => {
@@ -2199,9 +2209,13 @@ export function engine(render: (root: SnapNode) => string) {
         }
         state.frames++
       }
+      const first = !state.sampled
       state.sampled = true
       const response = checkAction(request, state)
       if (response !== undefined) return response
+      // The first round returns early only when its first sample observed a blocker; after a stability
+      // baseline it keeps waiting like any round, through later samples too.
+      if (request.sample === true && first && state.history.length > 0) return actionTimeout(request, state)
     }
   }
 
@@ -3590,6 +3604,8 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
         for (const type of events) addEventListener(type, changed, true)
       }
     })
+  // An expectation's cap-0 round samples once; an action's first round ends early only on recorded evidence.
+  const singleSample = (request: CooperativeRequest): boolean => request.op !== "act" && request.cap <= 0
   const run = async (command: CooperativeCommand): Promise<CooperativeResponse> => {
     sweepTerminals()
     if (command.command === "start") {
@@ -3603,7 +3619,8 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
         session: command.session,
         request: command.request,
         final: command.final === true || command.request.op === "act" && command.request.apply,
-        end: now() + Math.max(0, Math.min(command.budget, command.request.cap)),
+        end: now() +
+          Math.max(0, singleSample(command.request) ? command.budget : Math.min(command.budget, command.request.cap)),
         token: undefined,
         state: command.request.op === "act" ? helpers.createAction(command.request) : undefined,
         observed: null,
@@ -3685,9 +3702,11 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
     }
     try {
       if (session.request.op === "act") {
+        const first = !session.state!.sampled
         session.state!.sampled = true
         const response = helpers.checkAction(session.request, session.state!)
         if (response !== undefined) return finished(session, response)
+        if (session.request.sample === true && first && session.state!.history.length > 0) return expired(session)
         if (!(await wait(session, false))) return stopped(session)
       } else {
         helpers.clearTreeCaches()
@@ -3718,10 +3737,10 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
             )
           })
           if (!ready || session.disposed) return stopped(session)
-          if (passed) {
+          if (passed || singleSample(session.request)) {
             return finished(session, {
               _tag: "Expected",
-              passed: true,
+              passed,
               observed: session.observed,
               changed: session.changed
             })
@@ -3734,10 +3753,10 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
           ? { passed: helpers.matchesValue(expectation.expected, location.href), observed: location.href }
           : helpers.evaluate(session.request.steps, expectation)
         session.observed = result.observed
-        if (result.passed) {
+        if (result.passed || singleSample(session.request)) {
           return finished(session, {
             _tag: "Expected",
-            passed: true,
+            passed: result.passed,
             observed: result.observed,
             changed: session.changed
           })
