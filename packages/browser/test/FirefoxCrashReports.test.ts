@@ -2,7 +2,10 @@ import { assert, describe, it } from "@effect/vitest"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
+import { vi } from "vitest"
 import * as FirefoxCrashReports from "./integration/firefoxCrashReports.ts"
+
+vi.mock("node:fs", { spy: true })
 
 // The failure as recorded on macOS: Firefox's parent rejects a message, kills the content process, and the print fails
 const stderr = [
@@ -91,5 +94,53 @@ describe("FirefoxCrashReports", () => {
       FirefoxCrashReports.pendingDirectory("/h", "darwin"),
       "/h/Library/Application Support/Firefox/Crash Reports/pending"
     )
+  })
+})
+
+describe("Firefox crash collection review regressions", () => {
+  it("does not launch the crash reporter client after a parent-process crash", () => {
+    // ShouldReport in Firefox's nsExceptionHandler.cpp launches the client unless reporting is disabled.
+    assert.strictEqual(FirefoxCrashReports.environment["MOZ_CRASHREPORTER_NO_REPORT"], "1")
+  })
+
+  it("does not preselect submission from the tab-crashed page", () => {
+    // Firefox's release default is true; restoring a crashed tab can submit the report with that selection.
+    assert.strictEqual(FirefoxCrashReports.prefs["browser.tabs.crashReporting.sendReport"], false)
+  })
+
+  it("tolerates a temporary extra file disappearing while Firefox finalizes a content crash", async () => {
+    const { root, pending, destination } = scratch()
+    write(pending, "0a1b", 16)
+    const { statSync: stat } = await vi.importActual<typeof fs>("node:fs")
+    // TakeMinidumpForChild moves the temporary extra to pending, reads it, then removes it;
+    // FinalizeCrashReport writes it again. Reproduce that removal between directory listing and stat.
+    const intercepted = vi.spyOn(fs, "statSync").mockImplementation((...args) => {
+      if (String(args[0]) === path.join(pending, "0a1b.extra")) {
+        fs.rmSync(path.join(pending, "0a1b.extra"), { force: true })
+      }
+      return Reflect.apply(stat, fs, args)
+    })
+    try {
+      assert.doesNotThrow(() => FirefoxCrashReports.keep(pending, destination, 0, true))
+    } finally {
+      intercepted.mockRestore()
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it("preserves the source annotations when the destination cannot be written", () => {
+    const { root, pending, destination } = scratch()
+    write(pending, "0a1b", 16)
+    fs.writeFileSync(destination, "a file already occupies the destination")
+    try {
+      try {
+        FirefoxCrashReports.keep(pending, destination, 0, true)
+      } catch {
+        // The caller can report the failure; it must still have the original evidence to recover.
+      }
+      assert.isTrue(fs.existsSync(path.join(pending, "0a1b.extra")))
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true })
+    }
   })
 })
