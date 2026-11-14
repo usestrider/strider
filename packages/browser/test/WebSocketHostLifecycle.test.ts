@@ -7,6 +7,7 @@ import * as Fiber from "effect/Fiber"
 import * as Logger from "effect/Logger"
 import * as Scope from "effect/Scope"
 import * as TestClock from "effect/testing/TestClock"
+import type * as Adapter from "../src/internal/adapter.ts"
 import * as Kit from "../src/internal/adapterKit.ts"
 import * as Protocol from "../src/protocol/Protocol.ts"
 import { harness } from "./utils/WebSocketHostHarness.ts"
@@ -320,6 +321,7 @@ it.effect("releases a stalled payload at the route budget and proceeds to anothe
 it.effect("retires a missing WebKit payload context before its realm-end notification without logging a bridge failure", () => {
   const errors: Array<unknown> = []
   const holderReleased = Deferred.makeUnsafe<void>()
+  const handlesReleased: Array<Adapter.HandleId> = []
   return harness(
     (getBridge) =>
       Effect.gen(function*() {
@@ -348,11 +350,23 @@ it.effect("retires a missing WebKit payload context before its realm-end notific
         assert.deepStrictEqual(errors, [], "a discarded context is not a failed WebSocket bridge")
         // A confirmed discarded context must also retire its retained installation, without waiting for an event.
         yield* Deferred.await(holderReleased)
+        getBridge().ended(realm)
+        getBridge().ended(realm)
+        const next = Target.RealmId.make("R-replacement-payload-context")
+        const replacement = yield* context.routeWebSocket("**", () => Effect.void, { implementation: "script" })
+        yield* getBridge().captured(next, "replacement" as Adapter.HandleId)
         yield* registration.remove
+        assert.deepStrictEqual(handlesReleased, ["shim"], "the late event must not release the old holder twice")
+        yield* replacement.remove
+        assert.deepStrictEqual(handlesReleased, ["shim", "replacement"])
       }),
     undefined,
     {
-      releaseHandles: () => Deferred.succeed(holderReleased, undefined).pipe(Effect.asVoid)
+      releaseHandles: (handles) =>
+        Effect.sync(() => {
+          handlesReleased.push(...handles)
+          if (handles.includes("shim" as Adapter.HandleId)) Deferred.doneUnsafe(holderReleased, Effect.void)
+        })
     }
   ).pipe(Effect.provideService(
     Logger.CurrentLoggers,
@@ -361,3 +375,44 @@ it.effect("retires a missing WebKit payload context before its realm-end notific
     })])
   ))
 })
+
+for (const kind of ["other error", "other realm", "other target"] as const) {
+  it.effect(`reports a payload failure from ${kind} instead of treating it as its own realm retirement`, () => {
+    const errors: Array<unknown> = []
+    return harness((getBridge) =>
+      Effect.gen(function*() {
+        const context = yield* Browser.newContext()
+        const registration = yield* context.routeWebSocket("**", () => Effect.void, { implementation: "script" })
+        const realm = Target.RealmId.make("R-payload-guard")
+        const released = yield* Deferred.make<void>()
+        const gone = Kit.gone(
+          kind === "other target"
+            ? { _tag: "Document", id: Target.DocumentId.make("D-other") }
+            : { _tag: "Realm", id: kind === "other realm" ? Target.RealmId.make("R-other") : realm },
+          new Target.RealmDestroyed({})
+        )
+        // Exercise the unknown-cause boundary with a non-adapter error carrying a coincidentally matching reason.
+        const error = kind === "other error"
+          ? Object.assign(new Error("payload failed"), { reason: gone.reason })
+          : gone
+        assert.isTrue(
+          getBridge().receive(
+            realm,
+            Effect.fail(error as Adapter.AdapterError),
+            { _tag: "Worker", realm },
+            { isAlive: () => true, release: Deferred.succeed(released, undefined).pipe(Effect.asVoid) }
+          )
+        )
+        yield* Deferred.await(released)
+        assert.deepStrictEqual(errors, [["WebSocket bridge failed"]])
+        yield* registration.remove
+      }), () => Effect.succeed({ _tag: "Value", value: { type: "undefined" } })).pipe(
+        Effect.provideService(
+          Logger.CurrentLoggers,
+          new Set([Logger.make((entry) => {
+            if (entry.logLevel === "Error") errors.push(entry.message)
+          })])
+        )
+      )
+  })
+}
