@@ -1204,6 +1204,17 @@ export const contents = (
             const evaluate = yield* evaluator(page)
             assert.strictEqual(yield* evaluate(methods.sum, 1, 2), 3)
             assert.strictEqual(yield* page.evaluateInMainWorld(methods.later, 4), 8)
+            const strict = {
+              receiver(this: unknown) {
+                "use strict"
+                return typeof this
+              }
+            }
+            const receiver = yield* page.evaluateInMainWorld(function(this: unknown) {
+              "use strict"
+              return typeof this
+            })
+            assert.strictEqual(yield* page.evaluateInMainWorld(strict.receiver), receiver)
             const largeMethod = new Function(
               `return { large() { /*${"x".repeat(100_000)}*/ return 42 } }.large`
             )() as () => number

@@ -60,6 +60,14 @@ describe("FunctionSource.declaration", () => {
     assert.deepStrictEqual(Array.from(result), ["page:d", "page:p"])
   })
 
+  it("preserves a strict method's this value", () => {
+    const method = runInNewContext("({ read() { \"use strict\"; return this } }).read")
+    const sent = runInNewContext(`(${FunctionSource.declaration(method)})`)
+    for (const receiver of [undefined, null, 7]) {
+      assert.strictEqual(Reflect.apply(sent, receiver, []), Reflect.apply(method, receiver, []))
+    }
+  })
+
   it("keeps a method callable when WebKit stages its declaration in parts", () => {
     const method = new Function(`return { large() { /*${"x".repeat(100_000)}*/ return 42 } }.large`)()
     const source = FunctionSource.declaration(method)
