@@ -133,7 +133,8 @@ const explain = (reason: Engine.NotReady, frames: number, emulatesFocus: boolean
     case "Disabled":
       return "The element is disabled"
     case "Inert":
-      return "The element is inert"
+      return `The element is inert: ${reason.by} has the inert attribute` +
+        (reason.dialog === undefined ? "" : `, and a modal dialog, ${reason.dialog}, is open`)
     case "BlockedByModal":
       return `A modal dialog, ${reason.dialog}, blocks the element`
     case "OutsideViewport":
@@ -147,6 +148,8 @@ const explain = (reason: Engine.NotReady, frames: number, emulatesFocus: boolean
           : "")
     case "Covered":
       return `Another element covers the element's action point: ${reason.by}`
+    case "NoPointerEvents":
+      return `${reason.element} doesn't receive pointer events: its pointer-events is none`
     case "Intercepted":
       return `The element was covered when the input arrived, and the page never saw it: ${reason.by}`
     case "ReadOnly":
@@ -1661,7 +1664,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         const frame = answer.value
         // The iframe moved into view: the point inside it is right, but the next round reads it again
         if (frame.scrolled) return { _tag: "NotReady", reason: { _tag: "OutsideViewport" } } as const
-        if (frame.covered !== null) return { _tag: "NotReady", reason: { _tag: "Covered", by: frame.covered } } as const
+        if (frame.covered !== null) return { _tag: "NotReady", reason: frame.covered } as const
         at = { x: at.x + frame.origin.x, y: at.y + frame.origin.y }
         origin.x += frame.origin.x
         origin.y += frame.origin.y

@@ -995,6 +995,33 @@ describe("strider", () => {
     )
   }
 
+  // The CLI's click has the default 30 second deadline: there is no flag to shorten it
+  it.live(
+    "a click that timed out on an inert page prints the inert element and the open dialog",
+    () =>
+      Effect.scoped(Effect.gen(function*() {
+        const served = yield* site
+        const html =
+          `<div id="app" inert><button>Pay</button></div><div role="dialog" aria-modal="true" aria-label="Choose a hospital"><p>Pick one</p></div>`
+        const url = `${served.origin}/fixture?html=${encodeURIComponent(html)}`
+        const env = environment()
+        const run = (...args: ReadonlyArray<string>) => strider(env, ...args)
+        const started = yield* run("start", "--name", "inert", "--chromium", chromium.executable)
+        assert.strictEqual(started.code, 0, started.err)
+        try {
+          assert.strictEqual((yield* run("-s", "inert", "page", "new", "--name", "p", url)).code, 0)
+          const clicked = yield* run("-s", "inert", "-p", "p", "click", `role=button[name="Pay"]`)
+          assert.strictEqual(clicked.code, 12, clicked.err)
+          assert.include(clicked.err, "inert")
+          assert.include(clicked.err, "div#app")
+          assert.include(clicked.err, `a modal dialog, div "Pick one", is open`)
+        } finally {
+          yield* run("-s", "inert", "stop")
+        }
+      })),
+    timeout
+  )
+
   it.live("starts a session, drives its pages by name, and ends it", () =>
     Effect.scoped(Effect.gen(function*() {
       const served = yield* site

@@ -596,6 +596,92 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
       )
 
       it.effect(
+        "redacted capture omits field text from an inert click failure",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const served = yield* site
+            const page = yield* Browser.newPage()
+            const html =
+              "<div id=\"app\" inert><textarea>private-field-value</textarea><button id=\"go\">Pay</button></div>"
+            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+            const tools = yield* BrowserToolkit.make({
+              context: page.context,
+              secrets: {},
+              capture: CapturePolicy.strict
+            })
+            const result = yield* call(tools, "click", { page: "p1", target: "css=#go" }).pipe(
+              Deadline.within("1 second")
+            )
+            assert.isTrue(result.failed)
+            assert.include(result.value.message!, "inert")
+            assert.notInclude(result.value.message!, "private-field-value")
+          })),
+        timeout
+      )
+
+      it.effect(
+        "a Radix checkbox: the button, its label and its role click; its hidden input's failure names its own pointer-events",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const html =
+              `<div style="position:relative"><label for="ack">I understand</label><button type="button" role="checkbox" aria-checked="false" id="ack" onclick="this.setAttribute('aria-checked', String(this.getAttribute('aria-checked') !== 'true'))"></button><input type="checkbox" aria-hidden="true" tabindex="-1" style="position:absolute;pointer-events:none;opacity:0;margin:0;transform:translateX(-100%)"></div>`
+            const url = `${served.origin}/fixture?html=${encodeURIComponent(html)}`
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const tools = yield* BrowserToolkit.make({
+                context: page.context,
+                secrets: {},
+                capture: CapturePolicy.local
+              })
+              yield* call(tools, "newPage", { name: "shop", url })
+              const seen: Record<string, unknown> = {}
+              for (const target of ["css=#ack", "label=I understand", "role=checkbox", "css=input"]) {
+                const clicked = yield* call(tools, "click", { page: "shop", target }).pipe(Deadline.within("1 second"))
+                seen[target] = clicked.failed ? clicked.value.message : clicked.value.outcome
+              }
+              const json = JSON.stringify(seen)
+              for (const target of ["css=#ack", "label=I understand", "role=checkbox"]) {
+                assert.notInclude(String(seen[target]), "timed out", json)
+              }
+              const input = String(seen["css=input"])
+              assert.include(input, "timed out", json)
+              assert.include(input, "pointer-events", json)
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "a click that timed out on an inert page names the inert element and the open dialog",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const html =
+              `<div id="app" inert><button>Pay</button></div><div role="dialog" aria-modal="true" aria-label="Choose a hospital"><p>Pick one</p></div>`
+            const url = `${served.origin}/fixture?html=${encodeURIComponent(html)}`
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const tools = yield* BrowserToolkit.make({
+                context: page.context,
+                secrets: {},
+                capture: CapturePolicy.local
+              })
+              yield* call(tools, "newPage", { name: "shop", url })
+              const clicked = yield* call(tools, "click", { page: "shop", target: `role=button[name="Pay"]` }).pipe(
+                Deadline.within("1 second")
+              )
+              assert.isTrue(clicked.failed, JSON.stringify(clicked.value))
+              const message = String(clicked.value.message)
+              assert.include(message, "inert")
+              assert.include(message, "div#app")
+              assert.include(message, `a modal dialog, div "Pick one", is open`)
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
         "drives a page as a model would: names, refs, secrets, the digest and waits",
         () =>
           Effect.gen(function*() {
