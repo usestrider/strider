@@ -112,6 +112,20 @@ describe("Evaluation dispatch evidence", () => {
 })
 
 describe("Evaluation argument reconstruction", () => {
+  it("keeps interleaved staged functions separate and uses intrinsics captured before replacement", () => {
+    const results = runInNewContext(`(() => {
+      const helper = ${Utility.source}
+      globalThis.eval = () => () => -1
+      Array.prototype.join = () => "() => -2"
+      helper.stage(1, 1, "41")
+      helper.stage(2, 0, "() => ")
+      helper.stage(1, 0, "() => ")
+      helper.stage(2, 1, "42")
+      return [helper.compile(2)(), helper.compile(1)()]
+    })()`)
+    assert.deepStrictEqual(Array.from(results), [42, 41])
+  })
+
   it("constructs WebKit callbacks outside the handle-group wrapper bindings", () => {
     const call = runInNewContext(
       `(${

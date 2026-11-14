@@ -313,6 +313,23 @@ describe("Stock WebKit, attached through its remote inspector", () => {
         }).pipe(Effect.provide(attach(endpoint)))
       }))
 
+    it.effect("evaluates a large declaration when the page replaced eval before attachment", () =>
+      Effect.gen(function*() {
+        const { origin } = yield* site
+        const html = "<title>Custom eval</title><script>globalThis.eval = () => () => -1</script>"
+        const { endpoint } = yield* startMiniBrowser(fixtureUrl(origin, html))
+        yield* Effect.gen(function*() {
+          const browser = yield* Browser.Browser
+          yield* Effect.scoped(Effect.gen(function*() {
+            const tab = yield* (yield* byTitle(browser, "Custom eval")).control
+            assert.strictEqual(yield* tab.evaluateInMainWorld(() => 42), 42)
+            // This declaration fits the old single-packet path, but now crosses the staging threshold.
+            const fn = new Function(`/*${"x".repeat(70_000)}*/ return 42`) as () => number
+            assert.strictEqual(yield* tab.evaluateInMainWorld(fn), 42)
+          }))
+        }).pipe(Effect.provide(attach(endpoint)))
+      }))
+
     it.effect("finds a page the browser opens, and ends with the browser", () =>
       Effect.gen(function*() {
         const { origin } = yield* site

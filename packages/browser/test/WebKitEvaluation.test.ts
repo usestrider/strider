@@ -4,6 +4,7 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import { TestClock } from "effect/testing"
+import type * as Adapter from "../src/internal/adapter.ts"
 import * as Kit from "../src/internal/adapterKit.ts"
 import * as Engine from "../src/internal/engine.ts"
 import * as ProtocolClient from "../src/internal/protocolClient.ts"
@@ -218,7 +219,10 @@ describe("WebKit evaluation retirement", () => {
 describe("WebKit evaluation packets", () => {
   const budget = 128 * 1024 - 2048
 
-  const sendThroughWire = Effect.fnUntraced(function*(functionDeclaration: string) {
+  const sendThroughWire = Effect.fnUntraced(function*(
+    functionDeclaration: string,
+    args: ReadonlyArray<Adapter.LocalValue> = []
+  ) {
     const ids = Kit.makeIds()
     const id = ids.realm()
     const packets: Array<string> = []
@@ -255,7 +259,7 @@ describe("WebKit evaluation packets", () => {
     } as unknown as State.State
     const result = yield* Evaluation.evaluate(state, id, {
       functionDeclaration,
-      arguments: [],
+      arguments: args,
       result: "value",
       awaitPromise: true,
       userActivation: false
@@ -295,6 +299,15 @@ describe("WebKit evaluation packets", () => {
       assert.isAbove(sizes.length, 2)
       for (const size of sizes) assert.isBelow(size, budget)
       assert.strictEqual(sent, declaration)
+    }).pipe(Effect.scoped))
+
+  it.effect("bounds the final staged call when it carries a large value argument", () =>
+    Effect.gen(function*() {
+      const declaration = `value => { /*${"x".repeat(70_000)}*/ return value.length }`
+      const { sizes } = yield* sendThroughWire(declaration, [
+        { _tag: "Value", value: { type: "string", value: "x".repeat(140_000) } }
+      ])
+      for (const size of sizes) assert.isBelow(size, budget)
     }).pipe(Effect.scoped))
 
   it.effect("sends a small declaration in one command, as it is", () =>
