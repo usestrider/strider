@@ -179,7 +179,9 @@ With the viewport check enabled, actions also scroll targets wholly clipped by a
 
 An element that never passes a check, such as a button that pulses forever, times out. Turn single checks off with
 `checks`, by key: `visible`, `stable`, `enabled`, `editable`, `notInert`, `inViewport`, and `receivesPointer`.
-There's no blanket `force`: turning off one check rather than all keeps the rest guarding the action. `trial: true`
+There's no blanket `force`: turning off one check rather than all keeps the rest guarding the action.
+On Chromium, a pointer action into a cross-site frame goes to that frame without the browser hit-testing the page
+around it, so with `receivesPointer` off, a click reaches the frame's element even where the parent page covers it. `trial: true`
 does the reverse, running the checks and sending nothing, to learn whether an action would go through without
 causing it:
 

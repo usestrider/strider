@@ -669,7 +669,6 @@ export interface Modifiers {
   readonly shift: boolean
 }
 
-/** One primitive input event, in CSS pixels relative to the page's viewport. */
 /**
  * The frame input is aimed into, with its viewport's origin and that of each frame it is inside, outermost first and
  * itself last, in the page's coordinates.
@@ -682,6 +681,7 @@ export interface InputFrame {
   >
 }
 
+/** One primitive input event, in CSS pixels relative to the page's viewport. */
 export type InputEvent =
   | {
     readonly _tag: "Mouse"

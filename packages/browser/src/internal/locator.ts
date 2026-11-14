@@ -1337,7 +1337,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         { inViewport: true, receivesPointer: false },
         id
       ).pipe(Effect.mapError((failure) => this.sendFailure("Locator.dragTo", failure, record)))
-      // The frame the point is in: a gesture waits for it to be drawn before it sends input there
+      // The frame the point is in, which decides where the gesture's input is sent
       const frame = answer.routed.hops.at(-1)!.frame
       return translated._tag === "Point" ? Option.some({ ...translated.point, frame }) : Option.none()
     })
