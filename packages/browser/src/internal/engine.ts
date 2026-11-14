@@ -290,7 +290,10 @@ export type Request =
     readonly clip?: Clip
     /** Milliseconds this round may wait for the checks to pass. */
     readonly cap: number
-    /** Return after the first permitted readiness sample, retaining rendering requirements. */
+    /**
+     * Return after the first permitted readiness sample only when that sample recorded a blocker. Otherwise the
+     * round waits like any other, retaining rendering requirements.
+     */
     readonly sample?: boolean
     readonly action: Action
     /**
@@ -2201,11 +2204,13 @@ export function engine(render: (root: SnapNode) => string) {
         }
         state.frames++
       }
+      const first = !state.sampled
       state.sampled = true
       const response = checkAction(request, state)
       if (response !== undefined) return response
-      // The first round returns early only for an observed blocker; a stability baseline keeps waiting.
-      if (request.sample === true && state.history.length > 0) return actionTimeout(request, state)
+      // The first round returns early only when its first sample observed a blocker; after a stability
+      // baseline it keeps waiting like any round, through later samples too.
+      if (request.sample === true && first && state.history.length > 0) return actionTimeout(request, state)
     }
   }
 
@@ -3692,10 +3697,11 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
     }
     try {
       if (session.request.op === "act") {
+        const first = !session.state!.sampled
         session.state!.sampled = true
         const response = helpers.checkAction(session.request, session.state!)
         if (response !== undefined) return finished(session, response)
-        if (session.request.sample === true && session.state!.history.length > 0) return expired(session)
+        if (session.request.sample === true && first && session.state!.history.length > 0) return expired(session)
         if (!(await wait(session, false))) return stopped(session)
       } else {
         helpers.clearTreeCaches()
