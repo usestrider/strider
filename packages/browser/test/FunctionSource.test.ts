@@ -65,6 +65,16 @@ describe("FunctionSource.declaration", () => {
     })
   }
 
+  it("reads a conditional computed key, and a comment holding a bracket before the parameters", () => {
+    const methods = runInNewContext(
+      "const c = true, a = ['k']; ({ [c ? a[0] : 'b']() { return 42 }, sum /* ( */ (a, b) { return a + b } })"
+    )
+    assert.deepStrictEqual(
+      [FunctionSource.declaration(methods.k), FunctionSource.declaration(methods.sum), call(methods.sum, 1, 2)],
+      ["function () { return 42 }", "function (a, b) { return a + b }", 3]
+    )
+  })
+
   it("reads a numeric key", () => {
     const methods = runInNewContext(
       "({ 0x1f() { return 1 }, 1_000() { return 2 }, 2e+3() { return 3 }, .5() { return 4 }, 7n() { return 5 } })"
