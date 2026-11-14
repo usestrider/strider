@@ -85,6 +85,30 @@ describe("FunctionSource.declaration", () => {
     )
   })
 
+  for (
+    const [kind, source, expected] of [
+      ["a name spelled with an escape", "({ async\\u0061() { return 42 } }).asynca", "Function"],
+      ["an async method", "({ async x() { return 42 } }).x", "AsyncFunction"],
+      [
+        "an async method whose computed key reads await",
+        "const await = 'k'; ({ async [await]() { return 42 } }).k",
+        "AsyncFunction"
+      ],
+      [
+        "an async generator with a private name",
+        "(class { static async *#items() { yield 42 } static get() { return this.#items } }).get()",
+        "AsyncGeneratorFunction"
+      ]
+    ]
+  ) {
+    it(`reads the kind of ${kind} from its whole head`, async () => {
+      const method = runInNewContext(source!)
+      const sent = runInNewContext(`(${FunctionSource.declaration(method)})`)
+      assert.strictEqual(method.constructor.name, expected)
+      assert.strictEqual(sent.constructor.name, expected)
+    })
+  }
+
   it("reads a numeric key", () => {
     const methods = runInNewContext(
       "({ 0x1f() { return 1 }, 1_000() { return 2 }, 2e+3() { return 3 }, .5() { return 4 }, 7n() { return 5 } })"

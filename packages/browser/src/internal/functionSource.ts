@@ -53,11 +53,21 @@ const isKey = (key: string): boolean =>
   key.startsWith("#") ? parses(`return (class { ${key} = 0 })`) : parses(`return ({ ${key}: 0 })`)
 
 /**
+ * Whether the method whose head is `head`, everything before its parameter list, is of the kind whose body `body`
+ * needs: `await 0` parses only in an async method, and `yield 0` only in a generator, however the head is spelled.
+ * A private name's head parses only in a class, and a head such as `async constructor` only in an object literal, so
+ * either may pass; in both, the body parses only for that kind.
+ */
+const isKind = (head: string, body: string): boolean =>
+  parses(`return ({ ${head}() { ${body} } })`) || parses(`return (class { ${head}() { ${body} } })`)
+
+/**
  * A method's source as an anonymous function expression, or `undefined` where there is none, as for a method that
- * uses `super`, or a source whose head doesn't read as a method's. The head is read in order: `async` (with no line
- * break after it) and `*`, which are kept, or `get` or `set`, which are dropped; each only where the next token isn't
- * the `(` that would make it the key. Then the key, which is dropped: the text up to the first `(` that parses on its
- * own as a property name. The parameter list and body run from that `(` to the end.
+ * uses `super`, or a source whose head doesn't read as a method's. The words before the key, `async`, `*`, `get` or
+ * `set`, are skipped to find where the key starts, each only where the next token isn't the `(` that would make it the
+ * key. The key is the text up to the first `(` that parses on its own as a property name, and the parameter list and
+ * body run from that `(` to the end. Whether the function is async or a generator is left to the parser too: it is
+ * read from the whole head, so a word spelled with escapes, such as `async\u0061`, is never taken for a modifier.
  */
 const fromMethod = (source: string): string | undefined => {
   let i = skipTrivia(source, 0)
@@ -72,14 +82,15 @@ const fromMethod = (source: string): string | undefined => {
     return next
   }
   const afterAsync = modifier(i, ["async"], true)
-  const async = afterAsync !== undefined
   if (afterAsync !== undefined) i = afterAsync
-  const generator = source[i] === "*"
-  if (generator) i = skipTrivia(source, i + 1)
-  else if (!async) i = modifier(i, ["get", "set"], false) ?? i
+  if (source[i] === "*") i = skipTrivia(source, i + 1)
+  else if (afterAsync === undefined) i = modifier(i, ["get", "set"], false) ?? i
   if (i === -1) return undefined
   for (let at = source.indexOf("(", i); at !== -1; at = source.indexOf("(", at + 1)) {
     if (!isKey(source.slice(i, at))) continue
+    const head = source.slice(0, at)
+    const async = isKind(head, "await 0")
+    const generator = isKind(head, "yield 0")
     const candidate = `${async ? "async " : ""}function${generator ? "*" : ""} ${source.slice(at)}`
     return isExpression(candidate) ? candidate : undefined
   }
