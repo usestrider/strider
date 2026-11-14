@@ -9,6 +9,7 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
+import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { TestClock } from "effect/testing"
@@ -752,5 +753,80 @@ describe("Session.open", () => {
       // The name is free again
       const opened = yield* session.open({ name: "refused", url: "https://example.test/" })
       assert.strictEqual(opened.name, "refused")
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+})
+
+describe("Session press refusals", () => {
+  it.effect("reports and drains pending navigation on a bad modifier as on a bad key", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const page = yield* context.newPage
+      const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+      for (const key of ["NotAKey", "Ctrl+k"]) {
+        const url = Schema.decodeUnknownSync(Url.Url)(`https://example.test/${key}`)
+        Events.publish(Handles.page(page).entry.events.navigation, {
+          navigation: Schema.decodeUnknownSync(PageNavigation.Id)(key),
+          frame: page.id,
+          url,
+          outcome: {
+            _tag: "Committed",
+            document: Schema.decodeUnknownSync(Target.DocumentId)(key),
+            response: Option.none()
+          }
+        })
+        yield* TestClock.adjust("1 millis")
+        const last = yield* session.toolkit.handle("press", { page: "p1", key }).pipe(
+          Effect.flatMap(Stream.runLast),
+          Effect.map(Option.getOrThrow)
+        )
+        assert.isTrue(last.isFailure)
+        assert.include((last.result as ToolFailure).sinceLast ?? [], `p1 navigated to ${url}`, key)
+        const next = yield* session.toolkit.handle("pages", {}).pipe(
+          Effect.flatMap(Stream.runLast),
+          Effect.map(Option.getOrThrow)
+        )
+        assert.deepStrictEqual((next.result as { sinceLast: ReadonlyArray<string> }).sinceLast, [])
+      }
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+
+  it.effect("conceals configured secret values in bad modifier failures as in bad key failures", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      yield* context.newPage
+      const session = yield* ToolkitImpl.makeSession({
+        context,
+        secrets: { password: Redacted.make("private-value") },
+        capture: CapturePolicy.local
+      })
+      for (const key of ["private-value", "private-value+k"]) {
+        const last = yield* session.toolkit.handle("press", { page: "p1", key }).pipe(
+          Effect.flatMap(Stream.runLast),
+          Effect.map(Option.getOrThrow)
+        )
+        assert.isTrue(last.isFailure)
+        const failure = last.result as ToolFailure
+        assert.notInclude(failure.message, "private-value", key)
+        assert.include(failure.message, "%password%")
+      }
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+
+  it.effect("identifies a bad modifier's locator the same way as a bad key", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      yield* context.newPage
+      const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+      const prefixes: Array<string> = []
+      for (const key of ["NotAKey", "Ctrl+k"]) {
+        const last = yield* session.toolkit.handle("press", { page: "p1", key, target: "css=#field" }).pipe(
+          Effect.flatMap(Stream.runLast),
+          Effect.map(Option.getOrThrow)
+        )
+        assert.isTrue(last.isFailure)
+        const failure = last.result as ToolFailure
+        assert.strictEqual(failure.error, "LocatorError")
+        assert.strictEqual(failure.reason, "InvalidInput")
+        prefixes.push(failure.message.split(": Invalid")[0]!)
+      }
+      assert.strictEqual(prefixes[1], prefixes[0])
     }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
 })

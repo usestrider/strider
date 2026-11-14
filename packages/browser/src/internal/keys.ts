@@ -9,6 +9,7 @@
  * - **A named key** (`Enter`, `ArrowDown`, `Shift`) is the same on every layout. Anything else isn't a key.
  */
 import type * as Keyboard from "../Keyboard.ts"
+import * as Reason from "../Reason.ts"
 import * as Layouts from "./keyboardLayouts.ts"
 
 /** One key: its `KeyboardEvent.key`, `code`, and the text it inserts, if any. */
@@ -135,3 +136,42 @@ export const altGraph: Definition = named.get("AltGraph")!
 /** Whether a key is a modifier, and which. */
 export const modifierOf = (key: string): Keyboard.Modifier | undefined =>
   key === "Shift" || key === "Control" || key === "Alt" || key === "Meta" ? key : undefined
+
+/** A key with modifiers held, as a `Modifier+Key` chord names it. */
+export interface Chord {
+  readonly key: string
+  readonly modifiers: ReadonlyArray<Keyboard.Modifier>
+}
+
+/**
+ * A `Modifier+Key` chord, such as `Meta+k` or `Control+Shift+P`: every part but the last a modifier, and the last
+ * the key. A `+` with nothing before it is the key itself, so `+` and `Shift++` press `+`. A key alone is a chord
+ * with no modifiers, and what the key is isn't checked here. A part that isn't a modifier fails as `InvalidInput`.
+ */
+export const chord = (text: string): Chord | Reason.InvalidInput => {
+  const parts: Array<string> = []
+  let part = ""
+  for (const character of text) {
+    if (character === "+" && part !== "") {
+      parts.push(part)
+      part = ""
+    } else {
+      part += character
+    }
+  }
+  parts.push(part)
+  const key = parts.pop()!
+  const modifiers: Array<Keyboard.Modifier> = []
+  for (const each of parts) {
+    const modifier = modifierOf(each)
+    if (modifier === undefined) {
+      return new Reason.InvalidInput({
+        input: "modifier",
+        expected: "Alt, Control, Meta, or Shift",
+        hint: `${JSON.stringify(each)} in ${JSON.stringify(text)} isn't a modifier`
+      })
+    }
+    if (!modifiers.includes(modifier)) modifiers.push(modifier)
+  }
+  return { key, modifiers }
+}

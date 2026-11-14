@@ -496,6 +496,15 @@ information. Plain output bounds its preview, while JSON preserves the complete 
 masks arbitrary returned data as a whole: a value no longer identifies the editable field it came from, so applying
 snapshot-text masking alone would let a segment expose that field. Page handles retain their names and IDs.
 
+**The CLI and the toolkit press chords; the library takes modifiers as an option.** A tool's `press` takes one
+string, which agents and Playwright users write as `Modifier+Key` (`Meta+k`, `Control+Shift+P`), so the toolkit reads
+every part but the last as one of the library's modifiers, `Alt`, `Control`, `Meta`, or `Shift`, and a `+` with
+nothing before it as the key. `Keyboard.press` and `Locator.press` keep `{ modifiers }`, so a key has one spelling
+in code, and exported tests replay a chord with it. Rejected: a `--modifiers` flag beside the chord, which writes one
+press two ways; chords in the library too, which parses strings where the type already names the modifiers; and
+`ControlOrMeta` or aliases such as `Ctrl` and `Cmd`, which would need a platform-dependent default the library
+doesn't have, or a second name for a modifier. They are refused as `InvalidInput`, naming the four.
+
 **The `strider` client loads Effect, and talks to its session's daemon through one `effect/rpc` group.** Each caller,
 the command, `strider mcp`, `strider sessions`, and `start --fork`, uses the same RPC client over the session's Unix
 socket, so what crosses it is a Schema: a command's output and exit code, a tool call's parameters and result, the

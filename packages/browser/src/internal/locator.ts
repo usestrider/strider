@@ -2057,6 +2057,10 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
   }
 }
 
+/** A locator's refusal of an input to one of its operations, naming the locator as its own refusals do. */
+export const refusal = (locator: Locator.Locator, operation: string, reason: Locator.LocatorErrorReason) =>
+  (locator as LocatorImpl).error(operation, reason, Operation.idNow())
+
 /** A page's root locator queries. */
 export const pageQueries = (owner: Owner): Locator.Queries<Locator.Locator> =>
   queries([], (steps) => new LocatorImpl(owner, steps))

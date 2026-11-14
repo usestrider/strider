@@ -159,6 +159,31 @@ describe("Spans", () => {
       assert.isDefined(spans.find((span) => span.name === "strider Browser.newPage"))
     }))
 
+  it.effect("records a toolkit bad modifier as a Keyboard.press failure like a bad key", () =>
+    Effect.gen(function*() {
+      const { spans, tracer } = recording()
+      yield* Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const session = yield* ToolkitImpl.makeSession({
+          context: page.context,
+          secrets: {},
+          capture: CapturePolicy.local
+        })
+        for (const key of ["NotAKey", "Ctrl+k"]) {
+          const start = spans.length
+          const last = yield* session.toolkit.handle("press", { page: "p1", key }).pipe(
+            Effect.flatMap(Stream.runLast),
+            Effect.map(Option.getOrThrow)
+          )
+          assert.isTrue(last.isFailure)
+          const press = spans.slice(start).find((span) => span.attributes.get("browser.operation") === "Keyboard.press")
+          assert.isDefined(press, `${key}: ${spans.slice(start).map((span) => span.name).join(", ")}`)
+          assert.strictEqual(press!.attributes.get("error.type"), "KeyboardError.InvalidInput")
+          assert.strictEqual(press!.attributes.get("browser.page.id"), page.id)
+        }
+      })).pipe(Effect.provide(Browser.layerTest("")), Effect.withTracer(tracer))
+    }))
+
   it.effect("names a failed operation's error by its tag and its reason's", () =>
     Effect.gen(function*() {
       const { spans, tracer } = recording()
