@@ -8,6 +8,7 @@ import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as Input from "../src/internal/input.ts"
+import * as Keys from "../src/internal/keys.ts"
 import * as Operation from "../src/internal/operation.ts"
 
 const release: ReadonlyArray<Adapter.InputEvent> = [{
@@ -237,3 +238,36 @@ it.effect("records unfinished cleanup before waking recovery and reports the res
       assert.strictEqual(state.cleanups.length, 0)
     }).pipe(Operation.named("Mouse.click"))
   }))
+
+describe("Input key events", () => {
+  const keys = (events: ReadonlyArray<Adapter.InputEvent> | undefined) =>
+    (events ?? []).flatMap((event) =>
+      event._tag === "Key" ? [`${event.type}:${event.key}:${event.modifiers.meta}:${event.autoRepeat}`] : []
+    )
+
+  it("gives a modifier's keydown its own flag and its keyup none, pressed, typed or held", () => {
+    const state = Input.make()
+    const meta = Keys.modifier("Meta")
+    const expected = ["down:Meta:true:false", "up:Meta:false:false"]
+    assert.deepStrictEqual(keys(Input.press(state, meta)), expected)
+    assert.deepStrictEqual(keys(Input.type(state, "Meta", "us")), expected)
+    assert.deepStrictEqual(keys([Input.keyDown(state, meta)]), [expected[0]])
+    state.keys.push(meta)
+    assert.deepStrictEqual(keys([Input.keyUp(state, meta)]), [expected[1]])
+  })
+
+  it("marks a keydown for a key already held as a repeat, and only that one", () => {
+    const state = Input.make()
+    const a = Keys.definition("a", "us")!
+    assert.deepStrictEqual(keys([Input.keyDown(state, a)]), ["down:a:false:false"])
+    state.keys.push(a)
+    const repeat = ["down:a:false:true", "up:a:false:false"]
+    assert.deepStrictEqual(keys(Input.press(state, a)), repeat)
+    assert.deepStrictEqual(keys(Input.type(state, "a", "us")), repeat)
+    assert.deepStrictEqual(keys([Input.keyDown(state, a)]), ["down:a:false:true"])
+    assert.deepStrictEqual(keys(Input.press(state, Keys.definition("b", "us")!)), [
+      "down:b:false:false",
+      "up:b:false:false"
+    ])
+  })
+})

@@ -5485,10 +5485,11 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               yield* page.locator("#i").focus()
               for (const key of ["Shift", "Control", "Alt", "Meta"]) yield* page.keyboard.press(key)
               const altGraph = page.keyboard.press("AltGraph")
-              if (name === "WebKit") {
-                // Stock WebKit's Automation has no AltGraph key, and refuses it
+              if (!(yield* supports("input.keyboardLayout"))) {
+                // A backend without a layout's keys, as stock WebKit's Automation, has no AltGraph key, and refuses it
                 const error = yield* Effect.flip(altGraph)
                 assert(Keyboard.isKeyboardError(error) && error.reason._tag === "Unsupported", String(error))
+                assert.strictEqual(error.reason.capability, "input.keyboardLayout")
               } else {
                 yield* altGraph
               }

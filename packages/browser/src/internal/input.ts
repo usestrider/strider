@@ -163,6 +163,7 @@ const record = (state: State, description: string, events: ReadonlyArray<Adapter
         ...event,
         type: "up",
         text: Option.none(),
+        autoRepeat: false,
         modifiers: modifier === undefined ? event.modifiers : { ...event.modifiers, [modifier.toLowerCase()]: false }
       })
     }
@@ -221,20 +222,30 @@ export const anyModifier = (state: State, extra: ReadonlyArray<Keyboard.Modifier
   return flags.alt || flags.control || flags.meta || flags.shift
 }
 
+/**
+ * One key event. A modifier key's keydown carries its own flag, as a real keyboard's does; its keyup carries only
+ * the `flags` given, which hold it only if something else does. A keydown for a key whose `code` is already held is
+ * a repeat.
+ */
 const key = (
+  state: State,
   type: "down" | "up",
   definition: Keys.Definition,
   flags: Adapter.Modifiers,
   text?: string
-): Adapter.InputEvent => ({
-  _tag: "Key",
-  type,
-  key: definition.key,
-  code: definition.code,
-  text: type === "down" && text !== undefined ? Option.some(text) : Option.none(),
-  modifiers: flags,
-  autoRepeat: false
-})
+): Adapter.InputEvent => {
+  const modifier = Keys.modifierOf(definition.key)
+  return {
+    _tag: "Key",
+    type,
+    key: definition.key,
+    code: definition.code,
+    text: type === "down" && text !== undefined ? Option.some(text) : Option.none(),
+    modifiers: type === "down" && modifier !== undefined ? { ...flags, [modifier.toLowerCase()]: true } : flags,
+    autoRepeat: type === "down" && definition.code !== "" &&
+      state.keys.some((held) => held.code === definition.code)
+  }
+}
 
 /** Presses the modifiers asked for that aren't held: the events to send before a gesture, and after it. */
 const withModifiers = (state: State, wanted: ReadonlyArray<Keyboard.Modifier>) => {
@@ -242,10 +253,10 @@ const withModifiers = (state: State, wanted: ReadonlyArray<Keyboard.Modifier>) =
   const before: Array<Adapter.InputEvent> = []
   const after: Array<Adapter.InputEvent> = []
   for (const [index, modifier] of added.entries()) {
-    before.push(key("down", Keys.modifier(modifier), modifiers(state, added.slice(0, index + 1))))
+    before.push(key(state, "down", Keys.modifier(modifier), modifiers(state, added.slice(0, index))))
   }
   for (const [index, modifier] of [...added].reverse().entries()) {
-    after.push(key("up", Keys.modifier(modifier), modifiers(state, [...added].reverse().slice(index + 1))))
+    after.push(key(state, "up", Keys.modifier(modifier), modifiers(state, [...added].reverse().slice(index + 1))))
   }
   return { before, after, flags: modifiers(state, wanted) }
 }
@@ -263,7 +274,12 @@ export const press = (
 ): Array<Adapter.InputEvent> => {
   const { after, before, flags } = withModifiers(state, wanted)
   const pressed = flags.shift ? Keys.withShift(definition, layout) : definition
-  return [...before, key("down", pressed, flags, textOf(pressed, flags)), key("up", pressed, flags), ...after]
+  return [
+    ...before,
+    key(state, "down", pressed, flags, textOf(pressed, flags)),
+    key(state, "up", pressed, flags),
+    ...after
+  ]
 }
 
 /**
@@ -287,10 +303,10 @@ export const type = (
     const pressed = flags.shift && !stroke.shift ? Keys.withShift(stroke.definition, layout) : stroke.definition
     return [
       ...before,
-      ...(stroke.altGraph ? [key("down", Keys.altGraph, flags)] : []),
-      key("down", pressed, flags, textOf(pressed, flags)),
-      key("up", pressed, flags),
-      ...(stroke.altGraph ? [key("up", Keys.altGraph, flags)] : []),
+      ...(stroke.altGraph ? [key(state, "down", Keys.altGraph, flags)] : []),
+      key(state, "down", pressed, flags, textOf(pressed, flags)),
+      key(state, "up", pressed, flags),
+      ...(stroke.altGraph ? [key(state, "up", Keys.altGraph, flags)] : []),
       ...after
     ]
   })
@@ -298,16 +314,11 @@ export const type = (
 
 /** A key held down, for `keyboard.hold`. */
 export const keyDown = (state: State, definition: Keys.Definition): Adapter.InputEvent =>
-  key(
-    "down",
-    definition,
-    modifiers(state, Keys.modifierOf(definition.key) === undefined ? [] : [Keys.modifierOf(definition.key)!]),
-    textOf(definition, modifiers(state))
-  )
+  key(state, "down", definition, modifiers(state), textOf(definition, modifiers(state)))
 
 /** A held key released. */
 export const keyUp = (state: State, definition: Keys.Definition): Adapter.InputEvent =>
-  key("up", definition, modifiers({ ...state, keys: state.keys.filter((held) => held !== definition) }))
+  key(state, "up", definition, modifiers({ ...state, keys: state.keys.filter((held) => held !== definition) }))
 
 type Point = { readonly x: number; readonly y: number }
 

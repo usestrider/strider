@@ -93,6 +93,16 @@ export const keyCode = (key: string): number | undefined => {
   return undefined
 }
 
+/**
+ * The `KeyboardEvent.location` of the key at `code`, as UI Events places it: 1 and 2 for the left and right
+ * modifier keys, 3 for the numeric keypad, and 0 for the rest, such as `BracketLeft` or `ArrowRight`. Chromium
+ * reports 0 for a key it isn't sent a location for.
+ */
+export const keyLocation = (code: string): number => {
+  const side = /^(?:Shift|Control|Alt|Meta)(Left|Right)$/.exec(code)?.[1]
+  return side === "Left" ? 1 : side === "Right" ? 2 : code.startsWith("Numpad") ? 3 : 0
+}
+
 export const modifierBits = (modifiers: Adapter.Modifiers): number =>
   (modifiers.alt ? 1 : 0) | (modifiers.control ? 2 : 0) | (modifiers.meta ? 4 : 0) | (modifiers.shift ? 8 : 0)
 
