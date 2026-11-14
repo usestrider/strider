@@ -593,7 +593,8 @@ export const engine = (backend: Backend) =>
             const { call } = yield* open(backend, "<button id=\"go\" hidden>Go</button>", controlledCooperativeClock)
             // The session's budget runs out while its resume is in the browser's frame wait, so the host holds no
             // token: the pending resume itself answers with the timeout evidence and no token. A later resume that
-            // carries that missing token, as a host would, is Disposed, and cancel clears the retained terminal.
+            // carries that missing token, as the original failing test did, is Disposed, and cancel clears the
+            // retained terminal.
             const result = yield* cooperativeExercise(
               call,
               `
