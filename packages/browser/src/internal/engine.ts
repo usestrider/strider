@@ -1444,12 +1444,25 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   // Actionability
-  /** A short description of an element for errors: `button#buy.primary "Add to cart"`. */
+  /** An element's text for a description: as `textOf`, but with no field's content, which may be private. */
+  const describedText = (node: Node): string =>
+    node.nodeType === Node.TEXT_NODE
+      ? node.nodeValue ?? ""
+      : !(node instanceof Element) || SKIPPED.has(node.localName) || fieldOf(node)
+      ? ""
+      : buttonLikeInput(node)
+      ? node.value
+      : flatChildNodes(node).map(describedText).join("")
+
+  /**
+   * A short description of an element for errors: `button#buy.primary "Add to cart"`. Its text leaves out what a
+   * field holds, such as a textarea's or an editable element's content, whatever the capture policy.
+   */
   const describe = (element: Element): string => {
     let out = element.localName
     if (element.id !== "") out += `#${element.id}`
     for (const name of Array.from(element.classList).slice(0, 2)) out += `.${name}`
-    const text = textOf(element)
+    const text = collapse(describedText(element))
     if (text !== "") out += ` "${text.length > 40 ? `${text.slice(0, 40)}…` : text}"`
     return out
   }
@@ -1714,20 +1727,36 @@ export function engine(render: (root: SnapNode) => string) {
       ? { _tag: "NoPointerEvents", element: describe(element) }
       : { _tag: "Covered", by: hit === null ? "nothing at that point" : describe(hit) }
 
-  const inertReason = (element: Element): NotReady | null => {
-    for (let current: Element | null = element; current !== null; current = composedParent(current)) {
-      if (current.hasAttribute("inert")) {
-        const modal = Array.from(document.querySelectorAll("dialog,[aria-modal=true]")).find((d) =>
-          !composedContains(d, element) &&
-          (d instanceof HTMLDialogElement
-            ? d.matches(":modal")
-            : /dialog$/.test(d.getAttribute("role") ?? "") && !d.closest("[inert]") && visible(d))
-        )
-        return { _tag: "Inert", by: describe(current), dialog: modal && describe(modal) }
-      }
+  /** The element whose `inert` attribute makes `element` inert: inertness applies on the flat tree, through slots. */
+  const inertAncestor = (element: Element): Element | null => {
+    for (
+      let current: Element | null = element;
+      current !== null;
+      current = current.assignedSlot ?? composedParent(current)
+    ) {
+      if (current.hasAttribute("inert")) return current
     }
-    const modal = Array.from(document.querySelectorAll("dialog")).find((dialog) => dialog.matches(":modal"))
-    return modal !== undefined && !composedContains(modal, element)
+    return null
+  }
+
+  const inertReason = (element: Element): NotReady | null => {
+    const inert = inertAncestor(element)
+    // Dialogs outside the target, in shadow roots too
+    const dialogs = elementsUnder(document).filter((d) =>
+      (d instanceof HTMLDialogElement || d.hasAttribute("aria-modal")) && !composedContains(d, element)
+    )
+    if (inert !== null) {
+      // An open modal: a native one, or a rendered `aria-modal` dialog that isn't inert itself
+      const modal = dialogs.find((d) =>
+        d instanceof HTMLDialogElement
+          ? d.matches(":modal")
+          : d.matches("[role=dialog][aria-modal=true],[role=alertdialog][aria-modal=true]") &&
+            inertAncestor(d) === null && visible(d)
+      )
+      return { _tag: "Inert", by: describe(inert), dialog: modal && describe(modal) }
+    }
+    const modal = dialogs.find((dialog) => dialog instanceof HTMLDialogElement && dialog.matches(":modal"))
+    return modal !== undefined
       ? { _tag: "BlockedByModal", dialog: describe(modal) }
       : null
   }
@@ -1776,7 +1805,10 @@ export function engine(render: (root: SnapNode) => string) {
     return center
   }
 
-  /** Probe centres only when requested; retain the first geometric point for a Covered result if none reaches. */
+  /**
+   * Probe centres only when requested; retain the first geometric point for a `Covered` or `NoPointerEvents` result
+   * if none reaches.
+   */
   const actionPoints = (
     element: Element,
     position: { readonly x: number; readonly y: number } | null,
