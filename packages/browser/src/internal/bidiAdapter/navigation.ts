@@ -111,7 +111,16 @@ const readiness = (
   if (bidi !== null) {
     const documentStart = document.navigationStarts?.get(bidi)
     if (documentStart !== undefined && params.timestamp < documentStart) return
-    if (document.navigation !== undefined && document.navigation !== bidi && documentStart === undefined) return
+    if (document.navigation !== undefined && document.navigation !== bidi && documentStart === undefined) {
+      // The same delayed load can arrive before the start of the identity it names: keep it for that start.
+      if (
+        navigation === undefined && readiness === "complete" && params.url === document.url &&
+        (document.committedAt === undefined || params.timestamp >= document.committedAt)
+      ) {
+        document.navigable.staleLoad = { bidi, timestamp: params.timestamp, document: document.id }
+      }
+      return
+    }
   }
   if (readiness === "interactive" && document.complete) {
     // Loaded again after it was complete: `document.open()` replaced its tree (probe 17)
@@ -128,6 +137,7 @@ const committed = (state: State, navigable: NavigableEntry, params: BrowsingCont
   const bidi = params.navigation ?? `committed:${navigable.bidi}:${url}`
   // A duplicate commit for the current document is not another document or outcome.
   if (navigable.document?.navigation === bidi) return
+  navigable.staleLoad = undefined
   const isError = errorPage(url)
   const known = state.navigations.get(bidi)
   const bound = navigable.commandNavigations.has(bidi)
@@ -201,6 +211,8 @@ const failed = (state: State, navigable: NavigableEntry, params: BrowsingContext
 
 const started = (state: State, navigable: NavigableEntry, params: BrowsingContext.NavigationInfo) => {
   if (params.navigation === null || state.navigations.has(params.navigation)) return
+  const early = navigable.staleLoad
+  navigable.staleLoad = undefined
   const pending = [...new Set(navigable.navigations.values())].filter((entry) => !entry.ended && !entry.sameDocument)
   // Delivery can lag behind a newer start or a commit; old starts cannot replace newer work.
   if (
@@ -235,6 +247,10 @@ const started = (state: State, navigable: NavigableEntry, params: BrowsingContex
     false
   )
   navigation.starts.set(params.navigation, params.timestamp)
+  if (
+    early !== undefined && early.bidi === params.navigation && early.timestamp < params.timestamp &&
+    early.document === navigable.document?.id
+  ) navigation.staleLoad = early.document
 }
 
 /** Resolves attribution only; no deferred event can start a competing navigation or commit a document. */

@@ -335,8 +335,10 @@ Adapter responsibilities:
     are evidence, not logical navigation ids. Firefox can assign a delayed load to a newer start and then issue a
     replacement start without a second document request. Correlate the replacement only when that load's timestamp
     predates the active start, its URL identifies the current document, the active navigation has a document request,
-    and no competing command reservation exists. The destination URL must also agree, but cannot establish
-    continuity alone. A distinct document request for the replacement identity establishes competition and splits
+    and no competing command reservation exists. The load can also arrive before the start of the identity it
+    names: keep it on the navigable, if it is for the current document and no earlier than its commit, until the
+    next start or commit, and count it for that identity only if the identity's start is the next and is later. The
+    destination URL must also agree, but cannot establish continuity alone. A distinct document request for the replacement identity establishes competition and splits
     it into a new logical navigation. Preserve the original request and single outcome across correlated identities;
     reject starts older than an observed newer start or commit. Clear aliases and stale-load evidence when their
     navigation and outstanding command correlation end, and on context removal. A committed document retains the

@@ -535,6 +535,8 @@ commit supersedes it after outstanding correlation finishes. No public operation
 
 BiDi wire navigation identities do not alone prove logical supersession. A delayed load whose timestamp predates
 an active start and whose URL belongs to the current document can cause Firefox to allocate another identity.
+That load may arrive before the start it names; it is kept until the next start or commit and counts only if that
+start is the identity's own and later, so the correlation does not depend on the order the events arrive in.
 With an existing document request, the same destination and no competing reservation, correlate that next start
 with the active logical navigation. A distinct document request for the new identity separates the navigations;
 command reservations always retain their separate ownership. This keeps request, commit and terminal outcome

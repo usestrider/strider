@@ -84,6 +84,15 @@ export interface NavigableEntry extends Kit.NavigableNode<NavigableEntry> {
     | (Kit.Expected & { readonly bidi?: string | undefined; readonly aliases?: ReadonlySet<string> | undefined })
     | undefined
   readonly navigations: Map<string, NavigationEntry>
+  /**
+   * A load for the current document that names a wire identity not started yet: evidence that the navigation
+   * that identity starts predates it, kept until the next start or commit.
+   */
+  staleLoad?: {
+    readonly bidi: string
+    readonly timestamp: number
+    readonly document: L1Target.DocumentId
+  } | undefined
   /** The documents it had, by URL: what a restore from the back/forward cache restores. */
   readonly past: Map<string, L1Target.DocumentId>
 }
