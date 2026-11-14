@@ -5,6 +5,7 @@
  * `serialization: "deep"`.
  */
 import * as Cause from "effect/Cause"
+import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
@@ -333,6 +334,10 @@ export const realm = Effect.fnUntraced(function*(state: State, id: L1Target.Docu
 })
 
 export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.RealmId, call: Adapter.EvaluationCall) {
+  // A dedicated worker's evaluations wait until its script has loaded or it has ended (`workerGate` in
+  // targets.ts); the operation's deadline bounds the wait, and an ended worker's realm is gone when looked up again
+  const held = (yield* realmOf(state, id)).target.scriptLoaded
+  if (held !== undefined) yield* Deferred.await(held)
   const realm = yield* realmOf(state, id)
   const on = Protocol.on(realm.target.session)
   const deadline = yield* ProtocolClient.CommandDeadline

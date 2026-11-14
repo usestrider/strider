@@ -80,6 +80,11 @@ export interface TargetEntry {
   readonly url: string
   /** For a worker: its realm, once its context is created. */
   realm: RealmEntry | undefined
+  /**
+   * For a dedicated worker attached waiting for the debugger: done once its script has loaded, or it has ended.
+   * Evaluations in its realm wait on it (`Evaluation.evaluate`).
+   */
+  scriptLoaded?: Deferred.Deferred<void> | undefined
   /** The intercept patterns last applied, so a change is applied once. */
   intercepts: string
   readonly scripts: Map<string, string>
