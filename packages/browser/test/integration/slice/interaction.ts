@@ -1380,7 +1380,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           Effect.scoped(Effect.gen(function*() {
             // Preserve the post-scroll geometry from the Firefox failure: (20, 110.5), with offset (7, 9).
             const { url } = yield* fixture(() =>
-              `<!doctype html><style>body{margin:0}#go{position:absolute;left:20px;top:110.5px;display:block;width:100px;height:24px}</style><a id="go" href="#">Go</a><output id="out"></output><script>go.onclick=e=>{e.preventDefault();out.textContent=JSON.stringify({trusted:e.isTrusted,x:e.offsetX,y:e.offsetY,clientY:e.clientY,top:go.getBoundingClientRect().top})}</script>`
+              `<!doctype html><style>body{margin:0}#go{position:absolute;left:20px;top:110.5px;display:block;width:100px;height:24px}</style><a id="go" href="#">Go</a><output id="out"></output><script>go.onpointerdown=e=>window.pointerY=e.clientY;go.onclick=e=>{e.preventDefault();out.textContent=JSON.stringify({trusted:e.isTrusted,x:e.offsetX,y:e.offsetY,clientY:e.clientY,pointerY:window.pointerY,top:go.getBoundingClientRect().top})}</script>`
             )
             const page = yield* Browser.newPage()
             yield* page.goto(url)
@@ -1390,6 +1390,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             assert.strictEqual(click.top, 110.5)
             if (yield* fullySupports("input.fractionalPointer")) {
               assert.deepStrictEqual({ x: click.x, y: click.y }, { x: 7, y: 9 }, JSON.stringify(click))
+              assert.strictEqual(click.pointerY, click.top + 9, JSON.stringify(click))
             } else {
               // Whole-pixel delivery: the event lands within half a pixel of the point sent.
               assert.isAtMost(Math.abs(click.clientY - (click.top + 9)), 0.5, JSON.stringify(click))
