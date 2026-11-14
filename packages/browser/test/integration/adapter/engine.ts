@@ -263,29 +263,24 @@ export const engine = (backend: Backend) =>
         for (const cooperative of [false, true]) {
           for (const rendered of [false, true]) {
             it.effect(
-              `keeps a stability baseline out of evidence with cooperative=${cooperative} rendered=${rendered}`,
+              `waits past a stability baseline to Ready in the first round with cooperative=${cooperative} rendered=${rendered}`,
               () =>
                 Effect.gen(function*() {
-                  const { send, call } = yield* open(
-                    backend,
-                    "<button id=\"go\">Go</button>",
-                    controlledCooperativeClock
-                  )
+                  const { send, call } = yield* open(backend, "<button id=\"go\">Go</button>", countFrames())
                   const request = { ...point(2), checks: { ...point(2).checks, rendered }, sample: true }
                   const response = cooperative
                     ? (yield* cooperativeExercise(
                       call,
                       `
-                    let reply = await command({ command: "start", budget: 500, request: ${JSON.stringify(request)} })
-                    reply = await command({ command: "resume", token: reply.token, left: 500, decision: "continue" })
+                    let reply = await command({ command: "start", budget: 2000, request: ${JSON.stringify(request)} })
+                    reply = await command({ command: "resume", token: reply.token, left: 2000, decision: "continue" })
                     return JSON.stringify(reply)
                   `
                     )).response
                     : yield* send(request)
-                  assert(response._tag === "NotReady")
-                  assert.deepStrictEqual(response.reason, { _tag: "NotStable" })
-                  assert.deepStrictEqual(response.history, [])
-                  assert.strictEqual(response.checked, false)
+                  // A still, enabled button: the first sample only takes the stability baseline, which is not
+                  // evidence, so the round keeps waiting and comes back Ready instead of returning early.
+                  assert(response._tag === "Ready", JSON.stringify(response))
                 }),
               timeout
             )
