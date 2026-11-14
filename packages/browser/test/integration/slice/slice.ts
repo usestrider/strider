@@ -164,8 +164,9 @@ export const slice = (
           }))
         }), timeout)
 
-      it.effect("commits a data: URL, and a reload of it, with no response", () =>
+      it.effect("commits a data: or blob: URL, and a reload of it, with no response", () =>
         Effect.gen(function*() {
+          const url = yield* fixture("<p>site</p>")
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
             const navigation = yield* page.goto("data:text/html,<p>inline</p>")
@@ -174,6 +175,16 @@ export const slice = (
             const reloaded = yield* page.reload()
             assert(reloaded._tag === "Committed", String(reloaded))
             assert(Option.isNone(reloaded.response), "a reload of a data: URL makes no network request")
+            yield* page.goto(url)
+            const blob = yield* page.evaluateInMainWorld(() =>
+              URL.createObjectURL(new Blob(["<p>blob</p>"], { type: "text/html" }))
+            )
+            const fromBlob = yield* page.goto(blob)
+            assert(fromBlob._tag === "Committed", String(fromBlob))
+            assert(Option.isNone(fromBlob.response), "a blob: URL makes no network request")
+            const blobReloaded = yield* page.reload()
+            assert(blobReloaded._tag === "Committed", String(blobReloaded))
+            assert(Option.isNone(blobReloaded.response), "a reload of a blob: URL makes no network request")
           }))
         }), timeout)
 
