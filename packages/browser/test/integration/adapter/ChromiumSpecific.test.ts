@@ -469,33 +469,6 @@ describe("Chromium adapter, CDP only", () => {
           )
         }`
 
-      for (const [name, expression] of [
-        ["module", "new Worker('/slow-worker.js', { type: 'module' })"],
-        ["blob", "new Worker(URL.createObjectURL(new Blob(['self.onmessage = () => {}'], {type: 'text/javascript'})))"],
-        ["data", "new Worker('data:text/javascript,self.onmessage=()=>{}')"],
-        ["syntax", "new Worker('/invalid-worker.js')"],
-        ["missing", "new Worker('/missing-worker.js')"],
-        ["module-init", "new Worker('/slow-worker.js', { type: 'module' })"],
-        ["syntax-init", "new Worker('/invalid-worker.js')"]
-      ]) {
-        it.effect(`review worker ${name}`, () => Effect.gen(function*() {
-          const served = yield* site
-          const log: Array<{ readonly sent: boolean; readonly wire: any }> = []
-          const result = yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
-            if (name!.endsWith('-init')) yield* page.addInitScript({ source: "self.__marked = 'yes'" }, { workers: true })
-            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(`<button id="start" onclick="window.w = ${expression}">Start</button>`)}`)
-            const started = yield* BrowserWorker.next(page)
-            yield* page.locator("#start").click()
-            const worker = yield* started.pipe(Deadline.within("3 seconds"))
-            return yield* worker.evaluate(() => 42).pipe(Deadline.within("3 seconds"))
-          })).pipe(Effect.provide(loggedBackend(log)), Effect.exit)
-          const sessions = new Set(log.filter(x => !x.sent && x.wire.method === 'Target.attachedToTarget' && x.wire.params.targetInfo.type === 'worker').map(x => x.wire.params.sessionId))
-          console.log('REVIEW', name, String(result), JSON.stringify(log.filter(x => sessions.has(x.wire.sessionId) || x.wire.method === 'Target.detachedFromTarget').map(x => [x.sent, x.wire.method, x.wire.params])))
-          assert.strictEqual(result._tag, 'Success')
-        }), timeout)
-      }
-
       it.effect(
         "evaluates in a dedicated worker only once its script has loaded",
         () =>
