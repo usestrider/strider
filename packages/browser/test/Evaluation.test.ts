@@ -172,3 +172,31 @@ describe("Evaluation argument reconstruction", () => {
     assert.strictEqual(value["__proto__"], "data")
   })
 })
+
+describe("Evaluation.exception", () => {
+  const thrown = (text: string, exception: Adapter.RemoteValue) =>
+    Evaluation.exception({ _tag: "Exception", text, exception, stack: Option.none() })
+
+  it("reads a thrown value that isn't an object as an Error whose message is the value", () => {
+    const read = (value: Adapter.RemoteValue) => {
+      const { message, name } = thrown("Uncaught", value)
+      return `${name}: ${message}`
+    }
+    assert.deepStrictEqual(
+      [
+        read({ type: "string", value: "Foo: bar" }),
+        read({ type: "null" }),
+        read({ type: "undefined" }),
+        read({ type: "number", value: "NaN" }),
+        read({ type: "boolean", value: false }),
+        read({ type: "bigint", value: "7" })
+      ],
+      ["Error: Foo: bar", "Error: null", "Error: undefined", "Error: NaN", "Error: false", "Error: 7"]
+    )
+  })
+
+  it("reads an object's name and message from the browser's text", () => {
+    const read = thrown("Uncaught TypeError: boom", { type: "object" })
+    assert.deepStrictEqual([read.name, read.message], ["TypeError", "boom"])
+  })
+})

@@ -25,6 +25,7 @@ import * as Reason from "../Reason.ts"
 import type * as Target from "../Target.ts"
 import type * as Adapter from "./adapter.ts"
 import * as BrowserClock from "./browserClock.ts"
+import * as FunctionSource from "./functionSource.ts"
 import { isolatedWorld } from "./initScripts.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
@@ -59,8 +60,30 @@ const fromAdapter = (
   return mapped._tag === "Timeout" ? { _tag: "Deadline", error: mapped.error } : mapped
 }
 
-/** An exception's name and message, from the text the browser gives (`Uncaught TypeError: boom`). */
+/** The text of a thrown value that isn't an object, as `String` gives it, or `undefined` for an object. */
+const primitiveText = (value: Adapter.RemoteValue): string | undefined => {
+  switch (value.type) {
+    case "undefined":
+    case "null":
+      return value.type
+    case "string":
+    case "bigint":
+      return value.value
+    case "number":
+    case "boolean":
+      return String(value.value)
+    default:
+      return undefined
+  }
+}
+
+/**
+ * An exception's name and message, from the text the browser gives (`Uncaught TypeError: boom`). A thrown value
+ * that isn't an object, such as a string, reads as an `Error` whose message is the value.
+ */
 export const exception = (result: Extract<Adapter.RemoteResult, { readonly _tag: "Exception" }>) => {
+  const primitive = primitiveText(result.exception)
+  if (primitive !== undefined) return { name: "Error", message: primitive, stack: Option.none<string>() }
   // Chromium's text ends with the stack, which `stack` has
   const text = result.text.replace(/^Uncaught (\(in promise\) )?/, "").replace(/\n\s+at [\s\S]*$/, "")
   const colon = text.indexOf(": ")
@@ -307,7 +330,7 @@ export class HandleImpl<A> implements JSHandle.JSHandle<A> {
         const value = yield* call(this.runtime, {
           dispatch: record,
           realm: this.realm,
-          functionDeclaration: fn.toString(),
+          functionDeclaration: FunctionSource.declaration(fn),
           arguments: [localOf(this as HandleImpl<unknown>), ...rest],
           result,
           group,

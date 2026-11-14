@@ -74,6 +74,18 @@ const numberValue = (value: unknown): number | "NaN" | "-0" | "Infinity" | "-Inf
     ? value
     : Number(value)
 
+/**
+ * A remote object CDP didn't serialize deeply, such as a thrown exception, as a serialized value: `null` is an
+ * object whose subtype is `null`, and a value JSON can't hold, such as `NaN` or `7n`, is in `unserializableValue`.
+ */
+const shallow = (object: Runtime.RemoteObject): Runtime.DeepSerializedValue =>
+  object.subtype === "null" ? { type: "null" } : {
+    type: object.type as Runtime.DeepSerializedValueType,
+    value: object.value ?? (object.type === "bigint"
+      ? object.unserializableValue?.replace(/n$/, "")
+      : object.unserializableValue)
+  }
+
 /** A value CDP serialized deeply, as the contract's `RemoteValue`; a node names its document by loader id. */
 const toRemoteValue = (
   value: Runtime.DeepSerializedValue | undefined,
@@ -475,8 +487,7 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
       }
       const documentOf = (loaderId: string) => state.documentsByLoader.get(loaderId)?.id
       const value = (object: Runtime.RemoteObject): Adapter.RemoteValue => {
-        const serialized = object.deepSerializedValue ??
-          { type: object.type as Runtime.DeepSerializedValueType, value: object.value }
+        const serialized = object.deepSerializedValue ?? shallow(object)
         if (call.result === "handle" && object.objectId !== undefined) {
           const handle = state.ids.handle()
           state.handles.set(handle, { target: realm.target, realm, objectId: object.objectId, group: call.group })

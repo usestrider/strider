@@ -1145,13 +1145,115 @@ export const contents = (
           }))
         }), timeout)
 
+      it.effect("fails with a thrown value that isn't an Error as an Error whose message is the value", () =>
+        Effect.gen(function*() {
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            const evaluate = yield* evaluator(page)
+            const thrownBy = Effect.fnUntraced(function*(fn: () => unknown) {
+              const failure = reasonOf(yield* Effect.exit(evaluate(fn))) as unknown as Page.PageError
+              assert.strictEqual(failure.reason._tag, "EvaluationThrown")
+              return failure.reason._tag === "EvaluationThrown" ? failure.reason.exception : undefined
+            })
+            const thrown = yield* Effect.forEach([
+              () => {
+                throw "qwerty"
+              },
+              () => {
+                throw null
+              },
+              () => {
+                throw 7
+              },
+              () =>
+                Promise.reject(7),
+              // A thrown string that looks like an error's text is still only a message
+              () => {
+                throw "Foo: bar"
+              }
+            ], (fn) =>
+              Effect.map(thrownBy(fn), (exception) => `${exception?.name}: ${exception?.message}`))
+            assert.deepStrictEqual(thrown, [
+              "Error: qwerty",
+              "Error: null",
+              "Error: 7",
+              "Error: 7",
+              "Error: Foo: bar"
+            ])
+          }))
+        }), timeout)
+
+      it.effect("evaluates a method shorthand and an async method", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<p id="x">hello</p>`))
+            const methods = {
+              sum(a: number, b: number) {
+                return a + b
+              },
+              async later(a: number) {
+                await Promise.resolve()
+                return a * 2
+              },
+              text(element: Element) {
+                return element.textContent
+              }
+            }
+            const evaluate = yield* evaluator(page)
+            assert.strictEqual(yield* evaluate(methods.sum, 1, 2), 3)
+            assert.strictEqual(yield* page.evaluateInMainWorld(methods.later, 4), 8)
+            const dividedKey = new Function(
+              "return ({ [({return: 4}).return / 2]() { return `/ ]() { return 99 /* `; /* filler */ } })[2]"
+            )() as () => string
+            const divided = yield* Effect.exit(page.evaluateInMainWorld(dividedKey))
+            if (Exit.isSuccess(divided)) {
+              assert.strictEqual(divided.value, dividedKey())
+            } else {
+              const failure = reasonOf(divided) as unknown as Page.PageError
+              assert.strictEqual(failure.reason._tag, "EvaluationThrown")
+              if (failure.reason._tag === "EvaluationThrown") {
+                assert.strictEqual(failure.reason.exception.name, "SyntaxError")
+              }
+            }
+            const quoted = new Function(
+              `return { "a() { return 99 } //"() { return 42 } }["a() { return 99 } //"]`
+            )() as () => number
+            assert.strictEqual(yield* page.evaluateInMainWorld(quoted), 42)
+            const strict = {
+              receiver(this: unknown) {
+                "use strict"
+                return typeof this
+              }
+            }
+            const receiver = yield* page.evaluateInMainWorld(function(this: unknown) {
+              "use strict"
+              return typeof this
+            })
+            assert.strictEqual(yield* page.evaluateInMainWorld(strict.receiver), receiver)
+            const largeMethod = new Function(
+              `return { large() { /*${"x".repeat(100_000)}*/ return 42 } }.large`
+            )() as () => number
+            assert.strictEqual(yield* page.evaluateInMainWorld(largeMethod), 42)
+            if (yield* isolatedRefused(page.locator("#x").evaluate(methods.text))) {
+              return
+            }
+            assert.strictEqual(yield* page.locator("#x").evaluate(methods.text), "hello")
+          }))
+        }), timeout)
+
       it.effect("hands out handles the scope releases, which end with their realm", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, `<p id="x">hello</p>`))
-            if (yield* isolatedRefused(page.evaluateHandle(() => document.body))) return
+            if (
+              yield* isolatedRefused(page.evaluateHandle(() =>
+                document.body
+              ))
+            ) return
             const body = yield* page.evaluateHandle(() => document.body)
             assert.isTrue(JSHandle.isJSHandle(body))
             assert.strictEqual(yield* body.evaluate((element) => element.tagName), "BODY")

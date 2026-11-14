@@ -189,6 +189,11 @@ export class BackendFailure extends Schema.Error<BackendFailure>("@usestrider/br
 /**
  * Reason for an evaluated function that threw, or returned a promise that rejected.
  *
+ * **Details**
+ *
+ * `exception` is the thrown error's name, message and stack. A thrown value that isn't an object, such as
+ * `throw "missing"` or `Promise.reject(7)`, reads as an `Error` whose message is the value, with no stack.
+ *
  * **Gotchas**
  *
  * Functions are serialized and run in the page, so they must be self-contained. A `ReferenceError` for a

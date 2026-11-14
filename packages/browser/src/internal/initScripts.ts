@@ -15,6 +15,7 @@ import type * as InitScript from "../InitScript.ts"
 import * as Reason from "../Reason.ts"
 import type * as Target from "../Target.ts"
 import type * as Adapter from "./adapter.ts"
+import * as FunctionSource from "./functionSource.ts"
 import * as Operation from "./operation.ts"
 import type * as Runtime from "./runtime.ts"
 import * as Spans from "./spans.ts"
@@ -61,7 +62,7 @@ const covers = (dependency: Adapter.DeclarationScope, dependent: Adapter.Declara
 
 /** The script's source: a function is called, so it must be self-contained; a path is read now. */
 const sourceOf = Effect.fnUntraced(function*(runtime: Runtime.Runtime, script: InitScript.Source) {
-  if (typeof script === "function") return `(${script.toString()})();`
+  if (typeof script === "function") return `(${FunctionSource.declaration(script)})();`
   if ("source" in script) return script.source
   if (Option.isNone(runtime.fileSystem) || Option.isNone(runtime.path)) {
     return yield* Effect.fail(
