@@ -71,17 +71,3 @@ it("collects a Firefox launched under a suite's custom ledger", () => {
     fs.rmSync(Reports.outbox, { recursive: true, force: true })
   }
 })
-
-it("enables KillHard reports in the Node children used by the CLI integration tests", async () => {
-  const { execFileSync } = await import("node:child_process")
-  const output = execFileSync(process.execPath, [
-    "--import",
-    new URL("./integration/tracePreload.ts", import.meta.url).pathname,
-    "--input-type=module",
-    "-e",
-    `import { firefoxPrefs } from ${JSON.stringify(new URL("../src/internal/profiles.ts", import.meta.url).href)};
-process.stdout.write(JSON.stringify(firefoxPrefs.automation));`
-  ], { encoding: "utf8", env: { ...process.env, ...Reports.environment } })
-  // CLI.test.ts starts Node children; the parent's in-memory preference mutation is not inherited.
-  expect(JSON.parse(output)["dom.ipc.tabs.createKillHardCrashReports"]).toBe(true)
-})

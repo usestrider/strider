@@ -19,13 +19,15 @@
  * `outbox`, a directory every copy of this module computes alike for the process.
  *
  * The runner (`failureTraceRunner.ts`) then keeps what the outbox holds:
- * - after each test, the reports that arrived while it ran, from a browser started for that test, in
- *   `.data/integration-failures/<test file>-<test id>-<pid>-firefox-crash/` when it failed;
- * - at the file's end, once its shared scope has closed, those of a browser shared by the file's tests, in
- *   `<test file>-<file id>-<pid>-shared-firefox-crash/` beside the shared trace when any test in the file failed.
- *   A report's `.extra` records its crash time, which places it against the test traces' timestamps.
- * Otherwise they are discarded, so a file whose tests pass keeps nothing. A collection that fails is logged and
- * changes neither the test's result nor its trace.
+ * - after a test that failed, the reports that arrived while it ran, such as those of a browser started for it, in
+ *   `.data/integration-failures/<test file>-<test id>-<pid>-firefox-crash/`; a passing test takes nothing, since a
+ *   shared browser recycled during it may bring an earlier failed test's reports;
+ * - at the file's end, once its shared scope has closed, the rest, such as a browser shared by the file's tests, in
+ *   `<test file>-<file id>-<pid>-shared-firefox-crash/` beside the shared trace when any test in the file failed,
+ *   and deletes them when none did. A report's `.extra` records its crash time, which places it against the test
+ *   traces' timestamps.
+ * A collection that fails is logged and changes neither the test's result nor its trace. Firefox started by the
+ * `strider` daemon in the CLI tests runs in another process, with its own ledger and preferences, and isn't covered.
  */
 import * as Effect from "effect/Effect"
 import * as fs from "node:fs"

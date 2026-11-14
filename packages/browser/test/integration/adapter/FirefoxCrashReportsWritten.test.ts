@@ -9,6 +9,8 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { execFileSync } from "node:child_process"
 import * as fs from "node:fs"
+import * as http from "node:http"
+import type * as net from "node:net"
 import * as os from "node:os"
 import * as path from "node:path"
 import * as FirefoxLauncher from "../../../src/internal/firefoxLauncher.ts"
@@ -96,7 +98,29 @@ layer(services, { excludeTestServices: true })((it) => {
           remove: () => Effect.void
         })
         const written = yield* Effect.scoped(Effect.gen(function*() {
-          const { launched } = yield* FirefoxLauncher.launch({ executablePath: firefox.executable })
+          // A page whose load event reports back, so the content processes have run a page, and set up their
+          // crash handling, before one is aborted
+          let loaded!: () => void
+          const pageLoaded = new Promise<void>((resolve) => loaded = resolve)
+          const server = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              new Promise<http.Server>((resolve) => {
+                const server = http.createServer((request, response) => {
+                  if (request.url === "/loaded") loaded()
+                  response.setHeader("content-type", "text/html")
+                  response.end("<p>page</p><script>addEventListener('load', () => fetch('/loaded'))</script>")
+                })
+                server.listen(0, "127.0.0.1", () => resolve(server))
+              })
+            ),
+            (server) => Effect.promise(() => new Promise<void>((resolve) => server.close(() => resolve())))
+          )
+          const port = (server.address() as net.AddressInfo).port
+          const { launched } = yield* FirefoxLauncher.launch({
+            executablePath: firefox.executable,
+            args: [`http://127.0.0.1:${port}/`]
+          })
+          yield* Effect.promise(() => pageLoaded)
           const profile = items.find(FirefoxCrashReports.isFirefox)?.profile
           assert.isDefined(profile, "the launch recorded no Firefox")
           const minidumps = path.join(profile!, "minidumps")
