@@ -58,10 +58,8 @@ const deliver = (
   hop: NetworkRequest.HopId,
   { headers, phase, statusCode }: ExtraInfo
 ) => {
-  if (statusCode === 304) {
-    const sizes = request.frame?.page.context.requestSizes?.get(hop)
-    if (sizes !== undefined) sizes.network = false
-  }
+  // A 304 says only here that the response is the cache's, revalidated
+  if (statusCode === 304 && hop === request.hop) request.network = false
   state.buffer.emit({ _tag: "HopHeaders", hop, phase, headers: Kit.headersOf(headers) })
   if (hop !== request.hop) return
   if (phase === "response") {
@@ -202,6 +200,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
           navigation,
           finished: Deferred.makeUnsafe(),
           servedFromCache: false,
+          network: false,
           attribution: state.pendingAttribution.get(key) ?? { target, fulfilled: false },
           resourceType: resourceTypes[params.type ?? "Other"] ?? "other",
           received: undefined,
@@ -273,9 +272,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       rawHeaders(state, requestKey(target, params.requestId), {
         phase: "response",
         headers: params.headers,
-        ...((target.page ?? target.frame?.page)?.context.requestSizes === undefined
-          ? {}
-          : { statusCode: params.statusCode })
+        statusCode: params.statusCode
       })
     })
     .on(Network.requestServedFromCache, (params, { state, target }) => {
@@ -288,10 +285,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       if (target === undefined) return
       const request = state.requests.get(requestKey(target, params.requestId))
       if (request === undefined) return
-      const sizes = request.frame?.page.context.requestSizes?.get(request.hop)
-      if (sizes !== undefined) {
-        sizes.network = servedBy(request, params.response) === "network" && params.response.status !== 304
-      }
+      request.network = servedBy(request, params.response) === "network" && params.response.status !== 304
       request.frame?.page.context.requestTiming?.get(request.hop)?.response(
         servedBy(request, params.response) === "network" ? params.response.timing : undefined
       )
@@ -327,7 +321,8 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       if (request === undefined) return
       const sizes = request.frame?.page.context.requestSizes?.get(request.hop)
       // A still-held response lacks final raw-header evidence (including a possible 304).
-      if (sizes?.network && request.held === undefined) {
+      const counted = request.network && request.held === undefined
+      if (sizes !== undefined && counted) {
         state.buffer.emit({
           _tag: "HopSizes",
           hop: request.hop,
@@ -340,7 +335,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       const finished: Adapter.Fact = {
         _tag: "RequestFinished",
         hop: request.hop,
-        ...Sizes.transferred(Sizes.cdp(params.encodedDataLength, undefined)),
+        ...(counted ? Sizes.transferred(Sizes.cdp(params.encodedDataLength, undefined)) : Sizes.unknown),
         at: Adapter.now()
       }
       // An image's `ExtraInfo` can come after its load finished

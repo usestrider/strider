@@ -168,6 +168,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
           requestId: params.requestId,
           loaderId: loader,
           redirects: 0,
+          network: false,
           hop: state.ids.hop(id, 0),
           responded: undefined,
           url: params.request.url,
@@ -225,10 +226,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     .on(Network.responseReceived, (params, { state, session }) => {
       const request = state.requests.get(requestKey(session, params.requestId))
       if (request !== undefined) {
-        const sizes = request.frame?.page.context.requestSizes?.get(request.hop)
-        if (sizes !== undefined) {
-          sizes.network = servedBy(request, params.response) === "network" && params.response.status !== 304
-        }
+        request.network = servedBy(request, params.response) === "network" && params.response.status !== 304
         request.frame?.page.context.requestTiming?.get(request.hop)?.response(params.response.timing)
         emitResponse(state, request, params.response)
       }
@@ -237,14 +235,16 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       const request = state.requests.get(requestKey(session, params.requestId))
       if (request === undefined) return
       const sizes = request.frame?.page.context.requestSizes?.get(request.hop)
-      if (sizes?.network) state.buffer.emit({ _tag: "HopSizes", hop: request.hop, sizes: Sizes.webkit(params.metrics) })
+      if (sizes !== undefined && request.network) {
+        state.buffer.emit({ _tag: "HopSizes", hop: request.hop, sizes: Sizes.webkit(params.metrics) })
+      }
       request.frame?.page.context.requestTiming?.get(request.hop)?.finish(params.timestamp)
       request.frame?.page.context.requestTiming?.delete(request.hop)
       request.frame?.page.context.requestSizes?.delete(request.hop)
       state.buffer.emit({
         _tag: "RequestFinished",
         hop: request.hop,
-        ...Sizes.transferred(Sizes.webkit(params.metrics)),
+        ...(request.network ? Sizes.transferred(Sizes.webkit(params.metrics)) : Sizes.unknown),
         at: Adapter.now(),
         httpVersion: params.metrics?.protocol
       })
@@ -279,6 +279,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         requestId: params.requestId,
         loaderId: undefined,
         redirects: 0,
+        network: false,
         hop: state.ids.hop(id, 0),
         responded: undefined,
         url: resource.url,

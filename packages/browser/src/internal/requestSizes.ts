@@ -1,4 +1,7 @@
-/** Native HTTP accounting, invoked only for contexts that opt into sizes. */
+/**
+ * Native HTTP accounting: a hop's `Sizes`, for contexts that opt into them, and the byte counts every finished hop
+ * carries, by the same rules.
+ */
 import * as Option from "effect/Option"
 import { Sizes } from "../NetworkRequest.ts"
 
@@ -88,10 +91,9 @@ export const cdp = (total: number, decoded: number | undefined): Sizes =>
 /** At most 1000 active collectors per opted-in context; no request entries are retained. */
 export interface Collector {
   readonly owner: string
-  network: boolean
   decoded: number | undefined
 }
 export const keep = (store: Map<string, Collector>, hop: string, owner: string): void => {
-  store.set(hop, { owner, network: false, decoded: 0 })
+  store.set(hop, { owner, decoded: 0 })
   if (store.size > 1000) store.delete(store.keys().next().value!)
 }

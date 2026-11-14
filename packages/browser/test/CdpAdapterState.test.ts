@@ -3290,7 +3290,7 @@ for (const outcome of ["success", "failure"] as const) {
       state.pages.set(page.id, current)
       state.contexts.set(context.id, context)
       state.targets.set(mock, target)
-      context.requestSizes!.set("hop", { owner: page.id, network: true, decoded: 65 })
+      context.requestSizes!.set("hop", { owner: page.id, decoded: 65 })
       const accepts = Network.eventScopes(state).get("Network.dataReceived")!
       assert.isTrue(accepts(mock))
       const result = yield* Contexts.removeUserContext(state, context.id).pipe(Effect.exit)
