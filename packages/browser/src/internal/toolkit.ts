@@ -839,7 +839,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
         target === undefined
           ? Effect.as(
             chord instanceof Reason.InvalidInput
-              ? Effect.fail(Devices.keyboardRefusal("Keyboard.press", chord))
+              ? Devices.keyboardRefusal(page.id, "Keyboard.press", chord)
               : page.keyboard.press(chord.key, { modifiers: chord.modifiers }),
             `pressed ${text}`
           )

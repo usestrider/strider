@@ -148,9 +148,14 @@ const keyboardError = (operation: string) => (reason: Failure, id: Diagnostics.O
 const mouseError = (operation: string) => (reason: Failure, id: Diagnostics.OperationId) =>
   new Mouse.MouseError({ operation, reason, diagnostics: Operation.diagnostics(id) })
 
-/** The keyboard's refusal of an input to one of its operations, as its own refusals are made. */
-export const keyboardRefusal = (operation: string, reason: Failure) =>
-  keyboardError(operation)(reason, Operation.idNow())
+/**
+ * The keyboard's refusal of an input to one of its operations on a page, in an operation of its own, as the
+ * keyboard refuses a bad key; it dispatches nothing.
+ */
+export const keyboardRefusal = (page: string, operation: string, reason: Failure) =>
+  Effect.flatMap(Operation.record, (record) => Effect.fail(keyboardError(operation)(reason, record.id))).pipe(
+    Operation.named(operation, { attributes: { "browser.page.id": page } })
+  )
 
 const unknownKey = (key: string) =>
   new Reason.InvalidInput({
