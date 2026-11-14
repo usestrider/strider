@@ -1299,8 +1299,9 @@ export function engine(render: (root: SnapNode) => string) {
 
   /**
    * The whole document's elements, open shadow roots included, walked once per readiness check: `checkAction`
-   * opens a scope its queries and its dialog search share, and closes it when it returns, so nothing outlives the
-   * synchronous check, and no page code runs inside it. Outside a scope each call walks the document again.
+   * opens a scope its queries and its dialog search share, and closes it when it returns, or before it runs page
+   * code such as a focus handler, so no walk outlives the synchronous check or a change the page made. Outside a
+   * scope each call walks the document again.
    */
   let treeScope: { elements?: Array<Element> } | null = null
   const documentElements = (): Array<Element> =>
@@ -2245,6 +2246,8 @@ export function engine(render: (root: SnapNode) => string) {
           return
         }
       }
+      // `ready` runs page code, such as focus handlers, which can change the tree: what follows walks it afresh
+      treeScope = null
       let response = ready(element, action, request.apply, state.scrolled, point, checks)
       if (response._tag === "Retry") {
         reason = response.reason
@@ -2371,6 +2374,8 @@ export function engine(render: (root: SnapNode) => string) {
           return { _tag: "Final", final: { _tag: "Refused", element: describe(element), value: action.value } }
         }
         const recheckFill = (): Response | { readonly _tag: "Retry"; readonly reason: NotReady } | undefined => {
+          // Focus handlers may have changed the tree: read it afresh
+          clearTreeCaches()
           let reason: NotReady | null = null
           if (checks.visible && !rendered(element, false)) reason = { _tag: "NotVisible" }
           else if (checks.enabled && !enabled(element)) reason = { _tag: "Disabled" }
