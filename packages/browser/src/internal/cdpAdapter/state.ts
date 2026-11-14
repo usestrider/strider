@@ -121,6 +121,11 @@ export interface FrameEntry extends Kit.NavigableNode<FrameEntry> {
   readonly failed: Map<string, NavigationEntry>
   /** Main-world realms created during a traversal, for the document it restores. */
   readonly pendingRealms: Array<RealmEntry>
+  /**
+   * The loader ids of documents whose start (`init`) the frame's session reported and whose first paint
+   * (`firstPaint`) it hasn't yet. A document whose start wasn't seen counts as drawn.
+   */
+  readonly unpainted: Set<string>
 }
 
 export interface DocumentEntry {

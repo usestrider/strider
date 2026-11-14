@@ -232,6 +232,7 @@ export const newFrame = (options: {
   navigations: new Map(),
   failed: new Map(),
   pendingRealms: [],
+  unpainted: new Set(),
   removed: false
 })
 

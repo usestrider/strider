@@ -3,6 +3,7 @@
  * every frame, out of process too; HTML drags, which headless Chromium starts none of, caught and finished with drag
  * events; and the elements input acts on by binding: an iframe's frame, a file input's files.
  */
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
@@ -10,13 +11,14 @@ import * as DOM from "../../cdp/DOM.ts"
 import * as Input from "../../cdp/Input.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
 import type * as L1Target from "../../Target.ts"
-import type * as Adapter from "../adapter.ts"
+import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as BrowserClock from "../browserClock.ts"
 import * as Gestures from "../input.ts"
 import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
 import { heldButton, keyCode, modifierBits } from "./mapping.ts"
-import { documentOf, type Event, frameOf, pageOf, type State } from "./state.ts"
+import { documentOf, type Event, frameById, type FrameEntry, frameOf, pageOf, type State } from "./state.ts"
 
 export const register = (handlers: Kit.Handlers<Event>) =>
   handlers.on(Input.dragIntercepted, (params, { state, target }) => {
@@ -39,10 +41,72 @@ const mouseCommand = (event: Extract<Adapter.InputEvent, { _tag: "Mouse" }>) =>
     modifiers: modifierBits(event.modifiers)
   })
 
-/** Page coordinates reach every frame; pages with child frames keep sequential acknowledgments. */
+/**
+ * The outermost out-of-process frame from the page down to `frame` whose current document hasn't drawn its first
+ * frame, if any. Chromium picks each pointer event's target in its browser process, from hit-test data that includes
+ * an out-of-process frame only after the frame has drawn; until then, input aimed into it reaches the parent's
+ * iframe element.
+ */
+const unpresented = (frame: FrameEntry): FrameEntry | undefined => {
+  let found: FrameEntry | undefined
+  for (let each: FrameEntry | undefined = frame; each?.parent !== undefined; each = each.parent) {
+    const loader = each.document?.loaderId
+    if (each.owner !== each.parent.owner && loader !== undefined && each.unpainted.has(loader)) found = each
+  }
+  return found
+}
+
+/**
+ * Waits until every out-of-process frame on the way to `id` has drawn its current document, under the command's
+ * deadline on the browser's clock. When it runs out, nothing has been sent, and the operation's history names the
+ * frame that hasn't drawn.
+ */
+const presented = Effect.fnUntraced(function*(state: State, id: L1Target.NavigableId) {
+  const target = yield* frameById(state, id)
+  const first = unpresented(target)
+  if (first === undefined) return
+  const deadline = yield* ProtocolClient.CommandDeadline
+  const timeout = Option.isSome(deadline)
+    ? Duration.millis(yield* BrowserClock.left(deadline.value))
+    : yield* Protocol.CommandTimeout
+  const at = Option.isSome(deadline) ? deadline.value : yield* BrowserClock.after(Duration.toMillis(timeout))
+  const record = yield* Operation.current
+  if (Option.isSome(record)) {
+    record.value.observe({ _tag: "FrameNotDrawn", frame: first.id, url: first.document?.url })
+  }
+  const waited = yield* state.buffer.waitFor(() =>
+    target.removed || unpresented(target) === undefined ? true : undefined
+  ).pipe(BrowserClock.until(at))
+  if (Option.isNone(waited)) {
+    const pending = unpresented(target) ?? first
+    return yield* Effect.fail(Adapter.protocolError(
+      new Protocol.ProtocolError({
+        reason: new Protocol.NoReply({
+          method: `Page.lifecycleEvent firstPaint of frame ${pending.id} (${pending.document?.url}), before input`,
+          timeout
+        })
+      })
+    ))
+  }
+  yield* frameById(state, id)
+})
+
+/**
+ * Page coordinates reach every frame; pages with child frames keep sequential acknowledgments. Pointer input aimed
+ * into a frame first waits for the out-of-process frames on its way to draw (`unpresented`).
+ */
 export const dispatchInput = Effect.fnUntraced(
-  function*(state: State, id: L1Target.NavigableId, events: ReadonlyArray<Adapter.InputEvent>) {
+  function*(
+    state: State,
+    id: L1Target.NavigableId,
+    events: ReadonlyArray<Adapter.InputEvent>,
+    frame?: { readonly frame: L1Target.NavigableId }
+  ) {
     const page = yield* pageOf(state, id)
+    // Keys and text go to the focused element, with no hit testing
+    if (frame !== undefined && events.some((event) => event._tag !== "Key" && event._tag !== "InsertText")) {
+      yield* presented(state, frame.frame)
+    }
     const on = Protocol.on(page.target.session)
     const click = Gestures.singleClick(events)
     if (
