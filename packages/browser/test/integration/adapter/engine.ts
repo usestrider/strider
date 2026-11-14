@@ -273,14 +273,17 @@ export const engine = (backend: Backend) =>
                       call,
                       `
                     let reply = await command({ command: "start", budget: 2000, request: ${JSON.stringify(request)} })
-                    reply = await command({ command: "resume", token: reply.token, left: 2000, decision: "continue" })
+                    // Each later sample asks the host to check its handlers again.
+                    for (let i = 0; i < 20 && reply._tag === "Check"; i++) {
+                      reply = await command({ command: "resume", token: reply.token, left: 2000, decision: "continue" })
+                    }
                     return JSON.stringify(reply)
                   `
-                    )).response
-                    : yield* send(request)
+                    ))
+                    : { response: yield* send(request) }
                   // A still, enabled button: the first sample only takes the stability baseline, which is not
                   // evidence, so the round keeps waiting and comes back Ready instead of returning early.
-                  assert(response._tag === "Ready", JSON.stringify(response))
+                  assert(response.response?._tag === "Ready", JSON.stringify(response))
                 }),
               timeout
             )
