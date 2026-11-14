@@ -1,8 +1,7 @@
 /**
  * Playwright's `tests/page/expect-timeout.spec.ts`: an expectation's timeout and its failure messages (EX-244 to
- * EX-249 and EX-252) and the expectations' cancellation (EX-253 to EX-257) are ported. EX-250 and EX-251 are
- * `needsFeature` for Playwright's locator handlers, and EX-258 for an AbortSignal that is aborted before the expectation
- * starts (see the ledger).
+ * EX-252) and the expectations' cancellation (EX-253 to EX-257) are ported. EX-258 is `needsFeature` for an AbortSignal
+ * that is aborted before the expectation starts (see the ledger).
  *
  * What the port changes:
  * - `{ timeout }` is `Deadline.within` around the expectation. Playwright's default expectation timeout is 5 seconds, so
@@ -18,6 +17,10 @@
  *   condition `to be visible`.
  * - EX-249's `expect(...)` promise is `startWaiting`, which runs it at once; the original's navigation and `setContent`
  *   happen between its start and its join.
+ * - EX-250 and EX-251 register a locator handler first. A handler's trigger that shows (EX-251's `div`) holds the
+ *   expectation until it is hidden, so the expectation runs out its 3 seconds; the port asserts Strider's
+ *   `ExpectationFailed` of the matcher, and that its message names the locator handler, where Playwright's message
+ *   says "locator handler has finished, waiting for locator('div') to be hidden" in its call log.
  * - EX-252's `window.builtins.setTimeout` is Playwright's own timer; the port schedules the same callback with
  *   `window.setTimeout`, in the main world.
  * - EX-246 and EX-247 run an expectation under a 1 ms deadline. Strider's expectation sends its first check to the page
@@ -120,6 +123,31 @@ upstream(import.meta.filename, {}, (test) => {
       yield* page.goto(server.EMPTY_PAGE)
       yield* page.setContent(`<div>bye</div>`)
       yield* Fiber.join(waiting.fiber)
+    }))
+
+  test("EX-250", ({ page, server }) =>
+    Effect.gen(function*() {
+      yield* page.addLocatorHandler(page.locator("span"), () => Effect.void)
+      yield* page.setContent(`<div>hello</div>`)
+      const waiting = yield* startWaiting(
+        page.locator("div").pipe(Expect.toHaveText("bye"), expectDeadline)
+      )
+      yield* page.goto(server.EMPTY_PAGE)
+      yield* page.setContent(`<div>bye</div>`)
+      yield* Fiber.join(waiting.fiber)
+    }))
+
+  test("EX-251", ({ page }) =>
+    Effect.gen(function*() {
+      yield* page.addLocatorHandler(page.locator("div"), () => Effect.void)
+      yield* page.setContent(`<div>hello</div><span>bye</span>`)
+      const failure = yield* expectationFailure(
+        page.locator("span").pipe(Expect.toHaveText("bye"), Deadline.within("3 seconds"))
+      )
+      // Playwright: "Expected: \"bye\"", "Received: \"\"", and the call log's "locator handler has finished, waiting for
+      // locator('div') to be hidden"
+      assert.strictEqual(failure.condition, "to have the text \"bye\"")
+      assert.include(failure.message, "locator handler")
     }))
 
   test("EX-252", ({ page }) =>

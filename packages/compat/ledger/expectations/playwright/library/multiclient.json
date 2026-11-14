@@ -63,14 +63,6 @@
   },
   {
     "tests": [
-      "MC-014"
-    ],
-    "status": "needsFeature",
-    "matrix": "method-page-addlocatorhandler",
-    "reason": "Registers a locator handler on a page, and expects it to be removed when its client disconnects; Strider has no locator handlers"
-  },
-  {
-    "tests": [
       "MC-015"
     ],
     "status": "notApplicable",
@@ -90,14 +82,6 @@
     ],
     "status": "notApplicable",
     "reason": "Starts and stops Playwright's internal recorder (_startRecording, _stopRecording) and reads its action recordings, an internal test hook"
-  },
-  {
-    "tests": [
-      "MC-020"
-    ],
-    "status": "needsFeature",
-    "matrix": "method-page-addlocatorhandler",
-    "reason": "Registers a locator handler on a page, then a second one after reconnecting; Strider has no locator handlers"
   },
   {
     "tests": [

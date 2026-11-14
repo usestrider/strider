@@ -4,8 +4,8 @@
       "PA-041"
     ],
     "status": "needsFeature",
-    "matrix": "method-page-addlocatorhandler",
-    "reason": "Registering a locator handler on a page, which runs when a locator's interstitial shows and is what the closed page's error reports; Strider has no addLocatorHandler"
+    "matrix": "option-page-close-reason",
+    "reason": "Closes the page from a locator handler with page.close({ reason: 'custom reason' }), and expects the click the handler interrupted to fail with that reason in its message; Strider's page.close has no reason option, so its closed-page failure can't say it"
   },
   {
     "tests": [
