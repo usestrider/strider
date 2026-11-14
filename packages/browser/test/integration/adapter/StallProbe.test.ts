@@ -1,7 +1,10 @@
-/** The macOS stall probe captures a pipe child that never answers, and nothing for one that does. */
+/**
+ * The macOS stall probe captures a pipe child that never answers, with whoever holds the crash database's settings lock,
+ * and nothing for one that does.
+ */
 import { spawn } from "node:child_process"
 import type { ChildProcess } from "node:child_process"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import * as path from "node:path"
 import type { Writable } from "node:stream"
@@ -16,7 +19,12 @@ describe.runIf(process.platform === "darwin")("stall probe", () => {
   const children: Array<ChildProcess> = []
   const profiles: Array<string> = []
   afterEach(() => {
-    Object.assign(settings, { enabled: saved.enabled, thresholdMs: saved.thresholdMs, onCapture: saved.onCapture })
+    Object.assign(settings, {
+      enabled: saved.enabled,
+      thresholdMs: saved.thresholdMs,
+      crashDatabase: saved.crashDatabase,
+      onCapture: saved.onCapture
+    })
     for (const child of children.splice(0)) child.kill("SIGKILL")
     for (const profile of profiles.splice(0)) rmSync(profile, { recursive: true, force: true })
   })
@@ -35,7 +43,7 @@ describe.runIf(process.platform === "darwin")("stall probe", () => {
     return child
   }
 
-  const observe = (wait: number) => {
+  const observe = (wait: number, crashDatabase?: string) => {
     const captures: Array<Capture> = []
     let resolve: (capture: Capture) => void = () => {}
     const first = new Promise<Capture | undefined>((done) => {
@@ -45,6 +53,7 @@ describe.runIf(process.platform === "darwin")("stall probe", () => {
     Object.assign(settings, {
       enabled: true,
       thresholdMs,
+      crashDatabase,
       onCapture: (capture: Capture) => {
         captures.push(capture)
         resolve(capture)
@@ -71,6 +80,42 @@ describe.runIf(process.platform === "darwin")("stall probe", () => {
     assert.isTrue(capture.profile.entries.some((entry) => entry.endsWith(" Local State")))
     assert.isTrue(capture.uptime.ok)
     assert.isTrue(capture.vmStat.ok)
+  })
+
+  it("names the process holding the crash database's settings lock", { timeout: 40_000 }, async () => {
+    const database = mkdtempSync(path.join(tmpdir(), "strider-stall-probe-crashpad-"))
+    profiles.push(database)
+    mkdirSync(database, { recursive: true })
+    const settingsFile = path.join(database, "settings.dat")
+    // Holds an exclusive flock on settings.dat, as a Crashpad client does while it writes the file.
+    const holder = spawn("python3", [
+      "-c",
+      "import fcntl, sys, time\nf = open(sys.argv[1], 'a+')\nfcntl.flock(f, fcntl.LOCK_EX)\nprint('locked', flush=True)\ntime.sleep(60)",
+      settingsFile
+    ], { stdio: ["ignore", "pipe", "inherit"] })
+    children.push(holder)
+    await new Promise<void>((resolve, reject) => {
+      holder.stdout!.on("data", (data: Buffer) => data.toString().includes("locked") && resolve())
+      holder.once("exit", (code) => reject(new Error(`Lock holder exited with ${code}`)))
+    })
+    const { first } = observe(30_000, database)
+    const child = launch("sleep 60; :")
+    const capture = await first
+    assert.isDefined(capture)
+    assert.strictEqual(capture.browserPid, child.pid)
+    const lock = capture.crashSettings
+    assert.isDefined(lock)
+    assert.strictEqual(lock.file, settingsFile)
+    assert.isTrue(lock.lsof.ok, lock.lsof.error)
+    assert.include(lock.lsof.output, settingsFile)
+    assert.include(lock.openers, holder.pid)
+    const record = lock.holders.find((entry) => entry.pid === holder.pid)
+    assert.isDefined(record)
+    assert.isTrue(record.ps.ok, record.ps.error)
+    assert.include(record.ps.output, "python3")
+    assert.isTrue(record.sample.ok, record.sample.error)
+    assert.include(record.sample.output, "Call graph")
+    assert.isTrue(capture.chromeProcesses.ok, capture.chromeProcesses.error)
   })
 
   it("records nothing for a child that answers", { timeout: 10_000 }, async () => {
