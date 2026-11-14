@@ -45,7 +45,9 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         navigable,
         navigable.parent !== undefined
           ? new L1Target.FrameDetached({})
-          : navigable.closing ?? (navigable.context.removing
+          : navigable.closing ?? (navigable.closeRequested
+            ? new L1Target.PageClosed({ by: "command" })
+            : navigable.context.removing
             ? new L1Target.PageClosed({ by: "userContextRemoved" })
             : new L1Target.PageClosed({ by: "script" })),
         "bidi:browsingContext.contextDestroyed"
@@ -286,11 +288,13 @@ export const closePage = Effect.fnUntraced(
     const navigable = yield* navigableById(state, id)
     const closing = options.runBeforeUnload ? undefined : new L1Target.PageClosed({ by: "command" })
     if (closing !== undefined) navigable.closing = closing
+    else navigable.closeRequested = true
     // The reply may wait on a beforeunload prompt, which the context's end reports
     state.buffer.start(
       state.send(BrowsingContext.close({ context: navigable.bidi, promptUnload: options.runBeforeUnload })).pipe(
         Effect.onError((cause) =>
           Effect.gen(function*() {
+            if (closing === undefined) navigable.closeRequested = false
             if (navigable.closing !== closing) return
             navigable.closing = undefined
             if (Option.exists(Cause.findErrorOption(cause), Cleanup.sessionEnded)) return

@@ -206,7 +206,14 @@ export const closePage = Effect.fnUntraced(
   function*(state: State, id: L1Target.NavigableId, options: { readonly runBeforeUnload: boolean }) {
     const page = yield* pageOf(state, id)
     if (options.runBeforeUnload) {
-      yield* Kit.protocol(whileSwapping(Page.close().pipe(Protocol.on(page.target.session))))
+      page.closeRequested = true
+      yield* Kit.protocol(whileSwapping(Page.close().pipe(Protocol.on(page.target.session)))).pipe(
+        Effect.onError(() =>
+          Effect.sync(() => {
+            page.closeRequested = false
+          })
+        )
+      )
       return
     }
     // Chromium answers a close sent while the page swaps documents, then drops it (QUIRKS.md, Q149). A page command

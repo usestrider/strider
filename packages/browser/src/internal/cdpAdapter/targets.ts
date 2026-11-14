@@ -96,6 +96,7 @@ const attached = (state: State, parent: TargetEntry | undefined, params: Target.
         target,
         ready: Deferred.makeUnsafe(),
         closing: undefined,
+        closeRequested: false,
         ended: false
       }
       const entry = { ...target, page }
@@ -196,7 +197,9 @@ export const ended = (state: State, session: ProtocolClient.Session, reason: Pro
         ? Kit.closed()
         : reason.why === "modelUnavailable"
         ? new L1Target.ModelUnavailable({})
-        : page.closing ?? (page.context.removing
+        : page.closing ?? (page.closeRequested
+          ? new L1Target.PageClosed({ by: "command" })
+          : page.context.removing
           ? new L1Target.PageClosed({ by: "userContextRemoved" })
           : new L1Target.PageClosed({ by: "script" }))
       endPage(state, page, why, `cdp: the page's session ended (${reason.why})`)

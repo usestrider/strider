@@ -218,7 +218,13 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       if (target === undefined || page === undefined) return
       const prompt = state.ids.prompt()
       const obligation = state.ids.obligation()
-      state.obligations.set(obligation, { _tag: "Prompt", id: obligation, prompt, target })
+      state.obligations.set(obligation, {
+        _tag: "Prompt",
+        id: obligation,
+        prompt,
+        target,
+        beforeUnload: params.type === "beforeunload"
+      })
       state.buffer.emit({
         _tag: "ObligationOpened",
         obligation,
@@ -242,6 +248,8 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       for (const [id, obligation] of state.obligations) {
         if (obligation._tag !== "Prompt" || obligation.target !== target) continue
         state.obligations.delete(id)
+        // A refused beforeunload prompt keeps the page open, so a later end isn't the close's
+        if (obligation.beforeUnload && !params.result && target.page !== undefined) target.page.closeRequested = false
         state.buffer.emit({
           _tag: "PromptClosed",
           prompt: obligation.prompt,

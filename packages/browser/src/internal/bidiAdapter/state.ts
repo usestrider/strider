@@ -48,6 +48,12 @@ export interface NavigableEntry extends Kit.NavigableNode<NavigableEntry> {
   /** The page: itself for a top-level context. */
   readonly page: NavigableEntry
   closing: L1Target.CloseReason | undefined
+  /**
+   * A close that runs `beforeunload` was sent and its prompt, if any, hasn't refused it: the context's end is the
+   * command's. Kept apart from `closing`, which refuses declarations, since the page stays usable until the prompt
+   * is answered.
+   */
+  closeRequested: boolean
   document: DocumentEntry | undefined
   /**
    * Realms created for the next document, before it commits: replacement main realms, and the sandboxes held with
@@ -170,6 +176,7 @@ export type ObligationEntry =
     readonly id: Adapter.ObligationId
     readonly prompt: Dialog.PromptId
     readonly context: BrowsingContext.BrowsingContext
+    readonly beforeUnload: boolean
   }
   | {
     readonly _tag: "FileChooser"
