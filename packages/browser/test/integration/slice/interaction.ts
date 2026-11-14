@@ -3722,9 +3722,46 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 Effect.flip
               )
               assert(Deadline.isTimeout(error), String(error))
-              assert.include(String(error.hint.pipe(Option.getOrUndefined)), `value "${value}"`)
+              const hint = String(error.hint.pipe(Option.getOrUndefined))
+              assert.include(hint, `value "${value}"`)
+              assert.include(hint, "is disabled")
               assert.strictEqual(yield* select.readValue, "a")
             }
+          })),
+        timeout
+      )
+
+      it.effect(
+        "selectOption chooses a disabled option once it is enabled, or when enabled isn't checked",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<select id="s" onchange="window.changes = (window.changes ?? []).concat(this.value)"><option value="a">Ay</option><option value="off" disabled>Off</option><optgroup id="g" label="G" disabled><option value="grouped">Grouped</option></optgroup><option value="forced" disabled>Forced</option></select>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            const select = page.locator("#s")
+            for (const [value, enable] of [["off", "#s [value=off]"], ["grouped", "#g"]] as const) {
+              const pending = yield* select.selectOption({ value }).pipe(
+                Deadline.within("5 seconds"),
+                Effect.forkScoped
+              )
+              const early = yield* select.selectOption({ value }).pipe(Deadline.within("300 millis"), Effect.flip)
+              assert(Deadline.isTimeout(early), String(early))
+              yield* page.evaluateInMainWorld((selector: string) => {
+                document.querySelector(selector)!.removeAttribute("disabled")
+              }, enable)
+              yield* Fiber.join(pending)
+              assert.strictEqual(yield* select.readValue, value)
+            }
+            yield* select.selectOption({ value: "forced" }, { checks: { enabled: false } }).pipe(
+              Deadline.within("2 seconds")
+            )
+            assert.strictEqual(yield* select.readValue, "forced")
+            assert.deepStrictEqual(
+              yield* page.evaluateInMainWorld(() => (window as unknown as { changes: Array<string> }).changes),
+              ["off", "grouped", "forced"]
+            )
           })),
         timeout
       )
