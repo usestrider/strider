@@ -102,6 +102,12 @@ export interface PageEntry {
   readonly target: TargetEntry
   readonly ready: Deferred.Deferred<void, Adapter.AdapterError>
   closing: L1Target.CloseReason | undefined
+  /**
+   * A close that runs `beforeunload` was sent and its prompt, if any, hasn't refused it: the page's end is the
+   * command's, unless its context was removed, whose end stays its own. Kept apart from `closing`, since the page
+   * stays usable until the prompt is answered.
+   */
+  closeRequested: boolean
   ended: boolean
 }
 
@@ -237,6 +243,7 @@ export type ObligationEntry =
     readonly id: Adapter.ObligationId
     readonly prompt: Dialog.PromptId
     readonly target: TargetEntry
+    readonly beforeUnload: boolean
   }
   | {
     readonly _tag: "FileChooser"

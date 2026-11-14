@@ -280,6 +280,7 @@ export const addNavigable = (state: State, info: {
       return parent?.page ?? navigable
     },
     closing: undefined,
+    closeRequested: false,
     document: undefined,
     pendingRealms: [],
     restoring: undefined,

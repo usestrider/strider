@@ -97,6 +97,7 @@ const withPage = Effect.fnUntraced(function*(protocolSession = session, requestT
     target,
     ready: Deferred.makeUnsafe(),
     closing: undefined,
+    closeRequested: false,
     ended: false
   }
   state.pages.set(page.id, page)
