@@ -152,11 +152,6 @@ export const fromAdapter = (
         _tag: "Reason",
         reason: new Reason.BackendFailure({ kind: "Rejected", method: "emulation.viewport", hint: error.message })
       }
-    case "FrameNotDrawn":
-      return {
-        _tag: "Reason",
-        reason: new Reason.BackendFailure({ kind: "Rejected", method: "input", hint: error.message })
-      }
     case "Gone":
       return {
         _tag: "Gone",

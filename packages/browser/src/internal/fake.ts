@@ -371,7 +371,6 @@ export const connect = (
       evaluate: () => unsupported("engine"),
       releaseHandles: () => Effect.void,
       dispatchInput: () => Effect.mapError(unsupported("input.native"), Adapter.unsent),
-      frameReady: () => Effect.void,
       contentFrame: () => unsupported("engine"),
       releaseNodes: () => Effect.void,
       geometry: () => unsupported("Locator.boundingBox"),

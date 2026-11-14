@@ -127,11 +127,6 @@ export interface FrameEntry extends Kit.NavigableNode<FrameEntry> {
   readonly failed: Map<string, NavigationEntry>
   /** Main-world realms created during a traversal, for the document it restores. */
   readonly pendingRealms: Array<RealmEntry>
-  /**
-   * The latest document whose start (`init`) the frame's session reported, by loader id, and whether it has
-   * reported its first paint (`firstPaint`); a navigation replaces it.
-   */
-  started: { readonly loaderId: string; painted: boolean } | undefined
 }
 
 export interface DocumentEntry {
@@ -331,7 +326,8 @@ export interface State {
   readonly connections: Map<string, NetworkConnection.Id>
   /** HTML drags Chromium started and the adapter intercepted, by page, until they are dropped or the page ends. */
   readonly drags: Map<L1Target.NavigableId, DragEntry>
-  readonly interceptingDrags: Set<L1Target.NavigableId>
+  /** The sessions drag interception is enabled on. */
+  readonly interceptingDrags: WeakSet<TargetEntry>
   /** The buttons each page's last mouse event left held, until the page ends. */
   readonly heldButtons: Map<L1Target.NavigableId, number>
   /** A worker no page owns belongs to the context its target names. */
@@ -399,7 +395,7 @@ export const make = (options: {
     groups: Groups.make(),
     connections: new Map(),
     drags: new Map(),
-    interceptingDrags: new Set(),
+    interceptingDrags: new WeakSet(),
     heldButtons: new Map(),
     workerContexts: new Map(),
     attachedAtConnect: true,

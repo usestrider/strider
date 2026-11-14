@@ -113,7 +113,7 @@ export const endPage = (state: State, page: PageEntry, reason: L1Target.CloseRea
   state.pages.delete(page.id)
   state.heldButtons.delete(page.id)
   state.drags.delete(page.id)
-  state.interceptingDrags.delete(page.id)
+  state.interceptingDrags.delete(page.target)
   for (const [id, obligation] of state.obligations) {
     if (obligation.target.page === page) {
       state.obligations.delete(id)
@@ -232,7 +232,6 @@ export const newFrame = (options: {
   navigations: new Map(),
   failed: new Map(),
   pendingRealms: [],
-  started: undefined,
   removed: false
 })
 
