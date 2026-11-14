@@ -124,6 +124,7 @@ strider -s checkout -p shop snapshot            # refs e1…, kept as shop's lat
 strider -s checkout -p shop fill e4 "ada@example.com"
 strider -s checkout -p shop fill e5 %password%  # a secret named at start; never echoed or recorded
 strider -s checkout -p shop click e9
+strider -s checkout -p shop press Meta+k       # a chord: Alt, Control, Meta, or Shift held for the key
 strider -s checkout -p shop next download --within 2m   # → w1: waiting from now on, for at most 2 minutes
 strider -s checkout -p shop click 'role=button[name="Export CSV"]'
 strider -s checkout await w1                    # → d1 "export.csv", 12 KB

@@ -66,6 +66,7 @@ strider -s shop -p main click e3
 strider -s shop -p main expect 'role=status' visible
 strider -s shop -p main goto https://shop.example.com/cart
 strider -s shop -p main fill 'label=Email' "ada@example.com"
+strider -s shop -p main press Meta+k
 ```
 
 ```
@@ -75,12 +76,16 @@ role=status is visible on main · 4 ms
 at https://shop.example.com/cart (200) on main · 8 ms
 since last: GET https://shop.example.com/api/offers answered 503
 filled label=Email on main · 17 ms
+pressed Meta+k on main · 6 ms
 ```
 
 - Every command names its session with `-s`, or `STRIDER_SESSION` in its environment, and a command on a page
   names its page with `-p`; there's no default, so agents on one machine can't act on each other's tabs.
 - Commands are the toolkit's tools, and answer the same way: the outcome, then what happened since the last
   command.
+- `press` takes a key by its name, such as `Enter` or `a`, or a chord that holds modifiers for it, such as `Meta+k`
+  or `Control+Shift+P`. The modifiers are `Alt`, `Control`, `Meta`, and `Shift`, and a `+` with nothing before it is
+  the key, as in `Shift++`.
 - A `page new` that fails, on a name that's taken or a URL that doesn't load, leaves no page behind, so the name is
   free to try again.
 
