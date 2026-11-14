@@ -40,7 +40,7 @@ the browser can write one.
 
 Firefox writes the file itself. Chromium only streams the frames it paints, so a writer turns them into a file.
 `VideoWriter.layerFfmpeg` runs the ffmpeg you name, by its absolute path, and writes VP8 with no audio. Its quality
-is fixed so small text stays legible: constrained quality with a 1 Mbit/s average target, which a scroll can
+is fixed so small text stays legible: constrained quality with a 4 Mbit/s average target, which a scroll can
 burst above. For another trade-off, provide your own `VideoWriter`:
 
 ```ts
