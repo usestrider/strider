@@ -1964,6 +1964,64 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         )
       }
 
+      it.effect("reports pointer-events none on the containing iframe", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<iframe id="frame" style="pointer-events:none" srcdoc='<button id="go">Go</button>'></iframe>`
+          )
+          const page = yield* newPage
+          yield* page.goto(url)
+          const error = yield* page.frame(page.locator("iframe")).locator("#go").click().pipe(
+            Deadline.within("1 second"),
+            Effect.flip
+          )
+          assert(Deadline.isTimeout(error), String(error))
+          assert.include(error.message, "iframe#frame doesn't receive pointer events")
+        })), timeout)
+
+      it.effect(
+        "clicks a pointer-events none target through its pointer-events auto descendant",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<button id="go" style="pointer-events:none;padding:0" onclick="out.textContent='clicked'"><span style="display:block;padding:20px;pointer-events:auto">Go</span></button><output id="out"></output>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.locator("#go").click().pipe(Deadline.within("1 second"))
+            assert.strictEqual(yield* page.locator("#out").readText, "clicked")
+          })),
+        timeout
+      )
+
+      it.effect("names an open aria-modal dialog inside a shadow root", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<div id="app" inert><button id="go">Pay</button></div><div id="host"></div><script>host.attachShadow({mode:'open'}).innerHTML='<div id="picker" role="dialog" aria-modal="true">Pick one</div>'</script>`
+          )
+          const page = yield* newPage
+          yield* page.goto(url)
+          const error = yield* page.locator("#go").click().pipe(Deadline.within("1 second"), Effect.flip)
+          assert(Deadline.isTimeout(error), String(error))
+          assert.include(error.message, "a modal dialog, div#picker \"Pick one\", is open")
+        })), timeout)
+
+      it.effect(
+        "omits an aria-modal dialog made inert by its slot's shadow ancestor",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div id="app" inert><button id="go">Pay</button></div><div id="host"><div role="dialog" aria-modal="true">Pick one</div></div><script>host.attachShadow({mode:'open'}).innerHTML='<div inert><slot></slot></div>'</script>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            const error = yield* page.locator("#go").click().pipe(Deadline.within("1 second"), Effect.flip)
+            assert(Deadline.isTimeout(error), String(error))
+            assert.notInclude(error.message, "modal dialog")
+          })),
+        timeout
+      )
+
       it.effect(
         "an inert target's Timeout names the inert ancestor and the open modal dialog",
         () =>

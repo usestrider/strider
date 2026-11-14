@@ -596,6 +596,30 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
       )
 
       it.effect(
+        "redacted capture omits field text from an inert click failure",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const served = yield* site
+            const page = yield* Browser.newPage()
+            const html =
+              "<div id=\"app\" inert><textarea>private-field-value</textarea><button id=\"go\">Pay</button></div>"
+            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+            const tools = yield* BrowserToolkit.make({
+              context: page.context,
+              secrets: {},
+              capture: CapturePolicy.strict
+            })
+            const result = yield* call(tools, "click", { page: "p1", target: "css=#go" }).pipe(
+              Deadline.within("1 second")
+            )
+            assert.isTrue(result.failed)
+            assert.include(result.value.message!, "inert")
+            assert.notInclude(result.value.message!, "private-field-value")
+          })),
+        timeout
+      )
+
+      it.effect(
         "a Radix checkbox: the button, its label and its role click; its hidden input's failure names its own pointer-events",
         () =>
           Effect.gen(function*() {

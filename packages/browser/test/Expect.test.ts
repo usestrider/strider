@@ -203,6 +203,20 @@ describe("attachment failure evidence", () => {
 })
 
 describe("Expect.that last", () => {
+  it.live("keeps a completed observation when a later check never completes", () =>
+    Effect.gen(function*() {
+      let reads = 0
+      const read = Effect.suspend(() => ++reads === 1 ? Effect.succeed("observed") : Effect.never)
+      const error = yield* Expect.that(read, Condition.make("never", () => false)).pipe(
+        Deadline.within("300 millis"),
+        Effect.flip
+      )
+      assert(Expect.isExpectationFailed(error), String(error))
+      assert.strictEqual(reads, 2)
+      assert.deepStrictEqual(error.history.map((entry) => entry.value), ["observed"])
+      assert.deepStrictEqual(Option.map(error.last, (entry) => entry.value), Option.some("observed"))
+    }))
+
   it.live("keeps the last value the read returned, not the check cut off at the deadline", () =>
     Effect.gen(function*() {
       let reads = 0
