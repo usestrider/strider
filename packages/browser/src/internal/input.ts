@@ -316,9 +316,15 @@ export const type = (
 export const keyDown = (state: State, definition: Keys.Definition): Adapter.InputEvent =>
   key(state, "down", definition, modifiers(state), textOf(definition, modifiers(state)))
 
-/** A held key released. */
-export const keyUp = (state: State, definition: Keys.Definition): Adapter.InputEvent =>
-  key(state, "up", definition, modifiers({ ...state, keys: state.keys.filter((held) => held !== definition) }))
+/**
+ * A held key released: one hold of it, as the release takes one entry from `keys`, so another hold of the same key
+ * keeps its modifier's flag.
+ */
+export const keyUp = (state: State, definition: Keys.Definition): Adapter.InputEvent => {
+  const index = state.keys.indexOf(definition)
+  const keys = index < 0 ? state.keys : [...state.keys.slice(0, index), ...state.keys.slice(index + 1)]
+  return key(state, "up", definition, modifiers({ ...state, keys }))
+}
 
 type Point = { readonly x: number; readonly y: number }
 
