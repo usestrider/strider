@@ -1482,6 +1482,9 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             assert.strictEqual(error, undefined, String(error))
             assert.strictEqual(yield* frame.locator("#out").readText, "true")
           })),
+        timeout
+      )
+
       for (const handlers of [false, true]) {
         for (
           const [attribute, reason] of [["disabled", "Disabled"], ["readonly", "ReadOnly"], ["inert", "Inert"]] as const

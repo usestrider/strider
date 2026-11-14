@@ -355,6 +355,9 @@ export const engine = (backend: Backend) =>
               assert.strictEqual(result.observations, 2, JSON.stringify(result))
               assert.strictEqual(result.reply._tag, ending === "departure" ? "Departed" : "Disposed")
               assert.strictEqual(result.scrollTop, 0, "A stopped round must not scroll after its observation")
+            }), timeout)
+        }
+
         for (const cooperative of [false, true]) {
           it.effect(
             `keeps waiting after a baseline when a later blocker recovers with cooperative=${cooperative}`,
