@@ -765,6 +765,62 @@ export const conformance = (backend: Backend) =>
             yield* clicked.pipe(Effect.retry({ times: 30, schedule: Schedule.spaced("100 millis") }))
           }), timeout)
 
+        it.effect("sends input into a cross-site frame that has not drawn its first frame yet", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            const { page } = yield* newPage(world)
+            const fixture = (origin: string, html: string) =>
+              `${origin}/fixture?html=${encodeURIComponent(html)}`
+            // The child says it has loaded, then holds its main thread for a second, so it draws nothing
+            // until after the input below is sent
+            const child =
+              `<body style="margin:0"><button style="position:absolute;left:10px;top:10px;width:60px;height:30px" onclick="parent.postMessage('clicked', '*')">x</button><script>parent.postMessage('loaded', '*'); const end = performance.now() + 1000; while (performance.now() < end) {}</script></body>`
+            yield* goto(
+              world,
+              page,
+              fixture(
+                world.site.origin,
+                `<body style="margin:0"><script>window.got = []; addEventListener('message', (e) => got.push(e.data))</script><iframe id="cross" src="${
+                  fixture(world.site.crossSite, child)
+                }" style="position:absolute;left:100px;top:50px;width:200px;height:100px;border:5px solid red;padding:3px"></iframe></body>`
+              )
+            )
+            const added = yield* world.facts.when("FrameAdded")
+            const realm = yield* mainRealm(world, page)
+            const loaded = yield* world.adapter.evaluate(realm, {
+              functionDeclaration:
+                "() => window.got.includes('loaded') || new Promise((resolve) => addEventListener('message', (e) => { if (e.data === 'loaded') resolve(true) }))",
+              arguments: [],
+              awaitPromise: true,
+              result: "value",
+              userActivation: false
+            })
+            assert(loaded._tag === "Value" && json(loaded.value) === true)
+            const none = { alt: false, control: false, meta: false, shift: false }
+            const origin = { x: 100 + 5 + 3, y: 50 + 5 + 3 }
+            const x = origin.x + 40
+            const y = origin.y + 25
+            yield* world.adapter.dispatchInput(page, [
+              { _tag: "Mouse", type: "move", x, y, button: "none", clickCount: 0, modifiers: none, buttons: 0 },
+              { _tag: "Mouse", type: "down", x, y, button: "left", clickCount: 1, modifiers: none, buttons: 1 },
+              { _tag: "Mouse", type: "up", x, y, button: "left", clickCount: 1, modifiers: none, buttons: 0 }
+            ], { frame: added.frame, origin })
+            const clicked = Effect.flatMap(
+              world.adapter.evaluate(realm, {
+                functionDeclaration: "() => window.got.includes('clicked')",
+                arguments: [],
+                awaitPromise: false,
+                result: "value",
+                userActivation: false
+              }),
+              (result) =>
+                result._tag === "Value" && json(result.value) === true
+                  ? Effect.void
+                  : Effect.fail("iframe button clicked message was not received")
+            )
+            yield* clicked.pipe(Effect.retry({ times: 30, schedule: Schedule.spaced("100 millis") }))
+          }), timeout)
+
         it.effect("delivers a prompt as an obligation that takes one decision", () =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
@@ -810,7 +866,8 @@ export const conformance = (backend: Backend) =>
             const fulfilled = yield* evaluate(world, page, "() => fetch('/json').then((r) => r.text())").pipe(
               Effect.forkChild
             )
-            const first = yield* world.facts.when("ObligationOpened", (fact) => fact.subject._tag === "PausedRequest")
+            const first = yield* world.facts.when("ObligationOpened", (fact) =>
+              fact.subject._tag === "PausedRequest")
             assert(first.subject._tag === "PausedRequest")
             assert.strictEqual(first.subject.request.url, `${world.site.origin}/json`)
             yield* world.adapter.resolve(first.obligation, {
@@ -1450,10 +1507,13 @@ export const conformance = (backend: Backend) =>
             assert.strictEqual(outcome._tag, "Download")
             const started = yield* world.facts.when("DownloadStarted")
             assert.strictEqual(started.suggestedFilename, "hello.txt")
-            const ended = yield* world.facts.when("DownloadEnded", (fact) => fact.download === started.download)
+            const ended = yield* world.facts.when("DownloadEnded", (fact) =>
+              fact.download === started.download)
             assert(ended.outcome._tag === "Completed")
             const path = Option.getOrThrow(ended.outcome.path)
-            const fs = yield* Effect.promise(() => import("node:fs/promises"))
+            const fs = yield* Effect.promise(() =>
+              import("node:fs/promises")
+            )
             assert.strictEqual(yield* Effect.promise(() => fs.readFile(path, "utf8")), "hello, download")
           }), timeout)
 
