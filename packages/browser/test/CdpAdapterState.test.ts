@@ -1842,17 +1842,17 @@ it.effect("provides automatic credentials to a challenge that comes before the r
       resourceType: "Fetch",
       request: sent(`${origin}/auth`).request
     }, { state, target })
-    const challenge = () =>
+    const challenge = (requestId: string) =>
       handlers.apply("Fetch.authRequired", {
-        requestId: "F1",
+        requestId,
         frameId: "T1",
         resourceType: "Fetch",
-        request: sent(`${origin}/auth`).request,
+        request: sent(`${origin}/${requestId === "F2" ? "redirected-auth" : "auth"}`).request,
         authChallenge: { source: "Server", origin, scheme: "basic", realm: "website" }
       }, { state, target })
     const decision = { _tag: "ProvideCredentials", username: "user", password: "secret", once: true } as const
-    const answer = Effect.fnUntraced(function*() {
-      challenge()
+    const answer = Effect.fnUntraced(function*(requestId = "F1") {
+      challenge(requestId)
       const obligation = [...state.obligations.values()].find((entry) =>
         entry._tag === "PausedRequest" && entry.phase === "auth"
       )!
@@ -1871,7 +1871,34 @@ it.effect("provides automatic credentials to a challenge that comes before the r
       method: "Fetch.continueWithAuth",
       params: { requestId: "F1", authChallengeResponse: { response: "CancelAuth" } }
     }, "a repeat challenge is cancelled once the request has had its attempt")
+    // The redirect's pause can precede its Network event, just like the first hop's pause.
+    handlers.apply("Fetch.requestPaused", {
+      requestId: "F2",
+      redirectedRequestId: "F1",
+      networkId: "R1",
+      frameId: "T1",
+      resourceType: "Fetch",
+      request: sent(`${origin}/redirected-auth`).request
+    }, { state, target })
+    assert.deepStrictEqual(yield* answer("F2"), {
+      method: "Fetch.continueWithAuth",
+      params: { requestId: "F2", authChallengeResponse: { response: "CancelAuth" } }
+    }, "an early redirect hop shares the chain's attempt")
+    handlers.apply(
+      "Network.requestWillBeSent",
+      sent(`${origin}/redirected-auth`, {
+        from: "/auth",
+        location: `${origin}/redirected-auth`,
+        hasExtraInfo: false
+      }),
+      { state, target }
+    )
+    assert.deepStrictEqual(yield* answer("F2"), {
+      method: "Fetch.continueWithAuth",
+      params: { requestId: "F2", authChallengeResponse: { response: "CancelAuth" } }
+    }, "the redirect's Network event preserves the chain's attempt")
     handlers.apply("Network.loadingFinished", { requestId: "R1", encodedDataLength: 0 }, { state, target })
+    assert.isFalse(state.credentialsAttempted.get(State.credentialsScope(target))?.has("R1") ?? false)
     yield* state.buffer.flush
   }))
 
@@ -1988,6 +2015,72 @@ it.effect("provides automatic credentials to a parent-page challenge before its 
       params: { requestId: "F1", authChallengeResponse: { response: "CancelAuth" } }
     }, "a repeat challenge is cancelled once the worker's request has had its attempt")
     assert.isUndefined(parent.proxyAuth)
+    yield* state.buffer.flush
+  }))
+
+it.effect("releases a worker credential attempt when its target ends while the page stays open", () =>
+  Effect.gen(function*() {
+    const calls: Array<{ method: string; params: unknown }> = []
+    const mock = {
+      ...session,
+      send: (command: { method: string; params: unknown }) =>
+        Effect.sync(() => {
+          calls.push({ method: command.method, params: command.params })
+          return {}
+        })
+    } as unknown as ProtocolClient.Session
+    const { state, page, target } = yield* withPage(mock)
+    const parent: State.TargetEntry = { ...target, page }
+    const worker: State.TargetEntry = {
+      ...target,
+      page,
+      kind: "worker",
+      session: { ...mock, key: "worker" as Protocol.SessionKey }
+    }
+    const handlers = Obligations.register(Network.register(Kit.handlers<State.Event>()))
+    // A dedicated worker's fetch pauses and is challenged on its parent page's session, and its
+    // Network.requestWillBeSent can come on the worker's session after both
+    handlers.apply("Fetch.requestPaused", {
+      requestId: "F1",
+      networkId: "R1",
+      frameId: "T1",
+      resourceType: "Fetch",
+      request: sent(`${origin}/auth`).request
+    }, { state, target: parent })
+    const decision = { _tag: "ProvideCredentials", username: "user", password: "secret", once: true } as const
+    const answer = Effect.fnUntraced(function*() {
+      handlers.apply("Fetch.authRequired", {
+        requestId: "F1",
+        frameId: "T1",
+        resourceType: "Fetch",
+        request: sent(`${origin}/auth`).request,
+        authChallenge: { source: "Server", origin, scheme: "basic", realm: "website" }
+      }, { state, target: parent })
+      const obligation = [...state.obligations.values()].find((entry) =>
+        entry._tag === "PausedRequest" && entry.phase === "auth"
+      )!
+      yield* Obligations.resolve(state, obligation.id, decision)
+      return calls.filter((command) => command.method === "Fetch.continueWithAuth").at(-1)
+    })
+    assert.deepStrictEqual(yield* answer(), {
+      method: "Fetch.continueWithAuth",
+      params: {
+        requestId: "F1",
+        authChallengeResponse: { response: "ProvideCredentials", username: "user", password: Redacted.make("secret") }
+      }
+    }, "the first challenge gets the credentials though the worker's Network event hasn't come")
+    handlers.apply("Network.requestWillBeSent", sent(`${origin}/auth`), { state, target: worker })
+    assert.deepStrictEqual(yield* answer(), {
+      method: "Fetch.continueWithAuth",
+      params: { requestId: "F1", authChallengeResponse: { response: "CancelAuth" } }
+    }, "a repeat challenge is cancelled once the worker's request has had its attempt")
+    state.targets.set(worker.session, worker)
+    Targets.ended(state, worker.session, new Protocol.SessionEnded({ why: "targetDestroyed" }))
+    assert.isFalse(page.ended)
+    assert.isFalse(
+      state.credentialsAttempted.get(State.credentialsScope(parent))?.has("R1") ?? false,
+      "a destroyed worker cannot report loadingFinished or loadingFailed; its attempt must end with it"
+    )
     yield* state.buffer.flush
   }))
 
