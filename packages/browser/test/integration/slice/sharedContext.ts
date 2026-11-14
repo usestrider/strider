@@ -26,6 +26,7 @@ import * as BrowserClock from "../../../src/internal/browserClock.ts"
 import * as Handles from "../../../src/internal/handles.ts"
 import * as Operation from "../../../src/internal/operation.ts"
 import { connection, type Record as TraceRecord } from "../failureTrace.ts"
+import { Recycler } from "./recycledBrowser.ts"
 
 /** A declaration in force, on a context or the whole browser. */
 interface Declared {
@@ -102,14 +103,18 @@ export const layer = <E>(backend: Layer.Layer<Browser.Browser, E>) =>
     Effect.gen(function*() {
       const browser = yield* Browser.Browser
       const outer = yield* Effect.scope
+      // Set when the suite runs over `recycling` (Firefox): its browser is replaced in `settle`, after the case's scope has closed, once it has opened 100 pages and nothing the harness owns is live (pages Firefox opens itself don't count).
+      const recycler = yield* Effect.serviceOption(Recycler)
       const declared = new Set<Declared>()
-      let watching = false
+      const watched = new WeakSet<object>()
       const open = Effect.gen(function*() {
         const scope = yield* Scope.fork(outer)
         const context = yield* browser.newContext().pipe(Scope.provide(scope))
-        if (!watching) {
-          watchDeclarations(behindOf(context).runtime.model.adapter, declared)
-          watching = true
+        // A replaced browser has a new adapter: the declaration watch goes onto each one, once.
+        const adapter = behindOf(context).runtime.model.adapter
+        if (!watched.has(adapter)) {
+          watchDeclarations(adapter, declared)
+          watched.add(adapter)
         }
         return { context, scope, baseline: new Set(declared) } satisfies Held
       })
@@ -147,8 +152,11 @@ export const layer = <E>(backend: Layer.Layer<Browser.Browser, E>) =>
         note: (found) => Effect.sync(() => void notes.push(...found)),
         settle: Effect.gen(function*() {
           const found = yield* left
-          if (found.length > 0) {
+          const stats = Option.isSome(recycler) ? yield* recycler.value.stats : undefined
+          const recycle = stats !== undefined && stats.pages >= stats.limit
+          if (found.length > 0 || recycle) {
             yield* Scope.close(held.scope, Exit.void)
+            if (recycle) yield* Option.getOrThrow(recycler).run
             held = yield* open
           }
           return found

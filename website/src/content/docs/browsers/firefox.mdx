@@ -115,6 +115,10 @@ What changes when attached:
 
 <BrowserLimits browser="firefox" when="attached" />
 
+## Memory in long sessions
+
+Measured on Firefox 158.0, a session that opens and closes many pages grew by about 10 MB per page in Firefox's main process, because Firefox keeps part of every closed window. About half was freed after roughly 30 seconds idle, and a busy session never idles that long. Restarting the browser releases it, so a session that opens thousands of pages should relaunch Firefox now and then, between tasks.
+
 ## Differences
 
 **[Init scripts](/docs/events/init-scripts) given as `{ source }` or `{ path }` run inside a function,** so their
