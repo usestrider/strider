@@ -98,11 +98,11 @@ export const dispatchInput = Effect.fnUntraced(
     )
     const sent = yield* pointerSession(page, frame, landed)
     const on = Protocol.on(sent.target.session)
-    const keys = Protocol.on(page.target.session)
+    const onPageSession = Protocol.on(page.target.session)
     const click = Gestures.singleClick(events)
     if (
       click !== undefined && state.navigables.get(page.id)?.children.size === 0 &&
-      !state.interceptingDrags.has(page.target) && !state.drags.has(page.id) &&
+      !state.interceptingDrags.has(page.id) && !state.drags.has(page.id) &&
       (state.heldButtons.get(page.id) ?? 0) === 0
     ) {
       // Move and press may overlap, but a modal mousedown handler can suspend the press while Chromium
@@ -190,10 +190,12 @@ export const dispatchInput = Effect.fnUntraced(
             }
             break
           }
-          // A move with a button held may start an HTML drag, which only an interception lets finish
-          if (event.type === "move" && event.buttons !== 0 && !state.interceptingDrags.has(sent.target)) {
-            state.interceptingDrags.add(sent.target)
-            yield* Kit.protocol(Input.setInterceptDrags({ enabled: true }).pipe(on))
+          // A move with a button held may start an HTML drag, which only an interception lets finish. Chromium
+          // offers a drag to the sessions of the tab's main frame alone, wherever in the tab it starts, so the
+          // interception is the page's, and its drag events go where the gesture's mouse events go
+          if (event.type === "move" && event.buttons !== 0 && !state.interceptingDrags.has(page.id)) {
+            state.interceptingDrags.add(page.id)
+            yield* Kit.protocol(Input.setInterceptDrags({ enabled: true }).pipe(onPageSession))
           }
           yield* Kit.protocol(mouseCommand(event, sent).pipe(on))
           break
@@ -223,12 +225,12 @@ export const dispatchInput = Effect.fnUntraced(
               location: keyLocation(event.code),
               ...(text === undefined ? {} : { text: Redacted.make(text), unmodifiedText: Redacted.make(text) }),
               ...(code === undefined ? {} : { windowsVirtualKeyCode: code, nativeVirtualKeyCode: code })
-            }).pipe(keys)
+            }).pipe(onPageSession)
           )
           break
         }
         case "InsertText":
-          yield* Kit.protocol(Input.insertText({ text: Redacted.make(event.text) }).pipe(keys))
+          yield* Kit.protocol(Input.insertText({ text: Redacted.make(event.text) }).pipe(onPageSession))
           break
         case "Touch":
           yield* Kit.protocol(

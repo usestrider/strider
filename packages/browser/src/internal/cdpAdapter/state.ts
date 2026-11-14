@@ -326,8 +326,7 @@ export interface State {
   readonly connections: Map<string, NetworkConnection.Id>
   /** HTML drags Chromium started and the adapter intercepted, by page, until they are dropped or the page ends. */
   readonly drags: Map<L1Target.NavigableId, DragEntry>
-  /** The sessions drag interception is enabled on. */
-  readonly interceptingDrags: WeakSet<TargetEntry>
+  readonly interceptingDrags: Set<L1Target.NavigableId>
   /** The buttons each page's last mouse event left held, until the page ends. */
   readonly heldButtons: Map<L1Target.NavigableId, number>
   /** A worker no page owns belongs to the context its target names. */
@@ -395,7 +394,7 @@ export const make = (options: {
     groups: Groups.make(),
     connections: new Map(),
     drags: new Map(),
-    interceptingDrags: new WeakSet(),
+    interceptingDrags: new Set(),
     heldButtons: new Map(),
     workerContexts: new Map(),
     attachedAtConnect: true,

@@ -287,11 +287,11 @@ describe("CdpAdapter state", () => {
       const { page, state } = yield* withPage()
       state.heldButtons.set(page.id, 1)
       state.drags.set(page.id, { data: { items: [], dragOperationsMask: 1 }, entered: true, stale: false })
-      state.interceptingDrags.add(page.target)
+      state.interceptingDrags.add(page.id)
       Tree.endPage(state, page, new Target.PageClosed({ by: "command" }), "test")
       assert.isFalse(state.heldButtons.has(page.id))
       assert.isFalse(state.drags.has(page.id))
-      assert.isFalse(state.interceptingDrags.has(page.target))
+      assert.isFalse(state.interceptingDrags.has(page.id))
     }))
 
   it.effect("fails an operation on a page that ended as Gone, with why it ended", () =>
