@@ -10,6 +10,7 @@ import { execFileSync } from "node:child_process"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
+import { fileURLToPath } from "node:url"
 import { deflateSync } from "node:zlib"
 import * as BrowserClock from "../../src/internal/browserClock.ts"
 import * as Video from "../../src/internal/video.ts"
@@ -53,32 +54,27 @@ const pngFromRows = (width: number, height: number, rowAt: (y: number) => Buffer
 const textWidth = 1280
 const textHeight = 720
 
-/** A page of small text: 6 by 9 pixel glyph cells with one-pixel strokes in a deterministic pseudo-random pattern. */
-const textPage = (scroll: number) => {
-  const pixels = Buffer.alloc(textWidth * textHeight * 3, 255)
-  const glyph = (code: number) => {
-    let state = (code * 2654435761) >>> 0
-    return Array.from({ length: 5 * 7 }, () => {
-      state = (Math.imul(state, 1664525) + 1013904223) >>> 0
-      return state >>> 29 < 3
-    })
+/**
+ * A page of small text: `fixtures/smallText.png`, Chromium's 1280 by 800 headless screenshot of 12 px DejaVu Sans
+ * paragraphs, decoded once. A page scrolled by `scroll` pixels is the 720 rows from that offset.
+ */
+const textPage = (() => {
+  let rendered: Buffer | undefined
+  return (scroll: number) => {
+    rendered ??= execFileSync(process.env["STRIDER_FFMPEG"]!, [
+      "-v",
+      "error",
+      "-i",
+      fileURLToPath(new URL("../fixtures/smallText.png", import.meta.url)),
+      "-f",
+      "rawvideo",
+      "-pix_fmt",
+      "rgb24",
+      "pipe:1"
+    ], { maxBuffer: 1 << 24 })
+    return Buffer.from(rendered.subarray(scroll * textWidth * 3, (scroll + textHeight) * textWidth * 3))
   }
-  for (let line = 0; line * 12 < textHeight + scroll + 12; line++) {
-    for (let column = 0; column * 6 < textWidth; column++) {
-      if (column % 7 === 6) continue
-      const cells = glyph((line * 131 + column * 17) % 94)
-      for (let i = 0; i < cells.length; i++) {
-        if (!cells[i]) continue
-        const x = column * 6 + (i % 5)
-        const y = line * 12 + Math.floor(i / 5) + 3 - scroll
-        if (y < 0 || y >= textHeight) continue
-        const at = (y * textWidth + x) * 3
-        pixels[at] = pixels[at + 1] = pixels[at + 2] = 20
-      }
-    }
-  }
-  return pixels
-}
+})()
 
 const psnr = (a: Buffer, b: Buffer) => {
   let error = 0
