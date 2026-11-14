@@ -85,8 +85,8 @@ export interface NavigableEntry extends Kit.NavigableNode<NavigableEntry> {
     | undefined
   readonly navigations: Map<string, NavigationEntry>
   /**
-   * A load for the current document that names a wire identity not started yet: evidence that the navigation
-   * that identity starts predates it, kept until the next start or commit.
+   * A load for the current document that names a wire identity not started yet: evidence that the load predates
+   * the navigation that identity starts, kept until the next start or commit.
    */
   staleLoad?: {
     readonly bidi: string

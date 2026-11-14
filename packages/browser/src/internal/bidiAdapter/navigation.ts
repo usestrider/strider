@@ -111,16 +111,15 @@ const readiness = (
   if (bidi !== null) {
     const documentStart = document.navigationStarts?.get(bidi)
     if (documentStart !== undefined && params.timestamp < documentStart) return
-    if (document.navigation !== undefined && document.navigation !== bidi && documentStart === undefined) {
-      // The same delayed load can arrive before the start of the identity it names: keep it for that start.
-      if (
-        navigation === undefined && readiness === "complete" && params.url === document.url &&
-        (document.committedAt === undefined || params.timestamp >= document.committedAt)
-      ) {
-        document.navigable.staleLoad = { bidi, timestamp: params.timestamp, document: document.id }
-      }
-      return
+    // The same delayed load can arrive before the start of the identity it names: keep it for that start.
+    if (
+      navigation === undefined && documentStart === undefined && document.navigation !== bidi &&
+      readiness === "complete" && params.url === document.url &&
+      (document.committedAt === undefined || params.timestamp >= document.committedAt)
+    ) {
+      document.navigable.staleLoad = { bidi, timestamp: params.timestamp, document: document.id }
     }
+    if (document.navigation !== undefined && document.navigation !== bidi && documentStart === undefined) return
   }
   if (readiness === "interactive" && document.complete) {
     // Loaded again after it was complete: `document.open()` replaced its tree (probe 17)
@@ -210,9 +209,9 @@ const failed = (state: State, navigable: NavigableEntry, params: BrowsingContext
 }
 
 const started = (state: State, navigable: NavigableEntry, params: BrowsingContext.NavigationInfo) => {
-  if (params.navigation === null || state.navigations.has(params.navigation)) return
   const early = navigable.staleLoad
   navigable.staleLoad = undefined
+  if (params.navigation === null || state.navigations.has(params.navigation)) return
   const pending = [...new Set(navigable.navigations.values())].filter((entry) => !entry.ended && !entry.sameDocument)
   // Delivery can lag behind a newer start or a commit; old starts cannot replace newer work.
   if (
