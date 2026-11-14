@@ -505,6 +505,39 @@ describe("Chromium adapter, CDP only", () => {
       )
 
       it.effect(
+        "evaluates in a dedicated worker with init scripts once they have run and the worker resumed",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const log: Array<{ readonly sent: boolean; readonly wire: any }> = []
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.addInitScript({ source: "self.__marked = 'yes'" }, { workers: true })
+              yield* page.goto(workerPage(served))
+              const started = yield* BrowserWorker.next(page)
+              yield* page.locator("#start").click()
+              const worker = yield* started
+              const value = yield* worker.evaluate(() => (self as any).__marked).pipe(Deadline.within("10 seconds"))
+              assert.strictEqual(value, "yes")
+            })).pipe(Effect.provide(loggedBackend(log)))
+            const attached = log.find(({ sent, wire }) =>
+              !sent && wire.method === "Target.attachedToTarget" && wire.params.targetInfo.type === "worker"
+            )
+            assert.isDefined(attached)
+            const session = attached!.wire.params.sessionId
+            const resumed = log.findIndex(({ sent, wire }) =>
+              sent && wire.sessionId === session && wire.method === "Debugger.resume"
+            )
+            const evaluated = log.findIndex(({ sent, wire }) =>
+              sent && wire.sessionId === session && wire.method === "Runtime.callFunctionOn"
+            )
+            assert.notStrictEqual(resumed, -1, "the worker never paused for its init scripts")
+            assert.isAbove(evaluated, resumed, "the evaluation went to the worker before it resumed")
+          }),
+        timeout
+      )
+
+      it.effect(
         "ends an evaluation held for a worker's script when the worker ends first",
         () =>
           Effect.gen(function*() {
