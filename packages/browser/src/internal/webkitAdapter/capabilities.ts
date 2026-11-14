@@ -256,7 +256,9 @@ export const launchedCapabilities = (info: Browser.Info, video = false) => {
       "Automation types characters and named keys, not a layout's physical keys"
     ]],
     "input.pointerModifiers": ["supported", []],
-    "input.fractionalPointer": ["supported", []],
+    "input.fractionalPointer": ["partial", [
+      "Strider sends the exact point, but WebKit delivers pointer events at whole pixels, truncating the fraction"
+    ]],
     "input.dragAndDrop": ["unsupported", ["untested with Automation's pointer"]],
     "input.touch": ["unsupported", ["WebKitGTK builds its Automation without touch"]],
     prompts: ["partial", ["a dialog's kind and default text aren't reported"]],

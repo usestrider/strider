@@ -1364,8 +1364,10 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   if (yield* fullySupports("input.fractionalPointer")) {
                     assert.deepStrictEqual({ x: click.x, y: click.y }, { x: 7, y: 9 })
                   } else {
-                    // Whole-pixel delivery: the event lands within half a pixel of the point sent.
-                    assert.isAtMost(Math.abs(click.clientY - (click.top + 9)), 0.5, JSON.stringify(click))
+                    // Whole-pixel delivery: Firefox rounds the point sent and WebKit truncates it, so the event lands
+                    // less than a pixel away on y.
+                    assert.strictEqual(click.x, 7, JSON.stringify(click))
+                    assert.isBelow(Math.abs(click.clientY - (click.top + 9)), 1, JSON.stringify(click))
                   }
                 }
               }
@@ -1392,8 +1394,10 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               assert.deepStrictEqual({ x: click.x, y: click.y }, { x: 7, y: 9 }, JSON.stringify(click))
               assert.strictEqual(click.pointerY, click.top + 9, JSON.stringify(click))
             } else {
-              // Whole-pixel delivery: the event lands within half a pixel of the point sent.
-              assert.isAtMost(Math.abs(click.clientY - (click.top + 9)), 0.5, JSON.stringify(click))
+              // Whole-pixel delivery: Firefox rounds the point sent and WebKit truncates it, so the event lands
+              // less than a pixel away on y.
+              assert.strictEqual(click.x, 7, JSON.stringify(click))
+              assert.isBelow(Math.abs(click.clientY - (click.top + 9)), 1, JSON.stringify(click))
             }
           })),
         timeout

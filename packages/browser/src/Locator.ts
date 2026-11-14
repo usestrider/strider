@@ -1032,8 +1032,10 @@ export interface PointerOptions extends ActionOptions {
    * Explicit positions are never replaced by another fragment. The point stays inside its rectangle after integer rounding
    * when that rectangle contains an integer point. A target with no visible rectangle has no default point,
    * even when actionability checks are disabled. The chosen point is sent to the browser exactly, fractions
-   * included. Firefox delivers pointer events at whole pixels, so there a fractional point lands up to half a
-   * pixel away; the capability `input.fractionalPointer` says which browsers deliver the exact point.
+   * included, for mouse and touch input. Chromium delivers it exactly. Firefox and WebKit deliver pointer events
+   * at whole pixels: Firefox rounds a fractional point, landing up to half a pixel away, and WebKit truncates it,
+   * landing less than a pixel above and to the left. The capability `input.fractionalPointer` says which
+   * browsers deliver the exact point.
    *
    * @default the first reachable fragment centre, or the first geometric centre when receivesPointer is disabled
    */
