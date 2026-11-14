@@ -273,7 +273,9 @@ describe("WebKit evaluation packets", () => {
     )
     const sent = commands.length === 1
       ? commands[0]!.params.functionDeclaration
-      : commands.slice(0, -1).map((command) => command.params.arguments[2]!.value).join("")
+      : commands.slice(0, -1).sort((a, b) =>
+        Number(a.params.arguments[1]!.value) - Number(b.params.arguments[1]!.value)
+      ).map((command) => command.params.arguments[2]!.value).join("")
     return { sizes, sent, commands }
   })
 

@@ -7,6 +7,9 @@
  *   either as the value itself (for a handle) or as WebDriver BiDi's `RemoteValue`, as JSON text.
  * - Nodes in a serialized value are kept in a batch the adapter takes next (`takeNodes`), for their object ids:
  *   WebKit's handle on a node is its remote object.
+ * - A function too large for one inspector message arrives in parts (`stage`), which `compile` joins and compiles
+ *   with the `eval` captured at install. WebKit allows eval for the length of an inspector call, even where the
+ *   page's Content-Security-Policy forbids it, and the compile runs inside one.
  *
  * The helper captures the intrinsics it uses when it is installed, so a page that later replaces
  * `JSON.stringify` or `Array.prototype` doesn't change what it returns; a page that replaced them before can.
@@ -37,7 +40,10 @@ export const source = String.raw`(() => {
   const ErrorType = Error
   const MapType = Map
   const SetType = Set
+  const join = Array.prototype.join
+  const compile = eval
   const batches = new Map()
+  const staged = new Map()
   let batchId = 0
 
   const tag = (value) => apply(toStringTag, value, []).slice(8, -1)
@@ -168,6 +174,16 @@ export const source = String.raw`(() => {
       const nodes = batches.get(id) || []
       batches.delete(id)
       return nodes
+    },
+    stage(key, index, text) {
+      let parts = staged.get(key)
+      if (parts === undefined) staged.set(key, parts = [])
+      parts[index] = text
+    },
+    compile(key) {
+      const parts = staged.get(key) || []
+      staged.delete(key)
+      return compile("(" + apply(join, parts, [""]) + ")")
     }
   }
 })()`
@@ -192,3 +208,65 @@ export const callBeside = (fn: string, mode: "value" | "handle", awaitResult: bo
 
 /** The function declaration that takes a batch of nodes, as an array. */
 export const takeNodes = "function(id) { return this.takeNodes(id) }"
+
+/** The most bytes a part's text takes in a message once JSON-encoded twice, half of libsoup's 128 KiB limit. */
+const partBytes = 64 * 1024
+
+/**
+ * What a UTF-16 code unit outside a surrogate pair takes once JSON-encoded twice: a quote or backslash becomes
+ * four bytes (`\\\"`), a control character three or seven (`\\n`, `\\u0001`), a lone surrogate seven, and any other its
+ * UTF-8 bytes.
+ */
+const encodedBytes = (code: number): number => {
+  if (code === 0x22 || code === 0x5c) return 4
+  if (code === 0x08 || code === 0x09 || code === 0x0a || code === 0x0c || code === 0x0d) return 3
+  if (code < 0x20) return 7
+  if (code < 0x80) return 1
+  if (code < 0x800) return 2
+  if (code >= 0xd800 && code < 0xe000) return 7
+  return 3
+}
+
+/**
+ * A function declaration's parts, for the helper to stage (`stage`) when it is too large to send in one message,
+ * or `undefined` when it isn't. The attached inspector carries a page's command as a JSON string inside
+ * `Target.sendMessageToTarget`, so a declaration is JSON-encoded twice, and libsoup closes a socket whose incoming
+ * message is over 128 KiB. Each part takes at most 64 KiB once encoded, and never splits a surrogate pair.
+ */
+export const parts = (fn: string): ReadonlyArray<string> | undefined => {
+  // At most seven bytes a code unit: a declaration this short fits without measuring it
+  if (fn.length * 7 <= partBytes) return undefined
+  const found: Array<string> = []
+  let start = 0
+  let bytes = 0
+  for (let i = 0; i < fn.length;) {
+    const code = fn.charCodeAt(i)
+    const next = fn.charCodeAt(i + 1)
+    const pair = code >= 0xd800 && code < 0xdc00 && next >= 0xdc00 && next < 0xe000
+    const cost = pair ? 4 : encodedBytes(code)
+    if (bytes + cost > partBytes) {
+      found.push(fn.slice(start, i))
+      start = i
+      bytes = 0
+    }
+    bytes += cost
+    i += pair ? 2 : 1
+  }
+  found.push(fn.slice(start))
+  return found.length === 1 ? undefined : found
+}
+
+/** The function declaration that stages a part of a function, called on the helper with its key, index and text. */
+export const stage = "function(key, index, text) { this.stage(key, index, text) }"
+
+/** As `call`, for a function staged in parts, called with its key before the argument kinds. */
+export const callStaged = (mode: "value" | "handle", awaitResult: boolean): string =>
+  `function(key, kinds, ...args) { return this.run(this.compile(key), kinds, args, ${
+    JSON.stringify(mode)
+  }, ${awaitResult}) }`
+
+/** As `callBeside`, for a function staged in parts, called with the helper, then its key, before the kinds. */
+export const callStagedBeside = (mode: "value" | "handle", awaitResult: boolean): string =>
+  `function(helper, key, kinds, ...args) { return helper.run(helper.compile(key), kinds, args, ${
+    JSON.stringify(mode)
+  }, ${awaitResult}) }`
