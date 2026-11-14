@@ -88,13 +88,13 @@
       "MC-005"
     ],
     "status": "notApplicable",
-    "reason": "Strider won't collect coverage from a browser run (ROOK-385, ROOK-386): build-time instrumentation, read back with evaluate, works on every browser. Starts JavaScript coverage on a page, and expects a second client's start to fail while the first holds it; Strider has no coverage API"
+    "reason": "Strider won't collect coverage from a browser run: build-time instrumentation, read back with evaluate, works on every browser. Starts JavaScript coverage on a page, and expects a second client's start to fail while the first holds it; Strider has no coverage API"
   },
   {
     "tests": [
       "MC-006"
     ],
     "status": "notApplicable",
-    "reason": "Strider won't collect coverage from a browser run (ROOK-385, ROOK-386): build-time instrumentation, read back with evaluate, works on every browser. Starts CSS coverage on a page, and expects a second client's start to fail while the first holds it; Strider has no coverage API"
+    "reason": "Strider won't collect coverage from a browser run: build-time instrumentation, read back with evaluate, works on every browser. Starts CSS coverage on a page, and expects a second client's start to fail while the first holds it; Strider has no coverage API"
   }
 ]

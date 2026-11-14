@@ -12,13 +12,13 @@
       "CV-017"
     ],
     "status": "notApplicable",
-    "reason": "Strider won't collect coverage from a browser run (ROOK-385, ROOK-386): build-time instrumentation, read back with evaluate, works on every browser. `page.coverage.startCSSCoverage()` and `stopCSSCoverage()`, which report the ranges of each stylesheet a page used. Strider has no JavaScript or CSS coverage API, so these can't be ported"
+    "reason": "Strider won't collect coverage from a browser run: build-time instrumentation, read back with evaluate, works on every browser. `page.coverage.startCSSCoverage()` and `stopCSSCoverage()`, which report the ranges of each stylesheet a page used. Strider has no JavaScript or CSS coverage API, so these can't be ported"
   },
   {
     "tests": [
       "CV-015"
     ],
     "status": "notApplicable",
-    "reason": "Strider won't collect coverage from a browser run (ROOK-385, ROOK-386): build-time instrumentation, read back with evaluate, works on every browser. `page.coverage.startCSSCoverage({ resetOnNavigation: false })` keeps the stylesheets of earlier navigations. Strider has no CSS coverage API to take the option, which the matrix row marks missing with its parent"
+    "reason": "Strider won't collect coverage from a browser run: build-time instrumentation, read back with evaluate, works on every browser. `page.coverage.startCSSCoverage({ resetOnNavigation: false })` keeps the stylesheets of earlier navigations. Strider has no CSS coverage API to take the option, which the matrix row marks missing with its parent"
   }
 ]

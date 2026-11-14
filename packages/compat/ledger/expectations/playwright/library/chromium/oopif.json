@@ -72,7 +72,6 @@
       "chromium"
     ],
     "status": "fails",
-    "issue": "ROOK-150",
     "reason": "With a viewport declared, a cross-site iframe never loads, so goto's load wait and the frame's onload time out"
   }
 ]

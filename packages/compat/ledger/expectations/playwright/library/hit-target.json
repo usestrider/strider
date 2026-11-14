@@ -30,7 +30,6 @@
       "HT-017"
     ],
     "status": "fails",
-    "issue": "ROOK-513",
     "reason": "A timed-out action's message names only its operation and phase, not the element covering the target"
   },
   {
@@ -38,7 +37,6 @@
       "HT-016"
     ],
     "status": "fails",
-    "issue": "ROOK-518",
     "reason": "A locator scoped to a shadow host doesn't search the host's own shadow root"
   }
 ]

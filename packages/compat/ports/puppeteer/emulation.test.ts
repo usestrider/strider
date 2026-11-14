@@ -17,7 +17,7 @@
  *   is the touch flag Modernizr reads, not the insertion, and the script is the vendored `modernizr.js`.
  * - "should support touch emulation" and "should support landscape emulation" check the page's current document. Strider
  *   applies touch handlers at the next document (`emulation.touch`'s note), and Chromium doesn't set the screen's size
- *   or orientation (ROOK-564), so those assertions fail on Chromium. "should detect touch when applying viewport with
+ *   or orientation, so those assertions fail on Chromium. "should detect touch when applying viewport with
  *   touches" fails the same way: its page is still the first document when the script runs, and Strider applies touch at
  *   the next one. "should support timezone offset" fails because Strider's `timezone` accepts IANA names only and refuses
  *   `GMT+10:00` before the browser sees it. These four are Strider's behavior, with no ledger entry.

@@ -15,7 +15,7 @@
       "TR-038"
     ],
     "status": "needsFeature",
-    "issue": "ROOK-370",
+    "matrix": "property-apirequestcontext-tracing",
     "reason": "The requests of an APIRequestContext (`context.request`, `page.request`, or a request context of the test's own), which Strider has no counterpart of, recorded in a trace of their own"
   },
   {

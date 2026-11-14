@@ -20,7 +20,7 @@
       "[CDPSession.test] Target.createCDPSession should enable and disable domains independently"
     ],
     "status": "notApplicable",
-    "reason": "Strider won't collect coverage from a browser run (ROOK-385, ROOK-386): build-time instrumentation, read back with evaluate, works on every browser. Starts and stops JS coverage (`page.coverage.startJSCoverage` and `stopJSCoverage`) between a session's own `Debugger.enable` and the `scriptParsed` event it waits for. Strider has no JS coverage"
+    "reason": "Strider won't collect coverage from a browser run: build-time instrumentation, read back with evaluate, works on every browser. Starts and stops JS coverage (`page.coverage.startJSCoverage` and `stopJSCoverage`) between a session's own `Debugger.enable` and the `scriptParsed` event it waits for. Strider has no JS coverage"
   },
   {
     "tests": [

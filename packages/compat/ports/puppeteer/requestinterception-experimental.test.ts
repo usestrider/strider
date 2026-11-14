@@ -731,7 +731,7 @@ upstream(import.meta.filename, {}, (test) => {
       const response = valueOf(responseOf(navigation), "response")
       assert.strictEqual(response.status, 201)
       assert.strictEqual(response.headers["foo"], "bar")
-      // The body is read from the page: a fulfilled body can't be read back through NetworkResponse on Chromium (ROOK-540)
+      // The body is read from the page: a fulfilled body can't be read back through NetworkResponse on Chromium
       assert.strictEqual(
         yield* page.evaluateInMainWorld(() =>
           document.body.textContent

@@ -9,13 +9,13 @@
       "CV-007"
     ],
     "status": "notApplicable",
-    "reason": "Strider won't collect coverage from a browser run (ROOK-385, ROOK-386): build-time instrumentation, read back with evaluate, works on every browser. Collecting JavaScript coverage: `page.coverage.startJSCoverage` and `stopJSCoverage`, which Strider has no API for"
+    "reason": "Strider won't collect coverage from a browser run: build-time instrumentation, read back with evaluate, works on every browser. Collecting JavaScript coverage: `page.coverage.startJSCoverage` and `stopJSCoverage`, which Strider has no API for"
   },
   {
     "tests": [
       "CV-004"
     ],
     "status": "notApplicable",
-    "reason": "Strider won't collect coverage from a browser run (ROOK-385, ROOK-386): build-time instrumentation, read back with evaluate, works on every browser. Collecting the coverage of `eval()` scripts with `reportAnonymousScripts`, which needs `startJSCoverage`, which Strider has no API for"
+    "reason": "Strider won't collect coverage from a browser run: build-time instrumentation, read back with evaluate, works on every browser. Collecting the coverage of `eval()` scripts with `reportAnonymousScripts`, which needs `startJSCoverage`, which Strider has no API for"
   }
 ]
