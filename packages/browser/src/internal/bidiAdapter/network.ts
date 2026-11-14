@@ -155,7 +155,8 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       state.buffer.emit({
         _tag: "RequestFinished",
         hop: request.hop,
-        encodedBytes: params.response.bytesReceived,
+        // A response a route fulfilled has no transfer to count
+        ...(request.fulfilled ? Sizes.unknown : Sizes.transferred(Sizes.bidi(params.response, true))),
         at: Adapter.now()
       })
       // Completion belongs to this hop, including a terminal 3xx without a followed redirect.

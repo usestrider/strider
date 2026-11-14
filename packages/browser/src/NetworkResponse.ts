@@ -188,7 +188,9 @@ export interface Filter {
  * **Details**
  *
  * It's read when a subscription with a `body` starts, and declared to the browser with it; `Har.record` and
- * `Trace.record` with `network` read it too. A larger body fails with `BodyUnavailable`, `why: "overLimit"`.
+ * `Trace.record` with `network` read it too. A larger body fails with `BodyUnavailable`, `why: "overLimit"`: the
+ * body as transferred, without its headers, where the browser counts it (Firefox and WebKit), and as read
+ * otherwise (Chromium).
  * Effect's `HttpIncomingMessage.MaxBodySize` bounds what this program reads, and is a separate setting.
  *
  * @stability unstable

@@ -848,7 +848,8 @@ export const make = Effect.fnUntraced(function*(options: {
         case "RequestFinished": {
           endHop(fact.hop, {
             _tag: "Finished",
-            encodedBytes: fact.encodedBytes,
+            transferBytes: fact.transferBytes,
+            bodyBytes: fact.bodyBytes,
             at: fact.at,
             httpVersion: Option.fromUndefinedOr(fact.httpVersion)
           })

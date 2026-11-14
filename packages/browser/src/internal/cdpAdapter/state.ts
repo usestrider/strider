@@ -192,6 +192,11 @@ export interface RequestEntry {
   readonly finished: Deferred.Deferred<void, string>
   /** `Network.requestServedFromCache` came for the current hop: `responseReceived` doesn't say so. */
   servedFromCache: boolean
+  /**
+   * Whether the current hop's response came over the network as itself, not from a cache, a service worker or a
+   * route, and not a 304's revalidation: only then are its byte counts its own.
+   */
+  network: boolean
   /** The current hop's route attribution, shared with its Fetch pauses. */
   attribution: Attribution
   /** What the `Network` domain calls it: `Fetch` calls a `fetch()` an `XHR`. */

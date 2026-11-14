@@ -47,6 +47,7 @@ export const PostData = Schema.Struct({
 export const Content = Schema.Struct({
   size: Schema.Number,
   mimeType: Schema.String,
+  compression: Schema.optionalKey(Schema.Number),
   text: Schema.optionalKey(Schema.String),
   encoding: Schema.optionalKey(Schema.String),
   _file: Schema.optionalKey(Schema.String)
