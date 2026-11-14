@@ -107,9 +107,11 @@ interface ErrorMatcher {
   the adapter's `frameReady`, a read, for every frame its gesture's points land in (a drag's source and
   destination), before it releases earlier input or marks its own as sent. `dispatchInput` doesn't wait: it checks
   those frames again as it writes, and refuses pointer input into one that isn't drawn, as when it navigated since
-  the wait, with `FrameNotDrawn`, before writing anything. An input failure before anything is written is marked
-  `unsent`, so the operation records nothing sent and leaves nothing to release; on a refused frame the action
-  checks the changed page again, under the same deadline. The deadline ends the wait, as it does the adapter's other
+  the wait, with `FrameNotDrawn`, before writing anything. Each adapter marks `unsent` the failures its
+  `dispatchInput` meets before writing any input: its lookups and its refusals, such as an undrawn frame or a key
+  stock WebKit's Automation can't type. Locator actions and the page's devices record such a failure as nothing
+  sent and leave nothing of it to release; any other failure, or an interruption, still counts as input that may
+  have been sent. On a refused frame the action checks the changed page again, under the same deadline. The deadline ends the wait, as it does the adapter's other
   waits, and the operation's history names the frame (`FrameNotDrawn`). A frame whose document and
   descendants paint nothing never reports `firstPaint`, so input into it runs out its deadline. Keys and text
   aren't hit-tested and don't wait. Input that names no frame, such as `page.mouse`, doesn't wait, and can still

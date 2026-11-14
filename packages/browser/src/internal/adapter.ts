@@ -1025,8 +1025,8 @@ export interface AdapterConnection {
    * the frame's own (BiDi). `drawn` names the frames the gesture's points land in, the named one by default. On
    * CDP, pointer input into one of them that is out of process, or inside one, and hasn't been drawn is refused
    * with `FrameNotDrawn` before anything is sent: until it has been drawn, Chromium may send the input to the
-   * parent's iframe element. Callers wait for each first with `frameReady`. A failure before any input is written
-   * is marked `unsent`, so there is nothing of it to release.
+   * parent's iframe element. Callers wait for each first with `frameReady`. The failures it meets before writing
+   * any input, its lookups and refusals, are marked `unsent`, so there is nothing of them to release.
    */
   readonly dispatchInput: (
     page: Target.NavigableId,
