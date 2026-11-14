@@ -51,7 +51,7 @@ export const requestSnapshot = (
   })
 
 /** Continues a paused request as if nothing had paused it. */
-const continued = (state: State, phase: Phase, request: Network.Request, authSource?: "server" | "proxy") =>
+export const continued = (state: State, phase: Phase, request: Network.Request, authSource?: "server" | "proxy") =>
   phase === "auth"
     ? state.send(Network.continueWithAuth({ request, action: authSource === undefined ? "cancel" : "default" }))
     : phase === "response"

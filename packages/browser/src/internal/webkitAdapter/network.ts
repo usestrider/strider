@@ -158,6 +158,9 @@ export const register = (handlers: Kit.Handlers<Event>) =>
             navigation = startNavigation(state, frame, loader, params.request.url, "crossDocument", false)
           }
         }
+        // The browser answers it itself: its navigation goes on, but it is no request, so the events that follow
+        // for its id find none
+        if (Urls.answeredLocally(params.request.url)) return
         const worker = params.targetId === undefined
           ? undefined
           : [...state.workers.values()].find((worker) => worker.workerId === params.targetId)
@@ -269,7 +272,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     })
     .on(Network.requestServedFromMemoryCache, (params, { state, session, target }) => {
       // A request answered from the memory cache without a load: its request, response and end at once
-      if (target === undefined) return
+      if (target === undefined || Urls.answeredLocally(params.resource.url)) return
       const frame = state.frames.get(frameKey(target, params.frameId))
       const resource = params.resource
       const id = state.ids.request()

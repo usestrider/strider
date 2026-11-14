@@ -166,6 +166,12 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       if (target === undefined) return
       const key = requestKey(target, params.requestId)
       let request = state.requests.get(key)
+      if (request === undefined && Urls.answeredLocally(params.request.url)) {
+        // The browser answers it itself: no request, so the events that follow for its id find none
+        state.pendingAttribution.delete(key)
+        state.earlyHeaders.delete(key)
+        return
+      }
       if (request !== undefined && params.redirectResponse !== undefined) {
         // The redirect says whether `ExtraInfo` comes for the hop it ends
         if (params.redirectHasExtraInfo === true) expectExtraInfo(state, request, ["request", "response"])
