@@ -45,7 +45,7 @@ interface ProtocolSession {
 }
 
 type ProtocolError =
-  | { _tag: "Rejected"; method: string; reason: RejectReason; code: number | string; message: string; target?: "page" | "iframe" | "worker" }   // code and message sanitized, kept as evidence; target is the kind of target the command went to
+  | { _tag: "Rejected"; method: string; reason: RejectReason; code: number | string; message: string; target?: string }   // code and message sanitized, kept as evidence; target is the CDP target's kind (page, iframe, worker, service_worker, shared_worker, other), absent on the browser's session
   | { _tag: "Decode"; method: string; issue: string }
   | { _tag: "SessionEnded"; reason: SessionEndReason }
   | { _tag: "Unsupported"; method: string }

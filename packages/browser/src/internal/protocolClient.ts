@@ -81,7 +81,12 @@ export interface ErrorMatcher {
 
 /** The session lifecycle a backend's events announce, applied by the reader before the event is queued. */
 export interface Lifecycle {
-  readonly attached: (key: Protocol.SessionKey, parent: Protocol.SessionKey | undefined) => void
+  /** A session attached under `parent`, driving a target of `kind`, which its rejected commands then name. */
+  readonly attached: (
+    key: Protocol.SessionKey,
+    parent: Protocol.SessionKey | undefined,
+    kind?: string | undefined
+  ) => void
   readonly ended: (key: Protocol.SessionKey, why: Protocol.SessionEnded["why"]) => void
 }
 
@@ -768,10 +773,12 @@ export const make: (
   const root = makeSession(undefined, undefined)
 
   const lifecycle: Lifecycle = {
-    attached: (key, parentKey) => {
+    attached: (key, parentKey, kind) => {
       if (sessions.has(key)) return
       const parent = parentKey === undefined ? root : sessions.get(parentKey)
-      if (parent !== undefined && parent.endedWith === undefined) makeSession(key, parent)
+      if (parent === undefined || parent.endedWith !== undefined) return
+      const state = makeSession(key, parent)
+      if (kind !== undefined) setTargetKind(state.handle, kind)
     },
     ended: (key, why) => {
       const state = sessions.get(key)

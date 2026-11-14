@@ -26,7 +26,7 @@ import * as Target from "../../cdp/Target.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
 import * as L1Target from "../../Target.ts"
 import * as Kit from "../adapterKit.ts"
-import * as ProtocolClient from "../protocolClient.ts"
+import type * as ProtocolClient from "../protocolClient.ts"
 import * as Urls from "../urls.ts"
 import { configureTarget, type Setup } from "./declare.ts"
 import * as Evaluation from "./evaluation.ts"
@@ -61,7 +61,6 @@ const newTarget = (
   page: PageEntry | undefined,
   frame: FrameEntry | undefined
 ): TargetEntry => {
-  ProtocolClient.setTargetKind(session, kind)
   const target: TargetEntry = {
     event: undefined as unknown as import("./state.ts").DispatchContext,
     kind,

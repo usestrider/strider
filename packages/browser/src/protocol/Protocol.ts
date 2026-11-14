@@ -700,8 +700,32 @@ export type RejectReason = "NoSuchTarget" | "NoSuchFrame" | "NoSuchNode" | "Inva
  * **Details**
  *
  * Each backend's error table maps the reply onto `reason`; a reply that nothing matches is `Unrecognized`,
- * never a guess. `code` and `description` are the browser's own code and message, as it sent them. `target`
- * is the kind of target the command went to (`page`, `iframe` or `worker`), when the backend attaches targets.
+ * never a guess. `code` and `description` are the browser's own code and message, as it sent them.
+ *
+ * `target` names the kind of target the command was sent to, on CDP: `page`, `iframe`, `worker`,
+ * `service_worker`, `shared_worker`, or `other`. It is absent for a command sent to the browser's own session,
+ * and on the other backends.
+ *
+ * **Example** (Saying where a command was refused)
+ *
+ * ```ts import.meta.vitest
+ * import { Emulation } from "@usestrider/browser/cdp"
+ * import { Protocol } from "@usestrider/browser/protocol"
+ * import { Effect } from "effect"
+ *
+ * const clear = (session: Protocol.ProtocolSession) =>
+ *   Emulation.clearDeviceMetricsOverride().pipe(
+ *     Protocol.on(session),
+ *     Effect.catchReason(
+ *       "ProtocolError",
+ *       "Rejected",
+ *       (rejected) =>
+ *         Effect.logWarning(
+ *           `refused on ${rejected.target ?? "the browser"}: ${rejected.description}`
+ *         )
+ *     )
+ *   )
+ * ```
  *
  * @stability experimental
  * @category reasons

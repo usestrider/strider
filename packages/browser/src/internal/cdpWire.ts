@@ -78,6 +78,16 @@ const incoming = (envelope: Record<string, unknown>): Result.Result<Incoming, st
   return Result.fail("the envelope is neither a reply nor an event")
 }
 
+// The kinds a rejected command names; a type Chromium adds later, such as `tab` or `auction_worklet`, is `other`
+const targetKind = (info: unknown): string | undefined => {
+  if (!isRecord(info) || typeof info.type !== "string") return undefined
+  const type = info.type
+  return type === "page" || type === "iframe" || type === "worker" || type === "service_worker" ||
+      type === "shared_worker"
+    ? type
+    : "other"
+}
+
 export const wire: Wire = {
   encode: (id, method, params, key) => JSON.stringify({ id, method, params, sessionId: key }),
   decode: (message) => Result.flatMap(parseRecord(message), incoming),
@@ -85,8 +95,9 @@ export const wire: Wire = {
     if (!isRecord(event.params)) return
     const key = sessionKey(event.params.sessionId)
     if (key === undefined) return
-    if (event.method === "Target.attachedToTarget") sessions.attached(key, event.key)
-    else if (event.method === "Target.detachedFromTarget") sessions.ended(key, "detached")
+    if (event.method === "Target.attachedToTarget") {
+      sessions.attached(key, event.key, targetKind(event.params.targetInfo))
+    } else if (event.method === "Target.detachedFromTarget") sessions.ended(key, "detached")
   },
   errors
 }
