@@ -138,7 +138,7 @@ const failure = (hint: string) =>
  * Requires `ChildProcessSpawner`. The output has no audio and preserves variable frame times to millisecond
  * precision; images are scaled proportionally and padded with black to the recording's original dimensions. Closing the input finishes the file.
  *
- * Quality is fixed: libvpx encodes in real time at its fastest speed with constrained quality (CRF 8, quantizer 0 to
+ * Quality is fixed: libvpx encodes in real-time mode with `-cpu-used 8`, at constrained quality (CRF 8, quantizer 0 to
  * 50) and a target of 4 Mbit/s, so small text stays legible at desktop size. The target is an average, not a cap: a
  * scroll or a page change can burst well above it, and a file's size follows what the page shows. For another
  * trade-off, provide your own `VideoWriter`.
