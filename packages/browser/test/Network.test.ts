@@ -467,6 +467,20 @@ describe("A HAR an export writes", () => {
     assert.deepStrictEqual(written.request.postData, { mimeType: "text/plain", text: "Yf/+", _encoding: "base64" })
   })
 
+  it("preserves a leading UTF-8 BOM when exporting text bodies for replay", () => {
+    const text = "\uFEFFhello"
+    const post = sent("POST", "https://shop.example.com/notes", "text/plain", "Q1.0")
+    const written = entryOf(
+      answered(post, { status: 200, headers: { "content-type": "text/plain" } }, {
+        request: bytes(text),
+        response: bytes(text)
+      }),
+      ["requestBodies"]
+    )
+    assert.strictEqual(written.response.content.text, text)
+    assert.strictEqual(written.request.postData?.text, text)
+  })
+
   const withCookies = (headers: Record<string, string>, response: Record<string, string>) => {
     const get = new NetworkRequest.NetworkRequest({
       ...request("GET", "https://shop.example.com/", headers),
