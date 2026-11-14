@@ -340,6 +340,8 @@ export type Request =
    */
   | {
     readonly op: "frame"
+    /** Milliseconds available for native clipping observation; 1000 when omitted, as for reads that never scroll. */
+    readonly cap?: number
     readonly steps: ReadonlyArray<Step>
     readonly scroll: boolean
     readonly clip?: Clip
@@ -1818,6 +1820,71 @@ export function engine(render: (root: SnapNode) => string) {
 
   const inViewport = (element: Element): boolean => visibleFragment(element) !== null
 
+  /** Paint-stack membership ignores overlays without mistaking their coverage for clipping. */
+  const exposedFragment = (element: Element, clip?: Clip): boolean => {
+    for (const rect of fragments(element, clip)) {
+      const x = fragmentCenter(rect.left, rect.right)
+      const y = fragmentCenter(rect.top, rect.bottom)
+      const roots: Array<Document | ShadowRoot> = [document]
+      const seen = new Set<Document | ShadowRoot>()
+      while (roots.length > 0) {
+        const root = roots.pop()!
+        if (seen.has(root)) continue
+        seen.add(root)
+        for (const hit of root.elementsFromPoint(x, y)) {
+          if (composedContains(element, hit)) return true
+          if (hit.shadowRoot !== null) roots.push(hit.shadowRoot)
+        }
+      }
+    }
+    return false
+  }
+
+  /** Compare native intersections with only scrollport clipping expanded; other clipping stays in force. */
+  /** `onCancel` receives a function that disconnects the observers and clears the timer at once, answering no evidence. */
+  const clippedByScroller = (
+    element: Element,
+    timeout: number,
+    clip?: Clip,
+    onCancel?: (cancel: () => void) => void
+  ): Promise<boolean | null> | null => {
+    let margin = 0
+    for (let ancestor = composedParent(element); ancestor !== null; ancestor = composedParent(ancestor)) {
+      const style = getComputedStyle(ancestor)
+      if (
+        (/^(auto|scroll|hidden)$/.test(style.overflowX) && ancestor.scrollWidth > ancestor.clientWidth) ||
+        (/^(auto|scroll|hidden)$/.test(style.overflowY) && ancestor.scrollHeight > ancestor.clientHeight)
+      ) {
+        const rect = ancestor.getBoundingClientRect()
+        margin += ancestor.scrollWidth + ancestor.scrollHeight + Math.abs(rect.left) + Math.abs(rect.top) +
+          rect.width + rect.height
+      }
+    }
+    if (margin === 0 || exposedFragment(element, clip)) return null
+    return new Promise((resume) => {
+      const observers: Array<IntersectionObserver> = []
+      const values: Array<boolean | undefined> = []
+      const finish = (value: boolean | null) => {
+        clearTimer(timer)
+        for (const observer of observers) observer.disconnect()
+        resume(value)
+      }
+      const timer = setTimer(() => finish(null), Math.max(0, timeout))
+      onCancel?.(() => finish(null))
+      for (const expanded of [false, true]) {
+        const observer = new IntersectionObserver(([entry]) => {
+          if (entry === undefined) return
+          const present = entry.intersectionRect.width > 0 && entry.intersectionRect.height > 0
+          values[expanded ? 1 : 0] = present
+          if (values[0] === true || values[1] === false) finish(false)
+          else if (values[0] === false && values[1] === true) finish(true)
+        }, { scrollMargin: expanded ? `${margin}px` : "0px" })
+        observers.push(observer)
+        observer.observe(element)
+      }
+    })
+  }
+
   /** Oversized unions can have their centre in a gap between fragments; align an edge in that case. */
   const scrollToFragments = (element: Element, inherited?: Clip) => {
     const rect = element.getBoundingClientRect()
@@ -2102,7 +2169,10 @@ export function engine(render: (root: SnapNode) => string) {
       frames: 0,
       sampled: false,
       tracked: null as Element | null,
-      rects: [] as Array<DOMRect>
+      rects: [] as Array<DOMRect>,
+      /** Set once the owner stops the action; a pending clipping observation then never continues. */
+      stopped: false,
+      cancelObservation: undefined as (() => void) | undefined
     }
   }
   type ActionState = ReturnType<typeof createAction>
@@ -2131,7 +2201,10 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   /** Resolves fresh DOM and runs exactly one readiness/application check. */
-  const checkAction = (request: Extract<Request, { op: "act" }>, state: ActionState): Response | undefined => {
+  const checkAction = (
+    request: Extract<Request, { op: "act" }>,
+    state: ActionState
+  ): Response | undefined | Promise<Response | undefined> => {
     treeScope = {}
     try {
       return checkActionIn(request, state)
@@ -2140,7 +2213,10 @@ export function engine(render: (root: SnapNode) => string) {
     }
   }
 
-  const checkActionIn = (request: Extract<Request, { op: "act" }>, state: ActionState): Response | undefined => {
+  const checkActionIn = (
+    request: Extract<Request, { op: "act" }>,
+    state: ActionState
+  ): Response | undefined | Promise<Response | undefined> => {
     const action = request.action
     clearTreeCaches()
     const found = resolve(request.steps)
@@ -2150,145 +2226,178 @@ export function engine(render: (root: SnapNode) => string) {
       state.tracked = element ?? null
       state.rects = []
     }
-    // What no waiting mends fails at once
-    if (element !== undefined) {
-      if (request.checks.editable && !editableKind(element)) {
-        return { _tag: "Final", final: { _tag: "NotEditable", element: describe(element) } }
-      }
-      if (
-        (action._tag === "Checked" && checkedOf(element) === null) ||
-        (action._tag === "Point" && action.checked === true && checkableForAction(element) === null)
-      ) {
-        return {
-          _tag: "Final",
-          final: {
-            _tag: "WrongElement",
-            expected: "a checkbox, a radio, or an ARIA checkable",
-            element: describe(element)
-          }
+    // Observation is asynchronous only when a clipping check is needed: a synchronous caller sees no extra turn.
+    const observation = element !== undefined && request.checks.inViewport &&
+        visibleFragment(element, request.clip) !== null
+      ? clippedByScroller(element, state.end - now(), request.clip, (cancel) => {
+        state.cancelObservation = cancel
+      })
+      : null
+    const proceed = (clipped: boolean): Response | undefined => {
+      // What no waiting mends fails at once
+      if (element !== undefined) {
+        if (request.checks.editable && !editableKind(element)) {
+          return { _tag: "Final", final: { _tag: "NotEditable", element: describe(element) } }
         }
-      }
-      if (action._tag === "Select" && !(element instanceof HTMLSelectElement)) {
-        return { _tag: "Final", final: { _tag: "WrongElement", expected: "a <select>", element: describe(element) } }
-      }
-      if (action._tag === "FileInput" && !(element instanceof HTMLInputElement && element.type === "file")) {
-        return {
-          _tag: "Final",
-          final: { _tag: "WrongElement", expected: "a file input", element: describe(element) }
-        }
-      }
-    }
-    const checks = request.checks
-    const evidence = state.previous
-    state.previous = null
-    let reason: NotReady | null = null
-    // Computed once: its dialog search may walk the whole document
-    let inert: NotReady | null = null
-    if (element === undefined) reason = { _tag: "NoMatch" }
-    else if (checks.visible && !rendered(element, false)) reason = { _tag: "NotVisible" }
-    else if (
-      checks.enabled && (
-        !enabled(element) || (action._tag === "Point" && action.checked === true &&
-          !enabled(checkableForAction(element) ?? element))
-      )
-    ) reason = { _tag: "Disabled" }
-    else if (checks.editable && readOnly(element)) reason = { _tag: "ReadOnly" }
-    else if (checks.notInert && (inert = inertReason(element)) !== null) reason = inert
-    else if (checks.inViewport && visibleFragment(element, request.clip) === null) {
-      reason = { _tag: "OutsideViewport" }
-      if (!state.scrolled) {
-        scrollToFragments(element, request.clip)
-        state.scrolled = true
-      }
-    } else if (checks.stable > 0) {
-      const rect = element.getBoundingClientRect()
-      state.rects.push(rect)
-      if (state.rects.length > checks.stable + 1) state.rects.shift()
-      const unchanged = evidence !== null && evidence.element === element && evidence.frames === checks.stable &&
-        sameRect(evidence.rect, rect)
-      if (
-        !unchanged &&
-        (state.rects.length < checks.stable + 1 || !state.rects.every((rect) => sameRect(rect, state.rects[0]!)))
-      ) {
-        reason = { _tag: "NotStable" }
-      }
-    }
-    const position = action._tag === "Point" ? action.position : null
-    const points = reason === null && element !== undefined && (action._tag === "Point" || checks.receivesPointer)
-      ? actionPoints(element, position, request.clip, checks.receivesPointer)
-      : []
-    const point = points[0] ?? null
-    if (reason === null && element !== undefined && (action._tag === "Point" || checks.receivesPointer)) {
-      if (point === null) reason = { _tag: "OutsideViewport" }
-      else if (checks.receivesPointer) {
-        const hit = hitTarget(point.x, point.y)
-        if (hit === null || !composedContains(element, hit)) reason = missed(element, hit)
-      }
-    }
-    if (reason === null && element !== undefined && action._tag === "Select") {
-      const options = Array.from(element instanceof HTMLSelectElement ? element.options : [])
-      const missing = action.choices.find((choice) =>
-        !options.some((option, index) => optionMatches(option, index, choice))
-      )
-      if (missing !== undefined) reason = { _tag: "NoSuchOption", option: describeChoice(missing) }
-      else if (checks.enabled) {
-        // The native rule, as the role filters use it: :disabled differs between browsers for options.
-        const off = action.choices.find((choice) =>
-          options.some((option, index) =>
-            optionMatches(option, index, choice) && (option.disabled || option.closest("optgroup[disabled]") !== null)
-          )
-        )
-        if (off !== undefined) reason = { _tag: "DisabledOption", option: describeChoice(off) }
-      }
-    }
-    if (reason === null && element !== undefined) {
-      if (
-        request.apply && action._tag === "Fill" && document.designMode === "on" &&
-        !(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)
-      ) {
-        const active = deepActive()
-        if (active !== element && (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement)) {
-          noteAction(state, { _tag: "PreparingFocus", from: describe(active) })
-          active.blur()
-          // Blur handlers can replace the target or change any effective check. Resolve and check again
-          // through the ordinary wait loop before selecting a range or allowing native insertion.
-          state.rects = []
-          return
-        }
-      }
-      // `ready` runs page code, such as focus handlers, which can change the tree: what follows walks it afresh
-      treeScope = null
-      let response = ready(element, action, request.apply, state.scrolled, point, checks)
-      if (response._tag === "Retry") {
-        reason = response.reason
-      } else {
         if (
-          response._tag === "Ready" && action._tag === "Point" && action.position === null &&
-          checks.receivesPointer && request.clip !== undefined && points.length > 1
+          (action._tag === "Checked" && checkedOf(element) === null) ||
+          (action._tag === "Point" && action.checked === true && checkableForAction(element) === null)
         ) {
-          response = { ...response, candidates: points }
-        }
-        if (request.stability === "capture" && checks.stable > 0 && !request.apply && response._tag === "Ready") {
-          const captured = {
-            token: `${generation}:${++stabilitySequence}`,
-            element,
-            rect: state.rects[state.rects.length - 1]!,
-            frames: checks.stable
+          return {
+            _tag: "Final",
+            final: {
+              _tag: "WrongElement",
+              expected: "a checkbox, a radio, or an ARIA checkable",
+              element: describe(element)
+            }
           }
-          stability = captured
-          const token = captured.token
-          onFrame(() => {
-            if (stability?.token === token) stability = null
-          })
-          return { ...response, stability: captured.token }
         }
-        return response
+        if (action._tag === "Select" && !(element instanceof HTMLSelectElement)) {
+          return { _tag: "Final", final: { _tag: "WrongElement", expected: "a <select>", element: describe(element) } }
+        }
+        if (action._tag === "FileInput" && !(element instanceof HTMLInputElement && element.type === "file")) {
+          return {
+            _tag: "Final",
+            final: { _tag: "WrongElement", expected: "a file input", element: describe(element) }
+          }
+        }
       }
+      const checks = request.checks
+      const evidence = state.previous
+      state.previous = null
+      let reason: NotReady | null = null
+      // Computed once: its dialog search may walk the whole document
+      let inert: NotReady | null = null
+      if (element === undefined) reason = { _tag: "NoMatch" }
+      else if (checks.visible && !rendered(element, false)) reason = { _tag: "NotVisible" }
+      else if (
+        checks.enabled && (
+          !enabled(element) || (action._tag === "Point" && action.checked === true &&
+            !enabled(checkableForAction(element) ?? element))
+        )
+      ) reason = { _tag: "Disabled" }
+      else if (checks.editable && readOnly(element)) reason = { _tag: "ReadOnly" }
+      else if (checks.notInert && (inert = inertReason(element)) !== null) reason = inert
+      else if (checks.inViewport && (visibleFragment(element, request.clip) === null || clipped)) {
+        reason = { _tag: "OutsideViewport" }
+        if (!state.scrolled) {
+          scrollToFragments(element, request.clip)
+          state.scrolled = true
+        }
+      } else if (checks.stable > 0) {
+        const rect = element.getBoundingClientRect()
+        state.rects.push(rect)
+        if (state.rects.length > checks.stable + 1) state.rects.shift()
+        const unchanged = evidence !== null && evidence.element === element && evidence.frames === checks.stable &&
+          sameRect(evidence.rect, rect)
+        if (
+          !unchanged &&
+          (state.rects.length < checks.stable + 1 || !state.rects.every((rect) => sameRect(rect, state.rects[0]!)))
+        ) {
+          reason = { _tag: "NotStable" }
+        }
+      }
+      const position = action._tag === "Point" ? action.position : null
+      const points = reason === null && element !== undefined && (action._tag === "Point" || checks.receivesPointer)
+        ? actionPoints(element, position, request.clip, checks.receivesPointer)
+        : []
+      const point = points[0] ?? null
+      if (reason === null && element !== undefined && (action._tag === "Point" || checks.receivesPointer)) {
+        if (point === null) reason = { _tag: "OutsideViewport" }
+        else if (checks.receivesPointer) {
+          const hit = hitTarget(point.x, point.y)
+          if (hit === null || !composedContains(element, hit)) reason = missed(element, hit)
+        }
+      }
+      if (reason === null && element !== undefined && action._tag === "Select") {
+        const options = Array.from(element instanceof HTMLSelectElement ? element.options : [])
+        const missing = action.choices.find((choice) =>
+          !options.some((option, index) => optionMatches(option, index, choice))
+        )
+        if (missing !== undefined) reason = { _tag: "NoSuchOption", option: describeChoice(missing) }
+        else if (checks.enabled) {
+          // The native rule, as the role filters use it: :disabled differs between browsers for options.
+          const off = action.choices.find((choice) =>
+            options.some((option, index) =>
+              optionMatches(option, index, choice) && (option.disabled || option.closest("optgroup[disabled]") !== null)
+            )
+          )
+          if (off !== undefined) reason = { _tag: "DisabledOption", option: describeChoice(off) }
+        }
+      }
+      if (reason === null && element !== undefined) {
+        if (
+          request.apply && action._tag === "Fill" && document.designMode === "on" &&
+          !(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)
+        ) {
+          const active = deepActive()
+          if (active !== element && (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement)) {
+            noteAction(state, { _tag: "PreparingFocus", from: describe(active) })
+            active.blur()
+            // Blur handlers can replace the target or change any effective check. Resolve and check again
+            // through the ordinary wait loop before selecting a range or allowing native insertion.
+            state.rects = []
+            return
+          }
+        }
+        // `ready` runs page code, such as focus handlers, which can change the tree: what follows walks it afresh
+        treeScope = null
+        let response = ready(element, action, request.apply, state.scrolled, point, checks)
+        if (response._tag === "Retry") {
+          reason = response.reason
+        } else {
+          if (
+            response._tag === "Ready" && action._tag === "Point" && action.position === null &&
+            checks.receivesPointer && request.clip !== undefined && points.length > 1
+          ) {
+            response = { ...response, candidates: points }
+          }
+          if (request.stability === "capture" && checks.stable > 0 && !request.apply && response._tag === "Ready") {
+            const captured = {
+              token: `${generation}:${++stabilitySequence}`,
+              element,
+              rect: state.rects[state.rects.length - 1]!,
+              frames: checks.stable
+            }
+            stability = captured
+            const token = captured.token
+            onFrame(() => {
+              if (stability?.token === token) stability = null
+            })
+            return { ...response, stability: captured.token }
+          }
+          return response
+        }
+      }
+      if (reason!._tag !== "NotStable") state.rects = []
+      // A rect still settling within its first frames is the check working, not a reason to report
+      if (reason!._tag !== "NotStable" || state.rects.length === checks.stable + 1) noteAction(state, reason!)
+      else if (state.history.length === 0) state.last = reason!
     }
-    if (reason!._tag !== "NotStable") state.rects = []
-    // A rect still settling within its first frames is the check working, not a reason to report
-    if (reason!._tag !== "NotStable" || state.rects.length === checks.stable + 1) noteAction(state, reason!)
-    else if (state.history.length === 0) state.last = reason!
+    if (observation === null) return proceed(false)
+    return observation.then((result) => {
+      state.cancelObservation = undefined
+      state.previous = null
+      // A stopped action must not scroll or apply anything after its owner has gone.
+      if (state.stopped || result === null || now() >= state.end) return
+      clearTreeCaches()
+      const current = resolve(request.steps)
+      // An observation belongs to one node; a replacement must start its own complete check.
+      if (current.length !== 1 || current[0] !== element) return
+      // The continuation runs after `checkAction` closed its tree scope, so it opens its own
+      treeScope = {}
+      try {
+        return proceed(result)
+      } finally {
+        treeScope = null
+      }
+    })
+  }
+
+  /** Stops an action's pending clipping observation: both observers disconnect and its continuation ends. */
+  const stopAction = (state: ActionState) => {
+    state.stopped = true
+    state.cancelObservation?.()
   }
 
   const act = async (request: Extract<Request, { op: "act" }>): Promise<Response> => {
@@ -2305,7 +2414,8 @@ export function engine(render: (root: SnapNode) => string) {
       }
       const first = !state.sampled
       state.sampled = true
-      const response = checkAction(request, state)
+      const checked = checkAction(request, state)
+      const response = checked instanceof Promise ? await checked : checked
       if (response !== undefined) return response
       // The first round returns early only when its first sample observed a blocker; after a stability
       // baseline it keeps waiting like any round, through later samples too.
@@ -3302,15 +3412,28 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   /** An iframe's content box origin, scrolled into view when asked, and what the pointer would hit at a point. */
-  const frame = (request: Extract<Request, { op: "frame" }>): Response => {
+  const frame = async (request: Extract<Request, { op: "frame" }>): Promise<Response> => {
     const found = resolve(request.steps)
     if (found.length > 1) return strict(found)
     const iframe = found[0]
     if (iframe === undefined) return { _tag: "NoMatch" }
     let scrolled = false
-    if (request.scroll && visibleFragment(iframe, request.clip) === null) {
-      scrollToFragments(iframe, request.clip)
-      scrolled = true
+    if (request.scroll) {
+      let outside = visibleFragment(iframe, request.clip) === null
+      if (!outside) {
+        const observation = clippedByScroller(iframe, request.cap ?? 1000, request.clip)
+        if (observation !== null) {
+          const result = await observation
+          clearTreeCaches()
+          const current = resolve(request.steps)
+          if (result === null || current.length !== 1 || current[0] !== iframe) return { _tag: "NoMatch" }
+          outside = result
+        }
+      }
+      if (outside) {
+        scrollToFragments(iframe, request.clip)
+        scrolled = true
+      }
     }
     const rect = iframe.getBoundingClientRect()
     const style = getComputedStyle(iframe)
@@ -3416,7 +3539,7 @@ export function engine(render: (root: SnapNode) => string) {
         case "title":
           return JSON.stringify({ _tag: "Title", title: document.title } satisfies Response)
         case "frame":
-          return JSON.stringify(frame(request))
+          return JSON.stringify(await frame(request))
         case "snapshot":
           return JSON.stringify(snapshot(request))
         case "explain":
@@ -3456,6 +3579,7 @@ export function engine(render: (root: SnapNode) => string) {
   const cooperativeHelpers = () => ({
     createAction,
     checkAction,
+    stopAction,
     actionTimeout,
     actionFrameTimeout,
     evaluate,
@@ -3475,11 +3599,16 @@ export function engine(render: (root: SnapNode) => string) {
 /** The key the engine is installed under in a realm's global: a symbol, out of the way of anything else. */
 export const installKey = "@usestrider/browser/engine/1"
 
+/** Drops the indentation of function source, which no line of it depends on, to stay within inspector packet limits. */
+const compact = (source: string): string => source.replace(/^[ \t]+/gm, "")
+
 /** Installs the engine in a realm, once: a function declaration for `evaluate`. */
 export const install = `function() {
   const key = Symbol.for(${JSON.stringify(installKey)});
   if (globalThis[key] === undefined) {
-    Object.defineProperty(globalThis, key, { value: (${engine.toString()})(${renderText.toString()}), enumerable: false });
+    Object.defineProperty(globalThis, key, { value: (${compact(engine.toString())})(${
+  compact(renderText.toString())
+}), enumerable: false });
   }
   return "installed";
 }`
@@ -3816,7 +3945,17 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
       if (session.request.op === "act") {
         const first = !session.state!.sampled
         session.state!.sampled = true
-        const response = helpers.checkAction(session.request, session.state!)
+        // Only a clipping observation is asynchronous; otherwise the wait starts in the same turn.
+        const state = session.state!
+        const checked = helpers.checkAction(session.request, state)
+        let response: Response | undefined
+        if (checked instanceof Promise) {
+          // The session owns the observation: cancellation or departure stops it before it can scroll or apply.
+          session.stopWaiting = () => helpers.stopAction(state)
+          response = await checked
+          session.stopWaiting = undefined
+          if (session.disposed) return stopped(session)
+        } else response = checked
         if (response !== undefined) return finished(session, response)
         if (session.request.sample === true && first && session.state!.history.length > 0) return expired(session)
         if (!(await wait(session, false))) return stopped(session)

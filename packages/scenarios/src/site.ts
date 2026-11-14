@@ -78,6 +78,12 @@ const routes: Record<
       `<h1>Benchmark</h1><label>Name <input></label><button onclick="document.querySelector('#count').textContent = String(Number(document.querySelector('#count').textContent) + 1)">Increment</button><p id="count">0</p>`
     )
   }),
+  "/benchmark-scroll-layout": () => ({
+    body: page(
+      "Scrolling layout",
+      `<div style="height:200px;overflow:auto"><button onclick="document.querySelector('#count').textContent = String(Number(document.querySelector('#count').textContent) + 1)">Increment</button><div style="height:1200px"></div></div><p id="count">0</p>`
+    )
+  }),
   "/benchmark-viewport": () => ({
     body: page(
       "Viewport benchmark",

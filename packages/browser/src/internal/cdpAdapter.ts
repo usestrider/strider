@@ -165,6 +165,7 @@ export const capabilities = (
       entry("evaluation.userActivation", "supported"),
       entry("input.insertText", "supported"),
       entry("input.pointerModifiers", "supported"),
+      entry("input.fractionalPointer", "supported"),
       entry("input.dragAndDrop", "supported", ["Strider catches the drag Chromium starts, and finishes it"]),
       entry("webSocketFrames", "supported"),
       entry("networkConnections", "supported"),

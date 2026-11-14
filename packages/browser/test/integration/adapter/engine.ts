@@ -260,6 +260,104 @@ export const engine = (backend: Backend) =>
     ).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor)))
     layer(fixture, { excludeTestServices: true })(
       (it) => {
+        it.effect("reuses same-frame stability inside a reachable scrolling layout", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(
+              backend,
+              `<div style="height:100px;overflow:auto"><button id="go">Go</button><div style="height:600px"></div></div>`,
+              countFrames()
+            )
+            const result = yield* revalidate(call, "")
+            assert.strictEqual(result.response._tag, "Ready")
+            assert.strictEqual(result.frames, 0)
+          }), timeout)
+
+        for (const mutation of ["disable", "replace"] as const) {
+          it.effect(`rechecks readiness after clipping observation: ${mutation}`, () =>
+            Effect.gen(function*() {
+              const { send } = yield* open(
+                backend,
+                `<style>#s{height:40px;overflow:auto}#go{margin-top:120px}#tail{height:300px}</style><div id="s"><button id="go">Go</button><div id="tail"></div></div>`,
+                `() => {
+                  const Native = IntersectionObserver
+                  let changed = false
+                  globalThis.IntersectionObserver = class extends Native {
+                    constructor(callback, options) {
+                      super((entries, observer) => {
+                        if (!changed) {
+                          changed = true
+                          const go = document.getElementById("go")
+                          ${
+                  mutation === "disable"
+                    ? "go.disabled = true"
+                    : `go.outerHTML = '<button id="go" disabled>Replacement</button>'`
+                }
+                          document.getElementById("s").scrollTop = 120
+                        }
+                        callback(entries.map(entry => ({ target: entry.target, intersectionRect: { width: 20, height: 20 } })), observer)
+                      }, options)
+                    }
+                  }
+                }`
+              )
+              const response = yield* send({
+                ...point(0),
+                checks: { ...all, stable: 0, receivesPointer: false },
+                action: { _tag: "Focus" },
+                apply: true,
+                cap: 200
+              })
+              assert.strictEqual(response._tag, "NotReady", JSON.stringify(response))
+              if (response._tag === "NotReady") assert(response.history.some((reason) => reason._tag === "Disabled"))
+            }), timeout)
+        }
+
+        for (const ending of ["cancel", "departure"] as const) {
+          it.effect(`cooperative clipping ${ending} stops the pending observation before scrolling`, () =>
+            Effect.gen(function*() {
+              const { call } = yield* open(
+                backend,
+                `<style>#s{height:40px;overflow:auto}#go{margin-top:120px}#tail{height:300px}</style><div id="s"><button id="go">Go</button><div id="tail"></div></div>`,
+                `() => {
+                  const Native = IntersectionObserver
+                  globalThis.clippingObservations = 0
+                  let started
+                  globalThis.clippingStarted = new Promise(resolve => { started = resolve })
+                  globalThis.IntersectionObserver = class extends Native {
+                    constructor(callback, options) {
+                      super(callback, options)
+                      globalThis.clippingObservations++
+                      if (globalThis.clippingObservations === 2) started()
+                    }
+                  }
+                }`
+              )
+              const request = point(0)
+              const result = yield* cooperativeExercise(
+                call,
+                `
+                document.querySelector('#s').scrollTop = 0
+                const first = await command({ command: "start", budget: 2000, request: ${JSON.stringify(request)} })
+                const r = document.querySelector('#go').getBoundingClientRect()
+                const geometry = { x: r.x, y: r.y, width: r.width, height: r.height, innerWidth, innerHeight }
+                const pending = command({ command: "resume", token: first.token, left: 2000, decision: "continue" })
+                await globalThis.clippingStarted
+                const observations = globalThis.clippingObservations
+                ${
+                  ending === "cancel"
+                    ? "await command({ command: \"cancel\" })"
+                    : "dispatchEvent(new Event(\"pagehide\"))"
+                }
+                const reply = await pending
+                return JSON.stringify({ geometry, observations, reply, scrollTop: document.querySelector('#s').scrollTop })
+              `
+              )
+              assert.strictEqual(result.observations, 2, JSON.stringify(result))
+              assert.strictEqual(result.reply._tag, ending === "departure" ? "Departed" : "Disposed")
+              assert.strictEqual(result.scrollTop, 0, "A stopped round must not scroll after its observation")
+            }), timeout)
+        }
+
         for (const cooperative of [false, true]) {
           it.effect(
             `keeps waiting after a baseline when a later blocker recovers with cooperative=${cooperative}`,

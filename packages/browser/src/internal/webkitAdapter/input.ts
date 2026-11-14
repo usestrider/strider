@@ -117,7 +117,7 @@ export const dispatchInputLaunched = Effect.fnUntraced(
             {
               sourceId: "mouse",
               origin: "Viewport",
-              location: { x: Math.round(event.x), y: Math.round(event.y) },
+              location: { x: event.x, y: event.y },
               mouseInteraction: event.type === "move" ? "Move" : event.type === "down" ? "Down" : "Up",
               ...(button === undefined ? {} : { pressedButton: button })
             }
@@ -132,7 +132,7 @@ export const dispatchInputLaunched = Effect.fnUntraced(
             {
               sourceId: "wheel",
               origin: "Viewport",
-              location: { x: Math.round(event.x), y: Math.round(event.y) },
+              location: { x: event.x, y: event.y },
               delta: { width: wheel.width, height: wheel.height }
             }
           ])
