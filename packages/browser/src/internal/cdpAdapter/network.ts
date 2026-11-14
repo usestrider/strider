@@ -108,6 +108,8 @@ const noExtraInfo = (state: State, request: RequestEntry) => {
 
 /** The headers as sent and received: to the hop they belong to, or kept until its request is sent. */
 const rawHeaders = (state: State, key: string, extra: ExtraInfo) => {
+  // An extra-info event carries no URL, so a request the browser answered itself is known by its id
+  if (state.answeredLocally.has(key)) return
   const request = state.requests.get(key)
   if (request !== undefined) return assign(state, request, extra)
   const early = state.earlyHeaders.get(key) ?? []
@@ -170,6 +172,8 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         // The browser answers it itself: no request, so the events that follow for its id find none
         state.pendingAttribution.delete(key)
         state.earlyHeaders.delete(key)
+        state.answeredLocally.add(key)
+        if (state.answeredLocally.size > 500) state.answeredLocally.delete(state.answeredLocally.values().next().value!)
         return
       }
       if (request !== undefined && params.redirectResponse !== undefined) {
@@ -326,6 +330,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     .on(Network.loadingFinished, (params, { state, target }) => {
       if (target === undefined) return
       state.pendingAttribution.delete(requestKey(target, params.requestId))
+      state.answeredLocally.delete(requestKey(target, params.requestId))
       for (const [id, auth] of target.proxyAuth ?? []) {
         if (auth.networkId === params.requestId) target.proxyAuth!.delete(id)
       }
@@ -358,6 +363,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     .on(Network.loadingFailed, (params, { state, target }) => {
       if (target === undefined) return
       state.pendingAttribution.delete(requestKey(target, params.requestId))
+      state.answeredLocally.delete(requestKey(target, params.requestId))
       for (const [id, auth] of target.proxyAuth ?? []) {
         if (auth.networkId === params.requestId) target.proxyAuth!.delete(id)
       }
