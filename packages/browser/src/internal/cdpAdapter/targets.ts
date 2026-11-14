@@ -33,6 +33,7 @@ import * as Evaluation from "./evaluation.ts"
 import { frameUrl, targetKind } from "./mapping.ts"
 import {
   ContextEntry,
+  credentialsScope,
   dispatchContext,
   type Event,
   type FrameEntry,
@@ -182,6 +183,7 @@ export const ended = (state: State, session: ProtocolClient.Session, reason: Pro
   for (const [key, pending] of state.pendingAttribution) {
     if (pending.target === target) state.pendingAttribution.delete(key)
   }
+  if (target.page === undefined) state.credentialsAttempted.delete(credentialsScope(target))
   state.targets.delete(session)
   if (state.targetsById.get(target.targetId) === target) state.targetsById.delete(target.targetId)
   state.workerContexts.delete(target)

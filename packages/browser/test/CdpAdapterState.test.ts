@@ -1926,7 +1926,7 @@ it.effect("correlates parent-page Fetch authentication with its worker's Network
         authChallengeResponse: { response: "ProvideCredentials", username: "user", password: Redacted.make("secret") }
       }
     })
-    assert.isTrue(state.requests.get(State.requestKey(worker, "R1"))?.credentialsAttempted)
+    assert.isTrue(state.credentialsAttempted.get(State.credentialsScope(parent))?.has("R1"))
     assert.isUndefined(parent.proxyAuth)
     yield* state.buffer.flush
   }))

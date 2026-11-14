@@ -19,6 +19,7 @@ import * as Urls from "../urls.ts"
 import { postData, resourceTypes } from "./mapping.ts"
 import { emitResponse, release, servedBy } from "./responses.ts"
 import {
+  credentialsScope,
   type Event,
   type ExtraInfo,
   frameOf,
@@ -320,6 +321,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     .on(Network.loadingFinished, (params, { state, target }) => {
       if (target === undefined) return
       state.pendingAttribution.delete(requestKey(target, params.requestId))
+      state.credentialsAttempted.get(credentialsScope(target))?.delete(params.requestId)
       for (const [id, auth] of target.proxyAuth ?? []) {
         if (auth.networkId === params.requestId) target.proxyAuth!.delete(id)
       }
@@ -352,6 +354,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     .on(Network.loadingFailed, (params, { state, target }) => {
       if (target === undefined) return
       state.pendingAttribution.delete(requestKey(target, params.requestId))
+      state.credentialsAttempted.get(credentialsScope(target))?.delete(params.requestId)
       for (const [id, auth] of target.proxyAuth ?? []) {
         if (auth.networkId === params.requestId) target.proxyAuth!.delete(id)
       }

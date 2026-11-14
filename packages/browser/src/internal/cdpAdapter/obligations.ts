@@ -19,6 +19,7 @@ import * as Declarations from "../declarations.ts"
 import * as Urls from "../urls.ts"
 import { failReasons, fetchHeaders, postData, resourceTypes } from "./mapping.ts"
 import {
+  credentialsScope,
   type Event,
   frameOf,
   type ObligationEntry,
@@ -355,17 +356,16 @@ const decide = (
             entry.target === obligation.target && entry.fetchId === requestId
           ) :
           undefined
-        const networkId = pending?.[0].slice(requestKey(obligation.target, "").length)
-        const related = direct === undefined && networkId !== undefined && obligation.target.page !== undefined
-          ? [...state.requests.values()].filter((entry) =>
-            entry.requestId === networkId && entry.target.page === obligation.target.page
-          )
-          : []
-        const request = direct ?? (related.length === 1 ? related[0] : undefined)
-        if (request === undefined || request.credentialsAttempted === true) {
+        const networkId = direct?.requestId ?? pending?.[0].slice(requestKey(obligation.target, "").length)
+        // The attempt is counted by the request's chain from its first pause, since Chromium can challenge a
+        // request before its Network event comes, on the page's session or its worker's
+        const scope = credentialsScope(obligation.target)
+        const attempted = state.credentialsAttempted.get(scope)
+        if (networkId === undefined || attempted?.has(networkId) === true) {
           return Fetch.continueWithAuth({ requestId, authChallengeResponse: { response: "CancelAuth" } }).pipe(on)
         }
-        request.credentialsAttempted = true
+        if (attempted === undefined) state.credentialsAttempted.set(scope, new Set([networkId]))
+        else attempted.add(networkId)
       }
       return Fetch.continueWithAuth({
         requestId,
