@@ -7,10 +7,13 @@ import "./traceProcesses.ts"
 import type { Entry, Origin } from "./failureTrace.ts"
 import { connection } from "./failureTrace.ts"
 import { install, TraceBuffer } from "./failureTrace.ts"
+import * as FirefoxCrashReports from "./firefoxCrashReports.ts"
 import { summarize } from "./pointerRecipients.ts"
 import { installTransfer, TransferScope } from "./traceTransfer.ts"
 
-const directory = path.resolve(import.meta.dirname, "../../../../.data/integration-failures")
+// `STRIDER_INTEGRATION_FAILURES` moves them, as the runner's own tests do so their fixtures leave nothing here
+const directory = process.env.STRIDER_INTEGRATION_FAILURES ||
+  path.resolve(import.meta.dirname, "../../../../.data/integration-failures")
 const workerDiagnostics = process.env.STRIDER_MACOS_WORKER_DIAGNOSTICS === "1"
 const nativeDiagnostics = process.platform === "darwin" && Boolean(process.env.STRIDER_MACOS_CRASH_DATABASE)
 const diagnosticFile = (task: RunnerTask) =>
@@ -36,8 +39,9 @@ installTransfer(() => {
     ? transfers.get(id) ?? sharedTransfer
     : sharedTransfer
 })
-const active = new Map<string, { trace: TraceBuffer; inBody: boolean }>()
+const active = new Map<string, { trace: TraceBuffer; inBody: boolean; started: number }>()
 let sharedFile = ""
+let fileStarted = Date.now()
 const completed = new Map<string, { file?: string | undefined; sequence: number; bytes: number; overflow: boolean }>()
 let nextConnection = 0
 const serialize = (value: unknown): string =>
@@ -229,6 +233,7 @@ install({
 export default class FailureTraceRunner extends TestRunner {
   override onCollectStart(file: RunnerTestFile) {
     super.onCollectStart(file)
+    fileStarted = Date.now()
     sharedFile = filename(file, "shared")
     sharedTransfer = new TransferScope(() => connection("child-transfer"))
     shared.clear()
@@ -243,7 +248,7 @@ export default class FailureTraceRunner extends TestRunner {
     await super.onBeforeRunTask(task)
     // Vitest returns early for skipped/todo tasks without calling onAfterRunTask.
     if (task.type === "test" && (task.mode === "run" || task.mode === "queued")) {
-      active.set(task.id, { trace: new TraceBuffer(), inBody: false })
+      active.set(task.id, { trace: new TraceBuffer(), inBody: false, started: Date.now() })
       transfers.set(task.id, new TransferScope(() => connection("child-transfer")))
     }
   }
@@ -275,6 +280,21 @@ export default class FailureTraceRunner extends TestRunner {
     transfers.delete(task.id)
     active.delete(task.id)
     const failed = task.result?.state === "fail"
+    // Firefox's crash reports that arrived while this test ran: kept beside its trace when it failed. A
+    // collection that fails is logged, and never keeps the trace from being saved or replaces the test's failure.
+    try {
+      // A passing test discards nothing: a recycled shared browser's reports may belong to an earlier failed test
+      if (failed) {
+        FirefoxCrashReports.keep(
+          FirefoxCrashReports.outbox,
+          path.join(directory, `${path.basename(task.file.filepath)}-${task.id}-${process.pid}-firefox-crash`),
+          running.started,
+          true
+        )
+      }
+    } catch (error) {
+      console.error("Couldn't keep Firefox's crash reports", error)
+    }
     const file = failed || retainPasses || diagnosticTest(task)
       ? save(filename(task, "test"), running.trace, task.name, !failed && !diagnosticTest(task))
       : undefined
@@ -295,6 +315,18 @@ export default class FailureTraceRunner extends TestRunner {
         "Shared setup/teardown and unattributed concurrent traffic; not assigned to an individual test",
         suite.result?.state !== "fail" && !diagnosticFile(suite)
       )
+    }
+    // The rest, such as a shared browser's, which closed with the shared scope: kept beside the shared trace when
+    // any test in the file failed, and deleted when none did. A collection that fails is logged and changes nothing else.
+    try {
+      FirefoxCrashReports.keep(
+        FirefoxCrashReports.outbox,
+        path.join(directory, `${path.basename(suite.file.filepath)}-${suite.id}-${process.pid}-shared-firefox-crash`),
+        fileStarted,
+        suite.result?.state === "fail"
+      )
+    } catch (error) {
+      console.error("Couldn't keep Firefox's crash reports", error)
     }
     shared.clear()
   }

@@ -8,6 +8,7 @@ import { Browser, Deadline, Ledger } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { site } from "../adapter/harness.ts"
+import * as FirefoxCrashReports from "../firefoxCrashReports.ts"
 import { supports } from "./capabilities.ts"
 
 const timeout = 60_000
@@ -29,7 +30,7 @@ const against = Effect.fnUntraced(function*<A, E>(operation: Effect.Effect<A, E>
 
 export const deadlines = (name: string, backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} deadlines`, () => {
-    layer(backend.pipe(Layer.provide(Layer.succeed(Ledger.CurrentLedger, ledger))), {
+    layer(backend.pipe(Layer.provide(Layer.succeed(Ledger.CurrentLedger, FirefoxCrashReports.wrap(ledger)))), {
       excludeTestServices: true,
       timeout
     })((it) => {

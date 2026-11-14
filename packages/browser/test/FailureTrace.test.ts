@@ -3,12 +3,18 @@ import * as Option from "effect/Option"
 import { randomUUID } from "node:crypto"
 import * as fs from "node:fs"
 import { stripTypeScriptTypes } from "node:module"
+import * as os from "node:os"
 import * as path from "node:path"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import { describe, expect, it } from "vitest"
 import { TraceBuffer } from "./integration/failureTrace.ts"
 import { pointerTap, summarize } from "./integration/pointerRecipients.ts"
 import { pipeObserver } from "./integration/tracePipe.ts"
 import { instrument } from "./integration/tracePlugin.ts"
+
+// The fixture runs write their artifacts here, never in the real `.data/integration-failures/`
+const failures = pathToFileURL(fs.mkdtempSync(path.join(os.tmpdir(), "strider-failure-trace-")) + path.sep)
+process.env["STRIDER_INTEGRATION_FAILURES"] = fileURLToPath(failures)
 
 // The runner reports every artifact it writes. Directory snapshots also pick up other runs' traces.
 const fixtureFiles = (
@@ -330,7 +336,7 @@ describe("failure trace runner lifecycle", () => {
 
   it("retains failures and shared hook context, discards passes, and observes owned processes", async () => {
     const { spawnSync } = await import("node:child_process")
-    const directory = new URL("../../../.data/integration-failures/", import.meta.url)
+    const directory = failures
     const run = spawnSync("pnpm", [
       "exec",
       "vitest",
@@ -383,6 +389,20 @@ describe("failure trace runner lifecycle", () => {
     expect(run.stderr).toContain("Integration failure trace:")
     // A failed outer assertion leaves the diagnostic files available for inspection.
     for (const name of files) fs.unlinkSync(new URL(name, directory))
+    const reportDirectories = files.filter((name) => name.startsWith("firefoxReports.fixture"))
+      .map((name) => new URL(name.replace(/\.ndjson$/, "-firefox-crash"), directory))
+    try {
+      // The runs' Firefox reports went to the temporary directory, and none to the real one
+      const real = new URL("../../../.data/integration-failures/", import.meta.url)
+      const runs = new Set(files.map((name) => name.match(/-(\d+)-[a-z]+\.ndjson$/)?.[1]))
+      expect(
+        (fs.existsSync(real) ? fs.readdirSync(real) : []).filter((name) =>
+          name.startsWith("firefoxReports.fixture") && runs.has(name.match(/-(\d+)-shared-firefox-crash$/)?.[1])
+        )
+      ).toEqual([])
+    } finally {
+      for (const file of reportDirectories) fs.rmSync(file, { recursive: true, force: true })
+    }
   }, 30_000)
 })
 
@@ -407,7 +427,7 @@ describe("owned Chromium pipe framing", () => {
 describe("failure trace files", () => {
   it("writes only JSON lines, even when a failing file has no shared traffic", async () => {
     const { spawnSync } = await import("node:child_process")
-    const directory = new URL("../../../.data/integration-failures/", import.meta.url)
+    const directory = failures
     fs.mkdirSync(directory, { recursive: true })
     const unrelated = new URL(`unrelated-${randomUUID()}.ndjson`, directory)
     const run = spawnSync("pnpm", [
@@ -441,7 +461,7 @@ describe("failure trace files", () => {
 describe("late cleanup overflow", () => {
   it("writes one terminal overflow marker with a new sequence number", async () => {
     const { spawnSync } = await import("node:child_process")
-    const directory = new URL("../../../.data/integration-failures/", import.meta.url)
+    const directory = failures
     const run = spawnSync("pnpm", [
       "exec",
       "vitest",
@@ -472,7 +492,7 @@ describe("late cleanup overflow", () => {
 describe("a browser shared through layer", () => {
   it("keeps a later failing test's traffic on the connection the first test's beforeEach built", async () => {
     const { spawnSync } = await import("node:child_process")
-    const directory = new URL("../../../.data/integration-failures/", import.meta.url)
+    const directory = failures
     const run = spawnSync("pnpm", [
       "exec",
       "vitest",
@@ -494,7 +514,7 @@ describe("a browser shared through layer", () => {
 describe("shared layer lifecycle attribution", () => {
   it("separates two failures and links shared acquisition and finalization", async () => {
     const { spawnSync } = await import("node:child_process")
-    const directory = new URL("../../../.data/integration-failures/", import.meta.url)
+    const directory = failures
     const run = spawnSync("pnpm", [
       "exec",
       "vitest",
@@ -541,7 +561,7 @@ describe("shared layer lifecycle attribution", () => {
 describe("skipped task bookkeeping", () => {
   it("does not treat a skipped test as a concurrent observer", async () => {
     const { spawnSync } = await import("node:child_process")
-    const directory = new URL("../../../.data/integration-failures/", import.meta.url)
+    const directory = failures
     const run = spawnSync("pnpm", [
       "exec",
       "vitest",
@@ -566,7 +586,7 @@ describe("skipped task bookkeeping", () => {
 describe("run-time skip bookkeeping", () => {
   it("does not treat a test that skipped itself as a concurrent observer", async () => {
     const { spawnSync } = await import("node:child_process")
-    const directory = new URL("../../../.data/integration-failures/", import.meta.url)
+    const directory = failures
     const run = spawnSync("pnpm", [
       "exec",
       "vitest",
@@ -1000,3 +1020,79 @@ describe("pointer recipient capture", () => {
     expect(summary[2]!.recipients.map((r) => [r.href, r.target])).toEqual([["http://leaf/", "a#go"]])
   })
 })
+
+it("keeps a shared Firefox's reports beside the shared trace of a file with a failed test", async () => {
+  const { spawnSync } = await import("node:child_process")
+  const run = spawnSync("pnpm", [
+    "exec",
+    "vitest",
+    "--run",
+    "--config",
+    "packages/browser/test/fixtures/failureTrace/vitest.config.ts",
+    "firefoxReports.fixture"
+  ], {
+    cwd: new URL("../../../", import.meta.url),
+    encoding: "utf8",
+    env: { ...process.env, STRIDER_TRACE_RETAIN_PASSES: "0" }
+  })
+  expect(run.status, run.stdout + run.stderr).toBe(1)
+  const files = [...run.stderr.matchAll(/Integration failure trace: (.+\.ndjson)/g)].map((match) => match[1]!)
+  const traces = files.filter((file) => file.endsWith("-test.ndjson"))
+  const shared = files.filter((file) => file.endsWith("-shared.ndjson"))
+  const reports = [...traces, ...shared].map((file) => file.replace(/\.ndjson$/, "-firefox-crash"))
+  try {
+    expect(traces).toHaveLength(1)
+    expect(shared).toHaveLength(1)
+    expect(
+      path.resolve(shared[0]!).startsWith(
+        path.resolve(new URL("../../../.data/integration-failures/", import.meta.url).pathname) + path.sep
+      ),
+      "runtime fixture artifacts must use a temporary directory"
+    ).toBe(false)
+    const text = fs.readFileSync(traces[0]!, "utf8")
+    expect(text).toContain("failed Firefox print")
+    expect(text).toContain("PDocAccessibleConstructor")
+    expect(text).toContain("NS_ERROR_UNEXPECTED")
+    // The shared browser was still running when the test ended, so nothing is kept for the test itself
+    expect(fs.existsSync(reports[0]!)).toBe(false)
+    // It closed with the file's shared scope: both its reports go beside the shared trace, since a test failed
+    const kept = shared[0]!.replace(/\.ndjson$/, "-firefox-crash")
+    expect(fs.readdirSync(kept).sort()).toEqual([
+      "failed-report.dmp",
+      "failed-report.extra",
+      "passing-report.dmp",
+      "passing-report.extra"
+    ])
+    expect(JSON.parse(fs.readFileSync(path.join(kept, "failed-report.extra"), "utf8")))
+      .toHaveProperty("ipc_channel_error", "PWindowGlobal::Msg_PDocAccessibleConstructor")
+  } finally {
+    for (const file of [...files, ...reports]) fs.rmSync(file, { recursive: true, force: true })
+  }
+}, 30_000)
+
+it("keeps an earlier shared-browser crash when a later passing test recycles the browser", async () => {
+  const { spawnSync } = await import("node:child_process")
+  const run = spawnSync("pnpm", [
+    "exec",
+    "vitest",
+    "--run",
+    "--config",
+    "packages/browser/test/fixtures/failureTrace/vitest.config.ts",
+    "firefoxReports.fixture"
+  ], {
+    cwd: new URL("../../../", import.meta.url),
+    encoding: "utf8",
+    env: { ...process.env, STRIDER_TRACE_RETAIN_PASSES: "0", STRIDER_REPORT_FIXTURE_RECYCLE: "1" }
+  })
+  const files = [...run.stderr.matchAll(/Integration failure trace: (.+\.ndjson)/g)].map((match) => match[1]!)
+  const shared = files.find((file) => file.endsWith("-shared.ndjson"))
+  const reports = files.map((file) => file.replace(/\.ndjson$/, "-firefox-crash"))
+  try {
+    expect(run.status, run.stdout + run.stderr).toBe(1)
+    expect(shared).toBeDefined()
+    const kept = shared!.replace(/\.ndjson$/, "-firefox-crash")
+    expect(fs.existsSync(path.join(kept, "failed-report.extra"))).toBe(true)
+  } finally {
+    for (const file of [...files, ...reports]) fs.rmSync(file, { recursive: true, force: true })
+  }
+}, 30_000)
