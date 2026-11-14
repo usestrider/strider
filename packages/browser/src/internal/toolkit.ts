@@ -49,9 +49,11 @@ import type * as Snapshot from "../Snapshot.ts"
 import type * as Target from "../Target.ts"
 import * as UncaughtException from "../UncaughtException.ts"
 import type * as UserContext from "../UserContext.ts"
+import * as Devices from "./devices.ts"
 import * as Events from "./events.ts"
 import * as Handles from "./handles.ts"
 import * as Keys from "./keys.ts"
+import * as LocatorImpl from "./locator.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import * as Runtime from "./runtime.ts"
@@ -829,20 +831,23 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
           yield* revealed === value ? locator.fill(value) : locator.fill(Redacted.make(revealed))
           return `filled ${target}`
         })),
+    // A chord's modifiers are held for its key; a bad modifier is refused as the press refuses a bad key, once the
+    // page and the target resolve
     press: ({ page: name, key: text, target }) => {
-      // A chord's modifiers are held for its key; a bad modifier is refused as the press refuses a bad key
       const chord = Keys.chord(text)
-      if (chord instanceof Reason.InvalidInput) {
-        return target === undefined
-          ? Effect.fail(failed("KeyboardError", `Keyboard.press: ${chord.message}`, chord._tag))
-          : Effect.fail(failed("LocatorError", `Locator.press ${target}: ${chord.message}`, chord._tag))
-      }
-      const options = { modifiers: chord.modifiers }
       return acting(name, (page) =>
         target === undefined
-          ? Effect.as(page.keyboard.press(chord.key, options), `pressed ${text}`)
+          ? Effect.as(
+            chord instanceof Reason.InvalidInput
+              ? Effect.fail(Devices.keyboardRefusal("Keyboard.press", chord))
+              : page.keyboard.press(chord.key, { modifiers: chord.modifiers }),
+            `pressed ${text}`
+          )
           : Effect.as(
-            Effect.flatMap(targeted(page, name, target), (locator) => locator.press(chord.key, options)),
+            Effect.flatMap(targeted(page, name, target), (locator) =>
+              chord instanceof Reason.InvalidInput
+                ? Effect.fail(LocatorImpl.refusal(locator, "Locator.press", chord))
+                : locator.press(chord.key, { modifiers: chord.modifiers })),
             `pressed ${text} on ${target}`
           ))
     },
