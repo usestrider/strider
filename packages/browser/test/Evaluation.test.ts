@@ -112,6 +112,34 @@ describe("Evaluation dispatch evidence", () => {
 })
 
 describe("Evaluation argument reconstruction", () => {
+  it("keeps interleaved staged functions separate and uses intrinsics captured before replacement", () => {
+    const results = runInNewContext(`(() => {
+      const helper = ${Utility.source}
+      globalThis.eval = () => () => -1
+      Array.prototype.join = () => "() => -2"
+      helper.stage(1, 1, "41")
+      helper.stage(2, 0, "() => ")
+      helper.stage(1, 0, "() => ")
+      helper.stage(2, 1, "42")
+      return [helper.compile(2)(), helper.compile(1)()]
+    })()`)
+    assert.deepStrictEqual(Array.from(results), [42, 41])
+  })
+
+  it("refuses a staged function that an eval replaced before installation compiled", () => {
+    const thrown = runInNewContext(`(() => {
+      globalThis.eval = () => () => -1
+      const helper = ${Utility.source}
+      helper.stage(1, 0, "() => 42")
+      try {
+        return helper.compile(1)()
+      } catch (error) {
+        return error.message
+      }
+    })()`)
+    assert.include(thrown, "didn't compile the function staged in parts")
+  })
+
   it("constructs WebKit callbacks outside the handle-group wrapper bindings", () => {
     const call = runInNewContext(
       `(${

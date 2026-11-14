@@ -22,6 +22,9 @@ import { startMiniBrowser } from "./stockWebKit.ts"
 
 const timeout = 60_000
 
+/** A page whose Content-Security-Policy forbids eval and its inline script. */
+const cspPage = "<title>Policy</title><h1>Policy</h1><script>document.title = 'Ran'</script>"
+
 const fixtureUrl = (origin: string, html: string) => `${origin}/fixture?html=${encodeURIComponent(html)}`
 
 /** A tab with a heading and a button that reports whether its analytics call went through. */
@@ -30,6 +33,15 @@ const tabUrl = (origin: string, heading: string) =>
     origin,
     `<title>${heading}</title><h1>${heading}</h1><button onclick="fetch('/analytics/hit').then(() => { document.getElementById('out').textContent = 'sent' }, () => { document.getElementById('out').textContent = 'blocked' })">Refresh</button><p id="out">waiting</p>`
   )
+
+/**
+ * A function whose declaration is over 128 KiB once JSON-encoded twice, as the attached inspector sends it: a string
+ * of quotes, backslashes, newlines and non-ASCII text, whose length it returns.
+ */
+const large = (() => {
+  const text = "\"\\\né漢😀".repeat(20_000)
+  return { fn: new Function(`return ${JSON.stringify(text)}.length`) as () => number, length: text.length }
+})()
 
 /** The reason a failed effect gave, and the operation's dispatch. */
 const reasonOf = <A, E>(exit: Exit.Exit<A, E>) => {
@@ -42,6 +54,7 @@ const reasonOf = <A, E>(exit: Exit.Exit<A, E>) => {
         readonly capability?: string
         readonly netError?: string
         readonly hint?: string
+        readonly exception?: { readonly message: string }
       }
       readonly diagnostics?: { readonly dispatch: { readonly _tag: string } }
     }
@@ -280,6 +293,45 @@ describe("Stock WebKit, attached through its remote inspector", () => {
             const handler = reasonOf(yield* Effect.exit(Dialog.handle(tab, Dialog.acceptAll)))
             assert.strictEqual(handler?._tag, "DeclarationError")
             assert.strictEqual(handler?.reason?.capability, "prompts")
+          }))
+        }).pipe(Effect.provide(attach(endpoint)))
+      }))
+
+    it.effect("queries a page whose policy forbids eval, and evaluates a function over the message limit", () =>
+      Effect.gen(function*() {
+        const { origin } = yield* site
+        const { endpoint } = yield* startMiniBrowser(`${origin}/csp?html=${encodeURIComponent(cspPage)}`)
+        yield* Effect.gen(function*() {
+          const browser = yield* Browser.Browser
+          yield* Effect.scoped(Effect.gen(function*() {
+            const tab = yield* (yield* byTitle(browser, "Policy")).control
+            // The policy holds: the page's inline script never ran
+            assert.strictEqual(yield* tab.evaluateInMainWorld(() => document.title), "Policy")
+            // The engine's install is larger than one message, so it's compiled in the page in parts
+            assert.strictEqual(yield* tab.getByRole("heading").readText, "Policy")
+            assert.strictEqual(yield* tab.evaluateInMainWorld(large.fn), large.length)
+          }))
+        }).pipe(Effect.provide(attach(endpoint)))
+      }))
+
+    it.effect("evaluates a declaration one message carries when the page replaced eval, and refuses a larger one", () =>
+      Effect.gen(function*() {
+        const { origin } = yield* site
+        const html = "<title>Custom eval</title><script>globalThis.eval = () => () => -1</script>"
+        const { endpoint } = yield* startMiniBrowser(fixtureUrl(origin, html))
+        yield* Effect.gen(function*() {
+          const browser = yield* Browser.Browser
+          yield* Effect.scoped(Effect.gen(function*() {
+            const tab = yield* (yield* byTitle(browser, "Custom eval")).control
+            assert.strictEqual(yield* tab.evaluateInMainWorld(() => 42), 42)
+            // One message still carries this declaration, so the page's eval never compiles it
+            const fits = new Function(`/*${"x".repeat(70_000)}*/ return 42`) as () => number
+            assert.strictEqual(yield* tab.evaluateInMainWorld(fits), 42)
+            // This one is compiled from parts in the page, which the page's eval can't be trusted to do
+            const staged = new Function(`/*${"x".repeat(200_000)}*/ return 42`) as () => number
+            const refused = reasonOf(yield* Effect.exit(tab.evaluateInMainWorld(staged)))
+            assert.strictEqual(refused?.reason?._tag, "EvaluationThrown")
+            assert.include(refused?.reason?.exception?.message, "didn't compile the function staged in parts")
           }))
         }).pipe(Effect.provide(attach(endpoint)))
       }))
