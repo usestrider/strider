@@ -56,6 +56,16 @@ export const register = (handlers: Kit.Handlers<Event>) =>
   handlers
     .on(Fetch.requestPaused, (params, { state, target }) => {
       if (target === undefined) return
+      if (Urls.answeredLocally(params.request.url)) {
+        // Not a request, so no route sees it
+        const on = Protocol.on(target.session)
+        state.buffer.later(
+          params.responseStatusCode !== undefined || params.responseErrorReason !== undefined
+            ? Fetch.continueResponse({ requestId: params.requestId }).pipe(on)
+            : Fetch.continueRequest({ requestId: params.requestId }).pipe(on)
+        )
+        return
+      }
       const proxy = target.page?.context.proxy ?? state.workerContexts.get(target)?.proxy
       if (proxy?.credentials !== undefined && params.responseStatusCode === undefined) {
         target.proxyAuth ??= new Map()
@@ -148,6 +158,14 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     })
     .on(Fetch.authRequired, (params, { state, target }) => {
       if (target === undefined) return
+      if (Urls.answeredLocally(params.request.url)) {
+        // Not a request, so no route sees it
+        state.buffer.later(
+          Fetch.continueWithAuth({ requestId: params.requestId, authChallengeResponse: { response: "Default" } })
+            .pipe(Protocol.on(target.session))
+        )
+        return
+      }
       const proxy = target.page?.context.proxy ?? state.workerContexts.get(target)?.proxy
       if (params.authChallenge.source === "Proxy" && proxy?.credentials !== undefined) {
         target.proxyAuth ??= new Map()

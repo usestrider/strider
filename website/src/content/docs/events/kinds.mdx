@@ -32,8 +32,9 @@ const openOrders = Effect.fn("openOrders")(function*(page: Page.Page) {
 
 The navigation is data: `Committed` with its response, `SameDocument` for a fragment or the History API, which
 WebKit doesn't report, `Restored` from the back/forward cache, and the rest of
-[`PageNavigation`'s variants](/docs/api/browser/PageNavigation#PageNavigation). `waitUntil: "load"` also waits for
-the document to load.
+[`PageNavigation`'s variants](/docs/api/browser/PageNavigation#PageNavigation). A committed navigation's response
+is an `Option`, with `None` for `about:blank`, `data:`, and `blob:` URLs, because these loads don't use the network.
+`waitUntil: "load"` also waits for the document to load.
 
 ## Popups
 

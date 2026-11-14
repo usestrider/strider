@@ -206,7 +206,7 @@ interface NavigationModel {
     | { _tag: "Unresolved"; lastObserved: Evidence }>
 }
 type NavigationOutcome =
-  | { _tag: "Committed"; document: DocumentId; response: Option<ResponseRef> }   // None: about:blank, data:, and so on
+  | { _tag: "Committed"; document: DocumentId; response: Option<ResponseRef> }   // None: about:blank, data:, blob:
   | { _tag: "SameDocument"; document: DocumentId; via: "fragment" | "historyApi" | "intercepted" }
   | { _tag: "Restored"; document: DocumentId }        // back/forward cache
   | { _tag: "Activated"; document: DocumentId }       // prerender activation is not implemented
@@ -466,6 +466,11 @@ contexts must not be enabled by a host until expiry cleanup is available.
   - **No contradictions.** A timeout or disconnect after sending records `unknown` and never sends a contradictory fallback.
 
 ## 6. Network
+
+A `data:` or `blob:` URL is no network request: the browser answers it from the URL or from memory. The model reports
+no request, response, or route pause for one, on any backend, though Chromium and stock WebKit report both and Firefox
+reports `data:` ones; a navigation to one commits with no response, as one to `about:blank` does.
+[No requests for URLs the browser answers](docs/decisions.md#no-requests-for-urls-the-browser-answers) says why.
 
 A new context may carry a normalized HTTP proxy endpoint, a bypass host list (default empty), and optional
 credentials with a Redacted password. An omitted proxy leaves browser settings untouched. CDP and BiDi set the

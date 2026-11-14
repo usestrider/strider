@@ -267,6 +267,39 @@ const landedAs = (served?: { readonly hasExtraInfo: boolean; readonly fromDiskCa
 
 const landed = landedAs()
 
+describe("CDP events after a locally answered request", () => {
+  it.effect("does not retain extra headers after dropping a request", () =>
+    Effect.gen(function*() {
+      const { state, target } = yield* withPage()
+      const handlers = Network.register(Kit.handlers<State.Event>())
+      const event = { state, target }
+      handlers.apply("Network.requestWillBeSent", sent("data:text/plain,inline"), event)
+      handlers.apply("Network.requestWillBeSentExtraInfo", sentAs({}), event)
+      handlers.apply("Network.responseReceivedExtraInfo", received(200, {}), event)
+      assert.strictEqual(state.requests.size, 0)
+      assert.strictEqual(state.earlyHeaders.size, 0)
+    }).pipe(Effect.scoped))
+
+  it.effect("does not expose an auth pause for a dropped request", () =>
+    Effect.gen(function*() {
+      const { facts, state, target } = yield* withPage()
+      const handlers = Obligations.register(Network.register(Kit.handlers<State.Event>()))
+      const event = { state, target }
+      const request = sent("data:text/plain,inline")
+      handlers.apply("Network.requestWillBeSent", request, event)
+      handlers.apply("Fetch.authRequired", {
+        requestId: "F1",
+        frameId: "T1",
+        resourceType: "Fetch",
+        request: request.request,
+        authChallenge: { source: "Server", origin, scheme: "basic", realm: "website" }
+      }, event)
+      yield* state.buffer.flush
+      assert.deepStrictEqual(facts.filter((fact) => fact._tag === "ObligationOpened"), [])
+      assert.strictEqual(state.obligations.size, 0)
+    }).pipe(Effect.scoped))
+})
+
 /** Plays a redirect's events in the order given, and gives back the responses and hop headers it reported. */
 const play = Effect.fnUntraced(function*(order: ReadonlyArray<readonly [string, unknown]>) {
   const { facts, state, target } = yield* withPage()

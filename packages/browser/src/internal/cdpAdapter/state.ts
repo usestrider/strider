@@ -321,6 +321,8 @@ export interface State {
   readonly pendingAttribution: Map<string, Attribution>
   /** ExtraInfo that came before its request, by request key; a few hundred at most. */
   readonly earlyHeaders: Map<string, Array<ExtraInfo>>
+  /** Requests the browser answers itself (`data:`, `blob:`), by request key, until they end: their ExtraInfo is dropped; a few hundred at most. */
+  readonly answeredLocally: Set<string>
   /** Requests a route failed, by their `Network` key: an abort a route made has nothing after it to end it. */
   readonly routeFailed: Set<string>
   readonly obligations: Map<Adapter.ObligationId, ObligationEntry>
@@ -391,6 +393,7 @@ export const make = (options: {
     }),
     pendingAttribution: new Map(),
     earlyHeaders: new Map(),
+    answeredLocally: new Set(),
     routeFailed: new Set(),
     obligations: new Map(),
     downloads: new Map(),
