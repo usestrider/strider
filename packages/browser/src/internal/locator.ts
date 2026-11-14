@@ -1875,7 +1875,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
               events,
               frame === undefined
                 ? undefined
-                : { frame: frame.frame, origin: ready.path.at(-1)!.origin, path: ready.path },
+                : { frame: frame.frame, origin: ready.path.at(-1)?.origin ?? { x: 0, y: 0 }, path: ready.path },
               pointer ? frames : undefined
             ).pipe(
               Effect.tapError((error) =>
