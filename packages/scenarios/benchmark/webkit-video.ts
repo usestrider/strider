@@ -1,5 +1,5 @@
 /** Paired stock-WebKit sampling probe. Run only under the browser lock, in the pinned integration shell.
- * clutch lock browser -- nix develop .#integration --ignore-environment --keep TERM --command node packages/scenarios/benchmark/webkit-video.ts
+ * nix develop .#integration --ignore-environment --keep TERM --command node packages/scenarios/benchmark/webkit-video.ts
  * Optional arguments: output directory, seconds per sample (default 8), repetitions (default 3).
  * Polling matches trace.ts: wait interval, then capture; encoding repeats the latest PNG at 25fps.
  */
