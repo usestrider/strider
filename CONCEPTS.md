@@ -483,7 +483,7 @@ Only website challenges receive this pair: CDP supplies the challenge source, an
 header, and an explicitly empty challenge list. Passwords remain redacted until answering the
 protocol obligation. Automatic decisions are bounded to one credential submission across a native request and its whole redirect chain, even across origins; attempt
 state is kept by the native request's id from its first interception, since Chromium can challenge a request before
-it reports the request's network events, and ends with that request or its page. Unconfigured requests gain no
+it reports the request's network events, and ends with that request, the worker or frame that made it, or its page. Unconfigured requests gain no
 attempt state or interception. Stock WebKit refuses the option through its auth interception capability.
 
 Automatic proxy authentication participates in native interception without replacing route declarations. CDP
