@@ -177,7 +177,7 @@ upstream(import.meta.filename, {}, (test) => {
           role: "combobox",
           name: "",
           expanded: false,
-          // Strider omits a closed select's options from the tree (ROOK-545), so this fails until that's fixed
+          // Strider omits a closed select's options from the tree, so this fails until that's fixed
           children: [
             { role: "option", name: "First Option", selected: true },
             { role: "option", name: "Second Option" }

@@ -36,7 +36,7 @@
       "HA-054"
     ],
     "status": "needsFeature",
-    "issue": "ROOK-370",
+    "matrix": "method-apirequestcontext-fetch",
     "reason": "The requests of an APIRequestContext (`context.request` or `page.request`), which Strider has no counterpart of, are recorded or excluded here"
   },
   {
@@ -47,7 +47,7 @@
       "HA-065"
     ],
     "status": "needsFeature",
-    "issue": "ROOK-370",
+    "matrix": "method-apirequestcontext-fetch",
     "reason": "A standalone request context whose requests are recorded to a HAR, which Strider doesn't have"
   },
   {

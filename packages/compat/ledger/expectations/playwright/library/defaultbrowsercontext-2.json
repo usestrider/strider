@@ -68,6 +68,6 @@
       "DC-034"
     ],
     "status": "notApplicable",
-    "reason": "Strider won't collect coverage from a browser run (ROOK-385, ROOK-386): build-time instrumentation, read back with evaluate, works on every browser. JavaScript coverage (`page.coverage.startJSCoverage`), which Strider doesn't have"
+    "reason": "Strider won't collect coverage from a browser run: build-time instrumentation, read back with evaluate, works on every browser. JavaScript coverage (`page.coverage.startJSCoverage`), which Strider doesn't have"
   }
 ]

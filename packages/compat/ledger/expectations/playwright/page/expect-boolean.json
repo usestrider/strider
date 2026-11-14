@@ -20,7 +20,7 @@
       "EX-072"
     ],
     "status": "needsFeature",
-    "issue": "ROOK-370",
+    "matrix": "method-apiresponseassertions-tobeok",
     "reason": "Asserts `toBeOK` on the response of `page.request.get`, and on the error text it prints for a failing response, including its text body. Strider has no API request client or response object, and no response matcher; a browser's responses are network events"
   },
   {

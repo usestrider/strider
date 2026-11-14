@@ -12,7 +12,6 @@
       "CL-119"
     ],
     "status": "fails",
-    "issue": "ROOK-513",
     "reason": "A timed-out action's message names only its operation and phase, not the reason it observed"
   }
 ]

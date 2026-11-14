@@ -13,7 +13,7 @@
  * - "should warn about recursive objects" asserts Strider's typed reason, `NotSerializable`, which is more specific than
  *   Puppeteer's message. The cyclic object is the argument, and it's rejected before the page sees it.
  * - "should accept object handle to unserializable value" and "should not throw for circular objects" are ported as
- *   written. Strider's known gaps: a handle to `Infinity` loses its value (ROOK-568), and reading a cyclic object fails
+ *   written. Strider's known gaps: a handle to `Infinity` loses its value, and reading a cyclic object fails
  *   `NotSerializable` ("nested deeper than the browser serializes"), so these fail on Chromium.
  * - "should return the RemoteObject" is not applicable: `remoteObject()` returns the Chrome DevTools Protocol's
  *   `Runtime.RemoteObject`, a protocol detail that Strider's handles don't expose.

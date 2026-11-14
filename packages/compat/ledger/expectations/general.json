@@ -76,7 +76,7 @@
       "tests/library/browsercontext-fetch-happy-eyeballs.spec.ts"
     ],
     "status": "needsFeature",
-    "issue": "ROOK-370",
+    "matrix": "method-apirequest-newcontext",
     "reason": "Playwright's APIRequestContext, an HTTP client beside the browser (context.request, playwright.request.newContext); Strider has none"
   },
   {

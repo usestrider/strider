@@ -14,7 +14,7 @@
       "[coverage.test] Coverage specs JSCoverage includeRawScriptCoverage should include rawScriptCoverage field when enabled"
     ],
     "status": "notApplicable",
-    "reason": "Strider won't collect coverage from a browser run (ROOK-385, ROOK-386): build-time instrumentation, read back with evaluate, works on every browser. Starts and stops JavaScript coverage with `page.coverage`, which Strider doesn't have: no public JavaScript coverage collection. The matrix row for `startJSCoverage` is the nearest for the options some of these tests pass (`useBlockCoverage`, `includeRawScriptCoverage`), which have no row of their own"
+    "reason": "Strider won't collect coverage from a browser run: build-time instrumentation, read back with evaluate, works on every browser. Starts and stops JavaScript coverage with `page.coverage`, which Strider doesn't have: no public JavaScript coverage collection. The matrix row for `startJSCoverage` is the nearest for the options some of these tests pass (`useBlockCoverage`, `includeRawScriptCoverage`), which have no row of their own"
   },
   {
     "tests": [
@@ -22,14 +22,14 @@
       "[coverage.test] Coverage specs JSCoverage should ignore pptr internal scripts if reportAnonymousScripts is true"
     ],
     "status": "notApplicable",
-    "reason": "Strider won't collect coverage from a browser run (ROOK-385, ROOK-386): build-time instrumentation, read back with evaluate, works on every browser. Reports anonymous and evaluated scripts with `startJSCoverage({ reportAnonymousScripts: true })`, and Strider has no JavaScript coverage to report them from"
+    "reason": "Strider won't collect coverage from a browser run: build-time instrumentation, read back with evaluate, works on every browser. Reports anonymous and evaluated scripts with `startJSCoverage({ reportAnonymousScripts: true })`, and Strider has no JavaScript coverage to report them from"
   },
   {
     "tests": [
       "[coverage.test] Coverage specs JSCoverage resetOnNavigation should NOT report scripts across navigations when enabled"
     ],
     "status": "notApplicable",
-    "reason": "Strider won't collect coverage from a browser run (ROOK-385, ROOK-386): build-time instrumentation, read back with evaluate, works on every browser. Checks that JavaScript coverage forgets scripts across navigations, the `resetOnNavigation` option, and Strider has no JavaScript coverage to reset"
+    "reason": "Strider won't collect coverage from a browser run: build-time instrumentation, read back with evaluate, works on every browser. Checks that JavaScript coverage forgets scripts across navigations, the `resetOnNavigation` option, and Strider has no JavaScript coverage to reset"
   },
   {
     "tests": [
@@ -44,7 +44,7 @@
       "[coverage.test] Coverage specs CSSCoverage should work with a recently loaded stylesheet"
     ],
     "status": "notApplicable",
-    "reason": "Strider won't collect coverage from a browser run (ROOK-385, ROOK-386): build-time instrumentation, read back with evaluate, works on every browser. Starts and stops CSS coverage with `page.coverage`, which Strider doesn't have: no public CSS coverage collection"
+    "reason": "Strider won't collect coverage from a browser run: build-time instrumentation, read back with evaluate, works on every browser. Starts and stops CSS coverage with `page.coverage`, which Strider doesn't have: no public CSS coverage collection"
   },
   {
     "tests": [
@@ -52,6 +52,6 @@
       "[coverage.test] Coverage specs CSSCoverage resetOnNavigation should NOT report scripts across navigations"
     ],
     "status": "notApplicable",
-    "reason": "Strider won't collect coverage from a browser run (ROOK-385, ROOK-386): build-time instrumentation, read back with evaluate, works on every browser. Checks whether CSS coverage keeps stylesheets across navigations, the `resetOnNavigation` option, and Strider has no CSS coverage to reset"
+    "reason": "Strider won't collect coverage from a browser run: build-time instrumentation, read back with evaluate, works on every browser. Checks whether CSS coverage keeps stylesheets across navigations, the `resetOnNavigation` option, and Strider has no CSS coverage to reset"
   }
 ]

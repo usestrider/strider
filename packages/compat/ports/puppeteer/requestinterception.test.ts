@@ -85,7 +85,7 @@
  *     typed as strings and refuses anything else at compile time, so the stringifying test is not applicable.
  *   - The binary and content-length tests read the image's size and the body's length the way the Playwright port of the
  *     same tests does (`pngSize`, the page's text). A fulfilled body isn't read back through `NetworkResponse` on Chromium
- *     (ROOK-540), so the page's text stands for it.
+ *    , so the page's text stands for it.
  *   - "should report correct encoding from page when content-type is set" reads the page's `innerText`, as the original does.
  */
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
@@ -994,7 +994,7 @@ upstream(import.meta.filename, {
       const response = valueOf(responseOf(navigation), "response")
       assert.strictEqual(response.status, 201)
       assert.strictEqual(response.headers["foo"], "bar")
-      // The body is read from the page: a fulfilled body can't be read back through NetworkResponse on Chromium (ROOK-540)
+      // The body is read from the page: a fulfilled body can't be read back through NetworkResponse on Chromium
       assert.strictEqual(
         yield* page.evaluateInMainWorld(() =>
           document.body.textContent

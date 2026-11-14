@@ -78,7 +78,7 @@ upstream(import.meta.filename, {}, (test) => {
       yield* page.route("**/empty.html", () => Route.fulfill(HttpServerResponse.text("fulfilled")))
       yield* page.route("**/empty.html", () => Route.fallthrough)
       yield* page.goto(server.EMPTY_PAGE, { waitUntil: "load" })
-      // Strider's Chromium can't read a fulfilled body back through the navigation's response (ROOK-540), so the
+      // Strider's Chromium can't read a fulfilled body back through the navigation's response, so the
       // page's text is what the page received
       assert.strictEqual(yield* receivedText(page), "fulfilled")
       assert.isFalse(failed)

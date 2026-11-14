@@ -38,14 +38,15 @@ Each run writes `.data/compat/runs/<run>/run.json` and `report.md`, and a failed
   name `tests` (keys, `*` matching anything), optionally `browsers`, and a `status`. Entries over whole files, such
   as Playwright's inspector, are in `general.json`, with `source` and `files` (globs).
 
-  | Status              | Means                                                              | Names            |
-  | ------------------- | ------------------------------------------------------------------ | ---------------- |
-  | `fails`             | ported, and fails for a bug in Strider                             | `issue`          |
-  | `needsFeature`      | can't be ported until Strider has the API                          | `issue`/`matrix` |
-  | `differentByDesign` | Strider decided otherwise                                          | `decision`       |
-  | `notApplicable`     | tests what Strider doesn't have or shouldn't, such as an inspector | `reason`         |
+  | Status              | Means                                                              | Names      |
+  | ------------------- | ------------------------------------------------------------------ | ---------- |
+  | `fails`             | ported, and fails for a bug in Strider                             | `reason`   |
+  | `needsFeature`      | can't be ported until Strider has the API                          | `matrix`   |
+  | `differentByDesign` | Strider decided otherwise                                          | `decision` |
+  | `notApplicable`     | tests what Strider doesn't have or shouldn't, such as an inspector | `reason`   |
 
-  A `decision` is a heading of `docs/decisions.md`, or the bold sentence that opens a decision's paragraph, and the
+  A `fails` entry's reason describes the bug so it reads without an issue, and its `issue` is optional: a GitHub
+  issue number, never a private tracker's key. A `decision` is a heading of `docs/decisions.md`, or the bold sentence that opens a decision's paragraph, and the
   check holds it to that. A browser that lacks what a test needs (stock WebKit's missing file chooser) is a
   `needsFeature` entry with `browsers` set, not a deliberate difference.
   A port's own entries come first, and the first entry that covers a test on a browser applies. A test with none is
@@ -94,7 +95,7 @@ The rules:
   port the test and mark it `needsFeature` with the Playwright matrix row (`scripts/playwright-matrix/rows`) for
   what's missing. Never loosen a check to make it pass.
 - **Port what fails.** A failure is what the harness is for. A failure stays in the run's results until it's triaged, and
-  gets a `fails` entry once it has an issue.
+  gets a `fails` entry once it's triaged.
 - **Don't change the page under test.** Where the original reads a page global (`window.__clicked`), read it with
   `page.evaluateInMainWorld`, through `document.querySelector("iframe").contentWindow` for a same-origin frame. Never
   make the page's own handlers write markers for the port to read.

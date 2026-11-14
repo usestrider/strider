@@ -54,7 +54,7 @@ export interface Expectation {
   /** @default every browser */
   readonly browsers?: ReadonlyArray<BrowserName>
   /**
-   * `fails`: ported, and fails for a bug in Strider (`issue` names it). `needsFeature`: can't be ported until Strider
+   * `fails`: ported, and fails for a bug in Strider, which `reason` describes (`issue`, optional, a GitHub issue). `needsFeature`: can't be ported until Strider
    * has an API (`issue`, or `matrix`, the Playwright matrix row). `differentByDesign`: Strider decided otherwise
    * (`decision`, a heading of docs/decisions.md). `notApplicable`: tests something Strider doesn't have or
    * shouldn't, such as Playwright's inspector (`reason`).
@@ -186,8 +186,8 @@ export const check = (): ReadonlyArray<string> => {
     }
     if (!statuses.includes(expectation.status)) problems.push(`${label}: unknown status ${expectation.status}`)
     if (expectation.reason === undefined || expectation.reason.trim() === "") problems.push(`${label}: no reason`)
-    if (expectation.status === "fails" && expectation.issue === undefined) {
-      problems.push(`${label}: a failure names its issue`)
+    if (expectation.issue !== undefined && !/^#\d+$/.test(expectation.issue)) {
+      problems.push(`${label}: an issue is a GitHub issue number (#51), not ${expectation.issue}`)
     }
     if (expectation.status === "needsFeature" && expectation.issue === undefined && expectation.matrix === undefined) {
       problems.push(`${label}: a missing feature names its issue or matrix row`)

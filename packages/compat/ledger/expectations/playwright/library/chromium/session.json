@@ -11,7 +11,7 @@
       "CD-041"
     ],
     "status": "notApplicable",
-    "reason": "Strider won't collect coverage from a browser run (ROOK-385, ROOK-386): build-time instrumentation, read back with evaluate, works on every browser. Starts and stops JS coverage (`page.coverage.startJSCoverage` and `stopJSCoverage`) between a session's own `Debugger.enable` and the `scriptParsed` event it waits for, to check that coverage's use of the Debugger domain leaves the session's enabled. Strider has no JS coverage"
+    "reason": "Strider won't collect coverage from a browser run: build-time instrumentation, read back with evaluate, works on every browser. Starts and stops JS coverage (`page.coverage.startJSCoverage` and `stopJSCoverage`) between a session's own `Debugger.enable` and the `scriptParsed` event it waits for, to check that coverage's use of the Debugger domain leaves the session's enabled. Strider has no JS coverage"
   },
   {
     "tests": [
