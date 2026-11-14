@@ -54,6 +54,7 @@ const reasonOf = <A, E>(exit: Exit.Exit<A, E>) => {
         readonly capability?: string
         readonly netError?: string
         readonly hint?: string
+        readonly exception?: { readonly message: string }
       }
       readonly diagnostics?: { readonly dispatch: { readonly _tag: string } }
     }
@@ -329,8 +330,8 @@ describe("Stock WebKit, attached through its remote inspector", () => {
             // This one is compiled from parts in the page, which the page's eval can't be trusted to do
             const staged = new Function(`/*${"x".repeat(200_000)}*/ return 42`) as () => number
             const refused = reasonOf(yield* Effect.exit(tab.evaluateInMainWorld(staged)))
-            assert.strictEqual(refused?.reason?._tag, "Thrown")
-            assert.include(refused?.reason?.message, "replaced eval before Strider's helper was installed")
+            assert.strictEqual(refused?.reason?._tag, "EvaluationThrown")
+            assert.include(refused?.reason?.exception?.message, "replaced eval before Strider's helper was installed")
           }))
         }).pipe(Effect.provide(attach(endpoint)))
       }))
