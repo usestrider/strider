@@ -4014,86 +4014,95 @@ it.effect("retires a Firefox missing realm without a handler error and reclaims 
     const replacement: State.RealmEntry = { ...realm, id: state.ids.realm(), bidi: "R2" as Script.Realm, held: [] }
     state.realms.set(replacement.bidi, replacement)
     state.realmsById.set(replacement.id, replacement)
-    yield* webSocketHarness((getBridge) =>
-      Effect.gen(function*() {
-        const context = yield* Browser.newContext()
-        const old: Array<WebSocketRoute.Connection> = []
-        const next: Array<WebSocketRoute.Connection> = []
-        const registration = yield* context.routeWebSocket(
-          "**",
-          Effect.fnUntraced(function*(socket) {
-            yield* socket.open({})
-            if (socket.realm === realm.id) {
-              old.push(socket)
-              if (old.length === 14) yield* Deferred.succeed(ready, undefined)
-              if (socket.id.endsWith(":1")) {
-                yield* Deferred.await(trigger)
-                yield* socket.page.send({ _tag: "Text", data: "after realm destruction" })
+    yield* webSocketHarness(
+      (getBridge) =>
+        Effect.gen(function*() {
+          const context = yield* Browser.newContext()
+          const old: Array<WebSocketRoute.Connection> = []
+          const next: Array<WebSocketRoute.Connection> = []
+          const registration = yield* context.routeWebSocket(
+            "**",
+            Effect.fnUntraced(function*(socket) {
+              yield* socket.open({})
+              if (socket.realm === realm.id) {
+                old.push(socket)
+                if (old.length === 14) yield* Deferred.succeed(ready, undefined)
+                if (socket.id.endsWith(":1")) {
+                  yield* Deferred.await(trigger)
+                  yield* socket.page.send({ _tag: "Text", data: "after realm destruction" })
+                }
+              } else {
+                next.push(socket)
+                if (next.length === 14) yield* Deferred.succeed(replaced, undefined)
               }
-            } else {
-              next.push(socket)
-              if (next.length === 14) yield* Deferred.succeed(replaced, undefined)
-            }
-          }),
-          { implementation: "script" }
-        )
-        const bridge = getBridge()
-        const create = (target: State.RealmEntry, id: number) =>
-          bridge.receive(
-            target.id,
-            Effect.succeed(
-              JSON.stringify({
-                token: bridge.token,
-                type: "create",
-                id: String(id),
-                url: "ws://example.com/",
-                protocols: []
-              })
-            ),
-            { _tag: "Worker", realm: target.id },
-            { isAlive: () => !target.ended }
+            }),
+            { implementation: "script" }
           )
-        for (let id = 1; id <= 14; id++) assert.isTrue(create(realm, id))
-        yield* Deferred.await(ready)
-        yield* Deferred.succeed(trigger, undefined)
-        yield* old[0]!.status.changes.pipe(Stream.filter((status) => status === "closed"), Stream.runHead)
-        assert.deepStrictEqual(errors, [], "ordinary realm loss is not a failed user handler")
-        assert.isTrue(realm.ended)
-        assert.isFalse(state.realmsById.has(realm.id))
-        assert.strictEqual(facts.filter((fact) => fact._tag === "RealmRemoved" && fact.realm === realm.id).length, 1)
-        for (const socket of old) {
-          yield* socket.status.changes.pipe(Stream.filter((status) => status === "closed"), Stream.runHead)
-        }
-        bridge.ended(realm.id)
-        bridge.ended(realm.id)
-        for (let id = 1; id <= 15; id++) {
-          assert.isTrue(create(replacement, id))
-        }
-        assert.isTrue(
-          bridge.receive(
-            replacement.id,
-            Effect.yieldNow.pipe(
-              Effect.andThen(Deferred.succeed(tail, undefined)),
-              Effect.as(JSON.stringify({ token: "ignored", type: "ready", id: "" }))
-            ),
-            { _tag: "Worker", realm: replacement.id },
-            { isAlive: () => !replacement.ended }
+          const bridge = getBridge()
+          for (const target of [realm, replacement]) {
+            const handle = state.ids.handle()
+            state.handles.set(handle, { handle: "shim" as Script.Handle, realm: target.bidi })
+            yield* bridge.captured(target.id, handle)
+          }
+          const create = (target: State.RealmEntry, id: number) =>
+            bridge.receive(
+              target.id,
+              Effect.succeed(
+                JSON.stringify({
+                  token: bridge.token,
+                  type: "create",
+                  id: String(id),
+                  url: "ws://example.com/",
+                  protocols: []
+                })
+              ),
+              { _tag: "Worker", realm: target.id },
+              { isAlive: () => !target.ended }
+            )
+          for (let id = 1; id <= 14; id++) assert.isTrue(create(realm, id))
+          yield* Deferred.await(ready)
+          yield* Deferred.succeed(trigger, undefined)
+          yield* old[0]!.status.changes.pipe(Stream.filter((status) => status === "closed"), Stream.runHead)
+          assert.deepStrictEqual(errors, [], "ordinary realm loss is not a failed user handler")
+          assert.isTrue(realm.ended)
+          assert.isFalse(state.realmsById.has(realm.id))
+          assert.strictEqual(facts.filter((fact) => fact._tag === "RealmRemoved" && fact.realm === realm.id).length, 1)
+          for (const socket of old) {
+            yield* socket.status.changes.pipe(Stream.filter((status) => status === "closed"), Stream.runHead)
+          }
+          bridge.ended(realm.id)
+          bridge.ended(realm.id)
+          for (let id = 1; id <= 15; id++) {
+            assert.isTrue(create(replacement, id))
+          }
+          assert.isTrue(
+            bridge.receive(
+              replacement.id,
+              Effect.yieldNow.pipe(
+                Effect.andThen(Deferred.succeed(tail, undefined)),
+                Effect.as(JSON.stringify({ token: "ignored", type: "ready", id: "" }))
+              ),
+              { _tag: "Worker", realm: replacement.id },
+              { isAlive: () => !replacement.ended }
+            )
           )
-        )
-        yield* Deferred.await(replaced)
-        yield* Deferred.await(tail)
-        assert.strictEqual(next.length, 14, "all fourteen reservations must be usable again")
-        assert.strictEqual(rejected, 1, "duplicate death must not grant a fifteenth reservation")
-        assert.isFalse(replacement.ended)
-        yield* registration.remove
-      }), (id, call) => Evaluation.evaluate(state, id, call)).pipe(
-        Effect.provideService(
-          Logger.CurrentLoggers,
-          new Set([Logger.make((entry) => {
-            if (entry.logLevel === "Error") errors.push(entry.message)
-          })])
-        )
+          yield* Deferred.await(replaced)
+          yield* Deferred.await(tail)
+          assert.strictEqual(next.length, 14, "all fourteen reservations must be usable again")
+          assert.strictEqual(rejected, 1, "duplicate death must not grant a fifteenth reservation")
+          assert.isFalse(replacement.ended)
+          yield* registration.remove
+        }),
+      (id, call) => Evaluation.evaluate(state, id, call),
+      { capture: false }
+    ).pipe(
+      Effect.provideService(
+        Logger.CurrentLoggers,
+        new Set([Logger.make((entry) => {
+          if (entry.logLevel === "Error") errors.push(entry.message)
+        })])
       )
+    )
   }))
 
 it.effect("removes an obsolete preload even when reinstalling its survivor fails", () =>

@@ -102,6 +102,12 @@ export const errors: ReadonlyArray<ErrorMatcher> = [
     evidence: `DOM.resolveNode with an unknown nodeId, ${recorded}`
   },
   {
+    match: { code: -32000, message: "Missing injected script for given objectId" },
+    becomes: { _tag: "Rejected", reason: "NoSuchObject" },
+    evidence:
+      `InspectorRuntimeAgent answers it when InjectedScriptManager::injectedScriptForObjectId finds no script for the id: the id isn't JSON, names no script, or its script was discarded with its context, which navigation does. Strider sends only ids WebKit minted, so here it is a discarded context (WebKitGTK source, JavaScriptCore/inspector/InjectedScriptManager.cpp and agents/InspectorRuntimeAgent.cpp); callFunctionOn on a retired document's object, ${recorded}`
+  },
+  {
     match: { code: -32000, message: "WindowNotFound" },
     becomes: { _tag: "Rejected", reason: "NoSuchTarget" },
     evidence:

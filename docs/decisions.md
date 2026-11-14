@@ -1561,7 +1561,10 @@ Cross-realm capacity is conservative: issued unused credits remain charged, perm
 is reserved elsewhere, because an asynchronous host grant cannot precede a synchronous mutable-buffer snapshot.
 A counted shared outbound pool keeps ordinary replies usable even when browser credits fill their allocation.
 Target-specific dispatch and scoped subscriptions install the bridge only where requested; ordinary native events
-do not probe optional WebSocket hooks. Silent emulation, speculative per-realm capacity, blocking dialogs, and
+do not probe optional WebSocket hooks. Host commands use a reference captured at installation, shared across
+registrations in that realm and released after their drain or realm destruction. A page-global holder was rejected
+because an earlier page definition could intercept route tokens and commands; this does not make the main-world
+shim a security boundary. Silent emulation, speculative per-realm capacity, blocking dialogs, and
 always-on instrumentation were rejected.
 Optional installation follows [Pay for what you use](#pay-for-what-you-use).
 

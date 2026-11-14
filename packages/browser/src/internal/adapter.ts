@@ -539,6 +539,8 @@ export interface WebSocketBridge {
   readonly name: string
   readonly token: string
   readonly scope: Scope.Scope
+  /** Takes ownership of an installation reference before any socket commands run. */
+  readonly captured: (realm: Target.RealmId, handle: HandleId, isAlive?: () => boolean) => Effect.Effect<void>
   readonly receive: (
     realm: Target.RealmId,
     payload: Effect.Effect<string, AdapterError>,

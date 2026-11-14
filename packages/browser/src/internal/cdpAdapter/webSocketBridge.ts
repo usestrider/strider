@@ -34,6 +34,7 @@ let pending:
       {
         readonly bridge: Adapter.WebSocketBridge
         readonly events: Array<Runtime.BindingCalledParams>
+        readonly captures: Array<Runtime.ConsoleAPICalledParams>
         readonly known: Map<string, import("../../Target.ts").RealmId>
         overflow: boolean
       }
@@ -50,6 +51,22 @@ export const flush = (state: State, target: TargetEntry): void => {
       }
       holder.events.length = 0
       continue
+    }
+    for (const event of holder.captures.splice(0)) {
+      const realm = state.realmsByContext.get(contextKey(target, event.executionContextId))
+      if (realm === undefined || realm.ended || realm.pending) {
+        holder.captures.push(event)
+        continue
+      }
+      holder.known.set(realm.uniqueId, realm.id)
+      const objectId = event.args[1]?.objectId
+      if (objectId === undefined) {
+        holder.bridge.failed(realm.id)
+        continue
+      }
+      const handle = state.ids.handle()
+      state.handles.set(handle, { target, realm, objectId, group: undefined })
+      state.buffer.start(holder.bridge.captured(realm.id, handle, () => !realm.ended))
     }
     for (const event of holder.events.splice(0)) {
       const realm = state.realmsByContext.get(contextKey(target, event.executionContextId))
@@ -85,6 +102,16 @@ export const prepare = Effect.fnUntraced(
               const context = (params as Runtime.ExecutionContextCreatedParams).context
               if (context.uniqueId !== undefined && state.realmsByUnique.has(context.uniqueId)) return
             }
+            if (method === Runtime.consoleAPICalled.method) {
+              const message = params as Runtime.ConsoleAPICalledParams
+              const marker = message.args[0]?.value
+              const holder = [...(awaiting.get(target)?.values() ?? [])].find((h) =>
+                "__striderWebSocketCapture:" + h.bridge.token === marker
+              )
+              if (holder !== undefined && message.args[1]?.objectId !== undefined) {
+                return
+              }
+            }
             base.apply(method, params, event)
           }
         }
@@ -101,9 +128,30 @@ export const prepare = Effect.fnUntraced(
         awaiting.set(target, deferred)
       }
       const known = new Map<string, import("../../Target.ts").RealmId>()
-      const holder = { bridge, events: [] as Array<Runtime.BindingCalledParams>, known, overflow: false }
+      const holder = {
+        bridge,
+        events: [] as Array<Runtime.BindingCalledParams>,
+        captures: [] as Array<Runtime.ConsoleAPICalledParams>,
+        known,
+        overflow: false
+      }
       deferred.set(bridge.name, holder)
       const lifetime = yield* Scope.fork(bridge.scope)
+      const captures = yield* target.session.subscribe(Runtime.consoleAPICalled).pipe(Scope.provide(lifetime))
+      yield* captures.pipe(
+        Stream.runForEach((message) =>
+          Effect.sync(() => {
+            if (
+              message.args[0]?.value !== "__striderWebSocketCapture:" + bridge.token ||
+              message.args[1]?.objectId === undefined
+            ) return
+            if (holder.captures.length < 64) holder.captures.push(message)
+            else holder.overflow = true
+            flush(state, target)
+          })
+        ),
+        Effect.forkIn(lifetime)
+      )
       const events = yield* target.session.subscribe(Runtime.bindingCalled).pipe(Scope.provide(lifetime))
       yield* events.pipe(
         Stream.runForEach((event) =>
@@ -118,6 +166,8 @@ export const prepare = Effect.fnUntraced(
               }
               return
             }
+            // A capture may have arrived before the realm fold; a later binding proves it is now usable.
+            flush(state, target)
             known.set(realm.uniqueId, realm.id)
             bridge.receive(realm.id, Effect.succeed(event.payload), origin(realm), { isAlive: () => !realm.ended })
           })
@@ -188,6 +238,19 @@ export const prepare = Effect.fnUntraced(
         Runtime.removeBinding({ name: bridge.name }).pipe(
           Protocol.on(target.session),
           Effect.ignore,
+          Effect.andThen(Effect.suspend(() =>
+            Effect.forEach(
+              holder.captures.splice(0),
+              (event) =>
+                event.args[1]?.objectId === undefined
+                  ? Effect.void
+                  : Runtime.releaseObject({ objectId: event.args[1].objectId }).pipe(
+                    Protocol.on(target.session),
+                    Effect.ignore
+                  ),
+              { concurrency: "unbounded", discard: true }
+            )
+          )),
           Effect.andThen(Effect.sync(() => {
             names.delete(bridge.name)
             deferred.delete(bridge.name)

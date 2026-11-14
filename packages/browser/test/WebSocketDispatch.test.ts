@@ -82,6 +82,7 @@ it.effect("keeps the WebKit default console table intact and scopes filtering an
       name: "private",
       token: "token",
       scope,
+      captured: () => Effect.void,
       receive: () => {
         received++
         return false

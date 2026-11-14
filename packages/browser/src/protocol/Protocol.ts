@@ -688,11 +688,37 @@ export const withLateReplyHandler: {
 /**
  * Why the browser rejected a command, normalized across backends.
  *
+ * **Details**
+ *
+ * - `NoSuchTarget`: the target, window or browsing context the command named doesn't exist.
+ * - `NoSuchFrame`: the frame the command named doesn't exist.
+ * - `NoSuchNode`: the DOM node the command named doesn't exist.
+ * - `NoSuchObject`: the browser no longer holds the JavaScript object the command named. On WebKit this means the
+ *   page context the object was made in was discarded, as when the page navigates; that reply can arrive before
+ *   the event that announces the navigation. WebKit also gives it for an object id that isn't one it made, so a
+ *   malformed id gets it too.
+ * - `InvalidArgument`: the command's parameters were refused.
+ * - `Unrecognized`: a rejection the backend's error table doesn't know, never a guess.
+ *
+ * **Example** (Telling a discarded object from other rejections)
+ *
+ * ```ts import.meta.vitest
+ * import { Protocol } from "@usestrider/browser/protocol"
+ *
+ * const discarded = (reason: Protocol.RejectReason) => reason === "NoSuchObject"
+ * ```
+ *
  * @stability experimental
  * @category models
  * @since 0.1.0
  */
-export type RejectReason = "NoSuchTarget" | "NoSuchFrame" | "NoSuchNode" | "InvalidArgument" | "Unrecognized"
+export type RejectReason =
+  | "NoSuchTarget"
+  | "NoSuchFrame"
+  | "NoSuchNode"
+  | "NoSuchObject"
+  | "InvalidArgument"
+  | "Unrecognized"
 
 /**
  * Reason for a command the browser rejected.
@@ -705,6 +731,20 @@ export type RejectReason = "NoSuchTarget" | "NoSuchFrame" | "NoSuchNode" | "Inva
  * `target` names the kind of target the command was sent to, on CDP: `page`, `iframe`, `worker`,
  * `service_worker`, `shared_worker`, or `other`. It is absent for a command sent to the browser's own session,
  * and on the other backends.
+ *
+ * **Example** (Reading why a command was rejected)
+ *
+ * ```ts import.meta.vitest
+ * import { Protocol } from "@usestrider/browser/protocol"
+ * import { Effect } from "effect"
+ *
+ * const objectGone = Effect.fn("objectGone")(
+ *   function*(command: Protocol.Command<string, unknown, unknown>) {
+ *     const error = yield* Effect.flip(command)
+ *     return error.reason._tag === "Rejected" && error.reason.reason === "NoSuchObject"
+ *   }
+ * )
+ * ```
  *
  * **Example** (Saying where a command was refused)
  *
@@ -734,7 +774,14 @@ export type RejectReason = "NoSuchTarget" | "NoSuchFrame" | "NoSuchNode" | "Inva
 export class Rejected extends Schema.Error<Rejected>("@usestrider/browser/protocol/Protocol/Rejected")({
   _tag: Schema.tag("Rejected"),
   method: Schema.String,
-  reason: Schema.Literals(["NoSuchTarget", "NoSuchFrame", "NoSuchNode", "InvalidArgument", "Unrecognized"]),
+  reason: Schema.Literals([
+    "NoSuchTarget",
+    "NoSuchFrame",
+    "NoSuchNode",
+    "NoSuchObject",
+    "InvalidArgument",
+    "Unrecognized"
+  ]),
   code: Schema.Union([Schema.Number, Schema.String]),
   description: Schema.String,
   target: Schema.optional(Schema.String)

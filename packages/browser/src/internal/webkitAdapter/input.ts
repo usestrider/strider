@@ -266,13 +266,20 @@ const nodeHandleOf = Effect.fnUntraced(function*(state: State, node: Adapter.Nod
     return yield* Effect.fail(Kit.gone({ _tag: "Document", id: node.document }, new L1Target.DocumentReplaced({})))
   }
   // WebKit's binding is the element's object id, in the page's world
-  const { result } = yield* Kit.protocol(
+  const { result } = yield* (
     Runtime.callFunctionOn({
       objectId: node.binding as Runtime.RemoteObjectId,
       functionDeclaration:
         "function() { const steps = []; for (let e = this; e && e.parentElement; e = e.parentElement) { const same = [...e.parentElement.children].filter((c) => c.localName === e.localName); steps.unshift(e.localName + ':nth-of-type(' + (same.indexOf(e) + 1) + ')') } return ':root > ' + steps.join(' > ') }",
       returnByValue: true
-    }).pipe(Protocol.on(target.session))
+    }).pipe(
+      Protocol.on(target.session),
+      Effect.mapError((error) =>
+        error.reason._tag === "Rejected" && error.reason.reason === "NoSuchObject"
+          ? Kit.gone({ _tag: "Document", id: node.document }, new L1Target.DocumentReplaced({}))
+          : Kit.protocolError(error)
+      )
+    )
   )
   const found = yield* automationOf(
     process,

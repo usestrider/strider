@@ -1,12 +1,6 @@
 /** Main-world constructor shim. This function is serialized; it must not close over host code. */
-export const install = (name: string, token: string, pattern: string, transport: "binding" | "console") => {
+export const install = () => {
   const global = globalThis as any
-  const key = Symbol.for("@usestrider/browser/webSocketRouting")
-  const old = global[key]
-  if (old !== undefined) {
-    old.add(name, token, pattern, transport)
-    return
-  }
   const Native = global.WebSocket
   const debug = global.console.debug.bind(global.console)
   const stringify = global.JSON.stringify.bind(global.JSON)
@@ -423,41 +417,42 @@ export const install = (name: string, token: string, pattern: string, transport:
       sockets.delete(socket.id)
     }
   }
-  // A page cannot replace or delete the holder after install; removing the last route only deactivates it.
-  global.Object.defineProperty(global, key, {
-    value: global.Object.freeze({
-      add: (...args: [string, string, string, string]) => {
-        if (!active) {
-          active = true
-          global.WebSocket = Mock
-          global.Object.defineProperty(Native.prototype, "constructor", {
-            value: Mock,
-            configurable: true,
-            writable: true
-          })
-        }
-        add(...args)
-      },
-      dispatch
-    }),
-    configurable: false,
-    writable: false,
-    enumerable: false
-  })
+  const holder = {
+    add: (...args: [string, string, string, string]) => {
+      if (!active) {
+        active = true
+        global.WebSocket = Mock
+        global.Object.defineProperty(Native.prototype, "constructor", {
+          value: Mock,
+          configurable: true,
+          writable: true
+        })
+      }
+      add(...args)
+    },
+    dispatch
+  }
   Object.defineProperty(Mock, "name", { value: "WebSocket", configurable: true })
   // Native sockets of unrouted URLs report the page-visible constructor too. Removal puts it back.
   const nativeConstructor = global.Object.getOwnPropertyDescriptor(Native.prototype, "constructor")
   global.Object.defineProperty(Native.prototype, "constructor", { value: Mock, configurable: true, writable: true })
   global.WebSocket = Mock
-  add(name, token, pattern, transport)
+  return Object.freeze(holder)
 }
 
-export const source = (name: string, token: string, pattern: string, transport: "binding" | "console") =>
-  `(${install.toString()})(${JSON.stringify(name)},${JSON.stringify(token)},${JSON.stringify(pattern)},${
+/** A bundle-local reference, never a property of the page global. */
+export const holder = "__strider_webSocketRouting__"
+
+export const source = (name: string, token: string, pattern: string, transport: "binding" | "console", bidi = false) =>
+  `${holder} ??= (${install.toString()})();
+  ${
+    bidi ?
+      `globalThis[${JSON.stringify(name)}](${holder});` :
+      `console.debug(${JSON.stringify("__striderWebSocketCapture:" + token)}, ${holder});`
+  }
+  ${holder}.add(${JSON.stringify(name)},${JSON.stringify(token)},${JSON.stringify(pattern)},${
     JSON.stringify(transport)
   });`
 
 export const command = (token: string, value: unknown) =>
-  `() => globalThis[Symbol.for("@usestrider/browser/webSocketRouting")]?.dispatch(${JSON.stringify(token)},${
-    JSON.stringify(value)
-  })`
+  `(holder) => holder.dispatch(${JSON.stringify(token)},${JSON.stringify(value)})`

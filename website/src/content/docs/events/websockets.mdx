@@ -193,11 +193,11 @@ or service workers are not covered.
 ## Page scripts can interfere
 
 The shim runs in the page's own world, so scripts on the page can see and interfere with it. It makes that
-harder, not impossible, and it is not a security boundary. After it installs, a page cannot replace or delete the
-entry the library talks to or its members, and the socket internals and the message binding are not properties
-the page can reach by name. A page can still read the entry and call it. On a document that was already loaded
-when the route was registered, or under `timing: "bestEffort"`, a page could have claimed the entry first. Do not
-route sockets of pages you do not trust with anything a hostile script must not influence.
+harder, not impossible, and it is not a security boundary. The library captures a reference when it installs the
+shim and sends commands through that reference, so a page-defined global entry cannot receive those commands.
+The socket internals and the captured message binding are not properties the page can reach by name. Scripts
+can still replace browser globals or patch the constructor. Do not route sockets of pages you do not trust with
+anything a hostile script must not influence.
 
 ## Browser coverage
 

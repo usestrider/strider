@@ -553,6 +553,8 @@ Declarations are init scripts, HTTP and WebSocket routes, overrides, emulation, 
   data. A drained surrender or confirmed realm destruction reclaims them exactly once. See `WebSocketRoute` for
   all ceilings and the guide for the conservative allocation policy. Removing a registration closes its sockets,
   drains conversion work, removes future scripts, and restores only the constructor still owned by its shim.
+  Host commands and later registrations use a reference captured at installation, never a page-global holder;
+  registrations in one realm share that reference until the last registration is removed or the realm ends.
 - **Init scripts** form an ordered bundle per world and revision. Built as below, with what the probes found on every backend: a script runs before `document.documentElement` exists, in every frame, and a throw is reported as the page's uncaught exception.
   - **Phases.** A reserved *environment phase* (library shims such as the page clock) runs before user scripts.
   - **Order.** Within a phase, array order applies, then explicit `after` dependencies, then registration sequence.

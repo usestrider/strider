@@ -237,7 +237,13 @@ export interface State {
   /** Permissions granted, by context, as `[origin, name]` JSON: BiDi has no reset, so they are set back. */
   readonly granted: Map<UserContext.Id, Set<string>>
   /** The preload scripts registered, in order. */
-  preloads: ReadonlyArray<{ readonly script: Script.PreloadScript; readonly declaration: Adapter.RegistrationId }>
+  preloads: ReadonlyArray<
+    {
+      readonly script: Script.PreloadScript
+      readonly declaration: Adapter.RegistrationId
+      readonly owners?: ReadonlyArray<Adapter.RegistrationId>
+    }
+  >
   /** Contexts reported now existed before the connection: they are adopted. */
   adopting: boolean
 }
