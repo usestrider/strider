@@ -170,7 +170,8 @@ export const fill = tool(
 
 export const press = tool(
   "press",
-  "Presses a key, by its UI Events name (Enter, Tab, a), on the target or the focused element." + front,
+  "Presses a key, by its UI Events name (Enter, Tab, a), on the target or the focused element; a chord such as " +
+    "Meta+k or Control+Shift+P holds its modifiers (Alt, Control, Meta, or Shift) for the key." + front,
   { page: PageName, key: Schema.String, target: Schema.optional(Target) },
   Schema.String,
   "acts"

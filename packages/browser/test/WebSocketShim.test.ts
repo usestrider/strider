@@ -40,15 +40,10 @@ const setup = (BlobConstructor = Blob) => {
       }
     }
   })
-  vm.runInContext(`(${install.toString()})("bridge", "token", "ws://example.com/socket", "console")`, context)
+  const holder = vm.runInContext(`(${install.toString()})()`, context)
+  holder.add("bridge", "token", "ws://example.com/socket", "console")
   vm.runInContext(`globalThis.ws = new WebSocket("ws://example.com/socket")`, context)
-  const dispatch = (command: object): Promise<void> =>
-    vm.runInContext(
-      `globalThis[Symbol.for("@usestrider/browser/webSocketRouting")].dispatch("token", ${
-        JSON.stringify({ id: "1", ...command })
-      })`,
-      context
-    )
+  const dispatch = (command: object): Promise<void> => holder.dispatch("token", { id: "1", ...command })
   const waitFor = (count: number) =>
     new Promise<void>((resolve) => {
       const check = () => {
@@ -79,10 +74,10 @@ describe("WebSocket shim admission and conversion", () => {
     )
   })
 
-  it("keeps host dispatch intact when the page replaces the holder's dispatch method", async () => {
+  it("does not publish the captured holder on the page global", async () => {
     const { context, dispatch } = setup()
     vm.runInContext(
-      `globalThis[Symbol.for("@usestrider/browser/webSocketRouting")].dispatch = () => {}`,
+      `globalThis[Symbol.for("@usestrider/browser/webSocketRouting")] = { dispatch() {} }`,
       context
     )
     await dispatch({ type: "open" })
@@ -103,7 +98,10 @@ describe("WebSocket shim admission and conversion", () => {
       __binding: (payload: string) => calls.push(payload)
     })
     vm.runInContext(`globalThis.sealed = globalThis.__binding`, context)
-    vm.runInContext(`(${install.toString()})("__binding", "token", "ws://example.com/socket", "binding")`, context)
+    vm.runInContext(
+      `(${install.toString()})().add("__binding", "token", "ws://example.com/socket", "binding")`,
+      context
+    )
     assert.strictEqual(vm.runInContext(`typeof globalThis.__binding`, context), "undefined")
     assert.strictEqual(calls.length, 1, "the ready envelope used the captured binding")
   })

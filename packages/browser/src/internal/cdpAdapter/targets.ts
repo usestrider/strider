@@ -372,6 +372,9 @@ const gate = Effect.fnUntraced(
         resumed = true
       })
     ))
+    // Only a page's setup is staged: queued and sent together with the resume. An iframe that is waiting for the
+    // debugger resumes only after its setup ends, so that setup must not await a reply from its renderer, which
+    // stays paused until then (a `Page.createIsolatedWorld` there hangs the page's load).
     const staged = waiting && target.kind === "page"
     return yield* snapshot(
       state,

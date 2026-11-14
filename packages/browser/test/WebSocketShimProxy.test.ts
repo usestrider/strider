@@ -51,7 +51,8 @@ describe("WebSocket shim proxy lifecycle", () => {
         }
       }
     })
-    vm.runInContext(`(${install.toString()})("bridge", "token", "ws://example.com/socket", "console")`, context)
+    const holder = vm.runInContext(`(${install.toString()})()`, context)
+    holder.add("bridge", "token", "ws://example.com/socket", "console")
     vm.runInContext(
       `globalThis.seen = []; globalThis.ws = new WebSocket("ws://example.com/socket");
        ws.onmessage = (event) => seen.push("message:" + event.data);
@@ -59,13 +60,7 @@ describe("WebSocket shim proxy lifecycle", () => {
        ws.onclose = (event) => { seen.push("close:" + event.code); globalThis.closed = {code:event.code,reason:event.reason,wasClean:event.wasClean}; }`,
       context
     )
-    const dispatch = (command: object): Promise<void> =>
-      vm.runInContext(
-        `globalThis[Symbol.for("@usestrider/browser/webSocketRouting")]?.dispatch("token", ${
-          JSON.stringify({ id: "1", ...command })
-        })`,
-        context
-      )
+    const dispatch = (command: object): Promise<void> => holder.dispatch("token", { id: "1", ...command })
     const until = (predicate: () => boolean) =>
       new Promise<void>((resolve) => {
         delivered = () => predicate() && resolve()

@@ -1,6 +1,6 @@
 /** Page rounds must use the time left after cold engine setup. */
 import { assert, describe, it } from "@effect/vitest"
-import { Browser, Deadline, Expect, type Locator, Target } from "@usestrider/browser"
+import { Browser, Condition, Deadline, Expect, type Locator, Target } from "@usestrider/browser"
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
@@ -211,4 +211,35 @@ describe("attachment failure evidence", () => {
         assert.strictEqual(error.condition, matcher === Expect.toBeAttached ? "to be attached" : "to be detached")
       }))
   }
+})
+
+describe("Expect.that last", () => {
+  it.live("keeps a completed observation when a later check never completes", () =>
+    Effect.gen(function*() {
+      let reads = 0
+      const read = Effect.suspend(() => ++reads === 1 ? Effect.succeed("observed") : Effect.never)
+      const error = yield* Expect.that(read, Condition.make("never", () => false)).pipe(
+        Deadline.within("300 millis"),
+        Effect.flip
+      )
+      assert(Expect.isExpectationFailed(error), String(error))
+      assert.strictEqual(reads, 2)
+      assert.deepStrictEqual(error.history.map((entry) => entry.value), ["observed"])
+      assert.deepStrictEqual(Option.map(error.last, (entry) => entry.value), Option.some("observed"))
+    }))
+
+  it.live("keeps the last value the read returned, not the check cut off at the deadline", () =>
+    Effect.gen(function*() {
+      let reads = 0
+      const read = Effect.sleep("2 millis").pipe(Effect.map(() => ++reads))
+      const error = yield* Expect.that(read, Condition.make("never", () => false)).pipe(
+        Deadline.within("300 millis"),
+        Effect.flip
+      )
+      assert(Expect.isExpectationFailed(error), String(error))
+      const values = error.history.map((entry) => entry.value)
+      assert.isAbove(values.length, 0)
+      assert.notDeepInclude(values, { error: "a check was still running at the deadline" })
+      assert.deepStrictEqual(Option.map(error.last, (entry) => entry.value), Option.some(reads))
+    }))
 })

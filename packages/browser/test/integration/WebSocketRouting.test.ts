@@ -9,6 +9,7 @@ import { WebKit } from "@usestrider/browser/webkit"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Logger from "effect/Logger"
 import * as Stream from "effect/Stream"
 import { site } from "./adapter/harness.ts"
 import { chromium, firefox, webkitgtk } from "./browsers.ts"
@@ -35,6 +36,46 @@ const backends = [
 for (const [name, backend] of backends) {
   describe(`${name} context WebSocket routing`, () => {
     layer(backend, { excludeTestServices: true, timeout: 60_000 })((it) => {
+      it.effect(
+        "routes sockets without calling a routing holder defined by the page before registration",
+        () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            const page = yield* Browser.newPage()
+            const html = `<script>
+              window.intercepted = [];
+              globalThis[Symbol.for("@usestrider/browser/webSocketRouting")] = {
+                add: (_name, token) => window.intercepted.push({ method: "add", receivedToken: typeof token === "string" }),
+                dispatch: (token, command) => window.intercepted.push({
+                  method: "dispatch", receivedToken: typeof token === "string", type: command.type
+                })
+              };
+            </script>`
+            yield* page.goto(`${origin}/fixture?html=${encodeURIComponent(html)}`)
+            const registration = yield* page.context.routeWebSocket("**/socket", (connection) =>
+              connection.open({
+                fromPage: (_, endpoint) => endpoint.send({ _tag: "Text", data: "routed reply" })
+              }), {
+              implementation: "script",
+              timing: name === "WebKit" ? "bestEffort" : "beforeAuthorScript"
+            })
+            const reply = yield* page.evaluateInMainWorld(() =>
+              new Promise<string>((resolve) => {
+                const socket = new WebSocket(location.origin.replace("http:", "ws:") + "/socket")
+                socket.onopen = () => socket.send("native reply")
+                socket.onmessage = (event) => {
+                  resolve(String(event.data))
+                  socket.close()
+                }
+                socket.onerror = () => resolve("socket error")
+              })
+            )
+            yield* registration.remove
+            const intercepted = yield* page.evaluateInMainWorld(() => (globalThis as any).intercepted)
+            assert.deepStrictEqual({ intercepted, reply }, { intercepted: [], reply: "routed reply" })
+          }),
+        60_000
+      )
       it.effect(
         "mocks binary sends in order and keeps bridge envelopes out of public console events",
         () =>
@@ -186,6 +227,13 @@ for (const [name, backend] of backends) {
         "keeps other contexts native, restores overlap precedence and removes loaded-document shims",
         () =>
           Effect.gen(function*() {
+            const failures: Array<unknown> = []
+            const loggers = yield* Logger.CurrentLoggers
+            const logger = Logger.make((entry) => {
+              if (entry.logLevel === "Error") failures.push(entry.message)
+              for (const existing of loggers) existing.log(entry)
+            })
+            const served = yield* site
             const page = yield* Browser.newPage()
             const sibling = yield* Browser.newPage()
             const options = {
@@ -196,7 +244,7 @@ for (const [name, backend] of backends) {
               page.context.routeWebSocket("**/socket", (socket) =>
                 socket.open({
                   fromPage: (_, endpoint) => endpoint.send({ _tag: "Text", data: text })
-                }), options)
+                }), options).pipe(Effect.provideService(Logger.CurrentLoggers, new Set([logger])))
             const first = yield* register("old")
             assert.strictEqual(yield* sibling.evaluateInMainWorld(() => WebSocket.name), "WebSocket")
             const inspect = () =>
@@ -214,13 +262,19 @@ for (const [name, backend] of backends) {
             assert.strictEqual(yield* inspect(), "old")
             const newest = yield* register("new")
             assert.strictEqual(yield* inspect(), "new")
+            // Future documents share the same shim too; navigation retires the previous realm's reference.
+            yield* page.goto(`${served.origin}/empty`)
+            assert.strictEqual(yield* inspect(), "new")
             yield* newest.remove
+            assert.strictEqual(yield* inspect(), "old")
+            yield* page.goto(`${served.origin}/empty`)
             assert.strictEqual(yield* inspect(), "old")
             yield* first.remove
             assert.strictEqual(yield* page.evaluateInMainWorld(() => WebSocket.name), "WebSocket")
             const again = yield* register("again")
             assert.strictEqual(yield* inspect(), "again")
             yield* again.remove
+            assert.deepStrictEqual(failures, [], "navigation must retire sockets without reporting a handler failure")
           }),
         60_000
       )

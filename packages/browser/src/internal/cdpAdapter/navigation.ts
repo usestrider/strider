@@ -148,7 +148,13 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       state.buffer.emit({ _tag: "DocumentOpened", document: document.id, generation: document.generation })
     })
     .on(Page.lifecycleEvent, (params, { state }) => {
-      const document = state.frames.get(params.frameId)?.document
+      const frame = state.frames.get(params.frameId)
+      // Whether the document has painted, for input into out-of-process frames (`frameReady` in input.ts)
+      if (frame !== undefined && params.name === "init") frame.started = { loaderId: params.loaderId, painted: false }
+      else if (params.name === "firstPaint" && frame?.started?.loaderId === params.loaderId) {
+        frame.started.painted = true
+      }
+      const document = frame?.document
       if (document === undefined) return
       if (document.loaderId?.startsWith("initial:") && params.name === "init") {
         state.documentsByLoader.delete(document.loaderId)

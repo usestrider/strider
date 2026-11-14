@@ -105,6 +105,7 @@ it.effect("keeps proxy endpoints connecting until the native opening event", () 
       )
       const realm = Target.RealmId.make("R-proxy")
       const origin = { _tag: "Worker" as const, realm }
+      yield* bridge.captured(realm, "shim" as Adapter.HandleId)
       bridge.receive(
         realm,
         Effect.succeed(
@@ -125,6 +126,7 @@ it.effect("keeps proxy endpoints connecting until the native opening event", () 
       const before = yield* socket.status
       const earlySend = yield* socket.page.send({ _tag: "Text", data: "too early" }).pipe(Effect.exit)
       yield* Deferred.succeed(release, undefined)
+      yield* bridge.captured(realm, "shim" as Adapter.HandleId)
       bridge.receive(
         realm,
         Effect.succeed(JSON.stringify({ token: bridge.token, type: "opened", id: "1", protocol: "" })),
@@ -177,6 +179,7 @@ it.effect("drains rejected constructor lookups before processing another admissi
       const registration = yield* context.routeWebSocket("**", () => Effect.void, { implementation: "script" })
       const realm = Target.RealmId.make("R-constructors")
       for (let id = 1; id <= 16; id++) {
+        yield* bridge.captured(realm, "shim" as Adapter.HandleId)
         bridge.receive(
           realm,
           Effect.succeed(JSON.stringify({
@@ -236,6 +239,7 @@ it.effect("rejects new sends as soon as close is observed while retaining reserv
       )
       const realm = Target.RealmId.make("R-closed")
       const origin = { _tag: "Worker" as const, realm }
+      yield* bridge.captured(realm, "shim" as Adapter.HandleId)
       bridge.receive(
         realm,
         Effect.succeed(
@@ -252,6 +256,7 @@ it.effect("rejects new sends as soon as close is observed while retaining reserv
       )
       const socket = yield* Deferred.await(captured)
       yield* socket.open({})
+      yield* bridge.captured(realm, "shim" as Adapter.HandleId)
       bridge.receive(
         realm,
         Effect.succeed(
@@ -313,6 +318,7 @@ it.effect("ends owned connections even when the browser cannot acknowledge remov
         { implementation: "script" }
       )
       const realm = Target.RealmId.make("R-unacknowledged")
+      yield* bridge.captured(realm, "shim" as Adapter.HandleId)
       bridge.receive(
         realm,
         Effect.succeed(

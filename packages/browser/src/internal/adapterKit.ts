@@ -93,11 +93,13 @@ export const undecodable = (method: string, issue: string): Adapter.AdapterError
 
 /**
  * A command in a realm that failed: `Gone` where the realm ended or its session did, as when its page closed
- * while the command was in flight; the protocol's error otherwise.
+ * while the command was in flight, or where the browser no longer holds the object the command named (its
+ * context was discarded before the event that retires the realm arrived); the protocol's error otherwise.
  */
 export const realmFailure =
   (realm: Target.RealmId, ended: () => boolean) => (error: Protocol.ProtocolError): Adapter.AdapterError =>
-    ended() || error.reason._tag === "SessionEnded"
+    ended() || error.reason._tag === "SessionEnded" ||
+      (error.reason._tag === "Rejected" && error.reason.reason === "NoSuchObject")
       ? gone({ _tag: "Realm", id: realm }, new Target.RealmDestroyed({}))
       : protocolError(error)
 

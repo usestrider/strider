@@ -74,7 +74,27 @@ const reconcileScripts = Effect.fnUntraced(function*(state: State) {
   const previous = state.preloads
   const next: Array<State["preloads"][number]> = []
   const installed = yield* Effect.gen(function*() {
+    const routingScopes = new Set<string>()
     for (const entry of entries) {
+      if (entry.declaration.webSocket !== undefined) {
+        const key = JSON.stringify(entry.scope)
+        if (routingScopes.has(key)) continue
+        routingScopes.add(key)
+        const routes = entries.filter((candidate) =>
+          candidate.declaration.webSocket !== undefined && JSON.stringify(candidate.scope) === key
+        )
+        const bridges = routes.map((route) => route.declaration.webSocket!)
+        const bindings = bridges.map((bridge, index) => `globalThis[${JSON.stringify(bridge.name)}] = sends[${index}];`)
+          .join("\n")
+        const body = routes.map((route) => route.declaration.source).join("\n")
+        const { script } = yield* state.send(Script.addPreloadScript({
+          functionDeclaration: `(...sends) => { let __strider_webSocketRouting__; ${bindings} ${body} }`,
+          arguments: bridges.map(WebSocketBridge.channel),
+          ...scopeParams(state, entry.scope)
+        }))
+        next.push({ script, declaration: entry.id, owners: routes.map((route) => route.id) })
+        continue
+      }
       // Each script is a preload of its own, so what ran is kept where the next can look: a script runs only
       // after what it comes after ran without throwing
       const ran = `(globalThis[Symbol.for(${JSON.stringify(ranKey)})] ??= new Set())`
@@ -84,12 +104,7 @@ const reconcileScripts = Effect.fnUntraced(function*(state: State) {
         ? body
         : `if (${JSON.stringify(entry.declaration.after)}.every((id) => ${ran}.has(id))) { ${body} }`
       const { script } = yield* state.send(Script.addPreloadScript({
-        functionDeclaration: entry.declaration.webSocket === undefined ?
-          `() => { ${gated} }` :
-          `(send) => { globalThis[${JSON.stringify(entry.declaration.webSocket.name)}] = send; ${gated} }`,
-        ...(entry.declaration.webSocket === undefined
-          ? {}
-          : { arguments: [WebSocketBridge.channel(entry.declaration.webSocket)] }),
+        functionDeclaration: `() => { ${gated} }`,
         ...(entry.declaration.world._tag === "Isolated" ? { sandbox: entry.declaration.world.name } : {}),
         ...scopeParams(state, entry.scope)
       }))
@@ -99,8 +114,12 @@ const reconcileScripts = Effect.fnUntraced(function*(state: State) {
   if (Exit.isFailure(installed)) {
     // A failed addition must preserve old survivors, but never preserve a removed declaration.
     const desired = new Set(state.registry.all().map((entry) => entry.id))
-    const retained = previous.filter((script) => desired.has(script.declaration))
-    const obsolete = previous.filter((script) => !desired.has(script.declaration))
+    const retained = previous.filter((script) =>
+      (script.owners ?? [script.declaration]).every((owner) => desired.has(owner))
+    )
+    const obsolete = previous.filter((script) =>
+      (script.owners ?? [script.declaration]).some((owner) => !desired.has(owner))
+    )
     state.preloads = [...retained, ...yield* removePreloads(state, [...next, ...obsolete])]
     return yield* Effect.failCause(installed.cause)
   }

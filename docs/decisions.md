@@ -496,6 +496,15 @@ information. Plain output bounds its preview, while JSON preserves the complete 
 masks arbitrary returned data as a whole: a value no longer identifies the editable field it came from, so applying
 snapshot-text masking alone would let a segment expose that field. Page handles retain their names and IDs.
 
+**The CLI and the toolkit press chords; the library takes modifiers as an option.** A tool's `press` takes one
+string, which agents and Playwright users write as `Modifier+Key` (`Meta+k`, `Control+Shift+P`), so the toolkit reads
+every part but the last as one of the library's modifiers, `Alt`, `Control`, `Meta`, or `Shift`, and a `+` with
+nothing before it as the key. `Keyboard.press` and `Locator.press` keep `{ modifiers }`, so a key has one spelling
+in code, and exported tests replay a chord with it. Rejected: a `--modifiers` flag beside the chord, which writes one
+press two ways; chords in the library too, which parses strings where the type already names the modifiers; and
+`ControlOrMeta` or aliases such as `Ctrl` and `Cmd`, which would need a platform-dependent default the library
+doesn't have, or a second name for a modifier. They are refused as `InvalidInput`, naming the four.
+
 **The `strider` client loads Effect, and talks to its session's daemon through one `effect/rpc` group.** Each caller,
 the command, `strider mcp`, `strider sessions`, and `start --fork`, uses the same RPC client over the session's Unix
 socket, so what crosses it is a Schema: a command's output and exit code, a tool call's parameters and result, the
@@ -535,6 +544,9 @@ commit supersedes it after outstanding correlation finishes. No public operation
 
 BiDi wire navigation identities do not alone prove logical supersession. A delayed load whose timestamp predates
 an active start and whose URL belongs to the current document can cause Firefox to allocate another identity.
+That load may arrive before the start it names, for a committed or an initial document; it is kept until the next
+start of any identity or the next commit, and counts only if that start is the identity's own and later, so the
+correlation does not depend on the order the load and the start arrive in.
 With an existing document request, the same destination and no competing reservation, correlate that next start
 with the active logical navigation. A distinct document request for the new identity separates the navigations;
 command reservations always retain their separate ownership. This keeps request, commit and terminal outcome
@@ -556,7 +568,11 @@ and replacement registrations retain those dimensions until the last override ha
 While an override remains, release reapplies the current effective override. Per-target serialization recomputes
 that effective override when the command runs, including when registrations are released out of order.
 
-Measure in the named `__strider_viewport` isolated world for the target's main frame (or its own frame for an iframe),
+The viewport is applied, measured and cleared on top-level page targets only. Chromium refuses the commands on an
+out-of-process iframe's target, whose size comes from its frame in the parent page, and an iframe waiting for the debugger
+resumes only after its setup, so a measurement there waits for a reply the paused renderer can't send.
+
+Measure in the named `__strider_viewport` isolated world for the target's main frame,
 passing the returned execution context id explicitly to `Runtime.evaluate`. Create or retrieve that world for each
 measurement rather than caching an execution context across navigation. Main-world lexical bindings and numeric
 or nonnumeric shadows must not supply the baseline. Missing, rejected, or nonfinite measurements do not prevent
@@ -1303,8 +1319,10 @@ Expectation history contains observed values and diagnostic error entries, and `
 For locator expectations, page values must reach Strider before the deadline; with neither a page value nor a
 diagnostic error recorded, history is empty and `last` is absent. Late replies do not update a returned failure.
 A page can evaluate a value without delivering it in time, so a strict deadline cannot guarantee a page value.
-`Expect.that` on an effect records `{ error: "a check was still running at the deadline" }` for an unfinished check,
-even if no check has returned a value. This diagnostic describes the unfinished check rather than a page value.
+`Expect.that` on an effect keeps the last value a check returned as `last`, and starts no check once the deadline
+has passed. Only when no check returned a value does it record `{ error: "a check was still running at the deadline" }`
+for the unfinished check; this diagnostic describes that check rather than a value. A check cut off by the deadline
+says less than the value before it, which is what the caller needs to see why the condition didn't hold.
 Rejected: inventing a page value Strider never received, and waiting past the deadline for a reply, which breaks
 the caller’s budget. Changing how observations are collected is not required by this contract.
 
@@ -1557,7 +1575,10 @@ Cross-realm capacity is conservative: issued unused credits remain charged, perm
 is reserved elsewhere, because an asynchronous host grant cannot precede a synchronous mutable-buffer snapshot.
 A counted shared outbound pool keeps ordinary replies usable even when browser credits fill their allocation.
 Target-specific dispatch and scoped subscriptions install the bridge only where requested; ordinary native events
-do not probe optional WebSocket hooks. Silent emulation, speculative per-realm capacity, blocking dialogs, and
+do not probe optional WebSocket hooks. Host commands use a reference captured at installation, shared across
+registrations in that realm and released after their drain or realm destruction. A page-global holder was rejected
+because an earlier page definition could intercept route tokens and commands; this does not make the main-world
+shim a security boundary. Silent emulation, speculative per-realm capacity, blocking dialogs, and
 always-on instrumentation were rejected.
 Optional installation follows [Pay for what you use](#pay-for-what-you-use).
 
@@ -1589,3 +1610,7 @@ Firefox's automation profile disables new-tab preloading with `browser.newtab.pr
 ## Large WebKit evaluations are sent in bounded parts
 
 On stock WebKit, a function whose declaration takes over 96 KiB once JSON-encoded twice, as the attached inspector carries it inside `Target.sendMessageToTarget`, is staged in the realm's helper in parts of at most 64 KiB, then joined and compiled there inside the inspector call, which WebKit allows even under a Content-Security-Policy that forbids eval, with the page's `eval` as of the helper's install. That joins the intrinsics the helper already takes from the page, whose replacement before the install can already change what an evaluation returns: the inspector compiles only what arrives in one message, and a page can't supply a compiler it can't tamper with. A page's wrapper that passes the text on to the browser's `eval` works. A replacement that compiles different text is refused, by checking the compiled function's source against the joined text; one that returns a function with the same source isn't detected. The 96 KiB threshold leaves room in the last call's message for the arguments and wrapping. Capturing `eval` before the page's scripts run was rejected: it covers new documents, not those already open when Strider attaches. libsoup closes the socket on an incoming message over 128 KiB, and the page engine's install is sent this way, so the engine's size no longer has a cap, in any build form. Smaller declarations go in one call, so other backends and ordinary evaluations are unchanged, and the arguments, which go in the last call, keep their own limit; the engine's install costs one more round trip per document. Minifying the engine at generation time was rejected: it still goes in one message, so it only moves the cap, and adds a generated artifact. Splitting the engine into separately installed functions was rejected: a large refactor of one closure, with each part still capped.
+
+## Pointer input into an out-of-process frame waits until the frame is drawn
+
+On Chromium, pointer input that names a frame that is out of process, or inside one, waits until the frame's current document has been drawn, bounded by the operation's deadline: the document, or a document in a frame inside it, has reported `Page.lifecycleEvent` `firstPaint`. A document whose start Strider didn't see counts as drawn. Chromium picks each pointer event's target in its browser process, from hit-test data that includes an out-of-process frame only after the frame has been drawn, so input sent earlier reaches the parent's iframe element, and a click can split between the two documents. CDP reports no event for that hit-test data, so `firstPaint` is the signal Strider waits for, not proof of the browser's hit-test state: input has reached a child frame before its `firstPaint` arrived, and nothing in the protocol promises the data is in place when it does. It reports painted content, and a document can't be drawn without the documents that embed it, so a painting descendant shows that a wrapper document that paints nothing was drawn too. A locator action waits, for every frame its gesture lands in, before it marks its input as possibly sent, and the adapter refuses input into a frame that is no longer drawn when it writes, marked as sent nothing, so the action checks the changed page again; a deadline in either leaves nothing to release. Re-checking isn't a retry of the same input: nothing was sent, and the page the checks passed on has changed. Waiting for every out-of-process frame on the way was rejected: a wrapper that only holds an iframe never reports `firstPaint`. The trade-off: input into a frame whose document and every frame inside it paint nothing runs out its deadline without being sent. Input that names no frame, such as `page.mouse`, doesn't wait, so while an out-of-process frame hasn't been drawn it can still reach the parent's iframe element. Dispatching through the child frame's own session was rejected: it skips the browser's hit testing, so a covered element would get the click. Retries and delays were rejected: a retry can't undo input the parent already received, and no delay is known to be long enough. Waiting for a `requestAnimationFrame` in each document was rejected: it shows a frame was produced, not that it was drawn.

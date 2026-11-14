@@ -8,7 +8,7 @@ import * as Protocol from "../../protocol/Protocol.ts"
 import * as L1Target from "../../Target.ts"
 import * as Automation from "../../webkit-automation-protocol/Automation.ts"
 import * as Runtime from "../../webkit-stock-protocol/Runtime.ts"
-import type * as Adapter from "../adapter.ts"
+import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import type * as WebKitAutomation from "../webkitAutomation.ts"
 import { automationOf, pageHandleOf, processOfContext, resultOf, settleDialog } from "./automation.ts"
@@ -66,25 +66,26 @@ const source = (kind: "Mouse" | "Keyboard" | "Wheel") =>
  */
 export const dispatchInputLaunched = Effect.fnUntraced(
   function*(state: State, id: L1Target.NavigableId, events: ReadonlyArray<Adapter.InputEvent>) {
-    const page = yield* pageOf(state, id)
+    // Whatever fails before the first sequence is written sent nothing
+    const page = yield* pageOf(state, id).pipe(Effect.mapError(Adapter.unsent))
     // What Automation can't type is refused before anything is sent
     for (const event of events) {
       if (event._tag === "Touch") {
-        return yield* Effect.fail(
+        return yield* Effect.fail(Adapter.unsent(
           Kit.unsupported("input.touch", "WebKitGTK builds its Automation without touch (QUIRKS.md, Q214)")
-        )
+        ))
       }
       if (event._tag === "Key" && virtualKeys[event.key] === undefined && [...event.key].length !== 1) {
-        return yield* Effect.fail(
+        return yield* Effect.fail(Adapter.unsent(
           Kit.unsupported(
             "input.keyboardLayout",
             `stock WebKit's Automation types characters and named keys, not ${event.key}`
           )
-        )
+        ))
       }
     }
-    const handle = yield* pageHandleOf(state, page)
-    const process = yield* processOfContext(state, page.context)
+    const handle = yield* pageHandleOf(state, page).pipe(Effect.mapError(Adapter.unsent))
+    const process = yield* processOfContext(state, page.context).pipe(Effect.mapError(Adapter.unsent))
     let wheel = state.wheelStates.get(process.key)
     if (wheel === undefined) state.wheelStates.set(process.key, wheel = { width: 0, height: 0 })
     // The events up to text to insert, as one sequence: a sequence's end forgets a click, so a second click
@@ -266,13 +267,20 @@ const nodeHandleOf = Effect.fnUntraced(function*(state: State, node: Adapter.Nod
     return yield* Effect.fail(Kit.gone({ _tag: "Document", id: node.document }, new L1Target.DocumentReplaced({})))
   }
   // WebKit's binding is the element's object id, in the page's world
-  const { result } = yield* Kit.protocol(
+  const { result } = yield* (
     Runtime.callFunctionOn({
       objectId: node.binding as Runtime.RemoteObjectId,
       functionDeclaration:
         "function() { const steps = []; for (let e = this; e && e.parentElement; e = e.parentElement) { const same = [...e.parentElement.children].filter((c) => c.localName === e.localName); steps.unshift(e.localName + ':nth-of-type(' + (same.indexOf(e) + 1) + ')') } return ':root > ' + steps.join(' > ') }",
       returnByValue: true
-    }).pipe(Protocol.on(target.session))
+    }).pipe(
+      Protocol.on(target.session),
+      Effect.mapError((error) =>
+        error.reason._tag === "Rejected" && error.reason.reason === "NoSuchObject"
+          ? Kit.gone({ _tag: "Document", id: node.document }, new L1Target.DocumentReplaced({}))
+          : Kit.protocolError(error)
+      )
+    )
   )
   const found = yield* automationOf(
     process,

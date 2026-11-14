@@ -5,6 +5,7 @@ import * as Protocol from "../../protocol/Protocol.ts"
 import * as Console from "../../webkit-stock-protocol/Console.ts"
 import * as Runtime from "../../webkit-stock-protocol/Runtime.ts"
 import * as Adapter from "../adapter.ts"
+import * as Kit from "../adapterKit.ts"
 import { contextKey, type Event, placement, type State, type TargetEntry, type WorkerEntry } from "./state.ts"
 
 type Installation = { readonly view: State; readonly registered: Set<string> }
@@ -48,6 +49,24 @@ export const prepare: (
       worker: WorkerEntry | undefined,
       target: TargetEntry
     ): boolean => {
+      const captureMarker = message.parameters?.[0]?.value
+      const capturing = bridges.find((b) => "__striderWebSocketCapture:" + b.token === captureMarker)
+      const capture = message.parameters?.[1]
+      if (capturing !== undefined && capture?.objectId !== undefined) {
+        const contextId = (JSON.parse(capture.objectId) as { injectedScriptId: number }).injectedScriptId
+        const realm = worker?.realm ?? base.realmsByContext.get(contextKey(target, contextId))
+        const session = worker?.session ?? target.session
+        if (realm === undefined || realm.ended) {
+          base.buffer.later(
+            Runtime.releaseObject({ objectId: capture.objectId }).pipe(Protocol.on(session), Effect.ignore)
+          )
+        } else {
+          const handle = base.ids.handle()
+          base.handles.set(handle, { session, realm: realm.id, objectId: capture.objectId, group: undefined })
+          base.buffer.later(capturing.captured(realm.id, handle, () => !realm.ended))
+        }
+        return true
+      }
       const object = message.parameters?.find((argument) =>
         argument.objectId !== undefined &&
         argument.preview?.properties?.some((property) =>
@@ -78,7 +97,7 @@ export const prepare: (
         }).pipe(
           Protocol.on(session),
           Effect.map((result) => typeof result.result.value === "string" ? result.result.value : ""),
-          Effect.mapError(Adapter.protocolError)
+          Effect.mapError(Kit.realmFailure(realm.id, () => realm.ended))
         ),
         worker === undefined
           ? { _tag: "Frame", page: realm.document!.frame.page.id, frame: realm.document!.frame.id }

@@ -45,11 +45,11 @@ interface ProtocolSession {
 }
 
 type ProtocolError =
-  | { _tag: "Rejected"; method: string; reason: RejectReason; code: number | string; message: string }   // code and message sanitized, kept as evidence
+  | { _tag: "Rejected"; method: string; reason: RejectReason; code: number | string; message: string; target?: string }   // code and message sanitized, kept as evidence; target is the CDP target's kind (page, iframe, worker, service_worker, shared_worker, other), absent on the browser's session
   | { _tag: "Decode"; method: string; issue: string }
   | { _tag: "SessionEnded"; reason: SessionEndReason }
   | { _tag: "Unsupported"; method: string }
-type RejectReason = "NoSuchTarget" | "NoSuchFrame" | "NoSuchNode" | "InvalidArgument" | "Unrecognized"
+type RejectReason = "NoSuchTarget" | "NoSuchFrame" | "NoSuchNode" | "NoSuchObject" | "InvalidArgument" | "Unrecognized"
 type SessionEndReason = "detached" | "targetDestroyed" | "connectionLost" | "swapped"
 
 // ── Error matchers: one table per backend, data ───────────
@@ -94,6 +94,28 @@ interface ErrorMatcher {
   Pages with child frames or HTML drag interception enabled, drags, multiple clicks, and other input sequences
   keep their sequential dispatch. The frame restriction also applies to coordinate clicks, whose target frame
   is unknown before dispatch. Generated commands and the public protocol session API are unchanged.
+- **Pointer input into an out-of-process frame waits for the frame to be drawn.** Chromium picks each pointer
+  event's target in its browser process, from hit-test data that includes an out-of-process frame only after the
+  frame has been drawn; an event sent earlier reaches the parent's iframe element, and a click can split between the
+  two documents. The CDP adapter keeps, per frame, the latest document whose `Page.lifecycleEvent` `init` its session
+  reported, and whether it has reported `firstPaint`. Before pointer input into a frame that is out of process or
+  inside one, it waits until the frame's current document has been drawn, as the signal `firstPaint` gives: it, or
+  a document in a frame inside it, has reported it. `firstPaint` is the signal Strider waits for, not a report of
+  the browser's hit-test data, which CDP doesn't expose: input has reached a child before its `firstPaint` arrived.
+  A document can't be drawn without the documents that embed it, so a painting descendant shows a wrapper that
+  paints nothing was drawn. A document whose start wasn't reported counts as drawn. A locator action waits through
+  the adapter's `frameReady`, a read, for every frame its gesture's points land in (a drag's source and
+  destination), before it releases earlier input or marks its own as sent. `dispatchInput` doesn't wait: it checks
+  those frames again as it writes, and refuses pointer input into one that isn't drawn, as when it navigated since
+  the wait, with `FrameNotDrawn`, before writing anything. Each adapter marks `unsent` the failures its
+  `dispatchInput` meets before writing any input: its lookups and its refusals, such as an undrawn frame or a key
+  stock WebKit's Automation can't type. Locator actions and the page's devices record such a failure as nothing
+  sent and leave nothing of it to release; any other failure, or an interruption, still counts as input that may
+  have been sent. On a refused frame the action checks the changed page again, under the same deadline. The deadline ends the wait, as it does the adapter's other
+  waits, and the operation's history names the frame (`FrameNotDrawn`). A frame whose document and
+  descendants paint nothing never reports `firstPaint`, so input into it runs out its deadline. Keys and text
+  aren't hit-tested and don't wait. Input that names no frame, such as `page.mouse`, doesn't wait, and can still
+  reach the parent's iframe element while an out-of-process frame hasn't been drawn.
 - **Pending map.** Pending commands sit in a map from id to resumer. Interrupting the caller removes its entry and tombstones the id, so a late reply is dropped. Replies to commands that create resources are still passed to the late-reply handler, which releases them by default.
 - **No remote cancel.** No protocol can cancel a command; interruption only abandons the reply. Compensation metadata on generated commands tells L1 what to undo, for example releasing input or resolving a paused request.
 - **Timeouts** come from the operation deadline (L1), with a protocol-level fallback default for raw L0 use.
@@ -335,9 +357,12 @@ Adapter responsibilities:
     are evidence, not logical navigation ids. Firefox can assign a delayed load to a newer start and then issue a
     replacement start without a second document request. Correlate the replacement only when that load's timestamp
     predates the active start, its URL identifies the current document, the active navigation has a document request,
-    and no competing command reservation exists. The destination URL must also agree, but cannot establish
-    continuity alone. A distinct document request for the replacement identity establishes competition and splits
-    it into a new logical navigation. Preserve the original request and single outcome across correlated identities;
+    and no competing command reservation exists. The load can also arrive before the start of the identity it
+    names: when it is for the current document, including an initial document no navigation committed, and no
+    earlier than that document's commit, keep it on the navigable until the next start of any identity, known or
+    not, or the next commit. Count it only if that next start is its identity's own and later. The destination URL
+    must also agree, but cannot establish continuity alone. A distinct document request for the replacement
+    identity establishes competition and splits it into a new logical navigation. Preserve the original request and single outcome across correlated identities;
     reject starts older than an observed newer start or commit. Clear aliases and stale-load evidence when their
     navigation and outstanding command correlation end, and on context removal. A committed document retains the
     correlated start bounds for readiness until it is replaced; the retained completed failure keeps its identities
@@ -376,6 +401,14 @@ Adapter responsibilities:
   Dedicated-worker bindings are armed before its existing before-script breakpoint. A paused empty-URL popup batches Page/Runtime enablement, bindings, and preloads
   before resuming; captured execution contexts are checked for liveness before publication. At most 64 early
   binding envelopes per target wait for their model realm; overflow fails its routing closed. BiDi uses channel-valued arguments of scoped preloads and immediate realm calls.
+  Installation returns a frozen routing holder rather than publishing one on the page global. Current-document
+  evaluations retain that result as a remote handle; preloads transfer the holder to the opted-in backend bridge
+  (CDP/WebKit console arguments, BiDi root-owned channel values). Early CDP captures wait with binding envelopes
+  for their exact live realm, including popup replay. Intake waits for capture under its browser-clock budget.
+  Commands and route additions use only the captured handle, never a global lookup. Registrations share the
+  holder per context/realm; duplicate handles are released, and the retained handle is released after the final
+  registration drains or the realm ends. Preload bundles share a lexical holder. BiDi groups a context's routing
+  preloads into one closure and tracks every declaration owner when rolling back replacements.
   Shared BiDi preload reconciliation is serialized: it reads the current registry under that serialization,
   installs replacements before retiring predecessors, and rolls back staged additions on failure. Native preload
   IDs retain their declaration owner, so failed replacement preserves old survivors without retaining a removed
@@ -644,7 +677,7 @@ Adapter responsibilities:
   - **A page in the background of a Firefox context renders about a frame a second, not one in 150 ms:** 3 frames in 4 s, two seconds after the second page opened. The stable check needs two frames in one round, so an action there never passes; it times out, its history alternating `NotStable` and `NoRenderingOpportunity`, with the hint naming `page.activate`, after which it acts. `layout.throttled_frame_rate` in the launch prefs didn't change it, and activating before every action is ruled out (rule 23), so nothing changed; QUIRKS.md records it.
   - **Firefox on the desktop has no touch event interface:** no `TouchEvent`, `'ontouchstart' in window` is false, and an `ontouchstart` attribute never runs, though `touchstart` and `touchend` reach listeners.
   - **The fold publishes an event before the state it changes** (CONCEPTS.md §9, Subscriptions). A navigation's end was published after `goto`'s outcome was latched, so `PageNavigation.next` right after `goto` received `goto`'s own navigation; a `waitUntil` test caught it on Chromium. Popups, workers, dialogs, and document readiness were reordered the same way.
-  - **`Expect.that` bounds each check by its deadline,** and runs the subject under it. Under full load, a `Locator.count` inside it timed out while resolving, and the expectation failed with the subject's `Timeout` instead of `ExpectationFailed`; and a subject that never finished held the expectation past its deadline. A check still running at the deadline, or failing with it, now ends the expectation with `ExpectationFailed`, the observation "a check was still running at the deadline" last in its history. A shorter deadline inside the subject is still the subject's failure.
+  - **`Expect.that` bounds each check by its deadline,** and runs the subject under it. Under full load, a `Locator.count` inside it timed out while resolving, and the expectation failed with the subject's `Timeout` instead of `ExpectationFailed`; and a subject that never finished held the expectation past its deadline. A check still running at the deadline, or failing with it, now ends the expectation with `ExpectationFailed`. Its history ends with the last value a check returned, or, when none returned, with the observation "a check was still running at the deadline". No check starts once the deadline has passed, so a check cut off at once no longer replaces the value before it. A shorter deadline inside the subject is still the subject's failure.
   - **Every expectation re-checks at each animation frame,** not only those that depend on layout, and on `focusin` and `focusout`, which `toBeFocused` needs. One evaluation per frame was simpler than sorting expectations by what they depend on.
   - **`check` and `uncheck` read the state with a one-shot read before acting,** so an element already in the state sends nothing, and one of the wrong kind fails at once; an element that isn't there yet goes on to the click's checks, which wait.
   - **`fill("")` and `clear` press Delete on the selected contents** of a typed field.

@@ -11,7 +11,8 @@ export const harness = Effect.fnUntraced(
     test: (
       bridge: () => Adapter.WebSocketBridge
     ) => Effect.Effect<void, unknown, Browser.Browser | import("effect/Scope").Scope>,
-    evaluate?: Adapter.AdapterConnection["evaluate"]
+    evaluate?: Adapter.AdapterConnection["evaluate"],
+    options?: { readonly capture?: boolean; readonly releaseHandles?: Adapter.AdapterConnection["releaseHandles"] }
   ) {
     let bridge!: Adapter.WebSocketBridge
     const clock = yield* Clock.clockWith(Effect.succeed)
@@ -23,11 +24,19 @@ export const harness = Effect.fnUntraced(
         ...fake,
         ownership: "launched" as const,
         ...(evaluate === undefined ? {} : { evaluate }),
+        ...(options?.releaseHandles === undefined ? {} : { releaseHandles: options.releaseHandles }),
         declare: (scope, declaration) =>
           fake.declare(scope, declaration).pipe(Effect.tap(() =>
             Effect.sync(() => {
               if (declaration._tag === "InitScript" && declaration.webSocket !== undefined) {
-                bridge = declaration.webSocket
+                const current = declaration.webSocket
+                bridge = {
+                  ...current,
+                  receive: (realm, ...args) => {
+                    if (options?.capture !== false) Effect.runSync(current.captured(realm, "shim" as Adapter.HandleId))
+                    return current.receive(realm, ...args)
+                  }
+                }
               }
             })
           ))

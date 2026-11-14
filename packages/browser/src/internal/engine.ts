@@ -94,12 +94,18 @@ export const NotReady = Schema.Union([
   Schema.TaggedStruct("NotVisible", {}),
   Schema.TaggedStruct("Disabled", {}),
   Schema.TaggedStruct("ReadOnly", {}),
-  Schema.TaggedStruct("Inert", {}),
+  /**
+   * `by` is the element with the `inert` attribute; `dialog` the open modal dialog outside the target, when there is
+   * one: a native one, or a rendered `aria-modal` dialog that isn't inert itself.
+   */
+  Schema.TaggedStruct("Inert", { by: Schema.String, dialog: Schema.optional(Schema.String) }),
   Schema.TaggedStruct("BlockedByModal", { dialog: Schema.String }),
   Schema.TaggedStruct("OutsideViewport", {}),
   Schema.TaggedStruct("NotStable", {}),
   Schema.TaggedStruct("NoRenderingOpportunity", {}),
   Schema.TaggedStruct("Covered", { by: Schema.String }),
+  /** The hit test skips `element`, the target or an iframe holding it, because its `pointer-events` is `none`. */
+  Schema.TaggedStruct("NoPointerEvents", { element: Schema.String }),
   /** The guard stopped the gesture: its first trusted event landed on another element. */
   Schema.TaggedStruct("Intercepted", { by: Schema.String }),
   Schema.TaggedStruct("NoSuchOption", { option: Schema.String }),
@@ -428,8 +434,8 @@ export const Response = Schema.Union([
     viewport: Clip,
     /** Whether it was scrolled into view. */
     scrolled: Schema.Boolean,
-    /** What covers the iframe at the point given, or `null` when the iframe itself is hit there. */
-    covered: Schema.NullOr(Schema.String),
+    /** Why the iframe isn't hit at the point given (`Covered` or `NoPointerEvents`), or `null` when it is. */
+    covered: Schema.NullOr(NotReady),
     /** This document's scroll offset. */
     scroll: Point
   }),
@@ -1293,9 +1299,19 @@ export function engine(render: (root: SnapNode) => string) {
     return value !== null && matches(matcher, collapse(value))
   }
 
+  /**
+   * The whole document's elements, open shadow roots included, walked once per readiness check: `checkAction`
+   * opens a scope its queries and its dialog search share, and closes it when it returns, or before it runs page
+   * code such as a focus handler, so no walk outlives the synchronous check or a change the page made. Outside a
+   * scope each call walks the document again.
+   */
+  let treeScope: { elements?: Array<Element> } | null = null
+  const documentElements = (): Array<Element> =>
+    treeScope === null ? elementsUnder(document) : (treeScope.elements ??= elementsUnder(document))
+
   /** The candidates of one query under `scope`, in tree order. */
   const query = (scope: Document | Element, step: Step): Array<Element> => {
-    const under = elementsUnder(scope)
+    const under = scope === document ? documentElements() : elementsUnder(scope)
     switch (step._tag) {
       case "Css": {
         const roots: Array<Document | Element | ShadowRoot> = [scope]
@@ -1358,7 +1374,7 @@ export function engine(render: (root: SnapNode) => string) {
 
   const treeOrder = (elements: Iterable<Element>): Array<Element> => {
     const set = new Set(elements)
-    return elementsUnder(document).filter((element) => set.has(element))
+    return documentElements().filter((element) => set.has(element))
   }
 
   /** Validate the whole query before searching, including branches whose scope may be empty. */
@@ -1451,12 +1467,26 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   // Actionability
-  /** A short description of an element for errors: `button#buy.primary "Add to cart"`. */
+  /** An element's text for a description: as `textOf`, but with no field's content, which may be private. */
+  const describedText = (node: Node): string =>
+    node.nodeType === Node.TEXT_NODE
+      ? node.nodeValue ?? ""
+      : !(node instanceof Element) || SKIPPED.has(node.localName) || fieldOf(node)
+      ? ""
+      : buttonLikeInput(node)
+      ? node.value
+      : flatChildNodes(node).map(describedText).join("")
+
+  /**
+   * A short description of an element for errors: `button#buy.primary "Add to cart"`. Its text leaves out what a
+   * field holds, such as a textarea's or an editable element's content, whatever the capture policy: a field, or
+   * an element inside one, is described with no text.
+   */
   const describe = (element: Element): string => {
     let out = element.localName
     if (element.id !== "") out += `#${element.id}`
     for (const name of Array.from(element.classList).slice(0, 2)) out += `.${name}`
-    const text = textOf(element)
+    const text = withinField(element) ? "" : collapse(describedText(element))
     if (text !== "") out += ` "${text.length > 40 ? `${text.slice(0, 40)}…` : text}"`
     return out
   }
@@ -1716,12 +1746,41 @@ export function engine(render: (root: SnapNode) => string) {
       ? element.value
       : null
 
-  const inertReason = (element: Element): NotReady | null => {
-    for (let current: Element | null = element; current !== null; current = composedParent(current)) {
-      if (current.hasAttribute("inert")) return { _tag: "Inert" }
+  const missed = (element: Element, hit: Element | null): NotReady =>
+    getComputedStyle(element).pointerEvents === "none"
+      ? { _tag: "NoPointerEvents", element: describe(element) }
+      : { _tag: "Covered", by: hit === null ? "nothing at that point" : describe(hit) }
+
+  /** The element whose `inert` attribute makes `element` inert: inertness applies on the flat tree, through slots. */
+  const inertAncestor = (element: Element): Element | null => {
+    for (
+      let current: Element | null = element;
+      current !== null;
+      current = current.assignedSlot ?? composedParent(current)
+    ) {
+      if (current.hasAttribute("inert")) return current
     }
-    const modal = Array.from(document.querySelectorAll("dialog")).find((dialog) => dialog.matches(":modal"))
-    return modal !== undefined && !composedContains(modal, element)
+    return null
+  }
+
+  const inertReason = (element: Element): NotReady | null => {
+    const inert = inertAncestor(element)
+    // Dialogs outside the target, in shadow roots too
+    const dialogs = documentElements().filter((d) =>
+      (d instanceof HTMLDialogElement || d.hasAttribute("aria-modal")) && !composedContains(d, element)
+    )
+    if (inert !== null) {
+      // An open modal: a native one, or a rendered `aria-modal` dialog that isn't inert itself
+      const modal = dialogs.find((d) =>
+        d instanceof HTMLDialogElement
+          ? d.matches(":modal")
+          : d.matches("[role=dialog][aria-modal=true],[role=alertdialog][aria-modal=true]") &&
+            inertAncestor(d) === null && visible(d)
+      )
+      return { _tag: "Inert", by: describe(inert), dialog: modal && describe(modal) }
+    }
+    const modal = dialogs.find((dialog) => dialog instanceof HTMLDialogElement && dialog.matches(":modal"))
+    return modal !== undefined
       ? { _tag: "BlockedByModal", dialog: describe(modal) }
       : null
   }
@@ -1835,7 +1894,10 @@ export function engine(render: (root: SnapNode) => string) {
     return center
   }
 
-  /** Probe centres only when requested; retain the first geometric point for a Covered result if none reaches. */
+  /**
+   * Probe centres only when requested; retain the first geometric point for a `Covered` or `NoPointerEvents` result
+   * if none reaches.
+   */
   const actionPoints = (
     element: Element,
     position: { readonly x: number; readonly y: number } | null,
@@ -2133,6 +2195,18 @@ export function engine(render: (root: SnapNode) => string) {
     request: Extract<Request, { op: "act" }>,
     state: ActionState
   ): Response | undefined | Promise<Response | undefined> => {
+    treeScope = {}
+    try {
+      return checkActionIn(request, state)
+    } finally {
+      treeScope = null
+    }
+  }
+
+  const checkActionIn = (
+    request: Extract<Request, { op: "act" }>,
+    state: ActionState
+  ): Response | undefined | Promise<Response | undefined> => {
     const action = request.action
     clearTreeCaches()
     const found = resolve(request.steps)
@@ -2182,6 +2256,8 @@ export function engine(render: (root: SnapNode) => string) {
       const evidence = state.previous
       state.previous = null
       let reason: NotReady | null = null
+      // Computed once: its dialog search may walk the whole document
+      let inert: NotReady | null = null
       if (element === undefined) reason = { _tag: "NoMatch" }
       else if (checks.visible && !rendered(element, false)) reason = { _tag: "NotVisible" }
       else if (
@@ -2191,7 +2267,7 @@ export function engine(render: (root: SnapNode) => string) {
         )
       ) reason = { _tag: "Disabled" }
       else if (checks.editable && readOnly(element)) reason = { _tag: "ReadOnly" }
-      else if (checks.notInert && inertReason(element) !== null) reason = inertReason(element)
+      else if (checks.notInert && (inert = inertReason(element)) !== null) reason = inert
       else if (checks.inViewport && (visibleFragment(element, request.clip) === null || clipped)) {
         reason = { _tag: "OutsideViewport" }
         if (!state.scrolled) {
@@ -2220,9 +2296,7 @@ export function engine(render: (root: SnapNode) => string) {
         if (point === null) reason = { _tag: "OutsideViewport" }
         else if (checks.receivesPointer) {
           const hit = hitTarget(point.x, point.y)
-          if (hit === null || !composedContains(element, hit)) {
-            reason = { _tag: "Covered", by: hit === null ? "nothing at that point" : describe(hit) }
-          }
+          if (hit === null || !composedContains(element, hit)) reason = missed(element, hit)
         }
       }
       if (reason === null && element !== undefined && action._tag === "Select") {
@@ -2256,6 +2330,8 @@ export function engine(render: (root: SnapNode) => string) {
             return
           }
         }
+        // `ready` runs page code, such as focus handlers, which can change the tree: what follows walks it afresh
+        treeScope = null
         let response = ready(element, action, request.apply, state.scrolled, point, checks)
         if (response._tag === "Retry") {
           reason = response.reason
@@ -2298,7 +2374,13 @@ export function engine(render: (root: SnapNode) => string) {
       const current = resolve(request.steps)
       // An observation belongs to one node; a replacement must start its own complete check.
       if (current.length !== 1 || current[0] !== element) return
-      return proceed(result)
+      // The continuation runs after `checkAction` closed its tree scope, so it opens its own
+      treeScope = {}
+      try {
+        return proceed(result)
+      } finally {
+        treeScope = null
+      }
     })
   }
 
@@ -2402,6 +2484,8 @@ export function engine(render: (root: SnapNode) => string) {
           return { _tag: "Final", final: { _tag: "Refused", element: describe(element), value: action.value } }
         }
         const recheckFill = (): Response | { readonly _tag: "Retry"; readonly reason: NotReady } | undefined => {
+          // Focus handlers may have changed the tree: read it afresh
+          clearTreeCaches()
           let reason: NotReady | null = null
           if (checks.visible && !rendered(element, false)) reason = { _tag: "NotVisible" }
           else if (checks.enabled && !enabled(element)) reason = { _tag: "Disabled" }
@@ -2921,8 +3005,8 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   const fieldAncestry = new Map<Node, boolean>()
-  const inField = (node: Node): boolean => {
-    if (!provenance) return false
+  /** Whether `node` is a field or inside one: through its ancestors, assigned slots and shadow hosts. */
+  const withinField = (node: Node): boolean => {
     const cached = fieldAncestry.get(node)
     if (cached !== undefined) return cached
     const path: Array<Node> = []
@@ -2943,6 +3027,8 @@ export function engine(render: (root: SnapNode) => string) {
     for (const ancestor of path) fieldAncestry.set(ancestor, field)
     return field
   }
+
+  const inField = (node: Node): boolean => provenance && withinField(node)
 
   const fieldText = new Map<Element, boolean>()
   // Follow textOf's actual flat-tree contributors. Each subtree is classified at most once per walk.
@@ -3340,10 +3426,10 @@ export function engine(render: (root: SnapNode) => string) {
       x: rect.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft),
       y: rect.top + parseFloat(style.borderTopWidth) + parseFloat(style.paddingTop)
     }
-    let covered: string | null = null
+    let covered: NotReady | null = null
     if (request.point !== null) {
       const hit = hitTarget(origin.x + request.point.x, origin.y + request.point.y)
-      if (hit !== iframe) covered = hit === null ? "nothing at that point" : describe(hit)
+      if (hit !== iframe) covered = missed(iframe, hit)
     }
     const bounds = viewportBounds(request.clip)
     const viewport = {

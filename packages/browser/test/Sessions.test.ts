@@ -345,6 +345,24 @@ describe("strider export test", () => {
     )
   })
 
+  it("presses a chord as its key with the modifiers held, with and without a target", () => {
+    const { text } = ExportTest.render({
+      name: "shop",
+      browser: launched,
+      secrets: {},
+      state: undefined,
+      steps: [
+        tool("newPage", { name: "main" }, "main"),
+        tool("press", { page: "main", key: "Meta+k" }),
+        tool("press", { page: "main", key: "Control+Shift++", target: "css=#field" }),
+        tool("press", { page: "main", key: "Enter" })
+      ]
+    })
+    assert.include(text, `yield* main.keyboard.press("k", { modifiers: ["Meta"] })\n`)
+    assert.include(text, `.press("+", { modifiers: ["Control", "Shift"] })\n`)
+    assert.include(text, `yield* main.keyboard.press("Enter")\n`)
+  })
+
   it("writes a statement for every tool the session records, from the CLI or strider mcp, but the reads", () => {
     const reads = ["find", "history", "pages", "screenshot", "snapshot", "tabs"]
     const params = {

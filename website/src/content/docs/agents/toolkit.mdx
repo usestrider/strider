@@ -62,6 +62,10 @@ and `history` are the [event verbs](/docs/events/events#next-stream-and-history)
 [dialog handler](/docs/events/kinds#dialogs-and-file-choosers). A result reads
 [as the CLI prints it](/docs/agents/cli#commands).
 
+`press` takes a key as [actions](/docs/pages/actions#keys) name it, or a chord that holds modifiers for it, which
+the toolkit reads into the library's `modifiers`: `{ page: "p1", key: "Meta+k" }` presses `k` with Meta held, as
+`page.keyboard.press("k", { modifiers: ["Meta"] })` does. The modifiers are `Alt`, `Control`, `Meta`, and `Shift`.
+
 A click's digest reports `validation observed during click` once per affected control when an `invalid`
 event occurs during that click operation. This is temporal evidence only: page handlers can call
 `checkValidity()` or `reportValidity()` on unrelated controls, so it does not prove a submission was attempted

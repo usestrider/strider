@@ -24,7 +24,8 @@ export const examples = {
     ["strider", "-s", "shop", "-p", "main", "expect", "text=\"1 item\"", "visible"],
     ["strider", "-s", "shop", "-p", "main", "goto", "https://shop.example.com/cart"],
     ["strider", "-s", "shop", "-p", "main", "fill", "label=Email", "ada@example.com"],
-    ["strider", "-s", "shop", "-p", "main", "press", "Enter", "--target", "label=Email"]
+    ["strider", "-s", "shop", "-p", "main", "press", "Enter", "--target", "label=Email"],
+    ["strider", "-s", "shop", "-p", "main", "press", "Meta+k"]
   ],
   "events": [
     ["strider", "-s", "shop", "-p", "main", "goto", "https://shop.example.com/orders"],
@@ -127,7 +128,7 @@ ${example(examples.actions)}
 
 Targets accept refs (\`e3\`) or locators: \`role=button[name="Save"]\`, \`text="Add to cart"\`, \`label=Email\`, \`testid=cart\`, and \`css=...\`. Shell quotes keep a locator one argument. Actions need an unambiguous target; failures include details and hints for narrowing it.
 
-Actions click, fill fields, press keys, choose options by label, or scroll an element into view. A fill replaces the field's text; a key press targets an element or the focused element on the page. Navigation goes to a URL or back in history.
+Actions click, fill fields, press keys, choose options by label, or scroll an element into view. A fill replaces the field's text; a key press targets an element or the focused element on the page, and a chord such as \`Meta+k\` or \`Control+Shift+P\` holds its modifiers (Alt, Control, Meta, or Shift) for the key. Navigation goes to a URL or back in history.
 
 These command forms come from the CLI's definitions. All take the session and page selectors described above:
 

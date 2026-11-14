@@ -39,6 +39,12 @@
  * The existing Node preload applies the same interception in supported children, with origin PID/local sequence;
  * the child/runtime capture exclusions below still apply. No production source or ordinary execution is instrumented.
  *
+ * In hosted macOS jobs, `stallProbe.ts` adds a `stall-probe` entry to a `--remote-debugging-pipe` child's process
+ * connection when its first pipe write has had no byte back for 10 s while it runs: its process tree, `sample` of
+ * it and up to six descendants (first 4 KiB each here; up to 128 KiB in its file under `.data/macos-crash-reports/`),
+ * `lsof` of fds 0-4, a bounded two-level profile listing, and `uptime` and `vm_stat`. It captures once per launch,
+ * never blocks the launch, and records nothing for one that answers; `scripts/integration-macos.md` states its bounds.
+ *
  * In macOS jobs the Chromium worker test and the deliberate-crash identity test (`ChromiumIdentity.test.ts`, crash
  * with direct page attachment), plus their files' shared scopes, keep their full ordinary bounded history, raw traffic
  * and late cleanup on a pass, independent of the 16 MiB passing quota below; `scripts/integration-macos.md` says when
@@ -195,11 +201,12 @@
  * files but do not guarantee their complete prelude survives eviction. No real abnormal-loss probe has validated
  * browser kill or malformed-frame capture end to end. Traces assist investigation without guaranteeing a complete loss cause.
  *
- * Chromium iframe native capture (`iframeNativeProbe.ts`, `nativeInputCapture.ts`): only the Chromium adapter case
- * "names an iframe's frame, passes a node across worlds, and sends input into a frame" records Chromium's own trace of
- * where it routed its input. It exists because that case fails in some macOS nightlies with the press reaching the
- * parent `iframe` element, and the protocol and the pointer recipients cannot say whether the child's hit-test
- * region was published before the press. Every run of that case, passing or failing, writes
+ * Chromium iframe native capture (`iframeNativeProbe.ts`, `nativeInputCapture.ts`): only two Chromium adapter cases,
+ * "names an iframe's frame, passes a node across worlds, and sends input into a frame" and "sends input into a
+ * cross-site frame that has not drawn its first frame yet", record Chromium's own trace of where it routed their
+ * input. It exists because the first case failed in some macOS nightlies with the press reaching the parent `iframe`
+ * element, and the protocol and the pointer recipients cannot say whether the child's hit-test region was published
+ * before the press. Every run of either case, passing or failing, writes
  * `.data/integration-failures/iframe-native-<pid>-<uuid>/`, which CI uploads with the other failure traces
  * (Linux: every job, always; macOS: every run, passing ones included, as the upload step runs `if: always()`):
  * `trace.json` (a CDP `Tracing` JSON trace, categories `input`, `latencyInfo`, `viz.hit_testing_flow`,

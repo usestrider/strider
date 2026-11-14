@@ -200,6 +200,25 @@ describe("WebKit evaluation retirement", () => {
       }).pipe(Effect.scoped))
   }
 
+  it.effect("recognizes a missing injected script before the realm retirement event arrives", () =>
+    Effect.gen(function*() {
+      const f = yield* fixture()
+      const browser = yield* makeBrowser
+      const client = yield* ProtocolClient.make(browser.transport, WebKitWire.wire)
+      Object.assign(f.realm, { session: client.root })
+      const fiber = yield* Effect.forkChild(Effect.result(f.run))
+      const command = yield* browser.next
+      assert.strictEqual(command.method, "Runtime.callFunctionOn")
+      // Navigation can invalidate the inspector object before the document-commit event retires its realm.
+      yield* browser.receive({
+        id: command.id,
+        error: { code: -32000, message: "Missing injected script for given objectId" }
+      })
+      const result = yield* Fiber.join(fiber)
+      assert.strictEqual(result._tag, "Failure")
+      if (result._tag === "Failure") assert.strictEqual(result.failure.reason._tag, "Gone")
+    }).pipe(Effect.scoped))
+
   it.live("rejects a realm already retired before dispatch", () =>
     Effect.gen(function*() {
       const f = yield* fixture()

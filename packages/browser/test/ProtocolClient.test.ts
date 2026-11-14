@@ -317,6 +317,22 @@ describe("ProtocolClient", () => {
       assert.deepStrictEqual(receipts, [2, 4])
     }))
 
+  it.effect("names the kind of target a rejected command was sent to", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire)
+      ProtocolClient.setTargetKind(client.root, "iframe")
+      const failure = yield* Effect.forkScoped(client.root.send(Page.enable()).pipe(Effect.exit))
+      yield* browser.receive({
+        id: (yield* browser.next).id,
+        error: { code: -32000, message: "Command can only be executed on top-level targets" }
+      })
+      const reason = reasonOf(yield* Fiber.join(failure))
+      assert.strictEqual(reason._tag, "Rejected")
+      assert.strictEqual(reason._tag === "Rejected" ? reason.target : undefined, "iframe")
+      assert.include(reason.message, "Page.enable rejected on the iframe target")
+    }))
+
   it.effect("folds only declared live decisions during sync and never replays them", () =>
     Effect.gen(function*() {
       const browser = yield* makeBrowser

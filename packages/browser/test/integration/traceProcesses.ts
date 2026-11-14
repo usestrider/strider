@@ -4,6 +4,7 @@ import type { Readable, Writable } from "node:stream"
 import { connection } from "./failureTrace.ts"
 import { enabled as nativeEnabled, recordNative } from "./nativeCrash.ts"
 import { processCapture } from "./nativeInputProcess.ts"
+import { settings as stallProbe, watch as watchStall } from "./stallProbe.ts"
 import { pipeObserver } from "./tracePipe.ts"
 import { stderrText } from "./traceStderr.ts"
 import { prepareChild } from "./traceTransfer.ts"
@@ -19,6 +20,8 @@ if (!prototype[patched]) {
   prototype[patched] = true
   const spawn = prototype.spawn
   prototype.spawn = function(this: ChildProcess, options: SpawnOptions) {
+    // The stall probe's own ps, sample and lsof are not the suite's processes.
+    if (stallProbe.spawning) return spawn.call(this, options)
     const trace = connection(`process:${options.file}`)
     prepareChild(options)
     const result = spawn.call(this, options)
@@ -49,6 +52,9 @@ if (!prototype[patched]) {
       }
     } else trace("stderr-unavailable", "Process stdio configuration provides no readable stderr pipe")
     // Playwright's integration baselines use the same Chromium pipe, outside Strider's transports.
+    const stall = stallProbe.enabled && options.args?.includes("--remote-debugging-pipe")
+      ? watchStall(this, options.args, trace)
+      : undefined
     if (options.args?.includes("--remote-debugging-pipe")) {
       const input = this.stdio[3] as Writable | null
       const output = this.stdio[4] as Readable | null
@@ -58,6 +64,7 @@ if (!prototype[patched]) {
         input.write = function(this: Writable, ...args: Parameters<typeof write>) {
           const chunk = args[0]
           if (typeof chunk === "string" || chunk instanceof Uint8Array) observe(chunk)
+          stall?.sent()
           return write.apply(this, args)
         } as typeof write
       }
@@ -67,12 +74,14 @@ if (!prototype[patched]) {
         output.emit = function(event: string, ...values: Array<unknown>) {
           const chunk = values[0]
           if (event === "data" && (typeof chunk === "string" || chunk instanceof Uint8Array)) observe(chunk)
+          if (event === "data") stall?.received()
           return emit.call(this, event, ...values)
         }
       }
     }
     const emit = this.emit
     this.emit = function(event: string, ...values: Array<unknown>) {
+      if (event === "exit") stall?.exited()
       if (event === "exit") trace("process-exit", { code: values[0], signal: values[1] })
       if (event === "error") trace("process-error", String(values[0]))
       return emit.call(this, event, ...values)

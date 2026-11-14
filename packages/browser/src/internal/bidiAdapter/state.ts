@@ -84,6 +84,15 @@ export interface NavigableEntry extends Kit.NavigableNode<NavigableEntry> {
     | (Kit.Expected & { readonly bidi?: string | undefined; readonly aliases?: ReadonlySet<string> | undefined })
     | undefined
   readonly navigations: Map<string, NavigationEntry>
+  /**
+   * A load for the current document that names a wire identity not started yet: evidence that the load predates
+   * the navigation that identity starts, kept until the next start or commit.
+   */
+  staleLoad?: {
+    readonly bidi: string
+    readonly timestamp: number
+    readonly document: L1Target.DocumentId
+  } | undefined
   /** The documents it had, by URL: what a restore from the back/forward cache restores. */
   readonly past: Map<string, L1Target.DocumentId>
 }
@@ -237,7 +246,13 @@ export interface State {
   /** Permissions granted, by context, as `[origin, name]` JSON: BiDi has no reset, so they are set back. */
   readonly granted: Map<UserContext.Id, Set<string>>
   /** The preload scripts registered, in order. */
-  preloads: ReadonlyArray<{ readonly script: Script.PreloadScript; readonly declaration: Adapter.RegistrationId }>
+  preloads: ReadonlyArray<
+    {
+      readonly script: Script.PreloadScript
+      readonly declaration: Adapter.RegistrationId
+      readonly owners?: ReadonlyArray<Adapter.RegistrationId>
+    }
+  >
   /** Contexts reported now existed before the connection: they are adopted. */
   adopting: boolean
 }

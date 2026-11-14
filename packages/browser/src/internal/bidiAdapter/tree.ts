@@ -86,6 +86,7 @@ export const removeNavigable = (
     navigable.commandNavigations.clear()
     navigable.pendingTerminals.length = 0
     navigable.failedNavigation = undefined
+    navigable.staleLoad = undefined
     navigable.expected.list.length = 0
     for (const [bidi, navigation] of navigable.navigations) {
       navigation.ended = true
