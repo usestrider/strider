@@ -14,7 +14,7 @@ export default defineConfig({
       test: {
         name: "integration-macos",
         root: "packages/browser",
-        include: ["test/integration/slice/ChromiumLaunchStress.test.ts"],
+        include: ["test/integration/adapter/*.test.ts", "test/integration/slice/*.test.ts"],
         exclude: ["test/integration/**/WebKit*.test.ts"],
         setupFiles: [
           path.join(import.meta.dirname, "vitest.setup.ts"),
