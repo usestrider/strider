@@ -53,8 +53,26 @@ const run = Effect.fnUntraced(function*(page: Page.Page, origin: string, code: s
   return JSON.parse(yield* out.readText) as unknown
 })
 
+// The child reports its size, title and tag as it parses, on load and on each resize, and the parent keeps the latest:
+// an out-of-process iframe can parse before Chromium gives it its frame's geometry, when it measures 0 by 0
 const frameBody =
-  `<script>parent.postMessage(JSON.stringify([innerWidth, innerHeight, document.title, window.__tag ?? null]), '*')</script>`
+  `<script>const report = () => parent.postMessage(JSON.stringify([innerWidth, innerHeight, document.title, window.__tag ?? null]), '*'); report(); addEventListener('load', report); addEventListener('resize', report)</script>`
+
+const frameReport = (text: string): ReadonlyArray<unknown> | undefined => {
+  if (text === "pending") return undefined
+  const report = JSON.parse(text) as unknown
+  return Array.isArray(report) ? report : undefined
+}
+
+/** The child's latest report gives its frame's size, 300 by 200. */
+const framed = Condition.make("reports its frame's 300x200", (text: string) => {
+  const report = frameReport(text)
+  return report?.[0] === 300 && report[1] === 200
+})
+
+/** The child's latest report has the tag a declaration set. */
+const tagged = (tag: string) =>
+  Condition.make(`reports the tag ${tag}`, (text: string) => frameReport(text)?.[3] === tag)
 
 /**
  * A page with a cross-site iframe 300 by 200 pixels. Chromium gives such a frame a target of its own, which declarations
@@ -63,7 +81,7 @@ const frameBody =
  */
 const crossSiteFrame = Effect.fnUntraced(function*(
   declare: (target: Page.Page | UserContext.UserContext) => Effect.Effect<unknown, unknown, Scope.Scope>,
-  expected: (report: Array<unknown>) => void,
+  expected: Condition.Condition<string>,
   frameSource = fixtureUrl
 ) {
   const { crossSite, origin } = yield* site
@@ -79,9 +97,7 @@ const crossSiteFrame = Effect.fnUntraced(function*(
           frameSource(crossSite, frameBody)
         }"></iframe>`
       ))
-      const out = page.locator("#out")
-      yield* Expect.that(out.readText, Condition.make("reported", (text: string) => text !== "pending"))
-      expected(JSON.parse(yield* out.readText) as Array<unknown>)
+      yield* Expect.that(page.locator("#out").readText, expected)
     }))
   }))
 })
@@ -733,8 +749,7 @@ export const declarations = (
           yield* crossSiteFrame(
             (target) =>
               target.emulate({ viewport: { width: 640, height: 480 } }),
-            ([width, height]) =>
-              assert.deepStrictEqual([width, height], [300, 200])
+            framed
           )
         }), timeout)
 
@@ -756,13 +771,7 @@ export const declarations = (
               ),
               { waitUntil: "load" }
             )
-            const out = page.locator("#out")
-            yield* Expect.that(
-              out.readText,
-              Condition.make("reported", (text: string) =>
-                text !== "pending")
-            )
-            assert.deepStrictEqual(JSON.parse(yield* out.readText).slice(0, 2), [300, 200])
+            yield* Expect.that(page.locator("#out").readText, framed)
             yield* Effect.scoped(Effect.gen(function*() {
               yield* page.emulate({ viewport: { width: 640, height: 480 } })
               yield* page.locator("#size").pipe(Expect.toHaveText("640x480"))
@@ -788,8 +797,7 @@ export const declarations = (
           yield* crossSiteFrame(
             (target) =>
               target.emulate(settings),
-            ([width, height]) =>
-              assert.deepStrictEqual([width, height], [300, 200])
+            framed
           )
         }), timeout)
 
@@ -801,8 +809,7 @@ export const declarations = (
           yield* crossSiteFrame(
             (target) =>
               target.emulate({ extraHTTPHeaders: { "x-oopif": "1" } }),
-            ([width, height]) =>
-              assert.deepStrictEqual([width, height], [300, 200])
+            framed
           )
         }), timeout)
 
@@ -810,8 +817,7 @@ export const declarations = (
         crossSiteFrame(
           (target) =>
             target.addInitScript({ source: "window.__tag = 'init'" }),
-          ([, , , tag]) =>
-            assert.strictEqual(tag, "init")
+          tagged("init")
         ), timeout)
 
       // ── Init scripts ──
