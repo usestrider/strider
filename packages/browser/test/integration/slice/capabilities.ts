@@ -34,3 +34,14 @@ export const responseRouteInFlight: Readonly<Record<"Chromium" | "Firefox" | "We
   Firefox: true,
   WebKit: true
 }
+
+/**
+ * How a backend that reports `input.fractionalPointer` as partial places a fractional pointer position: Firefox
+ * rounds to the nearest whole pixel, and launched WebKit truncates the fraction.
+ */
+export const pointerQuantization: Readonly<Record<"Chromium" | "Firefox" | "WebKit", "exact" | "round" | "truncate">> =
+  {
+    Chromium: "exact",
+    Firefox: "round",
+    WebKit: "truncate"
+  }

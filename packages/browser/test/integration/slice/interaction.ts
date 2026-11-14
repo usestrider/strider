@@ -38,7 +38,7 @@ import * as InternalOperation from "../../../src/internal/operation.ts"
 import * as Reason from "../../../src/Reason.ts"
 import { site } from "../adapter/harness.ts"
 import { type LinkGeometry, wrappedLinkHtml, wrappedLinks } from "../wrappedLinks.ts"
-import { fullySupports, supports } from "./capabilities.ts"
+import { fullySupports, pointerQuantization, supports } from "./capabilities.ts"
 import * as SharedContext from "./sharedContext.ts"
 import { newPage } from "./sharedContext.ts"
 
@@ -174,6 +174,23 @@ const observesDisabled = Effect.fnUntraced(function*<E, R>(
   yield* Fiber.interrupt(running)
   assert.strictEqual(record.diagnostics().dispatch._tag, "NotSent")
 })
+
+/**
+ * Checks a delivered pointer coordinate against the one requested, by how the backend places fractional points:
+ * rounding lands within half a pixel, and truncation lands up to a pixel above, never below.
+ */
+const assertQuantized = (
+  name: "Chromium" | "Firefox" | "WebKit",
+  delivered: number,
+  requested: number,
+  detail: string
+) => {
+  const error = delivered - requested
+  if (pointerQuantization[name] === "truncate") {
+    assert.isAbove(error, -1, detail)
+    assert.isAtMost(error, 0, detail)
+  } else assert.isAtMost(Math.abs(error), 0.5, detail)
+}
 
 export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} interaction`, () => {
@@ -1364,10 +1381,10 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   if (yield* fullySupports("input.fractionalPointer")) {
                     assert.deepStrictEqual({ x: click.x, y: click.y }, { x: 7, y: 9 })
                   } else {
-                    // Whole-pixel delivery: Firefox rounds the point sent and WebKit truncates it, so the event lands
-                    // less than a pixel away on y.
+                    // Whole-pixel delivery: Firefox rounds the point sent, within half a pixel, and WebKit truncates
+                    // it, landing up to a pixel above.
                     assert.strictEqual(click.x, 7, JSON.stringify(click))
-                    assert.isBelow(Math.abs(click.clientY - (click.top + 9)), 1, JSON.stringify(click))
+                    assertQuantized(name, click.clientY, click.top + 9, JSON.stringify(click))
                   }
                 }
               }
@@ -1394,10 +1411,21 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               assert.deepStrictEqual({ x: click.x, y: click.y }, { x: 7, y: 9 }, JSON.stringify(click))
               assert.strictEqual(click.pointerY, click.top + 9, JSON.stringify(click))
             } else {
-              // Whole-pixel delivery: Firefox rounds the point sent and WebKit truncates it, so the event lands
-              // less than a pixel away on y.
+              // Whole-pixel delivery: Firefox rounds the point sent, within half a pixel, and WebKit truncates it,
+              // landing up to a pixel above. A half-pixel point can't tell the two apart; the quarter-pixel click
+              // below can.
               assert.strictEqual(click.x, 7, JSON.stringify(click))
-              assert.isBelow(Math.abs(click.clientY - (click.top + 9)), 1, JSON.stringify(click))
+              assertQuantized(name, click.clientY, click.top + 9, JSON.stringify(click))
+            }
+            // A quarter-pixel point (119.75): rounding delivers 120 and truncation 119.
+            yield* page.locator("#go").click({ position: { x: 7, y: 9.25 } })
+            const quarter = JSON.parse(yield* page.locator("#out").readText)
+            assert.isTrue(quarter.trusted)
+            assert.strictEqual(quarter.x, 7, JSON.stringify(quarter))
+            if (yield* fullySupports("input.fractionalPointer")) {
+              assert.strictEqual(quarter.pointerY, quarter.top + 9.25, JSON.stringify(quarter))
+            } else {
+              assertQuantized(name, quarter.clientY, quarter.top + 9.25, JSON.stringify(quarter))
             }
           })),
         timeout
