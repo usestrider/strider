@@ -1204,6 +1204,19 @@ export const contents = (
             const evaluate = yield* evaluator(page)
             assert.strictEqual(yield* evaluate(methods.sum, 1, 2), 3)
             assert.strictEqual(yield* page.evaluateInMainWorld(methods.later, 4), 8)
+            const dividedKey = new Function(
+              "return ({ [({return: 4}).return / 2]() { return `/ ]() { return 99 /* `; /* filler */ } })[2]"
+            )() as () => string
+            const divided = yield* Effect.exit(page.evaluateInMainWorld(dividedKey))
+            if (Exit.isSuccess(divided)) {
+              assert.strictEqual(divided.value, dividedKey())
+            } else {
+              const failure = reasonOf(divided) as unknown as Page.PageError
+              assert.strictEqual(failure.reason._tag, "EvaluationThrown")
+              if (failure.reason._tag === "EvaluationThrown") {
+                assert.strictEqual(failure.reason.exception.name, "SyntaxError")
+              }
+            }
             const quoted = new Function(
               `return { "a() { return 99 } //"() { return 42 } }["a() { return 99 } //"]`
             )() as () => number

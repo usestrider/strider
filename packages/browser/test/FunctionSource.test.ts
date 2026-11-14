@@ -9,6 +9,17 @@ const call = (fn: Function, ...args: ReadonlyArray<unknown>): unknown =>
   runInNewContext(`(${FunctionSource.declaration(fn)})`)(...args)
 
 describe("FunctionSource.declaration", () => {
+  it("does not mistake division after a keyword property for a regex", () => {
+    const methods = runInNewContext(
+      "({ [({return: 4}).return / 2]() { return `/ ]() { return 99 /* `; /* filler */ } })"
+    )
+    const method = methods[2]
+    const sent = FunctionSource.declaration(method)
+    // Unsupported syntax may be left unchanged, but a rewrite must retain the actual body.
+    if (sent === method.toString()) return
+    assert.strictEqual(runInNewContext(`(${sent})`)(), method())
+  })
+
   for (
     const [kind, source] of [
       ["quoted", "({ \"a() { return 99 } //\"() { return 42 } })"],
