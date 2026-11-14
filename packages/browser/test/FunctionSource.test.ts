@@ -2,6 +2,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { runInNewContext } from "node:vm"
 import * as FunctionSource from "../src/internal/functionSource.ts"
+import * as Utility from "../src/internal/webkitUtility.ts"
 
 /** The declaration, evaluated in a realm of its own as a browser evaluates it, then called. */
 const call = (fn: Function, ...args: ReadonlyArray<unknown>): unknown =>
@@ -51,6 +52,22 @@ describe("FunctionSource.declaration", () => {
     assert.strictEqual(call(accessor.get!), 4)
     assert.strictEqual(call(accessor.set!, 1), undefined)
     assert.deepStrictEqual([...(call(methods[Symbol.iterator]) as Iterable<never>)], [])
+  })
+
+  it("resolves a method's free identifiers in the destination realm", () => {
+    const method = runInNewContext("({ read() { return [d, p] } }).read")
+    const result = runInNewContext(`(${FunctionSource.declaration(method)})()`, { d: "page:d", p: "page:p" })
+    assert.deepStrictEqual(Array.from(result), ["page:d", "page:p"])
+  })
+
+  it("keeps a method callable when WebKit stages its declaration in parts", () => {
+    const method = new Function(`return { large() { /*${"x".repeat(100_000)}*/ return 42 } }.large`)()
+    const source = FunctionSource.declaration(method)
+    const parts = Utility.parts(source)
+    assert.isDefined(parts)
+    const helper = runInNewContext(Utility.source)
+    parts!.forEach((part, index) => helper.stage("method", index, part))
+    assert.strictEqual(helper.compile("method")(), 42)
   })
 
   it("sends a source that isn't a function as it is", () => {

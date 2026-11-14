@@ -1204,6 +1204,10 @@ export const contents = (
             const evaluate = yield* evaluator(page)
             assert.strictEqual(yield* evaluate(methods.sum, 1, 2), 3)
             assert.strictEqual(yield* page.evaluateInMainWorld(methods.later, 4), 8)
+            const largeMethod = new Function(
+              `return { large() { /*${"x".repeat(100_000)}*/ return 42 } }.large`
+            )() as () => number
+            assert.strictEqual(yield* page.evaluateInMainWorld(largeMethod), 42)
             if (yield* isolatedRefused(page.locator("#x").evaluate(methods.text))) {
               return
             }
