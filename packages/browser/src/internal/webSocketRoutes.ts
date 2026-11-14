@@ -18,7 +18,7 @@ import * as Reason from "../Reason.ts"
 import * as Target from "../Target.ts"
 import * as Url from "../Url.ts"
 import * as WebSocketRoute from "../WebSocketRoute.ts"
-import type * as Adapter from "./adapter.ts"
+import * as Adapter from "./adapter.ts"
 import * as BrowserClock from "./browserClock.ts"
 import * as Events from "./events.ts"
 import * as Handlers from "./handlers.ts"
@@ -706,10 +706,12 @@ export const register = <E, R>(
     }
     /** A payload whose fetch found its own realm gone: an end its notification may announce only later. */
     const goneRealm = (cause: Cause.Cause<unknown>, realm: Target.RealmId) =>
-      Option.exists(Cause.findErrorOption(cause), (error) => {
-        const reason = (error as Partial<Adapter.AdapterError>).reason
-        return reason?._tag === "Gone" && reason.target._tag === "Realm" && reason.target.id === realm
-      })
+      Option.exists(
+        Cause.findErrorOption(cause),
+        (error) =>
+          error instanceof Adapter.AdapterError && error.reason._tag === "Gone" &&
+          error.reason.target._tag === "Realm" && error.reason.target.id === realm
+      )
     yield* Stream.fromQueue(incoming).pipe(
       Stream.runForEach((incoming) =>
         incoming.payload.pipe(
