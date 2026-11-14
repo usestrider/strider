@@ -4,8 +4,11 @@ import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
+import * as Logger from "effect/Logger"
 import * as Scope from "effect/Scope"
 import * as TestClock from "effect/testing/TestClock"
+import * as Kit from "../src/internal/adapterKit.ts"
+import * as Protocol from "../src/protocol/Protocol.ts"
 import { harness } from "./utils/WebSocketHostHarness.ts"
 
 it.effect("releases every accepted payload in a pulled batch when removal interrupts its first fetch", () =>
@@ -313,3 +316,48 @@ it.effect("releases a stalled payload at the route budget and proceeds to anothe
     }), () => Effect.succeed({ _tag: "Value", value: { type: "undefined" } })).pipe(
       Effect.provideService(Deadline.DefaultBudget, Duration.millis(100))
     ))
+
+it.effect("retires a missing WebKit payload context before its realm-end notification without logging a bridge failure", () => {
+  const errors: Array<unknown> = []
+  const holderReleased = Deferred.makeUnsafe<void>()
+  return harness(
+    (getBridge) =>
+      Effect.gen(function*() {
+        const context = yield* Browser.newContext()
+        const registration = yield* context.routeWebSocket("**", () => Effect.void, { implementation: "script" })
+        const realm = Target.RealmId.make("R-missing-payload-context")
+        const released = yield* Deferred.make<void>()
+        // The console object belongs to the old document; its fetch can lose the context before the commit event.
+        const payload = Effect.fail(
+          new Protocol.ProtocolError({
+            reason: new Protocol.Rejected({
+              method: "Runtime.callFunctionOn",
+              reason: "NoSuchObject",
+              code: -32000,
+              description: "Missing injected script for given objectId"
+            })
+          })
+        ).pipe(Effect.mapError(Kit.realmFailure(realm, () => false)))
+        assert.isTrue(
+          getBridge().receive(realm, payload, { _tag: "Worker", realm }, {
+            isAlive: () => true,
+            release: Deferred.succeed(released, undefined).pipe(Effect.asVoid)
+          })
+        )
+        yield* Deferred.await(released)
+        assert.deepStrictEqual(errors, [], "a discarded context is not a failed WebSocket bridge")
+        // A confirmed discarded context must also retire its retained installation, without waiting for an event.
+        yield* Deferred.await(holderReleased)
+        yield* registration.remove
+      }),
+    undefined,
+    {
+      releaseHandles: () => Deferred.succeed(holderReleased, undefined).pipe(Effect.asVoid)
+    }
+  ).pipe(Effect.provideService(
+    Logger.CurrentLoggers,
+    new Set([Logger.make((entry) => {
+      if (entry.logLevel === "Error") errors.push(entry.message)
+    })])
+  ))
+})
