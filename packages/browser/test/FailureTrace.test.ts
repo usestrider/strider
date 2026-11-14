@@ -1000,3 +1000,43 @@ describe("pointer recipient capture", () => {
     expect(summary[2]!.recipients.map((r) => [r.href, r.target])).toEqual([["http://leaf/", "a#go"]])
   })
 })
+
+it("keeps the failed shared Firefox test's report beside its trace and discards the passing report", async () => {
+  const { spawnSync } = await import("node:child_process")
+  const run = spawnSync("pnpm", [
+    "exec",
+    "vitest",
+    "--run",
+    "--config",
+    "packages/browser/test/fixtures/failureTrace/vitest.config.ts",
+    "firefoxReports.fixture"
+  ], {
+    cwd: new URL("../../../", import.meta.url),
+    encoding: "utf8",
+    env: { ...process.env, STRIDER_TRACE_RETAIN_PASSES: "0" }
+  })
+  expect(run.status, run.stdout + run.stderr).toBe(1)
+  const files = [...run.stderr.matchAll(/Integration failure trace: (.+\.ndjson)/g)].map((match) => match[1]!)
+  const traces = files.filter((file) => file.endsWith("-test.ndjson"))
+  const reports = traces.map((file) => file.replace(/-test\.ndjson$/, "-firefox-crash"))
+  try {
+    expect(traces).toHaveLength(1)
+    const text = fs.readFileSync(traces[0]!, "utf8")
+    expect(text).toContain("failed Firefox print")
+    expect(text).toContain("PDocAccessibleConstructor")
+    expect(text).toContain("NS_ERROR_UNEXPECTED")
+    expect(fs.readdirSync(reports[0]!).sort()).toEqual(["failed-report.dmp", "failed-report.extra"])
+    expect(JSON.parse(fs.readFileSync(path.join(reports[0]!, "failed-report.extra"), "utf8")))
+      .toHaveProperty("ipc_channel_error", "PWindowGlobal::Msg_PDocAccessibleConstructor")
+    const prefix = path.basename(traces[0]!).replace(/-[^-]+-\d+-test\.ndjson$/, "")
+    // Inspect only this subprocess's artifacts, not another run's files.
+    const pid = path.basename(traces[0]!).match(/-(\d+)-test\.ndjson$/)![1]
+    expect(
+      fs.readdirSync(path.dirname(traces[0]!)).filter((name) =>
+        name.startsWith(prefix) && name.endsWith(`-${pid}-firefox-crash`)
+      )
+    ).toHaveLength(1)
+  } finally {
+    for (const file of [...files, ...reports]) fs.rmSync(file, { recursive: true, force: true })
+  }
+}, 30_000)
