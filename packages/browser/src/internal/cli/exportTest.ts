@@ -14,7 +14,9 @@
  * a segment's in its placeholder. One the export can't declare so is a marked placeholder too (Q251).
  */
 import * as Schema from "effect/Schema"
+import * as Reason from "../../Reason.ts"
 import type * as Snapshot from "../../Snapshot.ts"
+import * as Keys from "../keys.ts"
 import * as Secrets from "../secrets.ts"
 import * as Tools from "../tools.ts"
 
@@ -565,13 +567,19 @@ export const render = (options: {
       case "fill":
         body.push(`yield* ${target}.fill(${filled(step.params.value)})`)
         break
-      case "press":
+      case "press": {
+        // A chord the session pressed, such as Meta+k, is its key with the library's modifiers held
+        const chord = Keys.chord(step.params.key)
+        const pressed = chord instanceof Reason.InvalidInput || chord.modifiers.length === 0
+          ? quote(step.params.key)
+          : `${quote(chord.key)}, { modifiers: [${chord.modifiers.map(quote).join(", ")}] }`
         body.push(
           step.params.target === undefined
-            ? `yield* ${page}.keyboard.press(${quote(step.params.key)})`
-            : `yield* ${target}.press(${quote(step.params.key)})`
+            ? `yield* ${page}.keyboard.press(${pressed})`
+            : `yield* ${target}.press(${pressed})`
         )
         break
+      }
       case "select":
         body.push(
           `yield* ${target}.selectOption([${

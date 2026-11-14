@@ -43,6 +43,7 @@ import * as NetworkResponse from "../NetworkResponse.ts"
 import type * as Page from "../Page.ts"
 import * as PageNavigation from "../PageNavigation.ts"
 import * as Popup from "../Popup.ts"
+import * as Reason from "../Reason.ts"
 import * as Route from "../Route.ts"
 import type * as Snapshot from "../Snapshot.ts"
 import type * as Target from "../Target.ts"
@@ -50,6 +51,7 @@ import * as UncaughtException from "../UncaughtException.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as Events from "./events.ts"
 import * as Handles from "./handles.ts"
+import * as Keys from "./keys.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import * as Runtime from "./runtime.ts"
@@ -827,14 +829,23 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
           yield* revealed === value ? locator.fill(value) : locator.fill(Redacted.make(revealed))
           return `filled ${target}`
         })),
-    press: ({ page: name, key, target }) =>
-      acting(name, (page) =>
+    press: ({ page: name, key: text, target }) => {
+      // A chord's modifiers are held for its key; a bad modifier is refused as the press refuses a bad key
+      const chord = Keys.chord(text)
+      if (chord instanceof Reason.InvalidInput) {
+        return target === undefined
+          ? Effect.fail(failed("KeyboardError", `Keyboard.press: ${chord.message}`, chord._tag))
+          : Effect.fail(failed("LocatorError", `Locator.press ${target}: ${chord.message}`, chord._tag))
+      }
+      const options = { modifiers: chord.modifiers }
+      return acting(name, (page) =>
         target === undefined
-          ? Effect.as(page.keyboard.press(key), `pressed ${key}`)
+          ? Effect.as(page.keyboard.press(chord.key, options), `pressed ${text}`)
           : Effect.as(
-            Effect.flatMap(targeted(page, name, target), (locator) => locator.press(key)),
-            `pressed ${key} on ${target}`
-          )),
+            Effect.flatMap(targeted(page, name, target), (locator) => locator.press(chord.key, options)),
+            `pressed ${text} on ${target}`
+          ))
+    },
     select: ({ page: name, target, values }) =>
       acting(name, (page) =>
         Effect.as(
