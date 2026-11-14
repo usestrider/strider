@@ -322,7 +322,7 @@ export type Request =
    */
   | {
     readonly op: "frame"
-    /** Milliseconds available for native clipping observation; omitted for reads that never scroll. */
+    /** Milliseconds available for native clipping observation; 1000 when omitted, as for reads that never scroll. */
     readonly cap?: number
     readonly steps: ReadonlyArray<Step>
     readonly scroll: boolean
@@ -1761,7 +1761,13 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   /** Compare native intersections with only scrollport clipping expanded; other clipping stays in force. */
-  const clippedByScroller = (element: Element, timeout: number, clip?: Clip): Promise<boolean | null> | null => {
+  /** `onCancel` receives a function that disconnects the observers and clears the timer at once, answering no evidence. */
+  const clippedByScroller = (
+    element: Element,
+    timeout: number,
+    clip?: Clip,
+    onCancel?: (cancel: () => void) => void
+  ): Promise<boolean | null> | null => {
     let margin = 0
     for (let ancestor = composedParent(element); ancestor !== null; ancestor = composedParent(ancestor)) {
       const style = getComputedStyle(ancestor)
@@ -1784,6 +1790,7 @@ export function engine(render: (root: SnapNode) => string) {
         resume(value)
       }
       const timer = setTimer(() => finish(null), Math.max(0, timeout))
+      onCancel?.(() => finish(null))
       for (const expanded of [false, true]) {
         const observer = new IntersectionObserver(([entry]) => {
           if (entry === undefined) return
@@ -2079,7 +2086,10 @@ export function engine(render: (root: SnapNode) => string) {
       frames: 0,
       sampled: false,
       tracked: null as Element | null,
-      rects: [] as Array<DOMRect>
+      rects: [] as Array<DOMRect>,
+      /** Set once the owner stops the action; a pending clipping observation then never continues. */
+      stopped: false,
+      cancelObservation: undefined as (() => void) | undefined
     }
   }
   type ActionState = ReturnType<typeof createAction>
@@ -2123,7 +2133,9 @@ export function engine(render: (root: SnapNode) => string) {
     // Observation is asynchronous only when a clipping check is needed: a synchronous caller sees no extra turn.
     const observation = element !== undefined && request.checks.inViewport &&
         visibleFragment(element, request.clip) !== null
-      ? clippedByScroller(element, state.end - now(), request.clip)
+      ? clippedByScroller(element, state.end - now(), request.clip, (cancel) => {
+        state.cancelObservation = cancel
+      })
       : null
     const proceed = (clipped: boolean): Response | undefined => {
       // What no waiting mends fails at once
@@ -2257,14 +2269,22 @@ export function engine(render: (root: SnapNode) => string) {
     }
     if (observation === null) return proceed(false)
     return observation.then((result) => {
+      state.cancelObservation = undefined
       state.previous = null
-      if (result === null || now() >= state.end) return
+      // A stopped action must not scroll or apply anything after its owner has gone.
+      if (state.stopped || result === null || now() >= state.end) return
       clearTreeCaches()
       const current = resolve(request.steps)
       // An observation belongs to one node; a replacement must start its own complete check.
       if (current.length !== 1 || current[0] !== element) return
       return proceed(result)
     })
+  }
+
+  /** Stops an action's pending clipping observation: both observers disconnect and its continuation ends. */
+  const stopAction = (state: ActionState) => {
+    state.stopped = true
+    state.cancelObservation?.()
   }
 
   const act = async (request: Extract<Request, { op: "act" }>): Promise<Response> => {
@@ -3433,6 +3453,7 @@ export function engine(render: (root: SnapNode) => string) {
   const cooperativeHelpers = () => ({
     createAction,
     checkAction,
+    stopAction,
     actionTimeout,
     actionFrameTimeout,
     evaluate,
@@ -3786,8 +3807,16 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
       if (session.request.op === "act") {
         session.state!.sampled = true
         // Only a clipping observation is asynchronous; otherwise the wait starts in the same turn.
-        const checked = helpers.checkAction(session.request, session.state!)
-        const response = checked instanceof Promise ? await checked : checked
+        const state = session.state!
+        const checked = helpers.checkAction(session.request, state)
+        let response: Response | undefined
+        if (checked instanceof Promise) {
+          // The session owns the observation: cancellation or departure stops it before it can scroll or apply.
+          session.stopWaiting = () => helpers.stopAction(state)
+          response = await checked
+          session.stopWaiting = undefined
+          if (session.disposed) return stopped(session)
+        } else response = checked
         if (response !== undefined) return finished(session, response)
         if (!(await wait(session, false))) return stopped(session)
       } else {
