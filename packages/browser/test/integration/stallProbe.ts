@@ -1,6 +1,7 @@
 /**
  * Test-only capture of a `--remote-debugging-pipe` child that has not answered its first pipe command: its process
- * tree, `sample` stacks, fds 0–4, profile listing and the runner's load. It observes only; nothing waits on it.
+ * tree, `sample` stacks, fds 0–4, profile listing, the runner's load, and every process with the crash database's
+ * `settings.dat` open. It observes only; nothing waits on it.
  */
 import { execFile } from "node:child_process"
 import type { ChildProcess } from "node:child_process"
@@ -29,8 +30,27 @@ export interface Capture {
   readonly profile: { readonly directory?: string; readonly entries: ReadonlyArray<string>; readonly omitted: number }
   readonly uptime: Command
   readonly vmStat: Command
+  /** Every Chrome for Testing process, helper and `chrome_crashpad_handler`, whatever its parent. */
+  readonly chromeProcesses: Command
+  /** Present while a crash database is set: who has its `settings.dat` open, holding or waiting for its lock. */
+  readonly crashSettings?: CrashSettings
   readonly artifact?: string
   readonly artifactError?: string
+}
+
+export interface Holder {
+  readonly pid: number
+  readonly ps: Command
+  readonly sample: Command
+}
+export interface CrashSettings {
+  readonly file: string
+  readonly lsof: Command
+  /** The processes `lsof` lists, the browser included. */
+  readonly openers: ReadonlyArray<number>
+  /** Each opener but the browser, up to `limits.sampledHolders`. */
+  readonly holders: ReadonlyArray<Holder>
+  readonly omittedHolders: number
 }
 
 export const limits = {
@@ -40,6 +60,8 @@ export const limits = {
   traceSampleBytes: 4 * 1024,
   /** Descendants sampled besides the browser. */
   sampledDescendants: 6,
+  /** Processes with the crash database's `settings.dat` open, besides the browser, sampled. */
+  sampledHolders: 4,
   profileEntries: 256,
   /** Probe files in `.data/macos-crash-reports/`, across the run's processes, each one at most `artifactBytes`. */
   artifacts: 8,
@@ -49,6 +71,8 @@ export const limits = {
 interface Settings {
   enabled: boolean
   thresholdMs: number
+  /** The Crashpad database every launched Chromium shares; its `settings.dat` is locked while it is written. */
+  crashDatabase?: string | undefined
   /** Set while the probe starts its own commands, so the spawn tracing passes them by. */
   spawning: boolean
   onCapture?: ((capture: Capture) => void) | undefined
@@ -58,16 +82,26 @@ const key = Symbol.for("strider.integration.stallProbe")
 export const settings: Settings = ((globalThis as typeof globalThis & { [key]?: Settings })[key] ??= {
   enabled: nativeEnabled,
   thresholdMs: 10_000,
+  crashDatabase: process.env.STRIDER_MACOS_CRASH_DATABASE || undefined,
   spawning: false
 })
 const directory = path.resolve(import.meta.dirname, "../../../../.data/macos-crash-reports")
 
-const run = (command: string, args: ReadonlyArray<string>, timeout: number) =>
+/** Runs one command to its own timeout; `filter` keeps the lines it accepts, and the first, before the output bound. */
+const run = (
+  command: string,
+  args: ReadonlyArray<string>,
+  timeout: number,
+  filter?: (line: string) => boolean
+) =>
   new Promise<Command>((resolve) => {
     const start = performance.now()
     const text = [command, ...args].join(" ")
     const done = (error: Error | null, stdout: string | Buffer, stderr: string | Buffer) => {
-      const output = Buffer.concat([Buffer.from(stdout), Buffer.from(stderr)])
+      const out = filter === undefined ? Buffer.from(stdout) : Buffer.from(
+        String(stdout).split("\n").filter((line, index) => index === 0 || filter(line)).join("\n")
+      )
+      const output = Buffer.concat([out, Buffer.from(stderr)])
       const kept = output.subarray(0, limits.outputBytes)
       resolve({
         command: text,
@@ -138,12 +172,47 @@ const listProfile = async (root: string | undefined) => {
   return { directory: root, entries, omitted }
 }
 
+const chromeProcess = /Google Chrome for Testing|chrome_crashpad_handler/
+
+/** `lsof` exits 1 when no process has the file open; its listing's second column is the PID. */
+const openersOf = (listing: string) => [
+  ...new Set(
+    listing.split("\n").slice(1).map((line) => Number(line.trim().split(/\s+/)[1])).filter((pid) =>
+      Number.isInteger(pid) && pid > 0
+    )
+  )
+]
+
+const crashSettings = async (pid: number, database: string): Promise<CrashSettings> => {
+  const file = path.join(database, "settings.dat")
+  const lsof = await run("/usr/sbin/lsof", ["-nP", file], 10_000)
+  const openers = openersOf(lsof.output)
+  const others = openers.filter((opener) => opener !== pid)
+  const sampled = others.slice(0, limits.sampledHolders)
+  const holders = await Promise.all(sampled.map(async (holder) => {
+    const [ps, sample] = await Promise.all([
+      run("/bin/ps", ["-o", "pid,ppid,pgid,stat,etime,time,command", "-p", String(holder)], 5_000),
+      run("/usr/bin/sample", [String(holder), "2"], 15_000)
+    ])
+    return { pid: holder, ps, sample }
+  }))
+  return { file, lsof, openers, holders, omittedHolders: others.length - sampled.length }
+}
+
 const capture = async (pid: number, args: ReadonlyArray<string>, afterFirstSendMs: number): Promise<Capture> => {
   const started = new Date().toISOString()
   const profileDirectory = args.find((arg) => arg.startsWith("--user-data-dir="))?.slice("--user-data-dir=".length)
   const fds = run("/usr/sbin/lsof", ["-nP", "-a", "-p", String(pid), "-d", "0-4"], 10_000)
   const uptime = run("/usr/bin/uptime", [], 5_000)
   const vmStat = run("/usr/bin/vm_stat", [], 5_000)
+  const chromeProcesses = run(
+    "/bin/ps",
+    ["-axo", "pid,ppid,pgid,stat,etime,command"],
+    5_000,
+    (line) => chromeProcess.test(line)
+  )
+  const database = settings.crashDatabase
+  const lock = database === undefined ? undefined : crashSettings(pid, database)
   const profile = listProfile(profileDirectory)
   const browserSample = run("/usr/bin/sample", [String(pid), "2"], 15_000)
   const all = await run("/bin/ps", ["-axo", "pid,ppid,pgid,stat,etime,time,rss,wchan,command"], 5_000)
@@ -172,9 +241,23 @@ const capture = async (pid: number, args: ReadonlyArray<string>, afterFirstSendM
     fds: await fds,
     profile: await profile,
     uptime: await uptime,
-    vmStat: await vmStat
+    vmStat: await vmStat,
+    chromeProcesses: await chromeProcesses,
+    ...(lock === undefined ? {} : { crashSettings: await lock })
   }
 }
+
+/** The capture with each of its samples, the browser's, its descendants' and the lock holders', passed through `f`. */
+const withSamples = (result: Capture, f: <A extends Command>(sample: A) => A): Capture => ({
+  ...result,
+  samples: result.samples.map(f),
+  ...(result.crashSettings === undefined ? {} : {
+    crashSettings: {
+      ...result.crashSettings,
+      holders: result.crashSettings.holders.map((holder) => ({ ...holder, sample: f(holder.sample) }))
+    }
+  })
+})
 
 const save = (result: Capture): Capture => {
   try {
@@ -185,20 +268,14 @@ const save = (result: Capture): Capture => {
     let text = JSON.stringify({ ...result, artifact: name }, null, 2) + "\n"
     if (Buffer.byteLength(text) > limits.artifactBytes) {
       // Samples are the largest part; shorten them evenly rather than drop the smaller records.
-      const each = Math.floor(limits.artifactBytes / (2 * (result.samples.length + 1)))
-      text = JSON.stringify(
-        {
-          ...result,
-          artifact: name,
-          samples: result.samples.map((sample) => ({
-            ...sample,
-            output: sample.output.slice(0, each),
-            truncatedBytes: (sample.truncatedBytes ?? 0) + Math.max(0, Buffer.byteLength(sample.output) - each)
-          }))
-        },
-        null,
-        2
-      ) + "\n"
+      const count = result.samples.length + (result.crashSettings?.holders.length ?? 0)
+      const each = Math.floor(limits.artifactBytes / (2 * (count + 1)))
+      const shorten = <A extends Command>(sample: A): A => ({
+        ...sample,
+        output: sample.output.slice(0, each),
+        truncatedBytes: (sample.truncatedBytes ?? 0) + Math.max(0, Buffer.byteLength(sample.output) - each)
+      })
+      text = JSON.stringify({ ...withSamples(result, shorten), artifact: name }, null, 2) + "\n"
     }
     writeFileSync(path.join(directory, name), text)
     return { ...result, artifact: name }
@@ -208,14 +285,12 @@ const save = (result: Capture): Capture => {
 }
 
 /** The trace's copy: the whole capture but for each sample's head. */
-const summary = (result: Capture) => ({
-  ...result,
-  samples: result.samples.map(({ output, ...sample }) => ({
+const summary = (result: Capture) =>
+  withSamples(result, (sample) => ({
     ...sample,
-    output: output.slice(0, limits.traceSampleBytes),
-    retainedInTrace: Math.min(output.length, limits.traceSampleBytes)
+    output: sample.output.slice(0, limits.traceSampleBytes),
+    retainedInTrace: Math.min(sample.output.length, limits.traceSampleBytes)
   }))
-})
 
 /**
  * Watches one pipe child: once its first pipe write has gone unanswered for `settings.thresholdMs` while the

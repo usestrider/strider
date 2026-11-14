@@ -60,7 +60,10 @@
  * In hosted macOS jobs, `stallProbe.ts` adds a `stall-probe` entry to a `--remote-debugging-pipe` child's process
  * connection when its first pipe write has had no byte back for 10 s while it runs: its process tree, `sample` of
  * it and up to six descendants (first 4 KiB each here; up to 128 KiB in its file under `.data/macos-crash-reports/`),
- * `lsof` of fds 0-4, a bounded two-level profile listing, and `uptime` and `vm_stat`. It captures once per launch,
+ * `lsof` of fds 0-4, a bounded two-level profile listing, `uptime` and `vm_stat`, the `ps` rows of every Chrome for
+ * Testing process and `chrome_crashpad_handler` whatever its parent, and `lsof` of the crash database's `settings.dat`,
+ * whose exclusive lock a launch waits for, with the `ps` row and `sample` of up to four processes besides the browser
+ * holding or waiting for it. It captures once per launch,
  * never blocks the launch, and records nothing for one that answers; `scripts/integration-macos.md` states its bounds.
  *
  * In macOS jobs the Chromium worker test and the deliberate-crash identity test (`ChromiumIdentity.test.ts`, crash

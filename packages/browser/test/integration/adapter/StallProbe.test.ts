@@ -4,7 +4,7 @@
  */
 import { spawn } from "node:child_process"
 import type { ChildProcess } from "node:child_process"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import * as path from "node:path"
 import type { Writable } from "node:stream"
@@ -85,7 +85,6 @@ describe.runIf(process.platform === "darwin")("stall probe", () => {
   it("names the process holding the crash database's settings lock", { timeout: 40_000 }, async () => {
     const database = mkdtempSync(path.join(tmpdir(), "strider-stall-probe-crashpad-"))
     profiles.push(database)
-    mkdirSync(database, { recursive: true })
     const settingsFile = path.join(database, "settings.dat")
     // Holds an exclusive flock on settings.dat, as a Crashpad client does while it writes the file.
     const holder = spawn("python3", [
