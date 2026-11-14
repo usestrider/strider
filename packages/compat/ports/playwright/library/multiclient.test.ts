@@ -35,6 +35,11 @@
  *   client's page.
  * - MC-018 starts a recording, `Trace.record`, where the original starts context tracing. Strider's recordings are
  *   independent, so a second recording on the same context is not refused, and the assertion that it is fails.
+ * - MC-014 registers a locator handler on the first client's page under that client's scope, which ends with it: the
+ *   second client's click is covered by the interstitial and nothing in its timeout names a handler.
+ * - MC-020 creates the first client's context and page in the test's own scope, not the client's, since a page closes with
+ *   the scope it was created in and the test needs the page to outlive the first client's connection; the reconnecting
+ *   client finds it by its address, as `twoPages` does. The first client's locator handler stays in its own scope.
  * - MC-015 and MC-019 aren't ported (see the ledger): MC-015 is Playwright's server protocol, and MC-019 uses the
  *   internal `_startRecording` hook.
  */
@@ -293,6 +298,55 @@ upstream(import.meta.filename, { browsers: ["chromium"] }, (test) => {
       assert.strictEqual(yield* pageA.evaluateInMainWorld(() => (window as any).contextValueA), "contextValueA")
     })))
 
+  test("MC-014", { page: false }, ({ server }) =>
+    host(Effect.gen(function*() {
+      const { clientA, pageA, pageB } = yield* twoPages()
+
+      yield* pageA.goto(server.PREFIX + "/input/handle-locator.html", { waitUntil: "load" })
+
+      let count = 0
+      yield* pageA.addLocatorHandler(pageA.getByText("This interstitial covers the button"), () =>
+        Effect.gen(function*() {
+          ++count
+          yield* pageA.locator("#close").click()
+        })).pipe(Scope.provide(clientA.scope))
+
+      yield* pageA.locator("#aside").hover()
+      yield* pageA.evaluateInMainWorld(() => {
+        ;(window as any).clicked = 0
+        ;(window as any).setupAnnoyingInterstitial("mouseover", 1)
+      })
+      yield* pageA.locator("#target").click()
+      assert.strictEqual(count, 1)
+      assert.strictEqual(
+        yield* pageB.evaluateInMainWorld(() =>
+          (window as any).clicked
+        ),
+        1
+      )
+      yield* Expect.toBeHidden(pageB.locator("#interstitial"))
+
+      yield* pageA.locator("#aside").hover()
+      yield* pageA.evaluateInMainWorld(() => {
+        ;(window as any).clicked = 0
+        ;(window as any).setupAnnoyingInterstitial("mouseover", 1)
+      })
+
+      yield* disconnect(clientA)
+
+      const error = yield* failureOf(
+        pageB.locator("#target").click().pipe(Deadline.within("3 seconds")),
+        "pageB's click"
+      )
+      timedOut(error, 3000)
+      // "intercepts pointer events", and nothing of a locator handler: the first client's handler is gone with it
+      assert(Deadline.isTimeout(error))
+      const reason = Option.getOrUndefined(Option.map(error.last, (observed) => observed.value as { _tag: string }))
+      assert.strictEqual(reason?._tag, "Covered")
+      assert.notInclude(error.message, "locator handler")
+      assert.notInclude(Option.getOrElse(error.hint, () => ""), "locator handler")
+    })))
+
   test("MC-016", { page: false }, () =>
     host(Effect.gen(function*() {
       const { clientA, pageA, pageB } = yield* twoPages()
@@ -325,6 +379,52 @@ upstream(import.meta.filename, { browsers: ["chromium"] }, (test) => {
 
       assert(Target.isTargetGone(error), `the wait ended for another reason: ${String(error)}`)
       assert.strictEqual(counter, savedCounter)
+    })))
+
+  test("MC-020", { page: false }, ({ server }) =>
+    host(Effect.gen(function*() {
+      const clientA = yield* connect()
+      // The original's `browser.newPage()` is a page that outlives its client. Strider closes a page with the scope it
+      // was created in, so the port creates it in the test's own scope, which outlives the first client's connection, and
+      // the reconnecting client finds it again by its address.
+      const context = yield* clientA.browser.newContext()
+      const page = yield* context.newPage
+      yield* page.goto(server.PREFIX + "/input/handle-locator.html", { waitUntil: "load" })
+
+      let called = 0
+      yield* page.addLocatorHandler(page.getByText("This interstitial covers the button"), () =>
+        Effect.gen(function*() {
+          ++called
+          return yield* Effect.never
+        })).pipe(Scope.provide(clientA.scope))
+      yield* page.evaluateInMainWorld(() => {
+        ;(window as any).setupAnnoyingInterstitial("none", 1)
+      })
+      const error = yield* failureOf(
+        page.locator("#target").click().pipe(Deadline.within("1 second")),
+        "the first client's click"
+      )
+      timedOut(error, 1000)
+      assert.strictEqual(called, 1)
+
+      yield* disconnect(clientA)
+
+      const clientB = yield* connect()
+      let observed: Page.ObservedPage | undefined
+      for (const candidate of yield* clientB.browser.pages) {
+        if ((yield* candidate.url).endsWith("/input/handle-locator.html")) observed = candidate
+      }
+      assert.isDefined(observed, "the reconnected client doesn't see the first client's page")
+      const reconnected = yield* observed!.control.pipe(Scope.provide(clientB.scope))
+      yield* reconnected.addLocatorHandler(reconnected.getByText("This interstitial covers the button"), () =>
+        reconnected.locator("#close").click()).pipe(Scope.provide(clientB.scope))
+      yield* reconnected.locator("#target").click().pipe(Deadline.within("3 seconds"))
+      assert.strictEqual(
+        yield* reconnected.evaluateInMainWorld(() =>
+          (window as any).clicked
+        ),
+        1
+      )
     })))
 
   test("MC-018", { page: false }, () =>

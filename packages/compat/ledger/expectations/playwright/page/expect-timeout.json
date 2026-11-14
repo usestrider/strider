@@ -1,15 +1,6 @@
 [
   {
     "tests": [
-      "EX-250",
-      "EX-251"
-    ],
-    "status": "needsFeature",
-    "matrix": "method-page-addlocatorhandler",
-    "reason": "Waiting for Playwright's page.addLocatorHandler, which runs a handler when a locator is covered and waits for it to be hidden; Strider has no locator handler, so a check covered by an overlay can't be ported"
-  },
-  {
-    "tests": [
       "EX-258"
     ],
     "status": "needsFeature",
