@@ -156,6 +156,10 @@ What changes when attached:
 
 ## Differences
 
+**Pointer events land on whole pixels.** Strider sends the exact point an action picks, but WebKit drops the
+fraction, so a click at a fractional point, such as an explicit `position` in a box at a half-pixel offset, lands
+less than a pixel above and to the left. The capability `input.fractionalPointer` is `partial` here.
+
 **Dialogs are `Dialog.Unknown`,** with their message: WebKit doesn't say which kind is open. `accept` answers as OK,
 a prompt with its default; `dismiss` as Cancel; `respond(text)` answers a prompt. So a
 [handler](/docs/events/kinds#dialogs-and-file-choosers)'s `Confirm` and `Prompt` branches never run here, but keep them, so the same handler

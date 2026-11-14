@@ -894,6 +894,11 @@ export interface ReadonlyLocator
  *
  * **Details**
  *
+ * With `inViewport` enabled, an action scrolls when no viewport fragment remains or an ancestor scroller
+ * wholly clips the target, including scrollers in parent documents. Non-scrollable clipping and overlay
+ * coverage alone do not scroll. Disabling `receivesPointer` preserves
+ * this scrolling; disabling `inViewport` prevents it. Explicit positions remain padding-box offsets.
+ *
  * Each action documents which checks it runs. An override is recorded in the action's span. `stable` waits for
  * the element's box to stay the same for 2 animation frames, or as many as `{ frames }` says, and a timeout says
  * how many. `rendered` defaults on for pointer actions and off for the rest. With it off, checks run against
@@ -1026,7 +1031,11 @@ export interface PointerOptions extends ActionOptions {
    * Disabling `receivesPointer` uses the first geometric centre without coverage probes.
    * Explicit positions are never replaced by another fragment. The point stays inside its rectangle after integer rounding
    * when that rectangle contains an integer point. A target with no visible rectangle has no default point,
-   * even when actionability checks are disabled.
+   * even when actionability checks are disabled. The chosen point is sent to the browser exactly, fractions
+   * included, for mouse and touch input. Chromium delivers it exactly. Firefox and WebKit deliver pointer events
+   * at whole pixels: Firefox rounds a fractional point, landing up to half a pixel away, and WebKit truncates it,
+   * landing less than a pixel above and to the left. The capability `input.fractionalPointer` says which
+   * browsers deliver the exact point.
    *
    * @default the first reachable fragment centre, or the first geometric centre when receivesPointer is disabled
    */

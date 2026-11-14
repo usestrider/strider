@@ -72,7 +72,7 @@ export const dispatchInput = Effect.fnUntraced(
         case "Mouse": {
           const actions = pointer("strider-mouse")
           const button = buttons[event.button] ?? 0
-          actions.push({ type: "pointerMove", x: Math.round(event.x - dx), y: Math.round(event.y - dy) })
+          actions.push({ type: "pointerMove", x: event.x - dx, y: event.y - dy })
           if (event.type !== "move") actions.push({ type: event.type === "down" ? "pointerDown" : "pointerUp", button })
           break
         }
@@ -106,7 +106,7 @@ export const dispatchInput = Effect.fnUntraced(
           const actions = pointer("strider-touch")
           for (const point of event.points) {
             if (event.type === "move" || event.type === "start") {
-              actions.push({ type: "pointerMove", x: Math.round(point.x - dx), y: Math.round(point.y - dy) })
+              actions.push({ type: "pointerMove", x: point.x - dx, y: point.y - dy })
             }
             if (event.type === "start") actions.push({ type: "pointerDown", button: 0 })
             if (event.type === "end" || event.type === "cancel") actions.push({ type: "pointerUp", button: 0 })

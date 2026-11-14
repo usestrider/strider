@@ -38,7 +38,7 @@ import * as InternalOperation from "../../../src/internal/operation.ts"
 import * as Reason from "../../../src/Reason.ts"
 import { site } from "../adapter/harness.ts"
 import { type LinkGeometry, wrappedLinkHtml, wrappedLinks } from "../wrappedLinks.ts"
-import { supports } from "./capabilities.ts"
+import { fullySupports, pointerQuantization, supports } from "./capabilities.ts"
 import * as SharedContext from "./sharedContext.ts"
 import { newPage } from "./sharedContext.ts"
 
@@ -174,6 +174,23 @@ const observesDisabled = Effect.fnUntraced(function*<E, R>(
   yield* Fiber.interrupt(running)
   assert.strictEqual(record.diagnostics().dispatch._tag, "NotSent")
 })
+
+/**
+ * Checks a delivered pointer coordinate against the one requested, by how the backend places fractional points:
+ * rounding lands within half a pixel, and truncation lands up to a pixel above, never below.
+ */
+const assertQuantized = (
+  name: "Chromium" | "Firefox" | "WebKit",
+  delivered: number,
+  requested: number,
+  detail: string
+) => {
+  const error = delivered - requested
+  if (pointerQuantization[name] === "truncate") {
+    assert.isAbove(error, -1, detail)
+    assert.isAtMost(error, 0, detail)
+  } else assert.isAtMost(Math.abs(error), 0.5, detail)
+}
 
 export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} interaction`, () => {
@@ -1229,6 +1246,277 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             }))
           }), timeout)
       }
+
+      for (const mode of ["visible control", "explicit scroll control", "automatic scroll"] as const) {
+        it.effect(`clicks a wholly hidden nested-scroller link: ${mode}`, () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<!doctype html><style>body{margin:0}#s{position:absolute;left:20px;top:100px;width:240px;height:60px;overflow:auto}#go{display:block;width:100px;height:24px;margin-top:${
+                mode === "visible control" ? 0 : 120
+              }px}#tail{height:160px}</style><div id="s"><a id="go" href="#go">Click me</a><div id="tail"></div></div><output id="out"></output><script>document.querySelector('#go').addEventListener('click',e=>{e.preventDefault();document.querySelector('#out').textContent=String(e.isTrusted)})</script>`
+            )
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const geometry = () =>
+              page.evaluateInMainWorld(() => {
+                const target = document.querySelector("#go")!
+                const scroller = document.querySelector("#s")!
+                const r = target.getBoundingClientRect()
+                const s = scroller.getBoundingClientRect()
+                return {
+                  left: r.left,
+                  right: r.right,
+                  top: r.top,
+                  bottom: r.bottom,
+                  scrollerTop: s.top + scroller.clientTop,
+                  scrollerBottom: s.top + scroller.clientTop + scroller.clientHeight,
+                  viewportWidth: innerWidth,
+                  viewportHeight: innerHeight,
+                  scrollTop: scroller.scrollTop,
+                  hit: document.elementFromPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2)?.tagName
+                }
+              })
+            const before = yield* geometry()
+            assert.isAbove(before.left, 0)
+            assert.isBelow(before.right, before.viewportWidth)
+            assert.isAbove(before.top, 0)
+            assert.isBelow(before.bottom, before.viewportHeight)
+            assert.strictEqual(before.scrollTop, 0)
+            if (mode === "visible control") {
+              assert.isAtLeast(before.top, before.scrollerTop)
+              assert.isAtMost(before.bottom, before.scrollerBottom)
+              assert.strictEqual(before.hit, "A")
+            } else {
+              assert.isAtLeast(before.top, before.scrollerBottom)
+              // The hit is the document background, with no overlay in this fixture.
+              assert.strictEqual(before.hit, "HTML")
+            }
+            const target = page.locator("#go")
+            if (mode === "explicit scroll control") {
+              yield* target.scrollIntoView().pipe(Deadline.within("1 second"))
+              const after = yield* geometry()
+              assert.isAbove(after.scrollTop, 0)
+              assert.isAtLeast(after.top, after.scrollerTop)
+              assert.isAtMost(after.bottom, after.scrollerBottom)
+              assert.strictEqual(after.hit, "A")
+            }
+            const error = yield* target.click().pipe(
+              Deadline.within("1 second"),
+              Effect.match({ onFailure: (error) => error, onSuccess: () => undefined })
+            )
+            if (error !== undefined) {
+              assert(Deadline.isTimeout(error), String(error))
+              assert(error.history.some((entry) => (entry.value as { _tag: string })._tag === "Covered"))
+              assert.deepStrictEqual(yield* geometry(), before)
+              assert.strictEqual(yield* page.locator("#out").readText, "")
+              return yield* Effect.fail(error)
+            }
+            assert.strictEqual(yield* page.locator("#out").readText, "true")
+          })), timeout)
+      }
+
+      for (
+        const mode of [
+          "horizontal",
+          "multiple",
+          "pointer disabled",
+          "viewport disabled",
+          "explicit",
+          "overlay",
+          "escape"
+        ] as const
+      ) {
+        it.effect(
+          `scrolls ancestor clipping independently of coverage: ${mode}`,
+          () =>
+            Effect.scoped(Effect.gen(function*() {
+              const hidden = mode !== "overlay" && mode !== "escape"
+              const { url } = yield* fixture(() =>
+                `<!doctype html><style>body{margin:0}#s{position:absolute;left:20px;top:100px;width:240px;height:60px;overflow:auto}#inner{width:${
+                  mode === "multiple" ? 400 : 240
+                }px;height:${
+                  mode === "multiple" ? 80 : 260
+                }px;overflow:auto}#go{display:block;width:100px;height:24px;margin-top:${
+                  hidden && mode !== "horizontal" ? 120 : 0
+                }px;margin-left:${mode === "horizontal" ? 300 : 0}px;${
+                  mode === "escape" ? "position:fixed;left:300px;top:100px" : ""
+                }}#tail{width:600px;height:300px}</style><div id="s"><div id="inner"><a id="go" href="#">Go</a><div id="tail"></div></div></div>${
+                  mode === "overlay" ? "<div style=\"position:fixed;inset:0;background:white\"></div>" : ""
+                }<output id="out"></output><script>go.onclick=e=>{e.preventDefault();out.textContent=JSON.stringify({trusted:e.isTrusted,x:e.offsetX,y:e.offsetY,clientY:e.clientY,top:go.getBoundingClientRect().top})}</script>`
+              )
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const scrolls = () =>
+                page.evaluateInMainWorld(() =>
+                  ["s", "inner"].map((id) => {
+                    const el = document.getElementById(id)!
+                    return { x: el.scrollLeft, y: el.scrollTop }
+                  })
+                )
+              const before = yield* scrolls()
+              const error = yield* page.locator("#go").click({
+                checks: { inViewport: mode !== "viewport disabled", receivesPointer: mode !== "pointer disabled" },
+                position: mode === "explicit" ? { x: 7, y: 9 } : undefined
+              }).pipe(
+                Deadline.within("1 second"),
+                Effect.match({ onFailure: (error) => error, onSuccess: () => undefined })
+              )
+              if (mode === "viewport disabled" || mode === "overlay") {
+                assert(Deadline.isTimeout(error), String(error))
+                assert.deepStrictEqual(yield* scrolls(), before)
+                assert.strictEqual(yield* page.locator("#out").readText, "")
+              } else {
+                assert.strictEqual(error, undefined, String(error))
+                const click = JSON.parse(yield* page.locator("#out").readText)
+                assert.strictEqual(click.trusted, true)
+                const after = yield* scrolls()
+                if (mode === "escape") assert.deepStrictEqual(after, before)
+                else assert.notDeepEqual(after, before)
+                if (mode === "horizontal") assert.isAbove(after[1]!.x, 0)
+                if (mode === "multiple") {
+                  assert.isAbove(after[0]!.y, 0)
+                  assert.isAbove(after[1]!.y, 0)
+                }
+                if (mode === "explicit") {
+                  if (yield* fullySupports("input.fractionalPointer")) {
+                    assert.deepStrictEqual({ x: click.x, y: click.y }, { x: 7, y: 9 })
+                  } else {
+                    // Whole-pixel delivery: Firefox rounds the point sent, within half a pixel, and WebKit truncates
+                    // it, landing up to a pixel above.
+                    assert.strictEqual(click.x, 7, JSON.stringify(click))
+                    assertQuantized(name, click.clientY, click.top + 9, JSON.stringify(click))
+                  }
+                }
+              }
+            })),
+          timeout
+        )
+      }
+
+      it.effect(
+        "preserves an explicit offset at a half-pixel padding-box origin",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            // Preserve the post-scroll geometry from the Firefox failure: (20, 110.5), with offset (7, 9).
+            const { url } = yield* fixture(() =>
+              `<!doctype html><style>body{margin:0}#go{position:absolute;left:20px;top:110.5px;display:block;width:100px;height:24px}</style><a id="go" href="#">Go</a><output id="out"></output><script>go.onpointerdown=e=>window.pointerY=e.clientY;go.onclick=e=>{e.preventDefault();out.textContent=JSON.stringify({trusted:e.isTrusted,x:e.offsetX,y:e.offsetY,clientY:e.clientY,pointerY:window.pointerY,top:go.getBoundingClientRect().top})}</script>`
+            )
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            yield* page.locator("#go").click({ position: { x: 7, y: 9 } })
+            const click = JSON.parse(yield* page.locator("#out").readText)
+            assert.isTrue(click.trusted)
+            assert.strictEqual(click.top, 110.5)
+            if (yield* fullySupports("input.fractionalPointer")) {
+              assert.deepStrictEqual({ x: click.x, y: click.y }, { x: 7, y: 9 }, JSON.stringify(click))
+              assert.strictEqual(click.pointerY, click.top + 9, JSON.stringify(click))
+            } else {
+              // Whole-pixel delivery: Firefox rounds the point sent, within half a pixel, and WebKit truncates it,
+              // landing up to a pixel above. A half-pixel point can't tell the two apart; the quarter-pixel click
+              // below can.
+              assert.strictEqual(click.x, 7, JSON.stringify(click))
+              assertQuantized(name, click.clientY, click.top + 9, JSON.stringify(click))
+            }
+            // A quarter-pixel point (119.75): rounding delivers 120 and truncation 119.
+            yield* page.locator("#go").click({ position: { x: 7, y: 9.25 } })
+            const quarter = JSON.parse(yield* page.locator("#out").readText)
+            assert.isTrue(quarter.trusted)
+            assert.strictEqual(quarter.x, 7, JSON.stringify(quarter))
+            if (yield* fullySupports("input.fractionalPointer")) {
+              assert.strictEqual(quarter.pointerY, quarter.top + 9.25, JSON.stringify(quarter))
+            } else {
+              assertQuantized(name, quarter.clientY, quarter.top + 9.25, JSON.stringify(quarter))
+            }
+          })),
+        timeout
+      )
+
+      for (const clipping of ["overflow:clip", "contain:paint"] as const) {
+        it.effect(`does not scroll unrelated scrollers for ${clipping}`, () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<!doctype html><style>body{margin:0}#s{position:absolute;left:20px;top:100px;width:240px;height:150px;overflow:auto}#clip{display:flow-root;margin-top:80px;width:200px;height:40px;${clipping}}#go{display:block;margin-top:120px;width:100px;height:24px}#tail{height:600px}</style><div id="s"><div id="clip"><a id="go" href="#">Go</a></div><div id="tail"></div></div><output id="out"></output><script>go.onclick=e=>{e.preventDefault();out.textContent=String(e.isTrusted)}</script>`
+            )
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const before = yield* page.evaluateInMainWorld(() => document.getElementById("s")!.scrollTop)
+            const clipped = yield* page.evaluateInMainWorld(() => {
+              const target = document.getElementById("go")!.getBoundingClientRect()
+              const clip = document.getElementById("clip")!.getBoundingClientRect()
+              return target.top >= clip.bottom
+            })
+            assert.strictEqual(clipped, true)
+            const error = yield* page.locator("#go").click().pipe(
+              Deadline.within("1 second"),
+              Effect.match({ onFailure: (error) => error, onSuccess: () => undefined })
+            )
+            assert(Deadline.isTimeout(error), String(error))
+            assert.strictEqual(yield* page.evaluateInMainWorld(() => document.getElementById("s")!.scrollTop), before)
+            assert.strictEqual(yield* page.locator("#out").readText, "")
+          })), timeout)
+      }
+
+      for (const viewport of [true, false]) {
+        it.effect(
+          `routes parent scroller checks across origins with inViewport=${viewport}`,
+          () =>
+            Effect.scoped(Effect.gen(function*() {
+              const { origin, crossSite } = yield* site
+              const leaf =
+                `<style>body{margin:0}</style><a id="go" href="#">Go</a><output id="out"></output><script>go.onclick=e=>{e.preventDefault();out.textContent=String(e.isTrusted)}</script>`
+              const html =
+                `<style>body{margin:0}#s{position:absolute;left:20px;top:100px;width:240px;height:60px;overflow:auto}iframe{display:block;margin-top:120px;width:200px;height:40px;border:0}#tail{height:300px}</style><div id="s"><iframe src="${
+                  fixtureUrl(crossSite, leaf)
+                }"></iframe><div id="tail"></div></div>`
+              const page = yield* Browser.newPage()
+              yield* page.goto(fixtureUrl(origin, html))
+              const frame = page.frame(page.locator("iframe"))
+              const error = yield* frame.locator("#go").click({ checks: { inViewport: viewport } }).pipe(
+                Deadline.within("1 second"),
+                Effect.match({ onFailure: (error) => error, onSuccess: () => undefined })
+              )
+              const scroll = yield* page.evaluateInMainWorld(() => document.getElementById("s")!.scrollTop)
+              if (viewport) {
+                assert.strictEqual(error, undefined, String(error))
+                assert.isAbove(scroll, 0)
+                assert.strictEqual(yield* frame.locator("#out").readText, "true")
+              } else {
+                assert(Deadline.isTimeout(error), String(error))
+                assert.strictEqual(scroll, 0)
+                assert.strictEqual(yield* frame.locator("#out").readText, "")
+              }
+            })),
+          timeout
+        )
+      }
+
+      it.effect(
+        "clicks a link in a frame wholly clipped by a parent-document scroller",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<!doctype html><style>body{margin:0}#s{position:absolute;left:20px;top:100px;width:240px;height:60px;overflow:auto}iframe{display:block;margin-top:120px;width:200px;height:40px;border:0}#tail{height:300px}</style><div id="s"><iframe srcdoc='<style>body{margin:0}</style><a id="go" href="#">Go</a><output id="out"></output><script>go.onclick=e=>{e.preventDefault();out.textContent=String(e.isTrusted)}</script>'></iframe><div id="tail"></div></div>`
+            )
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            // The frame lies inside the document viewport but wholly below the scroller's client area.
+            const geometry = yield* page.evaluateInMainWorld(() => {
+              const frame = document.querySelector("iframe")!.getBoundingClientRect()
+              const scroller = document.getElementById("s")!.getBoundingClientRect()
+              return { frameTop: frame.top, frameBottom: frame.bottom, scrollerBottom: scroller.bottom }
+            })
+            assert.isAtLeast(geometry.frameTop, geometry.scrollerBottom)
+            assert.isBelow(geometry.frameBottom, 600)
+            const frame = page.frame(page.locator("iframe"))
+            const error = yield* frame.locator("#go").click().pipe(
+              Deadline.within("1 second"),
+              Effect.match({ onFailure: (error) => error, onSuccess: () => undefined })
+            )
+            assert.strictEqual(error, undefined, String(error))
+            assert.strictEqual(yield* frame.locator("#out").readText, "true")
+          })),
+        timeout
+      )
 
       for (const handlers of [false, true]) {
         for (

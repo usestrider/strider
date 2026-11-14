@@ -566,6 +566,7 @@ const prepareRound = Effect.fnUntraced(function*(
         op: "frame",
         steps: hop.steps,
         scroll: request.checks.inViewport,
+        cap: request.cap,
         point: null,
         ...(clip === undefined ? {} : { clip })
       }, id)

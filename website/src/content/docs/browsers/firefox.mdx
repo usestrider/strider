@@ -128,6 +128,10 @@ top-level `var` and function declarations aren't globals. Assign to `window` to 
 by a subscription with [`body`](/docs/events/network#decoding-bodies) or by
 [`Har.record`](/docs/tools/recordings#har-files).
 
+**Pointer events land on whole pixels.** Strider sends the exact point an action picks, for mouse and touch
+input, but Firefox delivers it at the nearest whole pixel, so a click at a fractional point, such as an explicit `position` in a box at a
+half-pixel offset, lands up to half a pixel away. The capability `input.fractionalPointer` is `partial` here.
+
 **An unhandled rejection is reported as a throw,** so [`UncaughtException`](/docs/events/events#history)'s `kind` is `"unknown"`.
 
 **[`servedBy`](/docs/events/network#response-sources) is `"cacheOrServiceWorker"`** for both: Firefox can't tell them apart. A script reused from the memory
