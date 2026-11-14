@@ -8,12 +8,18 @@ import { assert, describe, layer } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import { afterAll } from "vitest"
 import type * as Adapter from "../../../src/internal/adapter.ts"
 import * as BidiAdapter from "../../../src/internal/bidiAdapter.ts"
 import * as FirefoxLauncher from "../../../src/internal/firefoxLauncher.ts"
 import * as Target from "../../../src/Target.ts"
 import { assertPinned, firefox } from "../browsers.ts"
+import * as FirefoxCrashReports from "../firefoxCrashReports.ts"
 import { makeRecorder, site } from "./harness.ts"
+
+// This file's Firefox writes the crash reports of a content process it kills, kept when a test fails
+// (`firefoxCrashReports.ts`); the file undoes it when it ends, so later files launch Firefox as usual
+afterAll(FirefoxCrashReports.optIn())
 
 const executable = firefox.executable
 const timeout = 60_000

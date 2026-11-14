@@ -97,7 +97,8 @@ The live database remains Crashpad-managed: its default pruning target is 128 Mi
 A single report or reports written between pruning passes can exceed it. The database lives only on that runner;
 only the bounded copies are uploaded. Delayed reports and abrupt runner termination can still prevent capture.
 
-`integration-macos-log` retains the log, bounded failure traces, Firefox's crash reports for a failed test
+`integration-macos-log` retains the log, bounded failure traces, Firefox's crash reports for a failed test in
+the Firefox adapter files (`Firefox.adapter.test.ts`, `FirefoxSpecific.test.ts`, `FirefoxCrashReportsWritten.test.ts`)
 (`.data/integration-failures/*-firefox-crash/`: `.extra` annotations and minidumps up to 8 MiB each, as
 `packages/browser/test/integration/failureTrace.ts` says), `.data/macos-crash-reports/`, and investigation
 metadata when requested, for 14 days on success, failure or cancellation. Capture status includes pinned browser

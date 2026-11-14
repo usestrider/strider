@@ -6,7 +6,9 @@
  *
  * Bounded diagnostic history; independent of the optional drift fixture sampler.
  *
- * Firefox's crash reports are kept too, once the browser that wrote them has exited: those that arrive while a test
+ * In the Firefox adapter files (`adapter/Firefox.adapter.test.ts`, `adapter/FirefoxSpecific.test.ts` and
+ * `adapter/FirefoxCrashReportsWritten.test.ts`, which opt in), Firefox's crash reports are kept too, once the browser
+ * that wrote them has exited: those that arrive while a test
  * runs, such as a browser's started for it, in `.data/integration-failures/<test file>-<test id>-<pid>-firefox-crash/`
  * when that test failed; the rest, such as a browser's the file's tests shared or one recycled during a passing test,
  * in `<test file>-<file id>-<pid>-shared-firefox-crash/` beside the shared trace when any test in the file failed,
@@ -14,7 +16,7 @@
  * reason, when the parent process killed a content process) and their minidumps, up to 8 MiB each and 32 MiB per
  * test or file (`omitted.txt` names the rest). Otherwise nothing is kept. Firefox writes them in its profile's
  * `minidumps/`, with no crash reporter window and nothing submitted, and the harness moves them out after it exits,
- * before its profile is deleted, for every launch in this process, including those given a ledger of their own
+ * before its profile is deleted, for every launch in those files, including those given a ledger of their own
  * through `FirefoxCrashReports.wrap`; Firefox started by the `strider` daemon in the CLI tests isn't covered. A
  * collection that fails is logged and changes neither a test's result nor its trace. `STRIDER_INTEGRATION_FAILURES`
  * names another directory for all of these, as the runner's own tests do. `firefoxCrashReports.ts` says what makes

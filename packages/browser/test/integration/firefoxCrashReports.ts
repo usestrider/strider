@@ -28,11 +28,16 @@
  *   traces' timestamps.
  * A collection that fails is logged and changes neither the test's result nor its trace. Firefox started by the
  * `strider` daemon in the CLI tests runs in another process, with its own ledger and preferences, and isn't covered.
+ *
+ * Only the Firefox adapter files opt in (`optIn`): `adapter/Firefox.adapter.test.ts`, `adapter/FirefoxSpecific.test.ts`
+ * and `adapter/FirefoxCrashReportsWritten.test.ts`, each undoing it when it ends. Every other file, the slice suites
+ * included, launches Firefox without crash reporting and keeps no crash reports.
  */
 import * as Effect from "effect/Effect"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
+import { firefoxPrefs } from "../../src/internal/profiles.ts"
 import * as Ledger from "../../src/Ledger.ts"
 
 /** Turns Firefox's crash reporter on, with no client to show and nothing to submit. */
@@ -118,6 +123,39 @@ export const install = (): void => {
   const wrapped = wrap({ add: ledger.add, remove: ledger.remove })
   ledger.add = wrapped.add
   ledger.remove = wrapped.remove
+}
+
+/**
+ * Turns crash reporting on for the Firefox a test file launches, and returns what turns it off again: the
+ * environment, the preferences in every launch profile, and the default ledger's wrap, each restored as it was. A
+ * Vitest worker runs several files in one process, so a file that opts in undoes it when it ends (`afterAll`), and
+ * every other file launches Firefox as it would without this module.
+ */
+export const optIn = (): () => void => {
+  const env = Object.fromEntries(Object.keys(environment).map((name) => [name, process.env[name]]))
+  const profiles = Object.values(firefoxPrefs) as Array<Record<string, unknown>>
+  const before = profiles.map((profile) => Object.fromEntries(Object.keys(prefs).map((name) => [name, profile[name]])))
+  const ledger = Effect.runSync(Effect.gen(function*() {
+    return yield* Ledger.CurrentLedger
+  })) as { add: Ledger.Ledger["add"]; remove: Ledger.Ledger["remove"] }
+  const { add, remove } = ledger
+  Object.assign(process.env, environment)
+  for (const profile of profiles) Object.assign(profile, prefs)
+  install()
+  return () => {
+    for (const [name, value] of Object.entries(env)) {
+      if (value === undefined) delete process.env[name]
+      else process.env[name] = value
+    }
+    profiles.forEach((profile, index) => {
+      for (const [name, value] of Object.entries(before[index]!)) {
+        if (value === undefined) delete profile[name]
+        else profile[name] = value
+      }
+    })
+    ledger.add = add
+    ledger.remove = remove
+  }
 }
 
 const mtime = (file: string): number | undefined => {

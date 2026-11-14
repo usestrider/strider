@@ -17,10 +17,15 @@ import * as http from "node:http"
 import type * as net from "node:net"
 import * as os from "node:os"
 import * as path from "node:path"
+import { afterAll } from "vitest"
 import * as FirefoxLauncher from "../../../src/internal/firefoxLauncher.ts"
 import * as Ledger from "../../../src/Ledger.ts"
 import { firefox } from "../browsers.ts"
 import * as FirefoxCrashReports from "../firefoxCrashReports.ts"
+
+// This file's Firefox writes the crash reports of a content process it kills, kept when a test fails
+// (`firefoxCrashReports.ts`); the file undoes it when it ends, so later files launch Firefox as usual
+afterAll(FirefoxCrashReports.optIn())
 
 interface Row {
   readonly pid: number
@@ -102,8 +107,8 @@ layer(services, { excludeTestServices: true })((it) => {
           remove: () => Effect.void
         })
         const written = yield* Effect.scoped(Effect.gen(function*() {
-          // A page whose load event reports back, so the content processes have run a page, and set up their
-          // crash handling, before one is aborted
+          // A page whose load event reports back, so the process that runs it has set up its crash handling
+          // before the web content processes are aborted
           let loaded!: () => void
           const pageLoaded = new Promise<void>((resolve) => loaded = resolve)
           const server = yield* Effect.acquireRelease(
@@ -137,21 +142,24 @@ layer(services, { excludeTestServices: true })((it) => {
           // A web content process: Firefox's own binary with `-contentproc` on Linux, which may start it through
           // a fork server, and `plugin-container` on macOS; `-isForBrowser` marks it on both
           let processes = new Map<number, string>()
-          let tab: number | undefined
-          for (let attempt = 0; attempt < 100 && tab === undefined; attempt++) {
+          // Every web content process is aborted, since the page's own can't be told from the others by its command
+          // line; the one that ran the page has set up its crash handling
+          let tabs: Array<number> = []
+          for (let attempt = 0; attempt < 100 && tabs.length === 0; attempt++) {
             processes = descendants(Number(launched.handle.pid))
-            tab = [...processes].find(([, args]) => args.includes("-isForBrowser"))?.[0]
-            if (tab === undefined) yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 100)))
+            tabs = [...processes].filter(([, args]) => args.includes("-isForBrowser")).map(([pid]) => pid)
+            if (tabs.length === 0) yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 100)))
           }
-          assert.isDefined(
-            tab,
+          assert.isAbove(
+            tabs.length,
+            0,
             `Firefox started no web content process; its descendants: ${
               [...processes].map(([pid, args]) => `${pid} ${args}`).join("; ") || "none"
             }`
           )
-          // An abort, which Firefox's exception handler reports as a crash of that process, in the profile. The
+          // An abort, which Firefox's exception handler reports as a crash of each process, in the profile. The
           // running Firefox still owns the files, so they're only read until one is complete
-          process.kill(tab!, "SIGABRT")
+          for (const tab of tabs) process.kill(tab, "SIGABRT")
           let id: string | undefined
           for (let attempt = 0; attempt < 100 && id === undefined; attempt++) {
             yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 100)))
