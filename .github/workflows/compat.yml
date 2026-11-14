@@ -2,9 +2,14 @@
 # request; nothing depends on it passing. A plan job splits each browser's port files into shards of about `target`
 # seconds by their last recorded times (packages/compat/ledger/timings.json), and a report job merges the shards'
 # results into one report against the ledger, in the run's summary.
+#
+# GitHub dispatches only workflows on the default branch, so until the harness is on main a push to its branch runs it,
+# on every browser and every file.
 name: Compat
 
 on:
+  push:
+    branches: [compat-upstream-ports]
   workflow_dispatch:
     inputs:
       browsers:
@@ -43,9 +48,9 @@ jobs:
       - name: Plan shards
         id: plan
         env:
-          BROWSERS: ${{ inputs.browsers }}
+          BROWSERS: ${{ inputs.browsers || 'chromium,firefox,webkit' }}
           FILES: ${{ inputs.files }}
-          TARGET: ${{ inputs.target }}
+          TARGET: ${{ inputs.target || '900' }}
         run: |
           args=(--browsers "$BROWSERS" --target "$TARGET")
           for glob in $FILES; do args+=(--files "$glob"); done
