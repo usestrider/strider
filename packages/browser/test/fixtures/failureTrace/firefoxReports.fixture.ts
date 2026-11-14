@@ -21,7 +21,8 @@ afterAll(() => {
   fs.rmSync(profile, { recursive: true, force: true })
 })
 
-for (const failed of [false, true]) {
+const recycle = process.env["STRIDER_REPORT_FIXTURE_RECYCLE"] === "1"
+for (const failed of recycle ? [true, false] : [false, true]) {
   it(failed ? "failed Firefox print" : "passing Firefox print", () => {
     const id = failed ? "failed-report" : "passing-report"
     const trace = connection("Firefox print")
@@ -51,5 +52,7 @@ for (const failed of [false, true]) {
     )
     fs.writeFileSync(path.join(profile, "minidumps", `${id}.dmp`), "dump")
     if (failed) throw new Error("recorded print failure")
+    // A shared suite can restart its browser during a later passing test.
+    if (recycle) Effect.runSync(ledger.remove(item))
   })
 }
