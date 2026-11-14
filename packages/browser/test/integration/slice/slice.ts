@@ -4,12 +4,14 @@
  * the cases around it that the design says how to handle.
  */
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser, Deadline, Expect, Locator, PageNavigation } from "@usestrider/browser"
+import { Browser, Deadline, Expect, Locator, NetworkRequest, PageNavigation } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
+import * as Stream from "effect/Stream"
 import { site } from "../adapter/harness.ts"
 import * as SharedContext from "./sharedContext.ts"
 
@@ -33,6 +35,9 @@ const shop = `<title>Shop</title>
     document.getElementById("slot").append(button)
   }, 300)
 </script>`
+
+// A transparent 1×1 GIF
+const gif = "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
 
 const counter = (attributes: string, script = "") =>
   `<button id="b" ${attributes} onclick="this.dataset.clicks = (Number(this.dataset.clicks ?? 0) + 1); document.getElementById('out').textContent = 'clicked ' + this.dataset.clicks">Press</button>
@@ -156,6 +161,41 @@ export const slice = (
             const missing = yield* page.goto(`${served.origin}/missing`)
             assert(missing._tag === "Committed" && Option.isSome(missing.response), String(missing))
             assert.strictEqual(missing.response.value.status, 404)
+          }))
+        }), timeout)
+
+      it.effect("commits a data: URL, and a reload of it, with no response", () =>
+        Effect.gen(function*() {
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            const navigation = yield* page.goto("data:text/html,<p>inline</p>")
+            assert(navigation._tag === "Committed", String(navigation))
+            assert(Option.isNone(navigation.response), "a data: URL makes no network request")
+            const reloaded = yield* page.reload()
+            assert(reloaded._tag === "Committed", String(reloaded))
+            assert(Option.isNone(reloaded.response), "a reload of a data: URL makes no network request")
+          }))
+        }), timeout)
+
+      it.effect("reports no request for a data: document or a data: image on it", () =>
+        Effect.gen(function*() {
+          const served = yield* site
+          const sentinel = `${served.origin}/json?after=data`
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            const requests = yield* NetworkRequest.stream(page)
+            const collected = yield* requests.pipe(
+              Stream.map((request) => request.url),
+              Stream.takeUntil((url) => url === sentinel),
+              Stream.runCollect,
+              Effect.forkChild
+            )
+            yield* page.goto(`data:text/html,${encodeURIComponent(`<img src="data:image/gif;base64,${gif}">`)}`, {
+              waitUntil: "load"
+            })
+            // A request to the site after the load marks the end of what the page reported
+            yield* page.evaluateInMainWorld((url) => void fetch(url, { mode: "no-cors" }).catch(() => {}), sentinel)
+            assert.deepStrictEqual(Array.from(yield* Fiber.join(collected)), [sentinel])
           }))
         }), timeout)
 
