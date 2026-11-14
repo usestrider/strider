@@ -336,6 +336,21 @@ describe("Stock WebKit, attached through its remote inspector", () => {
         }).pipe(Effect.provide(attach(endpoint)))
       }))
 
+    it.effect("preserves a declaration between 96 and 128 KiB on a page with custom eval", () =>
+      Effect.gen(function*() {
+        const { origin } = yield* site
+        const html = "<title>Custom eval</title><script>globalThis.eval = () => () => -1</script>"
+        const { endpoint } = yield* startMiniBrowser(fixtureUrl(origin, html))
+        yield* Effect.gen(function*() {
+          const browser = yield* Browser.Browser
+          yield* Effect.scoped(Effect.gen(function*() {
+            const tab = yield* (yield* byTitle(browser, "Custom eval")).control
+            const fn = new Function(`/*${"x".repeat(100_000)}*/ return 42`) as () => number
+            assert.strictEqual(yield* tab.evaluateInMainWorld(fn), 42)
+          }))
+        }).pipe(Effect.provide(attach(endpoint)))
+      }))
+
     it.effect("finds a page the browser opens, and ends with the browser", () =>
       Effect.gen(function*() {
         const { origin } = yield* site
