@@ -210,6 +210,25 @@ export const slice = (
           }))
         }), timeout)
 
+      it.effect("searches a host's own open shadow root, and one nested in it, from a scoped locator", () =>
+        Effect.gen(function*() {
+          const url = yield* fixture(`<my-widget id="widget"></my-widget>
+<script>
+const root = document.querySelector("#widget").attachShadow({mode:"open"})
+root.innerHTML = "<button>Own</button><div id=inner></div>"
+root.querySelector("#inner").attachShadow({mode:"open"}).innerHTML = "<button>Nested</button>"
+</script>`)
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(url)
+            const widget = page.locator("my-widget")
+            yield* widget.getByRole("button", { name: "Own" }).pipe(Expect.toBeAttached)
+            yield* widget.getByRole("button", { name: "Nested" }).pipe(Expect.toBeAttached)
+            yield* widget.locator("button").first.pipe(Expect.toBeAttached)
+            yield* widget.locator("button").pipe(Expect.toHaveCount(2))
+          }))
+        }), timeout)
+
       it.effect("fails an expectation that never holds, with what it saw", () =>
         Effect.gen(function*() {
           const url = yield* fixture(`<p>1 item</p><p>2 items</p>`)

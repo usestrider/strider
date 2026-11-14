@@ -2244,6 +2244,53 @@ export const engine = (backend: Backend) =>
             assert.strictEqual(invalid._tag, "InvalidSelector")
           }), timeout)
 
+        it.effect("searches a scope's own open shadow root, and a root nested in it, with every kind of step", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<div id="host"></div><div id="outer"></div>
+<script>
+document.getElementById("host").attachShadow({ mode: "open" }).innerHTML =
+  '<button title="tip" data-testid="go">Go</button><label>Name <input placeholder="who"></label>' +
+  '<img alt="logo"><p>Hello</p><div id="inner"></div>'
+document.getElementById("host").shadowRoot.getElementById("inner").attachShadow({ mode: "open" }).innerHTML =
+  "<button>Deep</button>"
+document.getElementById("outer").attachShadow({ mode: "open" }).innerHTML =
+  "<div><span>chained</span></div>"
+</script>`
+            )
+            const host: Engine.Step = { _tag: "Css", selector: "#host" }
+            const inHost = (step: Engine.Step) =>
+              send({ op: "count", steps: [host, step] }).pipe(Effect.map(count))
+            assert.strictEqual(yield* inHost({ _tag: "Css", selector: "button" }), 2)
+            assert.strictEqual(yield* inHost(role("button", text("Go"))), 1)
+            assert.strictEqual(yield* inHost(role("button", text("Deep"))), 1)
+            assert.strictEqual(yield* inHost({ _tag: "Text", matcher: text("Hello") }), 1)
+            assert.strictEqual(yield* inHost({ _tag: "Label", matcher: text("Name") }), 1)
+            assert.strictEqual(yield* inHost({ _tag: "Placeholder", matcher: text("who") }), 1)
+            assert.strictEqual(yield* inHost({ _tag: "AltText", matcher: text("logo") }), 1)
+            assert.strictEqual(yield* inHost({ _tag: "Title", matcher: text("tip") }), 1)
+            assert.strictEqual(yield* inHost({ _tag: "TestId", id: "go" }), 1)
+            const hasDeep: Engine.Step = {
+              _tag: "Filter",
+              hasText: null,
+              hasNotText: null,
+              has: [role("button", text("Deep"))],
+              hasNot: null,
+              visible: null
+            }
+            // The host and the nested root's host both have the button under them.
+            assert.strictEqual(
+              count(yield* send({ op: "count", steps: [{ _tag: "Css", selector: "div" }, hasDeep] })),
+              2
+            )
+            const chain = [{ _tag: "Css", selector: "div" }, { _tag: "Css", selector: "div" }, {
+              _tag: "Css",
+              selector: "span"
+            }] as const
+            assert.strictEqual(count(yield* send({ op: "count", steps: chain })), 1)
+          }), timeout)
+
         it.effect("checks actionability at each frame: ready, covered, disabled, scrolled into view", () =>
           Effect.gen(function*() {
             const { send } = yield* open(
