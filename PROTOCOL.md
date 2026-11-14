@@ -98,12 +98,15 @@ interface ErrorMatcher {
   event's target in its browser process, from hit-test data that includes an out-of-process frame only after the
   frame has been drawn; an event sent earlier reaches the parent's iframe element, and a click can split between the
   two documents. The CDP adapter keeps, per frame, the latest document whose `Page.lifecycleEvent` `init` its session
-  reported, and whether it has reported `firstPaint`. When `dispatchInput` names a frame that is out of process or
-  inside one, and its events include pointer input, it first waits until the frame's current document has been
-  drawn: it, or a document in a frame inside it, has reported `firstPaint`. A document can't be drawn without the
-  documents that embed it, so a painting descendant shows a wrapper that paints nothing was drawn. A document whose
-  start wasn't reported counts as drawn. The operation's deadline ends the wait, as it does the adapter's other
-  waits: nothing is sent, and the operation's history names the frame (`FrameNotDrawn`). A frame whose document and
+  reported, and whether it has reported `firstPaint`. Before pointer input into a frame that is out of process or
+  inside one, it waits until the frame's current document has been drawn, as the signal `firstPaint` gives: it, or
+  a document in a frame inside it, has reported it. `firstPaint` is the signal Strider waits for, not a report of
+  the browser's hit-test data, which CDP doesn't expose: input has reached a child before its `firstPaint` arrived.
+  A document can't be drawn without the documents that embed it, so a painting descendant shows a wrapper that
+  paints nothing was drawn. A document whose start wasn't reported counts as drawn. A locator action waits through
+  the adapter's `frameReady`, a read, before it releases earlier input or marks its own as sent, and `dispatchInput`
+  waits the same way for direct callers. The operation's deadline ends the wait, as it does the adapter's other
+  waits: nothing is sent or left to release, and the operation's history names the frame (`FrameNotDrawn`). A frame whose document and
   descendants paint nothing never reports `firstPaint`, so input into it runs out its deadline. Keys and text
   aren't hit-tested and don't wait. Input that names no frame, such as `page.mouse`, doesn't wait, and can still
   reach the parent's iframe element while an out-of-process frame hasn't been drawn.

@@ -772,7 +772,7 @@ export const conformance = (backend: Backend) =>
             const fixture = (origin: string, html: string) =>
               `${origin}/fixture?html=${encodeURIComponent(html)}`
             // The child says it has loaded, then holds its main thread for a second, so it draws nothing
-            // until after the input below is sent
+            // until after the input request below has started
             const child =
               `<body style="margin:0"><button style="position:absolute;left:10px;top:10px;width:60px;height:30px" onclick="parent.postMessage('clicked', '*')">x</button><script>parent.postMessage('loaded', '*'); const end = performance.now() + 1000; while (performance.now() < end) {}</script></body>`
             yield* goto(
@@ -831,7 +831,7 @@ export const conformance = (backend: Backend) =>
                 `${origin}/fixture?html=${encodeURIComponent(html)}`
               // The wrapper paints nothing of its own: a borderless frame that paints, under a transparent element
               // that takes the click. It says it has loaded, then holds its main thread for a second, so the input
-              // below is sent before it is drawn
+              // request below starts before it is drawn
               const inner = `<body style="margin:0;background:red"></body>`
               const wrapper = `<body style="margin:0"><iframe src="${
                 fixture(world.site.origin, inner)

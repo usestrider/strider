@@ -195,11 +195,12 @@
  * files but do not guarantee their complete prelude survives eviction. No real abnormal-loss probe has validated
  * browser kill or malformed-frame capture end to end. Traces assist investigation without guaranteeing a complete loss cause.
  *
- * Chromium iframe native capture (`iframeNativeProbe.ts`, `nativeInputCapture.ts`): only the Chromium adapter case
- * "names an iframe's frame, passes a node across worlds, and sends input into a frame" records Chromium's own trace of
- * where it routed its input. It exists because that case fails in some macOS nightlies with the press reaching the
- * parent `iframe` element, and the protocol and the pointer recipients cannot say whether the child's hit-test
- * region was published before the press. Every run of that case, passing or failing, writes
+ * Chromium iframe native capture (`iframeNativeProbe.ts`, `nativeInputCapture.ts`): only two Chromium adapter cases,
+ * "names an iframe's frame, passes a node across worlds, and sends input into a frame" and "sends input into a
+ * cross-site frame that has not drawn its first frame yet", record Chromium's own trace of where it routed their
+ * input. It exists because the first case failed in some macOS nightlies with the press reaching the parent `iframe`
+ * element, and the protocol and the pointer recipients cannot say whether the child's hit-test region was published
+ * before the press. Every run of either case, passing or failing, writes
  * `.data/integration-failures/iframe-native-<pid>-<uuid>/`, which CI uploads with the other failure traces
  * (Linux: every job, always; macOS: every run, passing ones included, as the upload step runs `if: always()`):
  * `trace.json` (a CDP `Tracing` JSON trace, categories `input`, `latencyInfo`, `viz.hit_testing_flow`,

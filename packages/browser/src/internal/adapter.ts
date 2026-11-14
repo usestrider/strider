@@ -1008,9 +1008,11 @@ export interface AdapterConnection {
    * Sends input to a page, in its viewport's coordinates. Input aimed inside a frame names it, with the frame's
    * viewport origin in the page's coordinates: a backend that can't deliver page coordinates into a frame sends
    * the frame's own (BiDi). On CDP, pointer input that names a frame that is out of process, or inside one, first
-   * waits until the frame's document has been drawn: it, or a document in a frame inside it, has reported its first
-   * paint. Chromium routes pointer input into such a frame only once it has been drawn, and sends it to the parent's
-   * iframe element before. Keys and text don't wait.
+   * waits as `frameReady` does: until the frame's document, or a document in a frame inside it, has reported its
+   * first paint, the signal Strider takes that the frame has been drawn. Until it has, Chromium may send the input to
+   * the parent's iframe element. A document whose start wasn't reported counts as drawn. A frame whose document and
+   * every frame inside it paint nothing never reports it, so the input runs out the operation's deadline unsent;
+   * without an operation the wait is unbounded. Keys and text don't wait.
    */
   readonly dispatchInput: (
     page: Target.NavigableId,
