@@ -192,7 +192,8 @@ const TimeoutTypeId = "~@usestrider/browser/Deadline/Timeout"
  * - `"waitingForEvent"`: an event wait (`next`) saw no matching event.
  *
  * `history` is what the operation observed, with consecutive repeats dropped, and `last` is the latest of it.
- * Locator actions return after their first permitted readiness sample, retaining rendering requirements.
+ * A locator action's first readiness round returns early only when its first sample observes a blocker;
+ * a sample that only takes the stability baseline keeps waiting in the same round.
  * An incomplete stability baseline adds no evidence; observed blockers and established instability do.
  * Replies must arrive before the deadline to enter history. If none arrives, history can be empty.
  * Late replies cannot change it.
