@@ -8,6 +8,9 @@
  * and a worker's reach its page or context. Firefox and WebKit attribute a dedicated worker's requests to its
  * page's document, as `initiator` shows.
  *
+ * `data:` and `blob:` URLs are never reported as requests, on any backend: the browser answers them without the
+ * network.
+ *
  * @stability unstable
  * @since 0.1.0
  */

@@ -191,6 +191,11 @@ export interface RequestEntry {
   readonly finished: Deferred.Deferred<void, string>
   /** `Network.requestServedFromCache` came for the current hop: `responseReceived` doesn't say so. */
   servedFromCache: boolean
+  /**
+   * Whether the current hop's response came over the network as itself, not from a cache, a service worker or a
+   * route, and not a 304's revalidation: only then are its byte counts its own.
+   */
+  network: boolean
   /** The current hop's route attribution, shared with its Fetch pauses. */
   attribution: Attribution
   /** What the `Network` domain calls it: `Fetch` calls a `fetch()` an `XHR`. */
@@ -325,6 +330,8 @@ export interface State {
   readonly credentialsAttempted: Map<string, Set<string>>
   /** ExtraInfo that came before its request, by request key; a few hundred at most. */
   readonly earlyHeaders: Map<string, Array<ExtraInfo>>
+  /** Requests the browser answers itself (`data:`, `blob:`), by request key, until they end: their ExtraInfo is dropped; a few hundred at most. */
+  readonly answeredLocally: Set<string>
   /** Requests a route failed, by their `Network` key: an abort a route made has nothing after it to end it. */
   readonly routeFailed: Set<string>
   readonly obligations: Map<Adapter.ObligationId, ObligationEntry>
@@ -396,6 +403,7 @@ export const make = (options: {
     pendingAttribution: new Map(),
     credentialsAttempted: new Map(),
     earlyHeaders: new Map(),
+    answeredLocally: new Set(),
     routeFailed: new Set(),
     obligations: new Map(),
     downloads: new Map(),

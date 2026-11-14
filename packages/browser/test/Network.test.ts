@@ -22,6 +22,7 @@ import * as HarLog from "../src/internal/harLog.ts"
 import type * as Model from "../src/internal/model.ts"
 import * as RouteDecision from "../src/internal/routeDecision.ts"
 import * as Routes from "../src/internal/routes.ts"
+import * as Version from "../src/internal/version.ts"
 import * as NetworkRequest from "../src/NetworkRequest.ts"
 import * as NetworkResponse from "../src/NetworkResponse.ts"
 
@@ -74,7 +75,7 @@ const recorded = (sent: NetworkRequest.NetworkRequest, body: Uint8Array | undefi
   hop: Option.none(),
   end: Option.none(),
   body: Option.none(),
-  requestBody: Option.fromUndefinedOr(body),
+  requestBody: Option.some(Option.fromUndefinedOr(body)),
   frames: [],
   done: Deferred.makeUnsafe<void>()
 })
@@ -306,12 +307,13 @@ describe("A HAR an export writes", () => {
       hop: Option.some(hop),
       end: Option.some({
         _tag: "Finished",
-        encodedBytes: bodies.response.length,
+        transferBytes: Option.none(),
+        bodyBytes: Option.none(),
         at: at(3),
         httpVersion: Option.none()
       }),
       body: Option.some(bodies.response),
-      requestBody: Option.some(bodies.request),
+      requestBody: Option.some(Option.some(bodies.request)),
       frames: [],
       done: Deferred.makeUnsafe<void>()
     }
@@ -387,4 +389,150 @@ describe("A HAR an export writes", () => {
       assert.strictEqual(logo.status, 201)
       assert.deepStrictEqual(logo.body._tag === "Uint8Array" ? Array.from(logo.body.body) : [], Array.from(png))
     }).pipe(Effect.provide(NodeServices.layer)))
+
+  const bytes = (text: string) => new TextEncoder().encode(text)
+  const full = (include: ReadonlyArray<"requestBodies" | "cookies">): Har.Writing => ({
+    detail: "full",
+    include: new Set(include),
+    bodies: { _tag: "Embed" }
+  })
+  const entryOf = (recorded: Har.Recorded, include: ReadonlyArray<"requestBodies" | "cookies"> = []) =>
+    Har.entryOf(recorded, clock, full(include)).entry
+
+  it("names the package's version as its creator, generated from its package.json", () => {
+    const { version } = JSON.parse(
+      fs.readFileSync(path.join(import.meta.dirname, "..", "package.json"), "utf8")
+    ) as { readonly version: string }
+    assert.strictEqual(Version.version, version, "src/internal/version.ts is stale; run pnpm codegen")
+    const { log } = Har.logOf([], clock, full([]), { name: "Chromium", version: "155" })
+    assert.deepStrictEqual(log.log.creator, { name: "Strider", version })
+  })
+
+  it("writes 0 as the size of a request that sent no body, and -1 where its body wasn't read", () => {
+    const get = sent("GET", "https://shop.example.com/", "text/plain", "Q1.0")
+    const hop = answered(get, { status: 200, headers: {} }, { request: bytes(""), response: bytes("") })
+    assert.strictEqual(entryOf({ ...hop, requestBody: Option.some(Option.none()) }).request.bodySize, 0)
+    assert.isUndefined(
+      entryOf({ ...hop, requestBody: Option.some(Option.none()) }, ["requestBodies"]).request.postData
+    )
+    assert.strictEqual(entryOf({ ...hop, requestBody: Option.none() }).request.bodySize, -1)
+  })
+
+  it("writes a response's body and transfer sizes as the hop's end counted them, and what decoding saved", () => {
+    const get = sent("GET", "https://shop.example.com/", "text/plain", "Q1.0")
+    const hop = answered(get, { status: 200, headers: { "content-type": "text/plain" } }, {
+      request: bytes(""),
+      response: bytes("x".repeat(100))
+    })
+    const counted = (transferBytes: Option.Option<number>, bodyBytes: Option.Option<number>) =>
+      entryOf({
+        ...hop,
+        end: Option.some({ _tag: "Finished", transferBytes, bodyBytes, at: at(3), httpVersion: Option.none() })
+      })
+        .response
+    const known = counted(Option.some(300), Option.some(40))
+    assert.deepInclude(known, { bodySize: 40, _transferSize: 300 })
+    assert.strictEqual(known.content.compression, 60)
+    const unknown = counted(Option.some(300), Option.none())
+    assert.deepInclude(unknown, { bodySize: -1, _transferSize: 300 })
+    assert.isUndefined(unknown.content.compression)
+  })
+
+  it("keeps a MIME type's parameters, in a response's content and a request's postData", () => {
+    const upload = sent("POST", "https://shop.example.com/upload", "multipart/form-data; boundary=x", "Q1.0")
+    const written = entryOf(
+      answered(upload, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } }, {
+        request: bytes("--x--"),
+        response: bytes("<p>é</p>")
+      }),
+      ["requestBodies"]
+    )
+    assert.strictEqual(written.response.content.mimeType, "text/html; charset=utf-8")
+    assert.strictEqual(written.response.content.text, "<p>é</p>")
+    assert.strictEqual(written.request.postData?.mimeType, "multipart/form-data; boundary=x")
+  })
+
+  it("writes a body that isn't valid UTF-8 as base64, whatever its MIME type says", () => {
+    const invalid = new Uint8Array([0x61, 0xff, 0xfe])
+    const post = sent("POST", "https://shop.example.com/notes", "text/plain", "Q1.0")
+    const written = entryOf(
+      answered(post, { status: 200, headers: { "content-type": "text/plain" } }, {
+        request: invalid,
+        response: invalid
+      }),
+      ["requestBodies"]
+    )
+    assert.strictEqual(written.response.content.text, "Yf/+")
+    assert.strictEqual(written.response.content.encoding, "base64")
+    assert.deepStrictEqual(written.request.postData, { mimeType: "text/plain", text: "Yf/+", _encoding: "base64" })
+  })
+
+  it("preserves a leading UTF-8 BOM when exporting text bodies for replay", () => {
+    const text = "\uFEFFhello"
+    const post = sent("POST", "https://shop.example.com/notes", "text/plain", "Q1.0")
+    const written = entryOf(
+      answered(post, { status: 200, headers: { "content-type": "text/plain" } }, {
+        request: bytes(text),
+        response: bytes(text)
+      }),
+      ["requestBodies"]
+    )
+    assert.strictEqual(written.response.content.text, text)
+    assert.strictEqual(written.request.postData?.text, text)
+  })
+
+  const withCookies = (headers: Record<string, string>, response: Record<string, string>) => {
+    const get = new NetworkRequest.NetworkRequest({
+      ...request("GET", "https://shop.example.com/", headers),
+      at: at(1)
+    })
+    return answered(get, { status: 200, headers: response }, { request: bytes(""), response: bytes("") })
+  }
+
+  it("reads a Set-Cookie's Max-Age as its expiry from the response's time, before its Expires", () => {
+    const written = entryOf(
+      withCookies({}, {
+        "set-cookie": [
+          "a=1; Expires=Fri, 30 Oct 2026 12:00:00 GMT; Max-Age=60",
+          "b=2; Max-Age=0",
+          "c=3; Max-Age=soon; Expires=Fri, 30 Oct 2026 12:00:00 GMT"
+        ].join("\n")
+      }),
+      ["cookies"]
+    )
+    assert.deepStrictEqual(written.response.cookies, [
+      { name: "a", value: "1", expires: new Date(Date.UTC(2026, 9, 30) + 2 + 60_000).toISOString() },
+      { name: "b", value: "2", expires: new Date(0).toISOString() },
+      { name: "c", value: "3", expires: "2026-10-30T12:00:00.000Z" }
+    ])
+  })
+
+  it("exports cookies whose numeric Max-Age exceeds the date range", () => {
+    for (const maxAge of ["999999999999999", "9".repeat(400)]) {
+      const written = entryOf(withCookies({}, { "set-cookie": `a=1; Max-Age=${maxAge}` }))
+      assert.strictEqual(written.response.cookies.length, 1)
+      assert.strictEqual(written.response.cookies[0]!.value, "REDACTED")
+      assert.strictEqual(written.response.cookies[0]!.expires, new Date(8.64e15).toISOString())
+    }
+  })
+
+  it("keeps a cookie with no name, in a request's Cookie and a response's Set-Cookie", () => {
+    const written = entryOf(withCookies({ cookie: "a=1; token" }, { "set-cookie": "secret; Path=/" }), ["cookies"])
+    assert.deepStrictEqual(written.request.cookies, [{ name: "a", value: "1" }, { name: "", value: "token" }])
+    assert.deepStrictEqual(written.response.cookies, [{ name: "", value: "secret", path: "/" }])
+  })
+
+  it("redacts the value of a cookie with no name, in its headers and its cookies", () => {
+    const written = entryOf(withCookies({ cookie: "a=1; token" }, { "set-cookie": "secret; Path=/" }))
+    assert.deepStrictEqual(written.request.cookies, [{ name: "a", value: "REDACTED" }, {
+      name: "",
+      value: "REDACTED"
+    }])
+    assert.deepStrictEqual(written.request.headers, [{ name: "cookie", value: "a=REDACTED; REDACTED" }])
+    assert.deepStrictEqual(written.response.cookies, [{ name: "", value: "REDACTED", path: "/" }])
+    assert.deepStrictEqual(
+      written.response.headers.filter((header) => header.name === "set-cookie"),
+      [{ name: "set-cookie", value: "REDACTED; Path=/" }]
+    )
+  })
 })

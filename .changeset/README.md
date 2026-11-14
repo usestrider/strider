@@ -25,3 +25,9 @@ Source location under `internal/` does not make a user-facing CLI change interna
 
 Changesets does not infer these bumps from JSDoc; the author chooses the bump and review checks it against this policy.
 Documentation-only changes, tests and refactors that preserve public behavior do not need a changeset.
+
+## Versioning
+
+`@usestrider/browser` keeps its version in `src/internal/version.ts` too, generated from its `package.json`, so the
+library knows it without reading a file. After `pnpm changeset version` bumps the version, run `pnpm codegen` and
+commit the regenerated file; `pnpm check` and `packages/browser/test/Network.test.ts` fail until it matches.

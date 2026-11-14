@@ -88,7 +88,13 @@ describe("Scoped redirect evidence", () => {
         const redirectError3 = yield* Effect.flip(links.to(request))
         assert(redirectError3.reason._tag === "RedirectUnknown")
         assert.strictEqual(redirectError3.reason.why, "inFlight")
-        yield* fold.sink({ _tag: "RequestFinished", hop: request.hop, encodedBytes: 0, at: request.at })
+        yield* fold.sink({
+          _tag: "RequestFinished",
+          hop: request.hop,
+          transferBytes: Option.none(),
+          bodyBytes: Option.none(),
+          at: request.at
+        })
         if (status === 302) {
           const unknown = yield* Effect.flip(links.to(request))
           assert(unknown.reason._tag === "RedirectUnknown")
@@ -96,7 +102,13 @@ describe("Scoped redirect evidence", () => {
         } else assert.isTrue(Option.isNone(yield* links.to(request)))
       }
       const missing = yield* send("no-response.0")
-      yield* fold.sink({ _tag: "RequestFinished", hop: missing.hop, encodedBytes: 0, at: missing.at })
+      yield* fold.sink({
+        _tag: "RequestFinished",
+        hop: missing.hop,
+        transferBytes: Option.none(),
+        bodyBytes: Option.none(),
+        at: missing.at
+      })
       const redirectError4 = yield* Effect.flip(links.to(missing))
       assert(redirectError4.reason._tag === "RedirectUnavailable")
       assert.strictEqual(redirectError4.reason.why, "unavailable")
@@ -161,7 +173,13 @@ describe("Scoped redirect evidence", () => {
         })
       })
       // Firefox reports responseCompleted before the next beforeRequestSent. No next hop is visible yet.
-      yield* fold.sink({ _tag: "RequestFinished", hop: first.hop, encodedBytes: 0, at: first.at })
+      yield* fold.sink({
+        _tag: "RequestFinished",
+        hop: first.hop,
+        transferBytes: Option.none(),
+        bodyBytes: Option.none(),
+        at: first.at
+      })
       const unknown = yield* Effect.flip(links.to(first))
       assert(unknown.reason._tag === "RedirectUnknown")
       assert.strictEqual(unknown.reason.why, "completedRedirect")
@@ -201,7 +219,13 @@ describe("Scoped redirect evidence", () => {
             at: first.at
           })
         })
-        yield* fold.sink({ _tag: "RequestFinished", hop: first.hop, encodedBytes: 0, at: first.at })
+        yield* fold.sink({
+          _tag: "RequestFinished",
+          hop: first.hop,
+          transferBytes: Option.none(),
+          bodyBytes: Option.none(),
+          at: first.at
+        })
         assert.strictEqual(
           (yield* Effect.flip(links.to(first))).reason._tag,
           mismatch === "notRetained" ? "RedirectUnavailable" : "RedirectUnknown"
@@ -253,7 +277,13 @@ describe("Scoped redirect evidence", () => {
           at: request.at
         })
       })
-      yield* fold.sink({ _tag: "RequestFinished", hop: request.hop, encodedBytes: 0, at: request.at })
+      yield* fold.sink({
+        _tag: "RequestFinished",
+        hop: request.hop,
+        transferBytes: Option.none(),
+        bodyBytes: Option.none(),
+        at: request.at
+      })
       yield* fold.sink({
         _tag: "NavigationEnded",
         navigation,

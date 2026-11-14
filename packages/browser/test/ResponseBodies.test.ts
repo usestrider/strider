@@ -50,7 +50,10 @@ const setup = (
   })
   const publish = Effect.gen(function*() {
     const end = yield* Deferred.make<Model.HopEnd>()
-    yield* Deferred.succeed(end, { _tag: "Finished", encodedBytes: 1 } as Model.HopEnd)
+    yield* Deferred.succeed(
+      end,
+      { _tag: "Finished", transferBytes: Option.some(1), bodyBytes: Option.some(1) } as Model.HopEnd
+    )
     Events.publish(channel, { response, hop: { request: { method: "GET" }, end } as unknown as Model.HopEntry })
   })
   return { page, publish, declarations, released: () => released }

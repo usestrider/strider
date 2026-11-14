@@ -8,9 +8,14 @@
  * - **Timings** come from the library's clock, so they mean the same on every backend: `send` is 0, `wait`
  *   runs from the request to its response, and `receive` from the response to the hop's end. The phases no
  *   backend reports alike (`blocked`, `dns`, `connect`, `ssl`) are -1.
- * - **Redaction.** Cookie values, `Authorization` and `Proxy-Authorization`, and a URL's credentials are
- *   `REDACTED` unless the export includes their class; a request's body is left out unless it includes
- *   `requestBodies`.
+ * - **Redaction.** Cookie values, a nameless cookie's whole pair among them, `Authorization` and
+ *   `Proxy-Authorization`, and a URL's credentials are `REDACTED` unless the export includes their class; a
+ *   request's body is left out unless it includes `requestBodies`.
+ * - **Fields.** A `mimeType` is the `Content-Type` with its parameters; a body is text only where its type is
+ *   textual and its bytes are valid UTF-8, and base64 otherwise. A request's `bodySize` is 0 where it sent no
+ *   body and -1 where its body wasn't read. A `Set-Cookie`'s `Max-Age` gives its `expires`, ahead of `Expires`,
+ *   and a cookie with no `=` has the name `""`. A response's `bodySize` and `_transferSize` are the hop's end's
+ *   counts, by `requestSizes.ts`'s rules, and -1 where the backend has none; `compression` follows from the body's. The creator's version is the package's, generated into `version.ts`.
  * - **The format** is `harLog.ts`'s schema, which replay reads with: HAR 1.2, Playwright's extensions, which its
  *   trace viewer reads, and ours.
  */
@@ -40,6 +45,7 @@ import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import * as Recordings from "./recordings.ts"
 import type * as Runtime from "./runtime.ts"
+import * as Version from "./version.ts"
 
 /** One hop, as recorded: its request, the model's hop, and what the recording read as it ended. */
 export interface Recorded {
@@ -47,8 +53,8 @@ export interface Recorded {
   readonly hop: Option.Option<Model.HopEntry>
   end: Option.Option<Model.HopEnd>
   body: Option.Option<Uint8Array>
-  /** The body the hop's request sent (Q164). */
-  requestBody: Option.Option<Uint8Array>
+  /** The body the hop's request sent (Q164): `None` until it is read, and `Some(None)` where it sent none. */
+  requestBody: Option.Option<Option.Option<Uint8Array>>
   /** A WebSocket's frames, on its handshake's entry. */
   readonly frames: Array<NetworkConnection.Frame>
   /** Done once the hop has ended and its bodies, if any, were read. */
@@ -135,9 +141,7 @@ export const start = (
       recorded.end = Option.some(end)
       // A body the browser didn't keep is left out, as a response's is
       if (settings.requestBodies) {
-        recorded.requestBody = yield* runtime.model.adapter.requestBody(recorded.request.hop).pipe(
-          Effect.orElseSucceed(() => Option.none<Uint8Array>())
-        )
+        recorded.requestBody = yield* runtime.model.adapter.requestBody(recorded.request.hop).pipe(Effect.option)
       }
       const response = (yield* hop.state.get).response
       if (
@@ -245,11 +249,20 @@ const urlOf = (url: string, writing: Writing): string => {
 
 const isAuthorization = (name: string) => name === "authorization" || name === "proxy-authorization"
 
-/** One `name=value` pair of a cookie header, its value redacted unless cookies are included. */
+/**
+ * One `name=value` pair of a cookie header, its value redacted unless cookies are included. A pair with no `=`
+ * is a cookie with no name, all value, so all of it is redacted.
+ */
 const cookiePair = (pair: string, writing: Writing): string => {
   if (writing.include.has("cookies")) return pair
   const at = pair.indexOf("=")
-  return at < 0 ? pair : `${pair.slice(0, at)}=${redacted}`
+  return at < 0 ? redacted : `${pair.slice(0, at)}=${redacted}`
+}
+
+/** A cookie's name and value from its `name=value` pair; a pair with no `=` is a value with no name. */
+const nameAndValue = (pair: string): { readonly name: string; readonly value: string } => {
+  const at = pair.indexOf("=")
+  return at < 0 ? { name: "", value: pair } : { name: pair.slice(0, at), value: pair.slice(at + 1) }
 }
 
 /** Headers as HAR lists them, a repeated one once per value, with secrets redacted. */
@@ -275,28 +288,34 @@ const requestCookies = (
   headers: Readonly<Record<string, string | undefined>>,
   writing: Writing
 ): Array<typeof HarLog.Cookie.Type> =>
-  (headers.cookie ?? "").split(/;\s*/).filter((pair) => pair.includes("=")).map((pair) => {
-    const at = pair.indexOf("=")
-    return { name: pair.slice(0, at), value: writing.include.has("cookies") ? pair.slice(at + 1) : redacted }
+  (headers.cookie ?? "").split(/;\s*/).filter((pair) => pair !== "").map((pair) => {
+    const { name, value } = nameAndValue(pair)
+    return { name, value: writing.include.has("cookies") ? value : redacted }
   })
+
+/** The latest time a `Date` holds, in milliseconds since the epoch. */
+const latestDate = 8.64e15
 
 /**
  * The cookies a response set, from its `Set-Cookie` headers, as the response wrote them. Effect's
  * `Cookies.fromSetCookie` isn't used: it reads a cookie for a jar, so it drops a cookie whose name isn't a token
  * and a path that doesn't start with `/`, takes the leading `.` off a domain and lowercases `SameSite`, where a HAR
- * records what the server sent.
+ * records what the server sent. A `Max-Age` is counted from `receivedAt`, the response's wall time in
+ * milliseconds, and wins over an `Expires`, as RFC 6265 has it; one of 0 or less is the earliest time there is.
  */
 const responseCookies = (
   headers: Readonly<Record<string, string | undefined>>,
-  writing: Writing
+  writing: Writing,
+  receivedAt: number
 ): Array<typeof HarLog.Cookie.Type> =>
-  (headers["set-cookie"] ?? "").split("\n").filter((line) => line.includes("=")).map((line) => {
+  (headers["set-cookie"] ?? "").split("\n").filter((line) => line.trim() !== "").map((line) => {
     const [pair, ...attributes] = line.split(";").map((part) => part.trim())
-    const at = pair!.indexOf("=")
+    const { name, value } = nameAndValue(pair!)
     const cookie: Types.Mutable<typeof HarLog.Cookie.Type> = {
-      name: pair!.slice(0, at),
-      value: writing.include.has("cookies") ? pair!.slice(at + 1) : redacted
+      name,
+      value: writing.include.has("cookies") ? value : redacted
     }
+    let maxAge = false
     for (const attribute of attributes) {
       // An attribute's value runs to the end, `=` and all
       const equals = attribute.indexOf("=")
@@ -312,7 +331,17 @@ const responseCookies = (
         case "expires": {
           // HAR writes a cookie's expiry in ISO 8601; a date that doesn't parse is left out
           const date = new Date(value)
-          if (!Number.isNaN(date.getTime())) cookie.expires = date.toISOString()
+          if (!maxAge && !Number.isNaN(date.getTime())) cookie.expires = date.toISOString()
+          break
+        }
+        case "max-age": {
+          // Only digits, with an optional leading `-`, are a Max-Age; anything else is ignored
+          if (!/^-?\d+$/.test(value)) break
+          const seconds = Number(value)
+          maxAge = true
+          // One past the latest date there is gives that date, as RFC 6265 has it
+          cookie.expires = new Date(seconds <= 0 ? 0 : Math.min(receivedAt + seconds * 1000, latestDate))
+            .toISOString()
           break
         }
         case "httponly":
@@ -338,9 +367,22 @@ const queryOf = (url: string) => {
 const textual = (mimeType: string) =>
   /^text\/|[+/](json|xml|javascript|ecmascript)\b|^application\/(x-www-form-urlencoded|graphql)/i.test(mimeType)
 
+/** A MIME type without its parameters, as `textual` and a file's extension read it. */
+const essence = (mimeType: string) => mimeType.split(";")[0]!.trim().toLowerCase()
+
+/** A body as text, where its MIME type is textual and its bytes are valid UTF-8, a leading BOM kept. */
+const textOf = (mimeType: string, body: Uint8Array): Option.Option<string> => {
+  if (!textual(essence(mimeType))) return Option.none()
+  try {
+    return Option.some(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(body))
+  } catch {
+    return Option.none()
+  }
+}
+
 /**
- * A request's body as HAR's `postData` (Q164): text where its type is textual, with a form's `params`;
- * otherwise base64 with `_encoding` where bodies are embedded, or a file beside the HAR where they are attached.
+ * A request's body as HAR's `postData` (Q164), its MIME type with its parameters: text where its type is textual
+ * and it is valid UTF-8, with a form's `params`; otherwise base64 with `_encoding` where bodies are embedded, or a file beside the HAR where they are attached.
  * HAR's `postData` has no `encoding`, as a response's `content` has, so the flag is an extension.
  */
 const postDataOf = (
@@ -352,22 +394,22 @@ const postDataOf = (
   readonly postData: typeof HarLog.PostData.Type
   readonly file: Option.Option<{ path: string; content: Uint8Array }>
 } => {
-  const mimeType = (headers["content-type"] ?? "application/octet-stream").split(";")[0]!.trim()
-  if (textual(mimeType)) {
-    const text = new TextDecoder().decode(body)
+  const mimeType = (headers["content-type"] ?? "application/octet-stream").trim()
+  const text = textOf(mimeType, body)
+  if (Option.isSome(text)) {
     return {
       postData: {
         mimeType,
-        text,
-        ...(mimeType === "application/x-www-form-urlencoded"
-          ? { params: [...new URLSearchParams(text)].map(([name, value]) => ({ name, value })) }
+        text: text.value,
+        ...(essence(mimeType) === "application/x-www-form-urlencoded"
+          ? { params: [...new URLSearchParams(text.value)].map(([name, value]) => ({ name, value })) }
           : {})
       },
       file: Option.none()
     }
   }
   if (writing.bodies._tag === "File") {
-    const path = `${writing.bodies.prefix}${request.hop}-request.${Recordings.extension(mimeType)}`
+    const path = `${writing.bodies.prefix}${request.hop}-request.${Recordings.extension(essence(mimeType))}`
     return { postData: { mimeType, text: "", _file: path }, file: Option.some({ path, content: body }) }
   }
   return { postData: { mimeType, text: Encoding.encode(body), _encoding: "base64" }, file: Option.none() }
@@ -396,6 +438,8 @@ export const entryOf = (
     onNone: () => ({}),
     onSome: (response) => Option.getOrElse(received, () => response.headers) as Readonly<Record<string, string>>
   })
+  const finished = Option.flatMap(end, (end) => end._tag === "Finished" ? Option.some(end) : Option.none())
+  const bodyBytes = Option.flatMap(finished, (end) => end.bodyBytes)
   const endedAt = Option.flatMap(end, (end) => end._tag === "Forgotten" ? Option.none() : Option.some(end.at))
   const wait = Option.match(response, {
     onNone: () => -1,
@@ -408,7 +452,8 @@ export const entryOf = (
     ? { send: -1, wait: -1, receive: -1 }
     : { blocked: -1, dns: -1, connect: -1, ssl: -1, send: 0, wait, receive }
   const time = minimal ? -1 : [0, wait, receive].filter((each) => each >= 0).reduce((sum, each) => sum + each, 0)
-  const mimeType = (responseHeaders["content-type"] ?? "x-unknown").split(";")[0]!.trim()
+  // HAR's `mimeType` is the Content-Type, its parameters and all
+  const mimeType = (responseHeaders["content-type"] ?? "x-unknown").trim()
   const httpVersion = Option.getOrElse(
     Option.orElse(
       Option.flatMap(response, (response) => response.httpVersion),
@@ -420,27 +465,34 @@ export const entryOf = (
     size: Option.match(recorded.body, { onNone: () => -1, onSome: (body) => body.length }),
     mimeType
   }
+  // HAR's `compression` is the bytes decoding saved, known where the body and its transferred size both are
+  if (Option.isSome(recorded.body) && Option.isSome(bodyBytes) && recorded.body.value.length >= bodyBytes.value) {
+    content.compression = recorded.body.value.length - bodyBytes.value
+  }
   let file = Option.none<{ path: string; content: Uint8Array }>()
   if (Option.isSome(recorded.body)) {
     const body = recorded.body.value
     switch (writing.bodies._tag) {
-      case "Embed":
-        if (textual(mimeType)) content.text = new TextDecoder().decode(body)
+      case "Embed": {
+        const text = textOf(mimeType, body)
+        if (Option.isSome(text)) content.text = text.value
         else {
           content.text = Encoding.encode(body)
           content.encoding = "base64"
         }
         break
+      }
       case "File": {
-        const name = `${request.hop}.${Recordings.extension(mimeType)}`
+        const name = `${request.hop}.${Recordings.extension(essence(mimeType))}`
         content._file = `${writing.bodies.prefix}${name}`
         file = Option.some({ path: `${writing.bodies.prefix}${name}`, content: body })
         break
       }
     }
   }
-  const sentBody = !minimal && writing.include.has("requestBodies") && Option.isSome(recorded.requestBody)
-    ? Option.some(postDataOf(request, recorded.requestBody.value, requestHeaders, writing))
+  const requestBody = Option.flatten(recorded.requestBody)
+  const sentBody = !minimal && writing.include.has("requestBodies") && Option.isSome(requestBody)
+    ? Option.some(postDataOf(request, requestBody.value, requestHeaders, writing))
     : Option.none()
   const status = Option.match(response, { onNone: () => -1, onSome: (response) => response.status })
   const entry: HarLog.Entry = {
@@ -456,25 +508,30 @@ export const entryOf = (
       queryString: queryOf(request.url),
       ...(Option.isSome(sentBody) ? { postData: sentBody.value.postData } : {}),
       headersSize: -1,
-      bodySize: Option.match(recorded.requestBody, { onNone: () => -1, onSome: (body) => body.length })
+      // 0 for a request that sent no body, and -1 where its body wasn't read
+      bodySize: Option.match(recorded.requestBody, {
+        onNone: () => -1,
+        onSome: (body) => Option.match(body, { onNone: () => 0, onSome: (body) => body.length })
+      })
     },
     response: {
       status,
       statusText: Option.match(response, { onNone: () => "", onSome: (response) => response.statusText }),
       httpVersion,
-      cookies: minimal ? [] : responseCookies(responseHeaders, writing),
+      cookies: minimal ? [] : responseCookies(
+        responseHeaders,
+        writing,
+        clock.wall + ((Option.isSome(response) ? response.value.at : request.at) - clock.monotonic) / 1e6
+      ),
       headers: minimal ? [] : headersOf(responseHeaders, writing),
       content,
       redirectURL: status >= 300 && status < 400 ? (responseHeaders.location ?? "") : "",
       headersSize: -1,
-      bodySize: Option.match(end, {
-        onNone: () => -1,
-        onSome: (end) => end._tag === "Finished" ? end.encodedBytes : -1
-      }),
-      _transferSize: Option.match(end, {
-        onNone: () => -1,
-        onSome: (end) => end._tag === "Finished" ? end.encodedBytes : -1
-      }),
+      bodySize: Option.getOrElse(bodyBytes, () => -1),
+      _transferSize: Option.getOrElse(
+        Option.flatMap(finished, (end) => end.transferBytes),
+        () => -1
+      ),
       ...(Option.isSome(end) && end.value._tag === "Failed" ? { _failureText: end.value.error } : {})
     },
     cache: {},
@@ -502,7 +559,7 @@ export const entryOf = (
   }
 }
 
-/** A HAR 1.2 log of entries, and the body files they name. */
+/** A HAR 1.2 log of entries, and the body files they name, its creator Strider at the package's version. */
 export const logOf = (
   entries: ReadonlyArray<Recorded>,
   clock: Recordings.Clock,
@@ -525,7 +582,7 @@ export const logOf = (
   const log: HarLog.Log = {
     log: {
       version: "1.2",
-      creator: { name: "Strider", version: "0.1.0" },
+      creator: { name: "Strider", version: Version.version },
       browser,
       pages: writing.detail === "minimal" ? [] : pages.map((id) => {
         const first = entries.find((recorded) =>

@@ -53,6 +53,7 @@ const asTestAccount = Effect.fn("asTestAccount")(function*(page: Page.Page) {
 | `Route.fallthrough`         | asks the next route that matches, or lets the request continue           |
 
 - A pattern is a glob, a URL, or a `URLPattern`.
+- A `data:` or `blob:` URL can't be routed: the browser answers it without the network, so no route sees it.
 - A handler runs in the request phase, before the request is sent, unless given a `phase`.
 - On Chromium, a request already underway without response interception may miss a later response route, even
   before its headers arrive. Existing response pauses select the current routes by precedence.

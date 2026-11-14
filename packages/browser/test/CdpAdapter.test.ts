@@ -1082,7 +1082,7 @@ describe("CDP adapter redirect headers", () => {
                   }),
                   end: Option.none(),
                   body: Option.none(),
-                  requestBody: body,
+                  requestBody: Option.some(body),
                   frames: [],
                   done: Deferred.makeUnsafe()
                 },

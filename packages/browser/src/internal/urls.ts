@@ -46,3 +46,10 @@ const blank = Url.Url.make("about:blank")
  * as the name of a script run from a string is not.
  */
 export const reportedOption = (url: string): Option.Option<Url.Url> => Schema.decodeUnknownOption(Url.Url)(url)
+
+/**
+ * Whether the browser answers a URL itself, from the URL or from memory, so that loading it is no network request:
+ * `data:` and `blob:` URLs. The model reports no request, response or route for one, on any backend, though Chromium
+ * and stock WebKit report both and Firefox reports `data:` ones; `about:blank` no browser reports.
+ */
+export const answeredLocally = (url: string): boolean => /^(?:data|blob):/i.test(url)
