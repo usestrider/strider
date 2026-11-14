@@ -367,8 +367,8 @@ describe("Locator.check refusal deadlines", () => {
 
 describe("checked-action Disabled deadline evidence", () => {
   for (const action of ["check", "uncheck"] as const) {
-    for (const observed of [true, false]) {
-      it.effect(`${action} ${observed ? "retains observed Disabled" : "does not invent history for a late Disabled reply"} at its deadline`, () =>
+    for (const observed of [true, false, "immediate"] as const) {
+      it.effect(`${action} ${observed === "immediate" ? "samples Disabled before waiting" : observed ? "retains observed Disabled" : "does not invent history for a late Disabled reply"} at its deadline`, () =>
         Effect.gen(function*() {
           const clock = BrowserClock.fromClock(yield* Effect.service(Clock.Clock))
           const waiting = yield* Deferred.make<void>()
@@ -416,7 +416,9 @@ describe("checked-action Disabled deadline evidence", () => {
                 assert.strictEqual(request.action.checked, true)
                 assert.strictEqual(request.checks.enabled, true)
                 rounds++
-                if (observed && rounds === 1) return remote(disabled)
+                if (observed && rounds === 1 && (observed !== "immediate" || request.sample === true)) {
+                  return remote(disabled)
+                }
                 // The second request proves L1 already consumed the first Disabled reply.
                 // Otherwise this is the first reply, which the browser delivers only after expiry.
                 const late = yield* Deferred.await(release).pipe(
