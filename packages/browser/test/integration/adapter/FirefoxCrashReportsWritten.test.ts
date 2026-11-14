@@ -10,9 +10,9 @@ import * as Layer from "effect/Layer"
 import { execFileSync } from "node:child_process"
 import * as fs from "node:fs"
 import * as path from "node:path"
-import * as FirefoxLauncher from "../../src/internal/firefoxLauncher.ts"
-import { firefox } from "./browsers.ts"
-import * as FirefoxCrashReports from "./firefoxCrashReports.ts"
+import * as FirefoxLauncher from "../../../src/internal/firefoxLauncher.ts"
+import { firefox } from "../browsers.ts"
+import * as FirefoxCrashReports from "../firefoxCrashReports.ts"
 
 interface Row {
   readonly pid: number
