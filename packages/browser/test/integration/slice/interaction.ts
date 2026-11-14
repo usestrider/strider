@@ -5472,6 +5472,88 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
+      it.effect(
+        "reports a modifier's location on its keydown: left for the named modifiers, right for AltGraph",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="i"><p id="log"></p><script>const log = document.getElementById('log'); addEventListener('keydown', (e) => log.textContent += e.key + ':' + e.location + ' ')</script>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              yield* page.locator("#i").focus()
+              for (const key of ["Shift", "Control", "Alt", "Meta"]) yield* page.keyboard.press(key)
+              const altGraph = page.keyboard.press("AltGraph")
+              if (name === "WebKit") {
+                // Stock WebKit's Automation has no AltGraph key, and refuses it
+                const error = yield* Effect.flip(altGraph)
+                assert(Keyboard.isKeyboardError(error) && error.reason._tag === "Unsupported", String(error))
+              } else {
+                yield* altGraph
+              }
+              const expected = {
+                Chromium: "Shift:1 Control:1 Alt:1 Meta:1 AltGraph:2",
+                // WebDriver BiDi has no AltGraph key, so Firefox gets no event for it
+                Firefox: "Shift:1 Control:1 Alt:1 Meta:1",
+                // Stock WebKit names Meta's keydown neither by key nor by place, only its keyup
+                WebKit: "Shift:1 Control:1 Alt:1 Unidentified:0"
+              }[name]
+              assert.strictEqual((yield* page.locator("#log").readText).trim(), expected)
+            }))
+          }),
+        timeout
+      )
+
+      it.effect("marks a keydown for a key already held as a repeat", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<input id="i"><p id="log"></p><script>const log = document.getElementById('log'); addEventListener('keydown', (e) => log.textContent += e.key + ':' + e.repeat + ' ')</script>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.locator("#i").focus()
+            yield* Effect.scoped(Effect.gen(function*() {
+              yield* page.keyboard.hold("a")
+              yield* page.keyboard.press("a")
+            }))
+            yield* page.keyboard.press("a")
+            // Stock WebKit's Automation sends the keys held, not strokes, so a key already down sends no keydown
+            assert.strictEqual(
+              (yield* page.locator("#log").readText).trim(),
+              name === "WebKit" ? "a:false a:false" : "a:false a:true a:false"
+            )
+          }))
+        }), timeout)
+
+      it.effect(
+        "gives a pressed modifier its own flag on its keydown and not its keyup, as a held one",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="i"><p id="log"></p><script>const log = document.getElementById('log'); for (const type of ['keydown', 'keyup']) addEventListener(type, (e) => log.textContent += e.type + ':' + e.key + ':' + e.metaKey + ' ')</script>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              yield* page.locator("#i").focus()
+              yield* page.keyboard.press("Meta")
+              yield* Effect.scoped(Effect.gen(function*() {
+                const meta = yield* page.keyboard.hold("Meta")
+                yield* meta.release
+              }))
+              // Stock WebKit names Meta's keydown Unidentified (see the location case above)
+              const meta = name === "WebKit" ? "Unidentified" : "Meta"
+              assert.strictEqual(
+                (yield* page.locator("#log").readText).trim(),
+                `keydown:${meta}:true keyup:Meta:false keydown:${meta}:true keyup:Meta:false`
+              )
+            }))
+          }),
+        timeout
+      )
+
       it.effect("reads isEditable using the action and expectation rules", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
