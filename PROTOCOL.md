@@ -104,9 +104,13 @@ interface ErrorMatcher {
   the browser's hit-test data, which CDP doesn't expose: input has reached a child before its `firstPaint` arrived.
   A document can't be drawn without the documents that embed it, so a painting descendant shows a wrapper that
   paints nothing was drawn. A document whose start wasn't reported counts as drawn. A locator action waits through
-  the adapter's `frameReady`, a read, before it releases earlier input or marks its own as sent, and `dispatchInput`
-  waits the same way for direct callers. The operation's deadline ends the wait, as it does the adapter's other
-  waits: nothing is sent or left to release, and the operation's history names the frame (`FrameNotDrawn`). A frame whose document and
+  the adapter's `frameReady`, a read, for every frame its gesture's points land in (a drag's source and
+  destination), before it releases earlier input or marks its own as sent. `dispatchInput` doesn't wait: it checks
+  those frames again as it writes, and refuses pointer input into one that isn't drawn, as when it navigated since
+  the wait, with `FrameNotDrawn`, before writing anything. An input failure before anything is written is marked
+  `unsent`, so the operation records nothing sent and leaves nothing to release; on a refused frame the action
+  checks the changed page again, under the same deadline. The deadline ends the wait, as it does the adapter's other
+  waits, and the operation's history names the frame (`FrameNotDrawn`). A frame whose document and
   descendants paint nothing never reports `firstPaint`, so input into it runs out its deadline. Keys and text
   aren't hit-tested and don't wait. Input that names no frame, such as `page.mouse`, doesn't wait, and can still
   reach the parent's iframe element while an out-of-process frame hasn't been drawn.

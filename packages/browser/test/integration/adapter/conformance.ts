@@ -744,6 +744,8 @@ export const conformance = (backend: Backend) =>
             const origin = { x: 100 + 5 + 3, y: 50 + 5 + 3 }
             const x = origin.x + 40
             const y = origin.y + 25
+            // The caller waits for the frame to be drawn; the adapter refuses pointer input into one that isn't
+            yield* world.adapter.frameReady(added.frame)
             yield* world.adapter.dispatchInput(page, [
               { _tag: "Mouse", type: "move", x, y, button: "none", clickCount: 0, modifiers: none, buttons: 0 },
               { _tag: "Mouse", type: "down", x, y, button: "left", clickCount: 1, modifiers: none, buttons: 1 },
@@ -800,6 +802,8 @@ export const conformance = (backend: Backend) =>
             const origin = { x: 100 + 5 + 3, y: 50 + 5 + 3 }
             const x = origin.x + 40
             const y = origin.y + 25
+            // The caller waits for the frame to be drawn; the adapter refuses pointer input into one that isn't
+            yield* world.adapter.frameReady(added.frame)
             yield* world.adapter.dispatchInput(page, [
               { _tag: "Mouse", type: "move", x, y, button: "none", clickCount: 0, modifiers: none, buttons: 0 },
               { _tag: "Mouse", type: "down", x, y, button: "left", clickCount: 1, modifiers: none, buttons: 1 },
@@ -861,6 +865,8 @@ export const conformance = (backend: Backend) =>
               const origin = { x: 100, y: 50 }
               const x = origin.x + 40
               const y = origin.y + 25
+              // The caller waits for the frame to be drawn; the adapter refuses pointer input into one that isn't
+              yield* world.adapter.frameReady(added.frame)
               yield* world.adapter.dispatchInput(page, [
                 { _tag: "Mouse", type: "move", x, y, button: "none", clickCount: 0, modifiers: none, buttons: 0 },
                 { _tag: "Mouse", type: "down", x, y, button: "left", clickCount: 1, modifiers: none, buttons: 1 },

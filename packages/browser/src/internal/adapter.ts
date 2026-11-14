@@ -852,12 +852,20 @@ export type AdapterErrorReason =
     readonly hint: string
   }
   | { readonly _tag: "Gone"; readonly target: TargetDescription; readonly reason: Target.CloseReason }
+  /** Pointer input aimed into a frame that hasn't been drawn, refused before anything was sent (`frameReady`). */
+  | { readonly _tag: "FrameNotDrawn"; readonly frame: Target.NavigableId; readonly url: string | undefined }
   | { readonly _tag: "Unsupported"; readonly capability: string; readonly hint: string }
   | { readonly _tag: "Foreign"; readonly id: string }
   | { readonly _tag: "Protocol"; readonly error: Protocol.ProtocolError }
 
-/** An adapter operation's failure. */
-export class AdapterError extends Data.TaggedError("AdapterError")<{ readonly reason: AdapterErrorReason }> {
+/**
+ * An adapter operation's failure. `unsent` marks an input write that failed before any of its input was written,
+ * so there is nothing of it to release.
+ */
+export class AdapterError extends Data.TaggedError("AdapterError")<{
+  readonly reason: AdapterErrorReason
+  readonly unsent?: true | undefined
+}> {
   override get message(): string {
     const reason = this.reason
     switch (reason._tag) {
@@ -869,6 +877,10 @@ export class AdapterError extends Data.TaggedError("AdapterError")<{ readonly re
         return `Viewport ${reason.requested.width}x${reason.requested.height} was not confirmed; measured ${reason.actual.width}x${reason.actual.height} (${reason.hint})`
       case "Gone":
         return `${reason.target._tag} gone: ${reason.reason._tag}`
+      case "FrameNotDrawn":
+        return `Frame ${reason.frame}${
+          reason.url === undefined ? "" : ` (${reason.url})`
+        } hasn't been drawn, so pointer input into it wasn't sent`
       case "Unsupported":
         return `Unsupported: ${reason.capability} (${reason.hint})`
       case "Foreign":
@@ -878,6 +890,9 @@ export class AdapterError extends Data.TaggedError("AdapterError")<{ readonly re
     }
   }
 }
+
+/** The error, marked as an input write's failure before any of its input was written. */
+export const unsent = (error: AdapterError): AdapterError => new AdapterError({ reason: error.reason, unsent: true })
 
 /**
  * An adapter error for a protocol failure. A command the browser doesn't implement is `Unsupported`, named by
@@ -1007,23 +1022,24 @@ export interface AdapterConnection {
   /**
    * Sends input to a page, in its viewport's coordinates. Input aimed inside a frame names it, with the frame's
    * viewport origin in the page's coordinates: a backend that can't deliver page coordinates into a frame sends
-   * the frame's own (BiDi). On CDP, pointer input that names a frame that is out of process, or inside one, first
-   * waits as `frameReady` does: until the frame's document, or a document in a frame inside it, has reported its
-   * first paint, the signal Strider takes that the frame has been drawn. Until it has, Chromium may send the input to
-   * the parent's iframe element. A document whose start wasn't reported counts as drawn. A frame whose document and
-   * every frame inside it paint nothing never reports it, so the input runs out the operation's deadline unsent;
-   * without an operation the wait is unbounded. Keys and text don't wait.
+   * the frame's own (BiDi). `drawn` names the frames the gesture's points land in, the named one by default. On
+   * CDP, pointer input into one of them that is out of process, or inside one, and hasn't been drawn is refused
+   * with `FrameNotDrawn` before anything is sent: until it has been drawn, Chromium may send the input to the
+   * parent's iframe element. Callers wait for each first with `frameReady`. A failure before any input is written
+   * is marked `unsent`, so there is nothing of it to release.
    */
   readonly dispatchInput: (
     page: Target.NavigableId,
     events: ReadonlyArray<InputEvent>,
-    frame?: { readonly frame: Target.NavigableId; readonly origin: { readonly x: number; readonly y: number } }
+    frame?: { readonly frame: Target.NavigableId; readonly origin: { readonly x: number; readonly y: number } },
+    drawn?: ReadonlyArray<Target.NavigableId>
   ) => Effect.Effect<void, AdapterError>
   /**
    * Waits until pointer input aimed into a frame can be sent: on CDP, while the frame is out of process or inside
-   * one, until its document, or a document in a frame inside it, has reported its first paint; elsewhere, at once.
-   * Nothing is sent, so a caller that makes this call before `dispatchInput` knows a timeout in it sent no input.
-   * A document whose start wasn't reported counts as drawn. Without an operation it waits unbounded.
+   * one, until its document, or a document in a frame inside it, has reported its first paint, the signal Strider
+   * takes that the frame has been drawn; elsewhere, at once. It sends nothing. A document whose start wasn't
+   * reported counts as drawn. A frame whose document and every frame inside it paint nothing never reports one, so
+   * the wait runs out the operation's deadline; without an operation it is unbounded.
    */
   readonly frameReady: (frame: Target.NavigableId) => Effect.Effect<void, AdapterError>
   /** The frame an iframe element holds, by the element's binding; `None` while it holds none. */

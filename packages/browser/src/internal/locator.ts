@@ -110,6 +110,20 @@ const checksFor = (defaults: CheckSet, checks: Locator.Checks | undefined): Engi
 })
 
 /** What a `NotReady` reason says, as a timeout's hint, suggesting focus emulation only where the backend has it. */
+/**
+ * A frame the gesture lands in wasn't drawn when its input was to be written, so none was sent: the page changed
+ * after its checks, as when the frame navigated, and the action checks it again.
+ */
+class FrameNotDrawnYet {
+  readonly _tag = "FrameNotDrawnYet"
+  readonly frame: Target.NavigableId
+  readonly url: string | undefined
+  constructor(frame: Target.NavigableId, url: string | undefined) {
+    this.frame = frame
+    this.url = url
+  }
+}
+
 const explain = (reason: Engine.NotReady, frames: number, emulatesFocus: boolean): string => {
   switch (reason._tag) {
     case "NoMatch":
@@ -1328,7 +1342,9 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         { inViewport: true, receivesPointer: false },
         id
       ).pipe(Effect.mapError((failure) => this.sendFailure("Locator.dragTo", failure, record)))
-      return translated._tag === "Point" ? Option.some(translated.point) : Option.none()
+      // The frame the point is in: a gesture waits for it to be drawn before it sends input there
+      const frame = answer.routed.hops.at(-1)!.frame
+      return translated._tag === "Point" ? Option.some({ ...translated.point, frame }) : Option.none()
     })
   }
 
@@ -1421,7 +1437,10 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     extra: {
       readonly guard?: boolean
       readonly checked?: boolean
-      readonly target?: Effect.Effect<Option.Option<{ readonly x: number; readonly y: number }>, unknown>
+      readonly target?: Effect.Effect<
+        Option.Option<{ readonly x: number; readonly y: number; readonly frame?: Target.NavigableId }>,
+        unknown
+      >
       /** For an HTML drag: send the gesture, or say it was done another way. */
       readonly draggable?: (
         record: Operation.Record,
@@ -1449,7 +1468,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
           if (Input.anyModifier(state, options?.modifiers ?? [])) {
             yield* this.requires(operation, "input.pointerModifiers", record.id)
           }
-          let target: { readonly x: number; readonly y: number } | undefined
+          let target: { readonly x: number; readonly y: number; readonly frame?: Target.NavigableId } | undefined
           if (extra.target !== undefined) {
             const point = yield* extra.target.pipe(Effect.catch((failure) =>
               Deadline.isTimeout(failure) || Target.isTargetGone(failure) ||
@@ -1466,7 +1485,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
             target = point.value
           }
           const events = gesture(state, ready.point!, target)
-          yield* io.send(events)
+          yield* io.send(events, target?.frame === undefined ? [] : [target.frame])
           const last = events.filter((event): event is Extract<Adapter.InputEvent, { _tag: "Mouse" }> =>
             event._tag === "Mouse"
           ).at(-1)
@@ -1494,7 +1513,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     operation: string,
     routed: Runtime.Routed,
     record: Operation.Record,
-    insert: Effect.Effect<void, Locator.LocatorError | Target.TargetGone | Deadline.Timeout>
+    insert: Effect.Effect<void, Locator.LocatorError | Target.TargetGone | Deadline.Timeout | FrameNotDrawnYet>
   ) {
     const targets = [
       ...routed.hops.map((hop) => ({ document: hop.document, steps: hop.steps, ancestor: true })),
@@ -1665,23 +1684,24 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     perform: (
       ready: Extract<Engine.Response, { _tag: "Ready" }>,
       io: {
-        /** Sends input to the page, into the frame the element is in. */
+        /** Sends input to the page, into the frame the element is in, and any other frames its points land in. */
         readonly send: (
-          events: ReadonlyArray<Adapter.InputEvent>
-        ) => Effect.Effect<void, Locator.LocatorError | Target.TargetGone | Deadline.Timeout>
+          events: ReadonlyArray<Adapter.InputEvent>,
+          lands?: ReadonlyArray<Target.NavigableId>
+        ) => Effect.Effect<void, Locator.LocatorError | Target.TargetGone | Deadline.Timeout | FrameNotDrawnYet>
         /** Removes the guard the round armed: what stopped the gesture, if anything did. */
         readonly disarm: Effect.Effect<Option.Option<string>>
         readonly guardFill: (
-          insert: Effect.Effect<void, Locator.LocatorError | Target.TargetGone | Deadline.Timeout>
+          insert: Effect.Effect<void, Locator.LocatorError | Target.TargetGone | Deadline.Timeout | FrameNotDrawnYet>
         ) => Effect.Effect<
           "done" | { readonly retry: Engine.NotReady },
-          Locator.LocatorError | Target.TargetGone | Deadline.Timeout
+          Locator.LocatorError | Target.TargetGone | Deadline.Timeout | FrameNotDrawnYet
         >
       },
       record: Operation.Record
     ) => Effect.Effect<
       "done" | { readonly retry: Engine.NotReady },
-      Locator.LocatorError | Target.TargetGone | Deadline.Timeout
+      Locator.LocatorError | Target.TargetGone | Deadline.Timeout | FrameNotDrawnYet
     >,
     extra: { readonly redacted?: boolean } = {}
   ) {
@@ -1761,7 +1781,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
           return Option.some(
             `The frame the input is aimed into${
               typeof waited.url === "string" ? ` (${waited.url})` : ""
-            } hadn't been drawn, so no input was sent: Chromium sends pointer input into an out-of-process frame to the parent's iframe element until then, and a frame where nothing paints reports no first paint`
+            } hadn't reported its first paint, so no input was sent: until a frame in another process has been drawn, Chromium may send pointer input aimed into it to the parent's iframe element, and a frame where nothing paints reports no first paint`
           )
         }
         const reasons = record.history.map((each) => each.value as Engine.NotReady)
@@ -1828,15 +1848,19 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
           }
         })
       // Input reaches the page from here: a dialog it opens may block it, and a dialog nothing will decide fails it
-      const send = (ready: Ready) => (events: ReadonlyArray<Adapter.InputEvent>) => {
-        // Pointer input into a frame waits until the browser can route it there, before anything is sent or
+      const send = (ready: Ready) =>
+      (
+        events: ReadonlyArray<Adapter.InputEvent>,
+        lands: ReadonlyArray<Target.NavigableId> = []
+      ) => {
+        // Pointer input waits until each frame its points land in can be routed to, before anything is sent or
         // marked as possibly sent: a deadline in the wait leaves no input to release
         const frame = ready.routed.hops.at(-1)
-        const drawn = frame === undefined || !events.some((event) =>
-            event._tag !== "Key" && event._tag !== "InsertText"
-          )
+        const frames = Array.from(new Set([...(frame === undefined ? [] : [frame.frame]), ...lands]))
+        const pointer = events.some((event) => event._tag !== "Key" && event._tag !== "InsertText")
+        const drawn = !pointer || frames.length === 0
           ? Effect.void
-          : owner.runtime.model.adapter.frameReady(frame.frame).pipe(
+          : Effect.forEach(frames, (each) => owner.runtime.model.adapter.frameReady(each), { discard: true }).pipe(
             Effect.mapError((error) => Runtime.fromAdapter(error, id, owner.runtime.backend)),
             Effect.mapError((failure) =>
               failure._tag === "Gone"
@@ -1867,15 +1891,18 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
                 ))
               }
               record.markSent()
+              // The adapter checks the frames again as it writes: one that navigated since is refused unsent
               return owner.runtime.model.adapter.dispatchInput(
                 owner.page.id,
                 events,
-                frame === undefined ? undefined : { frame: frame.frame, origin: ready.origin }
+                frame === undefined ? undefined : { frame: frame.frame, origin: ready.origin },
+                pointer ? frames : undefined
               ).pipe(
                 Effect.tapError((error) =>
                   Effect.sync(() => {
-                    // A page that is gone took its input with it; otherwise the gesture may have left input pressed
-                    if (Deadline.isTimeout(error) || error.reason._tag !== "Gone") {
+                    // A page that is gone took its input with it, and input refused before any of it was written
+                    // left nothing pressed; otherwise the gesture may have left input pressed
+                    if (Deadline.isTimeout(error) || (error.reason._tag !== "Gone" && error.unsent !== true)) {
                       Input.uncertain(owner.page.inputState, `${operation}: ${error.message}`, events)
                     }
                   })
@@ -1884,12 +1911,18 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
                 Effect.onInterrupt(() =>
                   Effect.sync(() => Input.uncertain(owner.page.inputState, `${operation}: interrupted`, events))
                 ),
-                Effect.mapError((error) => Runtime.fromAdapter(error, id, owner.runtime.backend)),
+                Effect.mapError((error) =>
+                  !Deadline.isTimeout(error) && error.reason._tag === "FrameNotDrawn"
+                    ? new FrameNotDrawnYet(error.reason.frame, error.reason.url)
+                    : Runtime.fromAdapter(error, id, owner.runtime.backend)
+                ),
                 Effect.raceFirst(Runtime.promptBlocked(owner.page, true)),
                 Effect.mapError((failure) =>
                   // The input may have reached the page: the error says so, and nothing is sent again. A backend
                   // that can't send input refuses before it sends any (stock WebKit's inspector)
-                  failure._tag === "Gone"
+                  failure instanceof FrameNotDrawnYet
+                    ? failure
+                    : failure._tag === "Gone"
                     ? failure.error
                     : failure._tag === "Reason"
                     ? this.error(
@@ -1947,7 +1980,21 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
               send: send(again.value),
               disarm,
               guardFill: (insert) => this.guardFill(operation, again.value.routed, record, insert)
-            }, record)
+            }, record).pipe(
+              // A frame that navigated after the checks and hasn't been drawn: nothing was sent, so the action
+              // checks the changed page again, where the next round waits for the frame
+              Effect.catchIf(
+                (failure): failure is FrameNotDrawnYet => failure instanceof FrameNotDrawnYet,
+                (failure) =>
+                  Effect.succeed({
+                    retry: {
+                      _tag: "FrameNotDrawn",
+                      frame: failure.frame,
+                      url: failure.url
+                    } as unknown as Engine.NotReady
+                  })
+              )
+            )
             if (done === "done") return "done" as const
             // The guard stopped the gesture before the page saw it: nothing happened, so check again
             record.markNotSent()

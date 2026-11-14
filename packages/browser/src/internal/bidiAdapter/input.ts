@@ -8,7 +8,7 @@ import * as Redacted from "effect/Redacted"
 import * as Input from "../../bidi-protocol/Input.ts"
 import * as Script from "../../bidi-protocol/Script.ts"
 import type * as L1Target from "../../Target.ts"
-import type * as Adapter from "../adapter.ts"
+import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import { buttons, keyValue } from "./mapping.ts"
 import { documentOf, navigableById, navigableOf, type State } from "./state.ts"
@@ -31,7 +31,8 @@ export const dispatchInput = Effect.fnUntraced(
     events: ReadonlyArray<Adapter.InputEvent>,
     frame?: { readonly frame: L1Target.NavigableId; readonly origin: { readonly x: number; readonly y: number } }
   ) {
-    const navigable = yield* navigableById(state, id)
+    // Whatever fails before the actions are written sent nothing
+    const navigable = yield* navigableById(state, id).pipe(Effect.mapError(Adapter.unsent))
     // Firefox doesn't deliver page coordinates into a cross-site frame, so input aimed inside a frame goes to
     // the frame's own context, in its own coordinates
     const target = frame === undefined ? undefined : state.navigablesById.get(frame.frame)
