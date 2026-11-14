@@ -6,7 +6,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Stream from "effect/Stream"
-import { execFileSync } from "node:child_process"
+import { execFileSync, spawnSync } from "node:child_process"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
@@ -329,6 +329,104 @@ export const writerConformance = (
           }
         }),
       60_000
+    )
+
+    it.effect.skipIf(name !== "ffmpeg")(
+      `${name} cost measurement (temporary)`,
+      () =>
+        Effect.sync(() => {
+          const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-writer-cost-"))
+          try {
+            const ffmpeg = process.env["STRIDER_FFMPEG"]!
+            textPage(0)
+            const tall = Buffer.concat([textPage(0), textPage(80)])
+            const rows = tall.length / (textWidth * 3)
+            const raw = path.join(directory, "source.rgb")
+            const fd = fs.openSync(raw, "w")
+            const frames = [...Array(60).fill(0), ...Array.from({ length: 150 }, (_, i) => (i + 1) * 4)]
+            for (const scroll of frames) {
+              const frame = Buffer.alloc(textWidth * textHeight * 3)
+              for (let y = 0; y < textHeight; y++) {
+                const from = ((y + scroll) % rows) * textWidth * 3
+                tall.copy(frame, y * textWidth * 3, from, from + textWidth * 3)
+              }
+              fs.writeSync(fd, frame)
+            }
+            fs.closeSync(fd)
+            const input = [
+              "-f",
+              "rawvideo",
+              "-pix_fmt",
+              "rgb24",
+              "-s",
+              `${textWidth}x${textHeight}`,
+              "-framerate",
+              "30"
+            ]
+            const sets: Record<string, Array<string>> = {
+              main: ["-cpu-used", "8"],
+              "crf8 1M q0-50 cpu8": ["-cpu-used", "8", "-crf", "8", "-b:v", "1M", "-qmin", "0", "-qmax", "50"],
+              "crf8 2M q0-50 cpu8": ["-cpu-used", "8", "-crf", "8", "-b:v", "2M", "-qmin", "0", "-qmax", "50"],
+              "crf8 4M q0-50 cpu8": ["-cpu-used", "8", "-crf", "8", "-b:v", "4M", "-qmin", "0", "-qmax", "50"],
+              "crf12 4M q0-50 cpu8": ["-cpu-used", "8", "-crf", "12", "-b:v", "4M", "-qmin", "0", "-qmax", "50"],
+              "crf8 2M q0-50 cpu4": ["-cpu-used", "4", "-crf", "8", "-b:v", "2M", "-qmin", "0", "-qmax", "50"],
+              "crf4 b0 q0-20 cpu8": ["-cpu-used", "8", "-crf", "4", "-b:v", "0", "-qmin", "0", "-qmax", "20"]
+            }
+            for (const [label, args] of Object.entries(sets)) {
+              const out = path.join(directory, "out.webm")
+              const started = Date.now()
+              const run = spawnSync(ffmpeg, [
+                "-nostdin",
+                "-benchmark",
+                ...input,
+                "-i",
+                raw,
+                "-vf",
+                "format=yuv420p",
+                "-c:v",
+                "libvpx",
+                "-deadline",
+                "realtime",
+                ...args,
+                "-an",
+                "-y",
+                "-f",
+                "webm",
+                out
+              ], { encoding: "utf8" })
+              const wall = Date.now() - started
+              const bench = /bench: utime=([\d.]+)s stime=([\d.]+)s rtime=([\d.]+)s/.exec(run.stderr)
+              const stats = spawnSync(ffmpeg, [
+                "-nostdin",
+                "-i",
+                out,
+                ...input,
+                "-i",
+                raw,
+                "-lavfi",
+                "[0:v]format=rgb24[a];[1:v]format=rgb24[b];[a][b]psnr=stats_file=-",
+                "-f",
+                "null",
+                "-"
+              ], { encoding: "utf8", maxBuffer: 1 << 26 })
+              const per = [...stats.stdout.matchAll(/psnr_avg:([\d.]+|inf)/g)].map((m) =>
+                m[1] === "inf" ? 100 : Number(m[1])
+              )
+              const still = per.slice(0, 60)
+              const scroll = per.slice(60)
+              const mean = (xs: Array<number>) => xs.reduce((a, b) => a + b, 0) / xs.length
+              console.log(
+                `video cost [${process.platform}] ${label}: ${fs.statSync(out).size} bytes, wall ${wall} ms, ` +
+                  `utime ${bench?.[1]} s, stime ${bench?.[2]} s, rtime ${bench?.[3]} s, frames ${per.length}, ` +
+                  `PSNR still min ${Math.min(...still).toFixed(2)}, scroll min ${Math.min(...scroll).toFixed(2)} ` +
+                  `mean ${mean(scroll).toFixed(2)}, below 25 dB ${per.filter((x) => x < 25).length}`
+              )
+            }
+          } finally {
+            fs.rmSync(directory, { recursive: true, force: true })
+          }
+        }),
+      600_000
     )
 
     it.effect(
