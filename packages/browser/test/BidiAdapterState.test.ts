@@ -1653,6 +1653,70 @@ describe("BidiAdapter state", () => {
       }))
   }
 
+  // Reduced from Firefox 158's recorded 204 sent before the previous page's load: the stale load,
+  // tagged A, arrives before A's start, and B then starts the same navigation again.
+  it.effect("correlates Firefox's stale load that arrives before the start it names", () =>
+    Effect.gen(function*() {
+      const prior = "http://example.test/start"
+      const url = "http://example.test/204"
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const { facts, page, state } = yield* withPage({
+        "browsingContext.navigate": Effect.gen(function*() {
+          yield* Deferred.succeed(entered, undefined)
+          yield* Deferred.await(release)
+          return yield* Effect.fail(
+            new Protocol.ProtocolError({
+              reason: new Protocol.Rejected({
+                method: "browsingContext.navigate",
+                reason: "Unrecognized",
+                code: "unknown error",
+                description: "NS_BINDING_ABORTED"
+              })
+            })
+          )
+        })
+      })
+      const handlers = Contexts.register(Network.register(Navigation.register(Kit.handlers<State.Event>())))
+      const event = (method: string, params: unknown) => handlers.apply(method, params, { state })
+      const info = (navigation: string, timestamp: number) => ({ context: "C1", navigation, url, timestamp })
+      event("browsingContext.navigationStarted", { ...info("prior", 1), url: prior })
+      event("browsingContext.navigationCommitted", { ...info("prior", 2), url: prior })
+      const running = yield* Effect.forkChild(Navigation.navigate(state, page.id, url, { referrer: Option.none() }))
+      yield* Deferred.await(entered)
+      const reserved = page.expected.list[0]!.id
+      event("browsingContext.navigationFailed", { ...info("prior", 8), url: prior })
+      event("browsingContext.load", { ...info("A", 9), url: prior })
+      event("browsingContext.navigationStarted", info("A", 10))
+      const params = {
+        ...info("A", 11),
+        redirectCount: 0,
+        isBlocked: false,
+        request: { request: "request", url, method: "GET", headers: [], destination: "document", bodySize: 0 }
+      }
+      event("network.beforeRequestSent", params)
+      event("browsingContext.navigationStarted", info("B", 12))
+      event("network.responseStarted", {
+        ...params,
+        response: { url, status: 204, statusText: "", protocol: "HTTP/1.1", headers: [], fromCache: false }
+      })
+      event("network.fetchError", { ...params, errorText: "NS_BINDING_ABORTED" })
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(running)
+      event("browsingContext.navigationFailed", info("B", 14))
+      yield* state.buffer.flush
+      const ends = facts.filter((fact) => fact._tag === "NavigationEnded").filter((fact) =>
+        fact.navigation === reserved
+      )
+      assert.deepStrictEqual(ends.map((fact) => fact.outcome._tag), ["NoContent"])
+      assert.strictEqual(state.requests.get("request")!.navigation!.id, reserved)
+      assert.isEmpty(page.navigations)
+      assert.isEmpty(state.navigations)
+      assert.isEmpty(page.expected.list)
+      assert.isEmpty(page.commandNavigations)
+      assert.isEmpty(page.pendingTerminals)
+    }))
+
   for (
     const competition of ["same-URL command", "page request", "fresh load", "other context", "no request"] as const
   ) {
