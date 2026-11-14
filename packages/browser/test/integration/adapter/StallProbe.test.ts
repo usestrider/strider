@@ -111,7 +111,8 @@ describe.runIf(process.platform === "darwin")("stall probe", () => {
     const record = lock.holders.find((entry) => entry.pid === holder.pid)
     assert.isDefined(record)
     assert.isTrue(record.ps.ok, record.ps.error)
-    assert.include(record.ps.output, "python3")
+    // python3 may run as a framework binary named Python; its script names it.
+    assert.match(record.ps.output, new RegExp(`^\\s*${holder.pid}\\s.*fcntl\\.flock`, "m"))
     assert.isTrue(record.sample.ok, record.sample.error)
     assert.include(record.sample.output, "Call graph")
     assert.isTrue(capture.chromeProcesses.ok, capture.chromeProcesses.error)
