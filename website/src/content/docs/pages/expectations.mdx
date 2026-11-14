@@ -213,7 +213,9 @@ const cartSurvivesReload = Effect.fn("cartSurvivesReload")(function*(page: Page.
 })
 ```
 
-A locator's expectation returns its first observation without waiting for changes. Later rounds re-check in the
+A locator's expectation returns its first observation without waiting for changes. For `toBeInViewport`, the
+browser measures the element at its next rendering update, so the first observation can be the match count alone;
+the ratio follows as soon as the browser reports it. Later rounds re-check in the
 page on DOM changes, animation frames, and `input`, `change`, or focus events, for up to a second at a time until
 the deadline. A failure keeps the observations received before the deadline; a browser stall before the first
 reply can leave its history empty. Replies received after the deadline cannot change the returned failure.

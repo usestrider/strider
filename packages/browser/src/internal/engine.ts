@@ -324,6 +324,11 @@ export type Request =
     readonly expectation: Expectation
     /** Milliseconds this round may wait in the page for the expectation to hold. */
     readonly cap: number
+    /**
+     * Whether the last round answered with a provisional observation: this round then answers as soon as it has a
+     * complete one, before its cap.
+     */
+    readonly provisional?: boolean | undefined
   }
   | { readonly op: "expectStop"; readonly token: string }
   | { readonly op: "title" }
@@ -413,7 +418,12 @@ export const Response = Schema.Union([
     /** What the last check saw, for the expectation's history. */
     observed: Schema.Unknown,
     /** Whether it re-checked in the page after a change. */
-    changed: Schema.Boolean
+    changed: Schema.Boolean,
+    /**
+     * Whether `observed` is provisional: a viewport expectation's one match, before the browser has measured how
+     * much of it is in view.
+     */
+    provisional: Schema.optional(Schema.Boolean)
   }),
   Schema.TaggedStruct("Strict", { candidates: Schema.Array(Candidate), count: Schema.Number }),
   Schema.TaggedStruct("InvalidSelector", {
@@ -2724,6 +2734,7 @@ export function engine(render: (root: SnapNode) => string) {
       let cancelObservation: (() => void) | undefined
       let frame: number | undefined
       let last: { passed: boolean; observed: unknown } = { passed: false, observed: null }
+      let provisional = false
       let changed = false
       let samples = 0
       const finish = (error?: unknown) => {
@@ -2739,17 +2750,21 @@ export function engine(render: (root: SnapNode) => string) {
           if (viewportRounds?.size === 0) viewportRounds = undefined
         }
         if (error !== undefined) reject(error)
-        else resume({ _tag: "Expected", ...last, changed })
+        else resume({ _tag: "Expected", ...last, changed, ...(provisional ? { provisional } : {}) })
       }
       const sample = () => {
         if (done) return
         changed = samples++ > 0
-        cancelObservation = sampleViewport(request.steps, expectation, (result, provisional) => {
+        cancelObservation = sampleViewport(request.steps, expectation, (result, pending) => {
           // Keep the previous complete observation while a new native observation is pending.
-          if (!provisional || last.observed === null) last = result
+          if (!pending || last.observed === null) {
+            last = result
+            provisional = pending === true
+          }
         }, (error) => {
           if (error !== undefined) finish(error)
-          else if (last.passed) finish()
+          // The host holds only a provisional observation: the first complete one goes to it at once
+          else if (last.passed || request.provisional === true && !provisional) finish()
           else {
             if (last.observed !== null && typeof last.observed === "object" && "ratio" in last.observed) changed = true
             frame = onFrame(sample)
@@ -3546,6 +3561,8 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
     token: string | undefined
     state: ActionState | undefined
     observed: unknown
+    /** Whether `observed` is a viewport expectation's provisional observation. */
+    provisional: boolean
     terminal: Response | undefined
     changed: boolean
     disposed: boolean
@@ -3649,7 +3666,13 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
   const timeoutResponse = (session: Session): Response =>
     session.request.op === "act"
       ? helpers.actionTimeout(session.request, session.state!)
-      : { _tag: "Expected", passed: false, observed: session.observed, changed: session.changed }
+      : {
+        _tag: "Expected",
+        passed: false,
+        observed: session.observed,
+        changed: session.changed,
+        ...(session.provisional ? { provisional: true } : {})
+      }
   const expired = (session: Session): CooperativeResponse => finished(session, timeoutResponse(session))
   const expire = (session: Session) => {
     if (session.disposed) return
@@ -3712,6 +3735,7 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
         token: undefined,
         state: command.request.op === "act" ? helpers.createAction(command.request) : undefined,
         observed: null,
+        provisional: false,
         terminal: undefined,
         changed: false,
         disposed: false,
@@ -3817,7 +3841,10 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
               session.request.steps,
               expectation,
               (result, provisional) => {
-                if (!provisional || session.observed === null) session.observed = result.observed
+                if (!provisional || session.observed === null) {
+                  session.observed = result.observed
+                  session.provisional = provisional === true
+                }
                 passed = result.passed
               },
               (error) => finish(true, error),
@@ -3825,12 +3852,16 @@ function cooperativeEngine(helpers: ReturnType<ReturnType<typeof engine>["cooper
             )
           })
           if (!ready || session.disposed) return stopped(session)
-          if (passed || singleSample(session.request)) {
+          // A complete observation after the host's provisional one goes to it at once
+          if (
+            passed || singleSample(session.request) || session.request.provisional === true && !session.provisional
+          ) {
             return finished(session, {
               _tag: "Expected",
               passed,
               observed: session.observed,
-              changed: session.changed
+              changed: session.changed,
+              ...(session.provisional ? { provisional: true } : {})
             })
           }
           if (!(await wait(session, false))) return stopped(session)

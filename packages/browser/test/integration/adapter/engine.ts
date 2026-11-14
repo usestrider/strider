@@ -463,6 +463,26 @@ export const engine = (backend: Backend) =>
             assert.strictEqual(result._tag, "Done")
             assert.deepStrictEqual(result.response.observed, { matches: 1, ratio: 0 })
           }), timeout)
+        it.effect("cooperative viewport answers at its first complete observation after a provisional one", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(backend, "<div id=\"target\">Target</div>", controlledCooperativeClock)
+            const result = yield* cooperativeExercise(
+              call,
+              `
+              const first = await command({ command: "start", budget: 60000, request: {
+                op: "expect", steps: [{ _tag: "Css", selector: "#target" }],
+                expectation: { _tag: "Viewport", ratio: 0, inViewport: false }, cap: 60000, provisional: true
+              } })
+              const reply = await command({ command: "resume", token: first.token, left: 60000, decision: "continue" })
+              if (reply._tag === "Check") await command({ command: "cancel" })
+              return JSON.stringify(reply)
+            `
+            )
+            assert.deepStrictEqual(result, {
+              _tag: "Done",
+              response: { _tag: "Expected", passed: false, observed: { matches: 1, ratio: 1 }, changed: false }
+            })
+          }), timeout)
         it.effect("cooperative viewport accepts a target whose geometry keeps changing", () =>
           Effect.gen(function*() {
             const { call } = yield* open(
@@ -1029,6 +1049,48 @@ export const engine = (backend: Backend) =>
               stopped: 0,
               timedOut: 0,
               success: 0
+            })
+          }), timeout)
+
+        it.effect("returns a viewport round at its first complete observation after a provisional one", () =>
+          Effect.gen(function*() {
+            // The rounds' caps run on a clock only the test advances; frames and observers are the browser's
+            const { call } = yield* open(backend, "<div id=\"target\">Target</div>", controlledCooperativeClock)
+            const result = yield* call(
+              `async function() {
+              const engine = globalThis[Symbol.for(${JSON.stringify(Engine.installKey)})];
+              const request = { op: 'expect', steps: [{ _tag: 'Css', selector: '#target' }],
+                expectation: { _tag: 'Viewport', ratio: 0, inViewport: false } };
+              const frames = (count) => new Promise((resume) => {
+                const next = () => count-- > 0 ? requestAnimationFrame(next) : resume();
+                next();
+              });
+              const settle = (round) => Promise.race([
+                round.then((text) => JSON.parse(text)),
+                frames(10).then(() => 'held')
+              ]);
+              const zero = engine.run(JSON.stringify({ ...request, cap: 0 }));
+              globalThis.engineTestAdvance(0);
+              const first = JSON.parse(await zero);
+              // A round told its last observation was provisional answers once the observer has
+              const pending = engine.run(JSON.stringify({ ...request, cap: 60000, token: 'pending', provisional: true }));
+              const second = await settle(pending);
+              if (second === 'held') await engine.run(JSON.stringify({ op: 'expectStop', token: 'pending' }));
+              // Any other round still waits out its cap for the expectation to hold
+              const held = engine.run(JSON.stringify({ ...request, cap: 60000, token: 'held' }));
+              const third = await settle(held);
+              globalThis.engineTestAdvance(60000);
+              return JSON.stringify({ first, second, third, released: JSON.parse(await held) });
+            }`,
+              []
+            )
+            assert(result._tag === "Value")
+            assert(result.value.type === "string")
+            assert.deepStrictEqual(JSON.parse(result.value.value), {
+              first: { _tag: "Expected", passed: false, observed: { matches: 1 }, changed: false, provisional: true },
+              second: { _tag: "Expected", passed: false, observed: { matches: 1, ratio: 1 }, changed: false },
+              third: "held",
+              released: { _tag: "Expected", passed: false, observed: { matches: 1, ratio: 1 }, changed: true }
             })
           }), timeout)
 
