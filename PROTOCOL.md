@@ -94,6 +94,15 @@ interface ErrorMatcher {
   Pages with child frames or HTML drag interception enabled, drags, multiple clicks, and other input sequences
   keep their sequential dispatch. The frame restriction also applies to coordinate clicks, whose target frame
   is unknown before dispatch. Generated commands and the public protocol session API are unchanged.
+- **Pointer input into an out-of-process frame waits for the frame's first paint.** Chromium picks each pointer
+  event's target in its browser process, from hit-test data that includes an out-of-process frame only after the
+  frame has drawn; an event sent earlier reaches the parent's iframe element, and a click can split between the two
+  documents. The CDP adapter records, per frame, each document whose `Page.lifecycleEvent` `init` its session
+  reported and whose `firstPaint` it hasn't yet. When `dispatchInput` names a frame and its events include pointer
+  input, it first waits until every out-of-process frame from the page down to that frame has drawn its current
+  document. A document whose start wasn't reported counts as drawn. The command's deadline bounds the wait on the
+  browser's clock; when it runs out nothing is sent, and the operation's history names the frame. Keys and text
+  aren't hit-tested and don't wait. Input that names no frame, such as `page.mouse`, doesn't wait.
 - **Pending map.** Pending commands sit in a map from id to resumer. Interrupting the caller removes its entry and tombstones the id, so a late reply is dropped. Replies to commands that create resources are still passed to the late-reply handler, which releases them by default.
 - **No remote cancel.** No protocol can cancel a command; interruption only abandons the reply. Compensation metadata on generated commands tells L1 what to undo, for example releasing input or resolving a paused request.
 - **Timeouts** come from the operation deadline (L1), with a protocol-level fallback default for raw L0 use.
