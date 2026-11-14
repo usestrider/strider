@@ -1109,6 +1109,24 @@ export interface TypeOptions extends ActionOptions, Keyboard.TypeOptions {}
 /**
  * Which option of a `<select>` to choose, by its value, its label, or its index; the object names exactly one.
  *
+ * **Example** (Choosing by value, label, and index)
+ *
+ * ```ts import.meta.vitest
+ * import { Locator, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const byValue: Locator.SelectOption = { value: "pt" }
+ * const byLabel: Locator.SelectOption = { label: "Portugal" }
+ * const byIndex: Locator.SelectOption = { index: 2 }
+ *
+ * const chooseEach = Effect.fn("chooseEach")(function*(page: Page.Page) {
+ *   const country = page.getByLabel("Country")
+ *   yield* country.selectOption(byValue)
+ *   yield* country.selectOption(byLabel)
+ *   yield* country.selectOption(byIndex)
+ * })
+ * ```
+ *
  * @stability unstable
  * @category models
  * @since 0.1.0

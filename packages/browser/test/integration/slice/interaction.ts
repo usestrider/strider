@@ -3718,7 +3718,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             const select = page.locator("#s")
             for (const value of ["off", "grouped"]) {
               const error = yield* select.selectOption({ value }).pipe(
-                Deadline.within("300 millis"),
+                Deadline.within("1 second"),
                 Effect.flip
               )
               assert(Deadline.isTimeout(error), String(error))
