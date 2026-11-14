@@ -293,6 +293,9 @@ const requestCookies = (
     return { name, value: writing.include.has("cookies") ? value : redacted }
   })
 
+/** The latest time a `Date` holds, in milliseconds since the epoch. */
+const latestDate = 8.64e15
+
 /**
  * The cookies a response set, from its `Set-Cookie` headers, as the response wrote them. Effect's
  * `Cookies.fromSetCookie` isn't used: it reads a cookie for a jar, so it drops a cookie whose name isn't a token
@@ -336,7 +339,9 @@ const responseCookies = (
           if (!/^-?\d+$/.test(value)) break
           const seconds = Number(value)
           maxAge = true
-          cookie.expires = new Date(seconds <= 0 ? 0 : receivedAt + seconds * 1000).toISOString()
+          // One past the latest date there is gives that date, as RFC 6265 has it
+          cookie.expires = new Date(seconds <= 0 ? 0 : Math.min(receivedAt + seconds * 1000, latestDate))
+            .toISOString()
           break
         }
         case "httponly":
@@ -365,11 +370,11 @@ const textual = (mimeType: string) =>
 /** A MIME type without its parameters, as `textual` and a file's extension read it. */
 const essence = (mimeType: string) => mimeType.split(";")[0]!.trim().toLowerCase()
 
-/** A body as text, where its MIME type is textual and its bytes are valid UTF-8. */
+/** A body as text, where its MIME type is textual and its bytes are valid UTF-8, a leading BOM kept. */
 const textOf = (mimeType: string, body: Uint8Array): Option.Option<string> => {
   if (!textual(essence(mimeType))) return Option.none()
   try {
-    return Option.some(new TextDecoder("utf-8", { fatal: true }).decode(body))
+    return Option.some(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(body))
   } catch {
     return Option.none()
   }

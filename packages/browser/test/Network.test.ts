@@ -512,6 +512,7 @@ describe("A HAR an export writes", () => {
       const written = entryOf(withCookies({}, { "set-cookie": `a=1; Max-Age=${maxAge}` }))
       assert.strictEqual(written.response.cookies.length, 1)
       assert.strictEqual(written.response.cookies[0]!.value, "REDACTED")
+      assert.strictEqual(written.response.cookies[0]!.expires, new Date(8.64e15).toISOString())
     }
   })
 
