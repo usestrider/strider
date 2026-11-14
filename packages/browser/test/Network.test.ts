@@ -493,6 +493,14 @@ describe("A HAR an export writes", () => {
     ])
   })
 
+  it("exports cookies whose numeric Max-Age exceeds the date range", () => {
+    for (const maxAge of ["999999999999999", "9".repeat(400)]) {
+      const written = entryOf(withCookies({}, { "set-cookie": `a=1; Max-Age=${maxAge}` }))
+      assert.strictEqual(written.response.cookies.length, 1)
+      assert.strictEqual(written.response.cookies[0]!.value, "REDACTED")
+    }
+  })
+
   it("keeps a cookie with no name, in a request's Cookie and a response's Set-Cookie", () => {
     const written = entryOf(withCookies({ cookie: "a=1; token" }, { "set-cookie": "secret; Path=/" }), ["cookies"])
     assert.deepStrictEqual(written.request.cookies, [{ name: "a", value: "1" }, { name: "", value: "token" }])
