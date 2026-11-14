@@ -1,5 +1,33 @@
 # @usestrider/browser
 
+## 0.10.0
+
+### Breaking changes
+
+- **`selectOption` waits for a disabled option, and a choice names one attribute** (#317). A call whose chosen option, or its `<optgroup>`, is disabled now waits, and times out naming the option, instead of selecting it; pass `checks: { enabled: false }` to select it anyway. A `SelectOption` that names more than one of `value`, `label`, and `index` no longer compiles, where before only the first was used: name the one the call should match.
+- **A timed-out action says what it waited on** (#323). A `Timeout`'s message now ends with its hint, so the CLI, the toolkit, and the library all say what an action last waited on. An inert target's hint names the element with the `inert` attribute and any open modal dialog, native or `aria-modal`. A pointer action on an element whose `pointer-events` is `none`, or inside an iframe whose is, waits on a new `NoPointerEvents` reason instead of calling what's beneath it a cover. Element descriptions in errors leave out field text under every capture policy. Code that matched a `Timeout`'s exact message, or a description's field text, should match the new wording.
+- **Pointer input waits for a cross-site frame's first paint on Chromium** (#322). An action aimed into an out-of-process frame that has just loaded waits, under its deadline, until the frame has been drawn; before, its click could reach the parent page's `iframe` element. `checks: { rendered: false }` doesn't turn this wait off.
+
+### Added
+
+- **`Modifier+Key` chords in `strider press` and the toolkit's `press`** (#324), such as `Meta+k` or `Control+Shift+P`, holding `Alt`, `Control`, `Meta`, or `Shift` for the key, with or without a target. An exported test presses the chord with the library's `modifiers`.
+- **`input.fractionalPointer`** (#327): a capability saying whether a browser delivers a pointer event at the exact fractional point an action picks. Chromium does; Firefox rounds to the nearest whole pixel, and WebKit truncates.
+- **`Protocol.Rejected.target`** (#318): the kind of target a refused CDP command was sent to (`page`, `iframe`, `worker`, and so on), also named in its message.
+
+### Fixed
+
+- **Viewports on Chromium pages with a cross-site iframe** (#318). Such a page now loads, and `page.emulate({ viewport })`, `strider page viewport`, and closing a context with a viewport no longer fail with "Command can only be executed on top-level targets": the viewport is applied to top-level pages only.
+- **Targets hidden by a scrolled container** (#327) are scrolled into view by pointer actions, in their own document or a parent frame's, instead of timing out as covered. Firefox and WebKit pointer moves are sent at the exact point an action picks.
+- **Chromium worker evaluations** (#311) wait until a newly started dedicated worker's script has loaded. Sent earlier, they could crash the page's renderer.
+- **WebSocket routing** (#319) reaches its in-page shim through a handle captured at install, so a page script can no longer intercept a route's commands or bypass its handler.
+- **Firefox navigations** (#320) keep their outcome when the previous page's delayed `load` arrives before the navigation's start.
+- **Firefox's new-tab preloading is off** in the `automation` profile (#310), so a hidden new-tab browser is no longer announced as a page. A locator's first observation is kept when a later reply from a stalled browser misses the deadline.
+- **Recorded videos keep small text legible** (#315): the ffmpeg writer sets VP8 rate control, and Chromium's screencast asks for JPEG quality 90. Videos are larger.
+- **Locators scoped to a shadow host** (#312) search the host's own open shadow root.
+- **Large stock WebKit evaluations** (#314) are sent in bounded parts, so one over the attached inspector's 128 KiB message limit no longer closes its socket.
+- **`Expect.toBeInViewport`** (#325) reports an element's ratio as soon as the browser measures it.
+- **On stock WebKit**, a command on an object from a discarded page context fails as `TargetGone` (#319), and a key `page.keyboard` refuses before sending it no longer breaks the next press (#322). On Chromium, a check that runs as its frame moves into its own process resolves the frame again instead of failing (#322).
+
 ## 0.9.0
 
 ### Breaking changes
