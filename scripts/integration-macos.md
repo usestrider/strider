@@ -112,6 +112,19 @@ match the header's one-second precision). `verification.state` is `verified`, `m
 capture fails the collector step after writing metadata. An already failing suite keeps its result and the
 explicit verification status. No extra crash, browser retry, polling or delay is introduced.
 
+A stall probe (`test/integration/stallProbe.ts`) watches every child launched with `--remote-debugging-pipe`
+while `STRIDER_MACOS_CRASH_DATABASE` is set. If 10 s after its first pipe write nothing has arrived on its fd 4 and
+it is still running, it captures once, in parallel and without blocking the launch: the `ps` rows of the browser and
+its descendants (pid, ppid, pgid, state, elapsed and CPU time, RSS, wait channel, command); `sample <pid> 2` of the
+browser and of up to six descendants; `lsof` of fds 0–4; a two-level listing of its `--user-data-dir` (at most 256
+entries, with sizes and mtimes); and `uptime` and `vm_stat`. Each command has its own timeout (5–15 s) and keeps its
+result, ok or failed, independently; each keeps at most 128 KiB of output. The first received byte or the exit disarms
+it, so healthy launches record nothing. The capture is written to `.data/macos-crash-reports/stall-probe-<node
+pid>-<browser pid>.json`, at most 1 MiB each (samples shortened evenly beyond that) and at most eight files per run,
+and as a `stall-probe` event on the process's connection in the failure trace, with each sample's first 4 KiB. The
+probe's own commands are not traced as processes. `adapter/StallProbe.test.ts` shows it on a shell child that never
+answers, with the threshold lowered.
+
 The worker test and deliberate-crash test, plus both files' shared contexts, retain their ordinary bounded
 protocol/process histories on passing runs too. These four scopes are independent of the optional 16 MiB
 passing-diagnostics budget. Match native dump time/PID against these traces and the deliberate-crash marker;

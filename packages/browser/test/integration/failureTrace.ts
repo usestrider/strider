@@ -39,6 +39,12 @@
  * The existing Node preload applies the same interception in supported children, with origin PID/local sequence;
  * the child/runtime capture exclusions below still apply. No production source or ordinary execution is instrumented.
  *
+ * In hosted macOS jobs, `stallProbe.ts` adds a `stall-probe` entry to a `--remote-debugging-pipe` child's process
+ * connection when its first pipe write has had no byte back for 10 s while it runs: its process tree, `sample` of
+ * it and up to six descendants (first 4 KiB each here; up to 128 KiB in its file under `.data/macos-crash-reports/`),
+ * `lsof` of fds 0-4, a bounded two-level profile listing, and `uptime` and `vm_stat`. It captures once per launch,
+ * never blocks the launch, and records nothing for one that answers; `scripts/integration-macos.md` states its bounds.
+ *
  * In macOS jobs the Chromium worker test and the deliberate-crash identity test (`ChromiumIdentity.test.ts`, crash
  * with direct page attachment), plus their files' shared scopes, keep their full ordinary bounded history, raw traffic
  * and late cleanup on a pass, independent of the 16 MiB passing quota below; `scripts/integration-macos.md` says when
