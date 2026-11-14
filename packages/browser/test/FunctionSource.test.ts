@@ -37,6 +37,41 @@ describe("FunctionSource.declaration", () => {
     })
   }
 
+  for (
+    const [kind, source] of [
+      ["string", "({ [\"](\" + 1]() { return 42 } })"],
+      ["template", "({ [`](${\"](\"}`]() { return 42 } })"],
+      ["regular expression", "({ [/[\\](]/.source]() { return 42 } })"],
+      ["regular expression after a keyword", "({ [typeof /]\\(/]() { return 42 } })"],
+      ["division and a comment", "({ [6 / 2 /* ]( */]() { return 42 } })"]
+    ]
+  ) {
+    it(`reads a computed key holding a ${kind} with brackets in it`, () => {
+      const methods = runInNewContext(source!)
+      const method = methods[Reflect.ownKeys(methods)[0]!]
+      assert.strictEqual(FunctionSource.declaration(method), "function () { return 42 }")
+      assert.strictEqual(call(method), 42)
+    })
+  }
+
+  it("reads a numeric key", () => {
+    const methods = runInNewContext(
+      "({ 0x1f() { return 1 }, 1_000() { return 2 }, 2e+3() { return 3 }, .5() { return 4 }, 7n() { return 5 } })"
+    )
+    assert.deepStrictEqual(
+      ["31", "1000", "2000", "0.5", "7"].map((key) => [FunctionSource.declaration(methods[key]), call(methods[key])]),
+      [1, 2, 3, 4, 5].map((value) => [`function () { return ${value} }`, value])
+    )
+  })
+
+  it("reads a private method's key", () => {
+    const method = runInNewContext(
+      "(class { static #secret(a) { return a + 1 } static get() { return this.#secret } }).get()"
+    )
+    assert.strictEqual(FunctionSource.declaration(method), "function (a) { return a + 1 }")
+    assert.strictEqual(call(method, 41), 42)
+  })
+
   it("sends a function expression's source unchanged", () => {
     const arrow = (a: number, b: number) => a + b
     function named(a: number) {
