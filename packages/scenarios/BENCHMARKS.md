@@ -280,8 +280,8 @@ frames, very short transients and renderer CPU/wakeups remain outside these meas
 Use the existing scenario entry point for Q82's 3,000-span fixture without demo recordings:
 
 ```sh
-clutch lock browser -- pnpm scenarios --q82 --output /absolute/path/control.json
-clutch lock browser -- nix develop .#integration --ignore-environment --keep TERM --command node \
+pnpm scenarios --q82 --output /absolute/path/control.json
+nix develop .#integration --ignore-environment --keep TERM --command node \
   --import ./packages/scenarios/benchmark/observation-profile-hooks.mjs \
   packages/scenarios/benchmark/observation-profile.ts /absolute/path/profile.json heavy
 ```
@@ -308,8 +308,8 @@ outside the worktree. The profiler records hashes, runtime versions and host det
 For the distinct, non-layout attribute workload, retain the visibility reports and run two generations:
 
 ```sh
-clutch lock browser -- pnpm scenarios --q82 --workload attribute --order forward --output /absolute/path/attribute-forward.json
-clutch lock browser -- pnpm scenarios --q82 --workload attribute --order reverse --output /absolute/path/attribute-reverse.json
+pnpm scenarios --q82 --workload attribute --order forward --output /absolute/path/attribute-forward.json
+pnpm scenarios --q82 --workload attribute --order reverse --output /absolute/path/attribute-reverse.json
 ```
 
 Each uses ten measured pairs per cell after warmup. The reverse generation runs animated before static and
@@ -324,7 +324,7 @@ The timer's twenty mutations are identical in idle/one/twenty controls. New IDs 
 Run the bounded correctness probes separately:
 
 ```sh
-clutch lock browser -- nix develop .#integration --ignore-environment --keep TERM --command node \
+nix develop .#integration --ignore-environment --keep TERM --command node \
   packages/scenarios/benchmark/observation-profile.ts /absolute/path/probes.json probes
 ```
 
@@ -344,10 +344,10 @@ frame timing, a speedup, or general scheduler correctness. Production scheduling
 After preserving an uninstrumented baseline, run the opt-in observation profiler under the browser lock:
 
 ```sh
-clutch lock browser -- nix develop .#integration --ignore-environment --keep TERM --command node \
+nix develop .#integration --ignore-environment --keep TERM --command node \
   --import ./packages/scenarios/benchmark/observation-profile-hooks.mjs \
   packages/scenarios/benchmark/observation-profile.ts /absolute/path/profile.json
-clutch lock browser -- nix develop .#integration --ignore-environment --keep TERM --command node \
+nix develop .#integration --ignore-environment --keep TERM --command node \
   packages/scenarios/benchmark/observation-profile.ts /absolute/path/control.json control
 ```
 
@@ -918,7 +918,7 @@ run them sequentially through `benchmarks.yml` and retain every interval, includ
 For correctness-only local validation, without collecting benchmark timings:
 
 ```sh
-clutch lock browser -- nix develop .#integration --ignore-environment --keep TERM --command node packages/scenarios/benchmark/validate-viewport.ts
+nix develop .#integration --ignore-environment --keep TERM --command node packages/scenarios/benchmark/validate-viewport.ts
 ```
 
 This runs each of the three case bodies once for each library, checks the pinned Chromium version, and verifies

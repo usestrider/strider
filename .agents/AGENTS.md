@@ -250,8 +250,8 @@ after), and **Changeset** (the bump and its text, and whether anything breaks). 
 decisions for the maintainer, no review rounds or who reviewed what, no account of the investigation, no first person,
 and nothing of the tools or agents that produced it, such as a private tracker's keys, an agent's name or role, local
 paths or machine names. Cite GitHub issues by number (#51). What's for the maintainer goes to them directly, in
-conversation or on the private board, before the pull request is opened or updated. Commit messages follow the same
-rule, and so do branch names: name a branch for the change.
+conversation, before the pull request is opened or updated. Commit messages follow the same rule, and so do branch
+names: name a branch for the change.
 
 ## Issues
 
@@ -260,16 +260,11 @@ behaving oddly or differently from the others, a compromise in Strider it forced
 follow-up. The body says what it is, where it was seen (with the browser builds), what Strider does now, and what to
 reconsider or decide. Search first, and comment on an existing issue rather than filing it twice.
 
-- **Anyone else:** use GitHub. File with `gh issue create --title "…" --body "…"`, search with
-  `gh issue list --search "…"`, and comment with `gh issue comment 12 --body "…"`. The repository is public, so write
-  for anyone to read.
-- **The maintainer's own agents,** where the `clutch` command is on your `PATH`: use the private Clutch board. File with
-  `clutch issue new --title "…" --body "…"`, and leave it unassigned: assigning an agent queues a run, which is the
-  maintainer's call. Use `--parent` for work that belongs to a larger issue and `--blocked-by` for what must come
-  first. Search with `clutch issue list --search "…"`, and comment with `clutch comment <issue> --body "…"`.
+Issues are on GitHub. File with `gh issue create --title "…" --body "…"`, search with `gh issue list --search "…"`,
+and comment with `gh issue comment 12 --body "…"`. The repository is public, so write for anyone to read.
 
-Commits and code comments cite GitHub issues by number (`#51`). Everything public has to make sense to someone who
-can't open the board, so a comment explains the behavior itself.
+Commits and code comments cite GitHub issues by number (`#51`). A code comment explains the behavior itself, so it
+makes sense without the issue.
 
 A test that fails only in full runs is an issue too: trace it from the protocol's messages and fix the cause, never
 with a retry or a delay. Reproducing it under load (many processes beside busy loops) makes the machine unusable,
