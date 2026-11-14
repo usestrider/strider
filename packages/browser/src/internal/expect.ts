@@ -178,11 +178,11 @@ export const expectLocator = (
  * and then again on each change the page makes, until it holds or the deadline ends.
  */
 export const expectIn = (subject: InPage, expectation: Engine.Expectation, matcherName: string, condition: string) =>
-  expectUsing(subject, expectation, matcherName, condition, (cap, record) =>
+  expectUsing(subject, expectation, matcherName, condition, (cap, record, provisional) =>
     subject.page.execution.expect(
       subject.runtime,
       subject.page,
-      { op: "expect", steps: subject.steps, expectation, cap },
+      { op: "expect", steps: subject.steps, expectation, cap, ...(provisional ? { provisional } : {}) },
       record.id,
       record.budget.at
     ))
@@ -192,7 +192,11 @@ const expectUsing = (
   expectation: Engine.Expectation | Engine.CooperativeURLRequest["expectation"],
   matcherName: string,
   condition: string,
-  execute: (cap: number, record: Operation.Record) => Effect.Effect<Engine.Response, Execution.Failure>
+  execute: (
+    cap: number,
+    record: Operation.Record,
+    provisional: boolean
+  ) => Effect.Effect<Engine.Response, Execution.Failure>
 ) =>
   Effect.gen(function*() {
     yield* Access.check(subject.grant)
@@ -202,6 +206,8 @@ const expectUsing = (
     const history: Array<Diagnostics.ObservedValue> = []
     const triggers = new Set<"initial" | "change" | "interval">(["initial"])
     let checks = 0
+    // Whether the last observation is provisional, so the next round answers with the first complete one
+    let provisional = false
     const failed = (handlerFailure?: Reason.LocatorHandlerFailed) =>
       Effect.flatMap(
         // A count or absence is about matching nothing, and a title has no locator: nothing to explain
@@ -230,7 +236,11 @@ const expectUsing = (
       const left = record.left()
       if (left <= 0 && checks > 0) return yield* failed()
       checks++
-      const response = yield* execute(checks === 1 ? 0 : Runtime.roundCap(left), record).pipe(
+      const response: Engine.Response | { readonly error: string; readonly final: boolean } | null = yield* execute(
+        checks === 1 ? 0 : Runtime.roundCap(left),
+        record,
+        provisional
+      ).pipe(
         Effect.map((response): Engine.Response | { readonly error: string; readonly final: boolean } => response),
         Effect.catch((
           failure
@@ -251,6 +261,7 @@ const expectUsing = (
         )
       )
       if (response === null) return yield* failed()
+      provisional = !("error" in response) && response._tag === "Expected" && response.provisional === true
       if ("error" in response) {
         Operation.appendObservation(history, { error: response.error })
         if (response.final) return yield* failed()
