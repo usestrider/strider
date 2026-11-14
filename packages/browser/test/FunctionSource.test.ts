@@ -9,6 +9,16 @@ const call = (fn: Function, ...args: ReadonlyArray<unknown>): unknown =>
   runInNewContext(`(${FunctionSource.declaration(fn)})`)(...args)
 
 describe("FunctionSource.declaration", () => {
+  it("does not split an escaped identifier into an async modifier and a key", () => {
+    const method = runInNewContext(String.raw`({ async\u0061() { return 42 } }).asynca`)
+    const source = FunctionSource.declaration(method)
+    // An unsupported identifier may be sent unchanged, but must not change the function kind.
+    if (source === method.toString()) return
+    const sent = runInNewContext(`(${source})`)
+    assert.strictEqual(sent.constructor.name, method.constructor.name)
+    assert.strictEqual(sent(), method())
+  })
+
   it("does not mistake division after a keyword property for a regex", () => {
     const methods = runInNewContext(
       "({ [({return: 4}).return / 2]() { return `/ ]() { return 99 /* `; /* filler */ } })"
