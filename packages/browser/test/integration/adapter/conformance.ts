@@ -1724,6 +1724,25 @@ export const conformance = (backend: Backend) =>
             assert.deepStrictEqual(removed.reason, new Target.PageClosed({ by: "command" }))
           }), timeout)
 
+        it.effect("reports context removal during a beforeunload close as the context's", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            if (!(yield* supports(world, "close.runBeforeUnload"))) {
+              return
+            }
+            const { context, page } = yield* newPage(world)
+            yield* goto(world, page, `${world.site.origin}/beforeunload`)
+            yield* activate(world, page)
+            yield* world.adapter.closePage(page, { runBeforeUnload: true })
+            const opened = yield* world.facts.when("ObligationOpened", (fact) =>
+              fact.subject._tag === "Prompt")
+            assert.deepInclude(opened.subject, { kind: "beforeunload" })
+            yield* world.adapter.removeUserContext(context)
+            const removed = yield* world.facts.when("NavigableRemoved", (fact) =>
+              fact.navigable === page)
+            assert.deepStrictEqual(removed.reason, new Target.PageClosed({ by: "userContextRemoved" }))
+          }), timeout)
+
         it.effect("reports a close that ran beforeunload on a page without a listener as the command's", () =>
           Effect.gen(function*() {
             const world = yield* setup(backend)

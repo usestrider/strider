@@ -597,6 +597,33 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
         timeout
       )
 
+      it.effect(
+        "attributes a beforeunload close accepted by the default policy to the command",
+        () =>
+          Effect.gen(function*() {
+            const url = yield* fixture(
+              `<button>Edit</button><script>window.addEventListener("beforeunload", (e) => { e.preventDefault(); e.returnValue = "" })</script>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              // A page prompts before unloading only after the user has interacted with it
+              yield* page.getByRole("button", { name: "Edit" }).click()
+              if (!(yield* supports("close.runBeforeUnload"))) {
+                const error = yield* page.close({ runBeforeUnload: true }).pipe(Effect.flip)
+                assert(error._tag === "PageError" && error.reason._tag === "Unsupported", String(error))
+                assert.strictEqual(error.reason.capability, "close.runBeforeUnload")
+                return
+              }
+              yield* page.close({ runBeforeUnload: true })
+              const closed = yield* page.closed
+              assert(closed._tag === "PageClosed", String(closed))
+              assert.strictEqual(closed.by, "command")
+            }))
+          }),
+        timeout
+      )
+
       it.effect("reads the browser's own accessibility tree where there is one", () =>
         Effect.gen(function*() {
           const { info } = yield* Browser.Browser
