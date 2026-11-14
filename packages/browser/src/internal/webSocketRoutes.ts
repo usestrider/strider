@@ -194,6 +194,21 @@ export const register = <E, R>(
       blocked.add(realm)
       Queue.offerUnsafe(faults, { realm, destroyed: false })
     }
+    /** A realm that ended: its payloads stop, and its connections and installation are released. */
+    const retire = (realm: Target.RealmId) => {
+      if (destroying.has(realm)) return
+      let known = realms.has(realm) || unconfirmed.has(realm)
+      for (const item of owned) {
+        if (item.realm !== realm || item.destroyed) continue
+        item.destroyed = true
+        known = true
+      }
+      if (!known) return
+      destroying.add(realm)
+      Deferred.doneUnsafe(reference(realm), Effect.void)
+      realms.delete(realm)
+      Queue.offerUnsafe(faults, { realm, destroyed: true })
+    }
     const mapped = (error: Adapter.AdapterError | Deadline.Timeout) => {
       const failure = Operation.fromAdapter(error, record.id, runtime.backend)
       return failure._tag === "Reason"
@@ -687,21 +702,14 @@ export const register = <E, R>(
         return false
       },
       failed: fault,
-      ended: (realm) => {
-        if (destroying.has(realm)) return
-        let known = realms.has(realm) || unconfirmed.has(realm)
-        for (const item of owned) {
-          if (item.realm !== realm || item.destroyed) continue
-          item.destroyed = true
-          known = true
-        }
-        if (!known) return
-        destroying.add(realm)
-        Deferred.doneUnsafe(reference(realm), Effect.void)
-        realms.delete(realm)
-        Queue.offerUnsafe(faults, { realm, destroyed: true })
-      }
+      ended: retire
     }
+    /** A payload whose fetch found its own realm gone: an end its notification may announce only later. */
+    const goneRealm = (cause: Cause.Cause<unknown>, realm: Target.RealmId) =>
+      Option.exists(Cause.findErrorOption(cause), (error) => {
+        const reason = (error as Partial<Adapter.AdapterError>).reason
+        return reason?._tag === "Gone" && reason.target._tag === "Realm" && reason.target.id === realm
+      })
     yield* Stream.fromQueue(incoming).pipe(
       Stream.runForEach((incoming) =>
         incoming.payload.pipe(
@@ -725,9 +733,13 @@ export const register = <E, R>(
               )
           }),
           Effect.catchCause((cause) =>
-            !incoming.alive() || !live ? Effect.void : Handlers.report("WebSocket bridge failed", cause).pipe(
-              Effect.andThen(Effect.sync(() => fault(incoming.realm)))
-            )
+            !incoming.alive() || !live
+              ? Effect.void
+              : goneRealm(cause, incoming.realm)
+              ? Effect.sync(() => retire(incoming.realm))
+              : Handlers.report("WebSocket bridge failed", cause).pipe(
+                Effect.andThen(Effect.sync(() => fault(incoming.realm)))
+              )
           ),
           Effect.ensuring(incoming.release)
         )
