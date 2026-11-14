@@ -399,8 +399,9 @@ const workerGate = Effect.fnUntraced(function*(state: State, target: TargetEntry
   // Chromium reports a dedicated worker's context as soon as its script's headers arrive, before the script has
   // loaded. An evaluation sent in between can fail a check on the worker's thread and crash the renderer, or go
   // unanswered, so evaluations in the worker wait until `Inspector.workerScriptLoaded` (recorded on
-  // Chromium 155). A worker that gets init scripts never sends that event: it pauses at the breakpoint below once
-  // its script is fetched and parsed, so the hold ends when the init scripts have run and the worker resumed. The
+  // Chromium 155). For a worker that gets init scripts, that event can't be relied on: it may come only after the
+  // resume, or not at all. Such a worker pauses at the breakpoint below once its script is fetched and parsed, so
+  // the hold also ends when the init scripts have run and the worker resumed, whichever comes first. The
   // worker's end ends the hold too, and the evaluation then fails with the realm's end. There is no version check:
   // Strider is tested on one Chromium, which sends the event, and a version that doesn't would hold evaluations
   // until their deadline rather than crash. A worker attached already running has loaded its script and gets none.
