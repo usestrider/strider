@@ -84,7 +84,13 @@ describe("NetworkRequest.failure", () => {
           at: request.at
         })
       })
-      yield* fold.sink({ _tag: "RequestFinished", hop: request.hop, encodedBytes: 0, at: request.at })
+      yield* fold.sink({
+        _tag: "RequestFinished",
+        hop: request.hop,
+        transferBytes: Option.none(),
+        bodyBytes: Option.none(),
+        at: request.at
+      })
       assert.isTrue(Option.isNone(yield* NetworkRequest.failure(context, request)))
     }))
 

@@ -9,3 +9,8 @@ written as base64, whatever its MIME type says, where it was decoded with replac
 `Max-Age` gives the cookie's `expires`, and a cookie with no name is listed rather than dropped. That nameless
 cookie's value is now redacted in `Cookie` and `Set-Cookie` headers, where it was written even when cookies were
 redacted.
+
+A response's `bodySize` is its body's bytes as transferred, where it was the whole response's on Chromium and Firefox,
+and `_transferSize` the whole response's, where it was only the body's on WebKit; each is -1 where the browser
+doesn't count it, as Chromium doesn't count the body. `content.compression` is written where the body's count is
+known. `BodyLimit` no longer counts a response's headers as part of its body on Chromium and Firefox.

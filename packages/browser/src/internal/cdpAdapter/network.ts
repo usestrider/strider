@@ -175,7 +175,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         request.frame?.page.context.requestTiming?.delete(request.hop)
         request.frame?.page.context.requestSizes?.delete(request.hop)
         emitResponse(state, request, params.redirectResponse)
-        state.buffer.emit({ _tag: "RequestFinished", hop: request.hop, encodedBytes: 0, at: Adapter.now() })
+        state.buffer.emit({ _tag: "RequestFinished", hop: request.hop, ...Sizes.unknown, at: Adapter.now() })
         // The earlier hop's id stays, so a body read for it says it was a redirect (QUIRKS.md, Q39)
         request.attribution = state.pendingAttribution.get(key) ?? { target, fulfilled: false }
         request.servedFromCache = false
@@ -340,7 +340,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       const finished: Adapter.Fact = {
         _tag: "RequestFinished",
         hop: request.hop,
-        encodedBytes: params.encodedDataLength,
+        ...Sizes.transferred(Sizes.cdp(params.encodedDataLength, undefined)),
         at: Adapter.now()
       }
       // An image's `ExtraInfo` can come after its load finished

@@ -169,6 +169,9 @@ export interface Recording extends Declaration.Registration {
  *   `include` names `"requestBodies"`. A text body that is valid UTF-8 is written as `text`, with a form's
  *   `params`; any other is base64 (marked with `_encoding`) or a file beside the HAR when bodies are attached. A
  *   request that sent no body has a `bodySize` of 0.
+ * - A response's `bodySize` is its body's bytes as transferred, `_transferSize` the whole response's, headers
+ *   included, and `content.compression` the bytes decoding saved, each counted as `NetworkRequest.sizes` counts
+ *   them and -1 or left out where the browser doesn't report it: Chromium reports no body count.
  * - A cookie with no name, which a header writes as a value with no `=`, is listed with the name `""`, and its
  *   value is redacted as any cookie's is. A `Set-Cookie`'s `Max-Age` gives its `expires`, counted from the
  *   response, ahead of its `Expires`.

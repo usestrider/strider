@@ -307,7 +307,8 @@ describe("A HAR an export writes", () => {
       hop: Option.some(hop),
       end: Option.some({
         _tag: "Finished",
-        encodedBytes: bodies.response.length,
+        transferBytes: Option.none(),
+        bodyBytes: Option.none(),
         at: at(3),
         httpVersion: Option.none()
       }),
@@ -415,6 +416,26 @@ describe("A HAR an export writes", () => {
       entryOf({ ...hop, requestBody: Option.some(Option.none()) }, ["requestBodies"]).request.postData
     )
     assert.strictEqual(entryOf({ ...hop, requestBody: Option.none() }).request.bodySize, -1)
+  })
+
+  it("writes a response's body and transfer sizes as the hop's end counted them, and what decoding saved", () => {
+    const get = sent("GET", "https://shop.example.com/", "text/plain", "Q1.0")
+    const hop = answered(get, { status: 200, headers: { "content-type": "text/plain" } }, {
+      request: bytes(""),
+      response: bytes("x".repeat(100))
+    })
+    const counted = (transferBytes: Option.Option<number>, bodyBytes: Option.Option<number>) =>
+      entryOf({
+        ...hop,
+        end: Option.some({ _tag: "Finished", transferBytes, bodyBytes, at: at(3), httpVersion: Option.none() })
+      })
+        .response
+    const known = counted(Option.some(300), Option.some(40))
+    assert.deepInclude(known, { bodySize: 40, _transferSize: 300 })
+    assert.strictEqual(known.content.compression, 60)
+    const unknown = counted(Option.some(300), Option.none())
+    assert.deepInclude(unknown, { bodySize: -1, _transferSize: 300 })
+    assert.isUndefined(unknown.content.compression)
   })
 
   it("keeps a MIME type's parameters, in a response's content and a request's postData", () => {

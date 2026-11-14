@@ -14,7 +14,8 @@
  * - **Fields.** A `mimeType` is the `Content-Type` with its parameters; a body is text only where its type is
  *   textual and its bytes are valid UTF-8, and base64 otherwise. A request's `bodySize` is 0 where it sent no
  *   body and -1 where its body wasn't read. A `Set-Cookie`'s `Max-Age` gives its `expires`, ahead of `Expires`,
- *   and a cookie with no `=` has the name `""`. The creator's version is the package's, generated into `version.ts`.
+ *   and a cookie with no `=` has the name `""`. A response's `bodySize` and `_transferSize` are the hop's end's
+ *   counts, by `requestSizes.ts`'s rules, and -1 where the backend has none; `compression` follows from the body's. The creator's version is the package's, generated into `version.ts`.
  * - **The format** is `harLog.ts`'s schema, which replay reads with: HAR 1.2, Playwright's extensions, which its
  *   trace viewer reads, and ours.
  */
@@ -432,6 +433,8 @@ export const entryOf = (
     onNone: () => ({}),
     onSome: (response) => Option.getOrElse(received, () => response.headers) as Readonly<Record<string, string>>
   })
+  const finished = Option.flatMap(end, (end) => end._tag === "Finished" ? Option.some(end) : Option.none())
+  const bodyBytes = Option.flatMap(finished, (end) => end.bodyBytes)
   const endedAt = Option.flatMap(end, (end) => end._tag === "Forgotten" ? Option.none() : Option.some(end.at))
   const wait = Option.match(response, {
     onNone: () => -1,
@@ -456,6 +459,10 @@ export const entryOf = (
   const content: Types.Mutable<typeof HarLog.Content.Type> = {
     size: Option.match(recorded.body, { onNone: () => -1, onSome: (body) => body.length }),
     mimeType
+  }
+  // HAR's `compression` is the bytes decoding saved, known where the body and its transferred size both are
+  if (Option.isSome(recorded.body) && Option.isSome(bodyBytes) && recorded.body.value.length >= bodyBytes.value) {
+    content.compression = recorded.body.value.length - bodyBytes.value
   }
   let file = Option.none<{ path: string; content: Uint8Array }>()
   if (Option.isSome(recorded.body)) {
@@ -515,14 +522,11 @@ export const entryOf = (
       content,
       redirectURL: status >= 300 && status < 400 ? (responseHeaders.location ?? "") : "",
       headersSize: -1,
-      bodySize: Option.match(end, {
-        onNone: () => -1,
-        onSome: (end) => end._tag === "Finished" ? end.encodedBytes : -1
-      }),
-      _transferSize: Option.match(end, {
-        onNone: () => -1,
-        onSome: (end) => end._tag === "Finished" ? end.encodedBytes : -1
-      }),
+      bodySize: Option.getOrElse(bodyBytes, () => -1),
+      _transferSize: Option.getOrElse(
+        Option.flatMap(finished, (end) => end.transferBytes),
+        () => -1
+      ),
       ...(Option.isSome(end) && end.value._tag === "Failed" ? { _failureText: end.value.error } : {})
     },
     cache: {},

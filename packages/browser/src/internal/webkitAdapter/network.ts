@@ -137,7 +137,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         request.frame?.page.context.requestTiming?.delete(request.hop)
         request.frame?.page.context.requestSizes?.delete(request.hop)
         emitResponse(state, request, params.redirectResponse)
-        state.buffer.emit({ _tag: "RequestFinished", hop: request.hop, encodedBytes: 0, at: Adapter.now() })
+        state.buffer.emit({ _tag: "RequestFinished", hop: request.hop, ...Sizes.unknown, at: Adapter.now() })
         // The earlier hop's id stays, so a body read for it says it was a redirect (QUIRKS.md, Q39)
         request.redirects++
         request.hop = state.ids.hop(request.id, request.redirects)
@@ -244,7 +244,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       state.buffer.emit({
         _tag: "RequestFinished",
         hop: request.hop,
-        encodedBytes: params.metrics?.responseBodyBytesReceived ?? 0,
+        ...Sizes.transferred(Sizes.webkit(params.metrics)),
         at: Adapter.now(),
         httpVersion: params.metrics?.protocol
       })
@@ -328,7 +328,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
           at: Adapter.now()
         })
       })
-      state.buffer.emit({ _tag: "RequestFinished", hop: request.hop, encodedBytes: 0, at: Adapter.now() })
+      state.buffer.emit({ _tag: "RequestFinished", hop: request.hop, ...Sizes.unknown, at: Adapter.now() })
       Deferred.doneUnsafe(request.finished, Effect.void)
       state.retire(requestKey(session, params.requestId))
     })

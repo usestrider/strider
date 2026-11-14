@@ -64,6 +64,20 @@ export const bidi = (native: Response, complete: boolean): Sizes => {
     // Firefox reports content.size=0 even for nonempty bodies; it is deliberately never used.
   })
 }
+/**
+ * What a hop's end says of its response's bytes, by the same rules as its `Sizes`: `transferBytes` as
+ * transferred, headers and all, and `bodyBytes`, its body's as transferred; `None` where the backend doesn't
+ * report it.
+ */
+export interface Transferred {
+  readonly transferBytes: Option.Option<number>
+  readonly bodyBytes: Option.Option<number>
+}
+export const unknown: Transferred = { transferBytes: Option.none(), bodyBytes: Option.none() }
+export const transferred = (sizes: Sizes): Transferred => ({
+  transferBytes: sizes.responseTransferSize,
+  bodyBytes: sizes.responseBodySize
+})
 export const cdp = (total: number, decoded: number | undefined): Sizes =>
   new Sizes({
     ...empty(),

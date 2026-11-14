@@ -206,11 +206,10 @@ const delivery = <B, DE, DR>(
     if (end._tag === "Forgotten") {
       return yield* Effect.fail(unavailable(url, "evicted", "Too many requests were in flight to keep this one"))
     }
-    if (end.encodedBytes > limit) {
-      return yield* Effect.fail(
-        unavailable(url, "overLimit", `The body is ${end.encodedBytes} bytes, over BodyLimit's ${limit}`)
-      )
-    }
+    // The body as transferred, where the backend counts it apart from the headers; otherwise as read, below
+    const overLimit = (bytes: number) =>
+      Effect.fail(unavailable(url, "overLimit", `The body is ${bytes} bytes, over BodyLimit's ${limit}`))
+    if (Option.isSome(end.bodyBytes) && end.bodyBytes.value > limit) return yield* overLimit(end.bodyBytes.value)
     const bytes = yield* runtime.model.adapter.responseBody(response.hop).pipe(
       Effect.mapError((error) =>
         Deadline.isTimeout(error)
@@ -223,6 +222,7 @@ const delivery = <B, DE, DR>(
           : unavailable(url, "evicted", `The browser no longer has it: ${error.message}`)
       )
     )
+    if (Option.isNone(end.bodyBytes) && bytes.length > limit) return yield* overLimit(bytes.length)
     const message = new Captured(response, bytes, undefined)
     const body = yield* Effect.provideContext(decoder(message), context)
     return new Captured(response, bytes, body)

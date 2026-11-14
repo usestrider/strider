@@ -41,7 +41,13 @@ describe("Request header lifetime", () => {
       // A new lookup uses the immutable snapshot; a waiter already holds the removed entry.
       assert.isTrue(Option.isNone(fold.hop(first.hop)))
       assert.isTrue(Deferred.isDoneUnsafe(retained.end))
-      yield* fold.sink({ _tag: "RequestFinished", hop: first.hop, encodedBytes: 0, at: first.at })
+      yield* fold.sink({
+        _tag: "RequestFinished",
+        hop: first.hop,
+        transferBytes: Option.none(),
+        bodyBytes: Option.none(),
+        at: first.at
+      })
       assert.isTrue(Deferred.isDoneUnsafe(retained.sentKnown), "eviction must release the existing header waiter")
     }))
 
@@ -200,7 +206,13 @@ describe("Request response lifetime", () => {
       assert.isUndefined(fiber.pollUnsafe())
       const redirect = new NetworkResponse.NetworkResponse({ ...response, status: 302 as NetworkResponse.StatusCode })
       yield* fold.sink({ _tag: "ResponseReceived", response: redirect })
-      yield* fold.sink({ _tag: "RequestFinished", hop: sent.hop, encodedBytes: 0, at: sent.at })
+      yield* fold.sink({
+        _tag: "RequestFinished",
+        hop: sent.hop,
+        transferBytes: Option.none(),
+        bodyBytes: Option.none(),
+        at: sent.at
+      })
       const next = new NetworkRequest.NetworkRequest({ ...sent, hop: "request-0.1" as NetworkRequest.HopId })
       yield* fold.sink({ _tag: "RequestSent", request: next })
       yield* fold.sink({
@@ -300,7 +312,13 @@ describe("Request response lifetime", () => {
     Effect.scoped(Effect.gen(function*() {
       const { fold, target, sent, response } = yield* responseFixture
       yield* fold.sink({ _tag: "ResponseReceived", response })
-      yield* fold.sink({ _tag: "RequestFinished", hop: sent.hop, encodedBytes: 0, at: sent.at })
+      yield* fold.sink({
+        _tag: "RequestFinished",
+        hop: sent.hop,
+        transferBytes: Option.none(),
+        bodyBytes: Option.none(),
+        at: sent.at
+      })
       const wait = yield* NetworkRequest.response(target, sent)
       for (let i = 1; i <= Fold.maxHops; i++) {
         yield* fold.sink({ _tag: "RequestSent", request: request(i, { _tag: "Unattributed" }) })

@@ -165,8 +165,14 @@ export const requestSizes = (name: string, backend: Layer.Layer<Browser.Browser,
               // -1 where the backend doesn't count it, as HAR has it
               assert.strictEqual(bodySize, Option.getOrElse(counted.responseBodySize, () => -1), path)
               assert.strictEqual(_transferSize, Option.getOrElse(counted.responseTransferSize, () => -1), path)
-              assert.strictEqual(content.size, path === "/empty" ? 0 : text.length, path)
-              assert.strictEqual(content.compression, bodySize < 0 ? undefined : content.size - bodySize, path)
+              // Stock WebKit keeps no content for an empty response, so the HAR has no body to measure
+              if (path === "/empty") assert.include([0, -1], content.size, path)
+              else assert.strictEqual(content.size, text.length, path)
+              assert.strictEqual(
+                content.compression,
+                bodySize < 0 || content.size < 0 ? undefined : content.size - bodySize,
+                path
+              )
             }
           }).pipe(Effect.scoped),
         60_000
