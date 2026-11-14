@@ -2086,7 +2086,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         () =>
           Effect.scoped(Effect.gen(function*() {
             const { url } = yield* fixture(() =>
-              `<input id="field" type="date" value="2020-03-02" onfocus="if (!document.querySelector('dialog')) { const d = document.createElement('dialog'); d.textContent = 'Stop'; document.body.append(d); d.showModal(); }">`
+              `<input id="field" type="date" value="2020-03-02" onfocusin="if (!document.querySelector('dialog')) { const d = document.createElement('dialog'); d.textContent = 'Stop'; document.body.append(d); d.showModal(); }">`
             )
             const page = yield* newPage
             yield* page.goto(url)
