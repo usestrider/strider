@@ -592,8 +592,8 @@ export const engine = (backend: Backend) =>
           Effect.gen(function*() {
             const { call } = yield* open(backend, "<button id=\"go\" hidden>Go</button>", controlledCooperativeClock)
             // The session's budget runs out while its resume is in the browser's frame wait, so the host holds no
-            // token: the pending resume itself answers with the timeout evidence, a later tokenless resume is
-            // Disposed, and cancel clears the retained terminal.
+            // token: the pending resume itself answers with the timeout evidence and no token. A later resume that
+            // carries that missing token, as a host would, is Disposed, and cancel clears the retained terminal.
             const result = yield* cooperativeExercise(
               call,
               `
@@ -603,7 +603,7 @@ export const engine = (backend: Backend) =>
               globalThis.engineTestAdvance(100)
               const stopped = await pending
               const afterStop = resources()
-              const tokenless = await command({ command: "resume", token: reply.token, left: 0, decision: "continue" })
+              const tokenless = await command({ command: "resume", token: stopped.token, left: 0, decision: "continue" })
               await command({ command: "cancel" })
               const afterCancel = resources()
               return JSON.stringify({ stopped, tokenless, afterStop, afterCancel })
@@ -611,6 +611,7 @@ export const engine = (backend: Backend) =>
             )
             assert.strictEqual(result.stopped._tag, "Done", JSON.stringify(result.stopped))
             assert.isTrue(result.stopped.retained)
+            assert.isUndefined(result.stopped.token)
             assert.deepStrictEqual(result.stopped.response.reason, { _tag: "NotVisible" })
             assert.strictEqual(result.tokenless._tag, "Disposed")
             assert.deepStrictEqual(result.afterStop, [1, 0, 0, 1])
