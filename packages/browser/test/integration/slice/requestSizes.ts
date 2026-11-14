@@ -139,7 +139,7 @@ export const requestSizes = (name: string, backend: Layer.Layer<Browser.Browser,
             const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "strider-har-sizes-")), "sizes.har")
             const sizes = new Map<string, NetworkRequest.Sizes>()
             yield* Effect.scoped(Effect.gen(function*() {
-              const har = yield* Har.record(page, { content: "embed", url: `${served.origin}/{fixed,chunked,empty}` })
+              const har = yield* Har.record(page, { content: "embed", inFlightAtStop: "wait" })
               for (const path of ["/fixed", "/chunked", "/empty"]) {
                 const sent = yield* NetworkRequest.next(page, { url: served.origin + path })
                 yield* page.evaluateInMainWorld((path) => fetch(path).then((r) => r.text()), path)
@@ -147,7 +147,7 @@ export const requestSizes = (name: string, backend: Layer.Layer<Browser.Browser,
                 yield* ended(page, original)
                 sizes.set(path, yield* NetworkRequest.sizes(context, original))
               }
-              yield* har.entries.waitFor((count) => count === 3)
+              yield* har.entries.waitFor((count) => count >= 3)
               yield* har.exportHar(out)
             }))
             const entries: ReadonlyArray<{
