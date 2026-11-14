@@ -13,6 +13,8 @@
  *
  * **Gotchas**
  *
+ * A `data:` or `blob:` URL can't be routed: the browser answers it without the network, so no route sees it.
+ *
  * This module uses `effect/http`'s types, which Effect marks unstable, so it can change when they do.
  *
  * @stability unstable

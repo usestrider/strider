@@ -117,7 +117,7 @@ const DocumentStatus = Schema.Struct({
 // url: where the page went, after redirects, or the URL a same-document navigation set
 // frame (in every variant, left out below): the navigable it happened in, the page's own id or a frame's
 const PageNavigation = Schema.Union([
-  Schema.TaggedStruct("Committed", {                    // 404/500 is still a commit; response is None for about:blank, data:, …
+  Schema.TaggedStruct("Committed", {                    // 404/500 is still a commit; response is None for about:blank, data:, blob:
     id: Id, url: Url.Url, document: Target.DocumentId, response: Schema.Option(NetworkResponse.NetworkResponse) }),
   Schema.TaggedStruct("SameDocument", {
     id: Id, url: Url.Url, document: Target.DocumentId, via: Schema.Literals(["fragment", "historyApi", "intercepted"]) }),
