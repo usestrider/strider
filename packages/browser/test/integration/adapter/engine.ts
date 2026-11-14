@@ -261,6 +261,43 @@ export const engine = (backend: Backend) =>
     layer(fixture, { excludeTestServices: true })(
       (it) => {
         for (const cooperative of [false, true]) {
+          it.effect(
+            `keeps waiting after a baseline when a later blocker recovers with cooperative=${cooperative}`,
+            () =>
+              Effect.gen(function*() {
+                const { send, call } = yield* open(
+                  backend,
+                  "<button id=\"go\">Go</button>",
+                  countFrames("document.getElementById(\"go\").disabled = globalThis.engineTestFrames === 1")
+                )
+                for (const sample of [false, true]) {
+                  yield* call(
+                    "() => { globalThis.engineTestFrames = 0; document.getElementById(\"go\").disabled = false }",
+                    []
+                  )
+                  const request = { ...point(2), sample }
+                  const response = cooperative
+                    ? (yield* cooperativeExercise(
+                      call,
+                      `
+                    let reply = await command({ command: "start", budget: 2000, request: ${JSON.stringify(request)} })
+                    for (let i = 0; i < 20 && reply._tag === "Check"; i++) {
+                      reply = await command({ command: "resume", token: reply.token, left: 2000, decision: "continue" })
+                    }
+                    return JSON.stringify(reply)
+                  `
+                    )).response
+                    : yield* send(request)
+                  // The first sample sees only a stable-layout baseline. A later transient blocker must keep
+                  // waiting in that same round, just as the ordinary round above does.
+                  assert(response?._tag === "Ready", JSON.stringify({ sample, response }))
+                }
+              }),
+            timeout
+          )
+        }
+
+        for (const cooperative of [false, true]) {
           for (const rendered of [false, true]) {
             it.effect(
               `waits past a stability baseline to Ready in the first round with cooperative=${cooperative} rendered=${rendered}`,
