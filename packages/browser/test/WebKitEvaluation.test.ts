@@ -5,9 +5,11 @@ import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import { TestClock } from "effect/testing"
 import * as Kit from "../src/internal/adapterKit.ts"
+import * as Engine from "../src/internal/engine.ts"
 import * as ProtocolClient from "../src/internal/protocolClient.ts"
 import * as Evaluation from "../src/internal/webkitAdapter/evaluation.ts"
 import type * as State from "../src/internal/webkitAdapter/state.ts"
+import * as Envelope from "../src/internal/webkitEnvelope.ts"
 import * as WebKitWire from "../src/internal/webkitWire.ts"
 import * as Target from "../src/Target.ts"
 import { makeBrowser } from "./utils/FakeBrowser.ts"
@@ -207,4 +209,96 @@ describe("WebKit evaluation retirement", () => {
       assert.strictEqual(f.interrupted(), 0)
       assert.strictEqual(f.calls(), 0)
     }).pipe(Effect.scoped, Effect.timeout("1 second")))
+})
+
+/**
+ * A function's declaration crosses the attached inspector inside `Target.sendMessageToTarget`, JSON-encoded twice,
+ * in one WebSocket message, and libsoup closes a socket whose incoming message is over 128 KiB.
+ */
+describe("WebKit evaluation packets", () => {
+  const budget = 128 * 1024 - 2048
+
+  const sendThroughWire = Effect.fnUntraced(function*(functionDeclaration: string) {
+    const ids = Kit.makeIds()
+    const id = ids.realm()
+    const packets: Array<string> = []
+    let next = 0
+    const realm = {
+      id,
+      ended: false,
+      pending: false,
+      held: [],
+      document: { id: ids.document() },
+      session: {
+        send: (command: { readonly method: string; readonly params: unknown }) =>
+          Effect.sync(() => {
+            // What the attached transport writes to the page's WebSocket
+            const envelope = WebKitWire.encode(
+              ++next,
+              command.method,
+              command.params,
+              WebKitWire.targetKey("1-1", "page-8")
+            )
+            packets.push(Envelope.unwrap(envelope)!.message)
+            return {
+              result: { type: "string", value: "{\"batch\":0,\"value\":{\"type\":\"string\",\"value\":\"done\"}}" }
+            }
+          })
+      }
+    } as unknown as State.RealmEntry
+    const state = {
+      buffer: yield* Kit.makeFactBuffer(() => Effect.void),
+      ids,
+      realms: new Map([[id, realm]]),
+      helpers: yield* Cache.make({ capacity: 4, lookup: () => Effect.succeed("helper") }),
+      anchors: yield* Cache.make({ capacity: 4, lookup: () => Effect.succeed("anchor") })
+    } as unknown as State.State
+    const result = yield* Evaluation.evaluate(state, id, {
+      functionDeclaration,
+      arguments: [],
+      result: "value",
+      awaitPromise: true,
+      userActivation: false
+    })
+    assert.deepStrictEqual(result, { _tag: "Value", value: { type: "string", value: "done" } })
+    const sizes = packets.map((packet) => new TextEncoder().encode(packet).length)
+    // The commands the page receives, and the text they carry, in order
+    const commands = packets.map((packet) =>
+      JSON.parse((JSON.parse(packet) as { readonly params: { readonly message: string } }).params.message) as {
+        readonly params: {
+          readonly functionDeclaration: string
+          readonly arguments: ReadonlyArray<{ value?: unknown }>
+        }
+      }
+    )
+    const sent = commands.length === 1
+      ? commands[0]!.params.functionDeclaration
+      : commands.slice(0, -1).map((command) => command.params.arguments[2]!.value).join("")
+    return { sizes, sent, commands }
+  })
+
+  it.effect("sends the engine's install in packets under the inspector's limit", () =>
+    Effect.gen(function*() {
+      const { sizes, sent } = yield* sendThroughWire(Engine.install)
+      for (const size of sizes) assert.isBelow(size, budget)
+      assert.include(sent, Engine.install)
+    }).pipe(Effect.scoped))
+
+  it.effect("sends a 1 MiB declaration of escaped and non-ASCII text in parts under the limit, whole", () =>
+    Effect.gen(function*() {
+      const unit = "\"\\\n\t\u0001é漢😀 '`"
+      const body = unit.repeat(Math.ceil((1024 * 1024) / unit.length))
+      const declaration = `function() { return ${JSON.stringify(body)}.length }`
+      const { sizes, sent } = yield* sendThroughWire(declaration)
+      assert.isAbove(sizes.length, 2)
+      for (const size of sizes) assert.isBelow(size, budget)
+      assert.strictEqual(sent, declaration)
+    }).pipe(Effect.scoped))
+
+  it.effect("sends a small declaration in one command, as it is", () =>
+    Effect.gen(function*() {
+      const { sizes, sent } = yield* sendThroughWire("() => 1")
+      assert.strictEqual(sizes.length, 1)
+      assert.include(sent, "(() => 1)")
+    }).pipe(Effect.scoped))
 })
