@@ -14,7 +14,7 @@
  * - **Fields.** A `mimeType` is the `Content-Type` with its parameters; a body is text only where its type is
  *   textual and its bytes are valid UTF-8, and base64 otherwise. A request's `bodySize` is 0 where it sent no
  *   body and -1 where its body wasn't read. A `Set-Cookie`'s `Max-Age` gives its `expires`, ahead of `Expires`,
- *   and a cookie with no `=` has the name `""`. The creator's version is the package's (`version.ts`).
+ *   and a cookie with no `=` has the name `""`. The creator's version is the package's, generated into `version.ts`.
  * - **The format** is `harLog.ts`'s schema, which replay reads with: HAR 1.2, Playwright's extensions, which its
  *   trace viewer reads, and ours.
  */
@@ -24,9 +24,7 @@ import * as Effect from "effect/Effect"
 import * as Encoding from "effect/encoding/Base64"
 import * as Exit from "effect/Exit"
 import * as FiberSet from "effect/FiberSet"
-import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
-import * as Path from "effect/Path"
 import * as Queue from "effect/Queue"
 import * as Scope from "effect/Scope"
 import * as SubscriptionRef from "effect/SubscriptionRef"
@@ -552,32 +550,12 @@ export const entryOf = (
   }
 }
 
-/**
- * The package's version, which a log names as its creator's, read with the layer's `FileSystem` and `Path`; a
- * layer without them fails as the export writing to `path` would.
- */
-export const creatorVersion = (
-  runtime: Runtime.Runtime,
-  path: string
-): Effect.Effect<string, Recordings.WriteFailure> =>
-  Option.match(Option.all([runtime.fileSystem, runtime.path]), {
-    onNone: () =>
-      Effect.fail({
-        path,
-        hint:
-          "The browser's layer was built without Effect's FileSystem and Path, which the export reads Strider's version with"
-      }),
-    onSome: ([fs, paths]) =>
-      Version.read.pipe(Effect.provideService(FileSystem.FileSystem, fs), Effect.provideService(Path.Path, paths))
-  })
-
-/** A HAR 1.2 log of entries, and the body files they name, its creator Strider at `version` (`Version.read`). */
+/** A HAR 1.2 log of entries, and the body files they name, its creator Strider at the package's version. */
 export const logOf = (
   entries: ReadonlyArray<Recorded>,
   clock: Recordings.Clock,
   writing: Writing,
-  browser: { readonly name: string; readonly version: string },
-  version: string
+  browser: { readonly name: string; readonly version: string }
 ): { readonly log: HarLog.Log; readonly files: ReadonlyArray<{ path: string; content: Uint8Array }> } => {
   const files: Array<{ path: string; content: Uint8Array }> = []
   const written = entries.map((recorded) => {
@@ -595,7 +573,7 @@ export const logOf = (
   const log: HarLog.Log = {
     log: {
       version: "1.2",
-      creator: { name: "Strider", version },
+      creator: { name: "Strider", version: Version.version },
       browser,
       pages: writing.detail === "minimal" ? [] : pages.map((id) => {
         const first = entries.find((recorded) =>

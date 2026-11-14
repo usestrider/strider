@@ -22,6 +22,7 @@ import * as HarLog from "../src/internal/harLog.ts"
 import type * as Model from "../src/internal/model.ts"
 import * as RouteDecision from "../src/internal/routeDecision.ts"
 import * as Routes from "../src/internal/routes.ts"
+import * as Version from "../src/internal/version.ts"
 import * as NetworkRequest from "../src/NetworkRequest.ts"
 import * as NetworkResponse from "../src/NetworkResponse.ts"
 
@@ -349,8 +350,7 @@ describe("A HAR an export writes", () => {
           include: new Set(["requestBodies", "cookies"]),
           bodies: { _tag: "Embed" }
         },
-        { name: "Chromium", version: "155" },
-        "0.1.0"
+        { name: "Chromium", version: "155" }
       )
       const text = yield* Schema.encodeEffect(HarLog.LogJson)(log)
       // The schema writes every field the entries hold, in the order they hold them
@@ -398,17 +398,14 @@ describe("A HAR an export writes", () => {
   const entryOf = (recorded: Har.Recorded, include: ReadonlyArray<"requestBodies" | "cookies"> = []) =>
     Har.entryOf(recorded, clock, full(include)).entry
 
-  it.effect("names the package's version as its creator, as its package.json has it", () =>
-    Effect.gen(function*() {
-      const { version } = JSON.parse(
-        fs.readFileSync(path.join(import.meta.dirname, "..", "package.json"), "utf8")
-      ) as { readonly version: string }
-      const Version = yield* Effect.promise(() => import("../src/internal/version.ts"))
-      const read = yield* Version.read
-      assert.strictEqual(read, version)
-      const { log } = Har.logOf([], clock, full([]), { name: "Chromium", version: "155" }, read)
-      assert.deepStrictEqual(log.log.creator, { name: "Strider", version })
-    }).pipe(Effect.provide(NodeServices.layer)))
+  it("names the package's version as its creator, generated from its package.json", () => {
+    const { version } = JSON.parse(
+      fs.readFileSync(path.join(import.meta.dirname, "..", "package.json"), "utf8")
+    ) as { readonly version: string }
+    assert.strictEqual(Version.version, version, "src/internal/version.ts is stale; run pnpm codegen")
+    const { log } = Har.logOf([], clock, full([]), { name: "Chromium", version: "155" })
+    assert.deepStrictEqual(log.log.creator, { name: "Strider", version })
+  })
 
   it("writes 0 as the size of a request that sent no body, and -1 where its body wasn't read", () => {
     const get = sent("GET", "https://shop.example.com/", "text/plain", "Q1.0")

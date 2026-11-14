@@ -227,7 +227,7 @@ export const exitCodes: Readonly<Record<string, number>> = {
 }
 
 /** The package's version, from its `package.json`: what `--version` prints, and the MCP server reports. */
-export const version = Version.read
+export const version = Effect.succeed(Version.version)
 
 /** A process, by its id and when it started, in milliseconds since the epoch, as the ledger names its owner. */
 export const Owner = Schema.Struct({ pid: Schema.Number, startedAt: Schema.Number })

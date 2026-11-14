@@ -172,8 +172,7 @@ export interface Recording extends Declaration.Registration {
  * - A cookie with no name, which a header writes as a value with no `=`, is listed with the name `""`, and its
  *   value is redacted as any cookie's is. A `Set-Cookie`'s `Max-Age` gives its `expires`, counted from the
  *   response, ahead of its `Expires`.
- * - The log's `creator` is Strider at its package's version, which the export reads with the layer's
- *   `FileSystem` and `Path`.
+ * - The log's `creator` is Strider, at the version of `@usestrider/browser` that wrote it.
  *
  * **Gotchas**
  *
@@ -282,7 +281,6 @@ export const record = (
       exportHar: (path, exportOptions) =>
         Effect.gen(function*() {
           yield* (options.inFlightAtStop ?? "markIncomplete") === "wait" ? recorder.settle : recorder.flush
-          const version = yield* HarImpl.creatorVersion(runtime, path)
           const { log, files } = HarImpl.logOf(
             recorder.entries,
             recorder.clock,
@@ -295,8 +293,7 @@ export const record = (
                 ? { _tag: "File", prefix: "" }
                 : { _tag: "Omit" }
             },
-            { name: info.product, version: info.version },
-            version
+            { name: info.product, version: info.version }
           )
           const text = yield* Schema.encodeEffect(HarLog.LogJson)(log).pipe(
             Effect.mapError((error): Recordings.WriteFailure => ({

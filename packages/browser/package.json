@@ -91,7 +91,7 @@
     }
   },
   "scripts": {
-    "codegen": "strider-utils barrel",
+    "codegen": "strider-utils barrel version",
     "build": "node ../tools/docs/src/bin.mjs index --package browser && tsc -b tsconfig.json && pnpm babel",
     "babel": "babel dist --plugins annotate-pure-calls --out-dir dist --source-maps",
     "check": "tsc -b tsconfig.json",
