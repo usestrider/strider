@@ -143,6 +143,22 @@ const silentListenerCases = [
 describe("Stock WebKit, launched in automation mode", () => {
   layer(NodeServices.layer, { excludeTestServices: true, timeout })((it) => {
     it.effect(
+      "keeps keyboard input usable after refusing a key before dispatch",
+      () =>
+        launched(Effect.gen(function*() {
+          const served = yield* site
+          const page = yield* Browser.newPage()
+          yield* page.goto(fixtureUrl(served.origin, "<input id=target>"))
+          yield* page.locator("#target").focus()
+          const refused = yield* page.keyboard.press("CapsLock").pipe(Effect.exit)
+          assert.strictEqual(reasonOf(refused)?.reason?._tag, "Unsupported")
+          yield* page.keyboard.press("a")
+          yield* page.locator("#target").pipe(Expect.toHaveValue("a"))
+        })),
+      timeout
+    )
+
+    it.effect(
       "keeps child snapshot text when time origin reads differ by one millisecond",
       () =>
         launched(Effect.gen(function*() {

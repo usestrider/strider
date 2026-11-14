@@ -10,13 +10,13 @@ import * as DOM from "../../cdp/DOM.ts"
 import * as Input from "../../cdp/Input.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
 import type * as L1Target from "../../Target.ts"
-import type * as Adapter from "../adapter.ts"
+import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as Gestures from "../input.ts"
 import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
 import { heldButton, keyCode, modifierBits } from "./mapping.ts"
-import { documentOf, type Event, frameOf, pageOf, type State } from "./state.ts"
+import { documentOf, type Event, frameById, type FrameEntry, frameOf, pageOf, type State } from "./state.ts"
 
 export const register = (handlers: Kit.Handlers<Event>) =>
   handlers.on(Input.dragIntercepted, (params, { state, target }) => {
@@ -39,10 +39,74 @@ const mouseCommand = (event: Extract<Adapter.InputEvent, { _tag: "Mouse" }>) =>
     modifiers: modifierBits(event.modifiers)
   })
 
-/** Page coordinates reach every frame; pages with child frames keep sequential acknowledgments. */
+/** Whether the frame's session reported the first paint of the frame's current document. */
+const painted = (frame: FrameEntry): boolean =>
+  frame.started !== undefined && frame.started.painted && frame.started.loaderId === frame.document?.loaderId
+
+/**
+ * Whether the frame's current document has been drawn: it, or a document in a frame inside it, reported its first
+ * paint. A document can't be drawn without the documents that embed it, so a painting descendant shows a document
+ * that paints nothing was drawn too. A document whose start wasn't reported counts as drawn.
+ */
+const isDrawn = (frame: FrameEntry): boolean => {
+  if (frame.started === undefined || frame.started.loaderId !== frame.document?.loaderId) return true
+  const inside = (each: FrameEntry): boolean => painted(each) || Array.from(each.children).some(inside)
+  return inside(frame)
+}
+
+/** Whether the frame is out of process, or inside a frame that is. */
+const outOfProcess = (frame: FrameEntry): boolean => {
+  for (let each: FrameEntry | undefined = frame; each?.parent !== undefined; each = each.parent) {
+    if (each.owner !== each.parent.owner) return true
+  }
+  return false
+}
+
+/**
+ * Waits until the frame's current document has been drawn, when the frame is out of process or inside one.
+ * Chromium picks each pointer event's target in its browser process, from hit-test data that includes an
+ * out-of-process frame only once the frame has been drawn; until then, input aimed into it reaches the parent's
+ * iframe element. The operation's deadline ends the wait, with the frame in its history.
+ */
+export const frameReady = Effect.fnUntraced(function*(state: State, id: L1Target.NavigableId) {
+  const frame = yield* frameById(state, id)
+  if (!outOfProcess(frame) || isDrawn(frame)) return
+  const record = yield* Operation.current
+  if (Option.isSome(record)) {
+    record.value.observe({ _tag: "FrameNotDrawn", frame: frame.id, url: frame.document?.url })
+  }
+  yield* state.buffer.waitFor(() => frame.removed || isDrawn(frame) ? true : undefined)
+  yield* frameById(state, id)
+})
+
+/**
+ * Page coordinates reach every frame; pages with child frames keep sequential acknowledgments. Pointer input into a
+ * frame that hasn't been drawn is refused before anything is sent (`frameReady` waits for it).
+ */
 export const dispatchInput = Effect.fnUntraced(
-  function*(state: State, id: L1Target.NavigableId, events: ReadonlyArray<Adapter.InputEvent>) {
-    const page = yield* pageOf(state, id)
+  function*(
+    state: State,
+    id: L1Target.NavigableId,
+    events: ReadonlyArray<Adapter.InputEvent>,
+    frame?: { readonly frame: L1Target.NavigableId },
+    drawn?: ReadonlyArray<L1Target.NavigableId>
+  ) {
+    // Whatever fails before the first command is written sent nothing
+    const page = yield* pageOf(state, id).pipe(Effect.mapError(Adapter.unsent))
+    // Keys and text go to the focused element, with no hit testing
+    if (events.some((event) => event._tag !== "Key" && event._tag !== "InsertText")) {
+      for (const each of drawn ?? (frame === undefined ? [] : [frame.frame])) {
+        const entry = yield* frameById(state, each).pipe(Effect.mapError(Adapter.unsent))
+        if (outOfProcess(entry) && !isDrawn(entry)) {
+          return yield* Effect.fail(
+            new Adapter.AdapterError({
+              reason: { _tag: "FrameNotDrawn", frame: entry.id, url: entry.document?.url },
+              unsent: true
+            })
+          )
+        }
+      }
+    }
     const on = Protocol.on(page.target.session)
     const click = Gestures.singleClick(events)
     if (

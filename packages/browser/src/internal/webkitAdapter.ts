@@ -23,7 +23,7 @@ import * as Protocol from "../protocol/Protocol.ts"
 import type * as Transport from "../protocol/Transport.ts"
 import type * as L1Target from "../Target.ts"
 import * as VideoWriter from "../VideoWriter.ts"
-import type * as Adapter from "./adapter.ts"
+import * as Adapter from "./adapter.ts"
 import * as Kit from "./adapterKit.ts"
 import * as Declarations from "./declarations.ts"
 import * as Geometry from "./geometry.ts"
@@ -89,7 +89,9 @@ export interface Options extends Adapter.ConnectOptions {
   readonly automation?: WebKitAutomation.Group | undefined
 }
 
-const refuse = (capability: string, hint: string) => () => Effect.fail(Kit.unsupported(capability, hint))
+// A refused call wrote nothing, so a refused input write leaves nothing to release
+const refuse = (capability: string, hint: string) => () =>
+  Effect.fail(Adapter.unsent(Kit.unsupported(capability, hint)))
 
 const noPages = "stock WebKit's inspector makes no contexts or pages, and closes none"
 
@@ -190,6 +192,7 @@ export const connect: (
       evaluate: (realm, call) => Evaluation.evaluate(state, realm, call),
       releaseHandles: (list) => Evaluation.releaseHandles(state, list),
       dispatchInput: refuse("input.native", "stock WebKit's inspector protocol has no Input domain"),
+      frameReady: () => Effect.void,
       resolve: (obligation, decision) => Obligations.resolve(state, obligation, decision),
       declare: (scope, declaration) => Declare.declare(state, scope, declaration),
       screenshot: (page, options) => Capture.screenshot(state, page, options),

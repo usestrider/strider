@@ -99,8 +99,11 @@ export const answered = <A, E, R>(record: Record, call: Effect.Effect<A, E, R>) 
         const reason = exit.cause.reasons.length === 1 ? exit.cause.reasons[0] : undefined
         const error = reason !== undefined && Cause.isFailReason(reason) ? reason.error : undefined
         finish(
-          error instanceof AdapterError && error.reason._tag === "Protocol" &&
-            error.reason.error.reason._tag === "Rejected"
+          // An input write that failed before writing any input sent nothing
+          error instanceof AdapterError && error.unsent === true
+            ? { _tag: "NotSent" }
+            : error instanceof AdapterError && error.reason._tag === "Protocol" &&
+                error.reason.error.reason._tag === "Rejected"
             ? { _tag: "Acknowledged", result: "rejected" }
             : { _tag: "MayHaveBeenSent" }
         )
@@ -148,6 +151,11 @@ export const fromAdapter = (
       return {
         _tag: "Reason",
         reason: new Reason.BackendFailure({ kind: "Rejected", method: "emulation.viewport", hint: error.message })
+      }
+    case "FrameNotDrawn":
+      return {
+        _tag: "Reason",
+        reason: new Reason.BackendFailure({ kind: "Rejected", method: "input", hint: error.message })
       }
     case "Gone":
       return {

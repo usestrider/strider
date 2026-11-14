@@ -67,8 +67,9 @@ const sending = <E>(
       yield* owner.runtime.model.adapter.dispatchInput(owner.page.id, events as ReadonlyArray<Adapter.InputEvent>).pipe(
         Effect.tapError((error) =>
           Effect.sync(() => {
-            // A page that is gone took its input with it; otherwise the gesture may have left input pressed
-            if (Deadline.isTimeout(error) || error.reason._tag !== "Gone") {
+            // A page that is gone took its input with it, and input refused before any of it was written left
+            // nothing pressed; otherwise the gesture may have left input pressed
+            if (Deadline.isTimeout(error) || (error.reason._tag !== "Gone" && error.unsent !== true)) {
               Input.uncertain(state, `${operation}: ${error.message}`, events as ReadonlyArray<Adapter.InputEvent>)
             }
           })

@@ -11,8 +11,11 @@ import { checkpoint } from "./failureTrace.ts"
 import { NativeInputCapture } from "./nativeInputCapture.ts"
 import { selectProcessCapture } from "./nativeInputProcess.ts"
 
-const testName = "names an iframe's frame, passes a node across worlds, and sends input into a frame"
-export const selected = () => TestRunner.getCurrentTest<RunnerTestCase | undefined>()?.name === testName
+const testNames = new Set([
+  "names an iframe's frame, passes a node across worlds, and sends input into a frame",
+  "sends input into a cross-site frame that has not drawn its first frame yet"
+])
+export const selected = () => testNames.has(TestRunner.getCurrentTest<RunnerTestCase | undefined>()?.name ?? "")
 
 export const prepare = Effect.fnUntraced(function*() {
   const capture = yield* Effect.sync(() => {

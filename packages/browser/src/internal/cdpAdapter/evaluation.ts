@@ -428,9 +428,11 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
                 const reason = error.reason
                 if (
                   reason._tag !== "Rejected" || reason.method !== "Runtime.callFunctionOn" ||
-                  reason.code !== -32000 ||
-                  (reason.description !== "Inspected target navigated or closed" &&
-                    reason.description !== "Execution context was destroyed.")
+                  !((reason.code === -32000 &&
+                    (reason.description === "Inspected target navigated or closed" ||
+                      reason.description === "Execution context was destroyed.")) ||
+                    // A call naming a context a frame's process swap destroyed before it ran
+                    (reason.code === -32602 && reason.description === "uniqueContextId not found"))
                 ) return Effect.fail(error)
                 // CDP can reject before contexts-cleared or target-detached reaches the fold. Wait for that
                 // evidence before reporting Gone; only the engine's caller may reroute, never this evaluation.
@@ -447,9 +449,9 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
                     )
                   )
                 }
-                // "Execution context was destroyed." arrives after the destroy event on the wire, and is no
-                // evidence by itself: fold the events received before the reply, then fail at once. `failed`
-                // reports Gone only if the realm ended, and the rejection otherwise.
+                // "Execution context was destroyed." and "uniqueContextId not found" arrive after the destroy event
+                // on the wire, and are no evidence by themselves: fold the events received before the reply, then
+                // fail at once. `failed` reports Gone only if the realm ended, and the rejection otherwise.
                 return state.buffer.run(() => {}).pipe(
                   BrowserClock.until(at),
                   Effect.flatMap((folded) =>

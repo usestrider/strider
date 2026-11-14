@@ -70,6 +70,7 @@ const methods: { readonly [K in Method]: K extends Release ? typeof release : Ki
   releaseHandles: release,
   releaseNodes: release,
   dispatchInput: write("the input"),
+  frameReady: read("the first paint of the frame the input is aimed into"),
   contentFrame: read("the iframe's frame"),
   geometry: read("the element's geometry"),
   resolve: write("the decision"),

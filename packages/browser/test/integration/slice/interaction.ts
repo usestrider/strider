@@ -1214,7 +1214,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                     .getClientRects()[0]!
                   return { x: 20 + (rect.left + rect.right) / 2, y: 20 + (rect.top + rect.bottom) / 2 }
                 })
-                assert.deepStrictEqual(point.value, expected)
+                assert.deepStrictEqual({ x: point.value.x, y: point.value.y }, expected)
               } else {
                 const error = yield* target.click({
                   position: mode === "explicit covered" ? { x: 2, y: 2 } : undefined
