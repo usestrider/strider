@@ -179,7 +179,6 @@ export interface Attribution {
 }
 
 export interface RequestEntry {
-  credentialsAttempted?: boolean | undefined
   readonly id: NetworkRequest.Id
   readonly target: TargetEntry
   readonly requestId: string
@@ -324,6 +323,11 @@ export interface State {
   readonly retire: (key: string) => void
   /** A Fetch pause preceding its Network request shares this hop record until the request arrives or ends. */
   readonly pendingAttribution: Map<string, Attribution>
+  /**
+   * The `Network` ids of request chains a context's credentials were sent for, by `credentialsScope`. A Fetch
+   * pause names its chain before Network reports it, so the one attempt is counted from the first pause.
+   */
+  readonly credentialsAttempted: Map<string, Set<string>>
   /** ExtraInfo that came before its request, by request key; a few hundred at most. */
   readonly earlyHeaders: Map<string, Array<ExtraInfo>>
   /** Requests the browser answers itself (`data:`, `blob:`), by request key, until they end: their ExtraInfo is dropped; a few hundred at most. */
@@ -397,6 +401,7 @@ export const make = (options: {
       for (let hop = 0; hop <= request.redirects; hop++) hops.delete(state.ids.hop(request.id, hop))
     }),
     pendingAttribution: new Map(),
+    credentialsAttempted: new Map(),
     earlyHeaders: new Map(),
     answeredLocally: new Set(),
     routeFailed: new Set(),
@@ -438,6 +443,15 @@ export const dispatchContext = (state: State, target: TargetEntry | undefined): 
 export const contextKey = (target: TargetEntry, contextId: number) => `${target.session.key ?? ""}|${contextId}`
 
 export const requestKey = (target: TargetEntry, requestId: string) => `${target.session.key ?? ""}|${requestId}`
+
+/**
+ * What a request's `Network` id is unique within for credentials: its page, whose own and whose dedicated
+ * workers' requests share ids, or the target itself when it has none.
+ */
+export const credentialsScope = (target: TargetEntry) =>
+  target.page !== undefined ? pageCredentialsScope(target.page) : `session|${target.session.key ?? ""}`
+
+export const pageCredentialsScope = (page: PageEntry) => `page|${page.id}`
 
 export const frameOf = (state: State, frameId: string | undefined) =>
   frameId === undefined ? undefined : state.frames.get(frameId)

@@ -1853,7 +1853,7 @@ describe("CDP declaration cleanup lifetime", () => {
   }
 })
 
-it.effect("waits for observed Network ownership before providing automatic credentials and bounds attempts", () =>
+it.effect("provides automatic credentials to a challenge that comes before the request's Network event, once", () =>
   Effect.gen(function*() {
     const calls: Array<{ method: string; params: unknown }> = []
     const mock = {
@@ -1866,57 +1866,72 @@ it.effect("waits for observed Network ownership before providing automatic crede
     } as unknown as ProtocolClient.Session
     const { state, target } = yield* withPage(mock)
     const handlers = Obligations.register(Network.register(Kit.handlers<State.Event>()))
+    // Chromium pauses the request and challenges it from the browser's interceptor, so both can come
+    // before the request's Network.requestWillBeSent
     handlers.apply("Fetch.requestPaused", {
       requestId: "F1",
       networkId: "R1",
       frameId: "T1",
-      resourceType: "Document",
+      resourceType: "Fetch",
       request: sent(`${origin}/auth`).request
     }, { state, target })
-    const challenge = () =>
+    const challenge = (requestId: string) =>
       handlers.apply("Fetch.authRequired", {
-        requestId: "F1",
+        requestId,
         frameId: "T1",
-        resourceType: "Document",
-        request: sent(`${origin}/auth`).request,
+        resourceType: "Fetch",
+        request: sent(`${origin}/${requestId === "F2" ? "redirected-auth" : "auth"}`).request,
         authChallenge: { source: "Server", origin, scheme: "basic", realm: "website" }
       }, { state, target })
     const decision = { _tag: "ProvideCredentials", username: "user", password: "secret", once: true } as const
-    challenge()
-    const first = [...state.obligations.values()].find((entry) =>
-      entry._tag === "PausedRequest" && entry.phase === "auth"
-    )!
-    yield* Obligations.resolve(state, first.id, decision)
-    assert.deepStrictEqual(calls.at(-1), {
-      method: "Fetch.continueWithAuth",
-      params: {
-        requestId: "F1",
-        authChallengeResponse: { response: "CancelAuth" }
-      }
+    const answer = Effect.fnUntraced(function*(requestId = "F1") {
+      challenge(requestId)
+      const obligation = [...state.obligations.values()].find((entry) =>
+        entry._tag === "PausedRequest" && entry.phase === "auth"
+      )!
+      yield* Obligations.resolve(state, obligation.id, decision)
+      return calls.filter((command) => command.method === "Fetch.continueWithAuth").at(-1)
     })
-    handlers.apply("Network.requestWillBeSent", sent(`${origin}/auth`), { state, target })
-    challenge()
-    const second = [...state.obligations.values()].find((entry) =>
-      entry._tag === "PausedRequest" && entry.phase === "auth"
-    )!
-    yield* Obligations.resolve(state, second.id, decision)
-    assert.deepStrictEqual(calls.at(-1), {
+    assert.deepStrictEqual(yield* answer(), {
       method: "Fetch.continueWithAuth",
       params: {
         requestId: "F1",
         authChallengeResponse: { response: "ProvideCredentials", username: "user", password: Redacted.make("secret") }
       }
-    })
-    challenge()
-    const third = [...state.obligations.values()].find((entry) =>
-      entry._tag === "PausedRequest" && entry.phase === "auth"
-    )!
-    yield* Obligations.resolve(state, third.id, decision)
-    assert.deepStrictEqual(calls.at(-1), {
+    }, "the first challenge gets the credentials though its Network event hasn't come")
+    handlers.apply("Network.requestWillBeSent", sent(`${origin}/auth`), { state, target })
+    assert.deepStrictEqual(yield* answer(), {
       method: "Fetch.continueWithAuth",
       params: { requestId: "F1", authChallengeResponse: { response: "CancelAuth" } }
-    })
+    }, "a repeat challenge is cancelled once the request has had its attempt")
+    // The redirect's pause can precede its Network event, just like the first hop's pause.
+    handlers.apply("Fetch.requestPaused", {
+      requestId: "F2",
+      redirectedRequestId: "F1",
+      networkId: "R1",
+      frameId: "T1",
+      resourceType: "Fetch",
+      request: sent(`${origin}/redirected-auth`).request
+    }, { state, target })
+    assert.deepStrictEqual(yield* answer("F2"), {
+      method: "Fetch.continueWithAuth",
+      params: { requestId: "F2", authChallengeResponse: { response: "CancelAuth" } }
+    }, "an early redirect hop shares the chain's attempt")
+    handlers.apply(
+      "Network.requestWillBeSent",
+      sent(`${origin}/redirected-auth`, {
+        from: "/auth",
+        location: `${origin}/redirected-auth`,
+        hasExtraInfo: false
+      }),
+      { state, target }
+    )
+    assert.deepStrictEqual(yield* answer("F2"), {
+      method: "Fetch.continueWithAuth",
+      params: { requestId: "F2", authChallengeResponse: { response: "CancelAuth" } }
+    }, "the redirect's Network event preserves the chain's attempt")
     handlers.apply("Network.loadingFinished", { requestId: "R1", encodedDataLength: 0 }, { state, target })
+    assert.isFalse(state.credentialsAttempted.get(State.credentialsScope(target))?.has("R1") ?? false)
     yield* state.buffer.flush
   }))
 
@@ -1971,8 +1986,134 @@ it.effect("correlates parent-page Fetch authentication with its worker's Network
         authChallengeResponse: { response: "ProvideCredentials", username: "user", password: Redacted.make("secret") }
       }
     })
-    assert.isTrue(state.requests.get(State.requestKey(worker, "R1"))?.credentialsAttempted)
+    assert.isTrue(state.credentialsAttempted.get(State.credentialsScope(parent))?.has("R1"))
     assert.isUndefined(parent.proxyAuth)
+    yield* state.buffer.flush
+  }))
+
+it.effect("provides automatic credentials to a parent-page challenge before its worker's Network event, once", () =>
+  Effect.gen(function*() {
+    const calls: Array<{ method: string; params: unknown }> = []
+    const mock = {
+      ...session,
+      send: (command: { method: string; params: unknown }) =>
+        Effect.sync(() => {
+          calls.push({ method: command.method, params: command.params })
+          return {}
+        })
+    } as unknown as ProtocolClient.Session
+    const { state, page, target } = yield* withPage(mock)
+    const parent: State.TargetEntry = { ...target, page }
+    const worker: State.TargetEntry = {
+      ...target,
+      page,
+      kind: "worker",
+      session: { ...mock, key: "worker" as Protocol.SessionKey }
+    }
+    const handlers = Obligations.register(Network.register(Kit.handlers<State.Event>()))
+    // A dedicated worker's fetch pauses and is challenged on its parent page's session, and its
+    // Network.requestWillBeSent can come on the worker's session after both
+    handlers.apply("Fetch.requestPaused", {
+      requestId: "F1",
+      networkId: "R1",
+      frameId: "T1",
+      resourceType: "Fetch",
+      request: sent(`${origin}/auth`).request
+    }, { state, target: parent })
+    const decision = { _tag: "ProvideCredentials", username: "user", password: "secret", once: true } as const
+    const answer = Effect.fnUntraced(function*() {
+      handlers.apply("Fetch.authRequired", {
+        requestId: "F1",
+        frameId: "T1",
+        resourceType: "Fetch",
+        request: sent(`${origin}/auth`).request,
+        authChallenge: { source: "Server", origin, scheme: "basic", realm: "website" }
+      }, { state, target: parent })
+      const obligation = [...state.obligations.values()].find((entry) =>
+        entry._tag === "PausedRequest" && entry.phase === "auth"
+      )!
+      yield* Obligations.resolve(state, obligation.id, decision)
+      return calls.filter((command) => command.method === "Fetch.continueWithAuth").at(-1)
+    })
+    assert.deepStrictEqual(yield* answer(), {
+      method: "Fetch.continueWithAuth",
+      params: {
+        requestId: "F1",
+        authChallengeResponse: { response: "ProvideCredentials", username: "user", password: Redacted.make("secret") }
+      }
+    }, "the first challenge gets the credentials though the worker's Network event hasn't come")
+    handlers.apply("Network.requestWillBeSent", sent(`${origin}/auth`), { state, target: worker })
+    assert.deepStrictEqual(yield* answer(), {
+      method: "Fetch.continueWithAuth",
+      params: { requestId: "F1", authChallengeResponse: { response: "CancelAuth" } }
+    }, "a repeat challenge is cancelled once the worker's request has had its attempt")
+    assert.isUndefined(parent.proxyAuth)
+    yield* state.buffer.flush
+  }))
+
+it.effect("releases a worker credential attempt when its target ends while the page stays open", () =>
+  Effect.gen(function*() {
+    const calls: Array<{ method: string; params: unknown }> = []
+    const mock = {
+      ...session,
+      send: (command: { method: string; params: unknown }) =>
+        Effect.sync(() => {
+          calls.push({ method: command.method, params: command.params })
+          return {}
+        })
+    } as unknown as ProtocolClient.Session
+    const { state, page, target } = yield* withPage(mock)
+    const parent: State.TargetEntry = { ...target, page }
+    const worker: State.TargetEntry = {
+      ...target,
+      page,
+      kind: "worker",
+      session: { ...mock, key: "worker" as Protocol.SessionKey }
+    }
+    const handlers = Obligations.register(Network.register(Kit.handlers<State.Event>()))
+    // A dedicated worker's fetch pauses and is challenged on its parent page's session, and its
+    // Network.requestWillBeSent can come on the worker's session after both
+    handlers.apply("Fetch.requestPaused", {
+      requestId: "F1",
+      networkId: "R1",
+      frameId: "T1",
+      resourceType: "Fetch",
+      request: sent(`${origin}/auth`).request
+    }, { state, target: parent })
+    const decision = { _tag: "ProvideCredentials", username: "user", password: "secret", once: true } as const
+    const answer = Effect.fnUntraced(function*() {
+      handlers.apply("Fetch.authRequired", {
+        requestId: "F1",
+        frameId: "T1",
+        resourceType: "Fetch",
+        request: sent(`${origin}/auth`).request,
+        authChallenge: { source: "Server", origin, scheme: "basic", realm: "website" }
+      }, { state, target: parent })
+      const obligation = [...state.obligations.values()].find((entry) =>
+        entry._tag === "PausedRequest" && entry.phase === "auth"
+      )!
+      yield* Obligations.resolve(state, obligation.id, decision)
+      return calls.filter((command) => command.method === "Fetch.continueWithAuth").at(-1)
+    })
+    assert.deepStrictEqual(yield* answer(), {
+      method: "Fetch.continueWithAuth",
+      params: {
+        requestId: "F1",
+        authChallengeResponse: { response: "ProvideCredentials", username: "user", password: Redacted.make("secret") }
+      }
+    }, "the first challenge gets the credentials though the worker's Network event hasn't come")
+    handlers.apply("Network.requestWillBeSent", sent(`${origin}/auth`), { state, target: worker })
+    assert.deepStrictEqual(yield* answer(), {
+      method: "Fetch.continueWithAuth",
+      params: { requestId: "F1", authChallengeResponse: { response: "CancelAuth" } }
+    }, "a repeat challenge is cancelled once the worker's request has had its attempt")
+    state.targets.set(worker.session, worker)
+    Targets.ended(state, worker.session, new Protocol.SessionEnded({ why: "targetDestroyed" }))
+    assert.isFalse(page.ended)
+    assert.isFalse(
+      state.credentialsAttempted.get(State.credentialsScope(parent))?.has("R1") ?? false,
+      "a destroyed worker cannot report loadingFinished or loadingFailed; its attempt must end with it"
+    )
     yield* state.buffer.flush
   }))
 
