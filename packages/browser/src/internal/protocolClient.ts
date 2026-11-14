@@ -81,7 +81,12 @@ export interface ErrorMatcher {
 
 /** The session lifecycle a backend's events announce, applied by the reader before the event is queued. */
 export interface Lifecycle {
-  readonly attached: (key: Protocol.SessionKey, parent: Protocol.SessionKey | undefined) => void
+  /** A session attached under `parent`, driving a target of `kind`, which its rejected commands then name. */
+  readonly attached: (
+    key: Protocol.SessionKey,
+    parent: Protocol.SessionKey | undefined,
+    kind?: string | undefined
+  ) => void
   readonly ended: (key: Protocol.SessionKey, why: Protocol.SessionEnded["why"]) => void
 }
 
@@ -266,6 +271,13 @@ export const match = (table: ReadonlyArray<ErrorMatcher>, error: WireError): Err
   return best
 }
 
+const targetKinds = new WeakMap<Protocol.ProtocolSession, string>()
+
+/** Records the kind of target a session drives (`page`, `iframe`, `worker`), which its rejected commands then name. */
+export const setTargetKind = (session: Protocol.ProtocolSession, kind: string): void => {
+  targetKinds.set(session, kind)
+}
+
 /**
  * Classifies an error reply with a table. A reply that no row matches is `Rejected{Unrecognized}`, never a
  * guess.
@@ -273,7 +285,8 @@ export const match = (table: ReadonlyArray<ErrorMatcher>, error: WireError): Err
 export const classify = (
   table: ReadonlyArray<ErrorMatcher>,
   method: string,
-  error: WireError
+  error: WireError,
+  target?: string | undefined
 ): Protocol.Rejected | Protocol.Unsupported | Protocol.SessionEnded => {
   const becomes: Classification = match(table, error)?.becomes ?? { _tag: "Rejected", reason: "Unrecognized" }
   switch (becomes._tag) {
@@ -282,7 +295,13 @@ export const classify = (
     case "SessionEnded":
       return new Protocol.SessionEnded({ why: becomes.why })
     case "Rejected":
-      return new Protocol.Rejected({ method, reason: becomes.reason, code: error.code, description: error.message })
+      return new Protocol.Rejected({
+        method,
+        reason: becomes.reason,
+        code: error.code,
+        description: error.message,
+        ...(target === undefined ? {} : { target })
+      })
   }
 }
 
@@ -754,10 +773,12 @@ export const make: (
   const root = makeSession(undefined, undefined)
 
   const lifecycle: Lifecycle = {
-    attached: (key, parentKey) => {
+    attached: (key, parentKey, kind) => {
       if (sessions.has(key)) return
       const parent = parentKey === undefined ? root : sessions.get(parentKey)
-      if (parent !== undefined && parent.endedWith === undefined) makeSession(key, parent)
+      if (parent === undefined || parent.endedWith !== undefined) return
+      const state = makeSession(key, parent)
+      if (kind !== undefined) setTargetKind(state.handle, kind)
     },
     ended: (key, why) => {
       const state = sessions.get(key)
@@ -792,7 +813,12 @@ export const make: (
         settle(entry, incoming._tag === "Reply" ? "success" : "failure")
         if (incoming._tag === "ErrorReply") {
           if (entry.late === undefined) {
-            Deferred.doneUnsafe(entry.reply, Effect.fail(failure(classify(wire.errors, entry.method, incoming.error))))
+            Deferred.doneUnsafe(
+              entry.reply,
+              Effect.fail(
+                failure(classify(wire.errors, entry.method, incoming.error, targetKinds.get(entry.session.handle)))
+              )
+            )
           }
           return
         }

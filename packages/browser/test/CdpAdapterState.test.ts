@@ -912,6 +912,49 @@ describe("CDP declaration release", () => {
   }
 })
 
+describe("CDP viewport on child targets", () => {
+  it.effect("sends the viewport, its measurement and its clear to the top-level page only", () =>
+    Effect.gen(function*() {
+      const { state, target, page } = yield* withPage()
+      const sent = { page: [] as Array<string>, iframe: [] as Array<string> }
+      const mockFor = (kind: "page" | "iframe") =>
+        ({
+          ...session,
+          key: kind,
+          subscribe: () => Effect.succeed(Stream.never),
+          send: (command: { readonly method: string }) => {
+            sent[kind].push(command.method)
+            if (kind === "iframe" && command.method.endsWith("DeviceMetricsOverride")) {
+              return Effect.fail(
+                new Protocol.ProtocolError({
+                  reason: new Protocol.Rejected({
+                    method: command.method,
+                    reason: "Unrecognized",
+                    code: -32000,
+                    description: "Command can only be executed on top-level targets"
+                  })
+                })
+              )
+            }
+            return Effect.succeed({ executionContextId: 1, result: { value: [780, 493] } })
+          }
+        }) as unknown as ProtocolClient.Session
+      const top = mockFor("page")
+      const child = mockFor("iframe")
+      state.targets.set(top, { ...target, session: top, page })
+      state.targets.set(child, { ...target, targetId: "T2", kind: "iframe", session: child, page })
+      yield* Effect.scoped(Declare.declare(state, { _tag: "Page", page: page.id }, {
+        _tag: "Override",
+        override: { _tag: "Viewport", width: 640, height: 480, deviceScaleFactor: 1, mobile: false }
+      }))
+      const viewportCommands = (methods: Array<string>) =>
+        methods.filter((method) => /DeviceMetricsOverride$|createIsolatedWorld$/.test(method))
+      assert.deepStrictEqual(viewportCommands(sent.iframe), [])
+      assert.include(sent.page, "Emulation.setDeviceMetricsOverride")
+      assert.include(sent.page, "Emulation.clearDeviceMetricsOverride")
+    }))
+})
+
 describe("CDP restoration cleanup", () => {
   for (const end of ["deadline", "session"] as const) {
     it.effect(`bounds absent-frame restoration after an expired operation and cleans up on ${end}`, () =>

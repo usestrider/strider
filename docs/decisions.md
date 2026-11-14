@@ -556,7 +556,11 @@ and replacement registrations retain those dimensions until the last override ha
 While an override remains, release reapplies the current effective override. Per-target serialization recomputes
 that effective override when the command runs, including when registrations are released out of order.
 
-Measure in the named `__strider_viewport` isolated world for the target's main frame (or its own frame for an iframe),
+The viewport is applied, measured and cleared on top-level page targets only. Chromium refuses the commands on an
+out-of-process iframe's target, whose size comes from its frame in the parent page, and an iframe waiting for the debugger
+resumes only after its setup, so a measurement there waits for a reply the paused renderer can't send.
+
+Measure in the named `__strider_viewport` isolated world for the target's main frame,
 passing the returned execution context id explicitly to `Runtime.evaluate`. Create or retrieve that world for each
 measurement rather than caching an execution context across navigation. Main-world lexical bindings and numeric
 or nonnumeric shadows must not supply the baseline. Missing, rejected, or nonfinite measurements do not prevent

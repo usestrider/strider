@@ -242,7 +242,8 @@ const loadMetrics = Effect.fn("loadMetrics")(function*(port: number, url: string
   for each command Strider sends.
 
 A raw command Chromium rejects fails with a `ProtocolError` whose reason, `Rejected`, has Chromium's `code` and
-`description`, and a `reason` read from them: `NoSuchTarget`, `NoSuchFrame`, `NoSuchNode`, `InvalidArgument`, or
+`description`, a `target` naming the kind of target it went to (`page`, `iframe`, `worker`, `service_worker`,
+`shared_worker`, or `other`; absent for a command sent to the browser's own session), and a `reason` read from them: `NoSuchTarget`, `NoSuchFrame`, `NoSuchNode`, `InvalidArgument`, or
 `Unrecognized` for any other. A command Strider sends fails its operation with
 [`BackendFailure`](/docs/errors#three-kinds-of-failure), the `ProtocolError` as its `cause`. A raw step can recover
 from a rejection it expects, such as a tab that closed before it attached:
