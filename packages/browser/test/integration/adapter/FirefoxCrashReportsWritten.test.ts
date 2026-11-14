@@ -5,6 +5,10 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, layer } from "@effect/vitest"
+import * as BrowsingContext from "@usestrider/browser/bidi-protocol/BrowsingContext"
+import * as Script from "@usestrider/browser/bidi-protocol/Script"
+import * as Session from "@usestrider/browser/bidi-protocol/Session"
+import { BidiConnection, Protocol } from "@usestrider/browser/protocol"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { execFileSync } from "node:child_process"
@@ -116,11 +120,17 @@ layer(services, { excludeTestServices: true })((it) => {
             (server) => Effect.promise(() => new Promise<void>((resolve) => server.close(() => resolve())))
           )
           const port = (server.address() as net.AddressInfo).port
-          const { launched } = yield* FirefoxLauncher.launch({
+          const { launched, transport } = yield* FirefoxLauncher.launch({
             executablePath: firefox.executable,
             args: [`http://127.0.0.1:${port}/`]
           })
           yield* Effect.promise(() => pageLoaded)
+          const bidi = yield* BidiConnection.make(transport)
+          const on = Protocol.on(bidi.session)
+          yield* Session.new_({ capabilities: {} }).pipe(on)
+          const { contexts } = yield* BrowsingContext.getTree({}).pipe(on)
+          const loadedContext = contexts.find((context) => context.url === `http://127.0.0.1:${port}/`)
+          assert.isDefined(loadedContext, "the page that reported load must be present")
           const profile = items.find(FirefoxCrashReports.isFirefox)?.profile
           assert.isDefined(profile, "the launch recorded no Firefox")
           const minidumps = path.join(profile!, "minidumps")
@@ -148,6 +158,19 @@ layer(services, { excludeTestServices: true })((it) => {
             id = complete(minidumps)
           }
           assert.isDefined(id, `no complete report in ${minidumps} (it holds: ${listing(minidumps)})`)
+          // The load callback establishes readiness only for this page's process, not every descendant.
+          const survivingPage = yield* Script.evaluate({
+            expression: "location.href",
+            target: { context: loadedContext!.context },
+            awaitPromise: false
+          }).pipe(on, Effect.option, Effect.timeoutOption("2 seconds"))
+          assert.isFalse(
+            survivingPage._tag === "Some" && survivingPage.value._tag === "Some" &&
+              survivingPage.value.value.type === "success" &&
+              survivingPage.value.value.result.type === "string" &&
+              survivingPage.value.value.result.value === `http://127.0.0.1:${port}/`,
+            "the aborted process did not host the page whose load established crash-handler readiness"
+          )
           return id!
         })).pipe(Effect.provideService(Ledger.CurrentLedger, ledger))
         // The browser has exited and its profile is gone: the report waits in the outbox
