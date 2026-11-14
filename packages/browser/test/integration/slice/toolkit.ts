@@ -679,7 +679,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               // Failures are data, with what to do
               const bad = yield* call(tools, "click", { page: "shop", target: "button" })
               assert.isTrue(bad.failed)
-              assert.strictEqual(bad.value.reason, "InvalidInput")
+              assert.strictEqual(bad.value.error, "InvalidInput")
               const stale = yield* call(tools, "click", { page: "p1", target: ref! })
               assert.isTrue(stale.failed)
               assert.include(stale.value.message, `the ref is from shop's snapshot`)
