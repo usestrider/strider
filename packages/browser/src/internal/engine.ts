@@ -1391,9 +1391,15 @@ export function engine(render: (root: SnapNode) => string) {
 
   const nameOfElementValue = (element: Element, context: NameContext): string => {
     if (context.visited.has(element)) return ""
-    context.visited.add(element)
-    // 2A: hidden, unless asked for or in a traversal from a hidden reference
-    if (!context.includeHidden && !context.hiddenReference && hiddenFromAccessibility(element)) return ""
+    // 2A: hidden, unless asked for or in a traversal from a hidden reference. A select's options have no box of
+    // their own, and still name it.
+    if (
+      !context.includeHidden && !context.hiddenReference && hiddenFromAccessibility(element) &&
+      !(element instanceof HTMLOptionElement && dom.closest(element, "select") !== null)
+    ) {
+      context.visited.add(element)
+      return ""
+    }
     // 2B: aria-labelledby, not followed twice
     if (!context.labelledBy) {
       const ids = (dom.getAttribute(element, "aria-labelledby") ?? "").split(/\s+/).filter((id) => id !== "")
@@ -1411,6 +1417,8 @@ export function engine(render: (root: SnapNode) => string) {
       const joined = parts.join(" ")
       if (joined.trim() !== "") return joined
     }
+    // Marked only now, so an element whose aria-labelledby names itself still reaches its own aria-label
+    context.visited.add(element)
     const role = roleOf(element)
     // 2E: an embedded control inside another element's name contributes its value
     if (context.embedded !== "self" && embeddedControlRole(role)) {
@@ -1455,8 +1463,8 @@ export function engine(render: (root: SnapNode) => string) {
         return content
       }
     }
-    // 2I: the tooltip, then a placeholder (HTML-AAM)
-    const title = dom.getAttribute(element, "title") ?? ""
+    // 2I: the tooltip, except on a presentational element, then a placeholder (HTML-AAM)
+    const title = role === "none" || role === "presentation" ? "" : dom.getAttribute(element, "title") ?? ""
     if (title.trim() !== "") return title
     const placeholder = dom.getAttribute(element, "placeholder") ?? ""
     if ((element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) && placeholder.trim() !== "") {
@@ -3480,7 +3488,7 @@ export function engine(render: (root: SnapNode) => string) {
     const out: Array<SnapNode> = []
     let pending = ""
     const flush = () => {
-      const text = collapse(pending)
+      const text = collapse(pending.replace(/[\u200b\u00ad]/g, ""))
       pending = ""
       if (text !== "") out.push(textNode(text))
     }
@@ -3497,13 +3505,18 @@ export function engine(render: (root: SnapNode) => string) {
       const shown = display === "contents" || dom.checkVisibility(node, { visibilityProperty: true })
       const made = shown ? elementNode(node, level, walk) : null
       if (made === null) {
+        if (shown) pending += cssContent(node, "::before") ?? ""
         for (const child of flatChildNodes(node)) visit(child, shown)
+        if (shown) pending += cssContent(node, "::after") ?? ""
         return
       }
       flush()
       out.push(made)
     }
+    // Pseudo-element content is part of the text, as it is of a name
+    if (parent instanceof Element) pending += cssContent(parent, "::before") ?? ""
     for (const child of flatChildNodes(parent)) visit(child, true)
+    if (parent instanceof Element) pending += cssContent(parent, "::after") ?? ""
     flush()
     return out
   }
@@ -3555,7 +3568,8 @@ export function engine(render: (root: SnapNode) => string) {
     // Text that only repeats the node's name isn't a node of its own
     if (
       name._tag !== "None" && children.length === 1 && children[0]!.role._tag === "Aria" &&
-      children[0]!.role.role === "text" && children[0]!.name._tag !== "None" && children[0]!.name.value === name.value
+      children[0]!.role.role === "text" && children[0]!.name._tag !== "None" &&
+      children[0]!.name.value === collapse(name.value)
     ) children = []
     return {
       ref: refFor(element),
