@@ -17,7 +17,8 @@
  *   `waitUntil: "load"`, and FR-026's `goto` to a fragment does too.
  * - FR-025 attaches `./assets/frame.html`, which is no vendored file. Playwright's test server answers it 404 as the
  *   fixture server does, and the test checks only the frame's URL, which is the same.
- * - FR-035's console refusal is `ConsoleMessage.next` filtered on the same text.
+ * - FR-035's console refusal is `ConsoleMessage.next` filtered on the same text. The original skips Firefox, so the
+ *   port runs on Chromium and WebKit only (the ledger marks Firefox).
  */
 import { assert } from "@effect/vitest"
 import { ConsoleMessage, PageNavigation } from "@usestrider/browser"
@@ -212,7 +213,7 @@ upstream(import.meta.filename, {}, (test) => {
       assert.isFalse(nodesOf(reattached).some((node) => node.id === firstId))
     }))
 
-  test("FR-035", ({ page, server }) =>
+  test("FR-035", { browsers: ["chromium", "webkit"] }, ({ page, server }) =>
     Effect.gen(function*() {
       server.setRoute("/x-frame-options-deny.html", (_request, response) => {
         response.setHeader("Content-Type", "text/html")

@@ -10,5 +10,11 @@
     "status": "needsFeature",
     "matrix": "option-browser-newcontext-baseurl",
     "reason": "A context's baseURL resolves a relative WebSocket route pattern (\"/ws\") against the page's origin; Strider's context options have no baseURL, so a relative pattern has no origin to resolve against"
+  },
+  {
+    "tests": ["WS-019"],
+    "browsers": ["firefox", "webkit"],
+    "status": "notApplicable",
+    "reason": "Tests a socket closing on a bad frame, which Firefox and WebKit on Linux don't do: the original skips it there"
   }
 ]

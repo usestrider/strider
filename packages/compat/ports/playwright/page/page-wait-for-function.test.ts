@@ -7,6 +7,8 @@
  *   `Condition` for the truthy value. The polling is Expect's, not the page's: it checks once, then again each
  *   `Expect.CheckInterval` (100 ms unless `Expect.withCheckInterval` sets it). It does not check on animation frames,
  *   which is `polling: 'raf'`, so the tests about that mode aren't ported (see the ledger).
+ * - A wait that spans navigations (WA-021) reads through `survivingNavigation`, which turns the end of the realm a
+ *   navigation destroyed into a read that holds nothing yet: the original's wait runs again in the next document.
  * - Expect returns nothing, where the original's wait resolves with the value its predicate returned. Where the
  *   original reads that handle (WA-014), the port reads the value instead: `holding` keeps the value the condition
  *   accepted, which is the value the wait ended on. WA-015's window and WA-016's element don't cross by value, so
@@ -32,7 +34,7 @@
  * - `detachFrame` is local to this port.
  */
 import { assert } from "@effect/vitest"
-import { Condition, ConsoleMessage, Deadline, Expect, Locator, Page } from "@usestrider/browser"
+import { Condition, ConsoleMessage, Deadline, Expect, Locator, Page, Target } from "@usestrider/browser"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
@@ -40,6 +42,20 @@ import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import { attachFrame, expectationFailure, failureOf, startWaiting } from "../../harness/playwright.ts"
 import { upstream } from "../../harness/upstream.ts"
+
+/**
+ * What a wait on a page predicate reads when a navigation destroys the realm it was evaluating in: nothing yet. The
+ * original's `waitForFunction` runs again in the next document, and `Expect.that` runs its read again at its interval,
+ * so the read ends in `undefined`, which holds nothing, where it would otherwise fail the wait with the realm's end.
+ * Any other failure of the read still ends the wait.
+ */
+const survivingNavigation = <A, E, R>(read: Effect.Effect<A, E, R>) =>
+  read.pipe(
+    Effect.catchIf(
+      (error: E) => Target.isTargetGone(error) && error.reason._tag === "RealmDestroyed",
+      () => Effect.succeed(undefined)
+    )
+  )
 
 /** Playwright's predicate returning a truthy value; the wait ends on the first observation that holds. */
 const holds = Condition.make("to be true", (value: unknown) => value === true)
@@ -302,7 +318,7 @@ upstream(import.meta.filename, {}, (test) => {
     Effect.gen(function*() {
       const waiting = yield* startWaiting(
         Expect.that(
-          page.evaluateInMainWorld(() => Boolean(Reflect.get(window, "__done"))),
+          survivingNavigation(page.evaluateInMainWorld(() => Boolean(Reflect.get(window, "__done")))),
           Condition.make("to be set", (value: unknown) => value === true)
         )
       )

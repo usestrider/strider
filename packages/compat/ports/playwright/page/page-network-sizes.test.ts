@@ -12,8 +12,7 @@
  *   counts, the header counts, and the transferred body are `None`, so the tests that read them are in the ledger for
  *   Chromium as `needsFeature` (matrix row `method-request-sizes`); Firefox's request counts are `None` too.
  * - A redirect's successor is `NetworkRequest.redirects`' `to`, where Playwright's `redirectedTo()` is the next request.
- * - A failed request's `sizes()` is a `RequestError` with a typed reason, where Playwright's rejects with its message;
- *   NE-066 asserts that the error is a `RequestError`.
+ * - A failed request's `sizes()` rejects in Playwright. Strider's succeeds with every count `None`, which NE-066 asserts.
  * - `page.evaluate` is `page.evaluateInMainWorld`, which runs the original's `fetch` in the page's main world.
  * - Playwright's `waitForRequest` and `waitForEvent` are the arming of a `NetworkRequest.next` or `NetworkResponse.next`
  *   before the action, which is how a Strider wait is started.
@@ -190,9 +189,13 @@ upstream(import.meta.filename, {}, (test) => {
       const request = yield* sent
       const failure = yield* NetworkRequest.failure(page, request)
       assert.isTrue(Option.isSome(failure), "the request has no failure")
-      // Playwright's `request.sizes()` rejects with "Unable to fetch sizes for failed request"; Strider's reason is typed
-      const error = yield* Effect.flip(NetworkRequest.sizes(page, request))
-      assert.strictEqual(error._tag, "RequestError")
+      // Playwright's `request.sizes()` rejects with "Unable to fetch sizes for failed request". Strider's `sizes` is an
+      // immediate snapshot whose counts are `None` where the browser gave none (a failed request finishes no body or
+      // transfer count), so it succeeds with every count unavailable and the test asserts that
+      const sizes = yield* NetworkRequest.sizes(page, request)
+      for (const [name, count] of Object.entries(sizes)) {
+        if (Option.isOption(count)) assert.isTrue(Option.isNone(count), `${name} is known for a failed request`)
+      }
     }))
 
   for (const statusCode of [200, 401, 404, 500]) {

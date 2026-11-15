@@ -128,6 +128,30 @@ const proxyServer = (target: number, options: { readonly removePrefix?: string |
         tunnel.on("error", () => socket.destroy())
         socket.on("error", () => tunnel.destroy())
       })
+      // A websocket the browser sends as a plain request (stock WebKit) arrives as an upgrade: it is forwarded to the target
+      // as the original's proxy does, and the connection is then a tunnel
+      server.on("upgrade", (request, socket, head) => {
+        requestUrls.push(request.url ?? "")
+        sockets.add(socket)
+        socket.on("close", () => sockets.delete(socket))
+        const url = new URL(request.url ?? "/")
+        const prefix = options.removePrefix
+        const pathname = prefix !== undefined && url.pathname.startsWith(prefix)
+          ? url.pathname.slice(prefix.length)
+          : url.pathname
+        const tunnel = net.connect(target, "127.0.0.1", () => {
+          const headers = request.rawHeaders.reduce((text, value, index) =>
+            index % 2 === 0 ? `${text}${value}: ` : `${text}${value}\r\n`, "")
+          tunnel.write(`${request.method} ${pathname}${url.search} HTTP/1.1\r\n${headers}\r\n`)
+          tunnel.write(head)
+          tunnel.pipe(socket)
+          socket.pipe(tunnel)
+        })
+        sockets.add(tunnel)
+        tunnel.on("close", () => sockets.delete(tunnel))
+        tunnel.on("error", () => socket.destroy())
+        socket.on("error", () => tunnel.destroy())
+      })
       server.listen(0, () => {
         const port = (server.address() as net.AddressInfo).port
         resume(Effect.succeed({

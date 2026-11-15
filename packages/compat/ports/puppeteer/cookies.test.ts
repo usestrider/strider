@@ -635,7 +635,7 @@ upstream(import.meta.filename, {}, (test) => {
         const promise = new Promise<void>((x) => fulfill = x)
         const iframe = document.createElement("iframe")
         document.body.appendChild(iframe)
-        iframe.onload = fulfill
+        iframe.onload = () => fulfill()
         iframe.src = src
         return promise
       }, server.CROSS_PROCESS_PREFIX)
@@ -683,7 +683,7 @@ upstream(import.meta.filename, {}, (test) => {
           const promise = new Promise<void>((x) => fulfill = x)
           const iframe = document.createElement("iframe")
           document.body.appendChild(iframe)
-          iframe.onload = fulfill
+          iframe.onload = () => fulfill()
           iframe.src = src
           return promise
         }, server.https.CROSS_PROCESS_PREFIX)

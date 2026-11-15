@@ -15,5 +15,15 @@
     "status": "needsFeature",
     "matrix": "method-frame-page",
     "reason": "`frame.page()` returns the page a frame belongs to. Strider's frame locators are entered from a page but carry no reference back to it, so there's no read that returns the page"
+  },
+  {
+    "tests": [
+      "FR-035"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "notApplicable",
+    "reason": "The original skips Firefox (`it.skip(browserName === 'firefox')`): Firefox words its refusal of a frame that sets `X-Frame-Options` differently, and the test looks for Chromium's and WebKit's text"
   }
 ]

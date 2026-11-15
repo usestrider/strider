@@ -74,5 +74,11 @@
     "status": "needsFeature",
     "matrix": "option-tracing-starthar-resourcesdir",
     "reason": "Writing a recording's bodies to a directory of their own, which Strider's attached zip doesn't offer"
+  },
+  {
+    "tests": ["HA-048"],
+    "browsers": ["webkit"],
+    "status": "notApplicable",
+    "reason": "Tests that favicon requests are left out of a HAR; stock WebKit requests no favicon, and the original skips WebKit for the same reason"
   }
 ]

@@ -13,6 +13,9 @@
  * - The "hidden" waits start after `setContent`, where the original starts them before it. With no element yet, Puppeteer's
  *   hidden wait is satisfied (`checkVisibility(null, false)` is true) as Strider's `toBeHidden` is, so the original's
  *   wait only stays pending because its first poll runs after `setContent`; the port makes that order explicit.
+ * - "should survive cross-process navigation" for `waitForFunction` reads through `survivingNavigation`, which turns the
+ *   end of the realm a navigation destroyed into a read that holds nothing yet: the original's wait runs again in the
+ *   next document.
  * - `Promise.race([promise, createTimeout(40)])` is `stillPending`: the original's fixed 40 ms wait, after which the wait
  *   must still be pending. It's ported as written, with the same check.
  * - A wait that returns a handle (`using handle = await page.waitForSelector(…)`) is a wait that returns nothing. The
@@ -54,7 +57,7 @@
  * - `addElement`, `addShadowHost`, and `addElementToShadowRoot` are the original's helpers, run in the page's main world.
  */
 import { assert } from "@effect/vitest"
-import { Condition, Deadline, Expect } from "@usestrider/browser"
+import { Condition, Deadline, Expect, Target } from "@usestrider/browser"
 import * as Cause from "effect/Cause"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -64,6 +67,20 @@ import * as Result from "effect/Result"
 import { attachFrame, defaultTimeout, expectationFailure, startWaiting } from "../harness/playwright.ts"
 import { detachFrame, html } from "../harness/puppeteer.ts"
 import { upstream } from "../harness/upstream.ts"
+
+/**
+ * What a wait on a page predicate reads when a navigation destroys the realm it was evaluating in: nothing yet.
+ * Puppeteer's `waitForFunction` runs again in the next document, and `Expect.that` runs its read again at its interval,
+ * so the read ends in `undefined`, which holds nothing, where it would otherwise fail the wait with the realm's end.
+ * Any other failure of the read still ends the wait.
+ */
+const survivingNavigation = <A, E, R>(read: Effect.Effect<A, E, R>) =>
+  read.pipe(
+    Effect.catchIf(
+      (error: E) => Target.isTargetGone(error) && error.reason._tag === "RealmDestroyed",
+      () => Effect.succeed(undefined)
+    )
+  )
 
 /** Puppeteer's predicate returning a truthy value; the wait ends on the first observation that holds. */
 const holds = Condition.make("to be true", (value: unknown) => value === true)
@@ -270,7 +287,7 @@ upstream(import.meta.filename, {}, (test) => {
   test("waittask specs Frame.waitForFunction should survive cross-process navigation", ({ page, server }) =>
     Effect.gen(function*() {
       const waiting = yield* startWaiting(
-        Expect.that(page.evaluateInMainWorld(() => Reflect.get(window, "__FOO") === 1), holds)
+        Expect.that(survivingNavigation(page.evaluateInMainWorld(() => Reflect.get(window, "__FOO") === 1)), holds)
       )
       yield* page.goto(server.EMPTY_PAGE)
       assert.isFalse(yield* waiting.done)

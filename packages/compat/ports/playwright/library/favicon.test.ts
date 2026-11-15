@@ -1,7 +1,9 @@
 /**
  * Playwright's `tests/library/favicon.spec.ts`: an SVG favicon that the page's `prefers-color-scheme` styles.
- * Headless Chromium doesn't request favicons, so the original skips it there; the port runs on Firefox and stock WebKit,
- * and the Chromium case is `notApplicable` in the ledger.
+ * Headless Chromium doesn't request favicons, so the original skips it there, and headed WebKit has no favicon feature,
+ * so it skips that too (`it.skip(!headless && browserName === 'webkit')`). Stock WebKit's MiniBrowser is always headed,
+ * under its Xvfb, and never requests the favicon, so the port runs on Firefox only; the Chromium case is
+ * `notApplicable` in the ledger.
  *
  * What the port changes:
  * - `server.setRoute(favicon, …)` serves the vendored SVG with its `image/svg+xml` type, as the original's `serveFile`.
@@ -19,7 +21,7 @@ import * as fs from "node:fs"
 import { assetPath } from "../../harness/playwright.ts"
 import { upstream } from "../../harness/upstream.ts"
 
-upstream(import.meta.filename, { browsers: ["firefox", "webkit"] }, (test) => {
+upstream(import.meta.filename, { browsers: ["firefox"] }, (test) => {
   test("FA-001", ({ page, server }) =>
     Effect.gen(function*() {
       // Browsers cache favicons, so the query busts the cache, as the original's does

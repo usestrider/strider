@@ -11,8 +11,9 @@
  *   that already exists, as defaultbrowsercontext-2 notes. `deviceScaleFactor` is a viewport's field, so DC-005 gives the
  *   original's default viewport, 1280×720, with it.
  * - DC-001 and DC-002 read a cookie's `sameSite` as Strider reads it. A cookie the page sets names no SameSite, which
- *   Strider reads as none, where the original expects Chromium's `Lax`, so DC-001 asserts `undefined`, as
- *   browsercontext-cookies' CO-002 does. DC-002's `addCookies` with `sameSite: 'Lax'` is `cookies.set` with `"lax"`.
+ *   Strider reads as none, where the original expects Chromium's `Lax`, so DC-001 asserts `undefined` on Chromium and
+ *   Firefox, as browsercontext-cookies' CO-002 does. Stock WebKit reports `Lax` for it, as the original expects of WebKit
+ *   on Linux, so DC-001 asserts `lax` there. DC-002's `addCookies` with `sameSite: 'Lax'` is `cookies.set` with `"lax"`.
  * - `context.cookies([])` is an empty list of URLs; the port reads the context's own list after the clear, which is what
  *   the original's `[]` expects: no cookie remains.
  * - `page.evaluate(…)` runs in the page's main world, so it's `page.evaluateInMainWorld`. `page.reload()` names
@@ -124,8 +125,9 @@ upstream(import.meta.filename, {}, (test) => {
             expires: -1,
             httpOnly: false,
             secure: false,
-            // The page's cookie names no SameSite, which Strider reads as none; the original expects Chromium's `Lax`
-            sameSite: undefined
+            // The page's cookie names no SameSite, which Strider reads as none on Chromium and Firefox. Stock WebKit
+            // reports `Lax` for it, which is what the original expects of WebKit on Linux
+            sameSite: browserName === "webkit" ? "lax" : undefined
           }])
         }))
     }))

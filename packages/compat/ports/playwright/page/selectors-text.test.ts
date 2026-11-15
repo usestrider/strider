@@ -33,7 +33,7 @@
  *   so the collapsed text is the same. `e.outerHTML` is `readHtml`. `e.id` is `readAttribute("id")`.
  * - `page.$eval` and `page.$` take the first match, which is `.first`; `page.$$eval` and `page.$$` take all matches,
  *   which are `all` or `count`. The strict reads (`readHtml`, `readText`, `readAttribute`) fail on several matches, as
- *   Playwright's `$eval` doesn't; SE-042 turns on that.
+ *   Playwright's `$eval` doesn't; SE-042 and SE-043 take `.first` for that, and fail on which span it is.
  * - The original's `page.$eval("input", …)` and DOM edits run in the main world: `page.evaluateInMainWorld`.
  * - SE-036 asserts nothing: its loop only runs each query, so each count here only runs the query.
  * - SE-032's `issue` annotation is reporting metadata, not a step, and is left out.
@@ -452,16 +452,17 @@ upstream(import.meta.filename, {}, (test) => {
         lightSpan.textContent = "Hello from light"
         div.appendChild(lightSpan)
       })
-      // `div >> text=Hello`: Playwright prefers the light span. Strider's chained step doesn't enter its scope's own shadow
-      // root, so the shadow span isn't a candidate and the light span is the only match: the test passes without
-      // exercising the preference.
-      assert.strictEqual(yield* page.locator("div").getByText("Hello").readText, "Hello from light")
+      // `div >> text=Hello`: `$eval` takes the first match, and Playwright prefers the light span. A chained step does
+      // search its scope's own shadow root, so both spans match, and `.first` is Strider's tree order, which puts the
+      // shadow root's content before the host's light children.
+      assert.strictEqual(yield* page.locator("div").getByText("Hello").first.readText, "Hello from light")
     }))
 
   test("SE-043", ({ page }) =>
     Effect.gen(function*() {
+      // `waitForSelector` takes the first match, as `$eval` does, so the wait is on `.first`
       const waiting = yield* startWaiting(
-        Expect.toBeVisible(page.locator("div").getByText("Hello")).pipe(expectDeadline)
+        Expect.toBeVisible(page.locator("div").getByText("Hello").first).pipe(expectDeadline)
       )
       yield* page.evaluateInMainWorld(() => {
         const div = document.createElement("div")
@@ -478,7 +479,7 @@ upstream(import.meta.filename, {}, (test) => {
         div.appendChild(lightSpan)
       })
       yield* Fiber.join(waiting.fiber)
-      assert.strictEqual(yield* page.locator("div").getByText("Hello").readText, "Hello from light")
+      assert.strictEqual(yield* page.locator("div").getByText("Hello").first.readText, "Hello from light")
     }))
 
   test("SE-044", ({ page }) =>

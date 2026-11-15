@@ -11,8 +11,9 @@
  *   expectations are the original's, with Strider's sameSite words.
  * - A cookie that names no SameSite is reported with none: Strider's API says a cookie that didn't say is read as no
  *   `sameSite`. The original expects Chromium's default, `Lax`, for such a cookie, so CO-002, CO-003, CO-008, and CO-017
- *   assert `undefined`, as browsercontext-route's RO-169 does. A cookie that `cookies.set` writes without a sameSite
- *   is `lax`, Strider's documented default, and CO-011 expects that for its cookies.
+ *   assert `undefined`, as browsercontext-route's RO-169 does, and `lax` on stock WebKit, which reports `Lax` for it. A
+ *   cookie that `cookies.set` writes without a sameSite is `lax`, Strider's documented default, and CO-011 expects that
+ *   for its cookies.
  * - `expires` is Strider's epoch milliseconds, where the original's are seconds: CO-004 and CO-015 give `expires` in
  *   milliseconds, and the reads are converted to seconds by `asPlaywright`. The rollover and negative cases of CO-015 take
  *   the same values the original does, in milliseconds.
@@ -90,13 +91,19 @@ const withoutExpires = ({ expires: _expires, ...rest }: PlaywrightCookie) => res
 const listForAll = (context: UserContext.UserContext, urls: ReadonlyArray<string>) =>
   Effect.map(Effect.forEach(urls, (url) => context.cookies.listFor(url)), (lists) => lists.flat())
 
+/**
+ * What a cookie that names no SameSite reads as: none, except on stock WebKit, whose inspector reports `Lax` for it, as
+ * Playwright's `defaultSameSiteCookieValue` does for WebKit on Linux.
+ */
+const unsetSameSite = (browserName: string) => browserName === "webkit" ? "lax" : undefined
+
 upstream(import.meta.filename, {}, (test) => {
   test("CO-001", ({ page }) =>
     Effect.gen(function*() {
       assert.deepStrictEqual(yield* page.context.cookies.list, [])
     }))
 
-  test("CO-002", ({ page, server }) =>
+  test("CO-002", ({ page, server, browserName }) =>
     Effect.gen(function*() {
       yield* page.goto(server.EMPTY_PAGE, { waitUntil: "load" })
       const documentCookie = yield* page.evaluateInMainWorld(() => {
@@ -113,11 +120,11 @@ upstream(import.meta.filename, {}, (test) => {
         httpOnly: false,
         secure: false,
         // The page's cookie names no SameSite, so Strider reads none; the original expects Chromium's default, `Lax`
-        sameSite: undefined
+        sameSite: unsetSameSite(browserName)
       }])
     }))
 
-  test("CO-003", ({ page, server }) =>
+  test("CO-003", ({ page, server, browserName }) =>
     Effect.gen(function*() {
       yield* page.goto(server.EMPTY_PAGE, { waitUntil: "load" })
       // @see https://en.wikipedia.org/wiki/Year_2038_problem
@@ -139,7 +146,7 @@ upstream(import.meta.filename, {}, (test) => {
         path: "/",
         httpOnly: false,
         secure: false,
-        sameSite: undefined
+        sameSite: unsetSameSite(browserName)
       })
       // Browsers start to cap cookies with 400 days max expires value.
       // See https://github.com/httpwg/http-extensions/pull/1732
@@ -214,7 +221,7 @@ upstream(import.meta.filename, {}, (test) => {
       assert.strictEqual(Option.getOrUndefined(cookies[0]!.sameSite), "lax")
     }))
 
-  test("CO-008", ({ page, server }) =>
+  test("CO-008", ({ page, server, browserName }) =>
     Effect.gen(function*() {
       yield* page.goto(server.EMPTY_PAGE, { waitUntil: "load" })
       const documentCookie = yield* page.evaluateInMainWorld(() => {
@@ -234,7 +241,7 @@ upstream(import.meta.filename, {}, (test) => {
           httpOnly: false,
           secure: false,
           // Cookies the page names no SameSite for read with none (see CO-002)
-          sameSite: undefined
+          sameSite: unsetSameSite(browserName)
         },
         {
           name: "username",
@@ -244,7 +251,7 @@ upstream(import.meta.filename, {}, (test) => {
           expires: -1,
           httpOnly: false,
           secure: false,
-          sameSite: undefined
+          sameSite: unsetSameSite(browserName)
         }
       ])
     }))
@@ -501,7 +508,7 @@ upstream(import.meta.filename, {}, (test) => {
       })
   )
 
-  test("CO-017", ({ page, server }) =>
+  test("CO-017", ({ page, server, browserName }) =>
     Effect.gen(function*() {
       server.setRoute("/foobar", (_req, res) => {
         res.setHeader("set-cookie", [
@@ -524,7 +531,7 @@ upstream(import.meta.filename, {}, (test) => {
         httpOnly: false,
         secure: false,
         // Read as none, as CO-002 explains
-        sameSite: undefined
+        sameSite: unsetSameSite(browserName)
       })
     }))
 

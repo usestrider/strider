@@ -57,10 +57,10 @@
  *   Firefox is BiDi, where the original's own condition (`!isBidi`) is false.
  * - HA-058 makes its requests from the page, as Strider has no APIRequestContext; a 600 MB HAR needs the heap and time
  *   that the original marks `it.slow()`.
- * - HA-048 runs on every browser. The original skips headless browsers other than Firefox, because Playwright's
+ * - HA-048 runs on Chromium and Firefox. The original skips headless browsers other than Firefox, because Playwright's
  *   headless Chromium and WebKit request no favicons, and headed WebKit, which has no favicon feature; the Chromium
- *   Strider launches does request them, and stock WebKit is not Playwright's. HA-024 is Playwright's deprecated
- *   `omitContent` flag.
+ *   Strider launches does request them. Stock WebKit requests no favicon, so the test would wait for one forever, as
+ *   the original's skip of WebKit says. HA-024 is Playwright's deprecated `omitContent` flag.
  */
 import { assert } from "@effect/vitest"
 import { Browser, Expect, Har, NetworkResponse, Page, PageNavigation, Popup, Route } from "@usestrider/browser"
@@ -295,7 +295,10 @@ upstream(import.meta.filename, {}, (test) => {
     Effect.scoped(Effect.gen(function*() {
       const directory = yield* scratch
       // A browser launched with a profile directory: Strider's `launchPersistentContext`. Its default context is the
-      // persistent one, controlled for the scope.
+      // persistent one, controlled for the scope. `launchPersistentContext` creates the directory it is given, and
+      // Strider's `userDataDir` is one the caller owns, which Firefox writes its preferences into at once.
+      const profile = path.join(directory, "profile")
+      fs.mkdirSync(profile)
       yield* Effect.gen(function*() {
         const browser = yield* Browser.Browser
         const context = yield* browser.defaultContext.control
@@ -307,7 +310,7 @@ upstream(import.meta.filename, {}, (test) => {
         const pageEntry = nth(log.pages!, 0)
         assert.isTrue(pageEntry.id.length > 0)
         assert.strictEqual(pageEntry.title, "Hello")
-      }).pipe(Effect.provide(backend(browserName, { [browserName]: { userDataDir: path.join(directory, "profile") } })))
+      }).pipe(Effect.provide(backend(browserName, { [browserName]: { userDataDir: profile } })))
     })))
 
   test("HA-005", ({ page, server }) =>
@@ -1028,7 +1031,9 @@ upstream(import.meta.filename, {}, (test) => {
       assert.strictEqual(nth(log.entries, 0).response.content.text, "<h1>Hello World</h1>")
     })))
 
-  test("HA-048", { page: false }, ({ server }) =>
+  // The original skips headed WebKit, which has no favicon feature; the stock WebKit Strider launches requests none, so
+  // the test would wait for a request that never comes.
+  test("HA-048", { page: false, browsers: ["chromium", "firefox"] }, ({ server }) =>
     Effect.scoped(Effect.gen(function*() {
       const directory = yield* scratch
       const context = yield* Browser.newContext()

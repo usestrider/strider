@@ -27,6 +27,8 @@
  *   intersection ratio, and requires a positive ratio even at zero, as Puppeteer's observer does. A `false` is the
  *   matcher's inverse (`inViewport: false`), which passes when the ratio is below the threshold. Each is a matcher that
  *   passes at once when its state holds, not a read, so a wrong state waits until the deadline and fails.
+ * - `page.$('circle')` and `page.$('svg')` in the svg test are the first match, `page.locator(…).first`: the fixture holds
+ *   two of each, and a locator's matcher needs exactly one.
  * - `Element.waitForSelector` on an element is a locator chained from the first element's locator, which re-resolves
  *   the inner match after `innerHTML` changes, as the original's wait does. Both waits start before the page changes,
  *   as the original's do.
@@ -310,8 +312,9 @@ upstream(import.meta.filename, {}, (test) => {
   test("ElementHandle specs ElementHandle.isIntersectingViewport should work with svg elements", ({ page, server }) =>
     Effect.gen(function*() {
       yield* page.goto(server.PREFIX + "/inline-svg.html", load)
-      const circle = page.locator("circle")
-      const svg = page.locator("svg")
+      // `page.$` is the first match, and the fixture has two circles and two svgs; a Strider locator is strict
+      const circle = page.locator("circle").first
+      const svg = page.locator("svg").first
       yield* circle.pipe(Expect.toBeInViewport({ ratio: 1 }))
       yield* circle.pipe(Expect.toBeInViewport({ ratio: 0 }))
       yield* svg.pipe(Expect.toBeInViewport({ ratio: 1 }))

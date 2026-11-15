@@ -24,7 +24,8 @@
  * - `expect.poll` is `Expect.that`; `expect(x).toEqual(y)` is `assert.deepStrictEqual`; `expect.stringMatching` is
  *   `assert.match`. `withResolvers` is a `Deferred`, and a listener Playwright attaches with `once` is a fiber started
  *   before the page sends.
- * - The original's skips for Firefox (WS-019) and WebKit (WS-018) aren't Strider's, so those tests run everywhere.
+ * - The original's skip of WS-018 on WebKit isn't Strider's, so that test runs everywhere. WS-019 is skipped on Firefox
+ *   and stock WebKit, as the original skips it for them: neither browser closes a socket on a bad frame.
  * - WS-040 reads the requested subprotocols on the server's side from the upgrade request the server received.
  *   Strider's `Server` reports the protocol the server chose, not the requested list.
  */
@@ -298,7 +299,8 @@ upstream(import.meta.filename, {}, (test) => {
 
     test(
       "WS-019",
-      { variant },
+      // The original skips Firefox, and WebKit on Linux, because those browsers don't close a socket on a bad frame.
+      { variant, browsers: ["chromium"] },
       ({ page, server, browserName }) =>
         Effect.gen(function*() {
           yield* setupMock(page, variant, browserName)

@@ -431,8 +431,9 @@ upstream(import.meta.filename, {}, (test) => {
         if (browserName === "firefox") {
           // Firefox navigates to an error page, and this navigation might conflict with the next navigation we do in test.
           // So the navigation is subscribed before the `goto`, and both are waited for.
+          // A failed navigation is a failure of `next` too (PageNavigation's contract), so its outcome is read, not raised
           const navigated = yield* PageNavigation.next(page)
-          const [outcome] = yield* Effect.all([Effect.result(page.goto(server.EMPTY_PAGE)), navigated], {
+          const [outcome] = yield* Effect.all([Effect.result(page.goto(server.EMPTY_PAGE)), Effect.result(navigated)], {
             concurrency: "unbounded"
           })
           return outcome

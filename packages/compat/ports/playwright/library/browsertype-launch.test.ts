@@ -15,7 +15,8 @@
  *   BT-015 make those in scopes the test doesn't end, so it's the browser's close that ends them, and the reason is
  *   `BrowserClosed`.
  * - BT-010's dummy executable is the vendored script, copied to a directory the test makes and removes, with its
- *   executable bit set: the vendoring tool keeps a file's content, not its mode.
+ *   executable bit set: the vendoring tool keeps a file's content, not its mode. Strider launches stock WebKit only from
+ *   an executable named `MiniBrowser`, so on WebKit the copy takes that name and still exits at once.
  * - BT-014 passes Node's `process` object among the options, as the original does. Strider's options are plain data, so
  *   the cast is there only for that object.
  */
@@ -72,7 +73,11 @@ upstream(import.meta.filename, {}, (test) => {
     Effect.gen(function*() {
       const directory = fs.mkdtempSync(path.join(os.tmpdir(), "compat-bt-010-"))
       try {
-        const executable = path.join(directory, "dummy_bad_browser_executable.js")
+        // Strider launches WebKit only from an executable named `MiniBrowser`, so the dummy takes that name there
+        const executable = path.join(
+          directory,
+          browserName === "webkit" ? "MiniBrowser" : "dummy_bad_browser_executable.js"
+        )
         fs.copyFileSync(assetPath("playwright", "dummy_bad_browser_executable.js"), executable)
         fs.chmodSync(executable, 0o755)
         const error = yield* launchFailure(

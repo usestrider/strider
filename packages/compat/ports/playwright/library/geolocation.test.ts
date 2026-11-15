@@ -62,7 +62,8 @@ upstream(import.meta.filename, {}, (test) => {
       )
       // The browser refuses the position, and `emulate` reports the refusal instead of applying it
       assert(Declaration.isDeclarationError(failure), String(failure))
-      assert.include(failure.message, "geolocation")
+      // Chromium's message names the geolocation; Firefox's names the longitude field it refused
+      assert.match(failure.message, /geolocation|longitude/i)
     }))
 
   test("GE-003", ({ page, server }) =>
