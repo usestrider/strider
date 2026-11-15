@@ -2459,6 +2459,36 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
       )
 
       it.effect(
+        "clicks a pointer-events none target across a shadow root through its button",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<button onclick="out.textContent='clicked'"><span id="host" style="pointer-events:none"></span></button><output id="out"></output><script>host.attachShadow({mode:'open'}).innerHTML='<span id="inner" style="pointer-events:none">Click target</span>'</script>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.locator("#inner").click().pipe(Deadline.within("1 second"))
+            assert.strictEqual(yield* page.locator("#out").readText, "clicked")
+          })),
+        timeout
+      )
+
+      it.effect(
+        "clicks a pointer-events none slotted target through its enclosing link",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<span id="host"><span id="inner" style="pointer-events:none">Click target</span></span><output id="out"></output><script>host.attachShadow({mode:'open'}).innerHTML='<a href="#"><slot></slot></a>';host.shadowRoot.querySelector('a').onclick=()=>out.textContent='clicked'</script>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.locator("#inner").click().pipe(Deadline.within("1 second"))
+            assert.strictEqual(yield* page.locator("#out").readText, "clicked")
+          })),
+        timeout
+      )
+
+      it.effect(
         "rechecks a modal created by a fill focus callback before writing",
         () =>
           Effect.scoped(Effect.gen(function*() {
