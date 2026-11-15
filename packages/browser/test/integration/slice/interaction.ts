@@ -6512,6 +6512,23 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           timeout
         )
 
+        it.effect(
+          "reaches a frame inside a declarative shadow root through a frame locator",
+          () =>
+            Effect.scoped(Effect.gen(function*() {
+              const { origin } = yield* site
+              const page = yield* newPage
+              yield* page.goto(fixtureUrl(
+                origin,
+                `<section><template shadowrootmode="open"><iframe src="${
+                  fixtureUrl(origin, "<div>hello from iframe</div>")
+                }"></iframe></template></section>`
+              ))
+              yield* page.frame(page.locator("iframe")).locator("div").pipe(Expect.toHaveText("hello from iframe"))
+            })),
+          timeout
+        )
+
         it.effect("inserts a newline as a line break and submits no form", () =>
           Effect.scoped(Effect.gen(function*() {
             const { url } = yield* fixture(() =>
