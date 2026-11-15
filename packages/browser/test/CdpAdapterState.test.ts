@@ -1334,6 +1334,28 @@ describe("CDP restoration cleanup", () => {
       assert.isBelow(tags.indexOf("DownloadEnded"), tags.indexOf("UserContextRemoved"))
     })))
 
+  it.effect("does not retain detached frames of an externally discovered context", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { state, page, target } = yield* withPage()
+      state.contexts.get(state.defaultContext)!.browserContextId = "default"
+      const context = Tree.contextFor(state, "external")
+      assert.isFalse(context.isDefault)
+      ;(page as { context: State.ContextEntry }).context = context
+      const parent = state.frames.get("T1")!
+      for (const frameId of ["external-child-1", "external-child-2"]) {
+        const child = Tree.addFrame(state, frameId, parent, target)
+        Tree.removeFrame(state, child, new Target.FrameDetached({}), "external page removed its iframe")
+      }
+      yield* state.buffer.flush
+      assert.strictEqual(state.frames.size, 1, "only the live main frame remains")
+      assert.strictEqual(
+        state.retiredFrames.size,
+        0,
+        "an external context has no owned removal to release this history"
+      )
+      assert.strictEqual(context.retiredFrames?.size ?? 0, 0)
+    })))
+
   for (const closedPage of [false, true]) {
     it.effect(`waits for a download reported after its ${closedPage ? "page closed" : "frame detached"}, before disposal`, () =>
       Effect.scoped(Effect.gen(function*() {
