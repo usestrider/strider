@@ -1419,8 +1419,9 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
   }
 
   /**
-   * A pointer action: the checks, then under the permit the point, a guard armed on the element, the gesture,
-   * and the guard asked whether it stopped the gesture, in which case the action checks again.
+   * A pointer action: the checks, then under the permit the point, a guard armed on the element when the
+   * receivesPointer check is on, the gesture, and the guard asked whether it stopped the gesture, in which case the
+   * action checks again.
    */
   private pointer(
     operation: string,
