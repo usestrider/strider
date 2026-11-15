@@ -370,28 +370,72 @@ const kindsFor = (page: PageEntry, overrides: ReadonlyMap<Adapter.Override["_tag
   return kinds
 }
 
+/** The browser window that holds a page target, read once and kept. */
+const windowOf = (state: State, target: TargetEntry) =>
+  target.windowId !== undefined
+    ? Effect.succeed(target.windowId)
+    : BrowserCdp.getWindowForTarget({ targetId: target.targetId as Target.TargetID }).pipe(
+      Protocol.on(state.root()),
+      Effect.map(({ windowId }) => {
+        target.windowId = windowId
+        return windowId
+      })
+    )
+
+type Dimensions = { readonly width: number; readonly height: number }
+
 /**
- * A popup's own dimensions, when its gate can't measure them. Chromium starts a tab's renderer at its opener's
- * size, which is the opener's override while the opener emulates a viewport, until the tab is laid out in its
- * window. A popup that opens as a tab of its opener's window, as one a `target=_blank` link opens does, has the
- * opener's own size, so it takes the opener's recorded one. Undefined means the gate's measurement holds: the page
- * has no emulated opener, or it opened in a window of its own, which is laid out at its own size before its gate.
- * Null means the windows couldn't be compared, so the size is unknown.
+ * Where a popup's original dimensions come from, decided at its gate. Chromium starts a tab's renderer at its
+ * opener's size, which is the opener's override while the opener emulates a viewport, and lays it out at its
+ * window's size only once the override is cleared, so a tab's gate measures the size it inherited. A window that
+ * `window.open` opens as a popup is laid out at its own size before its gate, and holds no other page.
+ *
+ * - A popup that shares its window with another page of its context is a tab, so it takes that page's recorded
+ *   dimensions, or none (null) if no page there has any.
+ * - A popup alone in its window keeps its gate's measurement, unless it equals the size it would have inherited:
+ *   its opener's viewport override when the opener is tracked, or else its own. A tab that opened alone in a new
+ *   window measures that, so its dimensions are unknown (null), as they are when its window can't be read.
+ * - A page with no opener keeps its gate's measurement.
  */
-const openerBaseline = Effect.fnUntraced(function*(state: State, target: TargetEntry, page: PageEntry) {
-  const opener = page.opener
-  if (opener === undefined || opener.viewport === undefined) return undefined
-  const windows = yield* Effect.all(
-    [target.targetId, opener.targetId].map((targetId) =>
-      BrowserCdp.getWindowForTarget({ targetId: targetId as Target.TargetID }).pipe(
-        Protocol.on(state.root()),
-        Effect.map(({ windowId }) => windowId)
-      )
-    ),
+const popupBaseline = Effect.fnUntraced(function*(
+  state: State,
+  target: TargetEntry,
+  page: PageEntry,
+  override: Dimensions
+): Effect.fn.Return<
+  { readonly _tag: "Recorded"; readonly viewport: Dimensions | null } | {
+    readonly _tag: "Measured"
+    readonly inherited: Dimensions | undefined
+  }
+> {
+  if (page.openerId === undefined) return { _tag: "Measured", inherited: undefined }
+  const own = yield* windowOf(state, target).pipe(Effect.option)
+  if (Option.isNone(own)) return { _tag: "Recorded", viewport: null }
+  const others = [...state.targets.values()].filter((other) =>
+    other !== target && other.kind === "page" && !other.ended && other.page !== undefined &&
+    other.page.context === page.context
+  )
+  // A page whose window can't be read, as one that has just closed, is left out
+  const windows = yield* Effect.forEach(
+    others,
+    (other) => windowOf(state, other).pipe(Effect.option),
     { concurrency: "unbounded" }
-  ).pipe(Effect.option)
-  if (Option.isNone(windows)) return null
-  return windows.value[0] === windows.value[1] ? opener.viewport : undefined
+  )
+  const mates = others.filter((_, index) => {
+    const window = windows[index]!
+    return Option.isSome(window) && window.value === own.value
+  })
+  if (mates.length > 0) {
+    const recorded = mates.find((mate) => mate.viewport !== undefined && mate.viewport !== null)?.viewport
+    return { _tag: "Recorded", viewport: recorded ?? null }
+  }
+  const opener = state.targetsById.get(page.openerId)?.page
+  if (opener === undefined) return { _tag: "Measured", inherited: override }
+  const inherited = state.registry.overrides(placement(opener)).get("Viewport")
+  return {
+    _tag: "Measured",
+    inherited: inherited?._tag === "Viewport" ? { width: inherited.width, height: inherited.height } : undefined
+  }
 })
 
 /** What a new page or frame gets before its scripts run: the declarations in force for its page. */
@@ -438,14 +482,19 @@ export const configureTarget = Effect.fnUntraced(
           if (override?._tag !== "Viewport") {
             return
           }
-          const inherited = yield* openerBaseline(state, target, page)
-          if (inherited !== undefined) {
-            target.viewport = inherited
+          const baseline = yield* popupBaseline(state, target, page, override)
+          if (baseline._tag === "Recorded") {
+            target.viewport = baseline.viewport
           } else {
+            const inherited = baseline.inherited
             // The initial blank document has no scrollbars. Queue its dimensions before changing them, without
             // creating an isolated world whose identifier would require a renderer reply before resume.
             yield* setup.send(Page.getLayoutMetrics(), ({ cssLayoutViewport }) => {
-              target.viewport = { width: cssLayoutViewport.clientWidth, height: cssLayoutViewport.clientHeight }
+              const width = cssLayoutViewport.clientWidth
+              const height = cssLayoutViewport.clientHeight
+              target.viewport = inherited !== undefined && inherited.width === width && inherited.height === height
+                ? null
+                : { width, height }
             })
           }
           yield* setup.send(Emulation.setDeviceMetricsOverride({

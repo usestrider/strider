@@ -572,16 +572,22 @@ The viewport is applied, measured and cleared on top-level page targets only. Ch
 out-of-process iframe's target, whose size comes from its frame in the parent page, and an iframe waiting for the debugger
 resumes only after its setup, so a measurement there waits for a reply the paused renderer can't send.
 
-A popup that opens as a tab of its opener's window, as a `target=_blank` link's does, takes its opener's recorded
-dimensions instead of measuring its own. Chromium starts such a tab's renderer at its opener's current size, which
-is the override while the opener emulates a viewport, and lays it out at the window's size only once the override
-is cleared, so its gate's measurement is the override and its restore would wait for a size it never returns to.
-The windows are compared with `Browser.getWindowForTarget` while the popup waits for the debugger, a reply from the
-browser process alone. A popup in a window of its own, as `window.open` with window features opens, is laid out at
-that window's size before its gate and keeps its own measurement; if the windows can't be compared, its baseline is
-unknown. Rejected: taking the size after the clear as the baseline, which would confirm without the renderer having
-taken the original size, and skipping a removed context's restore, which would leave a released `context.emulate`
-waiting on the same popup.
+A page with an opener takes its original dimensions from the window it opens in, read with
+`Browser.getWindowForTarget` while it waits for the debugger, a reply from the browser process alone, and kept for
+each page. Chromium starts a tab's renderer at its opener's size, which is the override while the opener emulates a
+viewport, and lays it out at its window's size only once the override is cleared, so a tab's gate measures the size
+it inherited, and its restore would wait for a size it never returns to. A window that `window.open` opens as a
+popup holds no tabs and is laid out at its own size before its gate. So a page that shares its window with another
+page of its context is a tab, and takes that page's recorded dimensions, or none if no page there has any. A page
+alone in its window keeps its gate's measurement unless it equals the size it would have inherited: its opener's
+viewport override when the opener is tracked, or else its own. A tab that opened alone in a new window, as one a
+popup window's `target=_blank` link opens once its opener's window has closed, measures that, so its dimensions are
+unknown, as they are when its window can't be read. Rejected: taking the size after the clear as the baseline, which
+would confirm without the renderer having taken the original size; treating every popup's dimensions as unknown
+unless another page shares its window, which would leave a `window.open` popup window, such as a sign-in flow's,
+unverified though it measures its own size; reading the window's type from `Page.windowOpen`'s features, which
+aren't tied to the target they open; and skipping a removed context's restore, which would leave a released
+`context.emulate` waiting on the same popup.
 
 Measure in the named `__strider_viewport` isolated world for the target's main frame,
 passing the returned execution context id explicitly to `Runtime.evaluate`. Create or retrieve that world for each
