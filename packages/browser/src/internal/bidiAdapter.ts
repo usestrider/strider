@@ -21,6 +21,7 @@
 import * as Effect from "effect/Effect"
 import type * as Scope from "effect/Scope"
 import * as SubscriptionRef from "effect/SubscriptionRef"
+import * as BidiBrowser from "../bidi-protocol/Browser.ts"
 import * as BrowsingContext from "../bidi-protocol/BrowsingContext.ts"
 import * as Session from "../bidi-protocol/Session.ts"
 import * as Browser from "../Browser.ts"
@@ -237,6 +238,12 @@ export interface ConnectOptions extends Adapter.ConnectOptions {
    * @default "new"
    */
   readonly session?: "new" | "existing" | undefined
+  /**
+   * The launched process's exit. With it, a launched browser's connection closes the browser with
+   * `browser.close` as its scope closes, and waits for the exit, so the browser writes its profile before anything
+   * signals it.
+   */
+  readonly exited?: Effect.Effect<unknown, unknown> | undefined
 }
 
 // ── The fold ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -366,6 +373,12 @@ export const connect: (
       state.adopting = false
     })
     const capabilitySet = yield* SubscriptionRef.make(capabilities(info, options.ownership))
+    // Registered once connected, and last, so it runs first: `browser.close` ends the session itself, so it comes
+    // before `session.end`, and the connection stays open until the process exits
+    if (options.ownership === "launched" && options.exited !== undefined) {
+      const exited = options.exited
+      yield* Effect.addFinalizer(() => Launch.closeGracefully("Firefox.close", BidiBrowser.close().pipe(on), exited))
+    }
 
     return {
       ownership: options.ownership,
