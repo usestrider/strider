@@ -318,6 +318,45 @@ export const declarations = (
           )
         }), timeout)
 
+      it.effect("releases a context's viewport after a popup in its own window opens a tab", () =>
+        Effect.gen(function*() {
+          if (!(yield* supports("emulation.viewport")) || !(yield* supports("popups.opener"))) {
+            return
+          }
+          const { origin } = yield* site
+          const { warnings } = yield* withWarnings(Effect.scoped(Effect.gen(function*() {
+            const context = yield* Browser.newContext()
+            const page = yield* context.newPage
+            const declared = yield* context.emulate({ viewport: { width: 640, height: 480 } })
+            const target = fixtureUrl(origin, "<h1>Popup</h1>")
+            yield* page.goto(fixtureUrl(
+              origin,
+              `<button onclick="window.open('${target}', '_blank', 'width=400,height=300')">Open popup</button>`
+            ))
+            const opened = yield* Popup.next(page)
+            yield* page.getByRole("button", { name: "Open popup" }).click()
+            const popup = yield* opened
+            yield* popup.getByRole("heading").pipe(Expect.toHaveText("Popup"))
+            assert.deepStrictEqual(yield* size(popup), [640, 480])
+            const nested = yield* openPopup(popup, origin)
+            assert.deepStrictEqual(yield* size(nested), [640, 480])
+            const started = Date.now()
+            yield* declared.remove
+            const elapsed = Date.now() - started
+            assert.isBelow(elapsed, 5_000, `the viewport's release took ${elapsed} ms`)
+            assert.deepStrictEqual(yield* popup.viewportSize, Option.none())
+            assert.deepStrictEqual(yield* nested.viewportSize, Option.none())
+            assert.notDeepEqual(yield* size(popup), [640, 480])
+            assert.notDeepEqual(yield* size(nested), [640, 480])
+          })))
+          assert.deepStrictEqual(
+            warnings.filter((warning) =>
+              warning.includes("Failed to release") || warning.includes("could not be verified")
+            ),
+            []
+          )
+        }), timeout)
+
       // ── Routes ──
 
       it.effect("applies and releases a route immediately before navigation on a live page", () =>
