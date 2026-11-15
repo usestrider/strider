@@ -484,6 +484,14 @@ export const contents = (
             "second",
             "third"
           ])
+          yield* page.evaluateInMainWorld(() => {
+            for (let i = 0; i <= 300; i++) console.log(`message${i}`)
+          })
+          const history = yield* ConsoleMessage.history(page)
+          assert.deepStrictEqual(
+            history.entries.map((entry) => entry.text),
+            Array.from({ length: 301 }, (_, i) => `message${i}`).slice(-100)
+          )
         }), timeout)
 
       it.effect("setContent settles when the page silences console.debug", () =>
