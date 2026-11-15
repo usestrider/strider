@@ -1293,8 +1293,11 @@ scaled to fit, centred, and padded black. The writer owns pixel fitting because 
 that policy, timestamps, acknowledgements, and lifetimes. `layerFfmpeg`'s quality is fixed rather than an option: constrained-quality VP8 (CRF 8, quantizer 0 to 50, a 4 Mbit/s average target that bursts allow exceeding) in real-time mode with `-cpu-used 8` keeps small text legible at desktop size, where libvpx's 256 kbit/s default does not; Chromium's screencast asks for JPEG quality 90, which also enlarges native trace frames. An option is rejected for now because a caller with another trade-off can provide a `VideoWriter`, and adding one later is additive. Reusable writer conformance checks decode changing and odd-sized
 inputs to verify output dimensions and padding. Its file lives in the context's downloads directory on Chromium,
 or the explicitly named output directory on WebKit. Scope closure
-or normal source termination ends input and allows five seconds on the browser clock to finish a started writer,
-even while the caller scope stays open. An empty recording fails promptly without starting a writer; source failures
+or normal source termination ends input and allows `Deadline.DefaultBudget`, as read when the capability is
+acquired, on the browser clock to finish a started writer, even while the caller scope stays open. The finish stays
+bounded because scope close waits for the writer; a fixed five seconds is rejected because what is left to encode
+at the end depends on the machine's load, not on Strider, and a limit only while input is read is rejected because
+the writer's progress after input ends is not visible. An empty recording fails promptly without starting a writer; source failures
 retain their errors. A failed or unfinished writer fails
 `file` with `BackendFailure`. Native traces select video when available. Rejected: adding the writer to the
 capability's requirement channel, which would require Firefox callers to provide an unused service; naming the
