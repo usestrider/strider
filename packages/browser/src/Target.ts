@@ -399,7 +399,8 @@ export class Vanished extends Schema.Error<Vanished>("@usestrider/browser/Target
  * **Details**
  *
  * - Browser-wide: `BrowserClosed`, `BrowserCrashed`, `ConnectionLost`, `ModelUnavailable` (Strider lost track
- *   of the browser's state).
+ *   of the browser's state). A context or page still held when its browser's scope closes ends with
+ *   `BrowserClosed`.
  * - Context and access: `UserContextRemoved`, `AccessReleased`.
  * - Pages and frames: `PageClosed` (with what closed it), `PageCrashed`, `FrameDetached`.
  * - Dialogs, file choosers, paused requests, downloads, and request hops: `ObligationEnded` (a dialog, file chooser,

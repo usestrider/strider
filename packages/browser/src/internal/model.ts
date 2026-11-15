@@ -29,7 +29,7 @@ import type * as NetworkRequest from "../NetworkRequest.ts"
 import type * as NetworkResponse from "../NetworkResponse.ts"
 import type * as Page from "../Page.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
-import type * as Target from "../Target.ts"
+import * as Target from "../Target.ts"
 import type * as UncaughtException from "../UncaughtException.ts"
 import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
@@ -479,6 +479,9 @@ export const make = Effect.fnUntraced(function*() {
   const modelScope = yield* Effect.scope
   const ownership = yield* Ownership.make()
   const fold = yield* Fold.make({ release: ownership.release })
+  // Runs after the browser's own finalizers, which close it, and after the watcher of its connection is gone: what
+  // is still open, such as a context or page held past the browser's scope, ends with the browser
+  yield* Effect.addFinalizer(() => fold.loseConnection(new Target.BrowserClosed({})))
   yield* Obligations.run({ fold, connected: ownership.connected }).pipe(Effect.forkIn(modelScope))
 
   /** Gives the model its adapter, once connected, and folds the connection's loss when it comes. */
@@ -486,7 +489,10 @@ export const make = Effect.fnUntraced(function*() {
     Effect.gen(function*() {
       const bounded = BoundedAdapter.make(connected)
       yield* ownership.attach(connected, bounded.claims)
-      yield* connected.closed.pipe(Effect.andThen(fold.loseConnection), Effect.forkScoped)
+      yield* connected.closed.pipe(
+        Effect.andThen(fold.loseConnection(new Target.ConnectionLost({}))),
+        Effect.forkScoped
+      )
       const release = (page: Target.NavigableId, by?: Scope.Scope) =>
         Effect.suspend(() => {
           const entry = fold.page(page)

@@ -94,7 +94,7 @@ Browser-reported URLs that cannot be parsed become `about:blank` rather than end
 | `ObligationOpened` for a file chooser | a `FileChooser` event on its page; who decides it, chosen now: the page's latest handler or else cancel, reported as an `AutoResolution` (§5) |
 | `ObligationOpened` for a paused request | who decides it, chosen now: the routes that match it, the page's then the context's, the most recent first, or else continue (§6) |
 
-A page is open from its first commit: `createPage` replies once the page is ready, so `PageReady` adds nothing yet. Connection loss ends everything with `ConnectionLost`. Frames' documents are folded too: each frame's parent and current document, which a frame locator resolves in, and `page.frames` shows.
+A page is open from its first commit: `createPage` replies once the page is ready, so `PageReady` adds nothing yet. Connection loss ends everything with `ConnectionLost`, and the browser's scope closing ends whatever is still open, such as a context or page held past that scope, with `BrowserClosed`, once the browser has closed. Frames' documents are folded too: each frame's parent and current document, which a frame locator resolves in, and `page.frames` shows.
 
 ```ts
 // ── Containment ────────────────────────────────────────────
