@@ -143,21 +143,45 @@ export const removeUserContext = Effect.fnUntraced(function*(state: State, id: U
     if (context.disposed) return
     context.removing = true
     const inContext = [...state.pages.values()].filter((page) => page.context === context)
-    yield* Kit.protocol(
-      Target.disposeBrowserContext({ browserContextId: browserContextId as BrowserCdp.BrowserContextID }).pipe(
-        Protocol.on(state.root())
+    const behavior = state.registry.downloads(context.id)
+    const allowed = Option.isSome(behavior) && behavior.value._tag === "Allow"
+    yield* Effect.gen(function*() {
+      // Chromium starts a download during the disposal that it can't tie to a frame, and so to this context, any
+      // more; denied, none starts. A refused disposal applies the declarations' behavior again
+      if (allowed && inContext.length > 0) {
+        yield* Kit.protocol(
+          BrowserCdp.setDownloadBehavior({
+            behavior: "deny",
+            browserContextId: browserContextId as BrowserCdp.BrowserContextID,
+            eventsEnabled: true
+          }).pipe(Protocol.on(state.root()))
+        )
+      }
+      yield* Kit.protocol(
+        Target.disposeBrowserContext({ browserContextId: browserContextId as BrowserCdp.BrowserContextID }).pipe(
+          Protocol.on(state.root())
+        )
       )
-    ).pipe(Effect.onExit((exit) =>
+    }).pipe(Effect.onExit((exit) =>
       Effect.sync(() => {
         if (Exit.isFailure(exit)) context.removing = false
       })
     ))
     context.disposed = true
     context.requestSizes?.clear()
-    // Chromium may answer before its pages' sessions end. The context ends after they have, which L1 waits for under
-    // a budget of its own (`Model.remove`); they end with the connection at the latest
+    // Chromium may answer before its pages' sessions end, and before it cancels the context's downloads, which it
+    // reports after the reply, a download that was completing having moved its file into the context's directory
+    // meanwhile. The context ends after both, which L1 waits for under a budget of its own (`Model.remove`), before
+    // it removes that directory; they end with the connection at the latest
     state.buffer.start(Effect.gen(function*() {
-      yield* Effect.forEach(inContext, (page) => page.target.session.ended, { discard: true })
+      let downloads: Array<DownloadEntry> = []
+      yield* state.buffer.run(() => {
+        downloads = [...state.downloads.values()].filter((download) => download.context === context && !download.ended)
+      })
+      yield* Effect.all([
+        Effect.forEach(inContext, (page) => page.target.session.ended, { discard: true }),
+        state.buffer.waitFor(() => downloads.every((download) => download.ended) ? true : undefined)
+      ], { concurrency: "unbounded", discard: true })
       context.proxy = undefined
       state.contexts.delete(id)
       state.contextsByCdp.delete(browserContextId)
