@@ -94,13 +94,11 @@ const refused = Effect.fnUntraced(function*(
  * A site of its own whose `/file` is a download: the whole body at once (`hold: false`), or its headers and a first
  * part, holding the rest open until the site closes (`hold: true`).
  */
-let TEMP_onFile: (() => void) | undefined
 const downloadSite = (hold: boolean) =>
   Effect.acquireRelease(
     Effect.callback<{ server: http.Server; origin: string }>((resume) => {
       const server = http.createServer((request, response) => {
         if (!request.url?.startsWith("/file")) return html(response)
-        TEMP_onFile?.()
         if (!hold) {
           response.writeHead(200, {
             "content-type": "application/octet-stream",
@@ -253,43 +251,6 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
               yield* closesCleanly(scope)
             }), { discard: true })
         }), timeout)
-
-      for (const timing of ["request", "willBegin", "wholeBody"] as const) {
-        it.effect(`TEMP counts ${timing}`, () =>
-          Effect.gen(function*() {
-            const { origin } = yield* downloadSite(false)
-            let failed = 0
-            const notes: Array<string> = []
-            for (let i = 0; i < 50; i++) {
-              const scope = yield* Scope.make()
-              yield* Effect.gen(function*() {
-                const page = yield* Browser.newPage()
-                yield* page.goto(`${origin}/`)
-                const download = yield* Download.next(page)
-                const reached = yield* Deferred.make<void>()
-                TEMP_onFile = () => Deferred.doneUnsafe(reached, Exit.void)
-                yield* Effect.forkScoped(Effect.ignore(page.getByText("Export").click()))
-                if (timing === "request") return yield* Deferred.await(reached)
-                const file = yield* download
-                if (timing === "wholeBody") {
-                  yield* Effect.ignore(
-                    file.status.waitFor((status) => status._tag === "InProgress" && status.received === 15)
-                  )
-                }
-              }).pipe(Scope.provide(scope))
-              const exit = yield* Effect.exit(Scope.close(scope, Exit.void))
-              if (Exit.isFailure(exit)) {
-                failed++
-                const pretty = Cause.pretty(exit.cause)
-                const directory = /(\/[^\s()]*strider-downloads-[^\s()/]+)/.exec(pretty)?.[1]
-                const left = directory !== undefined && fs.existsSync(directory) ? fs.readdirSync(directory) : []
-                notes.push(`${JSON.stringify(left)} ${pretty.slice(0, 400)}`)
-              }
-            }
-            console.log(`TEMP ${name} ${timing}: ${failed}/50 failed\n${notes.join("\n")}`)
-            assert.strictEqual(failed, 0)
-          }), 300_000)
-      }
 
       it.effect("closes a context while a download's body is still arriving", () =>
         Effect.gen(function*() {
