@@ -78,7 +78,8 @@ export const Url = Schema.String.pipe(
 export type Url = typeof Url.Type
 
 /**
- * Schema for a URL pattern: a glob such as `https://*.example.com/api/**`, or a `URLPattern` string.
+ * Schema for a URL pattern: a glob such as `https://*.example.com/api/**`, a `URLPattern` string, or an exact URL,
+ * compared as the browser writes a URL.
  *
  * @stability unstable
  * @category schemas
