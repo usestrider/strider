@@ -25,6 +25,7 @@ const fixture = Effect.fnUntraced(function*(stage = "call", retireInReply = fals
   const realm = {
     id,
     ended: false,
+    target: { page: { closing: undefined, context: { removing: false } } },
     pending: false,
     held: [],
     document: { id: ids.document() },
@@ -245,6 +246,7 @@ describe("WebKit evaluation packets", () => {
     const realm = {
       id,
       ended: false,
+      target: { page: { closing: undefined, context: { removing: false } } },
       pending: false,
       held: [],
       document: { id: ids.document() },

@@ -300,7 +300,9 @@ export interface Queries<L> {
    * **Details**
    *
    * An element matches when its text does and no child element's does, so `<p>1 <b>item</b></p>` is found by
-   * `"1 item"`. An element's text is its text content through open shadow roots, without `script`, `style`,
+   * `"1 item"`. A `<slot>` is never a match: the text it shows, assigned to it or its fallback, is the text of the
+   * element around it, so `"Checkout"` slotted into a shadow `<button><slot></slot></button>` finds the button.
+   * An element's text is its text content through open shadow roots, without `script`, `style`,
    * `noscript`, and `template`, with a button-like `input`'s value, and with whitespace collapsed and trimmed; it
    * isn't `innerText`, which depends on layout and differs between browsers. A string matches as a case-insensitive
    * substring, or with `exact` as the whole text, case-sensitively; a `RegExp` is tested as given. The document's

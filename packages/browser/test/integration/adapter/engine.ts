@@ -2665,6 +2665,32 @@ export const engine = (backend: Backend) =>
             )
           }), timeout)
 
+        it.effect("finds the element around a slot as the smallest that says a slotted text", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<div id="assigned">Checkout</div><div id="fallback"></div><div id="list"><li id="item">Pear</li></div>
+<script>
+document.getElementById("assigned").attachShadow({ mode: "open" }).innerHTML =
+  '<button id="checkout"><slot></slot></button>'
+document.getElementById("fallback").attachShadow({ mode: "open" }).innerHTML =
+  '<button id="default"><slot>Default</slot></button>'
+document.getElementById("list").attachShadow({ mode: "open" }).innerHTML = '<ul><slot></slot></ul>'
+</script>`
+            )
+            const id = (said: string) =>
+              send({
+                op: "read",
+                steps: [{ _tag: "Text", matcher: text(said) }],
+                read: { _tag: "Attribute", name: "id" }
+              })
+            assert.deepStrictEqual([yield* id("Checkout"), yield* id("Default"), yield* id("Pear")], [
+              { _tag: "Read", value: "checkout" },
+              { _tag: "Read", value: "default" },
+              { _tag: "Read", value: "item" }
+            ])
+          }), timeout)
+
         it.effect("searches open shadow roots, and chains, filters and picks", () =>
           Effect.gen(function*() {
             const { send } = yield* open(

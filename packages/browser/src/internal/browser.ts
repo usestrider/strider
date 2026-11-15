@@ -956,8 +956,13 @@ export const layer = <E, R>(
   connect: (sink: Adapter.Sink) => Effect.Effect<Adapter.AdapterConnection, E, R>
 ): Layer.Layer<Browser.Browser, E, Exclude<R, Scope.Scope>> =>
   Layer.effect(BrowserService.Browser)(Effect.gen(function*() {
-    const { sink, attach } = yield* Model.make()
-    const adapter = yield* connect(sink)
-    const model = yield* attach(adapter)
-    return yield* make(model)
+    // The browser lives in a scope of its own, and the closing mark is the outer scope's last finalizer, so it runs
+    // before anything the browser's scope gained, such as a context's process or a page, closes
+    const outer = yield* Effect.scope
+    const inner = yield* Scope.fork(outer)
+    const { sink, attach, closing } = yield* Model.make().pipe(Scope.provide(inner))
+    yield* Effect.addFinalizer(() => closing)
+    const adapter = yield* connect(sink).pipe(Scope.provide(inner))
+    const model = yield* attach(adapter).pipe(Scope.provide(inner))
+    return yield* make(model).pipe(Scope.provide(inner))
   }))

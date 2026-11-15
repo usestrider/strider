@@ -376,6 +376,7 @@ export const connect: (
       info,
       capabilities: capabilitySet,
       pauseScope: options.ownership === "launched" ? "browser" : "related",
+      closing: Kit.closing(state),
       // `Page.documentOpened`
       reportsDocumentOpen: true,
       defaultContext: state.defaultContext,
