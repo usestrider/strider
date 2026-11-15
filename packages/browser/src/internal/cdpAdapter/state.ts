@@ -147,6 +147,27 @@ export interface RealmEntry extends Kit.RealmNode {
   readonly origin: string
 }
 
+/**
+ * Why a page is closing, once something closes it: a close command's, or its context's removal. A page that closes
+ * itself, by script, has no reason until its session ends.
+ */
+export const closingReason = (state: State, page: PageEntry): L1Target.CloseReason | undefined =>
+  page.closing ?? (page.context.removing
+    ? new L1Target.PageClosed({ by: "userContextRemoved" })
+    : page.closeRequested
+    ? new L1Target.PageClosed({ by: "command" })
+    : state.browserEnd)
+
+/** Why a realm's page is closing, once a close command or its context's removal closes it. */
+export const closingOf = (state: State, realm: RealmEntry) => (): L1Target.CloseReason | undefined => {
+  const page = realm.frame?.page ?? realm.target.page
+  return page === undefined ? state.browserEnd : closingReason(state, page)
+}
+
+/** Why a realm ends when the browser destroys it: its page's reason while the page closes, else `RealmDestroyed`. */
+export const realmEnd = (state: State, realm: RealmEntry): L1Target.CloseReason =>
+  closingOf(state, realm)() ?? new L1Target.RealmDestroyed({})
+
 export interface NavigationEntry extends Kit.NavigationNode {
   readonly frame: FrameEntry
   readonly loaderId: string
@@ -285,7 +306,7 @@ export interface CaptureGuard {
   readonly replaced: (document: L1Target.DocumentId, received: number) => void
 }
 
-export interface State {
+export interface State extends Kit.Ending {
   readonly handlers: Kit.Handlers<Event>
   readonly cleanupScope: Scope.Scope
   readonly captures: Set<CaptureGuard>
