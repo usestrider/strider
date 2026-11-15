@@ -2716,6 +2716,46 @@ document.getElementById("outer").attachShadow({ mode: "open" }).innerHTML =
               )
             }))
           }), timeout)
+
+        // A form's named controls, and the document's named images, forms and embeds, are properties of the form or
+        // the document that win over the built-in ones, in whichever worlds the browser exposes them to.
+        it.effect("reads a form's role, name and action point when its controls are named for DOM members", () =>
+          Effect.gen(function*() {
+            const controls = ["localName", "tagName", "nodeName", "id", "getAttribute", "hasAttribute"]
+              .map((name) =>
+                `<input name="${name}">`
+              ).join("")
+            const { send } = yield* open(backend, `<form aria-label="Signup">${controls}<button>Join</button></form>`)
+            const form = role("form", text("Signup", true))
+            assert.strictEqual(count(yield* send({ op: "count", steps: [form] })), 1)
+            const response = yield* send({ ...point(0), steps: [form], checks: { ...all, stable: 0 } })
+            assert.strictEqual(response._tag, "Ready", JSON.stringify(response))
+          }), timeout)
+
+        it.effect("finds roles elsewhere on a page whose form has a control named getAttribute", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(backend, `<form><input name="getAttribute"></form><button>Go</button>`)
+            assert.strictEqual(count(yield* send({ op: "count", steps: [role("button")] })), 1)
+          }), timeout)
+
+        it.effect("sees focus on a page with an image named activeElement", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(backend, `<img name="activeElement"><input id="go">`)
+            const focused = yield* send({
+              ...point(0),
+              checks: { ...all, stable: 0, receivesPointer: false },
+              action: { _tag: "Focus" },
+              apply: true
+            })
+            assert.strictEqual(focused._tag, "Ready", JSON.stringify(focused))
+            const response = yield* send({
+              op: "expect",
+              steps: [{ _tag: "Css", selector: "#go" }],
+              cap: 0,
+              expectation: { _tag: "Focused" }
+            })
+            assert(response._tag === "Expected" && response.passed, JSON.stringify(response))
+          }), timeout)
       }
     )
     beforeEach(({ task }) =>
