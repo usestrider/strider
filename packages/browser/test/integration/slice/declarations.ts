@@ -510,6 +510,62 @@ export const declarations = (
         timeout
       )
 
+      it.effect("sends each fetch of a cacheable URL from a new cross-site frame to the server", () =>
+        Effect.gen(function*() {
+          const { crossSite, origin, served } = yield* site
+          const page = yield* Browser.newPage()
+          const route = yield* page.route(`${crossSite}/cached.js*`, () =>
+            Route.continue)
+          const child = fixtureUrl(
+            crossSite,
+            `<script>(async () => { const read = () => fetch('/cached.js?frame').then((r) => r.status); parent.postMessage([await read(), await read()], '*') })()</script>`
+          )
+          const result = yield* run(
+            page,
+            origin,
+            `return new Promise((resolve) => { addEventListener('message', (event) => resolve(event.data), { once: true }); const frame = document.createElement('iframe'); frame.src = ${
+              JSON.stringify(child)
+            }; document.body.append(frame) })`
+          )
+          assert.deepStrictEqual(result, [200, 200])
+          assert.deepStrictEqual({
+            routed: yield* route.hits,
+            served: served.filter((request) =>
+              request.path === "/cached.js?frame"
+            ).length
+          }, { routed: 2, served: 2 })
+        }), timeout)
+
+      for (const scope of ["page", "context"] as const) {
+        it.effect(
+          `sends each fetch of a cacheable URL from a dedicated worker to the server while a ${scope} route is active`,
+          () =>
+            Effect.gen(function*() {
+              const { origin, served } = yield* site
+              const page = yield* Browser.newPage()
+              yield* (scope === "page" ? page : page.context).route(`${origin}/cached.js*`, () =>
+                Route.continue)
+              const script =
+                `onmessage = async ({ data }) => { const read = () => fetch(data).then((r) => r.status); postMessage([await read(), await read()]) }`
+              const result = yield* run(
+                page,
+                origin,
+                `return new Promise((resolve, reject) => { const worker = new Worker(URL.createObjectURL(new Blob([${
+                  JSON.stringify(script)
+                }], { type: 'text/javascript' }))); worker.onmessage = ({ data }) => { worker.terminate(); resolve(data) }; worker.onerror = reject; worker.postMessage(location.origin + '/cached.js?worker') })`
+              )
+              assert.deepStrictEqual(result, [200, 200])
+              assert.strictEqual(
+                served.filter((request) =>
+                  request.path === "/cached.js?worker"
+                ).length,
+                2
+              )
+            }),
+          timeout
+        )
+      }
+
       it.effect("answers a cacheable URL from the cache again once its page's last route is removed", () =>
         Effect.gen(function*() {
           const { origin, served } = yield* site
@@ -581,8 +637,7 @@ export const declarations = (
             yield* Effect.promise(() =>
               arrival
             ).pipe(Effect.timeout("10 seconds"))
-            const route = yield* page.route(`${origin}/cached.js`, () =>
-              Route.continue)
+            const route = yield* page.route(`${origin}/cached.js`, () => Route.continue)
             release()
             yield* Fiber.join(navigation)
             const out = page.locator("#out")
