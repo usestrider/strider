@@ -929,12 +929,17 @@ export const sendToDocument = (
   page: Model.PageEntry,
   document: Target.DocumentId,
   request: Engine.Request,
-  id: Diagnostics.OperationId
+  id: Diagnostics.OperationId,
+  /**
+   * Whether a request whose realm went after it was sent may be sent again, as `None`. A request that may have
+   * changed the page, such as an insertion, isn't: it fails instead.
+   */
+  replay = true
 ): Effect.Effect<Option.Option<Engine.Response>, SendFailure> =>
   Effect.raceFirst(
     Effect.suspend(() =>
       Option.isSome(runtime.model.document(document))
-        ? callInDocument(runtime, document, Engine.run, JSON.stringify(request), id).pipe(
+        ? callInDocument(runtime, document, Engine.run, JSON.stringify(request), id, undefined, replay).pipe(
           Effect.flatMap((value) =>
             Option.isSome(value) && value.value.type === "string"
               ? Effect.asSome(decode(value.value.value))
@@ -974,11 +979,12 @@ export const insertText = (
   Effect.gen(function*() {
     const { at } = yield* Operation.budget
     let document = (yield* openState(page, id)).document.id
-    // Each round goes one frame deeper; a document that ends on the way starts the walk again from the top, until
-    // the operation's deadline
+    // Each round goes one frame deeper; a document that ends before its request is sent starts the walk again
+    // from the top, until the operation's deadline
     while (true) {
       if ((yield* BrowserClock.left(at)) <= 0) return yield* Effect.fail<SendFailure>({ _tag: "Deadline" })
-      const answer = yield* sendToDocument(runtime, page, document, { op: "insert", text, beforeInput }, id)
+      // Never sent again: once sent, the page may have handled the input, so a realm lost after that fails
+      const answer = yield* sendToDocument(runtime, page, document, { op: "insert", text, beforeInput }, id, false)
       if (Option.isNone(answer)) {
         yield* Effect.yieldNow
         document = (yield* openState(page, id)).document.id
