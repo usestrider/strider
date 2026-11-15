@@ -62,11 +62,14 @@ const defaultFrames = 2
 
 type CheckSet = Omit<Engine.Checks, "stable"> & { readonly stable: boolean }
 
-/** A round that passed: the engine's answer with its point in the page's viewport, where it ran, and its frame's origin. */
+/**
+ * A round that passed: the engine's answer with its point in the page's viewport, where it ran, and the viewport
+ * origin of each frame on the way, outermost first.
+ */
 interface Ready {
   readonly response: Extract<Engine.Response, { _tag: "Ready" }>
   readonly routed: Runtime.Routed
-  readonly origin: { readonly x: number; readonly y: number }
+  readonly path: Adapter.InputFrame["path"]
 }
 
 /** The checks each action documents (API.md, Locators, actions, and actionability). */
@@ -111,19 +114,6 @@ const checksFor = (defaults: CheckSet, checks: Locator.Checks | undefined): Engi
 })
 
 /** What a `NotReady` reason says, as a timeout's hint, suggesting focus emulation only where the backend has it. */
-/**
- * A frame the gesture lands in wasn't drawn when its input was to be written, so none was sent: the page changed
- * after its checks, as when the frame navigated, and the action checks it again.
- */
-class FrameNotDrawnYet {
-  readonly _tag = "FrameNotDrawnYet"
-  readonly frame: Target.NavigableId
-  readonly url: string | undefined
-  constructor(frame: Target.NavigableId, url: string | undefined) {
-    this.frame = frame
-    this.url = url
-  }
-}
 
 const explain = (reason: Engine.NotReady, frames: number, emulatesFocus: boolean): string => {
   switch (reason._tag) {
@@ -1347,7 +1337,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         { inViewport: true, receivesPointer: false },
         id
       ).pipe(Effect.mapError((failure) => this.sendFailure("Locator.dragTo", failure, record)))
-      // The frame the point is in: a gesture waits for it to be drawn before it sends input there
+      // The frame the point is in, which decides where the gesture's input is sent
       const frame = answer.routed.hops.at(-1)!.frame
       return translated._tag === "Point" ? Option.some({ ...translated.point, frame }) : Option.none()
     })
@@ -1490,7 +1480,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
             target = point.value
           }
           const events = gesture(state, ready.point!, target)
-          yield* io.send(events, target?.frame === undefined ? [] : [target.frame])
+          yield* io.send(events, target === undefined ? [] : [target.frame ?? this.owner.page.id])
           const last = events.filter((event): event is Extract<Adapter.InputEvent, { _tag: "Mouse" }> =>
             event._tag === "Mouse"
           ).at(-1)
@@ -1518,7 +1508,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     operation: string,
     routed: Runtime.Routed,
     record: Operation.Record,
-    insert: Effect.Effect<void, Locator.LocatorError | Target.TargetGone | Deadline.Timeout | FrameNotDrawnYet>
+    insert: Effect.Effect<void, Locator.LocatorError | Target.TargetGone | Deadline.Timeout>
   ) {
     const targets = [
       ...routed.hops.map((hop) => ({ document: hop.document, steps: hop.steps, ancestor: true })),
@@ -1632,7 +1622,8 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
   /**
    * An action point in a frame, in the page's viewport: each iframe's content-box origin
    * added, innermost first, each iframe scrolled into view in its parent when the checks ask for the viewport, and,
-   * when they ask for the pointer, the iframe hit at the point in its parent. `NotReady` when one isn't.
+   * when they ask for the pointer, the iframe hit at the point in its parent; with each frame's viewport origin in the
+   * page's, outermost first. `NotReady` when one isn't.
    */
   translate(
     routed: Runtime.Routed,
@@ -1643,7 +1634,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     | {
       readonly _tag: "Point"
       readonly point: { x: number; y: number }
-      readonly origin: { x: number; y: number }
+      readonly path: Adapter.InputFrame["path"]
     }
     | { readonly _tag: "NotReady"; readonly reason: Engine.NotReady },
     Runtime.SendFailure
@@ -1652,8 +1643,9 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     const page = this.owner.page
     return Effect.gen(function*() {
       let at = { ...point }
-      const origin = { x: 0, y: 0 }
-      for (const hop of [...routed.hops].reverse()) {
+      // Each iframe's origin in its parent's viewport, by hop
+      const origins: Array<{ readonly x: number; readonly y: number }> = []
+      for (const [index, hop] of [...routed.hops.entries()].reverse()) {
         const answer = yield* Runtime.sendToDocument(runtime, page, hop.document, {
           op: "frame",
           steps: hop.steps,
@@ -1669,10 +1661,14 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         if (frame.scrolled) return { _tag: "NotReady", reason: { _tag: "OutsideViewport" } } as const
         if (frame.covered !== null) return { _tag: "NotReady", reason: frame.covered } as const
         at = { x: at.x + frame.origin.x, y: at.y + frame.origin.y }
-        origin.x += frame.origin.x
-        origin.y += frame.origin.y
+        origins[index] = frame.origin
       }
-      return { _tag: "Point", point: at, origin } as const
+      const path: Array<Adapter.InputFrame["path"][number]> = []
+      for (const [index, hop] of routed.hops.entries()) {
+        const outer = path.at(-1)?.origin ?? { x: 0, y: 0 }
+        path.push({ frame: hop.frame, origin: { x: outer.x + origins[index]!.x, y: outer.y + origins[index]!.y } })
+      }
+      return { _tag: "Point", point: at, path } as const
     })
   }
 
@@ -1694,20 +1690,20 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         readonly send: (
           events: ReadonlyArray<Adapter.InputEvent>,
           lands?: ReadonlyArray<Target.NavigableId>
-        ) => Effect.Effect<void, Locator.LocatorError | Target.TargetGone | Deadline.Timeout | FrameNotDrawnYet>
+        ) => Effect.Effect<void, Locator.LocatorError | Target.TargetGone | Deadline.Timeout>
         /** Removes the guard the round armed: what stopped the gesture, if anything did. */
         readonly disarm: Effect.Effect<Option.Option<string>>
         readonly guardFill: (
-          insert: Effect.Effect<void, Locator.LocatorError | Target.TargetGone | Deadline.Timeout | FrameNotDrawnYet>
+          insert: Effect.Effect<void, Locator.LocatorError | Target.TargetGone | Deadline.Timeout>
         ) => Effect.Effect<
           "done" | { readonly retry: Engine.NotReady },
-          Locator.LocatorError | Target.TargetGone | Deadline.Timeout | FrameNotDrawnYet
+          Locator.LocatorError | Target.TargetGone | Deadline.Timeout
         >
       },
       record: Operation.Record
     ) => Effect.Effect<
       "done" | { readonly retry: Engine.NotReady },
-      Locator.LocatorError | Target.TargetGone | Deadline.Timeout | FrameNotDrawnYet
+      Locator.LocatorError | Target.TargetGone | Deadline.Timeout
     >,
     extra: { readonly redacted?: boolean } = {}
   ) {
@@ -1781,15 +1777,6 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
             "The input was sent and the browser hadn't confirmed it by the deadline; a dialog it opened may still be deciding"
           )
         }
-        // The adapter waited for the frame the input is aimed into to be drawn (Chromium), and sent nothing
-        const waited = record.history.at(-1)?.value as { readonly _tag?: unknown; readonly url?: unknown } | undefined
-        if (waited?._tag === "FrameNotDrawn") {
-          return Option.some(
-            `The frame the input is aimed into${
-              typeof waited.url === "string" ? ` (${waited.url})` : ""
-            } hadn't reported its first paint, so no input was sent: until a frame in another process has been drawn, Chromium may send pointer input aimed into it to the parent's iframe element, and a frame where nothing paints reports no first paint`
-          )
-        }
         const reasons = record.history.map((each) => each.value as Engine.NotReady)
         const last = reasons.at(-1)
         // A page that rendered no frame in some rounds and one in others renders too seldom to tell the element
@@ -1823,7 +1810,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
               return response.checked ? notReady(response.reason) : Option.none<Ready>()
             case "Ready": {
               if (answer.routed.hops.length === 0 || response.point === null) {
-                return Option.some<Ready>({ response, routed: answer.routed, origin: { x: 0, y: 0 } })
+                return Option.some<Ready>({ response, routed: answer.routed, path: [] })
               }
               const points = checks.receivesPointer && action._tag === "Point" && action.position === null &&
                   response.candidates !== undefined && response.candidates.length > 0
@@ -1844,7 +1831,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
                 return Option.some<Ready>({
                   response: { ...response, point: translated.point },
                   routed: answer.routed,
-                  origin: translated.origin
+                  path: translated.path
                 })
               }
               return notReady(covered!)
@@ -1859,89 +1846,69 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         events: ReadonlyArray<Adapter.InputEvent>,
         lands: ReadonlyArray<Target.NavigableId> = []
       ) => {
-        // Pointer input waits until each frame its points land in can be routed to, before anything is sent or
-        // marked as possibly sent: a deadline in the wait leaves no input to release
+        // The frame the element is in, and the others the gesture's points land in, the page's own main frame
+        // among them when one does
         const frame = ready.routed.hops.at(-1)
         const frames = Array.from(new Set([...(frame === undefined ? [] : [frame.frame]), ...lands]))
         const pointer = events.some((event) => event._tag !== "Key" && event._tag !== "InsertText")
-        const drawn = !pointer || frames.length === 0
-          ? Effect.void
-          : Effect.forEach(frames, (each) => owner.runtime.model.adapter.frameReady(each), { discard: true }).pipe(
-            Effect.mapError((error) => Runtime.fromAdapter(error, id, owner.runtime.backend)),
-            Effect.mapError((failure) =>
-              failure._tag === "Gone"
-                ? failure.error
-                : failure._tag === "Reason"
-                ? this.error(operation, failure.reason, id, { _tag: "NotSent" })
-                : timedOut()
-            )
-          )
-        return Effect.andThen(
-          drawn,
-          Effect.flatMap(
-            Input.recover(
-              owner.page.inputState,
-              (release) => owner.runtime.model.adapter.dispatchInput(owner.page.id, release)
-            ),
-            (unknown) => {
-              if (Option.isSome(unknown)) {
-                return Effect.fail(this.error(
-                  operation,
-                  new Reason.BackendFailure({
-                    kind: "Rejected",
-                    method: "input",
-                    hint: `A held input's release failed (${unknown.value}), and failed again when sent before this ` +
-                      "gesture, so the page's input state is unknown"
-                  }),
-                  id
-                ))
-              }
-              record.markSent()
-              // The adapter checks the frames again as it writes: one that navigated since is refused unsent
-              return owner.runtime.model.adapter.dispatchInput(
-                owner.page.id,
-                events,
-                frame === undefined ? undefined : { frame: frame.frame, origin: ready.origin },
-                pointer ? frames : undefined
-              ).pipe(
-                Effect.tapError((error) =>
-                  Effect.sync(() => {
-                    // A page that is gone took its input with it, and input refused before any of it was written
-                    // left nothing pressed; otherwise the gesture may have left input pressed
-                    if (Deadline.isTimeout(error) || (error.reason._tag !== "Gone" && error.unsent !== true)) {
-                      Input.uncertain(owner.page.inputState, `${operation}: ${error.message}`, events)
-                    }
-                  })
-                ),
-                // Cut short, by a deadline or a dialog, it may still have pressed something
-                Effect.onInterrupt(() =>
-                  Effect.sync(() => Input.uncertain(owner.page.inputState, `${operation}: interrupted`, events))
-                ),
-                Effect.mapError((error) =>
-                  !Deadline.isTimeout(error) && error.reason._tag === "FrameNotDrawn"
-                    ? new FrameNotDrawnYet(error.reason.frame, error.reason.url)
-                    : Runtime.fromAdapter(error, id, owner.runtime.backend)
-                ),
-                Effect.raceFirst(Runtime.promptBlocked(owner.page, true)),
-                Effect.mapError((failure) =>
-                  // The input may have reached the page: the error says so, and nothing is sent again. A backend
-                  // that can't send input refuses before it sends any (stock WebKit's inspector)
-                  failure instanceof FrameNotDrawnYet
-                    ? failure
-                    : failure._tag === "Gone"
-                    ? failure.error
-                    : failure._tag === "Reason"
-                    ? this.error(
-                      operation,
-                      failure.reason,
-                      id,
-                      failure.reason._tag === "Unsupported" ? { _tag: "NotSent" } : record.dispatch
-                    )
-                    : timedOut()
-                )
-              )
+        return Effect.flatMap(
+          Input.recover(
+            owner.page.inputState,
+            (release) => owner.runtime.model.adapter.dispatchInput(owner.page.id, release)
+          ),
+          (unknown) => {
+            if (Option.isSome(unknown)) {
+              return Effect.fail(this.error(
+                operation,
+                new Reason.BackendFailure({
+                  kind: "Rejected",
+                  method: "input",
+                  hint: `A held input's release failed (${unknown.value}), and failed again when sent before this ` +
+                    "gesture, so the page's input state is unknown"
+                }),
+                id
+              ))
             }
-          )
+            record.markSent()
+            return owner.runtime.model.adapter.dispatchInput(
+              owner.page.id,
+              events,
+              frame === undefined
+                ? undefined
+                : { frame: frame.frame, origin: ready.path.at(-1)?.origin ?? { x: 0, y: 0 }, path: ready.path },
+              pointer ? frames : undefined
+            ).pipe(
+              Effect.tapError((error) =>
+                Effect.sync(() => {
+                  // A page that is gone took its input with it, and input refused before any of it was written
+                  // left nothing pressed; otherwise the gesture may have left input pressed
+                  if (Deadline.isTimeout(error) || (error.reason._tag !== "Gone" && error.unsent !== true)) {
+                    Input.uncertain(owner.page.inputState, `${operation}: ${error.message}`, events)
+                  }
+                })
+              ),
+              // Cut short, by a deadline or a dialog, it may still have pressed something
+              Effect.onInterrupt(() =>
+                Effect.sync(() => Input.uncertain(owner.page.inputState, `${operation}: interrupted`, events))
+              ),
+              Effect.mapError((error) => Runtime.fromAdapter(error, id, owner.runtime.backend)),
+              Effect.raceFirst(Runtime.promptBlocked(owner.page, true)),
+              Effect.mapError((failure) =>
+                // The input may have reached the page: the error says so, and nothing is sent again. A backend
+                // that can't send input refuses before it sends any (stock WebKit's inspector)
+                failure._tag === "Gone"
+                  ? failure.error
+                  : failure._tag === "Reason"
+                  ? this.error(
+                    operation,
+                    failure.reason,
+                    id,
+                    failure.reason._tag === "Unsupported" ? { _tag: "NotSent" } : record.dispatch
+                  )
+                  : timedOut()
+              )
+            )
+          }
         )
       }
       // A round that reached the deadline is the action's own Timeout, with what the record saw
@@ -1986,21 +1953,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
               send: send(again.value),
               disarm,
               guardFill: (insert) => this.guardFill(operation, again.value.routed, record, insert)
-            }, record).pipe(
-              // A frame that navigated after the checks and hasn't been drawn: nothing was sent, so the action
-              // checks the changed page again, where the next round waits for the frame
-              Effect.catchIf(
-                (failure): failure is FrameNotDrawnYet => failure instanceof FrameNotDrawnYet,
-                (failure) =>
-                  Effect.succeed({
-                    retry: {
-                      _tag: "FrameNotDrawn",
-                      frame: failure.frame,
-                      url: failure.url
-                    } as unknown as Engine.NotReady
-                  })
-              )
-            )
+            }, record)
             if (done === "done") return "done" as const
             // The guard stopped the gesture before the page saw it: nothing happened, so check again
             record.markNotSent()
