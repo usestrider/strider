@@ -2539,6 +2539,104 @@ export const engine = (backend: Backend) =>
             )
           }), timeout)
 
+        // HTML takes inert nodes out of the accessibility tree: `inert` on the element or a flat-tree ancestor, and,
+        // while a modal dialog is open, everything outside the topmost one.
+        const roles = Effect.fnUntraced(function*(send: Effect.Success<ReturnType<typeof open>>["send"], step: Engine.Step) {
+          const found = yield* send({ op: "role", steps: [step] })
+          assert(found._tag === "Roles", JSON.stringify(found))
+          return found.roles.map((each) => each.name)
+        })
+        const snapshotText = Effect.fnUntraced(function*(send: Effect.Success<ReturnType<typeof open>>["send"]) {
+          const snapshot = yield* send({ op: "snapshot", steps: null, interactivity: false, depth: null })
+          assert(snapshot._tag === "Snapshot", JSON.stringify(snapshot))
+          return JSON.stringify(snapshot.root)
+        })
+        const showModal = (ids: ReadonlyArray<string>) =>
+          `() => { for (const id of ${JSON.stringify(ids)}) document.getElementById(id).showModal() }`
+
+        it.effect("leaves inert elements out of role queries and snapshots unless hidden ones are asked for", () =>
+          Effect.gen(function*() {
+            const { call, send } = yield* open(
+              backend,
+              `<button inert>Self</button><div inert><button>Ancestor</button></div><div id="host" inert></div>
+<button>Shown</button>`
+            )
+            const attached = yield* call(
+              `() => { document.getElementById("host").attachShadow({ mode: "open" }).innerHTML = "<button>Shadow</button>" }`,
+              []
+            )
+            assert(attached._tag === "Value", attached._tag === "Exception" ? attached.text : "")
+            assert.deepStrictEqual(yield* roles(send, role("button")), ["Shown"])
+            assert.deepStrictEqual(yield* roles(send, role("button", null, true)), ["Self", "Ancestor", "Shadow", "Shown"])
+            const snapshot = yield* snapshotText(send)
+            assert.include(snapshot, "Shown")
+            for (const name of ["Self", "Ancestor", "Shadow"]) assert.notInclude(snapshot, name)
+          }), timeout)
+
+        it.effect("leaves inert descendants out of an accessible name", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(backend, `<button>Save <span inert>later</span></button>`)
+            assert.deepStrictEqual(yield* roles(send, role("button")), ["Save"])
+          }), timeout)
+
+        it.effect("leaves out what is outside an open modal dialog, an open non-modal dialog included", () =>
+          Effect.gen(function*() {
+            const { call, send } = yield* open(
+              backend,
+              `<button>Outside</button><dialog open><button>Modeless</button></dialog>
+<dialog id="modal"><button>Inside</button></dialog>`
+            )
+            yield* call(showModal(["modal"]), [])
+            assert.deepStrictEqual(yield* roles(send, role("button")), ["Inside"])
+            assert.strictEqual(count(yield* send({ op: "count", steps: [role("dialog")] })), 1)
+            assert.deepStrictEqual(yield* roles(send, role("button", null, true)), ["Outside", "Modeless", "Inside"])
+            const snapshot = yield* snapshotText(send)
+            assert.include(snapshot, "Inside")
+            for (const name of ["Outside", "Modeless"]) assert.notInclude(snapshot, name)
+          }), timeout)
+
+        it.effect("lets only the topmost of several open modal dialogs block the rest", () =>
+          Effect.gen(function*() {
+            const { call, send } = yield* open(
+              backend,
+              `<dialog id="first"><button>First</button></dialog>
+<dialog id="outer"><button>Outer</button><dialog id="inner"><button id="go">Inner</button></dialog></dialog>`
+            )
+            yield* call(showModal(["first", "outer", "inner"]), [])
+            assert.deepStrictEqual(yield* roles(send, role("button")), ["Inner"])
+            const ready = yield* send({ ...point(0), checks: { ...all, stable: 0, receivesPointer: false } })
+            assert.strictEqual(ready._tag, "Ready", JSON.stringify(ready))
+            const blocked = yield* send({
+              ...point(0),
+              steps: [{ _tag: "Css", selector: "#first button" }],
+              checks: { ...all, stable: 0, receivesPointer: false }
+            })
+            assert(blocked._tag === "NotReady", JSON.stringify(blocked))
+            assert.strictEqual(blocked.reason._tag, "BlockedByModal")
+          }), timeout)
+
+        it.effect("lets a modal dialog escape the inert subtree it opens in", () =>
+          Effect.gen(function*() {
+            const { call, send } = yield* open(
+              backend,
+              `<div inert><button>Under</button><dialog id="modal"><input id="go" aria-label="Inner"></dialog></div>
+<button>Outside</button>`
+            )
+            yield* call(showModal(["modal"]), [])
+            assert.deepStrictEqual(yield* roles(send, role("textbox")), ["Inner"])
+            assert.deepStrictEqual(yield* roles(send, role("button")), [])
+            const snapshot = yield* snapshotText(send)
+            assert.include(snapshot, "Inner")
+            for (const name of ["Under", "Outside"]) assert.notInclude(snapshot, name)
+            const focused = yield* send({
+              ...point(0),
+              checks: { ...all, stable: 0, receivesPointer: false },
+              action: { _tag: "Focus" },
+              apply: true
+            })
+            assert.strictEqual(focused._tag, "Ready", JSON.stringify(focused))
+          }), timeout)
+
         it.effect("finds the smallest element that says a text, outside head and scripts", () =>
           Effect.gen(function*() {
             const { send } = yield* open(
