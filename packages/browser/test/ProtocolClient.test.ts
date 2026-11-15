@@ -710,6 +710,35 @@ describe("ProtocolClient", () => {
       assert(Exit.isFailure(completed!))
     }))
 
+  it.effect("hands a resource reply that arrived to the late-reply handler when the wait for earlier events runs out", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const gate = yield* Deferred.make<void>()
+      const { fold } = makeFold({ apply: () => Deferred.await(gate) })
+      const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire, {
+        fold,
+        replyClock: yield* Clock.Clock
+      })
+      yield* attach(browser, client, "S1")
+      const late = yield* Deferred.make<Protocol.LateReply>()
+      const fiber = yield* client.root.send(Target.createTarget({ url: "about:blank" })).pipe(
+        Protocol.withCommandTimeout("1 second"),
+        Protocol.withLateReplyHandler((reply) => Deferred.succeed(late, reply).pipe(Effect.asVoid)),
+        Effect.forkChild
+      )
+      const sent = yield* browser.next
+      yield* load(browser, 1)
+      yield* browser.receive({ id: sent.id, result: { targetId: "late-target" } })
+      yield* browser.delivered
+      yield* TestClock.adjust("2 seconds")
+      const exit = yield* Fiber.await(fiber)
+      assert(Exit.isFailure(exit))
+      const reply = yield* Deferred.await(late)
+      assert.strictEqual(reply.method, "Target.createTarget")
+      assert.deepStrictEqual(reply.result, { targetId: "late-target" })
+      yield* Deferred.succeed(gate, undefined)
+    }))
+
   it.effect("returns the receive sequence of a reply from sendSequenced", () =>
     Effect.gen(function*() {
       const browser = yield* makeBrowser
