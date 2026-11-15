@@ -8,7 +8,7 @@ import * as Page from "@usestrider/browser/cdp/Page"
 import * as Target from "@usestrider/browser/cdp/Target"
 import { Protocol, Transport } from "@usestrider/browser/protocol"
 import * as Cause from "effect/Cause"
-import type * as Clock from "effect/Clock"
+import * as Clock from "effect/Clock"
 import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -17,6 +17,7 @@ import * as Fiber from "effect/Fiber"
 import * as Result from "effect/Result"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
+import * as TestClock from "effect/testing/TestClock"
 import * as Condition from "../src/Condition.ts"
 import * as Deadline from "../src/Deadline.ts"
 import * as Expect from "../src/Expect.ts"
@@ -681,6 +682,32 @@ describe("ProtocolClient", () => {
       yield* Deferred.succeed(gate, undefined)
       yield* Fiber.join(fiber)
       assert.deepStrictEqual(recorder.folded, ["1"])
+    }))
+
+  it.effect("bounds the wait for earlier events by the command timeout", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const gate = yield* Deferred.make<void>()
+      const { fold } = makeFold({ apply: () => Deferred.await(gate) })
+      const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire, {
+        fold,
+        replyClock: yield* Clock.Clock
+      })
+      const page = yield* attach(browser, client, "S1")
+      const fiber = yield* page.send(Page.enable()).pipe(
+        Protocol.withCommandTimeout("1 second"),
+        Effect.forkChild
+      )
+      const sent = yield* browser.next
+      yield* load(browser, 1)
+      yield* browser.receive({ id: sent.id, result: {}, sessionId: "S1" })
+      yield* browser.delivered
+      yield* TestClock.adjust("2 seconds")
+      const completed = fiber.pollUnsafe()
+      yield* Deferred.succeed(gate, undefined)
+      yield* Fiber.await(fiber)
+      assert.isDefined(completed, "the command must stop waiting when its budget expires")
+      assert(Exit.isFailure(completed!))
     }))
 
   it.effect("returns the receive sequence of a reply from sendSequenced", () =>
