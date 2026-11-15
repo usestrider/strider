@@ -6355,6 +6355,120 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
+      describe("insertText", () => {
+        /** Records each keyboard and input event the document sees into `window.events`, in order. */
+        const logsEvents =
+          `<script>window.events=[];for(const type of ["keydown","keypress","keyup","beforeinput","input"])document.addEventListener(type,e=>events.push(e.type+(e.inputType===undefined?"":":"+e.inputType+":"+e.data)),true)</script>`
+        const events = (page: Page.Page) => page.evaluateInMainWorld(() => (window as any).events as Array<string>)
+
+        it.effect(
+          "inserts text with beforeinput and input and no key events",
+          () =>
+            Effect.scoped(Effect.gen(function*() {
+              const { url } = yield* fixture(() => `<input id="field">${logsEvents}`)
+              const page = yield* newPage
+              yield* page.goto(url)
+              yield* page.locator("#field").focus()
+              yield* page.keyboard.insertText("héllo 嗨")
+              assert.strictEqual(yield* page.locator("#field").readValue, "héllo 嗨")
+              assert.deepStrictEqual(yield* events(page), [
+                "beforeinput:insertText:héllo 嗨",
+                "input:insertText:héllo 嗨"
+              ])
+            })),
+          timeout
+        )
+
+        it.effect("inserts nothing when the page cancels beforeinput", () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="field"><script>document.addEventListener("beforeinput",e=>e.preventDefault())</script>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.locator("#field").focus()
+            yield* page.keyboard.insertText("x")
+            assert.strictEqual(yield* page.locator("#field").readValue, "")
+          })), timeout)
+
+        it.effect("inserts after the page cancels every keydown", () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="field"><script>document.addEventListener("keydown",e=>e.preventDefault())</script>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.locator("#field").focus()
+            yield* page.keyboard.insertText("嗨")
+            yield* page.keyboard.insertText("a")
+            assert.strictEqual(yield* page.locator("#field").readValue, "嗨a")
+          })), timeout)
+
+        it.effect(
+          "fills an editor that cancels beforeinput and writes the text itself",
+          () =>
+            Effect.scoped(Effect.gen(function*() {
+              const { url } = yield* fixture(() =>
+                `<div id="editor" contenteditable></div><script>document.getElementById("editor").addEventListener("beforeinput",e=>{e.preventDefault();if(e.inputType==="insertText")e.target.textContent=e.data})</script>`
+              )
+              const page = yield* newPage
+              yield* page.goto(url)
+              yield* page.locator("#editor").fill("Playwright")
+              assert.strictEqual(yield* page.locator("#editor").readText, "Playwright")
+            })),
+          timeout
+        )
+
+        for (const where of ["same-site", "cross-site"] as const) {
+          it.effect(`inserts into a focused field in a ${where} frame`, () =>
+            Effect.scoped(Effect.gen(function*() {
+              const { crossSite, origin } = yield* site
+              const inner =
+                `<input id="field"><output id="keys">0</output><script>for(const type of ["keydown","keypress","keyup"])document.addEventListener(type,()=>document.getElementById("keys").textContent++,true)</script>`
+              const page = yield* newPage
+              yield* page.goto(
+                fixtureUrl(
+                  origin,
+                  `<iframe src="${fixtureUrl(where === "same-site" ? origin : crossSite, inner)}"></iframe>`
+                )
+              )
+              const frame = page.frame(page.locator("iframe"))
+              yield* frame.locator("#field").focus()
+              yield* page.keyboard.insertText("嗨")
+              assert.strictEqual(yield* frame.locator("#field").readValue, "嗨")
+              assert.strictEqual(yield* frame.locator("#keys").readText, "0")
+            })), timeout)
+        }
+
+        it.effect("inserts a newline as a line break and submits no form", () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<textarea id="area"></textarea><form onsubmit="event.preventDefault();document.getElementById('out').textContent='submitted'"><input id="field"></form>${out}`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.locator("#area").focus()
+            yield* page.keyboard.insertText("a\nb")
+            assert.strictEqual(yield* page.locator("#area").readValue, "a\nb")
+            yield* page.locator("#field").focus()
+            yield* page.keyboard.insertText("a\nb")
+            yield* page.locator("#field").fill("c\nd")
+            assert.strictEqual(yield* page.locator("#out").readText, "nothing yet")
+          })), timeout)
+
+        it.effect("inserts the same when the page replaces execCommand", () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="field"><script>Document.prototype.execCommand=document.execCommand=function(){document.getElementById("field").value="replaced";return true}</script>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.locator("#field").focus()
+            yield* page.keyboard.insertText("x")
+            assert.strictEqual(yield* page.locator("#field").readValue, "x")
+          })), timeout)
+      })
+
       it.effect("acts on a page after another opens in its context", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() => `<button onclick="${say("'clicked'")}">Click me</button>${out}`)
