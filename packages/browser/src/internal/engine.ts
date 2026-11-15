@@ -1221,6 +1221,9 @@ export function engine(render: (root: SnapNode) => string) {
     readonly contribution: { fieldContent: boolean }
   }
 
+  /** What separates the ids of an ID reference list: ASCII whitespace, so a non-breaking space can be part of an id. */
+  const ID_SEPARATOR = /[\t\n\f\r ]+/
+
   const byId = (element: Element, id: string): Element | null => {
     const root = dom.getRootNode(element)
     return root instanceof Document || root instanceof ShadowRoot
@@ -1236,7 +1239,7 @@ export function engine(render: (root: SnapNode) => string) {
   /** The elements an element contains or owns through `aria-owns`, in that order. */
   const ownedDescendants = (element: Element): Array<Element> => {
     const out = Array.from(dom.querySelectorAll(element, "*"))
-    for (const id of (dom.getAttribute(element, "aria-owns") ?? "").split(/\s+/)) {
+    for (const id of (dom.getAttribute(element, "aria-owns") ?? "").split(ID_SEPARATOR)) {
       const owned = id === "" ? null : byId(element, id)
       if (owned !== null) out.push(owned, ...Array.from(dom.querySelectorAll(owned, "*")))
     }
@@ -1401,7 +1404,7 @@ export function engine(render: (root: SnapNode) => string) {
     }
     // 2B: aria-labelledby, not followed twice
     if (!context.labelledBy) {
-      const ids = (dom.getAttribute(element, "aria-labelledby") ?? "").split(/\s+/).filter((id) => id !== "")
+      const ids = (dom.getAttribute(element, "aria-labelledby") ?? "").split(ID_SEPARATOR).filter((id) => id !== "")
       const parts = ids.flatMap((id) => {
         const target = byId(element, id)
         return target === null ? [] : [
@@ -1422,7 +1425,7 @@ export function engine(render: (root: SnapNode) => string) {
     // 2E: an embedded control inside another element's name contributes its value, unless it names itself
     const id = dom.id(element)
     const namesItself = id !== "" &&
-      (dom.getAttribute(element, "aria-labelledby") ?? "").split(/\s+/).includes(id)
+      (dom.getAttribute(element, "aria-labelledby") ?? "").split(ID_SEPARATOR).includes(id)
     if (context.embedded !== "self" && !namesItself && embeddedControlRole(role)) {
       const value = embeddedValue(element, role, context)
       if (value.trim() !== "") context.contribution.fieldContent = true
@@ -1457,7 +1460,7 @@ export function engine(render: (root: SnapNode) => string) {
           content += inline ? name : ` ${name} `
         }
         // Elements it owns through aria-owns follow its children
-        for (const owned of (dom.getAttribute(element, "aria-owns") ?? "").split(/\s+/)) {
+        for (const owned of (dom.getAttribute(element, "aria-owns") ?? "").split(ID_SEPARATOR)) {
           const target = owned === "" ? null : byId(element, owned)
           if (target === null) continue
           const name = nameOfElement(target, child)
@@ -1623,7 +1626,9 @@ export function engine(render: (root: SnapNode) => string) {
 
   const labelTexts = (element: Element): Array<string> => {
     const texts: Array<string> = []
-    for (const id of (dom.getAttribute(element, "aria-labelledby") ?? "").split(/\s+/).filter((id) => id !== "")) {
+    for (
+      const id of (dom.getAttribute(element, "aria-labelledby") ?? "").split(ID_SEPARATOR).filter((id) => id !== "")
+    ) {
       const target = byId(element, id)
       if (target !== null) texts.push(textOf(target))
     }
