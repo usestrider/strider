@@ -335,6 +335,17 @@ export interface Event {
 export const navigableOf = (state: State, context: string | null | undefined) =>
   context === null || context === undefined ? undefined : state.navigables.get(context)
 
+/**
+ * Why a page is closing, once something closes it: a close command's, or its context's removal. A page that closes
+ * itself, by script, has no reason until its context is destroyed.
+ */
+export const closingReason = (page: NavigableEntry): L1Target.CloseReason | undefined =>
+  page.closing ?? (page.context.removing
+    ? new L1Target.PageClosed({ by: "userContextRemoved" })
+    : page.closeRequested
+    ? new L1Target.PageClosed({ by: "command" })
+    : undefined)
+
 /** Where a navigable sits, for the declarations registry. */
 export const placement = (navigable: NavigableEntry): Declarations.Placement => ({
   page: navigable.page.id,

@@ -20,6 +20,7 @@ import * as Urls from "../urls.ts"
 import * as Cleanup from "./cleanup.ts"
 import { applyKind, recoverViewport } from "./declare.ts"
 import {
+  closingReason,
   type ContextEntry,
   contextOf,
   type DownloadEntry,
@@ -45,11 +46,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         navigable,
         navigable.parent !== undefined
           ? new L1Target.FrameDetached({})
-          : navigable.closing ?? (navigable.context.removing
-            ? new L1Target.PageClosed({ by: "userContextRemoved" })
-            : navigable.closeRequested
-            ? new L1Target.PageClosed({ by: "command" })
-            : new L1Target.PageClosed({ by: "script" })),
+          : closingReason(navigable) ?? new L1Target.PageClosed({ by: "script" }),
         "bidi:browsingContext.contextDestroyed"
       )
     })

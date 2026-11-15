@@ -357,7 +357,7 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
     ? Duration.millis(yield* BrowserClock.left(deadline.value))
     : yield* Protocol.CommandTimeout
   const at = Option.isSome(deadline) ? deadline.value : yield* BrowserClock.after(Duration.toMillis(timeout))
-  const failed = Kit.realmFailure(id, () => realm.ended)
+  const failed = Kit.realmFailure(realm)
   // Install cleanup before acquiring the first node. Each interruptible wire wait returns into the mask,
   // so its object ids are recorded before interruption can skip ownership registration.
   const nodes = new Map<string, string>()

@@ -339,7 +339,7 @@ it.effect("retires a missing WebKit payload context before its realm-end notific
               description: "Missing injected script for given objectId"
             })
           })
-        ).pipe(Effect.mapError(Kit.realmFailure(realm, () => false)))
+        ).pipe(Effect.mapError(Kit.realmFailure({ id: realm, ended: false, pending: false, held: [] })))
         assert.isTrue(
           getBridge().receive(realm, payload, { _tag: "Worker", realm }, {
             isAlive: () => true,

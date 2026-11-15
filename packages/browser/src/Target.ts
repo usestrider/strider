@@ -407,7 +407,7 @@ export class Vanished extends Schema.Error<Vanished>("@usestrider/browser/Target
  *   or paused request), `DownloadEnded`, `HopEnded`.
  * - No cause seen: `Vanished`, for a target Strider knows is gone but not why.
  * - Documents and realms: `DocumentReplaced`, `DocumentEvicted`, `DocumentDestroyed`, `DocumentUnloaded`,
- *   `RealmDestroyed`.
+ *   `RealmDestroyed`. A realm that ends with its page carries the page's reason instead, such as `PageClosed`.
  * - Connections: `NetworkConnectionClosed`, for a WebSocket or EventSource the page or the server closed.
  *   (`ConnectionLost` is the browser's connection.)
  *

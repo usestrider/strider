@@ -97,7 +97,7 @@ export const prepare: (
         }).pipe(
           Protocol.on(session),
           Effect.map((result) => typeof result.result.value === "string" ? result.result.value : ""),
-          Effect.mapError(Kit.realmFailure(realm.id, () => realm.ended))
+          Effect.mapError(Kit.realmFailure(realm))
         ),
         worker === undefined
           ? { _tag: "Frame", page: realm.document!.frame.page.id, frame: realm.document!.frame.id }
