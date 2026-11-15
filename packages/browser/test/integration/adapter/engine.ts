@@ -2557,18 +2557,41 @@ export const engine = (backend: Backend) =>
           timeout
         )
 
-        it.effect("counts a display: contents element's text as visible, unless its visibility hides it", () =>
+        it.effect("names an element through a slot's assigned nodes and fallback content", () =>
           Effect.gen(function*() {
             const { send } = yield* open(
               backend,
-              `<span id="shown" style="display:contents">hello</span>
-<span id="hidden" style="display:contents;visibility:hidden">hello</span>`
+              `<div id="button"><span>foo</span></div><div id="assigned"><span>Email</span></div><div id="fallback"></div>`,
+              `() => {
+                document.getElementById('button').attachShadow({mode:'open'}).innerHTML = '<button><slot></slot></button>'
+                document.getElementById('assigned').attachShadow({mode:'open'}).innerHTML = '<label><slot></slot><input></label>'
+                document.getElementById('fallback').attachShadow({mode:'open'}).innerHTML = '<label><slot>Phone</slot><input></label>'
+              }`
             )
-            const shown = yield* send({ op: "visible", steps: [{ _tag: "Css", selector: "#shown" }] })
-            assert.deepStrictEqual(shown, { _tag: "Visible", count: 1, visible: true })
-            const hidden = yield* send({ op: "visible", steps: [{ _tag: "Css", selector: "#hidden" }] })
-            assert.deepStrictEqual(hidden, { _tag: "Visible", count: 1, visible: false })
+            assert.strictEqual(count(yield* send({ op: "count", steps: [role("button", text("foo", true))] })), 1)
+            assert.strictEqual(count(yield* send({ op: "count", steps: [role("textbox", text("Email", true))] })), 1)
+            assert.strictEqual(count(yield* send({ op: "count", steps: [role("textbox", text("Phone", true))] })), 1)
           }), timeout)
+
+        it.effect(
+          "counts a display: contents element's text as visible, unless its visibility or opacity hides it",
+          () =>
+            Effect.gen(function*() {
+              const { send } = yield* open(
+                backend,
+                `<span id="shown" style="display:contents">hello</span>
+<span id="hidden" style="display:contents;visibility:hidden">hello</span>
+<span id="transparent" style="display:contents;opacity:0">hello</span>`
+              )
+              const shown = yield* send({ op: "visible", steps: [{ _tag: "Css", selector: "#shown" }] })
+              assert.deepStrictEqual(shown, { _tag: "Visible", count: 1, visible: true })
+              const hidden = yield* send({ op: "visible", steps: [{ _tag: "Css", selector: "#hidden" }] })
+              assert.deepStrictEqual(hidden, { _tag: "Visible", count: 1, visible: false })
+              const transparent = yield* send({ op: "visible", steps: [{ _tag: "Css", selector: "#transparent" }] })
+              assert.deepStrictEqual(transparent, { _tag: "Visible", count: 1, visible: false })
+            }),
+          timeout
+        )
 
         it.effect("leaves the text of a visibility: hidden display: contents element out of snapshots", () =>
           Effect.gen(function*() {
