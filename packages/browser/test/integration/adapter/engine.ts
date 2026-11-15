@@ -2537,20 +2537,24 @@ export const engine = (backend: Backend) =>
             )
           }), timeout)
 
-        it.effect("finds a display: contents element by role, unless aria-hidden or a display: none ancestor hides it", () =>
-          Effect.gen(function*() {
-            const { send } = yield* open(
-              backend,
-              `<button id="shown" style="display:contents">Buy</button>
+        it.effect(
+          "finds a display: contents element by role, unless aria-hidden or a display: none ancestor hides it",
+          () =>
+            Effect.gen(function*() {
+              const { send } = yield* open(
+                backend,
+                `<button id="shown" style="display:contents">Buy</button>
 <div aria-hidden="true"><button style="display:contents">Buy</button></div>
 <div style="display:none"><button style="display:contents">Buy</button></div>`
-            )
-            assert.strictEqual(count(yield* send({ op: "count", steps: [role("button", text("Buy", true))] })), 1)
-            assert.strictEqual(
-              count(yield* send({ op: "count", steps: [role("button", text("Buy", true), true)] })),
-              3
-            )
-          }), timeout)
+              )
+              assert.strictEqual(count(yield* send({ op: "count", steps: [role("button", text("Buy", true))] })), 1)
+              assert.strictEqual(
+                count(yield* send({ op: "count", steps: [role("button", text("Buy", true), true)] })),
+                3
+              )
+            }),
+          timeout
+        )
 
         it.effect("counts a display: contents element's text as visible, unless its visibility hides it", () =>
           Effect.gen(function*() {
