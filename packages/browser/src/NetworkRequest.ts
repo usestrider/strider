@@ -338,8 +338,10 @@ export const stream: {
  *
  * **Details**
  *
- * An operation returns only after the events the browser reported before answering it are in the log, so
- * what it caused is here once it returns, as far as the browser reported it by then.
+ * An operation returns only after the events the browser sent before answering it have been handled, so what
+ * it caused is here once it returns, as far as the browser reported it by then and the log still keeps it.
+ * The exception is a target whose state is still being read, as when it has just attached or its events
+ * overflowed: its events reach the log once that read completes.
  *
  * **Example** (Counting the images a page loaded)
  *

@@ -181,8 +181,10 @@ export const stream = <PE = never, PR = never>(
  *
  * **Details**
  *
- * An operation returns only after the events the browser reported before answering it are in the log, so
- * the messages an evaluation logged are here once the evaluation returns.
+ * An operation returns only after the events the browser sent before answering it have been handled, so the
+ * messages an evaluation logged are here once it returns, unless the log has since dropped them for newer ones.
+ * The exception is a target whose state is still being read, as when it has just attached or its events
+ * overflowed: its events reach the log once that read completes.
  *
  * **Example** (The errors logged so far)
  *
