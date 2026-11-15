@@ -451,6 +451,19 @@ export const declarations = (
           }))
         }), timeout)
 
+      it.effect("routes an exact origin written without its trailing slash", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const route = yield* page.route(origin, () =>
+              Route.fulfill(HttpServerResponse.html("<title>routed</title>")))
+            yield* page.goto(`${origin}/`)
+            assert.strictEqual(yield* page.title, "routed")
+            assert.strictEqual(yield* route.hits, 1)
+          }))
+        }), timeout)
+
       it.effect("matches a URLPattern route, pausing only the URLs under its fixed prefix", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
