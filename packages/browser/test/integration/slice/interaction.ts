@@ -3272,6 +3272,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               assert(target instanceof LocatorImpl)
               const adapter = target.owner.runtime.model.adapter
               const original = adapter.dispatchInput
+              const originalEvaluate = adapter.evaluate
               let changed = false
               const dispatchInput: typeof original = Effect.fnUntraced(function*(...args: Parameters<typeof original>) {
                 if (!changed) {
@@ -3281,11 +3282,25 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 }
                 return yield* original(...args)
               })
+              const evaluate: typeof originalEvaluate = Effect.fnUntraced(function*(realm, call) {
+                const argument = call.arguments[0]
+                const request = call.functionDeclaration === Engine.run && argument?._tag === "Value" &&
+                    argument.value.type === "string"
+                  ? JSON.parse(argument.value.value) as Engine.Request :
+                  undefined
+                if (!changed && request?.op === "insert") {
+                  changed = true
+                  yield* page.evaluateInMainWorld(() => (document.getElementById("other") as HTMLInputElement).focus())
+                    .pipe(Effect.orDie)
+                }
+                return yield* originalEvaluate(realm, call)
+              })
               yield* Effect.acquireUseRelease(
-                Effect.sync(() => Object.assign(adapter, { dispatchInput })),
+                Effect.sync(() => Object.assign(adapter, { dispatchInput, evaluate })),
                 () => target.fill("new").pipe(Deadline.within("2 seconds")),
-                () => Effect.sync(() => Object.assign(adapter, { dispatchInput: original }))
+                () => Effect.sync(() => Object.assign(adapter, { dispatchInput: original, evaluate: originalEvaluate }))
               )
+              assert(changed, "the test must move focus at the insertion boundary")
               assert.strictEqual(yield* page.locator("#other").readValue, "other")
               assert.strictEqual(yield* target.readText, "new")
             }))
@@ -6440,6 +6455,62 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               assert.strictEqual(yield* frame.locator("#keys").readText, "0")
             })), timeout)
         }
+
+        it.effect(
+          "does not replay insertion into the parent when beforeinput removes the focused frame",
+          () =>
+            Effect.scoped(Effect.gen(function*() {
+              const { origin } = yield* site
+              const child = fixtureUrl(
+                origin,
+                `<input id="field"><script>
+              document.addEventListener("beforeinput", () => {
+                const parentDocument = parent.document;
+                frameElement.remove();
+                parentDocument.getElementById("other").focus();
+              });
+            </script>`
+              )
+              const page = yield* newPage
+              yield* page.goto(fixtureUrl(origin, `<input id="other" value="safe"><iframe src="${child}"></iframe>`))
+              yield* page.frame(page.locator("iframe")).locator("#field").click()
+              yield* page.keyboard.insertText("x").pipe(Deadline.within("2 seconds"), Effect.exit)
+              assert.strictEqual(yield* page.locator("#other").readValue, "safe")
+            })),
+          timeout
+        )
+
+        it.effect(
+          "finds a focused frame inside a shadow root after another frame",
+          () =>
+            Effect.scoped(Effect.gen(function*() {
+              const { origin } = yield* site
+              const child = fixtureUrl(origin, `<input id="field">`)
+              const page = yield* newPage
+              yield* page.goto(fixtureUrl(
+                origin,
+                `<iframe></iframe><div id="host"></div>
+              <script>document.getElementById("host").attachShadow({mode:"open"}).innerHTML =
+                ${JSON.stringify(`<iframe id="chosen" src="${child}"></iframe>`)}</script>`
+              ))
+              yield* page.evaluateInMainWorld(async () => {
+                const frame = document.getElementById("host")!.shadowRoot!.querySelector("iframe")!
+                if (!frame.contentDocument?.getElementById("field")) {
+                  await new Promise<void>((resolve) => frame.addEventListener("load", () => resolve(), { once: true }))
+                }
+                ;(frame.contentDocument!.getElementById("field") as HTMLInputElement).focus()
+              })
+              yield* page.keyboard.insertText("shadow")
+              assert.strictEqual(
+                yield* page.evaluateInMainWorld(() => {
+                  const frame = document.getElementById("host")!.shadowRoot!.querySelector("iframe")!
+                  return (frame.contentDocument!.getElementById("field") as HTMLInputElement).value
+                }),
+                "shadow"
+              )
+            })),
+          timeout
+        )
 
         it.effect("inserts a newline as a line break and submits no form", () =>
           Effect.scoped(Effect.gen(function*() {
