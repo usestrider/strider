@@ -6,8 +6,9 @@
  * `snapshot({ sources: "aria" })` is the accessibility tree alone. While a document lives, the same node keeps the
  * same ref.
  *
- * A snapshot leaves out what role locators don't match: hidden elements, inert ones, and, while a modal dialog
- * opened with `showModal()` is open, everything outside it.
+ * A snapshot leaves out what role locators don't match: hidden elements, inert ones, and, while modal dialogs
+ * opened with `showModal()` are open, everything outside the topmost one, the one last in the document. That
+ * dialog is kept even inside an inert subtree.
  *
  * The tree is data, so it can be encoded for the CLI, an MCP result, or a trace. `ref(id)` returns a locator for a
  * node, bound to the page the snapshot came from and with that page's access.
