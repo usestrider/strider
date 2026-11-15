@@ -739,6 +739,42 @@ describe("ProtocolClient", () => {
       yield* Deferred.succeed(gate, undefined)
     }))
 
+  it.effect("hands a staged resource reply to cleanup only once after its barrier times out", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const gate = yield* Deferred.make<void>()
+      const { fold } = makeFold({ apply: () => Deferred.await(gate) })
+      const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire, {
+        fold,
+        replyClock: yield* Clock.Clock
+      })
+      yield* attach(browser, client, "S1")
+      const scope = yield* Scope.make()
+      const calls: Array<Protocol.LateReply> = []
+      const firstCleanup = yield* Deferred.make<void>()
+      const reply = yield* client.root.start(Target.createTarget({ url: "about:blank" }), scope).pipe(
+        Protocol.withCommandTimeout("1 second"),
+        Protocol.withLateReplyHandler((late) =>
+          Effect.andThen(
+            Effect.sync(() => calls.push(late)),
+            Deferred.succeed(firstCleanup, undefined)
+          ).pipe(Effect.asVoid)
+        )
+      )
+      const waiting = yield* reply.pipe(Effect.forkChild)
+      const sent = yield* browser.next
+      yield* load(browser, 1)
+      yield* browser.receive({ id: sent.id, result: { targetId: "late-target" } })
+      yield* browser.delivered
+      yield* TestClock.adjust("2 seconds")
+      assert.strictEqual(reasonOf(yield* Fiber.await(waiting))._tag, "NoReply")
+      yield* Deferred.await(firstCleanup)
+      yield* Scope.close(scope, Exit.void)
+      yield* Effect.yieldNow
+      yield* Deferred.succeed(gate, undefined)
+      assert.strictEqual(calls.length, 1)
+    }))
+
   it.effect("returns the receive sequence of a reply from sendSequenced", () =>
     Effect.gen(function*() {
       const browser = yield* makeBrowser
