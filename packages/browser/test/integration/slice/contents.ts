@@ -507,6 +507,46 @@ export const contents = (
           ])
         }), timeout)
 
+      it.effect("reports repeated browser console entries on stock WebKit", () =>
+        Effect.gen(function*() {
+          if (name !== "WebKit") return
+          const page = yield* SharedContext.newPage
+          yield* page.setContent(`<meta http-equiv="Content-Security-Policy" content="style-src 'none'">`)
+          const done = yield* ConsoleMessage.next(page, { text: "blocked styles finished" })
+          yield* page.evaluateInMainWorld(() => {
+            for (let i = 0; i < 2; i++) {
+              const style = document.createElement("style")
+              style.textContent = "body { color: red }"
+              document.head.append(style)
+            }
+            console.log("blocked styles finished")
+          })
+          yield* done
+          const entries = (yield* ConsoleMessage.history(page, { level: "error" })).entries
+          assert.lengthOf(entries, 2)
+          assert.match(entries[0]!.text, /Content Security Policy/i)
+          assert.strictEqual(entries[0]!.text, entries[1]!.text)
+        }), timeout)
+
+      it.effect("records synchronous browser and script console entries before evaluation returns", () =>
+        Effect.gen(function*() {
+          if (name !== "Chromium") return
+          const page = yield* SharedContext.newPage
+          yield* page.setContent(`<meta http-equiv="Content-Security-Policy" content="style-src 'none'">`)
+          yield* page.evaluateInMainWorld(() => {
+            console.log("before blocked style")
+            const style = document.createElement("style")
+            style.textContent = "body { color: red }"
+            document.head.append(style)
+            console.log("after blocked style")
+          })
+          const entries = (yield* ConsoleMessage.history(page)).entries.map((entry) => entry.text)
+          assert.lengthOf(entries, 3)
+          assert.strictEqual(entries[0], "before blocked style")
+          assert.match(entries[1]!, /Content Security Policy/i)
+          assert.strictEqual(entries[2], "after blocked style")
+        }), timeout)
+
       it.effect("reports the browser's own CSP and CORS errors at level error, as each browser sends them", () =>
         Effect.gen(function*() {
           const page = yield* SharedContext.newPage
