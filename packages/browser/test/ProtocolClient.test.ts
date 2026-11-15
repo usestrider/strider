@@ -664,6 +664,25 @@ describe("ProtocolClient", () => {
       assert.deepStrictEqual(recorder.folded, ["1"])
     }))
 
+  it.effect("returns a command's result only after the fold has applied every event received before its reply", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const gate = yield* Deferred.make<void>()
+      const { fold, recorder } = makeFold({ apply: () => Deferred.await(gate) })
+      const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire, { fold })
+      const page = yield* attach(browser, client, "S1")
+      const fiber = yield* page.send(Page.enable()).pipe(Effect.forkChild)
+      const sent = yield* browser.next
+      yield* load(browser, 1)
+      yield* browser.receive({ id: sent.id, result: {}, sessionId: "S1" })
+      yield* browser.delivered
+      // The event is still being folded, so the command it preceded on the wire must not have returned
+      assert.isUndefined(fiber.pollUnsafe())
+      yield* Deferred.succeed(gate, undefined)
+      yield* Fiber.join(fiber)
+      assert.deepStrictEqual(recorder.folded, ["1"])
+    }))
+
   it.effect("returns the receive sequence of a reply from sendSequenced", () =>
     Effect.gen(function*() {
       const browser = yield* makeBrowser
