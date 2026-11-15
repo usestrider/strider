@@ -10,8 +10,12 @@
  * **Details**
  *
  * The clock is a script Strider runs in each document's main world before the page's own. It replaces `Date` and
- * `performance.now`, and in controlled mode the timers and animation frames. Its controls are on a symbol, which a
- * page that lists the window's symbols can find.
+ * `performance.now`, and in controlled mode `performance.timeOrigin`, the timers, and animation frames. Its
+ * controls are on a symbol, which a page that lists the window's symbols can find.
+ *
+ * On a controlled clock, `performance.now()` is the controlled time that has passed in a document, from 0 where
+ * the clock reached it, and `performance.timeOrigin` is the clock's time then, which never moves. After `resume`,
+ * `performance.now()` carries on in real time from where it was. Controlled time moves by whole milliseconds.
  *
  * **Gotchas**
  *
@@ -42,7 +46,8 @@ import type * as Target from "./Target.ts"
  * **Details**
  *
  * - `fixed`: wall time frozen at `at`; timers still run.
- * - `offset`: wall time shifted by `by`; everything else real.
+ * - `offset`: wall time shifted by `by`, in whole milliseconds; everything else real. A `by` that isn't finite
+ *   fails with `InvalidInput`.
  * - `controlled`: wall time, monotonic time, timers, and animation frames move only when you call `adjust` or
  *   `setTime`.
  *
@@ -126,6 +131,19 @@ export interface PageClock {
    * Advances a controlled clock, firing every due timer in order, an interval as often as it falls due. Fails with
    * `WrongMode` on a `fixed` or `offset` clock.
    *
+   * **Details**
+   *
+   * A fractional duration is rounded up to a whole millisecond. Between two timers, the page's queued tasks run,
+   * such as a message a timer posted, so a timer they set fires within the same call if it falls due. A timer set
+   * by a timer, or by those tasks, with no delay waits 1 ms, so it fires in a later call. A duration that is
+   * negative or isn't finite fails with `InvalidInput`.
+   *
+   * **Gotchas**
+   *
+   * - A timer that throws is reported to the page, as an uncaught error is, and the other timers still run. Once
+   *   the clock has reached its time, `adjust` fails with `EvaluationThrown`, naming the first error and the
+   *   document it threw in.
+   *
    * **Example** (Letting a toast time out)
    *
    * ```ts import.meta.vitest
@@ -145,6 +163,12 @@ export interface PageClock {
   adjust(duration: Duration.Input): Effect.Effect<void, PageClockError | Target.TargetGone | Deadline.Timeout>
   /**
    * Jumps a fixed or controlled clock to `at`; due timers fire at most once.
+   *
+   * **Details**
+   *
+   * On a controlled clock, a jump forward passes time as `adjust` does: `performance.now()` moves with it, the page's
+   * queued tasks run between the timers it fires, and a timer that throws makes it fail with `EvaluationThrown`
+   * once the clock is at `at`. A jump back moves only the wall time.
    *
    * **Example** (Jumping past the end of a sale)
    *
@@ -222,7 +246,13 @@ export class WrongMode extends Schema.Error<WrongMode>("@usestrider/browser/Page
  * @category schemas
  * @since 0.1.0
  */
-export const PageClockErrorReason = Schema.Union([NotInstalled, WrongMode, Reason.InvalidInput, Reason.BackendFailure])
+export const PageClockErrorReason = Schema.Union([
+  NotInstalled,
+  WrongMode,
+  Reason.InvalidInput,
+  Reason.EvaluationThrown,
+  Reason.BackendFailure
+])
 
 /**
  * The reasons a clock operation can fail.

@@ -11,8 +11,14 @@
  * - **The engine is untouched**: it runs in its own world, which keeps the real timers and frames, so
  *   actionability and expectations run on native rendering. Where it shares the page's world, as on
  *   stock WebKit, the shim leaves the real ones under a symbol the engine takes them from (QUIRKS.md, Q222).
- * - **What it covers**: `Date`, `performance.now`, and in controlled mode `setTimeout`, `setInterval`,
- *   `requestAnimationFrame` and their clears. Not CSS animations or `document.timeline`.
+ * - **What it covers**: `Date`, `performance.now`, and in controlled mode `performance.timeOrigin`, `setTimeout`,
+ *   `setInterval`, `requestAnimationFrame` and their clears. Not CSS animations or `document.timeline`.
+ * - **The timeline's rules** are Playwright's clock's: controlled time moves by whole milliseconds, and
+ *   `performance.now()` counts it from 0 where the clock reaches a document. An operation runs one due timer at a
+ *   time, then lets the page's queued tasks run, so the evaluation that drives it awaits a promise; a timer set
+ *   during that turn with no delay waits 1 ms. A timer that throws is reported to the page and the rest still run;
+ *   the operation then fails with the first error. A document runs its controls one after another, since a host
+ *   deadline can leave one running when the next arrives.
  * - **Workers**, when installed with `workers: true`: the init script runs in the scope's dedicated
  *   workers too, and each operation reaches the current ones as it reaches documents.
  */
@@ -93,7 +99,12 @@ const shim = (key: string, initial: State, version: number): string => {
   let current = version
   /** Controlled time that passed in this document, in milliseconds. */
   let ticks = 0
-  const perfBase = realPerf()
+  /** After `resume`, what `performance.now()` adds to the real one, so it carries on from `ticks`. */
+  let perfBy: number | undefined = undefined
+  /** Whether a timer is running, or the page's tasks after it: a timer set then waits at least 1 ms. */
+  let duringTick = false
+  /** The controls run one after another: a host deadline can leave one running when the next arrives. */
+  let chain: Promise<unknown> = Promise.resolve()
   /** Controlled timers, by an id real timers never reach. */
   const timers = new Map<number, Timer>()
   let nextId = 1_000_000_000
@@ -102,23 +113,58 @@ const shim = (key: string, initial: State, version: number): string => {
 
   const wall = (): number =>
     state.mode === "fixed" ? state.wall : state.mode === "offset" ? realNow() + state.by : state.wall + ticks
-  const perf = (): number => state.mode === "controlled" ? perfBase + ticks : realPerf()
+  const perf = (): number =>
+    state.mode === "controlled" ? ticks : perfBy === undefined ? realPerf() : realPerf() + perfBy
 
   const callable = (callback: unknown): (...args: Array<unknown>) => void =>
     typeof callback === "function"
       ? callback as (...args: Array<unknown>) => void
       // oxlint-disable-next-line no-eval -- a string is a script, as the platform's own timers run it
       : () => (0, eval)(String(callback))
-  const run = (timer: Timer) => {
+  /** Runs a timer, reporting what it throws to the page, and returns that. */
+  const run = (timer: Timer): { readonly error: unknown } | undefined => {
     try {
       timer.callback.apply(global, timer.frame ? [perf()] : timer.args)
+      return undefined
     } catch (error) {
       report(error)
+      return { error }
+    }
+  }
+  /**
+   * Lets the page's queued tasks run: a message through a channel of our own, which arrives after the ones the page
+   * posted before it, then a real timer.
+   */
+  const yieldToPage = async () => {
+    if (typeof global.MessageChannel === "function") {
+      const channel = new global.MessageChannel()
+      await new Promise((resolve) => {
+        channel.port1.onmessage = resolve
+        channel.port2.postMessage(null)
+      })
+      channel.port1.close()
+    }
+    await new Promise((resolve) => realSetTimeout(resolve, 0))
+  }
+  /** The first error the timers of one control threw, as the host reads it. */
+  let thrown: { readonly error: unknown } | undefined = undefined
+  /**
+   * Runs one timer of `advance` or `jump`, then lets the page's tasks run, such as the messages it posted, through
+   * one real timer: a timer they set counts from the time it fired at.
+   */
+  const step = async (timer: Timer) => {
+    duringTick = true
+    try {
+      const result = run(timer)
+      if (thrown === undefined) thrown = result
+      await yieldToPage()
+    } finally {
+      duringTick = false
     }
   }
   const schedule = (callback: unknown, delay: unknown, args: Array<unknown>, every: boolean, frame: boolean) => {
     const id = nextId++
-    const wait = Math.max(0, Number(delay) || 0)
+    const wait = Math.max(duringTick ? 1 : 0, Math.floor(Number(delay) || 0))
     timers.set(id, {
       id,
       at: frame ? (Math.floor(ticks / 16) + 1) * 16 : ticks + wait,
@@ -141,23 +187,25 @@ const shim = (key: string, initial: State, version: number): string => {
     return next
   }
   /** Advances controlled time to `to`: each due timer runs in order, an interval as often as it falls due. */
-  const advance = (to: number) => {
+  const advance = async (to: number) => {
     for (let timer = due(to); timer !== undefined; timer = due(to)) {
       ticks = Math.max(ticks, timer.at)
       if (timer.every === undefined) timers.delete(timer.id)
       else timer.at += timer.every
-      run(timer)
+      await step(timer)
     }
     ticks = Math.max(ticks, to)
   }
   /** Jumps controlled time to `to`: each due timer runs once, as on waking from sleep. */
-  const jump = (to: number) => {
+  const jump = async (to: number) => {
     const list = [...timers.values()].filter((timer) => timer.at <= to).sort((a, b) => a.at - b.at || a.id - b.id)
     ticks = Math.max(ticks, to)
     for (const timer of list) {
+      // One an earlier timer cleared doesn't run
+      if (timers.get(timer.id) !== timer) continue
       if (timer.every === undefined) timers.delete(timer.id)
       else timer.at = ticks + timer.every
-      run(timer)
+      await step(timer)
     }
   }
   const clear = (id: unknown) => {
@@ -205,6 +253,11 @@ const shim = (key: string, initial: State, version: number): string => {
   Object.defineProperty(FakeDate, "name", { value: "Date" })
   global.Date = FakeDate
   performance.now = () => perf()
+  // A controlled clock's monotonic time starts here, at the timeline's wall time now, which stays its origin
+  if (initial.mode === "controlled") {
+    const origin = initial.wall
+    Object.defineProperty(performance, "timeOrigin", { get: () => origin, configurable: true, enumerable: true })
+  }
   global.setTimeout = (callback: unknown, delay?: unknown, ...args: Array<unknown>) =>
     state.mode === "controlled"
       ? schedule(callback, delay, args, false, false)
@@ -227,37 +280,69 @@ const shim = (key: string, initial: State, version: number): string => {
     }
   }
 
+  /** Moves controlled real time to an offset one, `performance.now()` carrying on from where it is. */
+  const toReal = () => {
+    perfBy = ticks - realPerf()
+    release()
+  }
+  /**
+   * Runs a control after the ones before it. It resolves to `"done"`, or to the first error a timer threw, as
+   * `"threw "` and the JSON of its name, message, and stack.
+   */
+  const queue = (control: () => void | Promise<void>): Promise<string> => {
+    const next = chain.then(async () => {
+      thrown = undefined
+      await control()
+      // `thrown` is set inside `control`, which narrowing can't see
+      const result = thrown as { readonly error: unknown } | undefined
+      thrown = undefined
+      if (result === undefined) return "done"
+      const error = result.error
+      return "threw " + JSON.stringify(
+        error instanceof Error
+          ? { name: error.name, message: error.message, stack: error.stack ?? null }
+          : { name: "Error", message: String(error), stack: null }
+      )
+    })
+    chain = next.catch(() => undefined)
+    return next
+  }
+
   const controls = {
     get version() {
       return current
     },
     /** A newer state of the timeline, from another declaration or an operation. */
-    set: (next: State, at: number) => {
-      if (at <= current) return
-      current = at
-      if (state.mode === "controlled" && next.mode !== "controlled") release()
-      // A controlled document keeps the time that passed in it: the timeline's wall time is now `next.wall`
-      state = next.mode === "controlled" ? { mode: "controlled", wall: next.wall - ticks } : next
-    },
-    adjust: (by: number, at: number) => {
-      current = Math.max(current, at)
-      advance(ticks + by)
-    },
-    setTime: (to: number, at: number) => {
-      current = Math.max(current, at)
-      if (state.mode === "fixed") state = { mode: "fixed", wall: to }
-      else if (state.mode === "controlled") {
-        const delta = to - wall()
-        if (delta > 0) jump(ticks + delta)
-        state = { mode: "controlled", wall: to - ticks }
-      }
-    },
-    resume: (at: number) => {
-      current = Math.max(current, at)
-      const by = wall() - realNow()
-      if (state.mode === "controlled") release()
-      state = { mode: "offset", by }
-    }
+    set: (next: State, at: number) =>
+      queue(() => {
+        if (at <= current) return
+        current = at
+        if (state.mode === "controlled" && next.mode !== "controlled") toReal()
+        // A controlled document keeps the time that passed in it: the timeline's wall time is now `next.wall`
+        state = next.mode === "controlled" ? { mode: "controlled", wall: next.wall - ticks } : next
+      }),
+    adjust: (by: number, at: number) =>
+      queue(async () => {
+        current = Math.max(current, at)
+        await advance(ticks + by)
+      }),
+    setTime: (to: number, at: number) =>
+      queue(async () => {
+        current = Math.max(current, at)
+        if (state.mode === "fixed") state = { mode: "fixed", wall: to }
+        else if (state.mode === "controlled") {
+          const delta = to - wall()
+          if (delta > 0) await jump(ticks + delta)
+          state = { mode: "controlled", wall: to - ticks }
+        }
+      }),
+    resume: (at: number) =>
+      queue(() => {
+        current = Math.max(current, at)
+        const by = wall() - realNow()
+        if (state.mode === "controlled") toReal()
+        state = { mode: "offset", by }
+      })
   }
   Object.defineProperty(global, symbol, { value: controls, enumerable: false })
   return "installed"
@@ -267,7 +352,10 @@ const shim = (key: string, initial: State, version: number): string => {
 const installer = (key: string, state: State, version: number) =>
   `(${shim.toString()})(${JSON.stringify(key)}, ${JSON.stringify(state)}, ${version})`
 
-/** Runs an operation in a document that has the shim: a function declaration for `evaluate`. */
+/**
+ * Runs an operation in a document that has the shim: a function declaration for `evaluate`, whose promise
+ * resolves to `"missing"`, `"done"`, or `"threw "` and the JSON of the first error a timer threw.
+ */
 const operationSource = (
   key: string,
   name: "adjust" | "setTime" | "resume",
@@ -277,9 +365,14 @@ const operationSource = (
   `function() {
   const clock = globalThis[Symbol.for(${JSON.stringify(key)})];
   if (clock === undefined) return "missing";
-  clock.${name}(${argument === undefined ? "" : `${argument}, `}${version});
-  return "done";
+  return clock.${name}(${argument === undefined ? "" : `${argument}, `}${version});
 }`
+
+/** A timer's error in one document, from the JSON the shim resolved to. */
+interface Thrown {
+  readonly url: string
+  readonly exception: { readonly name: string; readonly message: string; readonly stack: string | null }
+}
 
 /** A timeline, kept by its owner while a clock is installed. */
 interface Installed {
@@ -326,10 +419,12 @@ const stateOf = (mode: PageClock.Mode): State | string => {
       return Option.isSome(wall) ? { mode: "controlled", wall: wall.value } : `${String(mode.at)} isn't a time`
     }
     case "offset": {
-      const by = Duration.fromInput(mode.by)
+      // A whole millisecond, as `Date.now()` is
+      // `Duration.fromInput` reads NaN as zero
+      const by = Number.isNaN(mode.by) ? Option.none() : Option.filter(Duration.fromInput(mode.by), Duration.isFinite)
       return Option.isSome(by)
-        ? { mode: "offset", by: Duration.toMillis(by.value) }
-        : `${String(mode.by)} isn't a duration`
+        ? { mode: "offset", by: Math.trunc(Duration.toMillis(by.value)) }
+        : `${String(mode.by)} isn't a finite duration`
     }
   }
 }
@@ -343,9 +438,10 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
 
   /**
    * Evaluates in the main world of every current document of the timeline's pages, and with `workers` in their
-   * dedicated workers; a document or worker that ends is skipped.
+   * dedicated workers; a document or worker that ends is skipped. Every one runs to its end, and the errors their
+   * timers threw are returned, by where they threw.
    */
-  const broadcast = (functionDeclaration: string, workers: boolean) =>
+  const broadcast = (functionDeclaration: string, workers: boolean, awaitPromise: boolean) =>
     Effect.flatMap(
       Effect.forEach(owner.pages(), (page) => page.state.get),
       (states) =>
@@ -369,27 +465,33 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
                 adapter.evaluate(realm, {
                   functionDeclaration,
                   arguments: [],
-                  awaitPromise: false,
+                  awaitPromise,
                   result: "value",
                   userActivation: false
                 })
               ),
-              Effect.flatMap((result) =>
-                result._tag === "Exception"
-                  ? Effect.fail(`the clock threw in ${where.url}: ${result.text}`)
-                  : Effect.void
-              ),
+              Effect.flatMap((result): Effect.Effect<Array<Thrown>, string> => {
+                if (result._tag === "Exception") {
+                  return Effect.fail(`the clock threw in ${where.url}: ${result.text}`)
+                }
+                const value = result.value
+                return Effect.succeed(
+                  value.type === "string" && value.value.startsWith("threw ")
+                    ? [{ url: where.url, exception: JSON.parse(value.value.slice("threw ".length)) }]
+                    : []
+                )
+              }),
               Effect.catch((error) =>
                 typeof error === "string" || Deadline.isTimeout(error)
                   ? Effect.fail(error)
                   : error.reason._tag === "Gone"
-                  ? Effect.void
+                  ? Effect.succeed([])
                   : Effect.fail(error.message)
               )
             ),
-          { concurrency: "unbounded", discard: true }
+          { concurrency: "unbounded" }
         )
-    )
+    ).pipe(Effect.map((each) => each.flat()))
 
   const declare = Effect.fnUntraced(function*(installed: Installed) {
     const script = yield* Scope.fork(installed.scope)
@@ -432,23 +534,47 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
       return Effect.succeed(installed)
     })
 
-  /** Applies an operation to every document now, then declares the timeline's new state for later ones. */
+  /**
+   * Applies an operation to every document now, then declares the timeline's new state for later ones, which the
+   * timeline has whether or not the documents took it. Fails with the first error a page's timer threw.
+   */
   const apply = (operation: string, installed: Installed, next: State, run: string) =>
     Effect.gen(function*() {
       installed.version++
       installed.state = next
-      yield* broadcast(run, installed.workers).pipe(
-        Effect.mapError((hint) =>
-          Deadline.isTimeout(hint) ? hint : clockError(operation, backendFailure("evaluate", hint))
+      const applied = yield* Effect.exit(
+        broadcast(run, installed.workers, true).pipe(
+          Effect.mapError((hint) =>
+            Deadline.isTimeout(hint) ? hint : clockError(operation, backendFailure("evaluate", hint))
+          )
         )
       )
       const previous = installed.script
-      installed.script = yield* declare(installed).pipe(
-        Effect.mapError((error) =>
-          Deadline.isTimeout(error) ? error : clockError(operation, backendFailure("declare", error.message))
+      const declared = yield* Effect.exit(
+        declare(installed).pipe(
+          Effect.mapError((error) =>
+            Deadline.isTimeout(error) ? error : clockError(operation, backendFailure("declare", error.message))
+          )
         )
       )
-      yield* Scope.close(previous, Exit.void)
+      if (Exit.isSuccess(declared)) {
+        installed.script = declared.value
+        yield* Scope.close(previous, Exit.void)
+      }
+      const thrown = yield* applied
+      yield* declared
+      if (thrown.length > 0) {
+        const first = thrown[0]!
+        return yield* Effect.fail(clockError(
+          operation,
+          new Reason.EvaluationThrown({
+            exception: { ...first.exception, stack: Option.fromNullishOr(first.exception.stack) },
+            hint: `A timer threw in ${first.url}${
+              thrown.length > 1 ? `, and in ${thrown.length - 1} more documents` : ""
+            }; the clock still reached its time, and the page saw each error`
+          })
+        ))
+      }
     }).pipe(Operation.named(operation, {
       attributes: { ...Spans.scopeAttributes(owner.scope), "browser.clock.mode": next.mode }
     }))
@@ -488,7 +614,7 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
           Effect.onError(() => Scope.close(scope, Exit.void))
         )
         // The documents loaded already get it now; what their scripts captured before keeps real time
-        yield* broadcast(`function() { return ${installer(token, state, installed.version)} }`, workers).pipe(
+        yield* broadcast(`function() { return ${installer(token, state, installed.version)} }`, workers, false).pipe(
           Effect.mapError((hint) => Deadline.isTimeout(hint) ? hint : fail(backendFailure("evaluate", hint))),
           Effect.onError(() => Scope.close(scope, Exit.void))
         )
@@ -502,14 +628,23 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
     adjust: Effect.fnUntraced(function*(duration: Duration.Input) {
       const operation = `${owner.name}.adjust`
       const installed = yield* require(operation, ["controlled"])
-      const by = Duration.fromInput(duration)
+      // `Duration.fromInput` reads NaN as zero
+      const by = Number.isNaN(duration) ? Option.none() : Option.filter(
+        Duration.fromInput(duration),
+        (by) => Duration.isFinite(by) && !Duration.isNegative(by)
+      )
       if (Option.isNone(by)) {
         return yield* Effect.fail(clockError(
           operation,
-          new Reason.InvalidInput({ input: "duration", expected: "a duration", hint: `${String(duration)} isn't one` })
+          new Reason.InvalidInput({
+            input: "duration",
+            expected: "a finite duration of zero or more",
+            hint: `${String(duration)} isn't one`
+          })
         ))
       }
-      const ms = Duration.toMillis(by.value)
+      // Up to a whole millisecond, as timers and `Date.now()` count
+      const ms = Math.ceil(Duration.toMillis(by.value))
       const state = installed.state as Extract<State, { mode: "controlled" }>
       yield* apply(
         operation,

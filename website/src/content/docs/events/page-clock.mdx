@@ -37,7 +37,9 @@ Use `fixed` for a date the page only shows, `offset` to run in the future or the
 
 ## Moving time
 
-- `adjust` moves a controlled clock forward, firing each timer that comes due, in order.
+- `adjust` moves a controlled clock forward, firing each timer that comes due, in order. Between two timers, the
+  page's queued tasks run, such as a message a timer posted. If a timer throws, the page sees the error, the other
+  timers still run, and `adjust` fails with it.
 - `setTime` jumps, firing due timers at most once, as a laptop waking from sleep.
 - `resume` returns to real time from where the clock stands. The timers it held then run as real ones, for a step
   that needs them, such as a form that validates after a pause:

@@ -1624,3 +1624,13 @@ these, Playwright's `goto` and `reload` resolve to `null` for them, and the brow
 report both kinds as requests, and Firefox reports `data:` but not `blob:`. Reporting each browser's own events was
 rejected: the same page would report different requests on each backend, and a `data:` navigation would carry a
 response with no network behind it. `file:` URLs stay requests.
+
+## A timer that throws fails the page clock's operation
+
+When a timer that `adjust` or `setTime` fires on a controlled page clock throws, the error is still reported to
+the page, as a real browser reports an uncaught one, the remaining due timers still run, and the clock still reaches
+its time; then the operation fails with `PageClockError` whose reason is `EvaluationThrown`, carrying the first
+error and the document it threw in. Playwright's clock rethrows the first error once time has reached the target
+too. Succeeding and leaving the error to the page alone was rejected: a test that moves time past a broken timer
+would pass without seeing it. Stopping at the first error was rejected: the timeline would stop short of the time
+the caller asked for, with other documents already past it.
