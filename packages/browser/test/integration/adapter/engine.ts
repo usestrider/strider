@@ -2738,6 +2738,90 @@ document.getElementById("outer").attachShadow({ mode: "open" }).innerHTML =
             assert.strictEqual(count(yield* send({ op: "count", steps: [role("button")] })), 1)
           }), timeout)
 
+        for (const member of ["firstElementChild", "nextElementSibling"] as const) {
+          it.effect(`walks the real tree when a form control is named ${member}`, () =>
+            Effect.gen(function*() {
+              const { send } = yield* open(
+                backend,
+                `<form><button>Inside</button><input name="${member}"></form><button>Outside</button>`
+              )
+              assert.strictEqual(count(yield* send({ op: "count", steps: [role("button")] })), 2)
+            }), timeout)
+        }
+
+        it.effect("infers a nearby snapshot label when a form control is named previousElementSibling", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<span>Nearby</span><form tabindex="0"><input name="previousElementSibling"></form>`
+            )
+            const response = yield* send({
+              op: "snapshot",
+              steps: [{ _tag: "Css", selector: "form" }],
+              interactivity: true,
+              depth: 0
+            })
+            assert(response._tag === "Snapshot")
+            assert.deepStrictEqual(response.root.name, { _tag: "Inferred", value: "Nearby", from: "nearbyLabel" })
+          }), timeout)
+
+        for (const member of ["scrollWidth", "clientWidth", "scrollHeight", "clientHeight"] as const) {
+          it.effect(`scrolls a form ancestor when its control is named ${member}`, () =>
+            Effect.gen(function*() {
+              const horizontal = member.endsWith("Width")
+              const { send } = yield* open(
+                backend,
+                `<form style="width:100px;height:100px;overflow:auto;position:relative">` +
+                  `<input type="hidden" name="${member}">` +
+                  `<div style="${horizontal ? "width:400px;height:50px" : "height:400px;width:50px"}">` +
+                  `<button id="go" style="position:absolute;${
+                    horizontal ? "left:200px;top:10px" : "top:200px;left:10px"
+                  }">Go</button>` +
+                  `</div></form>`
+              )
+              const response = yield* send({ ...point(0), checks: { ...all, stable: 0 } })
+              assert.strictEqual(response._tag, "Ready", JSON.stringify(response))
+            }), timeout)
+        }
+
+        it.effect("does not treat form controls named labels as native labels", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<form title="Signup"><input type="submit" name="labels" value="Wrong"><input type="submit" name="labels" value="Name"></form>`
+            )
+            assert.strictEqual(count(yield* send({ op: "count", steps: [role("form", text("Signup", true))] })), 1)
+          }), timeout)
+
+        it.effect("describes strict form matches whose controls shadow description members", () =>
+          Effect.gen(function*() {
+            const controls = ["id", "matches", "closest"].map((name) =>
+              `<input name="${name}">`
+            ).join("")
+            const { send } = yield* open(backend, `<form id="first">${controls}</form><form id="second"></form>`)
+            const response = yield* send({ ...point(0), steps: [{ _tag: "Css", selector: "form" }] })
+            assert(response._tag === "Strict")
+            assert.deepStrictEqual(
+              response.candidates.map((candidate) =>
+                candidate.description
+              ),
+              ["form#first", "form#second"]
+            )
+          }), timeout)
+
+        it.effect("reads the document root and hit test through named document elements", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<form name="documentElement"></form><img name="elementFromPoint"><img name="elementsFromPoint"><button id="go">Go</button>`
+            )
+            const response = yield* send({ ...point(0), checks: { ...all, stable: 0 } })
+            assert.strictEqual(response._tag, "Ready", JSON.stringify(response))
+            const snapshot = yield* send({ op: "snapshot", steps: null, interactivity: false, depth: null })
+            assert(snapshot._tag === "Snapshot")
+            assert.include(JSON.stringify(snapshot.root), "\"Go\"")
+          }), timeout)
+
         it.effect("sees focus on a page with an image named activeElement", () =>
           Effect.gen(function*() {
             const { send } = yield* open(backend, `<img name="activeElement"><input id="go">`)
