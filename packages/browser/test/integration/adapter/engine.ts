@@ -2646,6 +2646,15 @@ export const engine = (backend: Backend) =>
             assert.deepStrictEqual(namesOf(yield* send(marked)), ["Delete Documentation.pdf", "Search"])
           }), timeout)
 
+        it.effect("ID reference lists split on ASCII whitespace only", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<span id="for&nbsp;save">Label</span><button data-t id="save" aria-labelledby="for&nbsp;save\n\tsave">More</button>`
+            )
+            assert.deepStrictEqual(namesOf(yield* send(marked)), ["Label More"])
+          }), timeout)
+
         it.effect("names from content follow aria-owns after the children", () =>
           Effect.gen(function*() {
             const { send } = yield* open(
