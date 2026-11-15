@@ -401,6 +401,32 @@ describe("Shared video lifetime", () => {
       assert.strictEqual(acknowledgedWhileBlocked, 0, "taking the synthetic copy must not acknowledge the source")
     }))
 
+  it.effect("lets a writer still finishing ten browser-clock seconds after end give its path", () =>
+    Effect.gen(function*() {
+      const clock = BrowserClock.fromClock(yield* Clock.Clock)
+      const ended = yield* Deferred.make<void>()
+      const received = yield* Deferred.make<void>()
+      const file = yield* Video.record(
+        Effect.succeed({
+          frames: Stream.concat(Stream.make(image), Stream.never),
+          ended: Deferred.await(ended)
+        }),
+        {
+          write: (frames, destination) =>
+            frames.pipe(
+              Stream.runForEach(() => Deferred.succeed(received, undefined)),
+              Effect.andThen(Effect.sleep("10 seconds")),
+              Effect.as(destination.path)
+            )
+        },
+        "/tmp"
+      ).pipe(Effect.provideService(BrowserClock.CurrentClock, clock))
+      yield* Deferred.await(received)
+      yield* Deferred.succeed(ended, undefined)
+      yield* TestClock.adjust("10 seconds")
+      assert.match(yield* file, /^\/tmp\/strider-.*\.webm$/)
+    }))
+
   it.effect("propagates writer failure and releases the capture source", () =>
     Effect.gen(function*() {
       let released = false
