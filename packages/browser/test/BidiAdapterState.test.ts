@@ -4642,3 +4642,32 @@ it.effect("rejects a sandbox realm created in a replacement document while acqui
       }
     }
   }).pipe(Effect.scoped))
+
+it.effect("keeps the browser's closing reason when Firefox rejects a pending call before realmDestroyed", () =>
+  Effect.gen(function*() {
+    const browser = yield* makeBrowser
+    const client = yield* ProtocolClient.make(browser.transport, BidiWire.wire)
+    const { realm, state } = yield* withPage({}, {}, client.root)
+    const running = yield* Evaluation.evaluate(state, realm.id, {
+      functionDeclaration: "() => new Promise(() => {})",
+      arguments: [],
+      awaitPromise: true,
+      result: "value",
+      userActivation: false
+    }).pipe(Effect.flip, Effect.forkChild)
+    const sent = yield* browser.next
+    yield* Kit.closing(state)(new Target.BrowserClosed({}))
+    // Firefox can reject a call naming a destroyed realm before its realmDestroyed event arrives.
+    yield* browser.receive({
+      type: "error",
+      id: sent.id,
+      error: "no such frame",
+      message: `Realm with id ${realm.bidi} not found`
+    })
+    const error = yield* Fiber.join(running)
+    assert.strictEqual(error.reason._tag, "Gone")
+    if (error.reason._tag === "Gone") {
+      assert.deepStrictEqual(error.reason.reason, new Target.BrowserClosed({}))
+    }
+    assert.deepStrictEqual(realm.endedWith, new Target.BrowserClosed({}))
+  }))
