@@ -26,7 +26,7 @@ import * as Cleanup from "../declarationCleanup.ts"
 import * as Declarations from "../declarations.ts"
 import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
-import { contextLock } from "./state.ts"
+import { contextLock, downloadDirectory, forgetRetiredFrames } from "./state.ts"
 import { type ContextEntry, type PageEntry, placement, type State, type TargetEntry } from "./state.ts"
 import { installWebSocketGates } from "./targets.ts"
 import * as WebSocketBridge from "./webSocketBridge.ts"
@@ -501,6 +501,8 @@ const releaseDeclaration = (state: State, declaration: Adapter.Declaration, scop
 export const applyDownloads = (state: State, context: ContextEntry) =>
   contextLock(context).withPermits(1)(Effect.suspend(() => {
     if (context.disposed) return Effect.void
+    // A download can no longer land in a declared directory, which its frames that ended were kept for
+    if (Option.isNone(downloadDirectory(state, context.id))) forgetRetiredFrames(state, context)
     const behavior = state.registry.downloads(context.id)
     return BrowserCdp.setDownloadBehavior({
       behavior: Option.isNone(behavior) ? "default" : behavior.value._tag === "Allow" ? "allowAndName" : "deny",

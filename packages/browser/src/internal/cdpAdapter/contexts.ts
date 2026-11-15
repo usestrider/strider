@@ -25,6 +25,7 @@ import {
   contextOf,
   downloadDirectory,
   type DownloadEntry,
+  forgetRetiredFrames,
   type Event,
   frameOf,
   pageOf,
@@ -186,8 +187,7 @@ export const removeUserContext = Effect.fnUntraced(function*(state: State, id: U
         state.buffer.waitFor(() => downloads.every((download) => download.ended) ? true : undefined)
       ], { concurrency: "unbounded", discard: true })
       context.proxy = undefined
-      for (const frameId of context.retiredFrames ?? []) state.retiredFrames.delete(frameId)
-      context.retiredFrames = undefined
+      forgetRetiredFrames(state, context)
       state.contexts.delete(id)
       state.contextsByCdp.delete(browserContextId)
       yield* state.buffer.run(() => state.buffer.emit({ _tag: "UserContextRemoved", context: id }))

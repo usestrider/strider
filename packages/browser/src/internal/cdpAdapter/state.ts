@@ -53,7 +53,7 @@ export class ContextEntry {
   declare removing: boolean
   declare disposed?: boolean | undefined
   declare lifecycleLock?: Semaphore.Semaphore | undefined
-  /** The ids of its frames that have ended, which `State.retiredFrames` holds until the context is removed. */
+  /** The ids of its frames that have ended, which `State.retiredFrames` holds (`retireFrame`). */
   declare retiredFrames?: Set<string> | undefined
   declare gate: ContextGate
   declare workerGate: WorkerGate
@@ -334,8 +334,9 @@ export interface State {
   readonly obligations: Map<Adapter.ObligationId, ObligationEntry>
   readonly downloads: Map<string, DownloadEntry>
   /**
-   * The context of each ended frame of a context the library created, by frame id, until that context is removed:
-   * Chromium can announce a download after the frame that started it has gone.
+   * The context of each ended frame, by frame id, of a context whose downloads go to a directory a declaration
+   * names, while they do and until the context is removed: Chromium can announce a download after the frame that
+   * started it has gone, and removing the context waits for it before the directory is removed.
    */
   readonly retiredFrames: Map<string, ContextEntry>
   readonly downloadsById: Map<Download.Id, DownloadEntry>
@@ -468,6 +469,23 @@ export const downloadDirectory = (state: State, context: UserContext.Id) => {
   return Option.isSome(behavior) && behavior.value._tag === "Allow"
     ? Option.fromUndefinedOr(behavior.value.directory)
     : Option.none<string>()
+}
+
+/**
+ * Keeps which context a frame that ended belonged to, while the context's downloads go to a declared directory: a
+ * download Chromium announces after the frame has gone is that context's. Nothing is kept for the default context,
+ * which is never removed, or for one already disposed.
+ */
+export const retireFrame = (state: State, context: ContextEntry, frameId: string) => {
+  if (context.isDefault || context.disposed || Option.isNone(downloadDirectory(state, context.id))) return
+  state.retiredFrames.set(frameId, context)
+  ;(context.retiredFrames ??= new Set()).add(frameId)
+}
+
+/** Forgets the frames of `context` that ended, once its downloads no longer go to a declared directory or it goes. */
+export const forgetRetiredFrames = (state: State, context: ContextEntry) => {
+  for (const frameId of context.retiredFrames ?? []) state.retiredFrames.delete(frameId)
+  context.retiredFrames = undefined
 }
 
 // ── Lookups: an id this connection minted that ended is Gone, any other Foreign ───────────────────────────
