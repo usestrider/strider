@@ -37,7 +37,7 @@ Realms are siblings of documents, not children. The one exception that forces th
 | Brand | Meaning | Validated as |
 |---|---|---|
 | `Url` (`Url.Url`) | an absolute URL | WHATWG URL parse |
-| `UrlPattern` (`Url.Pattern`) | a matcher (glob or URLPattern), never navigated to | pattern compile |
+| `UrlPattern` (`Url.Pattern`) | a matcher (glob, URLPattern, or exact URL), never navigated to | pattern compile |
 | `Origin`, `Site` (`Url.Origin`, `Url.Site`) | scheme+host+port; registrable-domain site (partition keys) | derived from `Url` |
 | `HttpStatusCode` (`NetworkResponse.StatusCode`) | 100–599 | integer range |
 | `HeaderName` | case-normalized header name | token grammar |

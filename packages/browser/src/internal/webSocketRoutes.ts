@@ -139,7 +139,9 @@ export const register = <E, R>(
     // Unrelated to the token: the page can see the binding's name until the shim captures it.
     const name = `__strider_ws_${crypto.randomUUID().replaceAll("-", "")}`
     const transport = adapter.info.protocol === "webkit" ? "console" : "binding"
-    const source = Shim.source(name, token, pattern, transport, adapter.info.protocol === "bidi")
+    // The shim compares an exact URL as it is, so it gets the URL as the browser writes it.
+    const shimPattern = UrlPattern.normalize(pattern)
+    const source = Shim.source(name, token, shimPattern, transport, adapter.info.protocol === "bidi")
     const allocation = Allocation.make()
     const accounting = allocation.budget
     const connections = new Map<string, Connection>()
@@ -858,7 +860,7 @@ export const register = <E, R>(
                 return adapter.evaluate(realm, {
                   functionDeclaration: `(old) => {
                   const holder = old ?? (${Shim.install.toString()})();
-                  holder.add(${JSON.stringify(name)}, ${JSON.stringify(token)}, ${JSON.stringify(pattern)}, ${
+                  holder.add(${JSON.stringify(name)}, ${JSON.stringify(token)}, ${JSON.stringify(shimPattern)}, ${
                     JSON.stringify(transport)
                   });
                   return holder;
