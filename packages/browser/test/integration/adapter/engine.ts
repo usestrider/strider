@@ -2593,6 +2593,27 @@ export const engine = (backend: Backend) =>
           timeout
         )
 
+        it.effect("resolves a pointer action on text-only display: contents without retrying geometry", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(backend, `<span id="go" style="display:contents">hello</span>`)
+            const response = yield* send(point(0))
+            assert(response._tag === "Ready" || response._tag === "Final", JSON.stringify(response))
+          }), timeout)
+
+        it.effect("does not count a hidden slot's text as visible display: contents", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<div id="host">secret</div>`,
+              `() => {
+                document.getElementById('host').attachShadow({mode:'open'}).innerHTML =
+                  '<span id="contents" style="display:contents"><slot style="visibility:hidden"></slot></span>'
+              }`
+            )
+            const response = yield* send({ op: "visible", steps: [{ _tag: "Css", selector: "#contents" }] })
+            assert.deepStrictEqual(response, { _tag: "Visible", count: 1, visible: false })
+          }), timeout)
+
         it.effect("leaves the text of a visibility: hidden display: contents element out of snapshots", () =>
           Effect.gen(function*() {
             const { send } = yield* open(
