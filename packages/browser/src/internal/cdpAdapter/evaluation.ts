@@ -26,7 +26,7 @@ import * as Groups from "../objectGroups.ts"
 import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
 import * as Urls from "../urls.ts"
-import { contextKey, documentOf, type Event, frameOf, realmOf, type State } from "./state.ts"
+import { closingOf, contextKey, documentOf, type Event, frameOf, realmEnd, realmOf, type State } from "./state.ts"
 import { addRealm, removeRealm } from "./tree.ts"
 
 // ── Remote values ─────────────────────────────────────────────────────────────────────────────────────────
@@ -240,12 +240,13 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     .on(Runtime.executionContextDestroyed, (params, { state, target }) => {
       if (target === undefined || params.executionContextUniqueId === undefined) return
       const realm = state.realmsByUnique.get(params.executionContextUniqueId)
-      if (realm !== undefined) removeRealm(state, realm, new L1Target.RealmDestroyed({}))
+      // Chromium destroys a closing page's realms before its session ends, and they end with the page
+      if (realm !== undefined) removeRealm(state, realm, realmEnd(realm))
     })
     .on(Runtime.executionContextsCleared, (_params, { state, target }) => {
       for (const realm of Array.from(state.realms.values())) {
         if (realm.target === target && realm.frame !== undefined) {
-          removeRealm(state, realm, new L1Target.RealmDestroyed({}))
+          removeRealm(state, realm, realmEnd(realm))
         }
       }
     })
@@ -357,7 +358,7 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
     ? Duration.millis(yield* BrowserClock.left(deadline.value))
     : yield* Protocol.CommandTimeout
   const at = Option.isSome(deadline) ? deadline.value : yield* BrowserClock.after(Duration.toMillis(timeout))
-  const failed = Kit.realmFailure(realm)
+  const failed = Kit.realmFailure(realm, closingOf(realm))
   // Install cleanup before acquiring the first node. Each interruptible wire wait returns into the mask,
   // so its object ids are recorded before interruption can skip ownership registration.
   const nodes = new Map<string, string>()

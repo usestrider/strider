@@ -22,6 +22,7 @@ import {
   anchorGroup,
   anchorKey,
   anchorRealm,
+  closingOf,
   contextKey,
   documentOf,
   type Event,
@@ -201,12 +202,12 @@ export const realmFor = Effect.fnUntraced(function*(state: State, id: L1Target.D
 /** A command in a realm that failed: `Gone` where it was refused, as a context that's gone is, or the realm ended. */
 const madeIn = (realm: RealmEntry) => (error: Protocol.ProtocolError): Adapter.AdapterError =>
   error.reason._tag === "Rejected"
-    ? Kit.gone({ _tag: "Realm", id: realm.id }, new L1Target.RealmDestroyed({}))
-    : Kit.realmFailure(realm)(error)
+    ? Kit.realmGone(realm, closingOf(realm))
+    : Kit.realmFailure(realm, closingOf(realm))(error)
 
 /** Observe the captured realm through acquisition and result processing, including an already-ended realm. */
 const inRealm = <A, E, R>(state: State, realm: RealmEntry, work: Effect.Effect<A, E, R>) => {
-  const gone = () => Kit.realmGone(realm)
+  const gone = () => Kit.realmGone(realm, closingOf(realm))
   const check = Effect.suspend(() => realm.ended ? Effect.fail(gone()) : Effect.void)
   return check.pipe(
     Effect.andThen(work),
@@ -296,7 +297,7 @@ export const evaluate = Effect.fnUntraced(function*(
       const anchor = call.result === "handle" && call.group !== undefined
         ? yield* Cache.get(state.anchors, anchorKey(id, call.group))
         : undefined
-      const realmGone = Kit.realmFailure(realm)
+      const realmGone = Kit.realmFailure(realm, closingOf(realm))
       const on = <M extends string, P, A>(command: Protocol.Command<M, P, A>) =>
         inRealm(state, realm, Protocol.on(command, realm.session).pipe(Effect.mapError(realmGone)))
       // A node crosses as its binding: stock WebKit has one world, the page's, whose object the binding already is,

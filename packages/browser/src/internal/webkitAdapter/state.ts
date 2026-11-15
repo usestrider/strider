@@ -122,6 +122,11 @@ export interface RealmEntry extends Kit.RealmNode {
   readonly world: Adapter.World
 }
 
+/** Why a realm's page is closing, once a close command or its context's removal closes it. */
+export const closingOf = (realm: RealmEntry) => (): L1Target.CloseReason | undefined =>
+  realm.target.page.closing ??
+    (realm.target.page.context.removing ? new L1Target.PageClosed({ by: "userContextRemoved" }) : undefined)
+
 export interface NavigationEntry extends Kit.NavigationNode {
   readonly frame: FrameEntry
   /** Its loader's key (`loaderKey`). */

@@ -92,22 +92,27 @@ export const undecodable = (method: string, issue: string): Adapter.AdapterError
   protocolError(new Protocol.ProtocolError({ reason: new Protocol.Decode({ method, issue }) }))
 
 /**
- * A realm's end as `Gone`: the reason it ended with, as its page's when it ended with its page, or
- * `RealmDestroyed`.
+ * A realm's end as `Gone`: the reason it ended with, as its page's when it ended with its page; else what `closing`
+ * says its page is closing for, where the command fails before the realm is seen to end; else `RealmDestroyed`.
  */
-export const realmGone = (realm: RealmNode): Adapter.AdapterError =>
-  gone({ _tag: "Realm", id: realm.id }, realm.endedWith ?? new Target.RealmDestroyed({}))
+export const realmGone = (
+  realm: RealmNode,
+  closing?: () => Target.CloseReason | undefined
+): Adapter.AdapterError =>
+  gone({ _tag: "Realm", id: realm.id }, realm.endedWith ?? closing?.() ?? new Target.RealmDestroyed({}))
 
 /**
  * A command in a realm that failed: `Gone` where the realm ended or its session did, as when its page closed
  * while the command was in flight, or where the browser no longer holds the object the command named (its
  * context was discarded before the event that retires the realm arrived); the protocol's error otherwise.
  */
-export const realmFailure = (realm: RealmNode) => (error: Protocol.ProtocolError): Adapter.AdapterError =>
-  realm.ended || error.reason._tag === "SessionEnded" ||
-    (error.reason._tag === "Rejected" && error.reason.reason === "NoSuchObject")
-    ? realmGone(realm)
-    : protocolError(error)
+export const realmFailure =
+  (realm: RealmNode, closing?: () => Target.CloseReason | undefined) =>
+  (error: Protocol.ProtocolError): Adapter.AdapterError =>
+    realm.ended || error.reason._tag === "SessionEnded" ||
+      (error.reason._tag === "Rejected" && error.reason.reason === "NoSuchObject")
+      ? realmGone(realm, closing)
+      : protocolError(error)
 
 // ── Ids ───────────────────────────────────────────────────────────────────────────────────────────────────
 

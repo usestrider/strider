@@ -32,6 +32,7 @@ import { configureTarget, type Setup } from "./declare.ts"
 import * as Evaluation from "./evaluation.ts"
 import { frameUrl, targetKind } from "./mapping.ts"
 import {
+  closingReason,
   ContextEntry,
   credentialsScope,
   dispatchContext,
@@ -202,11 +203,7 @@ export const ended = (state: State, session: ProtocolClient.Session, reason: Pro
     ? Kit.closed()
     : reason.why === "modelUnavailable"
     ? new L1Target.ModelUnavailable({})
-    : page.closing ?? (page.context.removing
-      ? new L1Target.PageClosed({ by: "userContextRemoved" })
-      : page.closeRequested
-      ? new L1Target.PageClosed({ by: "command" })
-      : new L1Target.PageClosed({ by: "script" }))
+    : closingReason(page) ?? new L1Target.PageClosed({ by: "script" })
   // A page's realms end with it, for its reason; a worker's or a frame's are destroyed
   for (const realm of Array.from(state.realms.values())) {
     if (realm.target === target) {
