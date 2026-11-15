@@ -138,7 +138,7 @@ export const fields = (settings: Emulation.Emulation): ReadonlyArray<Field> | Re
   }
   if (settings.javaScript !== undefined) {
     list.push({
-      capability: "emulation.javaScript",
+      capability: settings.javaScript === "enabled" ? "emulation.javaScript" : "emulation.javaScript.disabled",
       override: { _tag: "JavaScriptEnabled", enabled: settings.javaScript === "enabled" }
     })
   }

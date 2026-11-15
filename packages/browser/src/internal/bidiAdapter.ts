@@ -201,6 +201,9 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       entry("emulation.network.throttling", "unsupported", ["WebDriver BiDi can only take a page offline"]),
       entry("emulation.cpuSlowdown", "unsupported", ["WebDriver BiDi has no CPU throttling"]),
       entry("emulation.javaScript", "unsupported", ["Firefox doesn't implement emulation.setScriptingEnabled"]),
+      entry("emulation.javaScript.disabled", "unsupported", [
+        "Firefox doesn't implement emulation.setScriptingEnabled"
+      ]),
       entry("emulation.extraHTTPHeaders", "supported"),
       entry("emulation.touch", "unsupported", ["Firefox doesn't implement emulation.setTouchOverride"]),
       entry("emulation.focus", "unsupported", ["WebDriver BiDi has no focus emulation"]),
@@ -369,6 +372,8 @@ export const connect: (
       info,
       capabilities: capabilitySet,
       pauseScope: "context",
+      // Its `historyUpdated` is also what a `history.pushState` to the same URL sends
+      reportsDocumentOpen: false,
       defaultContext: state.defaultContext,
       closed: client.closed,
       createUserContext: (options) => Contexts.createUserContext(state, options),

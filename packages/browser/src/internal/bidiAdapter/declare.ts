@@ -320,7 +320,7 @@ const refusal = (declaration: Adapter.Declaration): Adapter.AdapterError | undef
     case "JavaScriptEnabled":
       return override.enabled
         ? undefined
-        : Kit.unsupported("emulation.javaScript", "Firefox doesn't implement emulation.setScriptingEnabled")
+        : Kit.unsupported("emulation.javaScript.disabled", "Firefox doesn't implement emulation.setScriptingEnabled")
     case "FocusEmulation":
       return Kit.unsupported("emulation.focus", "WebDriver BiDi has no focus emulation")
     case "NetworkConditions":
