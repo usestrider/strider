@@ -1252,20 +1252,23 @@ export function engine(render: (root: SnapNode) => string) {
     }
     if (role === "menu") return ""
     if (role === "combobox" || role === "listbox") {
-      let selected: Array<Element>
       if (element instanceof HTMLSelectElement) {
-        selected = Array.from(element.selectedOptions)
-        if (selected.length === 0 && element.options.length > 0) selected = [element.options[0]!]
-      } else {
-        const listbox = role === "combobox"
-          ? ownedDescendants(element).find((each) => roleOf(each) === "listbox")
-          : element
-        selected = listbox === undefined ?
-          [] :
-          ownedDescendants(listbox).filter((each) =>
-            roleOf(each) === "option" && (dom.getAttribute(each, "aria-selected") ?? "").toLowerCase() === "true"
-          )
+        // A native select gives its chosen options' labels, or its first option's: its own, not a name of theirs
+        let chosen = Array.from(element.selectedOptions)
+        if (chosen.length === 0 && element.options.length > 0) chosen = [element.options[0]!]
+        return chosen.map((option) => {
+          const label = dom.getAttribute(option, "label") ?? ""
+          return label !== "" ? label : textOf(option)
+        }).join(" ")
       }
+      const listbox = role === "combobox"
+        ? ownedDescendants(element).find((each) => roleOf(each) === "listbox")
+        : element
+      const selected = listbox === undefined ?
+        [] :
+        ownedDescendants(listbox).filter((each) =>
+          roleOf(each) === "option" && (dom.getAttribute(each, "aria-selected") ?? "").toLowerCase() === "true"
+        )
       if (selected.length === 0 && element instanceof HTMLInputElement) return element.value
       return selected.map((option) => nameOfElement(option, { ...context, embedded: "descendant" })).join(" ")
     }
@@ -1391,12 +1394,8 @@ export function engine(render: (root: SnapNode) => string) {
 
   const nameOfElementValue = (element: Element, context: NameContext): string => {
     if (context.visited.has(element)) return ""
-    // 2A: hidden, unless asked for or in a traversal from a hidden reference. A select's options have no box of
-    // their own, and still name it.
-    if (
-      !context.includeHidden && !context.hiddenReference && hiddenFromAccessibility(element) &&
-      !(element instanceof HTMLOptionElement && dom.closest(element, "select") !== null)
-    ) {
+    // 2A: hidden, unless asked for or in a traversal from a hidden reference
+    if (!context.includeHidden && !context.hiddenReference && hiddenFromAccessibility(element)) {
       context.visited.add(element)
       return ""
     }
@@ -3436,7 +3435,8 @@ export function engine(render: (root: SnapNode) => string) {
 
   /** An inferred node's name: its accessible name, or where one can be read from. */
   const inferredName = (element: Element): SnapNode["name"] => {
-    const accessible = accessibleName(element, false)
+    // A snapshot is text to read, so its names show a non-breaking space as a space
+    const accessible = collapse(accessibleName(element, false))
     if (accessible !== "") {
       return {
         _tag: "Accessible",
@@ -3562,7 +3562,8 @@ export function engine(render: (root: SnapNode) => string) {
     walk: Walk,
     frame: boolean
   ): SnapNode => {
-    const accessible = accessibleName(element, false)
+    // A snapshot is text to read, so its names show a non-breaking space as a space
+    const accessible = collapse(accessibleName(element, false))
     const field = provenance && fieldOf(element)
     const name: SnapNode["name"] = role._tag === "Inferred" && !role.evidence.includes("password")
       ? inferredName(element)
