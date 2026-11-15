@@ -532,6 +532,67 @@ export const declarations = (
           }))
         }), timeout)
 
+      it.effect(
+        "sends each fetch of a cacheable URL to the server from a document whose navigation was held as its route was declared",
+        () =>
+          Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            let arrived!: () => void
+            const arrival = new Promise<void>((resolve) => {
+              arrived = resolve
+            })
+            let release!: () => void
+            let served = 0
+            const server = yield* Effect.acquireRelease(
+              Effect.promise(() =>
+                new Promise<http.Server>((resolve, reject) => {
+                  const server = http.createServer((request, response) => {
+                    if (request.url === "/cached.js") {
+                      served++
+                      response.writeHead(200, { "content-type": "text/javascript", "cache-control": "max-age=3600" })
+                      response.end("// cached")
+                      return
+                    }
+                    release = () => {
+                      response.writeHead(200, { "content-type": "text/html", "cache-control": "no-store" })
+                      response.end(
+                        `<pre id="out">pending</pre><script>(async () => { const read = () => fetch('/cached.js').then((r) => r.status); return [await read(), await read()] })().then((value) => { document.getElementById('out').textContent = JSON.stringify(value) })</script>`
+                      )
+                    }
+                    arrived()
+                  })
+                  server.once("error", reject)
+                  server.listen(0, "127.0.0.1", () =>
+                    resolve(server))
+                })
+              ),
+              (server) =>
+                Effect.promise(() =>
+                  new Promise<void>((resolve) => {
+                    server.close(() =>
+                      resolve()
+                    )
+                    server.closeAllConnections()
+                  })
+                )
+            )
+            const origin = `http://127.0.0.1:${(server.address() as net.AddressInfo).port}`
+            const navigation = yield* page.goto(`${origin}/held`).pipe(Effect.forkChild)
+            yield* Effect.promise(() =>
+              arrival
+            ).pipe(Effect.timeout("10 seconds"))
+            const route = yield* page.route(`${origin}/cached.js`, () =>
+              Route.continue)
+            release()
+            yield* Fiber.join(navigation)
+            const out = page.locator("#out")
+            yield* Expect.that(out.readText, Condition.make("finished", (text: string) => text !== "pending"))
+            assert.deepStrictEqual(JSON.parse(yield* out.readText), [200, 200])
+            assert.deepStrictEqual({ routed: yield* route.hits, served }, { routed: 2, served: 2 })
+          }),
+        timeout
+      )
+
       it.effect("rejects an invalid HTTP credential origin without exposing credentials", () =>
         Effect.gen(function*() {
           const error = yield* Browser.newContext({
@@ -574,10 +635,8 @@ export const declarations = (
                 password: Redacted.make("secret")
               }
             })
-            yield* canceled.context.route("**", () =>
-              Route.fallthrough, { phase: "auth" })
-            const cancel = yield* canceled.route("**", () =>
-              Route.continue, { phase: "auth" })
+            yield* canceled.context.route("**", () => Route.fallthrough, { phase: "auth" })
+            const cancel = yield* canceled.route("**", () => Route.continue, { phase: "auth" })
             yield* canceled.goto(`${origin}/auth`)
             yield* canceled.getByText("who are you?").pipe(Expect.toBeVisible)
             yield* cancel.remove
@@ -682,16 +741,13 @@ export const declarations = (
                   }
                 })
                 server.once("error", reject)
-                server.listen(0, "127.0.0.1", () =>
-                  resolve(server))
+                server.listen(0, "127.0.0.1", () => resolve(server))
               })
             ),
             (server) =>
               Effect.promise(() =>
                 new Promise<void>((resolve) => {
-                  server.close(() =>
-                    resolve()
-                  )
+                  server.close(() => resolve())
                   server.closeAllConnections()
                 })
               )
@@ -713,8 +769,7 @@ export const declarations = (
             const page = yield* Browser.newPage()
             const registered = page.route(
               `${origin}/auth`,
-              () =>
-                Route.provideCredentials({ username: "strider", password: Redacted.make("secret") }),
+              () => Route.provideCredentials({ username: "strider", password: Redacted.make("secret") }),
               {
                 phase: "auth"
               }

@@ -221,7 +221,7 @@ const applyOverride = (
         // A tab in a context that emulates focus for its life renders only with it
         return Emulation.setFocusEmulationEnabled({ enabled: target.page?.context.focusEmulated === true }).pipe(on)
       case "CacheDisabled":
-        return Network.setCacheDisabled({ cacheDisabled: routed(state, target.page) }).pipe(on)
+        return sendCache(target, cacheDisabled(state, target, effective), on)
     }
   }
   switch (override._tag) {
@@ -265,27 +265,63 @@ const applyOverride = (
         enabled: override.enabled || target.page?.context.focusEmulated === true
       }).pipe(on)
     case "CacheDisabled":
-      return Network.setCacheDisabled({ cacheDisabled: override.disabled || routed(state, target.page) }).pipe(on)
+      return sendCache(target, cacheDisabled(state, target, effective), on)
   }
 }
 
 /**
- * Whether a request- or response-phase intercept is in force for a page. Chromium looks in its HTTP cache after
- * the request-stage pause, so a request an intercept continues would be answered from the cache, never reaching
- * the server: while one is in force, the cache is off, whatever the `CacheDisabled` override says.
+ * Whether a target's HTTP cache is off: where the `CacheDisabled` override says so, or a request- or
+ * response-phase intercept is in force for its page. Chromium looks in its HTTP cache after the request-stage
+ * pause, so a request an intercept continues would be answered from the cache, never reaching the server.
  */
-const routed = (state: State, page: PageEntry | undefined) => {
-  if (page === undefined) return false
-  const intercepts = state.registry.intercepts(placement(page))
+const cacheDisabled = (
+  state: State,
+  target: TargetEntry,
+  effective: ReadonlyMap<Adapter.Override["_tag"], Adapter.Override>
+) => {
+  const override = effective.get("CacheDisabled")
+  if (override?._tag === "CacheDisabled" && override.disabled) return true
+  if (target.page === undefined) return false
+  const intercepts = state.registry.intercepts(placement(target.page))
   return intercepts.request.length > 0 || intercepts.response.length > 0
 }
 
-/** The cache setting, sent again where an intercept's declaration or release may have changed it. */
+const sendCache = (target: TargetEntry, disabled: boolean, on: Send) =>
+  Effect.suspend(() => {
+    if (disabled === (target.cacheDisabled ?? false)) return Effect.void
+    target.cacheDisabled = disabled
+    return Network.setCacheDisabled({ cacheDisabled: disabled }).pipe(on)
+  })
+
+/**
+ * The cache setting a declaration or its release changes, written to a live target without waiting for its reply.
+ * The renderer answers it, and Chromium holds it while a cross-process navigation is under way, until the new
+ * document commits: a route declared while the navigation waits on its server, which may wait on the caller,
+ * would never return. The command is written before the declaration returns and applies in order with what
+ * follows it on the session; a failed reply is logged.
+ */
 const applyCache = (state: State, target: TargetEntry) =>
   withOverrides(
     target,
     Effect.suspend(() =>
-      applyOverride(state, target, "CacheDisabled", state.registry.overrides(placement(target.page!)))
+      sendCache(
+        target,
+        cacheDisabled(state, target, state.registry.overrides(placement(target.page!))),
+        (command) =>
+          Effect.gen(function*() {
+            // A connection already tearing down sets nothing more
+            if (state.cleanupScope.state._tag === "Closed") return
+            const reply = yield* target.session.start(command, state.cleanupScope)
+            yield* reply.pipe(
+              Effect.catchIf(
+                (error) => error._tag === "ProtocolError" && error.reason._tag === "SessionEnded",
+                () => Effect.void
+              ),
+              Effect.catch((error) => Effect.logWarning("Failed to set the CDP cache setting", error)),
+              Effect.forkIn(state.cleanupScope)
+            )
+          })
+      )
     )
   )
 
@@ -391,7 +427,10 @@ const kindsFor = (
 ) => {
   const kinds = [...overrides.keys()]
   if (page.context.focusEmulated === true && !overrides.has("FocusEmulation")) kinds.push("FocusEmulation")
-  if (routed(state, page) && !overrides.has("CacheDisabled")) kinds.push("CacheDisabled")
+  if (!overrides.has("CacheDisabled")) {
+    const intercepts = state.registry.intercepts(placement(page))
+    if (intercepts.request.length > 0 || intercepts.response.length > 0) kinds.push("CacheDisabled")
+  }
   return kinds
 }
 
@@ -482,6 +521,7 @@ const applyToTarget = (state: State, declaration: Adapter.Declaration, target: T
       if (declaration.override._tag === "Viewport") {
         return viewport(state, target, state.registry.overrides(placement(page)))
       }
+      if (declaration.override._tag === "CacheDisabled") return applyCache(state, target)
       return withOverrides(
         target,
         Effect.suspend(() =>
