@@ -75,5 +75,79 @@
     ],
     "status": "notApplicable",
     "reason": "Asserts that the WebSocket handshake carries Playwright's own User-Agent string (its getUserAgent(): Playwright's name and version). Strider sets no identity of its own: the handshake carries what the WebSocket constructor in context sends, Node's `node`, so there is no Strider string to assert. The headers option that CD-013 covers is how a program sets one"
+  },
+  {
+    "tests": [
+      "CD-014",
+      "CD-015"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "Connecting to a Chromium HTTP endpoint drops the path and query of /json/version"
+  },
+  {
+    "tests": [
+      "CD-024",
+      "CD-025"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "needsFeature",
+    "reason": "Chromium endpoint discovery ignores the environment's HTTP proxy",
+    "matrix": "method-browsertype-connectovercdp"
+  },
+  {
+    "tests": [
+      "CD-032"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "A second connection to the browser shares the first one's isolated world"
+  },
+  {
+    "tests": [
+      "CD-002",
+      "CD-004"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "Connecting to a browser with a crashed or discarded page hangs: adoption waits on a target that has no renderer"
+  },
+  {
+    "tests": [
+      "CD-011"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "A connection doesn't see a service worker that already exists when it connects"
+  },
+  {
+    "tests": [
+      "CD-027"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "A second connection's end resets the first connection's page media emulation"
+  },
+  {
+    "tests": [
+      "CD-031"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "A WebSocket closing during the connect handshake loses its close code and reason"
   }
 ]

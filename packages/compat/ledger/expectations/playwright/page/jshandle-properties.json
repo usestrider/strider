@@ -10,5 +10,17 @@
     "status": "needsFeature",
     "matrix": "method-jshandle-getproperties",
     "reason": "Listing a handle's own enumerable properties as handles, with `getProperties()` returning a map of them; Strider's JSHandle has evaluate, evaluateHandle, read and release, and no property enumeration"
+  },
+  {
+    "tests": [
+      "JH-010",
+      "JH-011",
+      "JH-012"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Unsupported: Strider refuses isolatedWorlds on stock WebKit: stock WebKit) (stock WebKit's inspector makes no worlds"
   }
 ]

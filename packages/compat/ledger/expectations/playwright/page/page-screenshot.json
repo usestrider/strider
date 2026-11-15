@@ -166,5 +166,105 @@
     "status": "differentByDesign",
     "decision": "Outcomes come from evidence, never from a guess or a timer",
     "reason": "A Strider capture never waits for fonts or for the page to load, so a stalled font doesn't make it time out; it captures what is drawn, as the API documents"
+  },
+  {
+    "tests": [
+      "SS-015"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Unsupported: Strider refuses screenshot.omitBackground on Firefox: WebDriver BiDi has no background override"
+  },
+  {
+    "tests": [
+      "SS-014"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Stock WebKit cannot make a viewport narrower than about 341 CSS px"
+  },
+  {
+    "tests": [
+      "SS-095"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Stock WebKit cannot make a viewport narrower than about 341 CSS px"
+  },
+  {
+    "tests": [
+      "SS-010"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "Concurrent clipped screenshots of one page return the wrong images"
+  },
+  {
+    "tests": [
+      "SS-007",
+      "SS-008"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: A screenshot clip is a rectangle of the page and is not clipped to, or refused outside, the viewport"
+  },
+  {
+    "tests": [
+      "SS-002"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "A Chromium screenshot of an element can show the blinking caret, which Playwright hides by default"
+  },
+  {
+    "tests": [
+      "SS-065"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "A too-tall Firefox screenshot fails as 'unsupported' and loses Firefox's message"
+  },
+  {
+    "tests": [
+      "SS-027"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "A Firefox screenshot taken while the page navigates fails with a raw rejection"
+  },
+  {
+    "tests": [
+      "SS-096"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "Stock WebKit leaves document.fonts.status 'loading' after a screenshot of a page with an unused @font-face whose local() source fails"
+  },
+  {
+    "tests": [
+      "SS-025"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "Stock WebKit's MiniBrowser hangs on a page that creates a WebGL context in the compat environment"
   }
 ]

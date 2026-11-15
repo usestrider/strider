@@ -59,5 +59,102 @@
     "status": "needsFeature",
     "matrix": "option-route-continue-url",
     "reason": "Continues a request to another URL, so the navigation to empty.html commits the other document (consolelog.html) and the page keeps its URL. Firefox can't continue a request with a new URL (`interception.continueUrl` is unsupported on its BiDi backend), so the redirect doesn't happen there"
+  },
+  {
+    "tests": [
+      "[requestinterception.test] request interception Page.setRequestInterception should navigate to URL with hash and fire requests without hash"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "A request's URL keeps the navigation's #fragment on Firefox and WebKit"
+  },
+  {
+    "tests": [
+      "[requestinterception.test] request interception Page.setRequestInterception should work with redirects",
+      "[requestinterception.test] request interception Page.setRequestInterception should work with redirects for subresources",
+      "[requestinterception.test] request interception Page.setRequestInterception should be able to abort redirects"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: WebKit pauses only a redirect's first hop, so later hops can't be routed, aborted, or read as redirect evidence"
+  },
+  {
+    "tests": [
+      "[requestinterception.test] request interception Page.setRequestInterception should cache ${resourceType} if cache enabled"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Firefox reports a cache hit and a service-worker response with one value, cacheOrServiceWorker"
+  },
+  {
+    "tests": [
+      "[requestinterception.test] request interception Request.respond should work with status code 422"
+    ],
+    "status": "fails",
+    "reason": "route.fulfill never conveys a status text, so the page sees the browser's phrase or none"
+  },
+  {
+    "tests": [
+      "[requestinterception.test] request interception Request.respond should report correct content-length header with buffer"
+    ],
+    "status": "fails",
+    "reason": "WebKit fulfill derives the mime type from Content-Type naively: none gives an empty one, a space breaks it, a charset is dropped"
+  },
+  {
+    "tests": [
+      "[requestinterception.test] request interception Request.respond should report correct encoding from page when content-type is set"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "WebKit fulfill derives the mime type from Content-Type naively: none gives an empty one, a space breaks it, a charset is dropped"
+  },
+  {
+    "tests": [
+      "[requestinterception.test] request interception Request.respond should allow mocking multiple headers with same key"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "WebKit rejects a fulfilled response whose repeated header is joined with a newline"
+  },
+  {
+    "tests": [
+      "[requestinterception.test] request interception Request.respond should redirect"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: WebKit doesn't follow a redirect a route fulfills"
+  },
+  {
+    "tests": [
+      "[requestinterception.test] request interception Page.setRequestInterception should work with file URLs"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "Firefox doesn't pause file: requests, and WebKit pauses only the document"
+  },
+  {
+    "tests": [
+      "[requestinterception.test] request interception Page.setRequestInterception should navigate to dataURL and fire dataURL requests",
+      "[requestinterception.test] request interception Page.setRequestInterception should be able to fetch dataURL and fire dataURL requests"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Puppeteer's tests expect a request and its event for a data: URL, which Strider reports as no request"
   }
 ]

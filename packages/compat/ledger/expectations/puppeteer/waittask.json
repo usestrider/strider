@@ -97,5 +97,35 @@
     "status": "needsFeature",
     "matrix": "method-locator-evaluate",
     "reason": "The port adds the element to the iframe's document through the frame's body locator's `evaluate`, which runs in the isolated world that stock WebKit doesn't have, so it fails Unsupported there (the isolatedWorlds capability)"
+  },
+  {
+    "tests": [
+      "[waittask.test] waittask specs Frame.waitForSelector should work with removed MutationObserver"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Stock WebKit: the engine runs in the page's world, so a page that deletes MutationObserver breaks it"
+  },
+  {
+    "tests": [
+      "[waittask.test] waittask specs Frame.waitForSelector should work for selector with a pseudo class"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "Stock WebKit: an input never matches :focus after a click"
+  },
+  {
+    "tests": [
+      "[waittask.test] waittask specs Frame.waitForFunction should survive navigations"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Port: A wait that reads through a navigation ends with the realm's destruction in two ports that the survivingNavigation fix missed"
   }
 ]

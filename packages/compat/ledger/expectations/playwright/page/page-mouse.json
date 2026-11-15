@@ -1,0 +1,29 @@
+[
+  {
+    "tests": [
+      "MO-010"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "On stock WebKit the engine runs in the page's world, so a page that deletes Node, Event, or JSON.stringify, or redefines innerWidth, breaks it"
+  },
+  {
+    "tests": [
+      "MO-013"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "A fractional pointer position is rounded, not truncated, on Firefox and stock WebKit"
+  },
+  {
+    "tests": [
+      "MO-009"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: hover waits for the element to be enabled where Playwright's does not"
+  }
+]

@@ -12,5 +12,88 @@
     "status": "needsFeature",
     "matrix": "method-route-fetch",
     "reason": "The port fulfills the page's own paused response at the response phase, which Strider does on Chromium only: Firefox can't fulfill at that phase (interception.responseFulfill), and WebKit can't read a paused response's body (interception.responseBody, CDP only) nor change its headers (interception.responseHeaders). Playwright's route.fetch works on every browser"
+  },
+  {
+    "tests": [
+      "RO-100"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "A held route's request cancelled by the page never ends on Firefox"
+  },
+  {
+    "tests": [
+      "RO-115"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Sync XHR and preload or prefetch requests are not paused, or hang, on WebKit"
+  },
+  {
+    "tests": [
+      "RO-098",
+      "RO-099",
+      "RO-119"
+    ],
+    "status": "fails",
+    "reason": "route.fulfill never conveys a status text, so the page sees the browser's phrase or none"
+  },
+  {
+    "tests": [
+      "RO-107",
+      "RO-108",
+      "RO-109"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "The body a route fulfilled with can't be read back on Chromium, and WebKit fails the same read for error statuses"
+  },
+  {
+    "tests": [
+      "RO-118"
+    ],
+    "browsers": [
+      "chromium",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "The body a route fulfilled with can't be read back on Chromium, and WebKit fails the same read for error statuses"
+  },
+  {
+    "tests": [
+      "RO-102"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "WebKit fulfill derives the mime type from Content-Type naively: none gives an empty one, a space breaks it, a charset is dropped"
+  },
+  {
+    "tests": [
+      "RO-113"
+    ],
+    "browsers": [
+      "chromium",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "WebKit fulfill derives the mime type from Content-Type naively: none gives an empty one, a space breaks it, a charset is dropped"
+  },
+  {
+    "tests": [
+      "RO-111"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "WebKit rejects a fulfilled response whose repeated header is joined with a newline"
   }
 ]

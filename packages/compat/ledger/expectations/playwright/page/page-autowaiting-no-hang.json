@@ -1,0 +1,34 @@
+[
+  {
+    "tests": [
+      "AW-019"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses popups.opener on stock WebKit: stock WebKit) (stock WebKit names no page's opener: a page another opens is reported as the browser's",
+    "matrix": "method-page-opener"
+  },
+  {
+    "tests": [
+      "AW-022"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit reports no same-document navigation, so fragment, pushState, replaceState, and Navigation API changes go unseen"
+  },
+  {
+    "tests": [
+      "AW-020"
+    ],
+    "browsers": [
+      "chromium",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Chromium: a click or goto issued while another navigation is stalled doesn't return until the deadline"
+  }
+]

@@ -48,24 +48,8 @@
   },
   {
     "tests": [
-      "OO-001",
-      "OO-002",
-      "OO-003",
-      "OO-004",
-      "OO-005",
       "OO-006",
-      "OO-008",
-      "OO-009",
-      "OO-010",
-      "OO-011",
-      "OO-013",
-      "OO-016",
-      "OO-017",
-      "OO-019",
-      "OO-020",
-      "OO-021",
       "OO-023",
-      "OO-024",
       "OO-026"
     ],
     "browsers": [
@@ -73,5 +57,16 @@
     ],
     "status": "fails",
     "reason": "With a viewport declared, a cross-site iframe never loads, so goto's load wait and the frame's onload time out"
+  },
+  {
+    "tests": [
+      "OO-028",
+      "OO-029"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "The first goto on a persistent profile's first tab, an adopted page, times out with no outcome"
   }
 ]

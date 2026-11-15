@@ -23,5 +23,16 @@
     "status": "needsFeature",
     "matrix": "method-touchscreen-tap",
     "reason": "Taps the button, which needs touch input. Stock WebKit's automation builds without touch (`input.touch`), so `Locator.tap` fails with Unsupported before anything is sent"
+  },
+  {
+    "tests": [
+      "[touchscreen.test] Touchscreen Touchscreen.prototype.tap should work"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "The touch tap's point has identifier 1 and Chromium's default radius and force, where Playwright's has 0 and Puppeteer's has 0.5"
   }
 ]

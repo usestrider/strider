@@ -39,5 +39,74 @@
     "status": "needsFeature",
     "matrix": "method-credentials-install",
     "reason": "The test installs a virtual authenticator with context.credentials.install(), which Strider has no context-wide credential API for"
+  },
+  {
+    "tests": [
+      "CA-026"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses fileChooser on stock WebKit: stock WebKit) (a chooser a click opens is cancelled by the browser, unreported; a file input's files are set (setInputFiles",
+    "matrix": "event-page-filechooser"
+  },
+  {
+    "tests": [
+      "CA-001"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit: a document with Cross-Origin-Opener-Policy fails goto with \"Load request cancelled\""
+  },
+  {
+    "tests": [
+      "CA-005",
+      "CA-006",
+      "CA-007",
+      "CA-010",
+      "CA-012",
+      "CA-016",
+      "CA-019"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "Stock WebKit (WebKitGTK MiniBrowser) lacks Safari-only and media features the capability tests probe"
+  },
+  {
+    "tests": [
+      "CA-008",
+      "CA-009"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "Stock WebKit (WebKitGTK MiniBrowser) lacks Safari-only and media features the capability tests probe"
+  },
+  {
+    "tests": [
+      "CA-011"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "Port: showDirectoryPicker's rejection on Chromium 155 words its AbortError differently from the test's pattern"
+  },
+  {
+    "tests": [
+      "CA-027"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Clicking a color input ends the stock WebKit session with connectionLost"
   }
 ]

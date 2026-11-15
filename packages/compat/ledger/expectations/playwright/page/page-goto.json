@@ -29,5 +29,137 @@
     "status": "needsFeature",
     "matrix": "option-page-goto-referer",
     "reason": "Each passes a `referer` to `goto` (NA-054 with extra headers that already set one) and checks the request's referer, or the policy that overrides it. Strider's `GotoOptions` has no referer option"
+  },
+  {
+    "tests": [
+      "NA-005"
+    ],
+    "status": "fails",
+    "reason": "Unsupported: Strider refuses browsingContext.navigate on Firefox: This browser doesn't implement it"
+  },
+  {
+    "tests": [
+      "NA-014"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Unsupported: Strider refuses navigation.sameDocument on stock WebKit: stock WebKit) (stock WebKit's inspector reports no same-document navigation"
+  },
+  {
+    "tests": [
+      "NA-051"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses navigation.traverse on stock WebKit: stock WebKit) (stock WebKit's inspector reports a traversal under the old document's URL, with no realm (QUIRKS.md, Q215",
+    "matrix": "method-page-goback"
+  },
+  {
+    "tests": [
+      "NA-008",
+      "NA-010",
+      "NA-011"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit: a document with Cross-Origin-Opener-Policy fails goto with \"Load request cancelled\""
+  },
+  {
+    "tests": [
+      "NA-009"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit: a document with Cross-Origin-Opener-Policy fails goto with \"Load request cancelled\""
+  },
+  {
+    "tests": [
+      "NA-048"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "A request's URL keeps the navigation's #fragment on Firefox and WebKit"
+  },
+  {
+    "tests": [
+      "NA-012",
+      "NA-013"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Subframe navigation requests are missing from the history on WebKit"
+  },
+  {
+    "tests": [
+      "NA-057"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit: frames a page has without a navigation of their own are missing from the frame tree"
+  },
+  {
+    "tests": [
+      "NA-028"
+    ],
+    "status": "fails",
+    "reason": "goto accepts an unknown waitUntil at run time"
+  },
+  {
+    "tests": [
+      "NA-030"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: A timed-out goto's Timeout doesn't name the URL"
+  },
+  {
+    "tests": [
+      "NA-037",
+      "NA-038",
+      "NA-056"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "A superseded goto fails as NavigationFailed on Firefox and WebKit, and as NavigationSuperseded on Chromium"
+  },
+  {
+    "tests": [
+      "NA-039"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "Chromium: a goto sent while a script navigation is pending starts its request only when that navigation's response ends"
+  },
+  {
+    "tests": [
+      "NA-002",
+      "NA-003",
+      "NA-004"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "Stock WebKit: file: URLs fail to load, so goto and frames of a local file fail"
   }
 ]

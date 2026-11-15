@@ -22,5 +22,22 @@
     "status": "differentByDesign",
     "decision": "Playwright is evidence, not the template",
     "reason": "Clicks `text=Reset` where two elements match, one hidden, and expects the call's log to say it proceeds with the first. Strider's locators are strict where one element is required, so the click fails at once with the ambiguity rather than picking the first element"
+  },
+  {
+    "tests": [
+      "WA-034"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Stock WebKit: the engine runs in the page's world, so a page that deletes MutationObserver breaks it"
+  },
+  {
+    "tests": [
+      "WA-043"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: A frame locator whose iframe is removed keeps waiting; it doesn't fail as FrameDetached"
   }
 ]

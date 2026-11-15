@@ -10,5 +10,35 @@
     "status": "needsFeature",
     "matrix": "option-browser-newcontext-ismobile",
     "reason": "Emulates a mobile viewport with `page.emulate` and clicks in it. Firefox and stock WebKit can't emulate a mobile viewport (`emulation.viewport.mobile` is unsupported there). The matrix row names the mobile option of a new context, the nearest row"
+  },
+  {
+    "tests": [
+      "[mouse.test] Mouse should trigger hover state with removed window.Node"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "On stock WebKit the engine runs in the page's world, so a page that deletes Node, Event, or JSON.stringify, or redefines innerWidth, breaks it"
+  },
+  {
+    "tests": [
+      "[mouse.test] Mouse should set ctrlKey on the wheel event"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit's key and wheel events ignore the modifiers held"
+  },
+  {
+    "tests": [
+      "[mouse.test] Mouse should reset properly"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit's reset leaves mouseup with detail 0 and a different event sequence"
   }
 ]

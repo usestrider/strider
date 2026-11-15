@@ -1,0 +1,24 @@
+[
+  {
+    "tests": [
+      "MO-018"
+    ],
+    "browsers": [
+      "chromium",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses popups.opener on stock WebKit: stock WebKit) (stock WebKit names no page's opener: a page another opens is reported as the browser's",
+    "matrix": "method-page-opener"
+  },
+  {
+    "tests": [
+      "MO-021"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit's key and wheel events ignore the modifiers held"
+  }
+]

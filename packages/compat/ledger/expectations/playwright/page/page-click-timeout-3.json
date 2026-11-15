@@ -8,10 +8,9 @@
   },
   {
     "tests": [
-      "CL-117",
-      "CL-119"
+      "CL-118"
     ],
     "status": "fails",
-    "reason": "A timed-out action's message names only its operation and phase, not the reason it observed"
+    "reason": "A pointer action with receivesPointer off is stopped by its own interception guard and retried until it times out"
   }
 ]

@@ -37,5 +37,82 @@
     ],
     "status": "notApplicable",
     "reason": "macOS shortcuts (`Shift+Control+Alt+KeyB` selects a word, `Shift+Meta+ArrowUp` selects to the document's start) that the original runs on macOS only (`it.skip(platform !== 'darwin')`, `it.skip(!isMac)`). The harness runs on Linux, where the original skips them"
+  },
+  {
+    "tests": [
+      "KB-009",
+      "KB-045"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit's key and wheel events ignore the modifiers held"
+  },
+  {
+    "tests": [
+      "KB-034"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit's held Meta key reports key Unidentified"
+  },
+  {
+    "tests": [
+      "KB-019"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit sends no keydown for a key already held, so the page sees no repeat"
+  },
+  {
+    "tests": [
+      "KB-011",
+      "KB-014"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: A shifted character is typed with an explicit Shift press, so the page sees Shift and the character's key with Shift held"
+  },
+  {
+    "tests": [
+      "KB-027"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: press() of a character the layout lacks types it instead of failing"
+  },
+  {
+    "tests": [
+      "KB-004",
+      "KB-006"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "insertText and fill type each character as key events on Firefox and stock WebKit"
+  },
+  {
+    "tests": [
+      "KB-046",
+      "KB-047",
+      "KB-048"
+    ],
+    "status": "fails",
+    "reason": "A CSS locator's combinators do not cross a shadow boundary: `host > .child` finds nothing"
+  },
+  {
+    "tests": [
+      "KB-052"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit sends a keypress for Escape"
   }
 ]

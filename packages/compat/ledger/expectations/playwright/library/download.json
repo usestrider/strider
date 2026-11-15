@@ -71,5 +71,70 @@
     "status": "needsFeature",
     "matrix": "method-download-cancel",
     "reason": "WebDriver BiDi has no command to cancel a download (`downloads.cancel`), so `download.cancel` fails with `Unsupported` on Firefox. The matrix row says `has` with the `downloads` capability alone"
+  },
+  {
+    "tests": [
+      "DO-009",
+      "DO-010"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Download.saveAs fails with NotFound when the destination's parent directory doesn't exist"
+  },
+  {
+    "tests": [
+      "DO-016",
+      "DO-023"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Port: Port runs tests the original skips on this browser (alt-click download on Firefox, inline PDF viewer)"
+  },
+  {
+    "tests": [
+      "DO-033"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Port: Port runs tests the original skips on this browser (alt-click download on Firefox, inline PDF viewer)"
+  },
+  {
+    "tests": [
+      "DO-017"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "A download started by a target=_blank link isn't delivered to Download.next on the opener page"
+  },
+  {
+    "tests": [
+      "DO-032"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Firefox: a response-phase fulfill with Content-Disposition: attachment on a PDF navigation shows the PDF instead of downloading"
+  },
+  {
+    "tests": [
+      "DO-020",
+      "DO-021"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Firefox: a second download on the same page never arrives (the second click times out resolving)"
   }
 ]

@@ -96,5 +96,29 @@
     ],
     "status": "notApplicable",
     "reason": "Strider won't collect coverage from a browser run: build-time instrumentation, read back with evaluate, works on every browser. Starts CSS coverage on a page, and expects a second client's start to fail while the first holds it; Strider has no coverage API"
+  },
+  {
+    "tests": [
+      "MC-004",
+      "MC-009",
+      "MC-010",
+      "MC-018"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Contexts' declarations are connection-scoped, so a second client doesn't see or chain the first client's viewport, routes, or recordings"
+  },
+  {
+    "tests": [
+      "MC-014",
+      "MC-020"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: What a client creates closes with its connection, so a second client can't see the first client's page or contexts after it disconnects"
   }
 ]

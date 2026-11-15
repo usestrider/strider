@@ -33,7 +33,8 @@
   },
   {
     "tests": [
-      "SC-004"
+      "SC-004",
+      "SC-011"
     ],
     "browsers": [
       "firefox",
@@ -83,20 +84,39 @@
     "tests": [
       "SC-011"
     ],
-    "browsers": [
-      "firefox",
-      "webkit"
-    ],
-    "status": "needsFeature",
-    "matrix": "method-screencast-start",
-    "reason": "Strider's native frame stream is Chromium's alone; Firefox and stock WebKit refuse Capability.Screencast, so there is no second acquisition to refuse"
-  },
-  {
-    "tests": [
-      "SC-011"
-    ],
     "status": "differentByDesign",
     "decision": "Chromium screencast ownership belongs to the session",
     "reason": "Playwright refuses a second `screencast.start` while a recording runs, with `Screencast is already started`. Strider shares the session's stream between acquisitions, so a second recording joins it and succeeds"
+  },
+  {
+    "tests": [
+      "SC-014"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Chromium: recording a page that paints no frame fails the recording and writes no file"
+  },
+  {
+    "tests": [
+      "SC-013"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Firefox: a recording's file never settles when its page or browser closes while the recording's scope is still open"
+  },
+  {
+    "tests": [
+      "SC-015"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Firefox: the recorded WebM has no duration, so ffprobe reports none"
   }
 ]

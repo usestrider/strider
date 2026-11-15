@@ -40,5 +40,23 @@
     ],
     "status": "notApplicable",
     "reason": "Checks the messages of Playwright's protocol validator for choices of the wrong type: a number, a number as a value or a label, a string index. Strider's SelectOption admits only strings and integers and the type checker enforces it, so a wrongly typed choice doesn't compile, and no runtime validator reports it"
+  },
+  {
+    "tests": [
+      "SO-025"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "On stock WebKit the engine runs in the page's world, so a page that deletes Node, Event, or JSON.stringify, or redefines innerWidth, breaks it"
+  },
+  {
+    "tests": [
+      "SO-010",
+      "SO-023"
+    ],
+    "status": "fails",
+    "reason": "selectOption with several choices on a single select keeps the last, and [] does not deselect"
   }
 ]

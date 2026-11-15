@@ -22,5 +22,17 @@
     ],
     "status": "notApplicable",
     "reason": "Passes a DataTransfer created in one frame's JavaScript context as the init of an event dispatched in another frame, and expects Playwright's error that a handle is only usable in its own context. Strider's event init crosses by value and cannot carry a handle at all, so there is no cross-context handle to refuse"
+  },
+  {
+    "tests": [
+      "DE-014",
+      "DE-015",
+      "DE-016"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Unsupported: Strider refuses dom.eventConstructor on stock WebKit: stock WebKit) (The target document does not provide the requested native event constructor"
   }
 ]

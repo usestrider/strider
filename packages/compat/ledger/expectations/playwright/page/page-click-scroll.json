@@ -6,5 +6,30 @@
     ],
     "status": "fails",
     "reason": "A timed-out action's message names only its operation and phase, not that the element is outside the viewport"
+  },
+  {
+    "tests": [
+      "CL-095",
+      "CL-097"
+    ],
+    "status": "fails",
+    "reason": "An element with display: contents and only text has no box, so it is never visible, never scrollable, and has no action point"
+  },
+  {
+    "tests": [
+      "CL-105"
+    ],
+    "status": "fails",
+    "reason": "A target covered by a fixed header after scrolling is never scrolled again with another alignment"
+  },
+  {
+    "tests": [
+      "CL-094"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Locator.click on stock WebKit still reports the scroller as covering a button that is partly out of view in a horizontally scrolling flex container"
   }
 ]

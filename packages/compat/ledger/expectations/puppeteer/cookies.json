@@ -41,5 +41,73 @@
     "status": "needsFeature",
     "matrix": "method-browsercontext-clearcookies",
     "reason": "Removes a cookie in one partition by its partition key. Strider's `CookieJar.remove` takes a name, domain and path, with no partition key, and removes the cookie in every partition, so the test's partitioned removal can't be written. No matrix row names a partition option for removal; this cites clearCookies, the nearest row"
+  },
+  {
+    "tests": [
+      "[cookies.test] Cookie specs Page.cookies should get cookies from multiple urls",
+      "[cookies.test] Cookie specs Page.cookies should get cookies from subdomain if the domain field allows it",
+      "[cookies.test] Cookie specs Page.cookies should get cookies from the domain itself if the domain field allows subdomains",
+      "[cookies.test] Cookie specs Page.cookies should get cookies from nested path",
+      "[cookies.test] Cookie specs Page.setCookie should be able to set insecure cookie for HTTP website",
+      "[cookies.test] Cookie specs Page.setCookie should set a cookie on a different domain",
+      "[cookies.test] Cookie specs Page.deleteCookie should not delete cookie for different domain",
+      "[cookies.test] Cookie specs Page.deleteCookie should delete cookie for specified URL",
+      "[cookies.test] Cookie specs Page.deleteCookie should delete cookie for specified URL regardless of the current page"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit's cookie list leaves out cookies for URLs no page has loaded, so cookies a caller sets are not listed or removed"
+  },
+  {
+    "tests": [
+      "[cookies.test] Cookie specs Page.setCookie should default to setting secure cookie for HTTPS websites"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit's cookie list leaves out cookies for URLs no page has loaded, so cookies a caller sets are not listed or removed"
+  },
+  {
+    "tests": [
+      "[cookies.test] Cookie specs Page.setCookie should set cookie with reasonable defaults",
+      "[cookies.test] Cookie specs Page.setCookie should set cookie with all available properties",
+      "[cookies.test] Cookie specs Page.setCookie should set a cookie with a path",
+      "[cookies.test] Cookie specs Page.setCookie should set cookies from a frame"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit stores a host-only cookie under its domain, so the jar reports '.localhost' where the cookie was set for 'localhost'"
+  },
+  {
+    "tests": [
+      "[cookies.test] Cookie specs Page.setCookie should not set a cookie on a blank page",
+      "[cookies.test] Cookie specs Page.setCookie should not set a cookie with blank page URL",
+      "[cookies.test] Cookie specs Page.setCookie should not set a cookie on a data URL page"
+    ],
+    "status": "fails",
+    "reason": "CookieJar.set doesn't validate its scope URL, so about:blank and data: URLs fail as BackendFailure or are accepted"
+  },
+  {
+    "tests": [
+      "[cookies.test] Cookie specs Page.setCookie should set a cookie with a partitionKey",
+      "[cookies.test] Cookie specs Page.deleteCookie should only delete cookie from the default partition if partitionkey is not specified"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "CookieJar.listFor leaves out Secure cookies for localhost and loopback addresses over http"
+  },
+  {
+    "tests": [
+      "[cookies.test] Cookie specs Page.setCookie should set secure same-site cookies from a frame"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Port: Port: a script's `iframe.onload = fulfill` resolves with the load Event, which Strider can't return"
   }
 ]

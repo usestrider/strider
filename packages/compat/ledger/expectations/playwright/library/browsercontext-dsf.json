@@ -1,0 +1,13 @@
+[
+  {
+    "tests": [
+      "DV-010"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses emulation.viewport.mobile on stock WebKit: stock WebKit) (no mobile viewport",
+    "matrix": "option-browser-newcontext-ismobile"
+  }
+]

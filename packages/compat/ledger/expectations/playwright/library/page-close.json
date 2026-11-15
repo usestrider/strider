@@ -42,5 +42,44 @@
     "status": "needsFeature",
     "matrix": "method-response-finished",
     "reason": "Waiting for a response's body to finish, which must reject when the page closes; Strider's NetworkResponse has no finished"
+  },
+  {
+    "tests": [
+      "PA-048"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses downloads on stock WebKit: stock WebKit) (stock WebKit's inspector reports no downloads: a navigation that becomes one ends as BecameDownload",
+    "matrix": "event-page-download"
+  },
+  {
+    "tests": [
+      "PA-052"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses popups.opener on stock WebKit: stock WebKit) (stock WebKit names no page's opener: a page another opens is reported as the browser's",
+    "matrix": "method-page-opener"
+  },
+  {
+    "tests": [
+      "PA-042"
+    ],
+    "status": "fails",
+    "reason": "A pending evaluation in a page closed by close() fails with RealmDestroyed, not the page's PageClosed reason"
+  },
+  {
+    "tests": [
+      "PA-046"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Closing the same page twice at once fails the second close on stock WebKit with NoSuchTarget"
   }
 ]

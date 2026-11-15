@@ -1,0 +1,12 @@
+[
+  {
+    "tests": [
+      "ST-032"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit's persistent first tab: a CacheStorage entry doesn't survive reload and navigator.storage is missing"
+  }
+]

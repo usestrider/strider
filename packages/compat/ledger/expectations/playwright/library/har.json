@@ -76,9 +76,174 @@
     "reason": "Writing a recording's bodies to a directory of their own, which Strider's attached zip doesn't offer"
   },
   {
-    "tests": ["HA-048"],
-    "browsers": ["webkit"],
+    "tests": [
+      "HA-048"
+    ],
+    "browsers": [
+      "webkit"
+    ],
     "status": "notApplicable",
     "reason": "Tests that favicon requests are left out of a HAR; stock WebKit requests no favicon, and the original skips WebKit for the same reason"
+  },
+  {
+    "tests": [
+      "HA-039"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses popups.opener on stock WebKit: stock WebKit) (stock WebKit names no page's opener: a page another opens is reported as the browser's",
+    "matrix": "method-page-opener"
+  },
+  {
+    "tests": [
+      "HA-008",
+      "HA-011",
+      "HA-012",
+      "HA-032",
+      "HA-036"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Recordings include the browser's own favicon requests, which Playwright never reports"
+  },
+  {
+    "tests": [
+      "HA-010",
+      "HA-028",
+      "HA-043"
+    ],
+    "status": "fails",
+    "reason": "Recordings include the browser's own favicon requests, which Playwright never reports"
+  },
+  {
+    "tests": [
+      "HA-029",
+      "HA-048"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Recordings include the browser's own favicon requests, which Playwright never reports"
+  },
+  {
+    "tests": [
+      "HA-005"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Recordings include Firefox's own favicon request"
+  },
+  {
+    "tests": [
+      "HA-014"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "A HAR's response cookie on stock WebKit takes the attributes of the next Set-Cookie line"
+  },
+  {
+    "tests": [
+      "HA-021",
+      "HA-025"
+    ],
+    "status": "fails",
+    "reason": "Chromium writes no content.compression and no response bodySize because it has no body byte count"
+  },
+  {
+    "tests": [
+      "HA-038"
+    ],
+    "status": "fails",
+    "reason": "A HAR's response body size on Firefox and stock WebKit counts the chunked transfer framing"
+  },
+  {
+    "tests": [
+      "HA-113"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "HAR: Firefox and stock WebKit write a binary body with a textual MIME type as text"
+  },
+  {
+    "tests": [
+      "HA-003",
+      "HA-004",
+      "HA-049",
+      "HA-062"
+    ],
+    "status": "fails",
+    "reason": "A HAR page's title is the navigable's id, and one page is made per navigable, not per document"
+  },
+  {
+    "tests": [
+      "HA-006"
+    ],
+    "status": "fails",
+    "reason": "A HAR entry's startedDateTime is when the host processed the event, not when the browser started the request"
+  },
+  {
+    "tests": [
+      "HA-041",
+      "HA-044"
+    ],
+    "status": "fails",
+    "reason": "A HAR has no serverIPAddress, _serverPort, or _securityDetails"
+  },
+  {
+    "tests": [
+      "HA-020",
+      "HA-035"
+    ],
+    "status": "fails",
+    "reason": "A HAR records the request the page made, not the request a route changed it into"
+  },
+  {
+    "tests": [
+      "HA-013",
+      "HA-018"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit merges a repeated Set-Cookie field, so a HAR's response cookies are wrong"
+  },
+  {
+    "tests": [
+      "HA-058"
+    ],
+    "status": "fails",
+    "reason": "A HAR over V8's maximum string length can't be written"
+  },
+  {
+    "tests": [
+      "HA-059"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "A HAR export called right after page activity can miss a request whose events haven't arrived yet"
+  },
+  {
+    "tests": [
+      "HA-060"
+    ],
+    "status": "fails",
+    "reason": "A HAR in minimal detail writes a request bodySize of 0 where Playwright's minimal mode writes -1"
   }
 ]

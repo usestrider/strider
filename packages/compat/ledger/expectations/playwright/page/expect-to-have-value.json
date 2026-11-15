@@ -1,0 +1,10 @@
+[
+  {
+    "tests": [
+      "EX-303",
+      "EX-307"
+    ],
+    "status": "fails",
+    "reason": "toHaveValue and selectOption don't follow a label to its control"
+  }
+]

@@ -295,5 +295,195 @@
     "status": "needsFeature",
     "matrix": "method-page-setviewportsize",
     "reason": "Resizes the browser window to fit the page's content with `page.resize`, and sets and reads a window's bounds and fullscreen state (`setWindowBounds`, `getWindowBounds`, `windowId`). Strider has no window bounds or window state. The nearest matrix row is the viewport size, which sets the page's content size but not the window's"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.Events.Popup should work",
+      "[page.test] Page Page.Events.Popup should work with noopener",
+      "[page.test] Page Page.Events.Popup should work with clicking target=_blank and without rel=opener",
+      "[page.test] Page Page.Events.Popup should work with clicking target=_blank and with rel=opener",
+      "[page.test] Page Page.Events.Popup should work with fake-clicking target=_blank and rel=noopener",
+      "[page.test] Page Page.Events.Popup should work with clicking target=_blank and rel=noopener",
+      "[page.test] Page Page.Events.Close should work with window.close"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses popups.opener on stock WebKit: stock WebKit) (stock WebKit names no page's opener: a page another opens is reported as the browser's",
+    "matrix": "method-page-opener"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.setGeolocation should work",
+      "[page.test] Page Page.setGeolocation should remove the override when called with null"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses permissions on stock WebKit: stock WebKit) (stock WebKit's inspector has no Emulation domain",
+    "matrix": "method-browsercontext-grantpermissions"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.setGeolocation should throw when invalid longitude"
+    ],
+    "browsers": [
+      "chromium",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses emulation.geolocation on stock WebKit: stock WebKit) (stock WebKit's inspector has no Emulation domain",
+    "matrix": "method-browsercontext-setgeolocation"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.setOfflineMode should work",
+      "[page.test] Page Page.setOfflineMode should emulate navigator.onLine"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses emulation.network.offline on stock WebKit: stock WebKit) (stock WebKit's inspector has no Emulation domain",
+    "matrix": "method-browsercontext-setoffline"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.setUserAgent should work",
+      "[page.test] Page Page.setUserAgent should work with options parameter",
+      "[page.test] Page Page.setUserAgent should work for subframes",
+      "[page.test] Page Page.setUserAgent should emulate device user-agent",
+      "[page.test] Page Page.setUserAgent should restore original"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses emulation.userAgent on stock WebKit: stock WebKit) (stock WebKit's inspector has no Emulation domain",
+    "matrix": "option-browser-newcontext-useragent"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.setJavaScriptEnabled should work"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "On stock WebKit, an evaluation after emulating JavaScript off times out"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.setJavaScriptEnabled setInterval should pause",
+      "[page.test] Page Page.setJavaScriptEnabled setTimeout should stop",
+      "[page.test] Page Page.setJavaScriptEnabled then should not pause"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses emulation.javaScript.disabled on stock WebKit: stock WebKit) (with scripts off, stock WebKit gives the page no script context, so Strider can't read or act on it",
+    "matrix": "option-browser-newcontext-javascriptenabled"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.reload should enable or disable the cache based on reload params"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Unsupported: Strider refuses browsingContext.reload on Firefox: This browser doesn't implement it"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.close should reject all promises when page is closed"
+    ],
+    "status": "fails",
+    "reason": "A pending evaluation in a page closed by close() fails with RealmDestroyed, not the page's PageClosed reason"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.select should work when re-defining top-level Event class"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "On stock WebKit, a page that replaces its own globals breaks Strider's helper and engine"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.setContent should work with comments outside HTML tag"
+    ],
+    "status": "fails",
+    "reason": "Page.readHtml drops comments outside the root element"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.bringToFront should work"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Page.activate doesn't hide the other page, because contexts don't emulate focus by default"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.select should select only first option"
+    ],
+    "status": "fails",
+    "reason": "Port: Port: Puppeteer's select on a non-multiple select keeps the first value; Strider selects every listed option, so the last wins"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.Events.error should throw when page crashes"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Page crash by chrome://crash is not seen within the bound on Chromium"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.Events.PageError should fire for all value types"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "UncaughtException name and message are parsed from the browser's rendered text on every backend"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.Events.Exception should report the name and text as rendered by the browser"
+    ],
+    "status": "fails",
+    "reason": "UncaughtException name and message are parsed from the browser's rendered text on every backend"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.Events.Exception should fire for primitive values"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "UncaughtException.stack is built differently on each backend"
+  },
+  {
+    "tests": [
+      "[page.test] Page Page.Events.PageError should fire"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Port: Port: exception tests assert Chromium's or Playwright's browser-specific details where Strider documents a difference"
   }
 ]

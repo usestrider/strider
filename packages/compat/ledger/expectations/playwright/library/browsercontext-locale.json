@@ -1,0 +1,37 @@
+[
+  {
+    "tests": [
+      "LC-001",
+      "LC-002",
+      "LC-003",
+      "LC-004",
+      "LC-005",
+      "LC-006",
+      "LC-007",
+      "LC-008",
+      "LC-009",
+      "LC-011",
+      "LC-012",
+      "LC-013",
+      "LC-014"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses emulation.locale on stock WebKit: stock WebKit) (the MiniBrowser takes its language from nothing it's given",
+    "matrix": "option-browser-newcontext-locale"
+  },
+  {
+    "tests": [
+      "LC-010"
+    ],
+    "browsers": [
+      "chromium",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses emulation.locale on stock WebKit: stock WebKit) (the MiniBrowser takes its language from nothing it's given",
+    "matrix": "option-browser-newcontext-locale"
+  }
+]

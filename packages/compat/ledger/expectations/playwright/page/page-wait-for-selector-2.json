@@ -33,5 +33,12 @@
     "status": "needsFeature",
     "matrix": "method-page-locator-value-xpath-and-playwright-selector-dsl",
     "reason": "Waits for an XPath selector whose evaluation is the point: WA-065 selects a paragraph by `normalize-space(.)`, and WA-070 an element by an absolute path with a single slash, `//html/body/div`. Strider's locators take CSS, not XPath, so a CSS selector for the same element would pass without testing either. XPath is planned for 1.0"
+  },
+  {
+    "tests": [
+      "WA-068"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: A frame locator whose iframe is removed keeps waiting; it doesn't fail as FrameDetached"
   }
 ]

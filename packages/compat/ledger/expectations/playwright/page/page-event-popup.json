@@ -21,5 +21,15 @@
     "status": "needsFeature",
     "matrix": "event-page-popup",
     "reason": "Subscribing to a page's popups, which stock WebKit doesn't support because it doesn't say which page opened another (popups.opener), so Popup.next fails with Unsupported"
+  },
+  {
+    "tests": [
+      "PO-005"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "An alert a script raises in a popup it just opened deadlocks the opener's evaluation on Chromium"
   }
 ]

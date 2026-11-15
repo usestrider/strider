@@ -8,5 +8,27 @@
     ],
     "status": "notApplicable",
     "reason": "Puppeteer skips this test on Firefox (\"Chrome-specific test\"), so the port runs it on Chromium and stock WebKit only"
+  },
+  {
+    "tests": [
+      "[network.test] network Page.setRequestInterception should work with internal redirects not paused by Fetch.requestPaused"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "An internal HSTS 307 upgrade redirect exists only in Chromium"
+  },
+  {
+    "tests": [
+      "[network.test] network Request.postData should be |undefined| when there is no post data",
+      "[network.test] network Request.postData should work with blobs"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "A multipart or non-text request body can't be read on WebKit and Chromium",
+    "matrix": "method-request-postdata"
   }
 ]

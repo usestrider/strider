@@ -13,5 +13,33 @@
     ],
     "status": "notApplicable",
     "reason": "Both set `process.env.PLAYWRIGHT_SKIP_INERT_CHECK` or `PLAYWRIGHT_SKIP_DIALOG_CHECK` and skip on every `mode` but `default`, because Playwright's in-process server reads the variable when it starts. They test that switch of Playwright's injected script, which Strider doesn't have: its `getByRole` always applies the inert and modal-dialog rules that these switches turn off"
+  },
+  {
+    "tests": [
+      "SE-066",
+      "SE-067",
+      "SE-068"
+    ],
+    "status": "fails",
+    "reason": "getByRole doesn't exclude inert elements, or elements outside an open modal dialog"
+  },
+  {
+    "tests": [
+      "SE-051",
+      "SE-052",
+      "SE-055",
+      "SE-059",
+      "SE-060",
+      "SE-061"
+    ],
+    "status": "fails",
+    "reason": "getByRole misses options of a closed select, role tokens in another case, and names from ariaLabelledByElements"
+  },
+  {
+    "tests": [
+      "SE-056"
+    ],
+    "status": "fails",
+    "reason": "aria-disabled on any ancestor disables a descendant, including one whose role doesn't support it"
   }
 ]

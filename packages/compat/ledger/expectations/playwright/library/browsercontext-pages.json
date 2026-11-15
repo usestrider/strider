@@ -45,5 +45,26 @@
     "status": "needsFeature",
     "matrix": "option-browser-newcontext-ismobile",
     "reason": "A mobile viewport in a context (isMobile), which Firefox and stock WebKit refuse with Unsupported (emulation.viewport.mobile), so the context can't be made there"
+  },
+  {
+    "tests": [
+      "BC-054"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit reports no same-document navigation, so a fragment link's navigation never arrives"
+  },
+  {
+    "tests": [
+      "BC-053"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Firefox and stock WebKit: pages in one context aren't both focused, so a focus handler on the second page doesn't run"
   }
 ]

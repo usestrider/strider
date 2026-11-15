@@ -1,0 +1,20 @@
+[
+  {
+    "tests": [
+      "EH-108",
+      "EH-111"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "press and pressSequentially focus an input without resetting its caret, so the text goes in the wrong place"
+  },
+  {
+    "tests": [
+      "EH-109"
+    ],
+    "status": "fails",
+    "reason": "press and pressSequentially focus an input without resetting its caret, so the text goes in the wrong place"
+  }
+]

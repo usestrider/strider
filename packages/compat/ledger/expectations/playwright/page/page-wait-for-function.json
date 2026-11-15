@@ -37,5 +37,26 @@
     "status": "needsFeature",
     "matrix": "method-page-evaluatehandle",
     "reason": "The port's wait subject is a handle, `page.evaluateHandle`, which runs in the isolated world that stock WebKit doesn't have, so it fails Unsupported there (the isolatedWorlds capability). WA-015's window and WA-016's element can't cross by value, and the main world offers no handle"
+  },
+  {
+    "tests": [
+      "WA-020"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Port: A wait that reads through a navigation ends with the realm's destruction in two ports that the survivingNavigation fix missed"
+  },
+  {
+    "tests": [
+      "WA-024",
+      "WA-025"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Port: A wait that reads right after a reload commits finds the previous document, so its console message is lost on stock WebKit"
   }
 ]

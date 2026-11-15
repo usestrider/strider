@@ -147,5 +147,70 @@
     "status": "differentByDesign",
     "decision": "The library changes nothing the caller didn't ask for",
     "reason": "Switches focus emulation off on a page that already has it. Strider's focus emulation is set when a page or context is made and holds for its life, and no call turns it off again"
+  },
+  {
+    "tests": [
+      "[emulation.test] Emulation Page.emulateMediaFeatures should work with forced-colors"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses override.Media.forced-colors on stock WebKit: stock WebKit) (WebKit doesn't emulate this feature",
+    "matrix": "option-page-emulatemedia-forcedcolors"
+  },
+  {
+    "tests": [
+      "[emulation.test] Emulation Page.viewport should get the proper viewport size"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Stock WebKit's viewport is its window: sizes below the window's minimum width or above the screen's height are refused as not confirmed"
+  },
+  {
+    "tests": [
+      "[emulation.test] Emulation Page.viewport should support landscape emulation"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "Chromium: viewport emulation leaves window.screen, screen orientation and window.orientation at the real window's"
+  },
+  {
+    "tests": [
+      "[emulation.test] Emulation Page.viewport should support touch emulation",
+      "[emulation.test] Emulation Page.viewport should detect touch when applying viewport with touches"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Touch emulation applies at the next document, so a script that checks `ontouchstart` on the current page doesn't see it"
+  },
+  {
+    "tests": [
+      "[emulation.test] Emulation Page.emulateTimezone should support timezone offset"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "needsFeature",
+    "reason": "Time zones other than IANA names: Strider refuses 'GMT+10:00' offsets, and passes aliases Firefox refuses",
+    "matrix": "option-browser-newcontext-timezoneid"
+  },
+  {
+    "tests": [
+      "[emulation.test] Emulation Page.emulateTimezone should work"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "needsFeature",
+    "reason": "Time zones other than IANA names: Strider refuses 'GMT+10:00' offsets, and passes aliases Firefox refuses",
+    "matrix": "option-browser-newcontext-timezoneid"
   }
 ]

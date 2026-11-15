@@ -66,5 +66,12 @@
     ],
     "status": "notApplicable",
     "reason": "Copies a Puppeteer locator, which is a mutable builder: a `setTimeout` on the copy leaves the original's timeout alone, and the test reads the copy's `timeout` property. Strider's locators are immutable values with no timeout property. A call's deadline is `Deadline.within` around it, so there is nothing to copy and no property to compare"
+  },
+  {
+    "tests": [
+      "[locator.test] Locator Locator.fill should fill readonly ${type} inputs"
+    ],
+    "status": "fails",
+    "reason": "fill refuses a color or range input with the readonly attribute, which doesn't apply to those types"
   }
 ]

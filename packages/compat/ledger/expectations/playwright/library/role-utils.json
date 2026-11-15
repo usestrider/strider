@@ -1,0 +1,117 @@
+[
+  {
+    "tests": [
+      "AR-147",
+      "AR-155",
+      "AR-157"
+    ],
+    "status": "fails",
+    "reason": "An element with display: contents, such as a slot, counts as hidden, so names that pass through a slot are empty and getByRole never finds it"
+  },
+  {
+    "tests": [
+      "AR-163"
+    ],
+    "browsers": [
+      "chromium",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "A form with a control named localName or tagName loses its role, because the engine reads element.localName"
+  },
+  {
+    "tests": [
+      "AR-154",
+      "AR-158"
+    ],
+    "status": "fails",
+    "reason": "An aria-labelledby that lists the element itself drops the element's own aria-label, value, or content"
+  },
+  {
+    "tests": [
+      "AR-144"
+    ],
+    "status": "fails",
+    "reason": "Hidden descendants of a visible aria-labelledby target still contribute to the name"
+  },
+  {
+    "tests": [
+      "AR-156"
+    ],
+    "status": "fails",
+    "reason": "A name keeps its soft hyphens and zero-width spaces and folds non-breaking spaces into plain spaces"
+  },
+  {
+    "tests": [
+      "AR-143",
+      "AR-151"
+    ],
+    "status": "fails",
+    "reason": "An input type=image ignores its label, and an image or submit input without a value or alt has no default name"
+  },
+  {
+    "tests": [
+      "AR-149"
+    ],
+    "status": "fails",
+    "reason": "A name from content descends into children whose role does not allow name from content"
+  },
+  {
+    "tests": [
+      "AR-159"
+    ],
+    "status": "fails",
+    "reason": "An embedded combobox or listbox contributes all of its options' text, not its selected option, to another element's name"
+  },
+  {
+    "tests": [
+      "AR-167",
+      "AR-168"
+    ],
+    "status": "fails",
+    "reason": "Pseudo-element content is read with a regular expression, so alt text, attr(), url(), and a pseudo on the element itself are mis-parsed"
+  },
+  {
+    "tests": [
+      "AR-165",
+      "AR-166"
+    ],
+    "status": "fails",
+    "reason": "A name includes pseudo-element content that is display: none or visibility: hidden, and does not separate a display: block pseudo from its neighbors"
+  },
+  {
+    "tests": [
+      "AR-148"
+    ],
+    "status": "fails",
+    "reason": "Text in a closed details is included, both in the name of a label that references it and in a snapshot"
+  },
+  {
+    "tests": [
+      "AR-146"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Elements with name-prohibited roles, such as a bare <a> or <g>, have empty names even with aria-label, aria-labelledby, or title"
+  },
+  {
+    "tests": [
+      "AR-150"
+    ],
+    "status": "fails",
+    "reason": "SVG elements get no role and no name from their title child: <svg> has no img role"
+  },
+  {
+    "tests": [
+      "AR-152"
+    ],
+    "status": "fails",
+    "reason": "An input whose list attribute does not name a datalist is a combobox"
+  },
+  {
+    "tests": [
+      "AR-145"
+    ],
+    "status": "fails",
+    "reason": "The implicit role table differs from HTML-AAM and axe-core for header and footer, th, img with an empty alt, form, and section"
+  }
+]

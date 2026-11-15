@@ -16,17 +16,27 @@
   },
   {
     "tests": [
-      "SS-072",
-      "SS-073",
       "SS-074",
       "SS-076",
       "SS-077",
-      "SS-082",
-      "SS-092",
       "SS-093"
     ],
     "browsers": [
       "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "matrix": "option-browser-newcontext-devicescalefactor",
+    "reason": "Each test uses a device scale factor other than 1, and Strider takes that only with the mobile-viewport capability (`emulation.viewport.mobile`), which Firefox and stock WebKit lack, so the context is refused as Unsupported. SS-074, SS-076, and SS-093 also capture at CSS-pixel scale (`screenshot.cssScale`), which those browsers lack too (matrix option-page-screenshot-scale-value-css). The matrix row marks the device scale as present on every browser, which holds only for Chromium"
+  },
+  {
+    "tests": [
+      "SS-092",
+      "SS-082",
+      "SS-073",
+      "SS-072"
+    ],
+    "browsers": [
       "webkit"
     ],
     "status": "needsFeature",
@@ -58,5 +68,27 @@
     ],
     "status": "notApplicable",
     "reason": "Playwright's it.skip runs this only off Chromium (playwright#9757): Chromium never answers `Page.captureScreenshot` while the page's main resource is still loading, so there is nothing for any driver to capture. Strider's capture is dispatched and ends at its deadline as `Deadline.Timeout` (`dispatchedUnconfirmed`), which reports the missing reply as it is"
+  },
+  {
+    "tests": [
+      "SS-075"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Unsupported: Strider refuses screenshot.cssScale on Firefox: WebDriver BiDi captures device pixels only"
+  },
+  {
+    "tests": [
+      "SS-078",
+      "SS-085"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "Stock WebKit cannot show a viewport taller than the Xvfb screen it runs in"
   }
 ]

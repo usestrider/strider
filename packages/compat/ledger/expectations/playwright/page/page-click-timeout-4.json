@@ -8,9 +8,9 @@
   },
   {
     "tests": [
-      "CL-120"
+      "CL-122"
     ],
     "status": "fails",
-    "reason": "A timed-out action's message names only its operation and phase, not the reason it observed"
+    "reason": "A target covered by a fixed header after scrolling is never scrolled again with another alignment"
   }
 ]

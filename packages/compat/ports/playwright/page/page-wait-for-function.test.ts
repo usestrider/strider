@@ -7,8 +7,10 @@
  *   `Condition` for the truthy value. The polling is Expect's, not the page's: it checks once, then again each
  *   `Expect.CheckInterval` (100 ms unless `Expect.withCheckInterval` sets it). It does not check on animation frames,
  *   which is `polling: 'raf'`, so the tests about that mode aren't ported (see the ledger).
- * - A wait that spans navigations (WA-021) reads through `survivingNavigation`, which turns the end of the realm a
- *   navigation destroyed into a read that holds nothing yet: the original's wait runs again in the next document.
+ * - A wait that spans navigations (WA-020 and WA-021) reads through `survivingNavigation`, which turns the end of the
+ *   realm a navigation destroyed into a read that holds nothing yet: the original's wait runs again in the next
+ *   document. WA-024 and WA-025 navigate with `waitUntil: "load"`, as the original's `goto` and `reload` wait for the
+ *   load, so no wait reads in the document a reload is about to replace.
  * - Expect returns nothing, where the original's wait resolves with the value its predicate returned. Where the
  *   original reads that handle (WA-014), the port reads the value instead: `holding` keeps the value the condition
  *   accepted, which is the value the wait ended on. WA-015's window and WA-016's element don't cross by value, so
@@ -299,7 +301,7 @@ upstream(import.meta.filename, {}, (test) => {
   test("WA-020", ({ page, server }) =>
     Effect.gen(function*() {
       const waiting = yield* startWaiting(
-        Expect.that(page.evaluateInMainWorld(() => Reflect.get(window, "__FOO") === 1), holds)
+        Expect.that(survivingNavigation(page.evaluateInMainWorld(() => Reflect.get(window, "__FOO") === 1)), holds)
       )
       yield* page.goto(server.EMPTY_PAGE)
       assert.isFalse(yield* waiting.done)
@@ -343,7 +345,7 @@ upstream(import.meta.filename, {}, (test) => {
 
   test("WA-024", ({ page, server }) =>
     Effect.gen(function*() {
-      yield* page.goto(server.EMPTY_PAGE)
+      yield* page.goto(server.EMPTY_PAGE, { waitUntil: "load" })
       yield* Expect.that(
         page.evaluateInMainWorld(() => {
           console.log("waitForFunction1")
@@ -351,7 +353,7 @@ upstream(import.meta.filename, {}, (test) => {
         }),
         holds
       )
-      yield* page.reload()
+      yield* page.reload({ waitUntil: "load" })
       yield* Expect.that(
         page.evaluateInMainWorld(() => {
           console.log("waitForFunction2")
@@ -359,7 +361,7 @@ upstream(import.meta.filename, {}, (test) => {
         }),
         holds
       )
-      yield* page.reload()
+      yield* page.reload({ waitUntil: "load" })
       yield* Expect.that(
         page.evaluateInMainWorld(() => {
           console.log("waitForFunction3")
@@ -376,7 +378,7 @@ upstream(import.meta.filename, {}, (test) => {
 
   test("WA-025", ({ page, server }) =>
     Effect.gen(function*() {
-      yield* page.goto(server.EMPTY_PAGE)
+      yield* page.goto(server.EMPTY_PAGE, { waitUntil: "load" })
       // The original's `.catch(e => null)`: each wait's error is expected and ignored
       yield* Expect.that(
         page.evaluateInMainWorld(() => {
@@ -385,7 +387,7 @@ upstream(import.meta.filename, {}, (test) => {
         }),
         holds
       ).pipe(Effect.ignore)
-      yield* page.reload()
+      yield* page.reload({ waitUntil: "load" })
       yield* Expect.that(
         page.evaluateInMainWorld(() => {
           console.log("waitForFunction2")
@@ -393,7 +395,7 @@ upstream(import.meta.filename, {}, (test) => {
         }),
         holds
       ).pipe(Effect.ignore)
-      yield* page.reload()
+      yield* page.reload({ waitUntil: "load" })
       yield* Expect.that(
         page.evaluateInMainWorld(() => {
           console.log("waitForFunction3")

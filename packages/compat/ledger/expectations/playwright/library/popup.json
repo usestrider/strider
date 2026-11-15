@@ -78,5 +78,48 @@
     "status": "needsFeature",
     "matrix": "method-browsercontext-exposebinding",
     "reason": "Exposing a binding to a context, which a closed popup's script calls and whose source page is reported; Strider has no exposeBinding"
+  },
+  {
+    "tests": [
+      "PO-021"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Window features of window.open are overridden by the context's viewport emulation, so the popup never has the requested size"
+  },
+  {
+    "tests": [
+      "PO-027"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: The opener of a popup stops rendering on headless Chromium, so animation frames never fire"
+  },
+  {
+    "tests": [
+      "PO-028"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "A popup's window.open('about:blank') content with a load handler hangs the opener's evaluation on Firefox"
+  },
+  {
+    "tests": [
+      "PO-016",
+      "PO-020",
+      "PO-023"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "On stock WebKit a popup doesn't inherit its opener context's extra headers, viewport, or init scripts"
   }
 ]

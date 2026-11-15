@@ -1,0 +1,9 @@
+[
+  {
+    "tests": [
+      "WA-132"
+    ],
+    "status": "fails",
+    "reason": "Strider's Timeout doesn't say which URL a request or response wait was for"
+  }
+]

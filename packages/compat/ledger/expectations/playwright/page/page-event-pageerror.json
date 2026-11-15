@@ -13,5 +13,43 @@
     "status": "needsFeature",
     "matrix": "method-page-clearpageerrors",
     "reason": "Clearing a page's recorded errors, after which the history is empty and a new error is the only one in it; Strider's UncaughtException.history reads the log and has no clear"
+  },
+  {
+    "tests": [
+      "ER-004"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "UncaughtException name and message are parsed from the browser's rendered text on every backend"
+  },
+  {
+    "tests": [
+      "ER-005"
+    ],
+    "status": "fails",
+    "reason": "UncaughtException name and message are parsed from the browser's rendered text on every backend"
+  },
+  {
+    "tests": [
+      "ER-001"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "UncaughtException.stack is built differently on each backend"
+  },
+  {
+    "tests": [
+      "ER-003"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Port: Port: exception tests assert Chromium's or Playwright's browser-specific details where Strider documents a difference"
   }
 ]

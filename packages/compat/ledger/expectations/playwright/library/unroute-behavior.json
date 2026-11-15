@@ -16,5 +16,26 @@
     "status": "needsFeature",
     "matrix": "option-page-unrouteall-behavior",
     "reason": "Playwright's `page.unrouteAll({ behavior })` waits for, or ignores the errors of, the handlers still running. Strider has no behavior option: removing a route's registration, or closing its scope, interrupts a running handler, so the request continues by default and nothing waits for it"
+  },
+  {
+    "tests": [
+      "RO-186"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: The route handler being removed is interrupted; Playwright lets a running handler finish and continue"
+  },
+  {
+    "tests": [
+      "RO-192"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: The route handler being removed is interrupted; Playwright lets a running handler finish and continue"
   }
 ]

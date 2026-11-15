@@ -1,8 +1,61 @@
 [
   {
-    "tests": ["CO-016"],
-    "browsers": ["chromium"],
+    "tests": [
+      "CO-016"
+    ],
+    "browsers": [
+      "chromium"
+    ],
     "status": "notApplicable",
     "reason": "Tests `document.requestStorageAccess`, which Chromium doesn't have: the original skips it there"
+  },
+  {
+    "tests": [
+      "CO-016"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Unsupported: Strider refuses isolatedWorlds on stock WebKit: stock WebKit) (stock WebKit's inspector makes no worlds"
+  },
+  {
+    "tests": [
+      "CO-018"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "A fulfilled response's Set-Cookie isn't stored by WebKit"
+  },
+  {
+    "tests": [
+      "CO-004",
+      "CO-010",
+      "CO-011",
+      "CO-013"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit's cookie list leaves out cookies for URLs no page has loaded, so cookies a caller sets are not listed or removed"
+  },
+  {
+    "tests": [
+      "CO-009",
+      "CO-015"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit's cookie list leaves out cookies for URLs no page has loaded, so cookies a caller sets are not listed or removed"
+  },
+  {
+    "tests": [
+      "CO-014"
+    ],
+    "status": "fails",
+    "reason": "CookieJar.listFor leaves out Secure cookies for localhost and loopback addresses over http"
   }
 ]

@@ -36,5 +36,32 @@
     "status": "needsFeature",
     "matrix": "method-page-evaluatehandle",
     "reason": "Creates a handle with `page.evaluateHandle`, and passes it back into `page.evaluate`, which runs in the isolated world. Stock WebKit has no isolated worlds (`isolatedWorlds` is unsupported), so it fails `Unsupported` there"
+  },
+  {
+    "tests": [
+      "[evaluation.test] Evaluation specs Page.evaluate should return properly serialize objects with unknown type fields"
+    ],
+    "status": "fails",
+    "reason": "Platform objects (URL, Performance, PerformanceMeasure, ImageBitmap) don't cross by value, though Serialized types their fields"
+  },
+  {
+    "tests": [
+      "[evaluation.test] Evaluation specs Page.evaluate should properly serialize null fields",
+      "[evaluation.test] Evaluation specs Page.evaluate should return undefined for non-serializable objects",
+      "[evaluation.test] Evaluation specs Page.evaluate should return promise as empty object",
+      "[evaluation.test] Evaluation specs Page.evaluate should work for circular object"
+    ],
+    "status": "fails",
+    "reason": "Port: Port: tests assert Puppeteer's and Playwright's lossy or permissive serialization where Strider fails fast with NotSerializable"
+  },
+  {
+    "tests": [
+      "[evaluation.test] Evaluation specs Page.evaluate should transfer 100Mb of data from page to node.js"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "A 100 MiB string result times out on stock WebKit"
   }
 ]

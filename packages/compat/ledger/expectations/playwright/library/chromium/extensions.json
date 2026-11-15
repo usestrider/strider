@@ -6,5 +6,35 @@
     "status": "needsFeature",
     "matrix": "option-browsertype-launchpersistentcontext-recordvideo",
     "reason": "Records a video of a persistent context with `recordVideo` at launch. Strider's video is a page capability that needs a VideoWriter on Chromium, not a launch option of a persistent context"
+  },
+  {
+    "tests": [
+      "CR-041"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "Service workers don't get a context's routes, offline emulation, extra headers, or user agent, and their script loads aren't reported"
+  },
+  {
+    "tests": [
+      "CR-039"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "A service worker's request body isn't collected, so postData fails with notCollected"
+  },
+  {
+    "tests": [
+      "CR-036"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "ServiceWorker.startWorker after stopWorker never reaches running"
   }
 ]

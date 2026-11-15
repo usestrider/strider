@@ -23,5 +23,107 @@
     "status": "needsFeature",
     "matrix": "method-page-ariasnapshot",
     "reason": "Checks the snapshot's `/url: /auth?r=/` line for a link whose URL looks like a regex; Strider's snapshot node carries no link URL, and no matrix row names that field"
+  },
+  {
+    "tests": [
+      "AR-046",
+      "AR-047"
+    ],
+    "status": "fails",
+    "reason": "getByRole doesn't exclude inert elements, or elements outside an open modal dialog"
+  },
+  {
+    "tests": [
+      "AR-018"
+    ],
+    "status": "fails",
+    "reason": "An element with display: contents, such as a slot, counts as hidden, so names that pass through a slot are empty and getByRole never finds it"
+  },
+  {
+    "tests": [
+      "AR-028"
+    ],
+    "status": "fails",
+    "reason": "A name keeps its soft hyphens and zero-width spaces and folds non-breaking spaces into plain spaces"
+  },
+  {
+    "tests": [
+      "AR-016",
+      "AR-017"
+    ],
+    "status": "fails",
+    "reason": "A name includes pseudo-element content that is display: none or visibility: hidden, and does not separate a display: block pseudo from its neighbors"
+  },
+  {
+    "tests": [
+      "AR-015",
+      "AR-020"
+    ],
+    "status": "fails",
+    "reason": "A snapshot's text nodes leave out ::before and ::after content"
+  },
+  {
+    "tests": [
+      "AR-008"
+    ],
+    "status": "fails",
+    "reason": "Text in a closed details is included, both in the name of a label that references it and in a snapshot"
+  },
+  {
+    "tests": [
+      "AR-023"
+    ],
+    "status": "fails",
+    "reason": "Inputs of type file, date, and time have no role"
+  },
+  {
+    "tests": [
+      "AR-014"
+    ],
+    "status": "fails",
+    "reason": "A snapshot joins the text of block siblings with no separator, so three divs read \"OneTwoThree\""
+  },
+  {
+    "tests": [
+      "AR-032"
+    ],
+    "status": "fails",
+    "reason": "A textarea's initial text is a text child of its textbox node"
+  },
+  {
+    "tests": [
+      "AR-033"
+    ],
+    "status": "fails",
+    "reason": "Content with visibility: visible inside a visibility: hidden parent is kept in the snapshot"
+  },
+  {
+    "tests": [
+      "AR-038"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: depth counts a text child as a level, so a node at the limit loses its text"
+  },
+  {
+    "tests": [
+      "AR-040",
+      "AR-045"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: A snapshot includes the content of every visible frame, where the original lists the iframe alone"
+  },
+  {
+    "tests": [
+      "AR-025"
+    ],
+    "status": "fails",
+    "reason": "Role queries and snapshots can't see an element's aria-owns children"
+  },
+  {
+    "tests": [
+      "AR-037"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: A snapshot never waits, so it cannot wait for a locator or for blocking CSS"
   }
 ]

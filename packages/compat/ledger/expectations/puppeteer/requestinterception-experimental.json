@@ -70,5 +70,87 @@
     "status": "differentByDesign",
     "decision": "Playwright is evidence, not the template",
     "reason": "Reads `isInterceptResolutionHandled()` and `interceptResolutionState()` in later handlers, to see whether an earlier handler already resolved the request and with which action (`AlreadyHandled`). Strider has no resolution state for a handler to read; method-route-continue is the nearest matrix row"
+  },
+  {
+    "tests": [
+      "[requestinterception-experimental.test] cooperative request interception Page.setRequestInterception should navigate to URL with hash and fire requests without hash"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "A request's URL keeps the navigation's #fragment on Firefox and WebKit"
+  },
+  {
+    "tests": [
+      "[requestinterception-experimental.test] cooperative request interception Page.setRequestInterception should work with redirects",
+      "[requestinterception-experimental.test] cooperative request interception Page.setRequestInterception should work with redirects for subresources",
+      "[requestinterception-experimental.test] cooperative request interception Page.setRequestInterception should be able to abort redirects"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: WebKit pauses only a redirect's first hop, so later hops can't be routed, aborted, or read as redirect evidence"
+  },
+  {
+    "tests": [
+      "[requestinterception-experimental.test] cooperative request interception Page.setRequestInterception should cache ${resourceType} if cache enabled"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Firefox reports a cache hit and a service-worker response with one value, cacheOrServiceWorker"
+  },
+  {
+    "tests": [
+      "[requestinterception-experimental.test] cooperative request interception Request.respond should work with status code 422"
+    ],
+    "status": "fails",
+    "reason": "route.fulfill never conveys a status text, so the page sees the browser's phrase or none"
+  },
+  {
+    "tests": [
+      "[requestinterception-experimental.test] cooperative request interception Request.respond should redirect"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: WebKit doesn't follow a redirect a route fulfills"
+  },
+  {
+    "tests": [
+      "[requestinterception-experimental.test] cooperative request interception Page.setRequestInterception should be abortable with custom error codes"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Firefox and WebKit can't abort with a custom error reason",
+    "matrix": "method-route-abort"
+  },
+  {
+    "tests": [
+      "[requestinterception-experimental.test] cooperative request interception Page.setRequestInterception should work with file URLs"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "Firefox doesn't pause file: requests, and WebKit pauses only the document"
+  },
+  {
+    "tests": [
+      "[requestinterception-experimental.test] cooperative request interception Page.setRequestInterception should navigate to dataURL and fire dataURL requests",
+      "[requestinterception-experimental.test] cooperative request interception Page.setRequestInterception should be able to fetch dataURL and fire dataURL requests"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Puppeteer's tests expect a request and its event for a data: URL, which Strider reports as no request"
   }
 ]

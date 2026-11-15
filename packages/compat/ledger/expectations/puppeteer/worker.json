@@ -60,5 +60,83 @@
     "status": "needsFeature",
     "matrix": "method-consolemessage-location",
     "reason": "Reads the message's stack trace, which a ConsoleMessage doesn't carry. Its location is one frame's URL, line, and column"
+  },
+  {
+    "tests": [
+      "[worker.test] Workers Page.workers",
+      "[worker.test] Workers should report network requests",
+      "[worker.test] Workers should report network requests with request interception"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses workers.evaluate on Firefox: Firefox can't evaluate in a worker realm",
+    "matrix": "method-worker-evaluate"
+  },
+  {
+    "tests": [
+      "[worker.test] Workers should have an execution context",
+      "[worker.test] Workers should report each worker exception on the page exactly once",
+      "[worker.test] Workers console should work for Error instances",
+      "[worker.test] Workers console should return the first line of the error message in text()",
+      "[worker.test] Workers console should work for console.warn",
+      "[worker.test] Workers console should work for console.error",
+      "[worker.test] Workers console should work for console.log with promise",
+      "[worker.test] Workers waitForFunction should wait for a condition",
+      "[worker.test] Workers waitForFunction should timeout if condition is not met",
+      "[worker.test] Workers waitForFunction should return a JSHandle to a string and parse it"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses workers.evaluate on Firefox: Firefox can't evaluate in a worker realm",
+    "matrix": "method-worker-evaluate"
+  },
+  {
+    "tests": [
+      "[worker.test] Workers console should work for console.trace",
+      "[worker.test] Workers console should work for console.dir",
+      "[worker.test] Workers console should work for different console API calls with timing functions",
+      "[worker.test] Workers console should work for different console API calls with group functions"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses workers.evaluate on Firefox: Firefox can't evaluate in a worker realm",
+    "matrix": "method-worker-evaluate"
+  },
+  {
+    "tests": [
+      "[worker.test] Workers should retrieve body for main worker requests"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "Chromium: a dedicated worker's script request gets no response event"
+  },
+  {
+    "tests": [
+      "[worker.test] Workers when the worker script does not load evaluate should reject if the script is not found",
+      "[worker.test] Workers when the worker script does not load evaluate should reject if a static import of a module worker is not found"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "On stock WebKit, a worker whose script fails to load is never reported"
+  },
+  {
+    "tests": [
+      "[worker.test] Workers should report console logs"
+    ],
+    "status": "fails",
+    "reason": "Port: Port: Puppeteer's worker console location is CDP's 0-based position with an empty URL"
   }
 ]

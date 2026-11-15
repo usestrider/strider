@@ -47,5 +47,49 @@
     "status": "needsFeature",
     "matrix": "method-browsercontext-route",
     "reason": "A URLPattern with ignoreCase: Strider's URL patterns are strings, and a URLPattern string has no case-insensitive option"
+  },
+  {
+    "tests": [
+      "RO-166"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Recordings include the browser's own favicon requests, which Playwright never reports"
+  },
+  {
+    "tests": [
+      "RO-169",
+      "RO-171"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "A fulfilled response's Set-Cookie isn't stored by WebKit"
+  },
+  {
+    "tests": [
+      "RO-183"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "The HTTP cache isn't disabled while a route is active, so a cached response bypasses the route"
+  },
+  {
+    "tests": [
+      "RO-167",
+      "RO-168",
+      "RO-179"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "The body a route fulfilled with can't be read back on Chromium, and WebKit fails the same read for error statuses"
   }
 ]

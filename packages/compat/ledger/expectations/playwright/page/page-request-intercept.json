@@ -22,5 +22,69 @@
     "status": "needsFeature",
     "matrix": "option-route-fetch-postdata",
     "reason": "Route.fetch's postData option sends the route's request with a body the route gives, whatever its method (the original's is a GET navigation), and fulfills with that response: Strider has no Route.fetch (method-route-fetch). Route.continueWith of a body on a GET navigation doesn't send it on Chromium, so it can't stand in for it"
+  },
+  {
+    "tests": [
+      "RO-148"
+    ],
+    "status": "fails",
+    "reason": "Recordings include the browser's own favicon requests, which Playwright never reports"
+  },
+  {
+    "tests": [
+      "RO-136"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "WebKit fulfill derives the mime type from Content-Type naively: none gives an empty one, a space breaks it, a charset is dropped"
+  },
+  {
+    "tests": [
+      "RO-141"
+    ],
+    "browsers": [
+      "chromium",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "A multipart or non-text request body can't be read on WebKit and Chromium",
+    "matrix": "method-request-postdata"
+  },
+  {
+    "tests": [
+      "RO-147"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "A multipart or non-text request body can't be read on WebKit and Chromium",
+    "matrix": "method-request-postdata"
+  },
+  {
+    "tests": [
+      "RO-134",
+      "RO-135"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "needsFeature",
+    "reason": "Response-phase fulfill and body reads aren't available on Firefox and WebKit",
+    "matrix": "method-route-fetch"
+  },
+  {
+    "tests": [
+      "RO-140"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Response-phase fulfill and body reads aren't available on Firefox and WebKit",
+    "matrix": "method-route-fetch"
   }
 ]

@@ -41,5 +41,28 @@
     "status": "needsFeature",
     "matrix": "option-browser-newcontext-ignorehttpserrors",
     "reason": "The test's context accepts the fixture's self-signed certificate (`ignoreHTTPSErrors`), which Chromium refuses per context with `acceptInsecureCerts`, as browsercontext-add-cookies' CO-041 is. Its removal by name also has no partition key in Strider's `Match`"
+  },
+  {
+    "tests": [
+      "CO-043"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit's cookie list leaves out cookies for URLs no page has loaded, so cookies a caller sets are not listed or removed"
+  },
+  {
+    "tests": [
+      "CO-051"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "A cookie with an empty name is refused by CookieJar.set, where the browsers store and clear it",
+    "matrix": "method-browsercontext-addcookies"
   }
 ]

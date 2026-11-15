@@ -56,5 +56,75 @@
     "status": "needsFeature",
     "matrix": "option-page-pageerrors-filter",
     "reason": "Reads a page's uncaught exceptions either since its last navigation or all of them; `UncaughtException.history` has no navigation filter"
+  },
+  {
+    "tests": [
+      "CM-010"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses popups.opener on stock WebKit: stock WebKit) (stock WebKit names no page's opener: a page another opens is reported as the browser's",
+    "matrix": "method-page-opener"
+  },
+  {
+    "tests": [
+      "CM-002"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "An operation returns before the console messages it caused reach ConsoleMessage.history"
+  },
+  {
+    "tests": [
+      "CM-017"
+    ],
+    "status": "fails",
+    "reason": "An operation returns before the console messages it caused reach ConsoleMessage.history"
+  },
+  {
+    "tests": [
+      "CM-008"
+    ],
+    "status": "fails",
+    "reason": "Browser-generated console messages (CORS errors, failed loads) are never reported on Chromium or WebKit"
+  },
+  {
+    "tests": [
+      "CM-006"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "needsFeature",
+    "reason": "ConsoleMessage.text has no value preview, so objects, arrays, and windows read as the browser's class name, differently per browser",
+    "matrix": "method-consolemessage-args"
+  },
+  {
+    "tests": [
+      "CM-007",
+      "CM-011"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "ConsoleMessage.text has no value preview, so objects, arrays, and windows read as the browser's class name, differently per browser",
+    "matrix": "method-consolemessage-args"
+  },
+  {
+    "tests": [
+      "CM-012"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "ConsoleMessage.text for an Error argument is each browser's own description: Chromium appends the stack, the others the whole message"
   }
 ]

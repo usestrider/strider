@@ -1,0 +1,13 @@
+[
+  {
+    "tests": [
+      "[defaultbrowsercontext.test] DefaultBrowserContext page.setCookie() should work",
+      "[defaultbrowsercontext.test] DefaultBrowserContext page.deleteCookie() should work"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "A WebKit cookie set for localhost is listed with the domain .localhost"
+  }
+]

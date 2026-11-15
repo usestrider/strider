@@ -5,5 +5,12 @@
     ],
     "status": "notApplicable",
     "reason": "Checks that Playwright accepts a RegExp made in another JavaScript realm, which its own instanceof check would refuse. Strider's URL filter takes a glob, a URLPattern, or an exact URL and no RegExp, so there is no realm check to run. WA-127's regular expression is applied as a predicate and is ported"
+  },
+  {
+    "tests": [
+      "WA-125"
+    ],
+    "status": "fails",
+    "reason": "Strider's Timeout doesn't say which URL a request or response wait was for"
   }
 ]

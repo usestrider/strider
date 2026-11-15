@@ -73,5 +73,15 @@
     "status": "needsFeature",
     "matrix": "method-page-opener",
     "reason": "Reads `target.opener()` of a popup, which is the page that opened it, and of the page itself, which has none. Strider has no `Page.opener`: a popup is reported by `Popup.next` to the page that opened it (not on WebKit), but a page can't say what opened it, and nothing says a page has none. Puppeteer launches Chromium with `--disable-popup-blocking`, so the page-load `window.open` opens there; without it Chromium blocks it, but the missing opener is the test's point"
+  },
+  {
+    "tests": [
+      "[target.test] Target should report when a service worker is created and destroyed"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "An unregistered Chromium service worker stays alive while Strider is attached, so its closed never fires"
   }
 ]

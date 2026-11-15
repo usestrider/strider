@@ -12,13 +12,5 @@
     ],
     "status": "fails",
     "reason": "A click on an element inside a disabled button succeeds without clicking, where it should wait for the button to be enabled"
-  },
-  {
-    "tests": [
-      "CL-112",
-      "CL-113"
-    ],
-    "status": "fails",
-    "reason": "A timed-out action's message names only its operation and phase, not the reason it observed"
   }
 ]

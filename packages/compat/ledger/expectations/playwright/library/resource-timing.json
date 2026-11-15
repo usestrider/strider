@@ -9,5 +9,22 @@
     "status": "needsFeature",
     "matrix": "option-browser-newcontext-ignorehttpserrors",
     "reason": "Accepting a self-signed HTTPS certificate in a context (`ignoreHTTPSErrors`), which this test needs for its TLS document. Chromium refuses `acceptInsecureCerts` with Unsupported, because its certificate override applies to the whole browser"
+  },
+  {
+    "tests": [
+      "NE-135"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Memory-cache responses report no timing on Chromium and WebKit"
+  },
+  {
+    "tests": [
+      "NE-134"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "On stock WebKit, the first hop of a redirect has no requestStart"
   }
 ]

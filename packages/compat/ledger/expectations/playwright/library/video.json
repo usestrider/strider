@@ -55,5 +55,104 @@
     "matrix": "option-browser-newcontext-recordvideo",
     "status": "needsFeature",
     "reason": "Playwright's recordVideo.size (VI-004, VI-015), its default size of 800 by 800 at most, or 800 by 450, or 800 by 600 for a context with no viewport (VI-016, VI-017, VI-020), and recordVideo.fps with its validation (VI-018, VI-019). Strider's Capability.Video takes no options: its file has the size of the page's first picture in device pixels, fixed for the file, and is variable-rate, so there is no requested size to scale or pad to, no default size, and no frame rate to request or read back. The matrix row says Strider has recordVideo, and it has the recording but neither the size nor the fps"
+  },
+  {
+    "tests": [
+      "VI-021"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses capability.video on Chromium: The context must allow downloads to a directory",
+    "matrix": "method-page-video"
+  },
+  {
+    "tests": [
+      "VI-023"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses downloads on stock WebKit: stock WebKit) (stock WebKit reports no downloads",
+    "matrix": "event-page-download"
+  },
+  {
+    "tests": [
+      "VI-026"
+    ],
+    "browsers": [
+      "chromium",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses downloads on stock WebKit: stock WebKit) (stock WebKit reports no downloads",
+    "matrix": "event-page-download"
+  },
+  {
+    "tests": [
+      "VI-029"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses downloads on stock WebKit: stock WebKit) (stock WebKit reports no downloads",
+    "matrix": "event-page-download"
+  },
+  {
+    "tests": [
+      "VI-010"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: A relative downloads directory is refused, where Playwright resolves it against the working directory"
+  },
+  {
+    "tests": [
+      "VI-006",
+      "VI-008",
+      "VI-009",
+      "VI-011"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Chromium: recording a page that paints no frame fails the recording and writes no file"
+  },
+  {
+    "tests": [
+      "VI-003",
+      "VI-005",
+      "VI-012",
+      "VI-013",
+      "VI-014"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Firefox: the recorded WebM has no duration, so ffprobe reports none"
+  },
+  {
+    "tests": [
+      "VI-025",
+      "VI-028"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Firefox: the file of a recording whose page closed first, or that drew nothing, is unreadable"
   }
 ]

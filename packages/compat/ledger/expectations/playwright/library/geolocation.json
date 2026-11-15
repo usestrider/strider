@@ -6,5 +6,32 @@
     ],
     "status": "notApplicable",
     "reason": "Playwright's runtime message for a geolocation missing its latitude or longitude. Strider's Geolocation type requires both, as the original's @ts-expect-error shows, so the call doesn't compile"
+  },
+  {
+    "tests": [
+      "GE-001",
+      "GE-003",
+      "GE-007",
+      "GE-008",
+      "GE-009"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses permissions.anyOrigin on Firefox: WebDriver BiDi grants a permission to one origin",
+    "matrix": "method-browsercontext-grantpermissions"
+  },
+  {
+    "tests": [
+      "GE-005"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses emulation.geolocation on stock WebKit: stock WebKit) (stock WebKit's inspector has no Emulation domain",
+    "matrix": "method-browsercontext-setgeolocation"
   }
 ]

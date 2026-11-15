@@ -15,5 +15,43 @@
     "status": "needsFeature",
     "matrix": "event-websocket-socketerror",
     "reason": "The socketerror event, which reports a WebSocket that fails (WS-007) and checks that none fires while a working socket runs (WS-008). Strider's connections have no socketerror event, so these tests have nothing to check"
+  },
+  {
+    "tests": [
+      "WS-002",
+      "WS-003",
+      "WS-004",
+      "WS-006",
+      "WS-009",
+      "WS-010"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Unsupported: Strider refuses networkConnections on Firefox: WebDriver BiDi reports a WebSocket's handshake as a request, and not its frames or its close"
+  },
+  {
+    "tests": [
+      "WS-012"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses emulation.network.offline on stock WebKit: stock WebKit) (stock WebKit's inspector has no Emulation domain",
+    "matrix": "method-browsercontext-setoffline"
+  },
+  {
+    "tests": [
+      "WS-014"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "On stock WebKit, a test whose worker opens a WebSocket under extra HTTP headers never finishes its teardown"
   }
 ]

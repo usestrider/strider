@@ -64,5 +64,45 @@
     ],
     "status": "notApplicable",
     "reason": "Playwright rejects first(), last(), and nth() on frameLocator(), its frame locator with no selector. Strider's frame locator has none of those methods: the iframe is selected on its element locator before the frame is entered (method-framelocator-first and the nth row), so there is no call to reject"
+  },
+  {
+    "tests": [
+      "LO-016"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Unsupported: Strider refuses isolatedWorlds on stock WebKit: stock WebKit) (stock WebKit's inspector makes no worlds"
+  },
+  {
+    "tests": [
+      "LO-019"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Unsupported: Strider refuses isolatedWorlds on stock WebKit: stock WebKit) (stock WebKit's inspector makes no worlds, so Strider's engine runs in the page's own"
+  },
+  {
+    "tests": [
+      "LO-018"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "differentByDesign",
+    "reason": "Locator.evaluate and the other reads fail at once when nothing matches, where Playwright's evaluate waits for the element",
+    "decision": "Playwright is evidence, not the template"
+  },
+  {
+    "tests": [
+      "LO-051"
+    ],
+    "status": "fails",
+    "reason": "Visibility inside a frame ignores the embedding iframe's own visibility, so a button in a visibility:hidden iframe counts as visible"
   }
 ]

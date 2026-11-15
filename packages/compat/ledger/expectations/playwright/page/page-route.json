@@ -72,5 +72,111 @@
     "status": "needsFeature",
     "matrix": "method-page-route",
     "reason": "A URLPattern with ignoreCase: Strider's URL patterns are strings, and a URLPattern string has no case-insensitive option"
+  },
+  {
+    "tests": [
+      "RO-002"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Recordings include the browser's own favicon requests, which Playwright never reports"
+  },
+  {
+    "tests": [
+      "RO-026"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "A request's URL keeps the navigation's #fragment on Firefox and WebKit"
+  },
+  {
+    "tests": [
+      "RO-003"
+    ],
+    "status": "fails",
+    "reason": "A glob with an escaped or unusual character is not read as Playwright reads it, and an invalid glob is accepted"
+  },
+  {
+    "tests": [
+      "RO-020"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Chromium and Firefox call a route for every redirect hop; Playwright calls it for the first request only"
+  },
+  {
+    "tests": [
+      "RO-022"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Chromium and Firefox call a route for every redirect hop; Playwright calls it for the first request only"
+  },
+  {
+    "tests": [
+      "RO-009"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "A route's header override carries browser-owned headers (Cookie, Origin, Trailer) to the server, where Playwright keeps the browser's"
+  },
+  {
+    "tests": [
+      "RO-017"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "A held route's request cancelled by the page never ends on Firefox"
+  },
+  {
+    "tests": [
+      "RO-011",
+      "RO-012"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Sync XHR and preload or prefetch requests are not paused, or hang, on WebKit"
+  },
+  {
+    "tests": [
+      "RO-032"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: WebKit doesn't follow a redirect a route fulfills"
+  },
+  {
+    "tests": [
+      "RO-035",
+      "RO-036"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: A fulfilled cross-origin response needs CORS headers; Playwright adds Access-Control-Allow-Origin"
+  },
+  {
+    "tests": [
+      "RO-050"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: A route's request headers lack the headers the browser adds (Fetch Metadata) on Chromium"
   }
 ]

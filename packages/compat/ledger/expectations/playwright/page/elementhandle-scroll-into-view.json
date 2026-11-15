@@ -6,5 +6,21 @@
     "status": "differentByDesign",
     "decision": "Playwright is evidence, not the template",
     "reason": "Removes the element through its handle, then expects the scroll to throw 'Element is not attached to the DOM' at once. Strider has no handle bound to one node: a locator finds its match again on each attempt, so the scroll would wait for a new match rather than throw"
+  },
+  {
+    "tests": [
+      "EH-096",
+      "EH-124"
+    ],
+    "status": "fails",
+    "reason": "An element with display: contents and only text has no box, so it is never visible, never scrollable, and has no action point"
+  },
+  {
+    "tests": [
+      "EH-097",
+      "EH-098"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: focus and scrollIntoView wait for the element to be visible where Playwright's do not"
   }
 ]

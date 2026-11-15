@@ -65,5 +65,15 @@
     "status": "needsFeature",
     "matrix": "option-locator-click-button",
     "reason": "Clicks with the back and forward mouse buttons; Strider's Mouse.Button is left, right and middle only, so these buttons have no Strider option. The matrix row says the option is present, which covers only the three buttons"
+  },
+  {
+    "tests": [
+      "[click.test] Page.click should click the button if window.Node is removed"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "On stock WebKit the engine runs in the page's world, so a page that deletes Node, Event, or JSON.stringify, or redefines innerWidth, breaks it"
   }
 ]

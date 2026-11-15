@@ -21,5 +21,75 @@
     ],
     "status": "notApplicable",
     "reason": "Playwright's check of WebKit's minimal viewport on Windows, headed. The original skips every other browser and platform. Strider's launched WebKit is WebKitGTK's MiniBrowser (API.md, Stock WebKit, launched), not Playwright's WebKit build for Windows, and the original skips every other build, so there is no refusal of a 250x240 minimum for the test to read"
+  },
+  {
+    "tests": [
+      "VP-010",
+      "VP-011"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses emulation.touch on Firefox: Firefox doesn't implement emulation.setTouchOverride",
+    "matrix": "option-browser-newcontext-hastouch"
+  },
+  {
+    "tests": [
+      "VP-014"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses emulation.viewport.mobile on stock WebKit: stock WebKit) (no mobile viewport",
+    "matrix": "option-browser-newcontext-ismobile"
+  },
+  {
+    "tests": [
+      "VP-017"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses emulation.viewport.mobile on Firefox: WebDriver BiDi has no mobile viewport",
+    "matrix": "option-browser-newcontext-ismobile"
+  },
+  {
+    "tests": [
+      "VP-005",
+      "VP-006"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Stock WebKit's viewport is its window: sizes below the window's minimum width or above the screen's height are refused as not confirmed"
+  },
+  {
+    "tests": [
+      "VP-016"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Stock WebKit's viewport is its window: sizes below the window's minimum width or above the screen's height are refused as not confirmed"
+  },
+  {
+    "tests": [
+      "VP-007"
+    ],
+    "status": "fails",
+    "reason": "Chromium: viewport emulation leaves window.screen, screen orientation and window.orientation at the real window's"
+  },
+  {
+    "tests": [
+      "VP-009"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Tap works without touch emulation, where Playwright refuses it"
   }
 ]

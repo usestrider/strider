@@ -6,5 +6,19 @@
     "status": "needsFeature",
     "matrix": "option-screencast-start-size",
     "reason": "Puppeteer's `page.screencast` takes `scale`, `crop`, and `speed`, which shape the file it writes; Strider's `Capability.Video` takes none of them, so a port would record a different file. The nearest matrix row is option-screencast-start-size, which has the sizing options"
+  },
+  {
+    "tests": [
+      "[prerender.test] Prerender can navigate to a prerendered page via input",
+      "[prerender.test] Prerender can navigate to a prerendered page via Locator",
+      "[prerender.test] Prerender via frame can navigate to a prerendered page via input",
+      "[prerender.test] Prerender with network requests can receive requests from the prerendered page",
+      "[prerender.test] Prerender with emulation can configure viewport for prerendered pages"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "Speculation-rule prerender doesn't activate: the page loads normally and no Activated navigation is reported"
   }
 ]

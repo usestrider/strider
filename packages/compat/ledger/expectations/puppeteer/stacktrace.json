@@ -10,5 +10,28 @@
     "status": "needsFeature",
     "matrix": "method-page-evaluatehandle",
     "reason": "page.evaluateHandle runs in the isolated world, which stock WebKit doesn't have, so it is Unsupported there (the matrix row is the nearest: its handle is the evaluation's result, which these tests throw from)"
+  },
+  {
+    "tests": [
+      "[stacktrace.test] Stack trace should work",
+      "[stacktrace.test] Stack trace should work with nested function calls"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "An exception thrown inside an evaluation carries no stack on Firefox, and on WebKit for a thrown Error"
+  },
+  {
+    "tests": [
+      "[stacktrace.test] Stack trace should work with handles",
+      "[stacktrace.test] Stack trace should work with contiguous evaluation"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "An exception thrown inside an evaluation carries no stack on Firefox, and on WebKit for a thrown Error"
   }
 ]

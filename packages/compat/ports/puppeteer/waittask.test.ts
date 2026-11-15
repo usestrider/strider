@@ -13,9 +13,9 @@
  * - The "hidden" waits start after `setContent`, where the original starts them before it. With no element yet, Puppeteer's
  *   hidden wait is satisfied (`checkVisibility(null, false)` is true) as Strider's `toBeHidden` is, so the original's
  *   wait only stays pending because its first poll runs after `setContent`; the port makes that order explicit.
- * - "should survive cross-process navigation" for `waitForFunction` reads through `survivingNavigation`, which turns the
- *   end of the realm a navigation destroyed into a read that holds nothing yet: the original's wait runs again in the
- *   next document.
+ * - "should survive navigations" and "should survive cross-process navigation" for `waitForFunction` read through
+ *   `survivingNavigation`, which turns the end of the realm a navigation destroyed into a read that holds nothing yet:
+ *   the original's wait runs again in the next document.
  * - `Promise.race([promise, createTimeout(40)])` is `stillPending`: the original's fixed 40 ms wait, after which the wait
  *   must still be pending. It's ported as written, with the same check.
  * - A wait that returns a handle (`using handle = await page.waitForSelector(…)`) is a wait that returns nothing. The
@@ -305,7 +305,7 @@ upstream(import.meta.filename, {}, (test) => {
   test("waittask specs Frame.waitForFunction should survive navigations", ({ page, server }) =>
     Effect.gen(function*() {
       const watchdog = yield* startWaiting(
-        Expect.that(page.evaluateInMainWorld(() => Boolean(Reflect.get(window, "__done"))), holds)
+        Expect.that(survivingNavigation(page.evaluateInMainWorld(() => Boolean(Reflect.get(window, "__done")))), holds)
       )
       yield* page.goto(server.EMPTY_PAGE)
       yield* page.goto(server.PREFIX + "/consolelog.html")

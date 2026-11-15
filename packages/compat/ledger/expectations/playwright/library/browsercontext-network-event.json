@@ -34,5 +34,17 @@
     "status": "needsFeature",
     "matrix": "event-browsercontext-requestfinished",
     "reason": "Records the context's requestfinished event as well as its request and response events, and checks that none of them names the favicon. Strider has no requestfinished event, and its own favicon request is reported (see the reference's page-network-request.test.ts), so the favicon check needs the event's filter the original applies"
+  },
+  {
+    "tests": [
+      "NE-121",
+      "NE-122"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses popups.opener on stock WebKit: stock WebKit) (stock WebKit names no page's opener: a page another opens is reported as the browser's",
+    "matrix": "method-page-opener"
   }
 ]

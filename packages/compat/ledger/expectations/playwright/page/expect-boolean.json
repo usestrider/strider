@@ -37,5 +37,26 @@
     ],
     "status": "notApplicable",
     "reason": "Tests the error message of Playwright's selector-string parser for an unknown engine name (`row=\"row\"`), reported as `Unknown engine`; Strider's `page.locator` takes a CSS string and has no engine names"
+  },
+  {
+    "tests": [
+      "EX-015",
+      "EX-016",
+      "EX-047",
+      "EX-048",
+      "EX-060",
+      "EX-061",
+      "EX-083",
+      "EX-084"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: An expectation under a 1 ms deadline can't read the page once, so it fails with an empty history"
+  },
+  {
+    "tests": [
+      "EX-063"
+    ],
+    "status": "fails",
+    "reason": "toBeFocused doesn't pass for the host of a shadow root that holds the focused element"
   }
 ]

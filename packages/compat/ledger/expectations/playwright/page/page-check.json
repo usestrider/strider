@@ -1,0 +1,9 @@
+[
+  {
+    "tests": [
+      "CH-008"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: check on role=option and role=treeitem fails as not checkable"
+  }
+]

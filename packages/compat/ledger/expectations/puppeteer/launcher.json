@@ -150,5 +150,98 @@
     "status": "needsFeature",
     "matrix": "method-browsertype-connect",
     "reason": "Connects a client to the running browser (`puppeteer.connect`), or reads the endpoint it listens on. Strider's stock WebKit layer has no connect; Chromium and Firefox connect with their own layers, so these run there"
+  },
+  {
+    "tests": [
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.launch should reject all promises when browser is closed"
+    ],
+    "status": "fails",
+    "reason": "A browser closing doesn't report BrowserClosed: in-flight evaluations and a context's closed end with RealmDestroyed or never resolve"
+  },
+  {
+    "tests": [
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.launch should have custom URL when launching browser"
+    ],
+    "status": "fails",
+    "reason": "A launch with an executable that exits at once fails with ConnectionFailed on Chromium (and for a locked or unwritable profile), not ProcessExited"
+  },
+  {
+    "tests": [
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.launch should pass the timeout parameter to browser.waitForTarget"
+    ],
+    "status": "fails",
+    "reason": "Launch ignores Deadline.within: a launch layer has no operation, so a one-millisecond deadline does not time it out"
+  },
+  {
+    "tests": [
+      "[launcher.test] Launcher specs Puppeteer Browser.disconnect should reject navigation when browser closes",
+      "[launcher.test] Launcher specs Puppeteer Browser.disconnect should reject waitForSelector when browser closes",
+      "[launcher.test] Launcher specs Puppeteer Browser.close should terminate network waiters",
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.launch should set the debugging port",
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.connect should be able to connect multiple times to the same browser",
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.connect should not modify the connect options",
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.connect should be able to connect to the same page simultaneously",
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.connect should be able to reconnect"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "A --remote-debugging-port in launch args is ignored by Firefox, because Strider passes its own --remote-debugging-port=0 first"
+  },
+  {
+    "tests": [
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.connect should be able to reconnect to a disconnected browser"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "A --remote-debugging-port in launch args is ignored by Firefox, because Strider passes its own --remote-debugging-port=0 first"
+  },
+  {
+    "tests": [
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.launch userDataDir argument",
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.launch userDataDir argument with non-existent dir"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "A --user-data-dir (or Firefox -profile) in launch args is silently overridden by Strider's own profile"
+  },
+  {
+    "tests": [
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.launch userDataDir option restores preferences"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Firefox's launch leaves prefs.js rewritten and user.js carrying Strider's block, where Puppeteer restores the profile's files"
+  },
+  {
+    "tests": [
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.launch userDataDir option should restore cookies"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Firefox loses cookies written in a profile directory you own: closing the scope signals the process instead of closing it gracefully"
+  },
+  {
+    "tests": [
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.launch userDataDir option should restore state"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "On stock WebKit a userDataDir persists nothing: the automation session's data store is ephemeral, and the option is accepted without effect"
   }
 ]

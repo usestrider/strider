@@ -1,0 +1,22 @@
+[
+  {
+    "tests": [
+      "EH-054"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Unsupported: Strider refuses isolatedWorlds on stock WebKit: stock WebKit) (stock WebKit's inspector makes no worlds"
+  },
+  {
+    "tests": [
+      "EH-046"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "On stock WebKit the engine runs in the page's world, so a page that deletes Node, Event, or JSON.stringify, or redefines innerWidth, breaks it"
+  }
+]

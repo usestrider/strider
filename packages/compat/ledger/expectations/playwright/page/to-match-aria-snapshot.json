@@ -46,5 +46,25 @@
     ],
     "status": "notApplicable",
     "reason": "Tests the YAML parse errors and attribute-value errors of Playwright's template (a sequence without its dashes, nested compact mappings, unterminated strings and regular expressions, unsupported or malformed attributes); a Strider pattern is typed data, and there is no template to parse"
+  },
+  {
+    "tests": [
+      "AR-126"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "toMatchAria matches the located node and its direct children, never a descendant",
+    "matrix": "method-locatorassertions-tomatchariasnapshot"
+  },
+  {
+    "tests": [
+      "AR-127"
+    ],
+    "status": "fails",
+    "reason": "An expectation whose deadline is shorter than its first check reports no observation"
   }
 ]

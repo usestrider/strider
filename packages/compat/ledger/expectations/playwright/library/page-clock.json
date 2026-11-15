@@ -38,5 +38,84 @@
     "status": "needsFeature",
     "matrix": "method-clock-pauseat",
     "reason": "Pausing a clock that runs in real time: Playwright's pauseAt stops a flowing clock at a time. Strider's resume turns a clock into a real-time one for good, and a controlled clock never runs, so there is no running clock to pause; a controlled clock that stays put would pass the test without ever having run"
+  },
+  {
+    "tests": [
+      "CK-027",
+      "CK-028",
+      "CK-029",
+      "CK-030"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses popups.opener on stock WebKit: stock WebKit) (stock WebKit names no page's opener: a page another opens is reported as the browser's",
+    "matrix": "method-page-opener"
+  },
+  {
+    "tests": [
+      "CK-051"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses emulation.timezone on stock WebKit: stock WebKit) (taken at launch, before a context's options reach it",
+    "matrix": "option-browser-newcontext-timezoneid"
+  },
+  {
+    "tests": [
+      "CK-007"
+    ],
+    "status": "fails",
+    "reason": "runFor doesn't reject when a timer throws"
+  },
+  {
+    "tests": [
+      "CK-012"
+    ],
+    "status": "fails",
+    "reason": "adjust accepts NaN, and probably Infinity and negative durations"
+  },
+  {
+    "tests": [
+      "CK-024",
+      "CK-026",
+      "CK-046"
+    ],
+    "status": "fails",
+    "reason": "performance.now and performance.timeOrigin aren't derived from the clock's timeline"
+  },
+  {
+    "tests": [
+      "CK-043"
+    ],
+    "status": "fails",
+    "reason": "A timer set with 0 ms inside a timer fires in the same adjust"
+  },
+  {
+    "tests": [
+      "CK-048"
+    ],
+    "status": "fails",
+    "reason": "A fractional adjust makes Date.now() fractional"
+  },
+  {
+    "tests": [
+      "CK-049",
+      "CK-050"
+    ],
+    "status": "fails",
+    "reason": "The page clock doesn't cover Temporal.Now"
+  },
+  {
+    "tests": [
+      "CK-053"
+    ],
+    "status": "fails",
+    "reason": "The page clock doesn't cover AbortSignal.timeout"
   }
 ]

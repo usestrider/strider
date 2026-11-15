@@ -1,0 +1,13 @@
+[
+  {
+    "tests": [
+      "FI-016"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "insertText and fill type each character as key events on Firefox and stock WebKit"
+  }
+]

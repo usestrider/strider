@@ -25,5 +25,79 @@
     "status": "needsFeature",
     "matrix": "method-consolemessage-page",
     "reason": "Reads the frame that wrote the message (`message.frame()`), which for an iframe's log is the iframe, not the main frame. A ConsoleMessage's origin is a page, named by its main frame's navigable, or a worker's realm: it doesn't name the frame. The row is the nearest: it lists `ConsoleMessage.page` as missing, and `frame` has none"
+  },
+  {
+    "tests": [
+      "[console.test] console should not throw when there are console messages in detached iframes"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses popups.opener on stock WebKit: stock WebKit) (stock WebKit names no page's opener: a page another opens is reported as the browser's",
+    "matrix": "method-page-opener"
+  },
+  {
+    "tests": [
+      "[console.test] console should include null and undefined in text()"
+    ],
+    "browsers": [
+      "chromium",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "ConsoleMessage.text writes null as 'object'"
+  },
+  {
+    "tests": [
+      "[console.test] console should trigger correct Log",
+      "[console.test] console should have location when fetch fails"
+    ],
+    "status": "fails",
+    "reason": "Browser-generated console messages (CORS errors, failed loads) are never reported on Chromium or WebKit"
+  },
+  {
+    "tests": [
+      "[console.test] console should not fail for window object"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "needsFeature",
+    "reason": "ConsoleMessage.text has no value preview, so objects, arrays, and windows read as the browser's class name, differently per browser",
+    "matrix": "method-consolemessage-args"
+  },
+  {
+    "tests": [
+      "[console.test] console should work for Error instances"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "ConsoleMessage.text for an Error argument is each browser's own description: Chromium appends the stack, the others the whole message"
+  },
+  {
+    "tests": [
+      "[console.test] console should return the first line of the error message in text()"
+    ],
+    "status": "fails",
+    "reason": "ConsoleMessage.text for an Error argument is each browser's own description: Chromium appends the stack, the others the whole message"
+  },
+  {
+    "tests": [
+      "[console.test] console should work for console.trace",
+      "[console.test] console should work for console.dir",
+      "[console.test] console should work for different console API calls with timing functions",
+      "[console.test] console should work for different console API calls with group functions"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "ConsoleMessage has no type for console.dir, trace, group, groupEnd, or timeEnd: they all read as 'log' (or 'debug')",
+    "matrix": "method-consolemessage-type"
   }
 ]

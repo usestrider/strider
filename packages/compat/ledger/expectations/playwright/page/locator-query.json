@@ -34,16 +34,5 @@
     ],
     "status": "notApplicable",
     "reason": "Registers a custom selector engine (`playwright.selectors.register`) and counts through it while the page navigates. Strider's locators take CSS only and have no selector engines to register"
-  },
-  {
-    "tests": [
-      "LO-161"
-    ],
-    "browsers": [
-      "webkit"
-    ],
-    "status": "needsFeature",
-    "matrix": "method-locator-evaluate",
-    "reason": "The test's point is that evaluate is strict, and Locator.evaluate runs in an isolated world, which stock WebKit doesn't have"
   }
 ]

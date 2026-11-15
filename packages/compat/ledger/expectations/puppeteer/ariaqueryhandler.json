@@ -36,5 +36,29 @@
     ],
     "status": "notApplicable",
     "reason": "Checks Puppeteer's aria selector grammar: a role or name in brackets after the name, quoting of the bracketed values, spaces around them, and the error for an unknown aria attribute. Strider's getByRole and its options replace the grammar; which elements the selector finds by role and name is covered by the queryOne tests"
+  },
+  {
+    "tests": [
+      "[ariaqueryhandler.test] AriaQueryHandler parseAriaSelector should handle non-breaking spaces in span"
+    ],
+    "status": "fails",
+    "reason": "A name keeps its soft hyphens and zero-width spaces and folds non-breaking spaces into plain spaces"
+  },
+  {
+    "tests": [
+      "[ariaqueryhandler.test] AriaQueryHandler queryOne (Chromium web test) should find by name \"bar\""
+    ],
+    "status": "fails",
+    "reason": "There is no way to find an element by accessible name without a role"
+  },
+  {
+    "tests": [
+      "[ariaqueryhandler.test] AriaQueryHandler waitForSelector (aria) should work with removed MutationObserver"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: On stock WebKit, the engine runs in the page's world, so a page that deletes MutationObserver breaks the engine"
   }
 ]

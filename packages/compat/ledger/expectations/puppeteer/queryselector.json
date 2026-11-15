@@ -15,10 +15,8 @@
     "tests": [
       "[queryselector.test] querySelector Page.$eval should work",
       "[queryselector.test] querySelector Page.$eval should accept arguments",
-      "[queryselector.test] querySelector Page.$eval should throw error if no element is found",
       "[queryselector.test] querySelector ElementHandle.$eval should work",
-      "[queryselector.test] querySelector ElementHandle.$eval should retrieve content from subtree",
-      "[queryselector.test] querySelector ElementHandle.$eval should throw in case of missing selector"
+      "[queryselector.test] querySelector ElementHandle.$eval should retrieve content from subtree"
     ],
     "browsers": [
       "webkit"

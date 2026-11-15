@@ -11,9 +11,25 @@
       "EV-109",
       "EV-111"
     ],
-    "browsers": ["webkit"],
+    "browsers": [
+      "webkit"
+    ],
     "status": "needsFeature",
     "matrix": "method-page-evaluatehandle",
     "reason": "Stock WebKit has no isolated world, so `page.evaluateHandle` fails with `Unsupported` there, and the handle these tests pass back into an evaluation is one of its values. Strider's handles are isolated-world values, as the `page-evaluate` port's handle tests are"
+  },
+  {
+    "tests": [
+      "EV-104",
+      "EV-105",
+      "EV-106",
+      "EV-107"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "A handle nested in an evaluation argument fails with an error naming the handle's internals"
   }
 ]

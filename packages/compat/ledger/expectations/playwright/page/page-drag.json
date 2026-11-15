@@ -1,0 +1,63 @@
+[
+  {
+    "tests": [
+      "DD-013",
+      "DD-016"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses input.dragAndDrop on Firefox: Firefox starts an HTML drag from WebDriver actions, and never drops it; dragTo(target, { html: \"synthetic\" }) has the page dispatch the drag's events, untrusted",
+    "matrix": "method-locator-dragto"
+  },
+  {
+    "tests": [
+      "DD-020"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses input.dragAndDrop on Firefox: Firefox starts an HTML drag from WebDriver actions, and never drops it; dragTo(target, { html: \"synthetic\" }) has the page dispatch the drag's events, untrusted",
+    "matrix": "method-locator-dragto"
+  },
+  {
+    "tests": [
+      "DD-002",
+      "DD-003",
+      "DD-004",
+      "DD-005",
+      "DD-006",
+      "DD-019"
+    ],
+    "status": "fails",
+    "reason": "On Chromium an HTML drag made with the mouse misses dragenter, repeats dragover, and does not drop or cancel as expected"
+  },
+  {
+    "tests": [
+      "DD-001",
+      "DD-008",
+      "DD-028",
+      "DD-010",
+      "DD-012"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Firefox and stock WebKit cannot complete a native HTML drag from mouse input",
+    "matrix": "method-page-draganddrop"
+  },
+  {
+    "tests": [
+      "DD-007"
+    ],
+    "status": "fails",
+    "reason": "Port: Hovering an element in a frame added at the end of the drag page times out"
+  }
+]

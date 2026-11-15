@@ -6,5 +6,15 @@
     "status": "differentByDesign",
     "decision": "Actions accept transparent controls; visible means a person can see it",
     "reason": "Expects `toBeVisible` to pass for an element with `opacity: 0`. Strider's visibility observation counts an element with `opacity: 0` on itself or an ancestor as hidden, so `isVisible` is false and `Expect.toBeVisible` waits; actions still accept it"
+  },
+  {
+    "tests": [
+      "LO-121"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit reports the options of a list box as hidden"
   }
 ]

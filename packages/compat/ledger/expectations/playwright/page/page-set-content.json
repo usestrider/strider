@@ -20,5 +20,15 @@
     ],
     "status": "notApplicable",
     "reason": "Replaces `document.close` in Playwright's utility world, through its internal `toImpl` and `evaluateExpression`, with a loop that never returns, then expects the call to time out. Strider has no utility world a caller can reach, and its setContent calls `document.close` in the page's main world, which the page's own scripts control, so the hook has no counterpart"
+  },
+  {
+    "tests": [
+      "PA-035"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit: frames a page has without a navigation of their own are missing from the frame tree"
   }
 ]

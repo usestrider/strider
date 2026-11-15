@@ -60,5 +60,15 @@
     "status": "needsFeature",
     "matrix": "event-browsercontext-requestfinished",
     "reason": "Reads a context's response, requestfinished, requestfailed, and requestservedfromcache events for its own pages. Strider has no requestfinished or requestservedfromcache event, and its requestfailed is read from the request (NetworkRequest.failure) rather than as an event, so the requestfinished and cache counts can't be read"
+  },
+  {
+    "tests": [
+      "[browsercontext.test] BrowserContext BrowserContext.on(\"console\") should only report console messages from workers of its own pages"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "On Firefox, a console message a worker's script writes is reported with a Page origin"
   }
 ]

@@ -1,0 +1,91 @@
+[
+  {
+    "tests": [
+      "IF-002"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Unsupported: Strider refuses input.setFiles on Firefox: This browser doesn't implement it"
+  },
+  {
+    "tests": [
+      "IF-008"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses popups.opener on stock WebKit: stock WebKit) (stock WebKit names no page's opener: a page another opens is reported as the browser's",
+    "matrix": "method-page-opener"
+  },
+  {
+    "tests": [
+      "IF-003"
+    ],
+    "status": "fails",
+    "reason": "Reads and actions on a label do not follow it to its control: enabled, editable, value, checked, and file input"
+  },
+  {
+    "tests": [
+      "IF-006"
+    ],
+    "browsers": [
+      "chromium",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "setInputFiles does not refuse a directory on a plain file input or a file on a webkitdirectory input"
+  },
+  {
+    "tests": [
+      "IF-007"
+    ],
+    "status": "fails",
+    "reason": "setInputFiles does not refuse a directory on a plain file input or a file on a webkitdirectory input"
+  },
+  {
+    "tests": [
+      "IF-022"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit's native upload gives a directory no relative paths, an IndexedDB store of the File fails, and a File has no type"
+  },
+  {
+    "tests": [
+      "IF-020"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit's native upload appends files on a multiple input instead of replacing them"
+  },
+  {
+    "tests": [
+      "IF-021"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Stock WebKit's upload sets lastModified to the upload time"
+  },
+  {
+    "tests": [
+      "IF-009",
+      "IF-011",
+      "IF-016"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "On stock WebKit, the click that submits a 200 MB upload does not return within its deadline"
+  }
+]

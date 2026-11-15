@@ -55,5 +55,26 @@
     "status": "needsFeature",
     "reason": "Stock WebKit's Automation protocol doesn't report file choosers (the `fileChooser` capability), so `FileChooser.next`, `stream`, `history`, and `handle` fail with `SubscriptionError` or `DeclarationError`, reason `Unsupported`, and the browser cancels the chooser itself (API.md, \"Stock WebKit, launched\"). The matrix row claims `has` with no WebKit requirement",
     "matrix": "event-page-filechooser"
+  },
+  {
+    "tests": [
+      "FC-020"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: A single file chooser refuses an empty selection, so a chooser cannot clear a file input"
+  },
+  {
+    "tests": [
+      "FC-010"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "A click that races a frame's removal fails with a backend NoSuchFrame instead of ending quietly"
   }
 ]

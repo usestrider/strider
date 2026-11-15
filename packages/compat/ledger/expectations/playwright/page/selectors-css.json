@@ -27,5 +27,36 @@
     "status": "differentByDesign",
     "decision": "Playwright is evidence, not the template",
     "reason": "Playwright's `>>` continues from the previous match with a relative selector: a leading combinator (`#div3 >> ~ div`, `#div1 >> + div`, `div >> >span`, `locator('>span')`) or `:scope` as the next step (`#div3 >> :scope ~ div`). Strider's chained locator queries only the descendants of its scope, so a sibling or a relative selector can't be written as a chain. A standard CSS sibling selector would give the same elements, but the test checks the relative mechanism, so the port doesn't rewrite it. SE-025 also uses `div:has(> div)`, and checks that the relative form is absolutized"
+  },
+  {
+    "tests": [
+      "SE-004",
+      "SE-017",
+      "SE-020",
+      "SE-021",
+      "SE-022"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "differentByDesign",
+    "reason": "A CSS locator matches within one shadow root at a time, so combinators, :not, :is, and :has never cross a root, and a plain selector finds elements in every open root",
+    "decision": "Playwright is evidence, not the template"
+  },
+  {
+    "tests": [
+      "SE-014",
+      "SE-024"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "differentByDesign",
+    "reason": "A chained locator searches only below its scope, so `:scope`, a step that should match the scope itself, and ancestors outside the scope behave as querySelectorAll does, not as Playwright's element-scoped matching",
+    "decision": "Playwright is evidence, not the template"
   }
 ]

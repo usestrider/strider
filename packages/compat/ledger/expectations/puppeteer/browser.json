@@ -95,5 +95,48 @@
     "status": "needsFeature",
     "reason": "Checks that a context's response and requestfinished events come before the browser's. Strider has no browser-level network events and no requestfinished event; the nearest matrix row is the context's requestfinished",
     "matrix": "event-browsercontext-requestfinished"
+  },
+  {
+    "tests": [
+      "[browser.test] Browser specs Browser.on(\"request\") should report requests from dedicated workers"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses workers.evaluate on Firefox: Firefox can't evaluate in a worker realm",
+    "matrix": "method-worker-evaluate"
+  },
+  {
+    "tests": [
+      "[browser.test] Browser specs Browser.on(\"console\") should report console messages from dedicated workers"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Firefox attributes a dedicated worker's console message to its page, and Firefox and stock WebKit report no service worker"
+  },
+  {
+    "tests": [
+      "[browser.test] Browser specs Browser.on(\"console\") should report console messages from service workers"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Firefox attributes a dedicated worker's console message to its page, and Firefox and stock WebKit report no service worker"
+  },
+  {
+    "tests": [
+      "[browser.test] Browser specs Browser.process should keep connected after the last page is closed"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Closing a launched Firefox's last page never confirms"
   }
 ]

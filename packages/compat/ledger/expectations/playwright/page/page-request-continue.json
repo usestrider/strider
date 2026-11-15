@@ -36,5 +36,120 @@
     "status": "needsFeature",
     "matrix": "option-route-continue-url",
     "reason": "Firefox's WebDriver BiDi aborts a request continued with a new URL, so Route.continueWith(setUrl) there is refused with Unsupported (interception.continueUrl), and the request continues to its original URL"
+  },
+  {
+    "tests": [
+      "RO-074"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit: a document with Cross-Origin-Opener-Policy fails goto with \"Load request cancelled\""
+  },
+  {
+    "tests": [
+      "RO-059"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "A route's header override carries browser-owned headers (Cookie, Origin, Trailer) to the server, where Playwright keeps the browser's"
+  },
+  {
+    "tests": [
+      "RO-075",
+      "RO-079"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "A route's header override carries browser-owned headers (Cookie, Origin, Trailer) to the server, where Playwright keeps the browser's"
+  },
+  {
+    "tests": [
+      "RO-080"
+    ],
+    "status": "fails",
+    "reason": "A route's header override carries browser-owned headers (Cookie, Origin, Trailer) to the server, where Playwright keeps the browser's"
+  },
+  {
+    "tests": [
+      "RO-060"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "A route's header removal isn't reflected in the headers the request was sent with on Firefox and WebKit"
+  },
+  {
+    "tests": [
+      "RO-083",
+      "RO-084",
+      "RO-085",
+      "RO-086"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "needsFeature",
+    "reason": "Header overrides from a route aren't carried to a redirect's later hops on Firefox",
+    "matrix": "option-route-continue-headers"
+  },
+  {
+    "tests": [
+      "RO-062"
+    ],
+    "browsers": [
+      "chromium",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: A request's URL and body in events and history are what the page asked for, not a route's override"
+  },
+  {
+    "tests": [
+      "RO-095"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: A request's URL and body in events and history are what the page asked for, not a route's override"
+  },
+  {
+    "tests": [
+      "RO-063"
+    ],
+    "browsers": [
+      "chromium",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "route.continue to another protocol isn't refused, and WebKit hangs"
+  },
+  {
+    "tests": [
+      "RO-064"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "A held route's request cancelled by the page never ends on Firefox"
+  },
+  {
+    "tests": [
+      "RO-076"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Sync XHR and preload or prefetch requests are not paused, or hang, on WebKit"
   }
 ]

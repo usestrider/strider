@@ -49,5 +49,24 @@
     ],
     "status": "notApplicable",
     "reason": "Checks that Playwright's browser, context and page implement `Symbol.asyncDispose`, so `await using` closes them in turn and reports the closed context's cookies as target-closed and the browser as disconnected. Strider's resources are Effect scopes, whose closes BT-004 and BT-015 and the scope tests in download.test.ts exercise, and it has no `isConnected`"
+  },
+  {
+    "tests": [
+      "BT-004",
+      "BT-015"
+    ],
+    "status": "fails",
+    "reason": "A browser closing doesn't report BrowserClosed: in-flight evaluations and a context's closed end with RealmDestroyed or never resolve"
+  },
+  {
+    "tests": [
+      "BT-010"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "A launch with an executable that exits at once fails with ConnectionFailed on Chromium (and for a locked or unwritable profile), not ProcessExited"
   }
 ]

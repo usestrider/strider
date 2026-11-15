@@ -1,0 +1,12 @@
+[
+  {
+    "tests": [
+      "LO-053"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "On stock WebKit the engine runs in the page's world, so a page that deletes Node, replaces Array.from, or overwrites Map breaks it"
+  }
+]

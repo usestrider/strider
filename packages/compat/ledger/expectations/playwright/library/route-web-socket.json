@@ -1,20 +1,61 @@
 [
   {
-    "tests": ["WS-032"],
+    "tests": [
+      "WS-032"
+    ],
     "status": "needsFeature",
     "matrix": "method-page-routewebsocket",
     "reason": "Playwright's page.routeWebSocket is a page-level route, and it takes precedence over the context's routes. Strider routes WebSockets only on a browser context (UserContext.routeWebSocket), so the page's own route, and which of the two wins, can't be expressed"
   },
   {
-    "tests": ["WS-037", "WS-038"],
+    "tests": [
+      "WS-037",
+      "WS-038"
+    ],
     "status": "needsFeature",
     "matrix": "option-browser-newcontext-baseurl",
     "reason": "A context's baseURL resolves a relative WebSocket route pattern (\"/ws\") against the page's origin; Strider's context options have no baseURL, so a relative pattern has no origin to resolve against"
   },
   {
-    "tests": ["WS-019"],
-    "browsers": ["firefox", "webkit"],
+    "tests": [
+      "WS-019"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
     "status": "notApplicable",
     "reason": "Tests a socket closing on a bad frame, which Firefox and WebKit on Linux don't do: the original skips it there"
+  },
+  {
+    "tests": [
+      "WS-023"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: A page-side route close isn't forwarded to the real server, which sees 'route removed' instead"
+  },
+  {
+    "tests": [
+      "WS-033"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Firefox: a WebSocket route's send racing a page closure fails with the realm's end"
+  },
+  {
+    "tests": [
+      "WS-034"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: A WebSocket route that decides nothing fails the page's socket, where Playwright leaves it open"
+  },
+  {
+    "tests": [
+      "WS-036"
+    ],
+    "status": "fails",
+    "reason": "An exact WebSocket URL pattern without a trailing slash never matches the browser's URL"
   }
 ]

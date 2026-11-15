@@ -25,5 +25,58 @@
     ],
     "status": "notApplicable",
     "reason": "The original skips Firefox (`it.skip(browserName === 'firefox')`): Firefox words its refusal of a frame that sets `X-Frame-Options` differently, and the test looks for Chromium's and WebKit's text"
+  },
+  {
+    "tests": [
+      "FR-026"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Unsupported: Strider refuses navigation.sameDocument on stock WebKit: stock WebKit) (stock WebKit's inspector reports no same-document navigation"
+  },
+  {
+    "tests": [
+      "FR-025"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Subframe navigation requests are missing from the history on WebKit"
+  },
+  {
+    "tests": [
+      "FR-030",
+      "FR-031"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Firefox: a child frame's URL and navigations reach the model after the iframe's own load event"
+  },
+  {
+    "tests": [
+      "FR-035"
+    ],
+    "browsers": [
+      "chromium",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Browser-generated console messages (a frame refused by X-Frame-Options) are never reported on Chromium, and aren't on WebKit"
+  },
+  {
+    "tests": [
+      "FR-034"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "page.frames lags the iframe's load event on Chromium and stock WebKit in a loaded run (one hit each)"
   }
 ]

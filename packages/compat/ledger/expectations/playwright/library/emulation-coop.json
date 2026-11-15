@@ -6,5 +6,18 @@
     "status": "needsFeature",
     "matrix": "option-browser-newpage-screen",
     "reason": "Sets a `screen` size next to the mobile viewport, and the original checks the page keeps the emulation with a COOP header. Strider's emulation has no screen size (the matrix row for the option is missing), so the test can't be ported without dropping its setup"
+  },
+  {
+    "tests": [
+      "EM-025",
+      "EM-026"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses emulation.media on Firefox: Firefox doesn't implement emulation.setMediaFeaturesOverride",
+    "matrix": "method-page-emulatemedia"
   }
 ]

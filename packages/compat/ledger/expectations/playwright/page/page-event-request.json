@@ -45,5 +45,47 @@
     "status": "differentByDesign",
     "decision": "Pay for what you use",
     "reason": "Reads the last requests of a page with `page.requests()` and each one's response text, long after they were sent. Strider keeps no response body unless a subscription declares a body decoder before the request, so a history entry's body can't be read later"
+  },
+  {
+    "tests": [
+      "NE-099"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit: a document with Cross-Origin-Opener-Policy fails goto with \"Load request cancelled\""
+  },
+  {
+    "tests": [
+      "NE-092"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Subframe navigation requests are missing from the history on WebKit"
+  },
+  {
+    "tests": [
+      "NE-105"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: A cross-origin CORS preflight differs by backend: Playwright answers it, Strider shows it to a route or lets it reach the server, and Firefox reports it as a request"
+  },
+  {
+    "tests": [
+      "NE-106"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: A cross-origin CORS preflight differs by backend: Playwright answers it, Strider shows it to a route or lets it reach the server, and Firefox reports it as a request"
   }
 ]

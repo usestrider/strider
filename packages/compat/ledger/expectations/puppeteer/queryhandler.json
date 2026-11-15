@@ -35,5 +35,46 @@
     "status": "needsFeature",
     "reason": "Registers a custom query handler (`Puppeteer.registerCustomQueryHandler`) and queries through it with `::-p-div`. Strider has no custom selector engines, the matrix row `method-selectors-register`, and its locators take CSS only",
     "matrix": "method-selectors-register"
+  },
+  {
+    "tests": [
+      "[queryhandler.test] Query handler tests Text selectors in Page should clear caches"
+    ],
+    "status": "fails",
+    "reason": "Unsupported: Strider refuses isolatedWorlds on stock WebKit: stock WebKit) (stock WebKit's inspector makes no worlds"
+  },
+  {
+    "tests": [
+      "[queryhandler.test] Query handler tests P selectors should query light DOM and slotted text of shadow hosts"
+    ],
+    "status": "fails",
+    "reason": "Unsupported: Strider refuses isolatedWorlds on stock WebKit: stock WebKit) (stock WebKit's inspector makes no worlds, so Strider's engine runs in the page's own"
+  },
+  {
+    "tests": [
+      "[queryhandler.test] Query handler tests P selectors should work with selector lists",
+      "[queryhandler.test] Query handler tests P selectors should match querySelector* ordering"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "differentByDesign",
+    "reason": "A CSS locator matches within one shadow root at a time, so combinators, :not, :is, and :has never cross a root, and a plain selector finds elements in every open root",
+    "decision": "Playwright is evidence, not the template"
+  },
+  {
+    "tests": [
+      "[queryhandler.test] Query handler tests Text selectors in Page should query inputs"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "differentByDesign",
+    "reason": "getByText doesn't match the value of a plain text input, only a button-like input's value",
+    "decision": "Playwright is evidence, not the template"
   }
 ]

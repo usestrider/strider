@@ -36,5 +36,12 @@
     ],
     "status": "notApplicable",
     "reason": "Its only failure is Playwright's internal test hook __testHookBeforeSetStorageState, which makes newContext fail before it sets storage state. Strider has no such hook, and no public option makes newContext fail that way without a second failure in the test"
+  },
+  {
+    "tests": [
+      "BR-005"
+    ],
+    "status": "fails",
+    "reason": "A browser closing doesn't report BrowserClosed: in-flight evaluations and a context's closed end with RealmDestroyed or never resolve"
   }
 ]

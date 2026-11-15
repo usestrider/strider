@@ -9,5 +9,47 @@
     ],
     "status": "notApplicable",
     "reason": "Playwright runs this only on macOS WebKit, where the setting that makes Tab reach every link is on by default; Chromium and Firefox are skipped upstream for that reason, and the port runs on WebKit alone"
+  },
+  {
+    "tests": [
+      "FO-001",
+      "FO-002"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: focus and scrollIntoView wait for the element to be visible where Playwright's do not"
+  },
+  {
+    "tests": [
+      "FO-003",
+      "FO-004",
+      "FO-010"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "Stock WebKit's window has no focus, so focus and blur events do not fire"
+  },
+  {
+    "tests": [
+      "FO-008",
+      "FO-009"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "Stock WebKit's window has no focus, so focus and blur events do not fire"
+  },
+  {
+    "tests": [
+      "FO-006"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "WebKitGTK's Tab reaches buttons and links, not only form elements"
   }
 ]

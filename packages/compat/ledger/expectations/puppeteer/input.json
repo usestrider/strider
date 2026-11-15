@@ -42,5 +42,47 @@
     "status": "needsFeature",
     "matrix": "event-page-filechooser",
     "reason": "Stock WebKit's Automation protocol doesn't report file choosers (the `fileChooser` capability), so `FileChooser.next`, `handle`, and `history` fail with `Unsupported`, and the browser cancels the chooser itself (API.md, \"Stock WebKit, launched\"). The matrix row claims `has` with no WebKit requirement"
+  },
+  {
+    "tests": [
+      "[input.test] input tests ElementHandle.uploadFile should upload the file"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit's native upload gives a directory no relative paths, an IndexedDB store of the File fails, and a File has no type"
+  },
+  {
+    "tests": [
+      "[input.test] input tests FileChooser.accept should be able to reset selected files with empty file list"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: A single file chooser refuses an empty selection, so a chooser cannot clear a file input"
+  },
+  {
+    "tests": [
+      "[input.test] input tests FileChooser.accept should error on read of non-existent files",
+      "[input.test] input tests FileChooser.cancel should cancel dialog"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Firefox file chooser: the wait for a cancelled chooser never arrives, and a missing file stalls the read"
+  },
+  {
+    "tests": [
+      "[input.test] input tests Page.waitForFileChooser should not throw unhandled rejection when file picker is opened without an input element"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: A page's showOpenFilePicker is reported as a file chooser"
   }
 ]

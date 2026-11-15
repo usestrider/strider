@@ -31,5 +31,91 @@
     "status": "needsFeature",
     "matrix": "method-browsercontext-routefromhar",
     "reason": "Telling recorded requests apart by their headers. Strider's replay matches by method, URL, and body, so requests that differ only by a header get the latest recording of that URL and body; its row says routeFromHAR is covered"
+  },
+  {
+    "tests": [
+      "HA-093",
+      "HA-094"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "A fulfilled response's Set-Cookie isn't stored by WebKit"
+  },
+  {
+    "tests": [
+      "HA-089"
+    ],
+    "status": "fails",
+    "reason": "A HAR records the request the page made, not the request a route changed it into"
+  },
+  {
+    "tests": [
+      "HA-085"
+    ],
+    "status": "fails",
+    "reason": "Replay finds a zip's HAR only under the exact name har.har"
+  },
+  {
+    "tests": [
+      "HA-072"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Route.fromHar rejects a HAR it can't read where Playwright ignores it and continues"
+  },
+  {
+    "tests": [
+      "HA-068",
+      "HA-069",
+      "HA-073",
+      "HA-074",
+      "HA-075",
+      "HA-078",
+      "HA-079",
+      "HA-080",
+      "HA-083"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Stock WebKit doesn't follow a redirect that a route fulfills, so a replayed HAR redirect stops at the 301"
+  },
+  {
+    "tests": [
+      "HA-081",
+      "HA-082"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Stock WebKit doesn't follow a redirect that a route fulfills, so a replayed HAR redirect stops at the 301"
+  },
+  {
+    "tests": [
+      "HA-092"
+    ],
+    "status": "fails",
+    "reason": "Replay matches a request body by its exact bytes, so a multipart form with a new boundary matches nothing"
+  },
+  {
+    "tests": [
+      "HA-100"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Replay answers a recorded failed request with a failure where Playwright leaves it unanswered"
+  },
+  {
+    "tests": [
+      "HA-088"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "On Firefox, a replay of POST bodies recorded through the HAR aborts requests"
   }
 ]

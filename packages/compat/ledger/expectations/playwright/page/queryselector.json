@@ -26,5 +26,15 @@
     "status": "needsFeature",
     "matrix": "method-page-locator-value-xpath-and-playwright-selector-dsl",
     "reason": "A selector that steps to a parent (`..`) is an XPath step, and Strider's locators search only descendants"
+  },
+  {
+    "tests": [
+      "QS-017"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "On stock WebKit the engine runs in the page's world, so a page that deletes Node, replaces Array.from, or overwrites Map breaks it"
   }
 ]

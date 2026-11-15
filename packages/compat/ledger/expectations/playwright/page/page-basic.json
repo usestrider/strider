@@ -28,5 +28,36 @@
     ],
     "status": "notApplicable",
     "reason": "Iterates the own properties of Playwright's client-side page object and asserts nothing about them; Strider's Page is an Effect service with no such object"
+  },
+  {
+    "tests": [
+      "PA-011"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses popups.opener on stock WebKit: stock WebKit) (stock WebKit names no page's opener: a page another opens is reported as the browser's",
+    "matrix": "method-page-opener"
+  },
+  {
+    "tests": [
+      "PA-008"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit reports no same-document navigation, so fragment, pushState, replaceState, and Navigation API changes go unseen"
+  },
+  {
+    "tests": [
+      "PA-017"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit: a textarea in a named iframe doesn't take a pressed key"
   }
 ]

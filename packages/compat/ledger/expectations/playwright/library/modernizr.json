@@ -21,5 +21,16 @@
     "status": "needsFeature",
     "matrix": "option-browser-newcontext-ismobile",
     "reason": "Emulates an iPhone 12, a mobile viewport with touch, which stock WebKit refuses (API.md, \"Emulation\"; QUIRKS.md, Q99). The matrix row says the option is present on every browser, which holds only for Chromium"
+  },
+  {
+    "tests": [
+      "CA-030"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses emulation.viewport.mobile on stock WebKit: stock WebKit) (no mobile viewport",
+    "matrix": "option-browser-newcontext-ismobile"
   }
 ]

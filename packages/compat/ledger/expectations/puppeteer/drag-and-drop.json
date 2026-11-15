@@ -18,5 +18,14 @@
     "status": "differentByDesign",
     "decision": "Playwright is evidence, not the template",
     "reason": "Drops from an element handle whose element the page replaced during the drag, and expects the drop to throw, then checks that the failed drop released the mouse button. Strider's locators find the element again rather than holding a handle to it, so no drop fails here; the nearest matrix row is method-locator-dragto"
+  },
+  {
+    "tests": [
+      "[drag-and-drop.test] Drag n' Drop should drop",
+      "[drag-and-drop.test] Drag n' Drop should drop using mouse",
+      "[drag-and-drop.test] Drag n' Drop should drag and drop"
+    ],
+    "status": "fails",
+    "reason": "On Chromium an HTML drag made with the mouse misses dragenter, repeats dragover, and does not drop or cancel as expected"
   }
 ]

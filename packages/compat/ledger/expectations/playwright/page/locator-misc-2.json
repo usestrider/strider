@@ -13,5 +13,28 @@
     "status": "needsFeature",
     "matrix": "method-locator-locator",
     "reason": "locator() and frameLocator().locator() take a CSS string only, so a Locator as the argument, which the test passes, has no form. The matrix row says the call is has, but its notes say CSS selectors only, which leaves out this argument"
+  },
+  {
+    "tests": [
+      "LO-153"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "On stock WebKit the engine runs in the page's world, so a page that deletes Node, replaces Array.from, or overwrites Map breaks it"
+  },
+  {
+    "tests": [
+      "LO-156"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "differentByDesign",
+    "reason": "press() types a character the layout lacks, instead of refusing it as an unknown key",
+    "decision": "Playwright is evidence, not the template"
   }
 ]

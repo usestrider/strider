@@ -6,5 +6,28 @@
     "status": "needsFeature",
     "matrix": "option-page-waitforurl-waituntil",
     "reason": "Waits for a URL with `waitUntil` set to domcontentloaded and to load, and expects the load wait to hold back until the stylesheet finishes; Strider's URL expectation takes no load state, so it resolves at the URL match"
+  },
+  {
+    "tests": [
+      "WA-115",
+      "WA-116",
+      "WA-117",
+      "WA-119"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit reports no same-document navigation, so fragment, pushState, replaceState, and Navigation API changes go unseen"
+  },
+  {
+    "tests": [
+      "WA-118"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit's inspector reports a history traversal under the old document's URL, so back and forward are refused or stale"
   }
 ]

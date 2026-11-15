@@ -1,0 +1,27 @@
+[
+  {
+    "tests": [
+      "TZ-001"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses emulation.locale on stock WebKit: stock WebKit) (the MiniBrowser takes its language from nothing it's given",
+    "matrix": "option-browser-newcontext-locale"
+  },
+  {
+    "tests": [
+      "TZ-003",
+      "TZ-004",
+      "TZ-005",
+      "TZ-006"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses emulation.timezone on stock WebKit: stock WebKit) (taken at launch, before a context's options reach it",
+    "matrix": "option-browser-newcontext-timezoneid"
+  }
+]

@@ -18,5 +18,28 @@
     "status": "needsFeature",
     "matrix": "option-browser-newcontext-ignorehttpserrors",
     "reason": "The test's HTTPS origin needs its self-signed certificate accepted in the context (acceptInsecureCerts), which Chromium refuses per context: CDP ignores certificate errors browser-wide"
+  },
+  {
+    "tests": [
+      "[bfcache.test] BFCache can navigate to a BFCached page"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses navigation.traverse on stock WebKit: stock WebKit) (stock WebKit's inspector reports a traversal under the old document's URL, with no realm (QUIRKS.md, Q215",
+    "matrix": "method-page-goback"
+  },
+  {
+    "tests": [
+      "[bfcache.test] BFCache can navigate to a BFCached page containing an OOPIF and a worker"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses workers.evaluate on Firefox: Firefox can't evaluate in a worker realm",
+    "matrix": "method-worker-evaluate"
   }
 ]

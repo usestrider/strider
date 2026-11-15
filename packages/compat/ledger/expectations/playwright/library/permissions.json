@@ -1,7 +1,6 @@
 [
   {
     "tests": [
-      "PE-002",
       "PE-003",
       "PE-004",
       "PE-005",
@@ -118,5 +117,38 @@
     "status": "needsFeature",
     "matrix": "method-frame-evaluate",
     "reason": "The test reads a cross-origin frame's permission and calls its `document.requestStorageAccess()` in the frame's main world, which Strider can't evaluate in a frame (the matrix row says no main-world frame evaluation). A locator into the cross-origin frame doesn't resolve either: `Locator.evaluate` on its `html` element timed out while resolving, so the isolated-world route is closed too. The test isn't ported"
+  },
+  {
+    "tests": [
+      "PE-002",
+      "PE-012",
+      "PE-013"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "needsFeature",
+    "reason": "A context can't deny a permission: grant([]) and unlisted names leave 'prompt', where Playwright denies everything not granted",
+    "matrix": "method-browsercontext-grantpermissions"
+  },
+  {
+    "tests": [
+      "PE-018"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "Chromium: granting local-network-access doesn't cover loopback requests"
+  },
+  {
+    "tests": [
+      "PE-021"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "Stock WebKit in the test environment has no capture devices, so getUserMedia fails with OverconstrainedError, not NotAllowedError"
   }
 ]

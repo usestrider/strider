@@ -45,5 +45,79 @@
     "status": "needsFeature",
     "matrix": "method-request-allheaders",
     "reason": "WebKitGTK's network process doesn't report the Cookie header, so a request's sent headers have no cookie there (network.headersSent is partial on stock WebKit). The matrix row method-request-allheaders says Strider has the full sent headers, which WebKit doesn't give"
+  },
+  {
+    "tests": [
+      "NE-027"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses popups.opener on stock WebKit: stock WebKit) (stock WebKit names no page's opener: a page another opens is reported as the browser's",
+    "matrix": "method-page-opener"
+  },
+  {
+    "tests": [
+      "NE-002"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Subframe navigation requests are missing from the history on WebKit"
+  },
+  {
+    "tests": [
+      "NE-022"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Subframe navigation requests are missing from the history on WebKit"
+  },
+  {
+    "tests": [
+      "NE-005"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Chromium and Firefox call a route for every redirect hop; Playwright calls it for the first request only"
+  },
+  {
+    "tests": [
+      "NE-007",
+      "NE-008",
+      "NE-009",
+      "NE-024",
+      "NE-025"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "WebKit's sent headers are partial: no Cookie, Host, Accept-Encoding, Accept-Language, or Connection, and a redirect hop has none"
+  },
+  {
+    "tests": [
+      "NE-021"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Firefox reports an EventSource request with resourceType other"
+  },
+  {
+    "tests": [
+      "NE-029"
+    ],
+    "status": "fails",
+    "reason": "Chromium reports a blocked request's failure with an empty errorText, because blockedReason is dropped"
   }
 ]

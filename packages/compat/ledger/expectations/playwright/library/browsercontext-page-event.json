@@ -8,5 +8,27 @@
     "status": "needsFeature",
     "matrix": "method-page-opener",
     "reason": "Reading the page that opened a popup, which Strider has no accessor for: these tests check the popup's opener (popup.opener()) after the page opened it, and a shift- or ctrl-click's popup has no opener in the original's check. Strider's Popup.next gives the popup to its opener's subscription, but there is no call that returns the opener of a page"
+  },
+  {
+    "tests": [
+      "BC-063",
+      "BC-068"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit: a popup opened with window.open(url) reaches a parsed status while it still shows about:blank"
+  },
+  {
+    "tests": [
+      "BC-064",
+      "BC-065"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Firefox: a popup opened at about:blank never reaches readiness 'interactive'"
   }
 ]

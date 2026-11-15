@@ -6,5 +6,26 @@
     "status": "needsFeature",
     "matrix": "method-frame-evaluatehandle",
     "reason": "Evaluates inside a frame to get an element of the top document, then asks for that element's content frame. A frame has no `evaluateHandle` in Strider, and a handle can't cross from one frame's realm to another, so the frame's element can't be reached from inside it"
+  },
+  {
+    "tests": [
+      "EH-019"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "On Firefox a loaded iframe's url in page.frames is about:blank"
+  },
+  {
+    "tests": [
+      "EH-020"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "A loaded iframe's URL and navigations reach page.frames after the iframe's own load event, on Firefox"
   }
 ]

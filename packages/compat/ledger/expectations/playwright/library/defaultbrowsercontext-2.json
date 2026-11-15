@@ -69,5 +69,150 @@
     ],
     "status": "notApplicable",
     "reason": "Strider won't collect coverage from a browser run: build-time instrumentation, read back with evaluate, works on every browser. JavaScript coverage (`page.coverage.startJSCoverage`), which Strider doesn't have"
+  },
+  {
+    "tests": [
+      "DC-012"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses emulation.touch on Firefox: Firefox doesn't implement emulation.setTouchOverride",
+    "matrix": "option-browser-newcontext-hastouch"
+  },
+  {
+    "tests": [
+      "DC-013"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses emulation.viewport.mobile on Firefox: WebDriver BiDi has no mobile viewport",
+    "matrix": "option-browser-newcontext-ismobile"
+  },
+  {
+    "tests": [
+      "DC-014",
+      "DC-015",
+      "DC-017"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses emulation.media on Firefox: Firefox doesn't implement emulation.setMediaFeaturesOverride",
+    "matrix": "method-page-emulatemedia"
+  },
+  {
+    "tests": [
+      "DC-016"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses emulation.media on Firefox: Firefox doesn't implement emulation.setMediaFeaturesOverride",
+    "matrix": "method-page-emulatemedia"
+  },
+  {
+    "tests": [
+      "DC-018",
+      "DC-019"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses emulation.locale on stock WebKit: stock WebKit) (the MiniBrowser takes its language from nothing it's given",
+    "matrix": "option-browser-newcontext-locale"
+  },
+  {
+    "tests": [
+      "DC-020"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses permissions.anyOrigin on Firefox: WebDriver BiDi grants a permission to one origin",
+    "matrix": "method-browsercontext-grantpermissions"
+  },
+  {
+    "tests": [
+      "DC-040"
+    ],
+    "browsers": [
+      "chromium",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit's persistent first tab: a CacheStorage entry doesn't survive reload and navigator.storage is missing"
+  },
+  {
+    "tests": [
+      "DC-042"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit's persistent first tab: a CacheStorage entry doesn't survive reload and navigator.storage is missing"
+  },
+  {
+    "tests": [
+      "DC-033"
+    ],
+    "status": "fails",
+    "reason": "A browser closing doesn't report BrowserClosed: in-flight evaluations and a context's closed end with RealmDestroyed or never resolve"
+  },
+  {
+    "tests": [
+      "DC-027",
+      "DC-039"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "The first goto on a persistent profile's first tab, an adopted page, times out with no outcome"
+  },
+  {
+    "tests": [
+      "DC-037"
+    ],
+    "browsers": [
+      "chromium",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "The first goto on a persistent profile's first tab, an adopted page, times out with no outcome"
+  },
+  {
+    "tests": [
+      "DC-024",
+      "DC-026"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Firefox launch doesn't create a missing userDataDir, so it fails writing user.js"
+  },
+  {
+    "tests": [
+      "DC-025"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Firefox launch doesn't create a missing userDataDir, so it fails writing user.js"
   }
 ]

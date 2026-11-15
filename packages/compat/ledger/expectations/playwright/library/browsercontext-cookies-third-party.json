@@ -67,5 +67,28 @@
     ],
     "status": "notApplicable",
     "reason": "The original is test.fixme for WebKit on Linux, so it states no expectation there to port"
+  },
+  {
+    "tests": [
+      "CO-056"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Unsupported: Strider refuses cookies.partitioned on Firefox: Firefox doesn't say which partition a cookie is in"
+  },
+  {
+    "tests": [
+      "CO-053",
+      "CO-055",
+      "CO-057"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Firefox: partitioned cookies are listed without their partition, so exporting and re-adding them changes which top-level site sees them"
   }
 ]

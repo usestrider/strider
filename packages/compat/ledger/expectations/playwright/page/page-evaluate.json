@@ -66,5 +66,74 @@
     ],
     "status": "notApplicable",
     "reason": "Checks that Playwright's injected script exports nothing to the page as `pwExport`, a global of Playwright's own script, which Strider doesn't have"
+  },
+  {
+    "tests": [
+      "EV-077",
+      "EV-078"
+    ],
+    "status": "fails",
+    "reason": "An Error in a result doesn't cross by value, although Serialized<Error> types it as name, message, and stack"
+  },
+  {
+    "tests": [
+      "EV-045",
+      "EV-046",
+      "EV-084"
+    ],
+    "status": "fails",
+    "reason": "Platform objects (URL, Performance, PerformanceMeasure, ImageBitmap) don't cross by value, though Serialized types their fields"
+  },
+  {
+    "tests": [
+      "EV-086"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Platform objects (URL, Performance, PerformanceMeasure, ImageBitmap) don't cross by value, though Serialized types their fields"
+  },
+  {
+    "tests": [
+      "EV-037"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "On Firefox, evaluate doesn't await a thenable that isn't a native Promise"
+  },
+  {
+    "tests": [
+      "EV-088",
+      "EV-094"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "On stock WebKit, a page that replaces its own globals breaks Strider's helper and engine"
+  },
+  {
+    "tests": [
+      "EV-099"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Port: Port: EV-099 needs `using`, which stock WebKit 2.54.1 doesn't parse"
+  },
+  {
+    "tests": [
+      "EV-067"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "A 100 MiB string result times out on stock WebKit"
   }
 ]

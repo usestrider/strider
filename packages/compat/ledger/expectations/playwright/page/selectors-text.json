@@ -14,5 +14,19 @@
     "status": "differentByDesign",
     "decision": "Playwright is evidence, not the template",
     "reason": "Playwright's `*` capture marker (`*css=button >> text=hello >> text=world`) returns the elements of the step it marks, which are the buttons. Strider's chain returns the elements its last step selects, so a capture that returns an earlier step has nothing to return"
+  },
+  {
+    "tests": [
+      "SE-042",
+      "SE-043"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "differentByDesign",
+    "reason": "Within a shadow host, tree order puts the shadow root's content before the host's light children, so the first match differs from Playwright's, which prefers light DOM, and both can match",
+    "decision": "Playwright is evidence, not the template"
   }
 ]

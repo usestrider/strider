@@ -1,0 +1,22 @@
+[
+  {
+    "tests": [
+      "LO-128"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "On stock WebKit the engine runs in the page's world, so a page that deletes Node, replaces Array.from, or overwrites Map breaks it"
+  },
+  {
+    "tests": [
+      "LO-136"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Stock WebKit doesn't focus the page, so element.focus() fires no focus event by default"
+  }
+]

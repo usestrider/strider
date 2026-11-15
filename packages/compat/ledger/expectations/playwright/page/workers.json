@@ -30,5 +30,104 @@
     "status": "needsFeature",
     "matrix": "method-request-frame",
     "reason": "Checks that a request a worker started, inside an iframe, belongs to that iframe; a request from a worker has a `Worker` initiator, which names the worker's realm and no frame, so the frame can't be read"
+  },
+  {
+    "tests": [
+      "WO-001",
+      "WO-022"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses workers.evaluate on Firefox: Firefox can't evaluate in a worker realm",
+    "matrix": "method-worker-evaluate"
+  },
+  {
+    "tests": [
+      "WO-003",
+      "WO-008",
+      "WO-009",
+      "WO-010"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses workers.evaluate on Firefox: Firefox can't evaluate in a worker realm",
+    "matrix": "method-worker-evaluate"
+  },
+  {
+    "tests": [
+      "WO-015",
+      "WO-021",
+      "WO-025"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses workers.evaluate on Firefox: Firefox can't evaluate in a worker realm",
+    "matrix": "method-worker-evaluate"
+  },
+  {
+    "tests": [
+      "WO-020"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses workers.evaluate on Firefox: Firefox can't evaluate in a worker realm",
+    "matrix": "method-worker-evaluate"
+  },
+  {
+    "tests": [
+      "WO-016",
+      "WO-017",
+      "WO-018"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "Chromium: a dedicated worker's script request gets no response event"
+  },
+  {
+    "tests": [
+      "WO-023",
+      "WO-024"
+    ],
+    "browsers": [
+      "chromium",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Chromium: a dedicated worker's script request gets no response event"
+  },
+  {
+    "tests": [
+      "WO-012"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "On Firefox after a cross-process navigation, and on WebKit after any navigation, a dedicated worker isn't reported closed by the time goto returns"
+  },
+  {
+    "tests": [
+      "WO-013"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "On Firefox after a cross-process navigation, and on WebKit after any navigation, a dedicated worker isn't reported closed by the time goto returns"
   }
 ]

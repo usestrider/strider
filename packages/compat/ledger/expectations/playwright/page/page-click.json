@@ -38,5 +38,135 @@
     ],
     "status": "notApplicable",
     "reason": "Both abort a click with an `AbortSignal` whose reason is a string, and check that Playwright wraps it in an `AbortError` with the string as its `cause`. Strider cancels by interrupting the fiber (matrix row option-locator-click-signal), which carries no reason to wrap. The behavior they share with CL-090 and CL-092, that an aborted click stops, is ported there"
+  },
+  {
+    "tests": [
+      "CL-003"
+    ],
+    "browsers": [
+      "chromium",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses popups.opener on stock WebKit: stock WebKit) (stock WebKit names no page's opener: a page another opens is reported as the browser's",
+    "matrix": "method-page-opener"
+  },
+  {
+    "tests": [
+      "CL-035"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Unsupported: Strider refuses isolatedWorlds on stock WebKit: stock WebKit) (stock WebKit's inspector makes no worlds"
+  },
+  {
+    "tests": [
+      "CL-048"
+    ],
+    "status": "fails",
+    "reason": "A pointer action with receivesPointer off is stopped by its own interception guard and retried until it times out"
+  },
+  {
+    "tests": [
+      "CL-070",
+      "CL-071",
+      "CL-072",
+      "CL-073"
+    ],
+    "status": "fails",
+    "reason": "A click or hover on an element with pointer-events: none inside a button or link is refused as covered by the button, and times out"
+  },
+  {
+    "tests": [
+      "CL-040",
+      "CL-041"
+    ],
+    "status": "fails",
+    "reason": "A click with an explicit position outside the viewport on a large element is never scrolled to"
+  },
+  {
+    "tests": [
+      "CL-036",
+      "CL-037"
+    ],
+    "status": "fails",
+    "reason": "A target covered by a fixed header after scrolling is never scrolled again with another alignment"
+  },
+  {
+    "tests": [
+      "CL-077",
+      "CL-080"
+    ],
+    "status": "fails",
+    "reason": "A click inside a CSS-transformed iframe, or nested transformed iframes, is mapped by summed offsets and misses"
+  },
+  {
+    "tests": [
+      "CL-019"
+    ],
+    "status": "fails",
+    "reason": "With the visible check off, an element with no box reports OutsideViewport instead of NotVisible"
+  },
+  {
+    "tests": [
+      "CL-049"
+    ],
+    "status": "fails",
+    "reason": "enabled checks and the click's enabled wait ignore a disabled button or fieldset that encloses the target"
+  },
+  {
+    "tests": [
+      "CL-005",
+      "CL-065"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "On stock WebKit the engine runs in the page's world, so a page that deletes Node, Event, or JSON.stringify, or redefines innerWidth, breaks it"
+  },
+  {
+    "tests": [
+      "CL-085",
+      "CL-086"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "Chromium pointer events from Strider carry pressure 0 where Playwright's carry 0.5"
+  },
+  {
+    "tests": [
+      "CL-089"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "Locator.click has no steps, so a tweened click repeats the final mousemove on Chromium"
+  },
+  {
+    "tests": [
+      "CL-057"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: A click with modifiers: [] while Shift is held still carries Shift"
+  },
+  {
+    "tests": [
+      "CL-063"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: There is no blanket force: a forced click waits for the element to come into view instead of failing"
+  },
+  {
+    "tests": [
+      "CL-087"
+    ],
+    "status": "fails",
+    "reason": "getByRole(\"button\", { name }) does not find a shadow button named by slotted content"
   }
 ]

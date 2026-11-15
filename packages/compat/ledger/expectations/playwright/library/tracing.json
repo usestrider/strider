@@ -88,5 +88,67 @@
     ],
     "status": "notApplicable",
     "reason": "Playwright's disposable returned by start and startChunk, which discards the trace so that a later stop throws. A Strider recording has no discard that makes its export fail: `remove` ends it, and `exportTrace` still writes what it recorded"
+  },
+  {
+    "tests": [
+      "TR-003"
+    ],
+    "status": "fails",
+    "reason": "Unsupported: Strider refuses interception.auth on stock WebKit: stock WebKit) (This backend cannot answer website authentication challenges"
+  },
+  {
+    "tests": [
+      "TR-034"
+    ],
+    "status": "fails",
+    "reason": "Unsupported: Strider refuses isolatedWorlds on stock WebKit: stock WebKit) (stock WebKit's inspector makes no worlds"
+  },
+  {
+    "tests": [
+      "TR-017"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "A request a route aborts isn't recorded in a trace with its failure on Firefox and WebKit"
+  },
+  {
+    "tests": [
+      "TR-024"
+    ],
+    "status": "fails",
+    "reason": "A trace's step list ends in-flight actions that haven't begun, so an interrupted action isn't exported"
+  },
+  {
+    "tests": [
+      "TR-002",
+      "TR-035"
+    ],
+    "status": "fails",
+    "reason": "A trace has no step for a dialog handler's decision"
+  },
+  {
+    "tests": [
+      "TR-006",
+      "TR-009"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: A trace takes one screenshot per action, after it; Playwright takes before, action, and after"
+  },
+  {
+    "tests": [
+      "TR-001"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: A trace keeps JavaScript response bodies; Playwright's keeps none"
+  },
+  {
+    "tests": [
+      "TR-025"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: A second recording on a context started alongside the first is allowed"
   }
 ]

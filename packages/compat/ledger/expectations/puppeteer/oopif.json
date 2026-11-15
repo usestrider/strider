@@ -33,5 +33,25 @@
     "status": "needsFeature",
     "matrix": "event-browsercontext-request",
     "reason": "Waits for the request on the browser as well as the context; Strider has no browser-level request event, and the nearest matrix row is the context's"
+  },
+  {
+    "tests": [
+      "[oopif.test] OOPIF should retrieve body for OOPIF document requests"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "Chromium: a response body read for a cross-site iframe's document never finishes"
+  },
+  {
+    "tests": [
+      "[oopif.test] OOPIF should recover cross-origin frames on reconnect"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "Chromium: a client that connects to a running browser doesn't see a page's existing out-of-process iframes"
   }
 ]

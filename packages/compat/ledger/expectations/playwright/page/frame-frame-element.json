@@ -24,5 +24,15 @@
     "status": "needsFeature",
     "matrix": "method-frame-frameelement",
     "reason": "Finds an iframe inside a closed shadow root from its frame. Strider's locators don't reach into a closed shadow root, so there's no locator to enter the frame with, and no `frameElement` read to give the element"
+  },
+  {
+    "tests": [
+      "FR-019"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit: a frame locator can't find an iframe inside a shadow root, because its node path ends at the shadow root"
   }
 ]

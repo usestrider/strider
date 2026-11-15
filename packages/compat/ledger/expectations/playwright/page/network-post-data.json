@@ -1,0 +1,15 @@
+[
+  {
+    "tests": [
+      "NE-108",
+      "NE-112",
+      "NE-113"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "A multipart or non-text request body can't be read on WebKit and Chromium",
+    "matrix": "method-request-postdata"
+  }
+]

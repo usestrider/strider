@@ -14,5 +14,18 @@
     "status": "needsFeature",
     "matrix": "option-page-ariasnapshotjson-boxes",
     "reason": "Playwright's `boxes: true` adds each node's bounding box to the snapshot. Strider's snapshot node has no box, and no option asks for one"
+  },
+  {
+    "tests": [
+      "AR-102"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "The cursor: pointer hint exists only on inferred nodes, not on nodes that have a role",
+    "matrix": "option-locator-ariasnapshot-mode"
   }
 ]

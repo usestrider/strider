@@ -1,9 +1,83 @@
 [
   {
-    "tests": ["CO-041"],
-    "browsers": ["chromium"],
+    "tests": [
+      "CO-041"
+    ],
+    "browsers": [
+      "chromium"
+    ],
     "status": "needsFeature",
     "matrix": "option-browser-newcontext-ignorehttpserrors",
     "reason": "Accepting a self-signed HTTPS certificate in a context (ignoreHTTPSErrors). Chromium refuses acceptInsecureCerts with Unsupported, because its certificate override applies to the whole browser, so the context that the test's TLS server needs can't be made there"
+  },
+  {
+    "tests": [
+      "CO-022"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit's cookie list leaves out cookies for URLs no page has loaded, so cookies a caller sets are not listed or removed"
+  },
+  {
+    "tests": [
+      "CO-025",
+      "CO-031",
+      "CO-032",
+      "CO-037"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit's cookie list leaves out cookies for URLs no page has loaded, so cookies a caller sets are not listed or removed"
+  },
+  {
+    "tests": [
+      "CO-036",
+      "CO-038"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit's cookie list leaves out cookies for URLs no page has loaded, so cookies a caller sets are not listed or removed"
+  },
+  {
+    "tests": [
+      "CO-033"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit stores a host-only cookie under its domain, so the jar reports '.localhost' where the cookie was set for 'localhost'"
+  },
+  {
+    "tests": [
+      "CO-023"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit's cookie expiry is read as seconds but the inspector reports milliseconds, so every expiry is 1000 times too far out"
+  },
+  {
+    "tests": [
+      "CO-034",
+      "CO-035"
+    ],
+    "status": "fails",
+    "reason": "CookieJar.set doesn't validate its scope URL, so about:blank and data: URLs fail as BackendFailure or are accepted"
+  },
+  {
+    "tests": [
+      "CO-040"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "A cookie with an empty name is refused by CookieJar.set, where the browsers store and clear it",
+    "matrix": "method-browsercontext-addcookies"
   }
 ]

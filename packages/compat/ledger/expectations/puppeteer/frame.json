@@ -12,17 +12,6 @@
   },
   {
     "tests": [
-      "[frame.test] Frame specs Frame.evaluate should throw for detached frames"
-    ],
-    "browsers": [
-      "webkit"
-    ],
-    "status": "needsFeature",
-    "matrix": "method-frame-evaluate",
-    "reason": "A frame is evaluated in through its locator in the isolated world, and stock WebKit has no isolated worlds (isolatedWorlds is unsupported): the evaluate fails Unsupported before it looks for the detached frame, so the NoMatch the test expects is never reached"
-  },
-  {
-    "tests": [
       "[frame.test] Frame specs Frame Management should send \"framenavigated\" when navigating on anchor URLs",
       "[frame.test] Frame specs Frame Management should send \"framenavigatedsamedocument\" when navigating on anchor URLs",
       "[frame.test] Frame specs Frame Management should send \"framenavigatedsamedocument\" on history.${method}"
@@ -58,5 +47,35 @@
     ],
     "status": "notApplicable",
     "reason": "Checks that Puppeteer's frame.client is its CDPSession class; Strider exposes no session on a frame, and raw CDP is a separate connection (ports/playwright/library/chromium/session.test.ts)"
+  },
+  {
+    "tests": [
+      "[frame.test] Frame specs Frame Management should report frame from-inside shadow DOM",
+      "[frame.test] Frame specs Frame Management should send \"framenavigatednewdocument\" for child frames",
+      "[frame.test] Frame specs Frame Management should send events when frames are manipulated dynamically",
+      "[frame.test] Frame specs Frame Management should support framesets"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Firefox: a child frame's URL and navigations reach the model after the iframe's own load event"
+  },
+  {
+    "tests": [
+      "[frame.test] Frame specs Frame Management should handle nested frames"
+    ],
+    "status": "fails",
+    "reason": "The frame tree has no frame names"
+  },
+  {
+    "tests": [
+      "[frame.test] Frame specs Frame Management should support lazy frames"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "Stock WebKit: a viewport of 1000x1000 isn't confirmed on the integration display"
   }
 ]

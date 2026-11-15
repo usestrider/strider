@@ -35,5 +35,47 @@
     ],
     "status": "notApplicable",
     "reason": "Playwright's internal connection table (`_connection._sessions`), which counts its protocol sessions; Strider has no such table to read"
+  },
+  {
+    "tests": [
+      "CR-022",
+      "CR-023"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "A launch with an executable that exits at once fails with ConnectionFailed on Chromium (and for a locked or unwritable profile), not ProcessExited"
+  },
+  {
+    "tests": [
+      "CR-027"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "Navigating a non-default context to some chrome:// WebUI pages takes the Chromium browser down"
+  },
+  {
+    "tests": [
+      "CR-010",
+      "CR-011",
+      "CR-012",
+      "CR-013",
+      "CR-014",
+      "CR-015",
+      "CR-016",
+      "CR-017",
+      "CR-018",
+      "CR-019",
+      "CR-020",
+      "CR-021"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "Service workers don't get a context's routes, offline emulation, extra headers, or user agent, and their script loads aren't reported"
   }
 ]

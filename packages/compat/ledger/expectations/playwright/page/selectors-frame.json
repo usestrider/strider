@@ -35,5 +35,28 @@
     ],
     "status": "notApplicable",
     "reason": "Playwright's parser errors for any-frame in the middle of a selector string, after an enter-frame, and for a dangling enter-frame after any-frame. They test the `>>` selector string's syntax, which the selector-dsl decision excludes from 1.0 (scripts/playwright-matrix/metadata.json), not the search across frames (SE-124 to SE-128 and SE-130 hold that). Strider's frame locators are built by calls that can't be put in these orders, and they can't end at a frame boundary, so no call reaches these errors"
+  },
+  {
+    "tests": [
+      "SE-106",
+      "SE-110",
+      "SE-111"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Unsupported: Strider refuses isolatedWorlds on stock WebKit: stock WebKit) (stock WebKit's inspector makes no worlds, so Strider's engine runs in the page's own"
+  },
+  {
+    "tests": [
+      "SE-108",
+      "SE-109"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Unsupported: Strider refuses isolatedWorlds on stock WebKit: stock WebKit) (stock WebKit's inspector makes no worlds"
   }
 ]

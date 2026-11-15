@@ -17,5 +17,17 @@
     "status": "needsFeature",
     "matrix": "option-browsercontext-addinitscript-exposefunctions",
     "reason": "Passing functions with an init script's argument and exposeFunctions option, so the script can call the test's functions from the page, in later navigations and popups. Strider's addInitScript takes a source with no argument and no exposeFunctions option, and each test calls or removes a Node-side function from the page, so inlining the function would not check the option. The matrix's addInitScript rows say Strider has the method but don't mention that its argument is missing"
+  },
+  {
+    "tests": [
+      "IS-026",
+      "IS-035"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses popups.opener on stock WebKit: stock WebKit) (stock WebKit names no page's opener: a page another opens is reported as the browser's",
+    "matrix": "method-page-opener"
   }
 ]

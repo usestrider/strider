@@ -1,7 +1,6 @@
 [
   {
     "tests": [
-      "ST-012",
       "ST-013"
     ],
     "browsers": [
@@ -47,5 +46,26 @@
     ],
     "status": "notApplicable",
     "reason": "Playwright reads a storage state from a file path and names the path in its read error. Strider's state is a decoded value and reads no file: a caller reads the file and decodes it with StorageState.Json, so the path error has no Strider counterpart"
+  },
+  {
+    "tests": [
+      "ST-001",
+      "ST-016",
+      "ST-017",
+      "ST-018"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: exportStorageState reports only the origins open documents are on, where Playwright reports every origin it has seen"
+  },
+  {
+    "tests": [
+      "ST-013"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: exportStorageState reports only the origins open documents are on, where Playwright reports every origin it has seen"
   }
 ]

@@ -17,5 +17,35 @@
     "status": "needsFeature",
     "matrix": "method-page-locator-value-xpath-and-playwright-selector-dsl",
     "reason": "XPath: `label >> xpath=.. >> input` climbs to a parent, `xpath=./*` and `//*` are relative and absolute paths, `//a|//b` is a union, and a malformed XPath's error prints the original expression. Strider's locator takes CSS only, and XPath is planned for 1.0 (the matrix row), so there's no XPath engine to run these against"
+  },
+  {
+    "tests": [
+      "SE-147"
+    ],
+    "status": "fails",
+    "reason": "An element with display: contents and only text has no box, so it is never visible, never scrollable, and has no action point"
+  },
+  {
+    "tests": [
+      "SE-148"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "differentByDesign",
+    "reason": "A chained locator searches only below its scope, so `:scope`, a step that should match the scope itself, and ancestors outside the scope behave as querySelectorAll does, not as Playwright's element-scoped matching",
+    "decision": "Playwright is evidence, not the template"
+  },
+  {
+    "tests": [
+      "SE-134"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "A click on a link in a shadow root, over slotted content, is refused as covered by its host"
   }
 ]

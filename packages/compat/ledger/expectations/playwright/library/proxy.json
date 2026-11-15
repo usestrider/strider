@@ -32,5 +32,28 @@
     "status": "needsFeature",
     "matrix": "option-browser-newcontext-proxy-value-socks-or-https-proxy-endpoint",
     "reason": "SOCKS proxy endpoints are refused (userContexts.proxy.scheme), and the harness has no SOCKS server to route through; the tests route through one"
+  },
+  {
+    "tests": [
+      "PR-015"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses emulation.userAgent on stock WebKit: stock WebKit) (stock WebKit's inspector has no Emulation domain",
+    "matrix": "option-browser-newcontext-useragent"
+  },
+  {
+    "tests": [
+      "PR-005"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "Chromium: a context proxy doesn't carry link-local requests, because Chromium's implicit bypass rules stay on"
   }
 ]

@@ -13,8 +13,8 @@
  * - Exports redact cookie values and `Authorization` headers unless `include` names their class. The tests that
  *   check cookie values include `"cookies"`, as Playwright's do by default.
  * - `postData` is written only when the export includes `"requestBodies"`. Binary bodies are base64 with
- *   `_encoding`, where Playwright writes `text: ""` (HA-011). Playwright's `mimeType` carries its charset; Strider
- *   writes the media type (HA-010).
+ *   `_encoding`, where Playwright writes `text: ""` (HA-011). A `postData` writes no `params`, so HA-010's port leaves
+ *   them out of its expectation.
  * - Strider names a page by its navigable's id and writes no page title or load timings, where Playwright writes the
  *   document's title. The original's assertions on those stay as written, so they fail until Strider records them.
  * - Strider writes no `content.compression`, `headersSize`, `serverIPAddress`, `_serverPort`, or `_securityDetails`,
@@ -408,9 +408,9 @@ upstream(import.meta.filename, {}, (test) => {
       })
       // Bodies are written when the export includes `requestBodies`, which the original always has.
       const log = yield* exportLog(har, directory, "test.har", { include: ["requestBodies"] })
-      // Strider's mimeType is the media type, without the charset the browser sent.
+      // The mimeType keeps the charset the browser sent, as the original's does. Strider writes no `params` for a body.
       assert.deepStrictEqual(nth(log.entries, 1).request.postData, {
-        mimeType: "text/plain",
+        mimeType: "text/plain;charset=UTF-8",
         text: "Hello"
       })
     }))

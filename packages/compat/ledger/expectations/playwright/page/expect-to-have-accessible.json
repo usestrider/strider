@@ -25,5 +25,12 @@
     "status": "needsFeature",
     "matrix": "method-locatorassertions-tohaveaccessibleerrormessage",
     "reason": "Playwright's toHaveAccessibleErrorMessage, which reads aria-errormessage (and the native validity rules for aria-invalid), with its aria-invalid cases and the .not forms. Strider has no error-message matcher or read, and its matchers have no negation to approximate the .not forms with"
+  },
+  {
+    "tests": [
+      "EX-259"
+    ],
+    "status": "fails",
+    "reason": "An option inside a closed select counts as hidden, so it has no name, no role match, and no place under its combobox in a snapshot"
   }
 ]

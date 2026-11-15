@@ -39,5 +39,16 @@
     "status": "needsFeature",
     "matrix": "method-browsercontext-clearcookies",
     "reason": "Removes the cookies of one partition, or those matching a partition key. Strider's `CookieJar.remove` takes a name, domain and path, with no partition key, so it removes the cookie in every partition and the test's partitioned removal can't be written. No matrix row names a partition option for removal; this cites clearCookies, the nearest row, as the cookies entry for the partitioned deleteCookie does"
+  },
+  {
+    "tests": [
+      "[browsercontext-cookies.test] BrowserContext cookies BrowserContext.deleteMatchingCookies should delete cookies matching ${JSON.stringify(filter)}",
+      "[browsercontext-cookies.test] BrowserContext cookies BrowserContext.deleteMatchingCookies should only delete cookies matching ${JSON.stringify(filter)}"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit's cookie list leaves out cookies for URLs no page has loaded, so cookies a caller sets are not listed or removed"
   }
 ]

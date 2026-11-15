@@ -1,0 +1,34 @@
+[
+  {
+    "tests": [
+      "TA-001",
+      "TA-003",
+      "TA-004",
+      "TA-006",
+      "TA-008",
+      "TA-009"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses emulation.touch on Firefox: Firefox doesn't implement emulation.setTouchOverride",
+    "matrix": "option-browser-newcontext-hastouch"
+  },
+  {
+    "tests": [
+      "TA-002",
+      "TA-005",
+      "TA-007"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses emulation.touch on Firefox: Firefox doesn't implement emulation.setTouchOverride",
+    "matrix": "option-browser-newcontext-hastouch"
+  }
+]

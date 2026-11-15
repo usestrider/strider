@@ -82,5 +82,27 @@
     "status": "needsFeature",
     "matrix": "method-download-page",
     "reason": "Reads the page a download came from; Strider's Download doesn't name its originating page"
+  },
+  {
+    "tests": [
+      "BC-034",
+      "BC-036"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses popups.opener on stock WebKit: stock WebKit) (stock WebKit names no page's opener: a page another opens is reported as the browser's",
+    "matrix": "method-page-opener"
+  },
+  {
+    "tests": [
+      "BC-035"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit: console output from a popup opened with a javascript: URL and closed at once is never reported"
   }
 ]

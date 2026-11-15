@@ -83,33 +83,5 @@
     "status": "needsFeature",
     "matrix": "method-disposable-dispose",
     "reason": "Disposes a handle with JavaScript's `using`, `await using`, or `move()`, which transfers it to a new handle. Strider's JSHandle has `release` and no disposal protocol, and handles are released with their scope; the matrix row for the disposal protocol is the nearest"
-  },
-  {
-    "tests": [
-      "[elementhandle.test] ElementHandle specs ElementHandle.click should work",
-      "[elementhandle.test] ElementHandle specs ElementHandle.click should return Point data",
-      "[elementhandle.test] ElementHandle specs ElementHandle.click should work for Shadow DOM v1",
-      "[elementhandle.test] ElementHandle specs ElementHandle.click should throw for detached nodes",
-      "[elementhandle.test] ElementHandle specs ElementHandle.click should throw for hidden nodes",
-      "[elementhandle.test] ElementHandle specs ElementHandle.click should throw for recursively hidden nodes",
-      "[elementhandle.test] ElementHandle specs ElementHandle.click should throw for <br> elements"
-    ],
-    "browsers": [
-      "webkit"
-    ],
-    "status": "needsFeature",
-    "matrix": "method-elementhandle-click",
-    "reason": "Clicks through a locator, which needs `input.native`, and stock WebKit's inspector protocol has no Input domain (the adapter refuses it Unsupported), so the click fails before the test's own checks run"
-  },
-  {
-    "tests": [
-      "[elementhandle.test] ElementHandle specs ElementHandle.hover should work"
-    ],
-    "browsers": [
-      "webkit"
-    ],
-    "status": "needsFeature",
-    "matrix": "method-elementhandle-hover",
-    "reason": "Hovers through a locator, which needs `input.native`; stock WebKit's inspector protocol has no Input domain, so the hover fails Unsupported"
   }
 ]

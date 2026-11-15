@@ -73,5 +73,30 @@
     "status": "needsFeature",
     "matrix": "method-page-ariasnapshotjson",
     "reason": "The test's point is that the accessibility properties of a node (busy, live, atomic, relevant, modal, roledescription, aria-invalid, errormessage, details, description) are reported and kept. Strider's snapshot node carries none of them, and its `invalid` state comes from native validation only"
+  },
+  {
+    "tests": [
+      "[accessibility.test] Accessibility iframes same-origin iframe (interesting only)",
+      "[accessibility.test] Accessibility iframes cross-origin iframe (interesting only)"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Unsupported: Strider refuses isolatedWorlds on stock WebKit: stock WebKit) (stock WebKit's inspector makes no worlds"
+  },
+  {
+    "tests": [
+      "[accessibility.test] Accessibility should work"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: The accessible name has no source for aria-placeholder, matching accname"
+  },
+  {
+    "tests": [
+      "[accessibility.test] Accessibility filtering children of leaf nodes rich text editable fields with role should have children"
+    ],
+    "status": "fails",
+    "reason": "A contenteditable role=textbox keeps an embedded image as a child"
   }
 ]

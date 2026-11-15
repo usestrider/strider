@@ -32,5 +32,54 @@
     "status": "needsFeature",
     "matrix": "option-browsertype-launch-headless",
     "reason": "The test launches a second browser headless next to the headed one. WebKitGTK has no headless mode, so the second launch is refused with InvalidInput, as the matrix row's webkit.launched override says"
+  },
+  {
+    "tests": [
+      "HE-005",
+      "HE-006",
+      "HE-007",
+      "HE-009",
+      "HE-013",
+      "HE-014"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Unsupported: Strider refuses emulation.focus on Firefox: WebDriver BiDi has no focus emulation"
+  },
+  {
+    "tests": [
+      "HE-010"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Unsupported: Strider refuses emulation.focus on Firefox: WebDriver BiDi has no focus emulation"
+  },
+  {
+    "tests": [
+      "HE-011",
+      "HE-015",
+      "HE-016"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Unsupported: Strider refuses emulation.focus on Firefox: WebDriver BiDi has no focus emulation"
+  },
+  {
+    "tests": [
+      "HE-003"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "On stock WebKit a beforeunload prompt raised by a script reload or a link click is never delivered, so the evaluation or the next click stalls"
   }
 ]

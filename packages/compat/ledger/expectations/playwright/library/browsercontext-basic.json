@@ -72,7 +72,8 @@
   },
   {
     "tests": [
-      "BC-029"
+      "BC-029",
+      "BC-028"
     ],
     "browsers": [
       "firefox"
@@ -95,13 +96,48 @@
   },
   {
     "tests": [
-      "BC-028"
+      "BC-018"
     ],
     "browsers": [
-      "firefox"
+      "webkit"
     ],
     "status": "needsFeature",
-    "matrix": "option-browser-newcontext-colorscheme",
-    "reason": "Emulating a color scheme in a context, which Firefox can't emulate (emulation.media), so the context's media can't be set there"
+    "reason": "Stock WebKit refuses emulation.javaScript.disabled, so a context or default context can't be made with JavaScript off",
+    "matrix": "option-browser-newcontext-javascriptenabled"
+  },
+  {
+    "tests": [
+      "BC-019",
+      "BC-020",
+      "BC-021",
+      "BC-022"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses emulation.javaScript.disabled on stock WebKit: stock WebKit) (with scripts off, stock WebKit gives the page no script context, so Strider can't read or act on it",
+    "matrix": "option-browser-newcontext-javascriptenabled"
+  },
+  {
+    "tests": [
+      "BC-029"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Unsupported: Strider refuses isolatedWorlds on stock WebKit: stock WebKit) (stock WebKit's inspector makes no worlds"
+  },
+  {
+    "tests": [
+      "BC-006",
+      "BC-007"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Stock WebKit's viewport is its window: sizes below the window's minimum width or above the screen's height are refused as not confirmed"
   }
 ]

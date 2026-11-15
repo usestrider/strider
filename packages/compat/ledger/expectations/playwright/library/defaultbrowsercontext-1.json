@@ -1,14 +1,107 @@
 [
   {
-    "tests": ["DC-007"],
+    "tests": [
+      "DC-007"
+    ],
     "status": "needsFeature",
     "matrix": "option-browsertype-launchpersistentcontext-bypasscsp",
     "reason": "Bypassing the page's Content Security Policy (`bypassCSP`) for a persistent context's launch. Strider's launch doesn't take it, and its controlled default context has no declaration for it"
   },
   {
-    "tests": ["DC-009"],
+    "tests": [
+      "DC-009"
+    ],
     "status": "needsFeature",
     "matrix": "option-browsertype-launchpersistentcontext-httpcredentials",
     "reason": "Website credentials (`httpCredentials`) for a persistent context's launch. Strider's controlled default context has no declaration for them, so the page's 401 challenge is not answered with them"
+  },
+  {
+    "tests": [
+      "DC-005"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses emulation.viewport.mobile on stock WebKit: stock WebKit) (no mobile viewport",
+    "matrix": "option-browser-newcontext-ismobile"
+  },
+  {
+    "tests": [
+      "DC-006"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses emulation.userAgent on stock WebKit: stock WebKit) (stock WebKit's inspector has no Emulation domain",
+    "matrix": "option-browser-newcontext-useragent"
+  },
+  {
+    "tests": [
+      "DC-008"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses emulation.javaScript.disabled on Firefox: Firefox doesn't implement emulation.setScriptingEnabled",
+    "matrix": "option-browser-newcontext-javascriptenabled"
+  },
+  {
+    "tests": [
+      "DC-010"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses emulation.network.offline on stock WebKit: stock WebKit) (stock WebKit's inspector has no Emulation domain",
+    "matrix": "method-browsercontext-setoffline"
+  },
+  {
+    "tests": [
+      "DC-011"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses downloads on stock WebKit: stock WebKit) (stock WebKit's inspector reports no downloads: a navigation that becomes one ends as BecameDownload",
+    "matrix": "event-page-download"
+  },
+  {
+    "tests": [
+      "DC-001",
+      "DC-003"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "The first goto on a persistent profile's first tab, an adopted page, times out with no outcome"
+  },
+  {
+    "tests": [
+      "DC-002"
+    ],
+    "browsers": [
+      "chromium",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "The first goto on a persistent profile's first tab, an adopted page, times out with no outcome"
+  },
+  {
+    "tests": [
+      "DC-004"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Stock WebKit confirms a viewport only up to its window and refuses a 456x789 viewport on the 1280x800 display"
   }
 ]

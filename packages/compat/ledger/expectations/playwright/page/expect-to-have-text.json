@@ -35,5 +35,19 @@
     "status": "needsFeature",
     "matrix": "method-locatorassertions-tocontaintext",
     "reason": "Passes a list to `toContainText`, which matches as many elements as the list has entries, each by its entry. Strider's `toContainText` takes one string or regular expression, so a list doesn't type-check. The matrix row for `toContainText` says Strider has the method, which holds only for the single-value form"
+  },
+  {
+    "tests": [
+      "EX-286"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: An expectation under a 1 ms deadline can't read the page once, so it fails with an empty history"
+  },
+  {
+    "tests": [
+      "EX-276"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: toContainText and toHaveText test a regular expression against whitespace-collapsed text"
   }
 ]

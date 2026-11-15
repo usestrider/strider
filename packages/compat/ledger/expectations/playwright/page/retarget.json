@@ -1,0 +1,24 @@
+[
+  {
+    "tests": [
+      "RE-001",
+      "RE-006",
+      "RE-007",
+      "RE-009",
+      "RE-010",
+      "RE-012",
+      "RE-014"
+    ],
+    "status": "fails",
+    "reason": "Reads and actions on a label do not follow it to its control: enabled, editable, value, checked, and file input"
+  },
+  {
+    "tests": [
+      "RE-002",
+      "RE-003",
+      "RE-004"
+    ],
+    "status": "fails",
+    "reason": "enabled checks and the click's enabled wait ignore a disabled button or fieldset that encloses the target"
+  }
+]

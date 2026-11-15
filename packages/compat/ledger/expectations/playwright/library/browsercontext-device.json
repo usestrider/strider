@@ -23,5 +23,17 @@
     "status": "needsFeature",
     "matrix": "option-browser-newcontext-screen",
     "reason": "The device's screen is 390 by 844 while its viewport is 390 by 664; Strider's emulation has a viewport but no separate screen size, so the screen assertion can't be made"
+  },
+  {
+    "tests": [
+      "DV-008"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses emulation.viewport.mobile on Firefox: WebDriver BiDi has no mobile viewport",
+    "matrix": "option-browser-newcontext-ismobile"
   }
 ]

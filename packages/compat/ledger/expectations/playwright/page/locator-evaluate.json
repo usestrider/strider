@@ -1,0 +1,25 @@
+[
+  {
+    "tests": [
+      "LO-084",
+      "LO-085"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Unsupported: Strider refuses isolatedWorlds on stock WebKit: stock WebKit) (stock WebKit's inspector makes no worlds"
+  },
+  {
+    "tests": [
+      "LO-086",
+      "LO-087",
+      "LO-088"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Unsupported: Strider refuses isolatedWorlds on stock WebKit: stock WebKit) (stock WebKit's inspector makes no worlds, so Strider's engine runs in the page's own"
+  }
+]

@@ -1,0 +1,30 @@
+[
+  {
+    "tests": [
+      "LO-113"
+    ],
+    "status": "fails",
+    "reason": "Visibility inside a frame ignores the embedding iframe's own visibility, on Chromium too"
+  },
+  {
+    "tests": [
+      "LO-106"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "differentByDesign",
+    "reason": "getByAltText matches only img, area, and input[type=image], where Playwright matches any element with an alt attribute",
+    "decision": "Playwright is evidence, not the template"
+  },
+  {
+    "tests": [
+      "LO-111",
+      "LO-112"
+    ],
+    "status": "fails",
+    "reason": "Visibility inside a frame ignores the embedding iframe's own visibility, so a button in a visibility:hidden iframe counts as visible"
+  }
+]

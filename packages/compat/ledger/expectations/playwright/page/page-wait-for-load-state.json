@@ -23,5 +23,57 @@
     "status": "differentByDesign",
     "decision": "Outcomes come from evidence, never from a guess or a timer",
     "reason": "Each waits for `networkidle` after `domcontentloaded` and `load`, on a page with an iframe whose source is `javascript:`, `data:`, or `blob:`. Strider's readiness is `loading`, `interactive`, and `complete`, with no network-idle state to wait for"
+  },
+  {
+    "tests": [
+      "WA-082",
+      "WA-086",
+      "WA-087",
+      "WA-088",
+      "WA-090"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses popups.opener on stock WebKit: stock WebKit) (stock WebKit names no page's opener: a page another opens is reported as the browser's",
+    "matrix": "method-page-opener"
+  },
+  {
+    "tests": [
+      "WA-083",
+      "WA-084"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses popups.opener on stock WebKit: stock WebKit) (stock WebKit names no page's opener: a page another opens is reported as the browser's",
+    "matrix": "method-page-opener"
+  },
+  {
+    "tests": [
+      "WA-085"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses popups.opener on stock WebKit: stock WebKit) (stock WebKit names no page's opener: a page another opens is reported as the browser's",
+    "matrix": "method-page-opener"
+  },
+  {
+    "tests": [
+      "WA-089"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "A page created with newPage, or a popup of about:blank, never reports its document complete"
   }
 ]

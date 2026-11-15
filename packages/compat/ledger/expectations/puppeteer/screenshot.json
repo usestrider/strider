@@ -75,5 +75,74 @@
     "status": "needsFeature",
     "matrix": "option-page-screenshot-omitbackground",
     "reason": "Firefox refuses `omitBackground` as Unsupported (`screenshot.omitBackground`), where Puppeteer's Firefox captures a transparent background. The matrix row has no per-browser entry for it"
+  },
+  {
+    "tests": [
+      "[screenshot.test] Screenshots ElementHandle.screenshot should not hang with zero width/height element"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "An element screenshot of a box with no height fails as a raw backend rejection on Chromium and Firefox and succeeds on WebKit"
+  },
+  {
+    "tests": [
+      "[screenshot.test] Screenshots Page.screenshot should get screenshot bigger than the viewport"
+    ],
+    "browsers": [
+      "chromium",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Stock WebKit cannot make a viewport narrower than about 341 CSS px"
+  },
+  {
+    "tests": [
+      "[screenshot.test] Screenshots Cdp should allow transparency"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Stock WebKit cannot make a viewport narrower than about 341 CSS px"
+  },
+  {
+    "tests": [
+      "[screenshot.test] Screenshots Page.screenshot should run in parallel"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "Concurrent clipped screenshots of one page return the wrong images"
+  },
+  {
+    "tests": [
+      "[screenshot.test] Screenshots Cdp should render white background on jpeg file"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "A JPEG screenshot with omitBackground has a black background"
+  },
+  {
+    "tests": [
+      "[screenshot.test] Screenshots ElementHandle.screenshot should work for an element with fractional dimensions"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "An element screenshot captures a whole-pixel box that doesn't cover a fractionally positioned element"
+  },
+  {
+    "tests": [
+      "[screenshot.test] Screenshots ElementHandle.screenshot should work for an element with an offset"
+    ],
+    "status": "fails",
+    "reason": "An element screenshot captures a whole-pixel box that doesn't cover a fractionally positioned element"
   }
 ]

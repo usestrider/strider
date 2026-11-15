@@ -58,5 +58,116 @@
     ],
     "status": "notApplicable",
     "reason": "Puppeteer's `networkEnabled: false` is a setting of its BiDi connector, which turns off that connector's network module, so the test expects `goto` to report no response. Strider's Firefox adapter has no network-events switch, and every committed navigation reports its response"
+  },
+  {
+    "tests": [
+      "[navigation.test] navigation Page.goto should work with anchor navigation"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Unsupported: Strider refuses navigation.sameDocument on stock WebKit: stock WebKit) (stock WebKit's inspector reports no same-document navigation"
+  },
+  {
+    "tests": [
+      "[navigation.test] navigation Page.goBack should work",
+      "[navigation.test] navigation Page.goBack should error if no history is found"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses navigation.traverse on stock WebKit: stock WebKit) (stock WebKit's inspector reports a traversal under the old document's URL, with no realm (QUIRKS.md, Q215",
+    "matrix": "method-page-goback"
+  },
+  {
+    "tests": [
+      "[navigation.test] navigation Page.goto should navigate to URL with hash and fire requests without hash"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "A request's URL keeps the navigation's #fragment on Firefox and WebKit"
+  },
+  {
+    "tests": [
+      "[navigation.test] navigation Frame.waitForNavigation should work"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Subframe navigation requests are missing from the history on WebKit"
+  },
+  {
+    "tests": [
+      "[navigation.test] navigation Page.waitForNavigation should work with clicking on anchor links",
+      "[navigation.test] navigation Page.waitForNavigation should work with history.pushState()",
+      "[navigation.test] navigation Page.waitForNavigation should work with history.replaceState()"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit reports no same-document navigation, so fragment, pushState, replaceState, and Navigation API changes go unseen"
+  },
+  {
+    "tests": [
+      "[navigation.test] navigation Page.goBack should work with HistoryAPI"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit's inspector reports a history traversal under the old document's URL, so back and forward are refused or stale"
+  },
+  {
+    "tests": [
+      "[navigation.test] navigation Page.waitForNavigation should work with DOM history.back()/history.forward()"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit's inspector reports a history traversal under the old document's URL, so back and forward are refused or stale"
+  },
+  {
+    "tests": [
+      "[navigation.test] navigation Page.goto should navigate to dataURL and fire dataURL requests"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Puppeteer's tests expect a request and its event for a data: URL, which Strider reports as no request"
+  },
+  {
+    "tests": [
+      "[navigation.test] navigation Page.goto should not throw an error for a 404 response with an empty body",
+      "[navigation.test] navigation Page.goto should not throw an error for a 500 response with an empty body"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "Chromium: a 404 or 500 with an empty body fails goto"
+  },
+  {
+    "tests": [
+      "[navigation.test] navigation Page.waitForNavigation should work when subframe issues window.stop()"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit: the main document's load doesn't complete after a subframe issues window.stop()"
+  },
+  {
+    "tests": [
+      "[navigation.test] navigation Frame.waitForNavigation should fail when frame detaches"
+    ],
+    "status": "fails",
+    "reason": "A wait for a frame's navigation isn't ended by the frame's removal"
   }
 ]

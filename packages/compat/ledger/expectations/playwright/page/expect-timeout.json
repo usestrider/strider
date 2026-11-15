@@ -6,5 +6,20 @@
     "status": "needsFeature",
     "matrix": "option-locatorassertions-tobevisible-signal",
     "reason": "An AbortSignal that is already aborted when the expectation starts fails it at once with the signal's reason, for toBeVisible and toHaveURL alike. Strider has no signal: an expectation that is interrupted before it starts never runs, so nothing fails with a message to assert. The matrix row says Strider cancels by interruption, which has no counterpart of an already-aborted signal"
+  },
+  {
+    "tests": [
+      "EX-251"
+    ],
+    "status": "fails",
+    "reason": "A locator handler on a trigger that stays visible, with noWaitAfter, is run again every round, so the action never gets to its input"
+  },
+  {
+    "tests": [
+      "EX-246",
+      "EX-247"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: An expectation under a 1 ms deadline can't read the page once, so it fails with an empty history"
   }
 ]

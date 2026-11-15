@@ -1,0 +1,10 @@
+[
+  {
+    "tests": [
+      "[userDataDir.test] userDataDir should not launch the browser twice with the same userDataDir with pipe=${pipe}",
+      "[userDataDir.test] userDataDir should report a permission error when the userDataDir is not writable"
+    ],
+    "status": "fails",
+    "reason": "A launch with an executable that exits at once fails with ConnectionFailed on Chromium (and for a locked or unwritable profile), not ProcessExited"
+  }
+]

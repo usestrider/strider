@@ -17,5 +17,30 @@
     ],
     "status": "notApplicable",
     "reason": "The original skips every browser but Chromium: `navigator.userAgentData` and the `sec-ch-ua` headers are Chromium's"
+  },
+  {
+    "tests": [
+      "UA-001",
+      "UA-002",
+      "UA-003",
+      "UA-004",
+      "UA-005"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses emulation.userAgent on stock WebKit: stock WebKit) (stock WebKit's inspector has no Emulation domain",
+    "matrix": "option-browser-newcontext-useragent"
+  },
+  {
+    "tests": [
+      "UA-006"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "Chromium: an emulated user agent sends no Client Hints"
   }
 ]

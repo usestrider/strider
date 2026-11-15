@@ -41,5 +41,43 @@
     ],
     "status": "notApplicable",
     "reason": "Runs only on macOS in the original (it returns at once on other platforms, `os.platform() !== 'darwin'`), so it does nothing on Linux and isn't ported. The harness runs on Linux"
+  },
+  {
+    "tests": [
+      "[keyboard.test] Keyboard should report modifiers"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit's key and wheel events ignore the modifiers held"
+  },
+  {
+    "tests": [
+      "[keyboard.test] Keyboard should specify repeat property"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit sends no keydown for a key already held, so the page sees no repeat"
+  },
+  {
+    "tests": [
+      "[keyboard.test] Keyboard should send proper codes while typing"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: A shifted character is typed with an explicit Shift press, so the page sees Shift and the character's key with Shift held"
+  },
+  {
+    "tests": [
+      "[keyboard.test] Keyboard should send a character with sendCharacter",
+      "[keyboard.test] Keyboard should send a character with sendCharacter in iframe"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "insertText and fill type each character as key events on Firefox and stock WebKit"
   }
 ]

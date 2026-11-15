@@ -5,5 +5,61 @@
     ],
     "status": "notApplicable",
     "reason": "A toHaveScreenshot golden comparison, against images made with Playwright's browser builds and fonts, which Strider's pinned browsers don't match; the test checks nothing else"
+  },
+  {
+    "tests": [
+      "LH-002"
+    ],
+    "status": "fails",
+    "reason": "A locator handler on a trigger that stays visible, with noWaitAfter, is run again every round, so the action never gets to its input"
+  },
+  {
+    "tests": [
+      "LH-003"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "differentByDesign",
+    "reason": "A hover isn't checked after its move, so an overlay that appears on the pointer's arrival doesn't run the handler during the hover",
+    "decision": "Playwright is evidence, not the template"
+  },
+  {
+    "tests": [
+      "LH-004"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "differentByDesign",
+    "reason": "Locator handlers run before an action even when its checks are forced off",
+    "decision": "Scoped overlay dispatch"
+  },
+  {
+    "tests": [
+      "LH-005"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "differentByDesign",
+    "reason": "A locator handler's callback shares its triggering action's deadline, so a stuck handler is interrupted when the action times out and runs again for the next one",
+    "decision": "Scoped overlay dispatch"
+  },
+  {
+    "tests": [
+      "LH-012"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "LocatorHandler wait: a timeout while the handler's trigger is still shown carries no hint on Firefox"
   }
 ]

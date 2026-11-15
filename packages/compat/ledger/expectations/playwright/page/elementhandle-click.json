@@ -14,5 +14,23 @@
     "status": "differentByDesign",
     "decision": "Playwright is evidence, not the template",
     "reason": "Clicks a handle to a node the page removed, and expects the click to fail as a node that is not attached to the DOM. A Strider locator finds the element again, so a removed element is a missing match, not a detached node; the handle's own binding is what this test needs"
+  },
+  {
+    "tests": [
+      "EH-015",
+      "EH-016"
+    ],
+    "status": "fails",
+    "reason": "With the visible check off, an element with no box reports OutsideViewport instead of NotVisible"
+  },
+  {
+    "tests": [
+      "EH-011"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "On stock WebKit the engine runs in the page's world, so a page that deletes Node, Event, or JSON.stringify, or redefines innerWidth, breaks it"
   }
 ]

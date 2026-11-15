@@ -32,5 +32,117 @@
     "status": "needsFeature",
     "matrix": "option-page-ariasnapshot-mode",
     "reason": "Playwright's AI snapshot lists the visible content of an aria-hidden subtree and marks its top element `[aria-hidden]`; Strider's default snapshot leaves an aria-hidden subtree out and its node has no such state"
+  },
+  {
+    "tests": [
+      "AR-055",
+      "AR-056",
+      "AR-094",
+      "AR-095"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Every element node gets a ref, even one a pointer cannot reach: pointer-events: none, zero size, inert, or outside a modal dialog",
+    "matrix": "method-page-ariasnapshot"
+  },
+  {
+    "tests": [
+      "AR-058",
+      "AR-064",
+      "AR-067",
+      "AR-068",
+      "AR-069",
+      "AR-081",
+      "AR-090"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "The cursor: pointer hint exists only on inferred nodes, not on nodes that have a role",
+    "matrix": "option-locator-ariasnapshot-mode"
+  },
+  {
+    "tests": [
+      "AR-059",
+      "AR-060",
+      "AR-061",
+      "AR-062"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: The AI snapshot keeps a heading or link name that repeats the text printed inside it"
+  },
+  {
+    "tests": [
+      "AR-065",
+      "AR-066",
+      "AR-088"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Images with no accessible name are in the snapshot",
+    "matrix": "option-locator-ariasnapshot-mode"
+  },
+  {
+    "tests": [
+      "AR-087",
+      "AR-089"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: A roleless element with a title, or text it must hold, is not a node of its own"
+  },
+  {
+    "tests": [
+      "AR-054"
+    ],
+    "status": "fails",
+    "reason": "Frame refs are numbered by position in the snapshot, so a frame's refs change when an earlier frame is removed"
+  },
+  {
+    "tests": [
+      "AR-073"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "A frame whose navigation failed appears with child text in the snapshot"
+  },
+  {
+    "tests": [
+      "AR-075"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: A snapshot never waits, so it cannot wait for a locator or for blocking CSS"
+  },
+  {
+    "tests": [
+      "AR-079"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "On stock WebKit, focus inside a data: iframe doesn't show as focused in the snapshot"
+  },
+  {
+    "tests": [
+      "AR-074"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "fails",
+    "reason": "Chromium: a snapshot taken while a page reloads reads an empty document, because Page.snapshot never waits"
   }
 ]

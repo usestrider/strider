@@ -1,0 +1,57 @@
+[
+  {
+    "tests": [
+      "NA-071",
+      "NA-074",
+      "NA-084"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses navigation.traverse on stock WebKit: stock WebKit) (stock WebKit's inspector reports a traversal under the old document's URL, with no realm (QUIRKS.md, Q215",
+    "matrix": "method-page-goback"
+  },
+  {
+    "tests": [
+      "NA-086"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses popups.opener on stock WebKit: stock WebKit) (stock WebKit names no page's opener: a page another opens is reported as the browser's",
+    "matrix": "method-page-opener"
+  },
+  {
+    "tests": [
+      "NA-072"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit's inspector reports a history traversal under the old document's URL, so back and forward are refused or stale"
+  },
+  {
+    "tests": [
+      "NA-083"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit's inspector reports a history traversal under the old document's URL, so back and forward are refused or stale"
+  },
+  {
+    "tests": [
+      "NA-073"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "Stock WebKit: file: URLs fail to load, so goto and frames of a local file fail"
+  }
+]

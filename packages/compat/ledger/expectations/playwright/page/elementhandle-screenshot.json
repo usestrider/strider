@@ -13,5 +13,59 @@
     ],
     "status": "notApplicable",
     "reason": "Tests the `path` option, which writes the image and creates its directories. Strider returns the image's bytes and writes nothing, so writing them, with their directories and names, is the caller's own file I/O"
+  },
+  {
+    "tests": [
+      "EH-091"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Unsupported: Strider refuses screenshot.format on stock WebKit: stock WebKit) (stock WebKit's snapshotRect writes PNG only"
+  },
+  {
+    "tests": [
+      "EH-084"
+    ],
+    "status": "fails",
+    "reason": "An element screenshot of a box with no height fails as a raw backend rejection on Chromium and Firefox and succeeds on WebKit"
+  },
+  {
+    "tests": [
+      "EH-076"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "On stock WebKit the engine runs in the page's world, so a page that deletes Node, Event, or JSON.stringify, or redefines innerWidth, breaks it"
+  },
+  {
+    "tests": [
+      "EH-082",
+      "EH-087"
+    ],
+    "status": "fails",
+    "reason": "An element screenshot floors its box instead of capturing the enclosing whole-pixel rectangle"
+  },
+  {
+    "tests": [
+      "EH-086"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "An element screenshot floors its box instead of capturing the enclosing whole-pixel rectangle"
+  },
+  {
+    "tests": [
+      "EH-085",
+      "EH-088"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: An element screenshot does not wait for the element to become visible or to stop moving"
   }
 ]

@@ -23,5 +23,36 @@
     "status": "needsFeature",
     "matrix": "method-frame-evaluatehandle",
     "reason": "Takes a frame's element handle (`frame.$('body')`) and passes it into the page's evaluation, which adopts it across frames (FR-007), or refuses it when the frames don't script each other (FR-008). Strider's frame locators re-resolve on use rather than retaining element handles, so there's no frame handle to pass."
+  },
+  {
+    "tests": [
+      "FR-013"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Unsupported: Strider refuses isolatedWorlds on stock WebKit: stock WebKit) (stock WebKit's inspector makes no worlds"
+  },
+  {
+    "tests": [
+      "FR-011"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: A frame's tree URL is about:blank where Playwright reports an empty string"
+  },
+  {
+    "tests": [
+      "FR-012"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit: frames a page has without a navigation of their own are missing from the frame tree"
   }
 ]

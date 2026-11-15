@@ -25,9 +25,7 @@
   },
   {
     "tests": [
-      "[network.test] network Request.content should work with binary post data",
-      "[network.test] network Response.buffer should work",
-      "[network.test] network Response.buffer should work with compression"
+      "[network.test] network Request.content should work with binary post data"
     ],
     "browsers": [
       "webkit"
@@ -96,5 +94,132 @@
     "status": "needsFeature",
     "matrix": "option-browser-newcontext-ignorehttpserrors",
     "reason": "Accepting a self-signed HTTPS certificate in a context (acceptInsecureCerts). Chromium refuses it per context with Unsupported, because its certificate override applies to the whole browser, so the context that the test's TLS server needs can't be made there"
+  },
+  {
+    "tests": [
+      "[network.test] network Page.Events.Request should fire for iframes",
+      "[network.test] network Request.frame should work for subframe navigation request"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Subframe navigation requests are missing from the history on WebKit"
+  },
+  {
+    "tests": [
+      "[network.test] network Request.page should work for subframe navigation request",
+      "[network.test] network Request.isNavigationRequest should work",
+      "[network.test] network Request.isNavigationRequest should work with request interception"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Subframe navigation requests are missing from the history on WebKit"
+  },
+  {
+    "tests": [
+      "[network.test] network Response.fromCache should work for ${type}"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Firefox reports a cache hit and a service-worker response with one value, cacheOrServiceWorker"
+  },
+  {
+    "tests": [
+      "[network.test] network Response.fromServiceWorker Response.fromServiceWorker",
+      "[network.test] network Response.encodedDataLength should return 0 for cached responses"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Firefox reports a cache hit and a service-worker response with one value, cacheOrServiceWorker"
+  },
+  {
+    "tests": [
+      "[network.test] network Network Events Page.Events.RequestServedFromCache for ${type}"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Firefox reports a cache hit and a service-worker response with one value, cacheOrServiceWorker"
+  },
+  {
+    "tests": [
+      "[network.test] network Page.authenticate should not disable caching for ${type}"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Firefox reports a cache hit and a service-worker response with one value, cacheOrServiceWorker"
+  },
+  {
+    "tests": [
+      "[network.test] network Request.headers should report all headers sent to the server on response.request()",
+      "[network.test] network Request.headers should report all headers sent to the server on requestfailed"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "WebKit's sent headers are partial: no Cookie, Host, Accept-Encoding, Accept-Language, or Connection, and a redirect hop has none"
+  },
+  {
+    "tests": [
+      "[network.test] network Request.headers cookie header should show Cookie header",
+      "[network.test] network Request.headers cookie header should show Cookie header for redirect",
+      "[network.test] network Request.headers cookie header should show Cookie header for fetch request"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "WebKit's sent headers are partial: no Cookie, Host, Accept-Encoding, Accept-Language, or Connection, and a redirect hop has none"
+  },
+  {
+    "tests": [
+      "[network.test] network Request.fetchPostData should be |undefined| when there is no post data",
+      "[network.test] network Request.fetchPostData should work with blobs",
+      "[network.test] network Request.fetchPostData should work with binary post data",
+      "[network.test] network Request.content should be |undefined| when there is no post data"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "A multipart or non-text request body can't be read on WebKit and Chromium",
+    "matrix": "method-request-postdata"
+  },
+  {
+    "tests": [
+      "[network.test] network Response.buffer should throw if the response does not have a body"
+    ],
+    "status": "fails",
+    "reason": "A CORS preflight is never in the request or response history on Chromium and WebKit"
+  },
+  {
+    "tests": [
+      "[network.test] network Network Events Page.Events.RequestFailed for blocked requests"
+    ],
+    "status": "fails",
+    "reason": "Chromium reports a blocked request's failure with an empty errorText, because blockedReason is dropped"
+  },
+  {
+    "tests": [
+      "[network.test] network Page.authenticate should fail if wrong credentials"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "A route's page.authenticate with wrong credentials loops or hangs"
   }
 ]

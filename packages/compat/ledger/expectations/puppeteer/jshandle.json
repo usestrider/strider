@@ -67,5 +67,26 @@
     "status": "needsFeature",
     "matrix": "method-disposable-dispose",
     "reason": "Disposes a handle with JavaScript's `using`, `await using`, or `move()`, which transfers it to a new handle. Strider's JSHandle has `release` and no disposal protocol, and handles are released with their scope; the matrix row for the disposal protocol is the nearest"
+  },
+  {
+    "tests": [
+      "[jshandle.test] JSHandle JSHandle.jsonValue should not throw for circular objects"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Port: Port: tests assert Puppeteer's and Playwright's lossy or permissive serialization where Strider fails fast with NotSerializable"
+  },
+  {
+    "tests": [
+      "[jshandle.test] JSHandle Page.evaluateHandle should use the same JS wrappers"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Port: Port: Puppeteer's evaluateHandle test runs in Strider's isolated world, where Firefox's sandbox keeps globals apart"
   }
 ]

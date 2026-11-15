@@ -1,0 +1,49 @@
+[
+  {
+    "tests": [
+      "WA-108"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Subframe navigation requests are missing from the history on WebKit"
+  },
+  {
+    "tests": [
+      "WA-099",
+      "WA-101",
+      "WA-102",
+      "WA-106"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit reports no same-document navigation, so fragment, pushState, replaceState, and Navigation API changes go unseen"
+  },
+  {
+    "tests": [
+      "WA-103"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Stock WebKit's inspector reports a history traversal under the old document's URL, so back and forward are refused or stale"
+  },
+  {
+    "tests": [
+      "WA-104"
+    ],
+    "status": "fails",
+    "reason": "Port: The test asserts at once that goto has completed after window.stop() in a subframe"
+  },
+  {
+    "tests": [
+      "WA-109"
+    ],
+    "status": "fails",
+    "reason": "A wait for a frame's navigation isn't ended by the frame's removal"
+  }
+]

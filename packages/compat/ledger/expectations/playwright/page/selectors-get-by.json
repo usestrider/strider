@@ -26,5 +26,19 @@
     "status": "needsFeature",
     "matrix": "option-page-getbyrole-description",
     "reason": "Playwright's getByRole takes a description option, matched against the element's accessible description (aria-describedby, or the title fallback), by substring, exactly, or as a regular expression. Strider's RoleOptions has name and state filters but no description, so these checks have no Strider call to make"
+  },
+  {
+    "tests": [
+      "SE-088",
+      "SE-090"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "differentByDesign",
+    "reason": "getByAltText matches only img, area, and input[type=image], where Playwright matches any element with an alt attribute",
+    "decision": "Playwright is evidence, not the template"
   }
 ]
