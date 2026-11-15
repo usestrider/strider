@@ -14,15 +14,14 @@ const timeline = () => {
   const registered = new Set<string>()
   let next = 0
   const adapter = {
-    declare: (_scope: Adapter.DeclarationScope, declaration: Adapter.Declaration) =>
-      Effect.gen(function*() {
-        yield* Effect.yieldNow
-        const id = `script-${next++}`
-        registered.add(id)
-        yield* Effect.addFinalizer(() => Effect.sync(() => registered.delete(id)))
-        assert.strictEqual(declaration._tag, "InitScript")
-        return id
-      })
+    declare: Effect.fnUntraced(function*(_scope: Adapter.DeclarationScope, declaration: Adapter.Declaration) {
+      yield* Effect.yieldNow
+      const id = `script-${next++}`
+      registered.add(id)
+      yield* Effect.addFinalizer(() => Effect.sync(() => registered.delete(id)))
+      assert.strictEqual(declaration._tag, "InitScript")
+      return id
+    })
   }
   const runtime = { model: { adapter }, timelines: Clock.makeTimelines() } as unknown as Runtime.Runtime
   const clock = Clock.make({
