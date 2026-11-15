@@ -2236,7 +2236,13 @@ export function engine(render: (root: SnapNode) => string) {
       unsafe: false,
       accepted: false,
       inserting: false,
-      check: (): string | null => blocker()
+      // At an insertion the engine makes itself: an ancestor's focus must still be on the guarded frame, as the
+      // trusted events a native insertion sends would show it
+      check: (): string | null => {
+        if (!ancestor) return blocker()
+        const active = deepActive()
+        return active === element ? null : active === null ? "another document" : describe(active)
+      }
     }
     const blocker = (): string | null => {
       // Ancestors should receive no insertion event: correct input reaches the target document instead.
@@ -2320,18 +2326,16 @@ export function engine(render: (root: SnapNode) => string) {
    */
   const insert = (text: string, beforeInput: boolean): Response => {
     const active = deepActive()
+    const guard = fillGuard
+    // An armed guard, in an ancestor document too, decides before anything goes further or is dispatched
+    const blocked = (): boolean => {
+      if (guard === null) return false
+      guard.blocked ??= guard.check()
+      return guard.blocked !== null
+    }
+    if (blocked()) return { _tag: "Inserted", inserted: false }
     if (active instanceof HTMLIFrameElement || active instanceof HTMLFrameElement) {
       return { _tag: "InFrame", index: resolve([{ _tag: "Css", selector: "iframe, frame" }]).indexOf(active) }
-    }
-    const guard = fillGuard
-    if (guard !== null) {
-      const blocked = guard.blocked ?? guard.check()
-      if (blocked !== null) {
-        guard.blocked = blocked
-        return { _tag: "Inserted", inserted: false }
-      }
-      guard.accepted = true
-      guard.inserting = true
     }
     if (beforeInput && active !== null) {
       const event = new InputEvent("beforeinput", {
@@ -2342,6 +2346,12 @@ export function engine(render: (root: SnapNode) => string) {
         composed: true
       })
       if (!dom.dispatchEvent(active, event)) return { _tag: "Inserted", inserted: false }
+      // Its handlers may have moved the focus or the selection
+      if (blocked()) return { _tag: "Inserted", inserted: false }
+    }
+    if (guard !== null) {
+      guard.accepted = true
+      guard.inserting = true
     }
     return { _tag: "Inserted", inserted: dom.execCommand(document, "insertText", false, text) }
   }
