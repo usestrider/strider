@@ -384,7 +384,11 @@ export type Fact =
       | { readonly _tag: "Completed"; readonly path: Option.Option<string> }
       | { readonly _tag: "Canceled" }
   }
-  | { readonly _tag: "ConsoleMessage"; readonly realm: Target.RealmId; readonly message: ConsoleMessage.ConsoleMessage }
+  | {
+    readonly _tag: "ConsoleMessage"
+    readonly realm: Option.Option<Target.RealmId>
+    readonly message: ConsoleMessage.ConsoleMessage
+  }
   | {
     readonly _tag: "UncaughtException"
     readonly realm: Option.Option<Target.RealmId>

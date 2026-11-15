@@ -3,6 +3,11 @@
  *
  * An exception is reported to its page and its context, as console messages are.
  *
+ * On Firefox, a message the browser writes to the console itself, such as a Content Security Policy violation or a
+ * request blocked by CORS, arrives here too, with no stack, as Firefox sends it as a script error. Stock WebKit sends
+ * its "Fetch API cannot load … due to access control checks" the same way. Each backend's `console` capability says
+ * so.
+ *
  * @stability unstable
  * @since 0.1.0
  */

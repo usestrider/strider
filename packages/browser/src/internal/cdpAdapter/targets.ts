@@ -19,6 +19,7 @@ import * as Stream from "effect/Stream"
 import * as Debugger from "../../cdp/Debugger.ts"
 import * as Fetch from "../../cdp/Fetch.ts"
 import * as Inspector from "../../cdp/Inspector.ts"
+import * as Log from "../../cdp/Log.ts"
 import * as Network from "../../cdp/Network.ts"
 import * as Page from "../../cdp/Page.ts"
 import * as Runtime from "../../cdp/Runtime.ts"
@@ -327,6 +328,8 @@ const snapshot = Effect.fnUntraced(function*(
       const tree = yield* target.session.start(Page.getFrameTree(), scope)
       // Runtime's replay follows the tree on the wire, so its contexts survive the snapshot's boundary.
       replies.push((yield* target.session.start(Runtime.enable(), scope)).pipe(Effect.asVoid))
+      // What the browser writes to the console itself comes only through the Log domain
+      yield* enable(Log.enable())
       // Browser-owned workers must not wait on a second session here.
       replies.push((yield* target.session.start(autoAttach, scope)).pipe(Effect.asVoid))
       const written = page === undefined ? Effect.void : configureTarget(state, target, page, setup)
@@ -349,7 +352,7 @@ const snapshot = Effect.fnUntraced(function*(
         Network.enable({}).pipe(on)
       ], { concurrency: "unbounded", discard: true })
       const tree = yield* target.session.sendSequenced(Page.getFrameTree())
-      yield* Runtime.enable().pipe(on)
+      yield* Effect.all([Runtime.enable().pipe(on), Log.enable().pipe(on)], { concurrency: "unbounded", discard: true })
       yield* autoAttach.pipe(on)
       const failure = yield* (configure && page !== undefined ? configureTarget(state, target, page) : Effect.void)
         .pipe(Effect.flip, Effect.option)
@@ -428,7 +431,12 @@ const workerGate = Effect.fnUntraced(function*(state: State, target: TargetEntry
       Debugger.setInstrumentationBreakpoint({ instrumentation: "beforeScriptExecution" }).pipe(on)
     ], { discard: true }).pipe(Effect.ignore)
   }
-  yield* Effect.all([Runtime.enable().pipe(on), Network.enable({}).pipe(on), resume(target.session, waiting)], {
+  yield* Effect.all([
+    Runtime.enable().pipe(on),
+    Log.enable().pipe(on),
+    Network.enable({}).pipe(on),
+    resume(target.session, waiting)
+  ], {
     concurrency: "unbounded",
     discard: true
   }).pipe(Effect.ignore)
@@ -468,6 +476,7 @@ export const webSocketGate: import("./state.ts").ContextGate = Effect.fnUntraced
       yield* Effect.all([
         Page.enable().pipe(on),
         Runtime.enable().pipe(on),
+        Log.enable().pipe(on),
         ...bindings.map((binding) => binding.pipe(on)),
         ...[...bundles].map(([key, bundle]) =>
           Page.addScriptToEvaluateOnNewDocument({
