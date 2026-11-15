@@ -3598,7 +3598,7 @@ export function engine(render: (root: SnapNode) => string) {
     const value = name._tag === "None" ? "" : name.value
     return matcher._tag === "RegExp"
       ? new RegExp(matcher.source, matcher.flags).test(value)
-      : value === collapse(matcher.value)
+      : collapse(value) === collapse(matcher.value)
   }
 
   /** Whether a node matches a pattern: its role and name, and its children as the pattern states. */
