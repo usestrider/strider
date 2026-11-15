@@ -126,6 +126,11 @@ export const stream = <PE = never, PR = never>(
 /**
  * Reads the uncaught exceptions still in the event log; never waits.
  *
+ * **Details**
+ *
+ * An operation returns only after the events the browser reported before answering it are in the log, so
+ * what it caused is here once it returns, as far as the browser reported it by then.
+ *
  * **Example** (Errors so far, and whether the log dropped any)
  *
  * ```ts import.meta.vitest

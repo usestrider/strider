@@ -304,6 +304,11 @@ export const stream = <PE = never, PR = never>(
 /**
  * Reads the downloads still in the event log; never waits.
  *
+ * **Details**
+ *
+ * An operation returns only after the events the browser reported before answering it are in the log, so
+ * what it caused is here once it returns, as far as the browser reported it by then.
+ *
  * **Gotchas**
  *
  * On a backend without the `downloads` capability, such as WebKit, it fails with `SubscriptionError`, reason

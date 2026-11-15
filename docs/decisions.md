@@ -162,6 +162,15 @@ A command to a page that can't be reached is dropped; the page's end, which foll
 decorator that qualifies decoded messages, which would still rewrite messages by method name, away from the tables
 that need the ids, and can't see which command a reply answers.
 
+**A command returns after the events the browser sent before its reply.** The reader settles a reply when it
+arrives, but the caller resumes only once the worker has folded and published every message received before it, on
+any session. So an operation that logs, requests, or opens a dialog finds it in the history when it returns, as the
+order on the wire says, and a test that acts and then reads a history doesn't race the worker. The barrier
+is the connection's: a held session's events count once they are held, so a sync's own reply never waits on the
+sync, and the fold never waits on a command, so the barrier never waits on itself. Rejected: documenting histories
+as eventually consistent with operations, which leaves every read after an action racing; and a per-session drain
+before each reply, which deadlocks a sync whose reply arrives while its session is held.
+
 ## The browser model (L1)
 
 **A plain click's commands go out as one step, and only their replies overlap.** The move's reply waits a rendering

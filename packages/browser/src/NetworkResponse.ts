@@ -378,6 +378,11 @@ export const stream: {
  * Reads the responses the target's event log kept (`UserContext.Options.eventLog`), without their bodies; never
  * waits.
  *
+ * **Details**
+ *
+ * An operation returns only after the events the browser reported before answering it are in the log, so
+ * what it caused is here once it returns, as far as the browser reported it by then.
+ *
  * **Example** (Listing the failed responses so far)
  *
  * ```ts import.meta.vitest

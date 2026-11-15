@@ -179,6 +179,11 @@ export const stream = <PE = never, PR = never>(
 /**
  * Reads the console messages still in the event log; never waits.
  *
+ * **Details**
+ *
+ * An operation returns only after the events the browser reported before answering it are in the log, so
+ * the messages an evaluation logged are here once the evaluation returns.
+ *
  * **Example** (The errors logged so far)
  *
  * ```ts import.meta.vitest

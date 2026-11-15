@@ -194,6 +194,11 @@ export const stream = <PE = never, PR = never>(
 /**
  * Reads the file choosers still in the page's event log; never waits.
  *
+ * **Details**
+ *
+ * An operation returns only after the events the browser reported before answering it are in the log, so
+ * what it caused is here once it returns, as far as the browser reported it by then.
+ *
  * **Gotchas**
  *
  * On a backend without the `fileChooser` capability, such as WebKit, it fails with `SubscriptionError`, reason

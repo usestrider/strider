@@ -137,6 +137,11 @@ export const stream: {
 /**
  * Reads the popups still in the page's event log; never waits.
  *
+ * **Details**
+ *
+ * An operation returns only after the events the browser reported before answering it are in the log, so
+ * what it caused is here once it returns, as far as the browser reported it by then.
+ *
  * **Gotchas**
  *
  * On a backend without the `popups.opener` capability, such as WebKit, it fails with `SubscriptionError`, reason

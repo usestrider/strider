@@ -243,6 +243,11 @@ export const stream = <PE = never, PR = never>(
 /**
  * Reads the successful navigations still in the page's event log, as `stream` emits them; never waits.
  *
+ * **Details**
+ *
+ * An operation returns only after the events the browser reported before answering it are in the log, so
+ * what it caused is here once it returns, as far as the browser reported it by then.
+ *
  * **Example** (The URLs a page has visited)
  *
  * ```ts import.meta.vitest

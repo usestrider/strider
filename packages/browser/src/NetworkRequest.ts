@@ -336,6 +336,11 @@ export const stream: {
 /**
  * Reads the requests the target's event log kept (`UserContext.Options.eventLog`); never waits.
  *
+ * **Details**
+ *
+ * An operation returns only after the events the browser reported before answering it are in the log, so
+ * what it caused is here once it returns, as far as the browser reported it by then.
+ *
  * **Example** (Counting the images a page loaded)
  *
  * ```ts import.meta.vitest

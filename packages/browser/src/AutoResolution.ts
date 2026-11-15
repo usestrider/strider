@@ -176,6 +176,11 @@ export const stream = <PE = never, PR = never>(
 /**
  * Reads the automatic decisions still in the event log; never waits.
  *
+ * **Details**
+ *
+ * An operation returns only after the events the browser reported before answering it are in the log, so
+ * what it caused is here once it returns, as far as the browser reported it by then.
+ *
  * **Example** (Checking that no default decided anything)
  *
  * ```ts import.meta.vitest
