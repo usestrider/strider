@@ -700,9 +700,10 @@ describe("ProtocolClient", () => {
       )
       const sent = yield* browser.next
       yield* load(browser, 1)
+      yield* TestClock.adjust("600 millis")
       yield* browser.receive({ id: sent.id, result: {}, sessionId: "S1" })
       yield* browser.delivered
-      yield* TestClock.adjust("2 seconds")
+      yield* TestClock.adjust("500 millis")
       const completed = fiber.pollUnsafe()
       yield* Deferred.succeed(gate, undefined)
       yield* Fiber.await(fiber)
@@ -732,7 +733,7 @@ describe("ProtocolClient", () => {
       yield* browser.delivered
       yield* TestClock.adjust("2 seconds")
       const exit = yield* Fiber.await(fiber)
-      assert(Exit.isFailure(exit))
+      assert.strictEqual(reasonOf(exit)._tag, "NoReply")
       const reply = yield* Deferred.await(late)
       assert.strictEqual(reply.method, "Target.createTarget")
       assert.deepStrictEqual(reply.result, { targetId: "late-target" })
