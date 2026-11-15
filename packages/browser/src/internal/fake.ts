@@ -289,7 +289,13 @@ export const connect = (
                     at: Adapter.now()
                   })
                 },
-                { _tag: "RequestFinished", hop, encodedBytes: 0, at: Adapter.now() }
+                {
+                  _tag: "RequestFinished",
+                  hop,
+                  transferBytes: Option.none(),
+                  bodyBytes: Option.none(),
+                  at: Adapter.now()
+                }
               )
               break
             }

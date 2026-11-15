@@ -142,6 +142,11 @@ export interface RequestEntry {
   /** The request event’s loader key, when reported. */
   readonly loaderId: string | undefined
   redirects: number
+  /**
+   * Whether the current hop's response came over the network as itself, not from a cache, a service worker or a
+   * route, and not a 304's revalidation: only then are its byte counts its own.
+   */
+  network: boolean
   hop: NetworkRequest.HopId
   /** The last hop a response was reported for: WebKit can report one twice. */
   responded: NetworkRequest.HopId | undefined

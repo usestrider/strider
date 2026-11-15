@@ -139,7 +139,10 @@ export interface NavigationEvent {
 export type HopEnd =
   | {
     readonly _tag: "Finished"
-    readonly encodedBytes: number
+    /** The response's bytes as transferred, headers and all, where the backend reports them. */
+    readonly transferBytes: Option.Option<number>
+    /** The response body's bytes as transferred, before decoding, where the backend reports them. */
+    readonly bodyBytes: Option.Option<number>
     readonly at: MonotonicInstant.MonotonicInstant
     /** The protocol, where the backend says it only now (WebKit). */
     readonly httpVersion: Option.Option<string>

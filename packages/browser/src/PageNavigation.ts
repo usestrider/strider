@@ -49,7 +49,8 @@ export type Id = typeof Id.Type
  *
  * **Details**
  *
- * - `Committed`: a new document. `response` is `None` for `about:blank`, `data:` URLs, and similar.
+ * - `Committed`: a new document. `response` is `None` for `about:blank`, `data:` URLs, and `blob:` URLs, which the browser
+ *   answers without a network request.
  * - `SameDocument`: the document stayed, through a fragment, the History API, or an intercepted navigation.
  * - `Restored`: a document came back from the back/forward cache.
  * - `Activated`: a prerendered document became the page's.

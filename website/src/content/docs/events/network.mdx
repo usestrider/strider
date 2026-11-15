@@ -14,6 +14,8 @@ causes to check what the server said, and decode its body with a Schema to get t
 - Each redirect hop has its own request and response.
 - Both are Schemas, with Effect's `Headers` and `HttpMethod`.
 - [`NetworkRequest.failure`](/docs/events/request-failures) reads why a request's transfer failed.
+- `data:` and `blob:` URLs are not network requests: the browser answers them without the network, so they have no request
+  or response events.
 
 `next` needs a `url`: a glob such as `"**/api/**"`, a URL, or a `URLPattern` string with `:name` groups, such as
 `"https://shop.example.com/api/orders/:id"`. A filter can also name a `method`; a request filter a `resourceType`,

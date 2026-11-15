@@ -206,7 +206,7 @@ interface NavigationModel {
     | { _tag: "Unresolved"; lastObserved: Evidence }>
 }
 type NavigationOutcome =
-  | { _tag: "Committed"; document: DocumentId; response: Option<ResponseRef> }   // None: about:blank, data:, and so on
+  | { _tag: "Committed"; document: DocumentId; response: Option<ResponseRef> }   // None: about:blank, data:, blob:
   | { _tag: "SameDocument"; document: DocumentId; via: "fragment" | "historyApi" | "intercepted" }
   | { _tag: "Restored"; document: DocumentId }        // back/forward cache
   | { _tag: "Activated"; document: DocumentId }       // prerender activation is not implemented
@@ -467,6 +467,11 @@ contexts must not be enabled by a host until expiry cleanup is available.
 
 ## 6. Network
 
+A `data:` or `blob:` URL is no network request: the browser answers it from the URL or from memory. The model reports
+no request, response, or route pause for one, on any backend, though Chromium and stock WebKit report both and Firefox
+reports `data:` ones; a navigation to one commits with no response, as one to `about:blank` does.
+[No requests for URLs the browser answers](docs/decisions.md#no-requests-for-urls-the-browser-answers) says why.
+
 A new context may carry a normalized HTTP proxy endpoint, a bypass host list (default empty), and optional
 credentials with a Redacted password. An omitted proxy leaves browser settings untouched. CDP and BiDi set the
 endpoint per user context; launched stock WebKit sets HTTP/HTTPS proxy environment variables on that context's
@@ -482,7 +487,8 @@ Only website challenges receive this pair: CDP supplies the challenge source, an
 407 is accepted as website evidence only after this request's proxy attempt, with a website header, no proxy
 header, and an explicitly empty challenge list. Passwords remain redacted until answering the
 protocol obligation. Automatic decisions are bounded to one credential submission across a native request and its whole redirect chain, even across origins; attempt
-state lives in the backend's existing request/auth ledger and ends with that request. Unconfigured requests gain no
+state is kept by the native request's id from its first interception, since Chromium can challenge a request before
+it reports the request's network events, and ends with that request, the worker or frame that made it, or its page. Unconfigured requests gain no
 attempt state or interception. Stock WebKit refuses the option through its auth interception capability.
 
 Automatic proxy authentication participates in native interception without replacing route declarations. CDP

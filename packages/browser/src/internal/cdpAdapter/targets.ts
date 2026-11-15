@@ -33,6 +33,7 @@ import * as Evaluation from "./evaluation.ts"
 import { frameUrl, targetKind } from "./mapping.ts"
 import {
   ContextEntry,
+  credentialsScope,
   dispatchContext,
   type Event,
   type FrameEntry,
@@ -181,6 +182,15 @@ export const ended = (state: State, session: ProtocolClient.Session, reason: Pro
   target.proxyAuth?.clear()
   for (const [key, pending] of state.pendingAttribution) {
     if (pending.target === target) state.pendingAttribution.delete(key)
+  }
+  if (target.page === undefined) state.credentialsAttempted.delete(credentialsScope(target))
+  else {
+    // A worker or frame target ending inside a live page can no longer finish its requests, so their chains'
+    // attempts go with it; the page's other chains keep theirs
+    const attempted = state.credentialsAttempted.get(credentialsScope(target))
+    for (const request of state.requests.values()) {
+      if (request.target === target) attempted?.delete(request.requestId)
+    }
   }
   state.targets.delete(session)
   if (state.targetsById.get(target.targetId) === target) state.targetsById.delete(target.targetId)

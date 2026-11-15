@@ -14,7 +14,7 @@ import * as Sizes from "../requestSizes.ts"
 import * as Timing from "../requestTiming.ts"
 import * as Urls from "../urls.ts"
 import { bytesOf, headersOf, resourceType } from "./mapping.ts"
-import { pause, requestSnapshot } from "./obligations.ts"
+import { continued, pause, requestSnapshot } from "./obligations.ts"
 import { type Event, navigableOf, placement, type RequestEntry, type State } from "./state.ts"
 import { endNavigation, startNavigation } from "./tree.ts"
 
@@ -25,6 +25,11 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     .on(Network.beforeRequestSent, (params, { state }) => {
       const data = params.request
       let request = state.requests.get(data.request)
+      if (request === undefined && Urls.answeredLocally(data.url)) {
+        // The browser answers it itself: no request, and no route sees it, so a pause for it goes on at once
+        if (params.isBlocked) state.buffer.later(continued(state, "request", data.request))
+        return
+      }
       if (request !== undefined && params.redirectCount > request.redirects) {
         // The earlier hop's id stays, so a body read for it says it was a redirect (QUIRKS.md, Q39)
         const previous = request.finished
@@ -96,7 +101,12 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     })
     .on(Network.responseStarted, (params, { state }) => {
       const request = state.requests.get(params.request.request)
-      if (request === undefined) return
+      if (request === undefined) {
+        if (params.isBlocked && Urls.answeredLocally(params.request.url)) {
+          state.buffer.later(continued(state, "response", params.request.request))
+        }
+        return
+      }
       if (request.navigable?.context.requestSizes && !request.fulfilled) {
         state.buffer.emit({
           _tag: "HopSizes",
@@ -145,7 +155,8 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       state.buffer.emit({
         _tag: "RequestFinished",
         hop: request.hop,
-        encodedBytes: params.response.bytesReceived,
+        // A response a route fulfilled has no transfer to count
+        ...(request.fulfilled ? Sizes.unknown : Sizes.transferred(Sizes.bidi(params.response, true))),
         at: Adapter.now()
       })
       // Completion belongs to this hop, including a terminal 3xx without a followed redirect.

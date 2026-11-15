@@ -1,4 +1,7 @@
-/** Native HTTP accounting, invoked only for contexts that opt into sizes. */
+/**
+ * Native HTTP accounting: a hop's `Sizes`, for contexts that opt into them, and the byte counts every finished hop
+ * carries, by the same rules.
+ */
 import * as Option from "effect/Option"
 import { Sizes } from "../NetworkRequest.ts"
 
@@ -64,6 +67,20 @@ export const bidi = (native: Response, complete: boolean): Sizes => {
     // Firefox reports content.size=0 even for nonempty bodies; it is deliberately never used.
   })
 }
+/**
+ * What a hop's end says of its response's bytes, by the same rules as its `Sizes`: `transferBytes` as
+ * transferred, headers and all, and `bodyBytes`, its body's as transferred; `None` where the backend doesn't
+ * report it.
+ */
+export interface Transferred {
+  readonly transferBytes: Option.Option<number>
+  readonly bodyBytes: Option.Option<number>
+}
+export const unknown: Transferred = { transferBytes: Option.none(), bodyBytes: Option.none() }
+export const transferred = (sizes: Sizes): Transferred => ({
+  transferBytes: sizes.responseTransferSize,
+  bodyBytes: sizes.responseBodySize
+})
 export const cdp = (total: number, decoded: number | undefined): Sizes =>
   new Sizes({
     ...empty(),
@@ -74,10 +91,9 @@ export const cdp = (total: number, decoded: number | undefined): Sizes =>
 /** At most 1000 active collectors per opted-in context; no request entries are retained. */
 export interface Collector {
   readonly owner: string
-  network: boolean
   decoded: number | undefined
 }
 export const keep = (store: Map<string, Collector>, hop: string, owner: string): void => {
-  store.set(hop, { owner, network: false, decoded: 0 })
+  store.set(hop, { owner, decoded: 0 })
   if (store.size > 1000) store.delete(store.keys().next().value!)
 }

@@ -17,6 +17,7 @@ import {
   type DocumentEntry,
   type FrameEntry,
   type NavigationEntry,
+  pageCredentialsScope,
   type PageEntry,
   type RealmEntry,
   type State,
@@ -110,6 +111,7 @@ export const endPage = (state: State, page: PageEntry, reason: L1Target.CloseRea
   for (const [key, pending] of state.pendingAttribution) {
     if (pending.target.page === page || pending.target === page.target) state.pendingAttribution.delete(key)
   }
+  state.credentialsAttempted.delete(pageCredentialsScope(page))
   state.pages.delete(page.id)
   state.heldButtons.delete(page.id)
   state.drags.delete(page.id)

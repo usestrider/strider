@@ -313,7 +313,10 @@ export type Fact =
   | {
     readonly _tag: "RequestFinished"
     readonly hop: NetworkRequest.HopId
-    readonly encodedBytes: number
+    /** The response's bytes as transferred, headers and all; `None` where the backend doesn't report them. */
+    readonly transferBytes: Option.Option<number>
+    /** The response body's bytes as transferred, before decoding; `None` where the backend doesn't report them. */
+    readonly bodyBytes: Option.Option<number>
     /** The response's protocol, where the backend says it only as the response ends (WebKit). */
     readonly httpVersion?: string | undefined
     readonly at: MonotonicInstant.MonotonicInstant

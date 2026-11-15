@@ -19,6 +19,7 @@ import * as Declarations from "../declarations.ts"
 import * as Urls from "../urls.ts"
 import { failReasons, fetchHeaders, postData, resourceTypes } from "./mapping.ts"
 import {
+  credentialsScope,
   type Event,
   frameOf,
   type ObligationEntry,
@@ -56,6 +57,16 @@ export const register = (handlers: Kit.Handlers<Event>) =>
   handlers
     .on(Fetch.requestPaused, (params, { state, target }) => {
       if (target === undefined) return
+      if (Urls.answeredLocally(params.request.url)) {
+        // Not a request, so no route sees it
+        const on = Protocol.on(target.session)
+        state.buffer.later(
+          params.responseStatusCode !== undefined || params.responseErrorReason !== undefined
+            ? Fetch.continueResponse({ requestId: params.requestId }).pipe(on)
+            : Fetch.continueRequest({ requestId: params.requestId }).pipe(on)
+        )
+        return
+      }
       const proxy = target.page?.context.proxy ?? state.workerContexts.get(target)?.proxy
       if (proxy?.credentials !== undefined && params.responseStatusCode === undefined) {
         target.proxyAuth ??= new Map()
@@ -148,6 +159,14 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     })
     .on(Fetch.authRequired, (params, { state, target }) => {
       if (target === undefined) return
+      if (Urls.answeredLocally(params.request.url)) {
+        // Not a request, so no route sees it
+        state.buffer.later(
+          Fetch.continueWithAuth({ requestId: params.requestId, authChallengeResponse: { response: "Default" } })
+            .pipe(Protocol.on(target.session))
+        )
+        return
+      }
       const proxy = target.page?.context.proxy ?? state.workerContexts.get(target)?.proxy
       if (params.authChallenge.source === "Proxy" && proxy?.credentials !== undefined) {
         target.proxyAuth ??= new Map()
@@ -355,17 +374,16 @@ const decide = (
             entry.target === obligation.target && entry.fetchId === requestId
           ) :
           undefined
-        const networkId = pending?.[0].slice(requestKey(obligation.target, "").length)
-        const related = direct === undefined && networkId !== undefined && obligation.target.page !== undefined
-          ? [...state.requests.values()].filter((entry) =>
-            entry.requestId === networkId && entry.target.page === obligation.target.page
-          )
-          : []
-        const request = direct ?? (related.length === 1 ? related[0] : undefined)
-        if (request === undefined || request.credentialsAttempted === true) {
+        const networkId = direct?.requestId ?? pending?.[0].slice(requestKey(obligation.target, "").length)
+        // The attempt is counted by the request's chain from its first pause, since Chromium can challenge a
+        // request before its Network event comes, on the page's session or its worker's
+        const scope = credentialsScope(obligation.target)
+        const attempted = state.credentialsAttempted.get(scope)
+        if (networkId === undefined || attempted?.has(networkId) === true) {
           return Fetch.continueWithAuth({ requestId, authChallengeResponse: { response: "CancelAuth" } }).pipe(on)
         }
-        request.credentialsAttempted = true
+        if (attempted === undefined) state.credentialsAttempted.set(scope, new Set([networkId]))
+        else attempted.add(networkId)
       }
       return Fetch.continueWithAuth({
         requestId,

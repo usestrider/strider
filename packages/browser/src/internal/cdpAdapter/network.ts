@@ -19,6 +19,7 @@ import * as Urls from "../urls.ts"
 import { postData, resourceTypes } from "./mapping.ts"
 import { emitResponse, release, servedBy } from "./responses.ts"
 import {
+  credentialsScope,
   type Event,
   type ExtraInfo,
   frameOf,
@@ -58,10 +59,8 @@ const deliver = (
   hop: NetworkRequest.HopId,
   { headers, phase, statusCode }: ExtraInfo
 ) => {
-  if (statusCode === 304) {
-    const sizes = request.frame?.page.context.requestSizes?.get(hop)
-    if (sizes !== undefined) sizes.network = false
-  }
+  // A 304 says only here that the response is the cache's, revalidated
+  if (statusCode === 304 && hop === request.hop) request.network = false
   state.buffer.emit({ _tag: "HopHeaders", hop, phase, headers: Kit.headersOf(headers) })
   if (hop !== request.hop) return
   if (phase === "response") {
@@ -108,6 +107,8 @@ const noExtraInfo = (state: State, request: RequestEntry) => {
 
 /** The headers as sent and received: to the hop they belong to, or kept until its request is sent. */
 const rawHeaders = (state: State, key: string, extra: ExtraInfo) => {
+  // An extra-info event carries no URL, so a request the browser answered itself is known by its id
+  if (state.answeredLocally.has(key)) return
   const request = state.requests.get(key)
   if (request !== undefined) return assign(state, request, extra)
   const early = state.earlyHeaders.get(key) ?? []
@@ -166,6 +167,14 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       if (target === undefined) return
       const key = requestKey(target, params.requestId)
       let request = state.requests.get(key)
+      if (request === undefined && Urls.answeredLocally(params.request.url)) {
+        // The browser answers it itself: no request, so the events that follow for its id find none
+        state.pendingAttribution.delete(key)
+        state.earlyHeaders.delete(key)
+        state.answeredLocally.add(key)
+        if (state.answeredLocally.size > 500) state.answeredLocally.delete(state.answeredLocally.values().next().value!)
+        return
+      }
       if (request !== undefined && params.redirectResponse !== undefined) {
         // The redirect says whether `ExtraInfo` comes for the hop it ends
         if (params.redirectHasExtraInfo === true) expectExtraInfo(state, request, ["request", "response"])
@@ -175,7 +184,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         request.frame?.page.context.requestTiming?.delete(request.hop)
         request.frame?.page.context.requestSizes?.delete(request.hop)
         emitResponse(state, request, params.redirectResponse)
-        state.buffer.emit({ _tag: "RequestFinished", hop: request.hop, encodedBytes: 0, at: Adapter.now() })
+        state.buffer.emit({ _tag: "RequestFinished", hop: request.hop, ...Sizes.unknown, at: Adapter.now() })
         // The earlier hop's id stays, so a body read for it says it was a redirect (QUIRKS.md, Q39)
         request.attribution = state.pendingAttribution.get(key) ?? { target, fulfilled: false }
         request.servedFromCache = false
@@ -202,6 +211,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
           navigation,
           finished: Deferred.makeUnsafe(),
           servedFromCache: false,
+          network: false,
           attribution: state.pendingAttribution.get(key) ?? { target, fulfilled: false },
           resourceType: resourceTypes[params.type ?? "Other"] ?? "other",
           received: undefined,
@@ -273,9 +283,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       rawHeaders(state, requestKey(target, params.requestId), {
         phase: "response",
         headers: params.headers,
-        ...((target.page ?? target.frame?.page)?.context.requestSizes === undefined
-          ? {}
-          : { statusCode: params.statusCode })
+        statusCode: params.statusCode
       })
     })
     .on(Network.requestServedFromCache, (params, { state, target }) => {
@@ -288,10 +296,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       if (target === undefined) return
       const request = state.requests.get(requestKey(target, params.requestId))
       if (request === undefined) return
-      const sizes = request.frame?.page.context.requestSizes?.get(request.hop)
-      if (sizes !== undefined) {
-        sizes.network = servedBy(request, params.response) === "network" && params.response.status !== 304
-      }
+      request.network = servedBy(request, params.response) === "network" && params.response.status !== 304
       request.frame?.page.context.requestTiming?.get(request.hop)?.response(
         servedBy(request, params.response) === "network" ? params.response.timing : undefined
       )
@@ -320,6 +325,8 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     .on(Network.loadingFinished, (params, { state, target }) => {
       if (target === undefined) return
       state.pendingAttribution.delete(requestKey(target, params.requestId))
+      state.credentialsAttempted.get(credentialsScope(target))?.delete(params.requestId)
+      state.answeredLocally.delete(requestKey(target, params.requestId))
       for (const [id, auth] of target.proxyAuth ?? []) {
         if (auth.networkId === params.requestId) target.proxyAuth!.delete(id)
       }
@@ -327,7 +334,8 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       if (request === undefined) return
       const sizes = request.frame?.page.context.requestSizes?.get(request.hop)
       // A still-held response lacks final raw-header evidence (including a possible 304).
-      if (sizes?.network && request.held === undefined) {
+      const counted = request.network && request.held === undefined
+      if (sizes !== undefined && counted) {
         state.buffer.emit({
           _tag: "HopSizes",
           hop: request.hop,
@@ -340,7 +348,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       const finished: Adapter.Fact = {
         _tag: "RequestFinished",
         hop: request.hop,
-        encodedBytes: params.encodedDataLength,
+        ...(counted ? Sizes.transferred(Sizes.cdp(params.encodedDataLength, undefined)) : Sizes.unknown),
         at: Adapter.now()
       }
       // An image's `ExtraInfo` can come after its load finished
@@ -352,6 +360,8 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     .on(Network.loadingFailed, (params, { state, target }) => {
       if (target === undefined) return
       state.pendingAttribution.delete(requestKey(target, params.requestId))
+      state.credentialsAttempted.get(credentialsScope(target))?.delete(params.requestId)
+      state.answeredLocally.delete(requestKey(target, params.requestId))
       for (const [id, auth] of target.proxyAuth ?? []) {
         if (auth.networkId === params.requestId) target.proxyAuth!.delete(id)
       }

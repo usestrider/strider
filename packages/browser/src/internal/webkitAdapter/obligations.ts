@@ -78,6 +78,12 @@ export const register = (handlers: Kit.Handlers<Event>) =>
   handlers
     .on(Network.requestIntercepted, (params, { state, session, target }) => {
       if (target === undefined) return
+      if (Urls.answeredLocally(params.request.url)) {
+        // Not a request, so no route sees it
+        return state.buffer.later(
+          Network.interceptContinue({ requestId: params.requestId, stage: "request" }).pipe(Protocol.on(target.session))
+        )
+      }
       const request = state.requests.get(requestKey(session, params.requestId))
       state.pausedRequests.set(target, (state.pausedRequests.get(target) ?? 0) + 1)
       const obligation = state.ids.obligation()
@@ -108,6 +114,13 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     })
     .on(Network.responseIntercepted, (params, { state, session, target }) => {
       if (target === undefined) return
+      if (Urls.answeredLocally(params.response.url)) {
+        return state.buffer.later(
+          Network.interceptContinue({ requestId: params.requestId, stage: "response" }).pipe(
+            Protocol.on(target.session)
+          )
+        )
+      }
       const request = state.requests.get(requestKey(session, params.requestId))
       state.pausedRequests.set(target, (state.pausedRequests.get(target) ?? 0) + 1)
       const obligation = state.ids.obligation()
