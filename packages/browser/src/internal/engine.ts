@@ -1146,13 +1146,66 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   // Hidden, visible
-  /** Excluded from the accessibility tree: `aria-hidden`, `display: none`, `visibility: hidden`. */
+  /** Excluded from the accessibility tree: `aria-hidden`, inert, `display: none`, `visibility: hidden`. */
   const hiddenFromAccessibility = (element: Element): boolean => {
     for (let current: Element | null = element; current !== null; current = composedParent(current)) {
       if (dom.getAttribute(current, "aria-hidden") === "true") return true
     }
-    return !dom.checkVisibility(element, { visibilityProperty: true })
+    return inert(element) || !dom.checkVisibility(element, { visibilityProperty: true })
   }
+
+  // Inertness
+  /** The parent in the flat tree, where inertness applies: the slot an element is assigned to, or its composed parent. */
+  const flatParent = (element: Element): Element | null => dom.assignedSlot(element) ?? composedParent(element)
+
+  const flatContains = (ancestor: Element, element: Element): boolean => {
+    for (let current: Element | null = element; current !== null; current = flatParent(current)) {
+      if (current === ancestor) return true
+    }
+    return false
+  }
+
+  /** What the document holds that makes anything inert, read once per call, so a page without it walks nothing. */
+  let inertness: { readonly attribute: boolean; readonly modal: HTMLDialogElement | null } | undefined
+  const inertnessOf = (): { readonly attribute: boolean; readonly modal: HTMLDialogElement | null } => {
+    if (inertness !== undefined) return inertness
+    let attribute = false
+    let modal: HTMLDialogElement | null = null
+    for (const element of documentElements()) {
+      if (!attribute && dom.hasAttribute(element, "inert")) attribute = true
+      if (element instanceof HTMLDialogElement && dom.matches(element, ":modal")) modal = element
+    }
+    return inertness = { attribute, modal }
+  }
+
+  /**
+   * The topmost open modal dialog. The DOM exposes no top-layer order, so it is the last open modal dialog in tree
+   * order, open shadow roots included: a dialog opened later but earlier in the document is taken for one beneath.
+   */
+  const topmostModal = (): HTMLDialogElement | null => inertnessOf().modal
+
+  /**
+   * The element whose `inert` attribute makes `element` inert, on the flat tree, through slots. The topmost modal
+   * dialog doesn't inherit its ancestors' inertness.
+   */
+  const inertAncestor = (element: Element): Element | null => {
+    const { attribute, modal } = inertnessOf()
+    if (!attribute) return null
+    for (let current: Element | null = element; current !== null; current = flatParent(current)) {
+      if (dom.hasAttribute(current, "inert")) return current
+      if (current === modal) return null
+    }
+    return null
+  }
+
+  /** The topmost modal dialog when `element` is outside it, which makes `element` inert. */
+  const blockingModal = (element: Element): HTMLDialogElement | null => {
+    const modal = topmostModal()
+    return modal === null || flatContains(modal, element) ? null : modal
+  }
+
+  /** HTML's inertness: `inert` on the element or a flat-tree ancestor, or outside the topmost open modal dialog. */
+  const inert = (element: Element): boolean => inertAncestor(element) !== null || blockingModal(element) !== null
 
   /** CONCEPTS.md §8: observations include opacity; action readiness ignores it. */
   const rendered = (element: Element, opacityProperty: boolean): boolean => {
@@ -1899,38 +1952,20 @@ export function engine(render: (root: SnapNode) => string) {
       ? { _tag: "NoPointerEvents", element: describe(element) }
       : { _tag: "Covered", by: hit === null ? "nothing at that point" : describe(hit) }
 
-  /** The element whose `inert` attribute makes `element` inert: inertness applies on the flat tree, through slots. */
-  const inertAncestor = (element: Element): Element | null => {
-    for (
-      let current: Element | null = element;
-      current !== null;
-      current = dom.assignedSlot(current) ?? composedParent(current)
-    ) {
-      if (dom.hasAttribute(current, "inert")) return current
-    }
-    return null
-  }
-
   const inertReason = (element: Element): NotReady | null => {
-    const inert = inertAncestor(element)
-    // Dialogs outside the target, in shadow roots too
-    const dialogs = documentElements().filter((d) =>
-      (d instanceof HTMLDialogElement || dom.hasAttribute(d, "aria-modal")) && !composedContains(d, element)
-    )
-    if (inert !== null) {
-      // An open modal: a native one, or a rendered `aria-modal` dialog that isn't inert itself
-      const modal = dialogs.find((d) =>
-        d instanceof HTMLDialogElement
-          ? dom.matches(d, ":modal")
-          : dom.matches(d, "[role=dialog][aria-modal=true],[role=alertdialog][aria-modal=true]") &&
-            inertAncestor(d) === null && visible(d)
-      )
-      return { _tag: "Inert", by: describe(inert), dialog: modal && describe(modal) }
+    const by = inertAncestor(element)
+    const modal = blockingModal(element)
+    if (by !== null) {
+      // The dialog to name: the topmost modal one, or a rendered `aria-modal` dialog outside the target that isn't
+      // inert itself, in shadow roots too
+      const dialog = modal ??
+        documentElements().find((d) =>
+          dom.matches(d, "[role=dialog][aria-modal=true],[role=alertdialog][aria-modal=true]") &&
+          !composedContains(d, element) && inertAncestor(d) === null && visible(d)
+        )
+      return { _tag: "Inert", by: describe(by), dialog: dialog && describe(dialog) }
     }
-    const modal = dialogs.find((dialog) => dialog instanceof HTMLDialogElement && dom.matches(dialog, ":modal"))
-    return modal !== undefined
-      ? { _tag: "BlockedByModal", dialog: describe(modal) }
-      : null
+    return modal !== null ? { _tag: "BlockedByModal", dialog: describe(modal) } : null
   }
 
   /** Geometric bounds only; the browser's hit test determines whether ancestors or overlays block a centre. */
@@ -3218,6 +3253,7 @@ export function engine(render: (root: SnapNode) => string) {
     rawText.clear()
     roleCache.clear()
     nameCache.clear()
+    inertness = undefined
     namesFromContent.clear()
     namesFromFields.clear()
     provenance = false
@@ -3301,6 +3337,14 @@ export function engine(render: (root: SnapNode) => string) {
       }
       if (!(node instanceof Element) || SKIPPED.has(dom.localName(node))) return
       if (dom.getAttribute(node, "aria-hidden") === "true") return
+      if (inert(node)) {
+        // An inert ancestor of the topmost modal dialog adds nothing of its own, but the dialog escapes it
+        const modal = topmostModal()
+        if (modal !== null && flatContains(node, modal)) {
+          for (const child of flatChildNodes(node)) visit(child, false)
+        }
+        return
+      }
       const display = getComputedStyle(node).display
       if (display === "none") return
       if (display !== "contents" && !dom.checkVisibility(node)) return
@@ -3632,6 +3676,7 @@ export function engine(render: (root: SnapNode) => string) {
       rawText.clear()
       roleCache.clear()
       nameCache.clear()
+      inertness = undefined
       const name = full ? accessibleName(element, true) : ""
       found.set(
         element,
