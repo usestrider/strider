@@ -44,10 +44,22 @@ export interface Options extends Settings {
   readonly executablePath: string
 }
 
-/** The arguments a launch passes, in order: the profile's, the caller's, then ours. */
+/**
+ * What a headless launch states of its input devices: a fine pointer that can hover, the mouse Strider drives the
+ * page with. Headless Chromium has no input devices, so a page would otherwise match `(hover: none)` and
+ * `(pointer: none)`; a headed launch reports the machine's own. Mobile and touch emulation still override it.
+ */
+export const headlessPointerArgs: ReadonlyArray<string> = [
+  "--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4"
+]
+
+/**
+ * The arguments a launch passes, in order: the profile's, headless with its pointer, the caller's, then ours. A
+ * caller's own `--blink-settings` comes later, so it wins.
+ */
 export const argsFor = (options: Settings, userDataDir: string, debugging: "pipe" | "port"): ReadonlyArray<string> => [
   ...(options.profileArgs ?? profileArgs[options.profile ?? "automation"]),
-  ...(options.headless ?? true ? ["--headless"] : []),
+  ...(options.headless ?? true ? ["--headless", ...headlessPointerArgs] : []),
   ...(options.args ?? []),
   debugging === "pipe" ? "--remote-debugging-pipe" : "--remote-debugging-port=0",
   `--user-data-dir=${userDataDir}`,
