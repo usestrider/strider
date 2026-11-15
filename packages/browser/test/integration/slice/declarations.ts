@@ -33,7 +33,7 @@ import type * as net from "node:net"
 import * as os from "node:os"
 import * as path from "node:path"
 import { site, tlsSite } from "../adapter/harness.ts"
-import { responseRouteInFlight, status, supports } from "./capabilities.ts"
+import { cachesFetches, responseRouteInFlight, status, supports } from "./capabilities.ts"
 
 const timeout = 60_000
 
@@ -509,6 +509,28 @@ export const declarations = (
           }),
         timeout
       )
+
+      it.effect("answers a cacheable URL from the cache again once its page's last route is removed", () =>
+        Effect.gen(function*() {
+          const { origin, served } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const fetched = () =>
+              served.filter((request) =>
+                request.path === "/cached.js?released"
+              ).length
+            const read = `return fetch('/cached.js?released').then((r) => r.status)`
+            yield* Effect.scoped(Effect.gen(function*() {
+              yield* page.route(`${origin}/cached.js*`, () =>
+                Route.continue)
+              assert.strictEqual(yield* run(page, origin, read), 200)
+            }))
+            assert.strictEqual(yield* run(page, origin, read), 200)
+            const before = fetched()
+            assert.strictEqual(yield* run(page, origin, read), 200)
+            assert.strictEqual(fetched(), cachesFetches[name] ? before : before + 1)
+          }))
+        }), timeout)
 
       it.effect("rejects an invalid HTTP credential origin without exposing credentials", () =>
         Effect.gen(function*() {
