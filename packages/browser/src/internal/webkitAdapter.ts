@@ -173,6 +173,8 @@ export const connect: (
       info,
       capabilities,
       pauseScope: "browser",
+      // Only the load events again (QUIRKS.md, Q11)
+      reportsDocumentOpen: false,
       defaultContext: state.defaultContext,
       closed: client.closed,
       createUserContext: refuse("userContexts", noPages),

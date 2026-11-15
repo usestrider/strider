@@ -361,10 +361,14 @@ export interface ContextEntry {
   readonly events: ContextEvents
 }
 
-/** What changes about a document: its URL, which a same-document navigation changes, and its readiness. */
+/**
+ * What changes about a document: its URL, which a same-document navigation changes, its readiness, and its
+ * generation, which `document.open()` increments as it returns readiness to `loading`.
+ */
 export interface DocumentState {
   readonly url: Url.Url
   readonly readiness: "loading" | "interactive" | "complete"
+  readonly generation: number
 }
 
 export interface DocumentEntry {

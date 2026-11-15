@@ -248,6 +248,11 @@ self.addEventListener("fetch", (event) => {
     response.writeHead(200, { "content-type": "image/svg+xml" })
     response.write("<svg xmlns=\"http://www.w3.org/2000/svg\">")
   },
+  // A script that never completes: a deferred one holds DOMContentLoaded back while the page is interactive
+  "/pending-script": (_request, response) => {
+    response.writeHead(200, { "content-type": "text/javascript" })
+    response.write("// pending\n")
+  },
   // An event stream that never ends
   "/events": (_request, response) => {
     response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" })

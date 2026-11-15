@@ -850,12 +850,15 @@ export interface Page extends ReadonlyPage {
    *
    * **Gotchas**
    *
-   * Interruption or a deadline stops waiting; it does not undo the replacement or stop scripts and requests
-   * already started. The temporary readiness listener is removed with a separate one-second cleanup budget;
-   * cleanup failures are recorded in diagnostics. Earlier resource requests can continue to delay load after
-   * another replacement; choose parsing readiness when those requests need not finish. Navigation during the
-   * call can fail with `TargetGone`. Page scripts can tamper with the main-world document methods. Avoid
-   * concurrent replacements.
+   * On Chromium, readiness is what the browser reports of the replaced document, so it is reached with
+   * JavaScript disabled too, and a navigation during the wait ends it. Firefox and WebKit don't report the
+   * replacement, so there readiness comes from a temporary listener in the page; Strider can't turn JavaScript off
+   * on either through emulation, so the listener runs under every emulation setting they support. It is removed with a separate one-second cleanup budget, and cleanup
+   * failures are recorded in diagnostics. Interruption or a deadline stops waiting; it does not undo the
+   * replacement or stop scripts and requests already started. Earlier resource requests can continue to delay
+   * load after another replacement; choose parsing readiness when those requests need not finish. A navigation
+   * during the call can fail with `TargetGone`. Page scripts can tamper with the main-world document methods.
+   * Avoid concurrent replacements.
    *
    * **Example** (Rendering an HTML fixture)
    *

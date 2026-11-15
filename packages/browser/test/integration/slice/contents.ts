@@ -7,6 +7,7 @@ import { assert, describe, layer } from "@effect/vitest"
 import {
   AriaPattern,
   Browser,
+  ConsoleMessage,
   CookieJar,
   Deadline,
   Expect,
@@ -411,7 +412,13 @@ export const contents = (
           if (Deadline.isTimeout(error)) {
             assert.strictEqual(error.operation, "Page.setContent")
             assert.strictEqual(error.phase, "postcondition")
-            assert.strictEqual(error.diagnostics.cleanup._tag, "Completed")
+            // A listener in the page is removed after the wait; the model's readiness leaves nothing to clean up
+            const body = page.locator("body")
+            assert(body instanceof LocatorImpl)
+            assert.strictEqual(
+              error.diagnostics.cleanup._tag,
+              body.owner.runtime.model.adapter.reportsDocumentOpen ? "NotNeeded" : "Completed"
+            )
           }
           yield* page.setContent("<title>Recovered</title>", { waitUntil: "domContentLoaded" })
           assert.strictEqual(yield* page.title, "Recovered")
@@ -450,6 +457,189 @@ export const contents = (
             ),
             []
           )
+        }), timeout)
+
+      it.effect("setContent adds no console messages of its own", () =>
+        Effect.gen(function*() {
+          const page = yield* SharedContext.newPage
+          const logged = yield* ConsoleMessage.next(page, { text: "fixture log" })
+          yield* page.setContent("<script>console.debug(\"fixture log\")</script>")
+          yield* logged
+          assert.deepStrictEqual(
+            (yield* ConsoleMessage.history(page)).entries.map((entry) =>
+              entry.text
+            ),
+            ["fixture log"]
+          )
+        }), timeout)
+
+      it.effect("setContent settles when the page silences console.debug", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* SharedContext.newPage
+          yield* page.goto(fixtureUrl(origin, "<script defer src=\"/pending-script\"></script>"), {
+            waitUntil: "commit"
+          })
+          yield* page.evaluateInMainWorld(() => {
+            console.debug = () => {}
+          })
+          yield* page.setContent("<title>Replacement</title>", { waitUntil: "domContentLoaded" }).pipe(
+            Deadline.within("2 seconds")
+          )
+          assert.strictEqual(yield* page.title, "Replacement")
+        }), timeout)
+
+      it.effect("an application's console messages survive setContent", () =>
+        Effect.gen(function*() {
+          const page = yield* SharedContext.newPage
+          const logged = yield* ConsoleMessage.next(page, { text: "after marker text" })
+          yield* page.evaluateInMainWorld(() => {
+            console.log("__striderDocumentOpened")
+            console.log("after marker text")
+          })
+          yield* logged
+          assert.deepStrictEqual((yield* ConsoleMessage.history(page)).entries.map((entry) => entry.text), [
+            "__striderDocumentOpened",
+            "after marker text"
+          ])
+        }), timeout)
+
+      it.effect("setContent replaces a parsed document still waiting for deferred scripts", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* SharedContext.newPage
+          yield* page.goto(
+            fixtureUrl(origin, "<title>Old</title><script defer src=\"/pending-script\"></script>"),
+            { waitUntil: "commit" }
+          )
+          assert.strictEqual(
+            yield* page.evaluateInMainWorld(() => document.readyState),
+            "interactive"
+          )
+          yield* page.setContent("<title>Replacement</title>", { waitUntil: "domContentLoaded" }).pipe(
+            Deadline.within("2 seconds")
+          )
+          assert.strictEqual(yield* page.title, "Replacement")
+        }), timeout)
+
+      it.effect("setContent does not use readiness from before queued input releases", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* SharedContext.newPage
+          yield* page.goto(
+            fixtureUrl(origin, "<title>Old</title><script defer src=\"/set-content-deferred.js\"></script>"),
+            {
+              waitUntil: "commit"
+            }
+          )
+          const locator = page.locator("body")
+          assert(locator instanceof LocatorImpl)
+          const input = locator.owner.page.input
+          const original = input.withPermit
+          // Hold the write until the old document finishes, as an in-flight native input can do.
+          const withPermit: typeof original = (effect) =>
+            input.withPermits(1)(Effect.andThen(
+              page.status.waitFor((status) => status._tag === "Open" && status.document.readiness === "complete").pipe(
+                Effect.orDie
+              ),
+              effect
+            ))
+          yield* Effect.acquireUseRelease(
+            Effect.sync(() => Object.assign(input, { withPermit })),
+            () =>
+              Effect.gen(function*() {
+                const before = yield* page.status
+                assert(before._tag === "Open" && before.document.readiness === "loading")
+                yield* page.setContent(
+                  "<title>New</title><script defer src=\"/set-content-deferred.js?replacement\"></script>",
+                  {
+                    waitUntil: "domContentLoaded"
+                  }
+                )
+                assert.strictEqual(yield* page.title, "Deferred", "the replacement's deferred script must finish")
+              }),
+            () => Effect.sync(() => Object.assign(input, { withPermit: original }))
+          )
+        }), timeout)
+
+      it.effect("setContent reaches load and domContentLoaded with JavaScript disabled", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const created = yield* Browser.newContext({ emulation: { javaScript: "disabled" } }).pipe(Effect.exit)
+            if (!(yield* supports("emulation.javaScript.disabled"))) {
+              assert.deepInclude(reasonOf(created)?.reason as unknown, {
+                _tag: "Unsupported",
+                capability: "emulation.javaScript.disabled"
+              })
+              return
+            }
+            assert(Exit.isSuccess(created), "a context with JavaScript disabled opens")
+            const page = yield* created.value.newPage
+            yield* page.goto(fixtureUrl(origin, "<title>Base</title>"), { waitUntil: "load" })
+            const loaded = yield* page.setContent(
+              `<title>Loaded</title><script>document.title = "Script ran"</script>`,
+              { waitUntil: "load" }
+            ).pipe(
+              Deadline.within("5 seconds"),
+              Effect.exit
+            )
+            assert.strictEqual(yield* page.title, "Loaded")
+            const parsed = yield* page.setContent(
+              `<title>Parsed</title><script>document.title = "Script ran"</script>`,
+              { waitUntil: "domContentLoaded" }
+            ).pipe(
+              Deadline.within("5 seconds"),
+              Effect.exit
+            )
+            assert.strictEqual(yield* page.title, "Parsed")
+            assert.isTrue(Exit.isSuccess(loaded), `setContent with load settles: ${loaded}`)
+            assert.isTrue(Exit.isSuccess(parsed), `setContent with domContentLoaded settles: ${parsed}`)
+          }))
+        }), timeout)
+
+      it.effect("a context with JavaScript disabled runs no script on a page it navigates", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const created = yield* Browser.newContext({ emulation: { javaScript: "disabled" } }).pipe(Effect.exit)
+            if (!(yield* supports("emulation.javaScript.disabled"))) {
+              assert.deepInclude(reasonOf(created)?.reason as unknown, {
+                _tag: "Unsupported",
+                capability: "emulation.javaScript.disabled"
+              })
+              return
+            }
+            assert(Exit.isSuccess(created), "a context with JavaScript disabled opens")
+            const page = yield* created.value.newPage
+            yield* page.goto(
+              fixtureUrl(origin, `<title>Static</title><script>document.title = "Script ran"</script>`),
+              { waitUntil: "load" }
+            )
+            assert.strictEqual(yield* page.title, "Static")
+          }))
+        }), timeout)
+
+      it.effect("a context with JavaScript enabled runs a navigated page's script", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const created = yield* Browser.newContext({ emulation: { javaScript: "enabled" } }).pipe(Effect.exit)
+            if (!(yield* supports("emulation.javaScript"))) {
+              assert.deepInclude(reasonOf(created)?.reason as unknown, {
+                _tag: "Unsupported",
+                capability: "emulation.javaScript"
+              })
+              return
+            }
+            assert(Exit.isSuccess(created), "a context with JavaScript enabled opens")
+            const page = yield* created.value.newPage
+            yield* page.goto(
+              fixtureUrl(origin, `<title>Static</title><script>document.title = "Script ran"</script>`),
+              { waitUntil: "load" }
+            )
+            assert.strictEqual(yield* page.title, "Script ran")
+          }))
         }), timeout)
 
       it.effect("selects only nonnegative nth positions and keeps first and last distinct in diagnostics", () =>
@@ -648,9 +838,7 @@ export const contents = (
             y: Math.min(...red.map((p) =>
               p.y
             )),
-            width: Math.max(...red.map((p) =>
-              p.x
-            )) - Math.min(...red.map((p) => p.x)) +
+            width: Math.max(...red.map((p) => p.x)) - Math.min(...red.map((p) => p.x)) +
               1,
             height: Math.max(...red.map((p) => p.y)) - Math.min(...red.map((p) => p.y)) + 1
           }

@@ -338,6 +338,7 @@ export const connect = (
       info: describe.info,
       capabilities: yield* SubscriptionRef.make(describe.capabilities),
       pauseScope: "browser",
+      reportsDocumentOpen: false,
       defaultContext,
       closed: Effect.never,
       createUserContext: Effect.fnUntraced(function*() {
