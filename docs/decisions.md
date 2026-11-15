@@ -595,6 +595,14 @@ reply wait are released, a warning records the incomplete restoration, and scope
 also closes the wait and is quiet. The original dimensions remain recorded after incomplete restoration so a
 later override does not mistake stale dimensions for the native viewport.
 
+A context the library created and removes as its scope closes skips releasing the overrides it holds for its life,
+its emulation and its focus emulation, as it skips its file chooser, challenge, credential and download
+declarations: the removal follows, so nothing can observe the restore, and the wait is the one cleanup that can
+last its whole budget, on a renderer blocked by a script or whose size never matches its recorded baseline. If the
+browser refuses the removal, those overrides are released after all. A context handed off and left open, and an
+`emulate` registration released with its own scope, still restore and wait. Rejected: restoring on close with a
+shorter bound, which still spends it on every close that cannot be confirmed and warns for a page about to go.
+
 Rejected: `dontSetVisibleSize: true`. It passed restoration and viewport/full-page capture checks, but Chromium
 screencast frames remained at the native 780x493 instead of an overridden 640x480. Keeping native resizing preserves
 that existing rendering behavior. The bounded wait accepts that a hidden page might not complete restoration;

@@ -1,8 +1,8 @@
 /**
  * Declarations on CDP: what the registry (`declarations.ts`) says each target gets, applied in its gate before
  * its scripts run and again to every target in scope when a registration comes or goes. A context that is about
- * to be removed skips the release of its own file chooser, challenge and credential declarations; if the removal
- * is refused, `restoreContext` reconciles its targets with the declarations that remain.
+ * to be removed skips the release of its own file chooser, challenge, credential, download and override
+ * declarations; if the removal is refused, `restoreContext` reconciles its targets with the declarations that remain.
  */
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -512,26 +512,41 @@ export const applyDownloads = (state: State, context: ContextEntry) =>
     }).pipe(Protocol.on(state.root()))
   }))
 
+/** Notes an override whose release was skipped because its context was to be removed, for `restoreContext`. */
+const retire = (state: State, scope: Adapter.DeclarationScope, declaration: Adapter.Declaration) => {
+  if (declaration._tag !== "Override" || scope._tag !== "UserContext") return
+  const context = state.contexts.get(scope.context)
+  if (context !== undefined) (context.retiredOverrides ??= new Map()).set(declaration.override._tag, declaration)
+}
+
 /**
  * What the declarations in force say, sent again to a context's targets, after a removal the browser refused left
  * in place a context whose declarations' releases were skipped because it was to go. Each target's interception
- * and file chooser are reset on their own: a reset that fails is logged and the others still run.
+ * and file chooser are reset on their own, and each override whose release was skipped is released as it would
+ * have been: a reset that fails is logged and the others still run.
  */
-export const restoreContext = (state: State, context: ContextEntry) =>
-  Effect.forEach(
-    targetsInScope(state, { _tag: "UserContext", context: context.id }),
-    (target) =>
-      // Each reset stands alone: one that fails is logged and leaves the others to run
-      Effect.all([
-        applyIntercepts(state, target, target.page!).pipe(releaseErrors),
-        target.kind === "page"
-          ? Page.setInterceptFileChooserDialog({
-            enabled: state.registry.fileChooser(placement(target.page!))
-          }).pipe(Protocol.on(target.session), releaseErrors)
-          : Effect.void
-      ], { discard: true }),
-    { concurrency: "unbounded", discard: true }
-  )
+export const restoreContext = (state: State, context: ContextEntry) => {
+  const scope: Adapter.DeclarationScope = { _tag: "UserContext", context: context.id }
+  const overrides = [...(context.retiredOverrides?.values() ?? [])]
+  context.retiredOverrides = undefined
+  return Effect.all([
+    Effect.forEach(
+      targetsInScope(state, scope),
+      (target) =>
+        // Each reset stands alone: one that fails is logged and leaves the others to run
+        Effect.all([
+          applyIntercepts(state, target, target.page!).pipe(releaseErrors),
+          target.kind === "page"
+            ? Page.setInterceptFileChooserDialog({
+              enabled: state.registry.fileChooser(placement(target.page!))
+            }).pipe(Protocol.on(target.session), releaseErrors)
+            : Effect.void
+        ], { discard: true }),
+      { concurrency: "unbounded", discard: true }
+    ),
+    Effect.forEach(overrides, (declaration) => releaseDeclaration(state, declaration, scope), { discard: true })
+  ], { concurrency: "unbounded", discard: true })
+}
 
 const releaseErrors = <A>(effect: Effect.Effect<A, Protocol.ProtocolError | Deadline.Timeout>) =>
   effect.pipe(
@@ -569,8 +584,9 @@ export const declare = Effect.fnUntraced(function*(
       // Registry removal is synchronous, before any caller stops waiting or prior settings are restored.
       state.registry.remove(id)
       const release = "retiring" in declaration && declaration.retiring?.() === true
-        // The context is removed right after: undoing the declaration would only add a round trip
-        ? Effect.void
+        // The context is removed right after: undoing the declaration would only add a round trip, or for a
+        // viewport a wait on a renderer that may never report its size again
+        ? Effect.sync(() => retire(state, scope, declaration))
         : declaration._tag === "Downloads"
         ? Effect.forEach(
           scope._tag === "UserContext"
