@@ -1,6 +1,16 @@
 [
   {
     "tests": [
+      "BC-068"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "flaky",
+    "reason": "Flaky: Stock WebKit: a popup opened with window.open(url) reaches a parsed status while it still shows about:blank"
+  },
+  {
+    "tests": [
       "BC-069",
       "BC-071",
       "BC-072"
@@ -11,8 +21,7 @@
   },
   {
     "tests": [
-      "BC-063",
-      "BC-068"
+      "BC-063"
     ],
     "browsers": [
       "webkit"

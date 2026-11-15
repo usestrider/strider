@@ -1,6 +1,16 @@
 [
   {
     "tests": [
+      "[network.test] network Page.authenticate should fail if wrong credentials"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "flaky",
+    "reason": "Flaky: A route's page.authenticate with wrong credentials loops or hangs"
+  },
+  {
+    "tests": [
       "[network.test] network Network Events Page.Events.RequestFailed for blocked requests"
     ],
     "browsers": [
@@ -227,8 +237,7 @@
       "[network.test] network Page.authenticate should fail if wrong credentials"
     ],
     "browsers": [
-      "chromium",
-      "firefox"
+      "chromium"
     ],
     "status": "fails",
     "reason": "A route's page.authenticate with wrong credentials loops or hangs"

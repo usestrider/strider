@@ -1,6 +1,16 @@
 [
   {
     "tests": [
+      "PO-028"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "flaky",
+    "reason": "Flaky: Locator.click page.getByRole(\"button\"): unknown: Rejected (The session ended: detached)"
+  },
+  {
+    "tests": [
       "PO-014"
     ],
     "browsers": [

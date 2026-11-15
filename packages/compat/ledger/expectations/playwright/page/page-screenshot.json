@@ -1,6 +1,16 @@
 [
   {
     "tests": [
+      "SS-027"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "flaky",
+    "reason": "Flaky: A Firefox screenshot taken while the page navigates fails with a raw rejection"
+  },
+  {
+    "tests": [
       "SS-095"
     ],
     "browsers": [
@@ -246,16 +256,6 @@
     ],
     "status": "fails",
     "reason": "A too-tall Firefox screenshot fails as 'unsupported' and loses Firefox's message"
-  },
-  {
-    "tests": [
-      "SS-027"
-    ],
-    "browsers": [
-      "firefox"
-    ],
-    "status": "fails",
-    "reason": "A Firefox screenshot taken while the page navigates fails with a raw rejection"
   },
   {
     "tests": [

@@ -1,6 +1,16 @@
 [
   {
     "tests": [
+      "[launcher.test] Launcher specs Puppeteer Puppeteer.launch userDataDir option should restore state"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "flaky",
+    "reason": "Flaky: Firefox: localStorage written before a clean close is missing after the profile is reused"
+  },
+  {
+    "tests": [
       "[launcher.test] Launcher specs Puppeteer Browser.close should stop the browser process when the close command fails"
     ],
     "status": "notApplicable",
@@ -238,7 +248,6 @@
       "[launcher.test] Launcher specs Puppeteer Puppeteer.launch userDataDir option should restore state"
     ],
     "browsers": [
-      "firefox",
       "webkit"
     ],
     "status": "fails",

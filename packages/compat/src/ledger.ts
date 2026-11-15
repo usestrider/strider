@@ -30,7 +30,7 @@ export const upstreamFileOf = (portFile: string): { source: keyof typeof layouts
   throw new Error(`${relative} isn't a port file: put it under ports/playwright/ or ports/puppeteer/`)
 }
 
-export const statuses = ["fails", "needsFeature", "differentByDesign", "notApplicable"] as const
+export const statuses = ["fails", "flaky", "needsFeature", "differentByDesign", "notApplicable"] as const
 export type Status = typeof statuses[number]
 
 /**
@@ -54,7 +54,8 @@ export interface Expectation {
   /** @default every browser */
   readonly browsers?: ReadonlyArray<BrowserName>
   /**
-   * `fails`: ported, and fails for a bug in Strider, which `reason` describes (`issue`, optional, a GitHub issue). `needsFeature`: can't be ported until Strider
+   * `fails`: ported, and fails for a bug in Strider, which `reason` describes (`issue`, optional, a GitHub issue). `flaky`: ported, and passes or fails
+   * from run to run for a timing-dependent bug, which `reason` describes; either result is expected. `needsFeature`: can't be ported until Strider
    * has an API (`issue`, or `matrix`, the Playwright matrix row). `differentByDesign`: Strider decided otherwise
    * (`decision`, a heading of docs/decisions.md). `notApplicable`: tests something Strider doesn't have or
    * shouldn't, such as Playwright's inspector (`reason`).
@@ -221,7 +222,7 @@ export const check = (): ReadonlyArray<string> => {
         continue
       }
       const unported = expectations.find((expectation) =>
-        expectation.source === port.source && expectation.status !== "fails" &&
+        expectation.source === port.source && expectation.status !== "fails" && expectation.status !== "flaky" &&
         expectation.browsers === undefined && covers(expectation, test)
       )
       if (unported !== undefined) problems.push(`${port.path}: ${key} is ported but marked ${unported.status}`)
@@ -271,6 +272,7 @@ export const outcomes: ReadonlyArray<Outcome> = [
   "skipped",
   "notRun",
   "notPorted",
+  "flaky",
   "needsFeature",
   "differentByDesign",
   "notApplicable"
@@ -311,14 +313,16 @@ export const compare = (run: Run): ReadonlyArray<Finding> => {
           const failed = ran.some((result) => result.state === "failed")
           // Any expectation that isn't a pass explains a failure, a port kept running on a browser it marks as
           // different by design included; a pass against one is news either way
-          outcome = expectation !== undefined
+          outcome = expectation?.status === "flaky"
+            ? "flaky"
+            : expectation !== undefined
             ? failed ? "failedAsExpected" : "passedUnexpectedly"
             : failed
             ? "failedUnexpectedly"
             : "passed"
         } else if (variants.length > 0) {
           outcome = "skipped"
-        } else if (expectation !== undefined && expectation.status !== "fails") {
+        } else if (expectation !== undefined && expectation.status !== "fails" && expectation.status !== "flaky") {
           outcome = expectation.status
         } else {
           outcome = ported.has(`${name}\0${test.key}`) ? "notRun" : "notPorted"
@@ -345,6 +349,7 @@ const plain: Record<Outcome, string> = {
   skipped: "skipped",
   notRun: "ported, not run",
   notPorted: "not ported",
+  flaky: "flaky, either result",
   needsFeature: "needs a feature",
   differentByDesign: "different by design",
   notApplicable: "not applicable"

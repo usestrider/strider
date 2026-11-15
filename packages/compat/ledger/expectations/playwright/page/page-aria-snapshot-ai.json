@@ -1,6 +1,26 @@
 [
   {
     "tests": [
+      "AR-074"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "flaky",
+    "reason": "Flaky: Chromium: a snapshot taken while a page reloads reads an empty document, because Page.snapshot never waits"
+  },
+  {
+    "tests": [
+      "AR-073"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "flaky",
+    "reason": "Flaky: A frame whose navigation failed appears with child text in the snapshot"
+  },
+  {
+    "tests": [
       "AR-052",
       "AR-083",
       "AR-084"
@@ -134,15 +154,5 @@
     ],
     "status": "fails",
     "reason": "On stock WebKit, focus inside a data: iframe doesn't show as focused in the snapshot"
-  },
-  {
-    "tests": [
-      "AR-074"
-    ],
-    "browsers": [
-      "chromium"
-    ],
-    "status": "fails",
-    "reason": "Chromium: a snapshot taken while a page reloads reads an empty document, because Page.snapshot never waits"
   }
 ]

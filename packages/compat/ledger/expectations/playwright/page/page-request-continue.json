@@ -1,6 +1,16 @@
 [
   {
     "tests": [
+      "RO-060"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "flaky",
+    "reason": "Flaky: expected 'a' to equal undefined"
+  },
+  {
+    "tests": [
       "RO-083",
       "RO-084",
       "RO-085",

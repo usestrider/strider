@@ -1,6 +1,26 @@
 [
   {
     "tests": [
+      "LH-012"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "flaky",
+    "reason": "Flaky: LocatorHandler wait: a timeout while the handler's trigger is still shown carries no hint on Firefox"
+  },
+  {
+    "tests": [
+      "LH-012"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "flaky",
+    "reason": "Flaky: WebKit: a click that times out while a locator handler's trigger is still shown reports no hint about the handler"
+  },
+  {
+    "tests": [
       "LH-008"
     ],
     "status": "notApplicable",
@@ -51,15 +71,5 @@
     "status": "differentByDesign",
     "reason": "A locator handler's callback shares its triggering action's deadline, so a stuck handler is interrupted when the action times out and runs again for the next one",
     "decision": "Scoped overlay dispatch"
-  },
-  {
-    "tests": [
-      "LH-012"
-    ],
-    "browsers": [
-      "firefox"
-    ],
-    "status": "fails",
-    "reason": "LocatorHandler wait: a timeout while the handler's trigger is still shown carries no hint on Firefox"
   }
 ]

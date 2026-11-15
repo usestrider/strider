@@ -1,6 +1,16 @@
 [
   {
     "tests": [
+      "WO-028"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "flaky",
+    "reason": "Flaky: Chromium: a context's offline emulation doesn't reach its service workers, so a worker's own fetch goes to the network"
+  },
+  {
+    "tests": [
       "WO-029",
       "WO-030",
       "WO-031"

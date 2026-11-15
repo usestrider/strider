@@ -41,6 +41,7 @@ Each run writes `.data/compat/runs/<run>/run.json` and `report.md`, and a failed
   | Status              | Means                                                              | Names      |
   | ------------------- | ------------------------------------------------------------------ | ---------- |
   | `fails`             | ported, and fails for a bug in Strider                             | `reason`   |
+  | `flaky`             | ported, and passes or fails from run to run, for a timing bug      | `reason`   |
   | `needsFeature`      | can't be ported until Strider has the API                          | `matrix`   |
   | `differentByDesign` | Strider decided otherwise                                          | `decision` |
   | `notApplicable`     | tests what Strider doesn't have or shouldn't, such as an inspector | `reason`   |

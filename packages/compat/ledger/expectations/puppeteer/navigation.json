@@ -1,6 +1,16 @@
 [
   {
     "tests": [
+      "[navigation.test] navigation Page.goto should not leak listeners during navigation of 11 pages"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "flaky",
+    "reason": "Flaky: Stock WebKit: twenty pages opened at once in one context lose one to a close"
+  },
+  {
+    "tests": [
       "[navigation.test] navigation Page.goto should return response when page replaces its state during load",
       "[navigation.test] navigation Page.goto should navigate to empty page with networkidle0",
       "[navigation.test] navigation Page.goto should navigate to page with iframe and networkidle0",

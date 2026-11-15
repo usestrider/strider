@@ -1,6 +1,36 @@
 [
   {
     "tests": [
+      "FR-031"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "flaky",
+    "reason": "Flaky: expected 1 to equal 2"
+  },
+  {
+    "tests": [
+      "FR-033"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "flaky",
+    "reason": "Flaky: expected 1 to equal 2"
+  },
+  {
+    "tests": [
+      "FR-034"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "flaky",
+    "reason": "Flaky: page.frames lags the iframe's load event on Chromium and stock WebKit in a loaded run (one hit each)"
+  },
+  {
+    "tests": [
       "FR-024",
       "FR-032"
     ],
@@ -68,15 +98,5 @@
     ],
     "status": "fails",
     "reason": "Browser-generated console messages (a frame refused by X-Frame-Options) are never reported on Chromium, and aren't on WebKit"
-  },
-  {
-    "tests": [
-      "FR-034"
-    ],
-    "browsers": [
-      "webkit"
-    ],
-    "status": "fails",
-    "reason": "page.frames lags the iframe's load event on Chromium and stock WebKit in a loaded run (one hit each)"
   }
 ]

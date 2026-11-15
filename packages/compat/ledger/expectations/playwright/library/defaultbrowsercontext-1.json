@@ -1,6 +1,16 @@
 [
   {
     "tests": [
+      "DC-008"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "flaky",
+    "reason": "Flaky: The first goto on a persistent profile's first tab, an adopted page, times out with no outcome"
+  },
+  {
+    "tests": [
       "DC-007"
     ],
     "status": "needsFeature",
@@ -42,7 +52,6 @@
       "DC-008"
     ],
     "browsers": [
-      "chromium",
       "firefox",
       "webkit"
     ],

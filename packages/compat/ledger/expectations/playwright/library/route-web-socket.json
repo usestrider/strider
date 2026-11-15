@@ -1,6 +1,26 @@
 [
   {
     "tests": [
+      "WS-033"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "flaky",
+    "reason": "Flaky: Firefox: a WebSocket route's send racing a page closure fails with the realm's end"
+  },
+  {
+    "tests": [
+      "WS-033"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "flaky",
+    "reason": "Flaky: A WebSocket payload's fetch finds its realm destroyed during a routed connection on Firefox and WebKit"
+  },
+  {
+    "tests": [
       "WS-032"
     ],
     "status": "needsFeature",
@@ -33,16 +53,6 @@
     ],
     "status": "fails",
     "reason": "Differs, pending a decision: A page-side route close isn't forwarded to the real server, which sees 'route removed' instead"
-  },
-  {
-    "tests": [
-      "WS-033"
-    ],
-    "browsers": [
-      "firefox"
-    ],
-    "status": "fails",
-    "reason": "Firefox: a WebSocket route's send racing a page closure fails with the realm's end"
   },
   {
     "tests": [

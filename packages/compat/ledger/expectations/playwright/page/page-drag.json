@@ -1,11 +1,32 @@
 [
   {
     "tests": [
-      "DD-013",
       "DD-016"
     ],
     "browsers": [
+      "chromium"
+    ],
+    "status": "flaky",
+    "reason": "Flaky: On Chromium an HTML drag made with the mouse misses dragenter, repeats dragover, and does not drop or cancel as expected"
+  },
+  {
+    "tests": [
+      "DD-013"
+    ],
+    "browsers": [
       "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "status": "needsFeature",
+    "reason": "Strider refuses input.dragAndDrop on Firefox: Firefox starts an HTML drag from WebDriver actions, and never drops it; dragTo(target, { html: \"synthetic\" }) has the page dispatch the drag's events, untrusted",
+    "matrix": "method-locator-dragto"
+  },
+  {
+    "tests": [
+      "DD-016"
+    ],
+    "browsers": [
       "firefox",
       "webkit"
     ],

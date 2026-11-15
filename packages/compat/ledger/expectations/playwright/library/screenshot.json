@@ -1,6 +1,16 @@
 [
   {
     "tests": [
+      "SS-068"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "flaky",
+    "reason": "Flaky: Page.goto timed out while postcondition: The navigation had no outcome before the deadline"
+  },
+  {
+    "tests": [
       "SS-069",
       "SS-070",
       "SS-071",

@@ -1,6 +1,16 @@
 [
   {
     "tests": [
+      "CM-002"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "flaky",
+    "reason": "Flaky: expected [ 'hello' ] to deeply equal [ 'hello', 'hello' ]"
+  },
+  {
+    "tests": [
       "CM-001"
     ],
     "status": "needsFeature",

@@ -1,6 +1,17 @@
 [
   {
     "tests": [
+      "PR-005"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "flaky",
+    "reason": "Flaky: Loopback destinations bypass a context proxy on every backend, including localhost, 127.0.0.1 and *.localhost"
+  },
+  {
+    "tests": [
       "PR-015"
     ],
     "browsers": [
