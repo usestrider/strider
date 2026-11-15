@@ -1282,6 +1282,58 @@ describe("CDP restoration cleanup", () => {
     )
   }
 
+  it.effect("ends a context only once its downloads have ended, which Chromium reports after the disposal's reply", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const sent: Array<string> = []
+      const mock = {
+        ...session,
+        ended: Effect.void,
+        send: (command: { readonly method: string; readonly params: { readonly behavior?: string } }) =>
+          Effect.sync(() => {
+            sent.push(
+              command.method === "Browser.setDownloadBehavior"
+                ? `${command.method} ${command.params.behavior}`
+                : command.method
+            )
+            return {}
+          })
+      } as unknown as ProtocolClient.Session
+      const { state, page, target, facts } = yield* withPage(mock)
+      const context = new State.ContextEntry(state.ids.userContext(), "scoped", false)
+      state.contexts.set(context.id, context)
+      state.contextsByCdp.set("scoped", context)
+      ;(page as { context: State.ContextEntry }).context = context
+      yield* Declare.declare(state, { _tag: "UserContext", context: context.id }, {
+        _tag: "Downloads",
+        behavior: { _tag: "Allow", directory: "/tmp/downloads" },
+        retiring: () => context.removing
+      })
+      const handlers = Contexts.register(Kit.handlers<State.Event>())
+      handlers.apply("Browser.downloadWillBegin", {
+        frameId: "T1",
+        guid: "G1",
+        url: "https://example.test/file",
+        suggestedFilename: "file"
+      }, { state, target })
+      yield* state.buffer.flush
+      sent.length = 0
+      yield* Contexts.removeUserContext(state, context.id)
+      assert.deepStrictEqual(sent, ["Browser.setDownloadBehavior deny", "Target.disposeBrowserContext"])
+      for (let i = 0; i < 10; i++) yield* Effect.yieldNow
+      assert.isTrue(state.contexts.has(context.id), "the download hasn't ended")
+      assert.notInclude(facts.map((fact) => fact._tag), "UserContextRemoved")
+      handlers.apply("Browser.downloadProgress", {
+        guid: "G1",
+        totalBytes: 15,
+        receivedBytes: 15,
+        state: "canceled"
+      }, { state, target })
+      yield* state.buffer.flush
+      yield* state.buffer.waitFor(() => state.contexts.has(context.id) ? undefined : true)
+      const tags = facts.map((fact) => fact._tag)
+      assert.isBelow(tags.indexOf("DownloadEnded"), tags.indexOf("UserContextRemoved"))
+    })))
+
   const declarationSession = (sent: Array<string>, refuseDisposal = false) =>
     ({
       ...session,
