@@ -1624,3 +1624,13 @@ these, Playwright's `goto` and `reload` resolve to `null` for them, and the brow
 report both kinds as requests, and Firefox reports `data:` but not `blob:`. Reporting each browser's own events was
 rejected: the same page would report different requests on each backend, and a `data:` navigation would carry a
 response with no network behind it. `file:` URLs stay requests.
+
+## A Chromium HTML drag fires each drag event as Chromium's own drag does
+
+On Chromium, the move that starts an intercepted HTML drag sends `dragEnter` alone, each later move `dragOver`, and the
+release `drop` alone, so the page sees `dragenter`, `dragover` and `drop` once each, as a drag Chromium runs itself
+gives. Chromium's `drop` command fires a `dragover` before the `drop`, so no sequence of drag commands also gives a
+`dragover` while the button is still held after a single move: a drag of one held move shows its first `dragover` at
+the release or the next move. Sending `dragEnter` and `dragOver` at the move that starts the drag, which shows the
+drag over the target while the button is held, was rejected: every drop would then end with a second `dragover`,
+which Playwright's and Puppeteer's drag tests both reject.
