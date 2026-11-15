@@ -1200,7 +1200,7 @@ session cookie, while closing that startup page first exposed the same loss. Iso
 session cookies. This is an observed boundary while the browser remains alive, not a traced Chromium cause or
 a claim about other session-only state. It affects default contexts with temporary as well as supplied profile
 directories, so preserving the window only for `userDataDir` would leave part of the behavior change in place.
-It is distinct from shutdown of a connected Chromium layer, which now attempts graceful close before signals.
+It is distinct from shutdown of a connected Chromium layer, which attempts graceful close before signals.
 
 Without a startup window, initial `strider tabs` and the `tabs` tool return empty listings. Existing callers
 would have to create a page explicitly. Retain the current initial-page behavior and the session-cookie guard;
@@ -1211,16 +1211,18 @@ silently changing session-cookie lifetime and initial tab listings; enabling it 
 which still changes temporary default contexts; and treating the saving as evidence that the startup page has
 no behavioral role. Caller opt-in keeps that trade explicit.
 
-## Owned Chromium attempts graceful close before termination
+## Owned Chromium and Firefox attempt graceful close before termination
 
-A successfully connected, owned Chromium launch sends Browser.close while the protocol client is alive and waits
-for actual process exit for up to five seconds on the browser clock, independently of the caller's deadline.
-The existing signal termination and five-second force-kill fallback follow, so a hung process can take roughly
-ten seconds plus process-group cleanup. This best effort helps preserve recent supplied-profile storage without
-promising durability on crashes or forced termination. Signal-only teardown was rejected because the reproduced
-normal shutdown lost a recent write; an unbounded wait could hang scope closure, and a caller-configurable budget
-would add public configuration for a bounded internal cleanup policy. Attached browsers and failed connections
-retain their existing release behavior.
+A successfully connected, owned Chromium or Firefox launch sends its protocol's close command (CDP's Browser.close,
+BiDi's browser.close, before session.end, which it ends itself) while the protocol client is alive and waits for
+actual process exit for up to five seconds on the browser clock, independently of the caller's deadline. Both
+adapters share the one finalizer. The wait is on the exit, not the reply: Firefox 158.0 answers browser.close
+before it writes the profile's cookies and localStorage. The existing signal termination and five-second force-kill
+fallback follow, so a hung process can take roughly ten seconds plus process-group cleanup. This best effort helps
+preserve recent supplied-profile storage without promising durability on crashes or forced termination. Signal-only
+teardown was rejected because the reproduced normal shutdown lost a recent write on both browsers; an unbounded
+wait could hang scope closure, and a caller-configurable budget would add public configuration for a bounded
+internal cleanup policy. Attached browsers and failed connections retain their existing release behavior.
 
 ## Chromium screencast ownership belongs to the session
 
