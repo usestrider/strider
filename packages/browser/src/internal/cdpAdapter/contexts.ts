@@ -38,11 +38,13 @@ export const register = (handlers: Kit.Handlers<Event>) =>
   handlers
     .on(BrowserCdp.downloadWillBegin, (params, { state }) => {
       const frame = frameOf(state, params.frameId)
+      // A frame that has ended still names its context, which the download's end is waited for by
+      const context = frame?.page.context ?? state.retiredFrames.get(params.frameId)
       const download: DownloadEntry = {
         id: state.ids.download(),
         guid: params.guid,
-        directory: frame === undefined ? Option.none() : downloadDirectory(state, frame.page.context.id),
-        context: frame?.page.context,
+        directory: context === undefined ? Option.none() : downloadDirectory(state, context.id),
+        context,
         ended: false
       }
       state.downloads.set(params.guid, download)
@@ -146,9 +148,9 @@ export const removeUserContext = Effect.fnUntraced(function*(state: State, id: U
     const behavior = state.registry.downloads(context.id)
     const allowed = Option.isSome(behavior) && behavior.value._tag === "Allow"
     yield* Effect.gen(function*() {
-      // Chromium starts a download during the disposal that it can't tie to a frame, and so to this context, any
-      // more; denied, none starts. A refused disposal applies the declarations' behavior again
-      if (allowed && inContext.length > 0) {
+      // While the context has pages or frames that ended, Chromium can still start a download in it, during the
+      // disposal too; denied, none starts. A refused disposal applies the declarations' behavior again
+      if (allowed && (inContext.length > 0 || (context.retiredFrames?.size ?? 0) > 0)) {
         yield* Kit.protocol(
           BrowserCdp.setDownloadBehavior({
             behavior: "deny",
@@ -171,8 +173,9 @@ export const removeUserContext = Effect.fnUntraced(function*(state: State, id: U
     context.requestSizes?.clear()
     // Chromium may answer before its pages' sessions end, and before it cancels the context's downloads, which it
     // reports after the reply, a download that was completing having moved its file into the context's directory
-    // meanwhile. The context ends after both, which L1 waits for under a budget of its own (`Model.remove`), before
-    // it removes that directory; they end with the connection at the latest
+    // meanwhile. The context ends after both. Its pages' sessions end with the connection at the latest; a download
+    // Chromium never reports ended keeps this wait until the connection's scope closes. L1 waits for the context's
+    // end under a budget of its own (`Model.remove`), which also ends when the connection is lost
     state.buffer.start(Effect.gen(function*() {
       let downloads: Array<DownloadEntry> = []
       yield* state.buffer.run(() => {
@@ -183,6 +186,8 @@ export const removeUserContext = Effect.fnUntraced(function*(state: State, id: U
         state.buffer.waitFor(() => downloads.every((download) => download.ended) ? true : undefined)
       ], { concurrency: "unbounded", discard: true })
       context.proxy = undefined
+      for (const frameId of context.retiredFrames ?? []) state.retiredFrames.delete(frameId)
+      context.retiredFrames = undefined
       state.contexts.delete(id)
       state.contextsByCdp.delete(browserContextId)
       yield* state.buffer.run(() => state.buffer.emit({ _tag: "UserContextRemoved", context: id }))

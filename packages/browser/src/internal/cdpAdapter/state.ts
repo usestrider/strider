@@ -53,6 +53,8 @@ export class ContextEntry {
   declare removing: boolean
   declare disposed?: boolean | undefined
   declare lifecycleLock?: Semaphore.Semaphore | undefined
+  /** The ids of its frames that have ended, which `State.retiredFrames` holds until the context is removed. */
+  declare retiredFrames?: Set<string> | undefined
   declare gate: ContextGate
   declare workerGate: WorkerGate
   constructor(id: UserContext.Id, browserContextId: string | undefined, isDefault: boolean) {
@@ -331,6 +333,11 @@ export interface State {
   readonly routeFailed: Set<string>
   readonly obligations: Map<Adapter.ObligationId, ObligationEntry>
   readonly downloads: Map<string, DownloadEntry>
+  /**
+   * The context of each ended frame of a context the library created, by frame id, until that context is removed:
+   * Chromium can announce a download after the frame that started it has gone.
+   */
+  readonly retiredFrames: Map<string, ContextEntry>
   readonly downloadsById: Map<Download.Id, DownloadEntry>
   readonly handles: Map<Adapter.HandleId, HandleEntry>
   readonly groups: Groups.Groups
@@ -402,6 +409,7 @@ export const make = (options: {
     routeFailed: new Set(),
     obligations: new Map(),
     downloads: new Map(),
+    retiredFrames: new Map(),
     downloadsById: new Map(),
     handles: new Map(),
     groups: Groups.make(),

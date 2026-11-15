@@ -94,6 +94,11 @@ export const removeFrame = (state: State, frame: FrameEntry, reason: L1Target.Cl
     }
     state.frames.delete(frame.frameId)
     state.navigables.delete(frame.id)
+    const context = frame.page.context
+    if (!context.isDefault && !context.disposed) {
+      state.retiredFrames.set(frame.frameId, context)
+      ;(context.retiredFrames ??= new Set()).add(frame.frameId)
+    }
     if (frame.document !== undefined) {
       for (const realm of frame.document.realms) removeRealm(state, realm, reason)
       state.documents.delete(frame.document.id)
