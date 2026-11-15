@@ -129,8 +129,8 @@ export const defaultLimits: Limits = { events: 10_000, bytes: 256 * 1024 * 1024 
 
 /**
  * The deadline of the operation a command is sent in, which replaces `Protocol.CommandTimeout` for it
- * (`boundedAdapter.ts`): the command waits for its reply until then, on the live clock, and then fails with
- * `NoReply`. A command in a region that can't be interrupted ends at the deadline too.
+ * (`boundedAdapter.ts`): the command waits for its reply, and for the events received before it to be handled,
+ * until then, on the live clock, and then fails with `NoReply`. A command in a region that can't be interrupted ends at the deadline too.
  */
 export const CommandDeadline: Context.Reference<Option.Option<MonotonicInstant.MonotonicInstant>> = Context.Reference(
   "@usestrider/browser/internal/ProtocolClient/CommandDeadline",
@@ -564,6 +564,10 @@ export const make: (
     run(handler({ session: state.handle, method: entry.method, params: entry.params, result: entry.raw, release }))
   }
 
+  // Waits until the worker has handled every message received before the entry's reply.
+  const caughtUp = (entry: Pending): Effect.Effect<void> =>
+    Effect.suspend(() => entry.through === undefined ? Effect.void : ingestion.caughtUp(entry.through))
+
   /** A registered command: writing it, the wait for its reply, and giving up on that reply. */
   const prepare = Effect.fnUntraced(function*<M extends string, P, A>(
     state: SessionState,
@@ -601,9 +605,16 @@ export const make: (
         runLate(entry, onLate)
       }
     })
+    // The caller resumes only once every message received before the reply has been handled, and the command's
+    // budget covers that wait too. Running out after the reply arrived leaves the reply to `abandon`, which hands
+    // a resource-creating one to the late-reply handler.
+    const replied = Deferred.await(entry.reply).pipe(
+      Effect.tap(() => caughtUp(entry)),
+      Effect.tapError(() => caughtUp(entry))
+    )
     // The browser clock rechecks the monotonic deadline when a timer fires early.
     const awaited = Duration.isFinite(timeout)
-      ? Deferred.await(entry.reply).pipe(
+      ? replied.pipe(
         BrowserClock.timeoutOn(replyBrowserClock, Duration.toMillis(timeout)),
         Effect.flatMap((reply) =>
           Option.isSome(reply)
@@ -611,7 +622,7 @@ export const make: (
             : Effect.andThen(abandon, Effect.fail(failure(new Protocol.NoReply({ method, timeout }))))
         )
       )
-      : Deferred.await(entry.reply)
+      : replied
     const tracing = yield* Tracing.TraceProtocolCommands
     return {
       write: transport.send(wire.encode(entry.id, method, encoded, state.key)).pipe(
@@ -626,9 +637,6 @@ export const make: (
         )
       ),
       reply: awaited.pipe(
-        // The caller resumes only once every event received before the reply has been folded and published.
-        Effect.tap(() => caughtUp(entry)),
-        Effect.tapError(() => caughtUp(entry)),
         Effect.flatMap((raw) => decode === undefined ? Effect.succeed(undefined as A) : decode(raw)),
         Effect.map((result) => {
           consumed = true
@@ -645,9 +653,6 @@ export const make: (
           : exchange
     }
   })
-
-  const caughtUp = (entry: Pending): Effect.Effect<void> =>
-    Effect.suspend(() => entry.through === undefined ? Effect.void : ingestion.caughtUp(entry.through))
 
   const send = Effect.fnUntraced(function*<M extends string, P, A>(
     state: SessionState,
