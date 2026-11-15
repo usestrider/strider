@@ -1635,4 +1635,6 @@ with `headless`, not with a launch profile: headless is what takes the device aw
 the profile, `stock` included; a launch with a window reports the machine's own devices. Putting them in the
 automation profile was rejected: a `stock` headless launch would still report no pointer, which no desktop browser
 does. A caller's own `--blink-settings`, or a profile's own pointer preferences, win, and Chromium's mobile touch
-emulation still overrides them.
+emulation still overrides them. On Firefox they're user values, as a launch profile's are, so in a profile directory
+the caller keeps, Firefox saves them into `prefs.js` and a later launch there, headed too, keeps them. Writing them
+as default values with `pref()`, which Firefox doesn't save, was rejected: Firefox 158 ignores them there.

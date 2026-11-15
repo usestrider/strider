@@ -47,7 +47,9 @@ const AdasFirefox = Firefox.layer({
   viewer, and popups in tabs. [`LaunchProfile.concurrent`](/docs/tools/testing#concurrent-pages) also turns off
   background timer throttling, for pages that run side by side.
 - A `userDataDir` of your own is never deleted. Its `user.js` keeps its own preferences; Strider's go in a block
-  after them, replaced at each launch.
+  after them, replaced at each launch. Firefox saves the preferences a launch writes, the headless pointer
+  preferences included, into the directory's `prefs.js`, so a later launch in that directory keeps them, a launch
+  with a window too.
 
 ## Pages as windows
 

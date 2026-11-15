@@ -335,6 +335,10 @@ export interface LaunchOptions {
    * profile that sets `ui.primaryPointerCapabilities` or `ui.allPointerCapabilities` keeps its value. On Chromium, a
    * context that emulates a mobile device with touch matches `(hover: none)` and `(pointer: coarse)` instead.
    *
+   * In a `userDataDir` you keep, Firefox saves the preferences a launch writes, these two pointer preferences
+   * included, into the directory's `prefs.js`, so a later launch in that directory keeps them, a launch with a
+   * window too.
+   *
    * @default true, except on WebKit, which opens a window
    */
   readonly headless?: boolean | undefined
@@ -354,6 +358,12 @@ export interface LaunchOptions {
    * A profile directory you own, never deleted. Chromium and Firefox lock it while they run, so two browsers can't
    * share one. On WebKit, it's the default context's only. Closing `Chromium.layer` closes the browser it
    * launched cleanly to preserve recent writes to this profile, stopping it if it does not exit within five seconds.
+   *
+   * **Gotchas**
+   *
+   * Firefox saves the preferences a launch writes, from its launch profile and, when headless, the pointer
+   * preferences `ui.primaryPointerCapabilities` and `ui.allPointerCapabilities`, into this directory's `prefs.js`. A
+   * later launch in the same directory keeps them, even one that doesn't write them, such as a launch with a window.
    *
    * @default a temporary profile, deleted after the browser exits
    */
