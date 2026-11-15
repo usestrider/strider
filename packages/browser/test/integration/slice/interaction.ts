@@ -960,6 +960,28 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         )
       }
 
+      it.effect(
+        "clicks a link whose slotted text is forwarded through nested shadow roots",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div id="outer">Sign up</div><script>
+            window.clickCount=0;
+            outer.attachShadow({mode:'open'}).innerHTML='<div id="inner"><slot></slot></div>';
+            outer.shadowRoot.querySelector('#inner').attachShadow({mode:'open'}).innerHTML='<a id="inner-link" href="#" onclick="clickCount++"><slot></slot></a>';
+            </script>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.locator("#inner-link").click().pipe(Deadline.within("3 seconds"))
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() => (globalThis as unknown as { clickCount: number }).clickCount),
+              1
+            )
+          })),
+        timeout
+      )
+
       /** A custom element whose shadow root wraps its slotted children in a link that counts its clicks. */
       const shadowLink = (content: string) =>
         `<!doctype html><script>window.clickCount=0;customElements.define("my-link",class extends HTMLElement{constructor(){super();this.attachShadow({mode:"open"}).innerHTML='<a href="#" id="inner-link" onclick="clickCount++"><slot></slot></a>'}})</script><my-link>${content}</my-link>`
@@ -999,6 +1021,32 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             yield* page.goto(url)
             assert.strictEqual(yield* page.getByRole("button").count, 1)
             assert.strictEqual(yield* page.getByRole("button", { name: "Shown" }).count, 1)
+          })),
+        timeout
+      )
+
+      it.effect("inherits aria-disabled through a slot's shadow ancestors", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<div id="host"><button>Save</button></div><script>host.attachShadow({mode:'open'}).innerHTML='<div role="group" aria-disabled="true"><slot></slot></div>'</script>`
+          )
+          const page = yield* newPage
+          yield* page.goto(url)
+          assert.strictEqual(yield* page.getByRole("button").count, 1)
+          assert.strictEqual(yield* page.getByRole("button", { disabled: true }).count, 1)
+        })), timeout)
+
+      it.effect(
+        "does not infer a new pointer cursor on content inheriting it from a slot",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div id="host"><span id="label">Save</span></div><script>host.attachShadow({mode:'open'}).innerHTML='<div style="cursor:pointer"><slot></slot></div>'</script>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            const snapshot = yield* page.locator("#label").snapshot()
+            assert.deepStrictEqual(snapshot.root.role, { _tag: "Aria", role: "generic" })
           })),
         timeout
       )
