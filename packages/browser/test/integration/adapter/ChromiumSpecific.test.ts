@@ -927,7 +927,7 @@ describe("Chromium adapter, CDP only", () => {
       )
 
       it.effect(
-        "enters and drags over the target while the button is held",
+        "enters the target while the button is held, leaving its dragover to the drop",
         () =>
           Effect.gen(function*() {
             const served = yield* site
@@ -940,9 +940,55 @@ describe("Chromium adapter, CDP only", () => {
                 const held = yield* page.mouse.hold("left")
                 yield* page.locator("#target").hover()
                 const log = yield* page.evaluateInMainWorld(() => (window as any).log)
-                assert.strictEqual(log, "123", order.join(", "))
+                // Chromium's drop command fires a dragover before the drop, so the move that starts the drag only
+                // enters it, and the whole drag fires dragenter, dragover and drop once each
+                assert.strictEqual(log, "12", order.join(", "))
                 yield* held.release
               }))
+            }).pipe(Effect.provide(recordingDrags(order)))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "cancels an HTML drag on Escape, and releases the button with a mouse release",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const order: Array<string> = []
+            const fixture =
+              `<script>window.log=[];for(const t of ['dragstart','dragenter','drop','dragend','keydown','keyup','mouseup'])addEventListener(t,(e)=>log.push(t),true)</script><div id="source" draggable="true" style="position:absolute;left:10px;top:10px;width:60px;height:60px;background:red">Source</div><div id="target" ondragover="event.preventDefault()" style="position:absolute;left:300px;top:10px;width:60px;height:60px;background:gray">Target</div>`
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(fixture)}`)
+              yield* page.locator("#source").hover()
+              yield* Effect.scoped(Effect.gen(function*() {
+                const held = yield* page.mouse.hold("left")
+                yield* page.locator("#target").hover()
+                yield* page.keyboard.press("Escape")
+                yield* held.release
+              }))
+              const log = yield* page.evaluateInMainWorld(() => (window as any).log.join(" "))
+              assert.strictEqual(log, "dragstart dragenter dragend mouseup", order.join(", "))
+            }).pipe(Effect.provide(recordingDrags(order)))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "drops the data an HTML drag's dragstart set",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const order: Array<string> = []
+            const fixture =
+              `<script>window.log=''</script><div id="source" draggable="true" ondragstart="event.dataTransfer.setData('text/x-strider','payload')" style="position:absolute;left:10px;top:10px;width:60px;height:60px;background:red">Source</div><div id="target" ondragover="event.preventDefault()" ondrop="event.preventDefault();log=event.dataTransfer.getData('text/x-strider')" style="position:absolute;left:300px;top:10px;width:60px;height:60px;background:gray">Target</div>`
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(fixture)}`)
+              yield* page.locator("#source").dragTo(page.locator("#target"))
+              const log = yield* page.evaluateInMainWorld(() => (window as any).log)
+              assert.strictEqual(log, "payload", order.join(", "))
             }).pipe(Effect.provide(recordingDrags(order)))
           }),
         timeout
