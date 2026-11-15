@@ -2088,9 +2088,10 @@ export function engine(render: (root: SnapNode) => string) {
 
   /**
    * What the pointer would hit at a point, through open shadow roots. Each root's answer counts only when it belongs
-   * to that root: over slotted text, whose DOM parent is a host, a root can answer with its own host or an enclosing
-   * one (Chromium does), and the hit is then the first element of the root's paint stack that belongs to it. Each
-   * step descends into a deeper root, so the walk ends.
+   * to that root. A root can answer with its own host or an enclosing one, for slotted text, whose DOM parent is a
+   * host (Chromium does), or for the host's own box or pseudo-element covering its contents. The topmost element of
+   * the root's paint stack then decides: the hit descends to it when it belongs to the root, and otherwise stops at
+   * the host, which covers. Each step descends into a deeper root, so the walk ends.
    */
   const hitTarget = (x: number, y: number): Element | null => {
     let hit = dom.elementFromPoint(document, x, y)
@@ -2098,10 +2099,8 @@ export function engine(render: (root: SnapNode) => string) {
     while (hit !== null && (shadow = dom.shadowRoot(hit)) !== null) {
       const root = shadow
       const answer = root.elementFromPoint(x, y)
-      const inner = answer !== null && dom.getRootNode(answer) === root
-        ? answer
-        : root.elementsFromPoint(x, y).find((element) => dom.getRootNode(element) === root) ?? null
-      if (inner === null) break
+      const inner = answer !== null && dom.getRootNode(answer) === root ? answer : root.elementsFromPoint(x, y)[0]
+      if (inner === undefined || dom.getRootNode(inner) !== root) break
       hit = inner
     }
     return hit
