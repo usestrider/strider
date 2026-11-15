@@ -195,8 +195,11 @@ export const register = <E, R>(
       Queue.offerUnsafe(faults, { realm, destroyed: false })
     }
     /** A realm that ended: its payloads stop, and its connections and installation are released. */
-    const retire = (realm: Target.RealmId) => {
+    // Why each retired realm ended, where its adapter said: its page's or the browser's reason
+    const endReasons = new Map<Target.RealmId, Target.CloseReason>()
+    const retire = (realm: Target.RealmId, reason?: Target.CloseReason | undefined) => {
       if (destroying.has(realm)) return
+      if (reason !== undefined) endReasons.set(realm, reason)
       let known = realms.has(realm) || unconfirmed.has(realm)
       for (const item of owned) {
         if (item.realm !== realm || item.destroyed) continue
@@ -267,7 +270,7 @@ export const register = <E, R>(
         unconfirmed.set(connection.realm, held)
       } else if (destroyed) accounting.destroy(connection.lease.owner, connection.lease.generation)
       else accounting.leave(connection.lease)
-      const reason = new Target.RealmDestroyed({})
+      const reason = endReasons.get(connection.realm) ?? new Target.RealmDestroyed({})
       yield* Deferred.fail(
         connection.opened,
         new Target.TargetGone({

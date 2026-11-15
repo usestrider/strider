@@ -119,7 +119,7 @@ export const prepare: (
                   fact.reason._tag === "ConnectionLost" || fact.reason._tag === "ModelUnavailable" ||
                   fact.reason._tag === "AccessReleased"
                 ) bridge.failed(fact.realm)
-                else bridge.ended(fact.realm)
+                else bridge.ended(fact.realm, fact.reason)
               }
             }
             base.buffer.emit(fact)

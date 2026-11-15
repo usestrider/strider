@@ -234,7 +234,7 @@ const make = (state: State, realm: RealmEntry, params: Omit<Runtime.EvaluatePara
       Effect.mapError(madeIn(state, realm)),
       Effect.flatMap((reply) =>
         reply.wasThrown === true || reply.result.objectId === undefined
-          ? Effect.fail(Kit.gone({ _tag: "Realm", id: realm.id }, new L1Target.RealmDestroyed({})))
+          ? Effect.fail(Kit.realmGone(realm, closingOf(state, realm)))
           : Effect.succeed(reply.result.objectId as string)
       )
     )

@@ -7,7 +7,7 @@ import * as Stream from "effect/Stream"
 import * as Script from "../../bidi-protocol/Script.ts"
 import * as Adapter from "../adapter.ts"
 import * as Declarations from "../declarations.ts"
-import { placement, type State } from "./state.ts"
+import { closingOf, placement, type State } from "./state.ts"
 
 export const channel = (bridge: Adapter.WebSocketBridge): Script.ChannelValue => ({
   type: "channel",
@@ -56,7 +56,8 @@ export const prepare = Effect.fnUntraced(
           const realm = known.get(event.realm)
           if (realm !== undefined) {
             known.delete(event.realm)
-            bridge.ended(realm)
+            const entry = state.realms.get(event.realm)
+            bridge.ended(realm, entry === undefined ? state.browserEnd : closingOf(state, entry)())
           }
         })
       ),

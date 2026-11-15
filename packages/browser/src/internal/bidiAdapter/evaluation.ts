@@ -352,10 +352,13 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
     userActivation: call.userActivation
   })).pipe(
     Effect.catch((error) => {
-      // callFunction targets this exact realm. Firefox can reject it before sending realmDestroyed.
+      // callFunction targets this exact realm. Firefox can reject it before sending realmDestroyed, and the realm
+      // ends then, with its page's or the browser's reason while either closes
       const missing = error.reason._tag === "Rejected" && error.reason.reason === "NoSuchFrame"
       return (missing
-        ? state.buffer.run(() => removeRealm(state, realm, new L1Target.RealmDestroyed({})))
+        ? state.buffer.run(() =>
+          removeRealm(state, realm, closingOf(state, realm)() ?? new L1Target.RealmDestroyed({}))
+        )
         : Effect.void).pipe(
           Effect.andThen(Effect.suspend(() => Effect.fail(Kit.realmFailure(realm, closingOf(state, realm))(error))))
         )
