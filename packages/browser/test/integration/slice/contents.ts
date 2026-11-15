@@ -15,6 +15,7 @@ import {
   Locator,
   Page,
   Pixels,
+  Route,
   Snapshot,
   StorageState,
   Url
@@ -23,6 +24,7 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
+import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
@@ -504,6 +506,36 @@ export const contents = (
           ])
         }), timeout)
 
+      it.effect("reports the browser's own CSP and CORS errors as console messages at level error", () =>
+        Effect.gen(function*() {
+          const page = yield* SharedContext.newPage
+          yield* page.route("https://csp.test/**", () =>
+            Route.fulfill(HttpServerResponse.text("<title>CSP</title><div style=\"color: red\">styled</div>", {
+              contentType: "text/html",
+              headers: { "content-security-policy": "style-src 'none'" }
+            })))
+          yield* page.route("https://cors.test/**", () =>
+            Route.fulfill(HttpServerResponse.text("{}", { contentType: "application/json" })))
+          // Each browser words these itself; what they share is the policy each names.
+          const csp = /Content.Security.Policy/i
+          const cors = /CORS|Access-Control|access control/i
+          const corsLogged = yield* ConsoleMessage.next(page, { level: "error", text: cors }).pipe(
+            Deadline.within("5 seconds")
+          )
+          yield* page.goto("https://csp.test/")
+          yield* page.evaluateInMainWorld(() =>
+            fetch("https://cors.test/data").then(() =>
+              "loaded", () =>
+              "blocked")
+          )
+          yield* Effect.exit(corsLogged)
+          const errors = (yield* ConsoleMessage.history(page, { level: "error" })).entries.map((entry) =>
+            entry.text
+          )
+          assert.isTrue(errors.some((text) => csp.test(text)), `a CSP error among ${JSON.stringify(errors)}`)
+          assert.isTrue(errors.some((text) => cors.test(text)), `a CORS error among ${JSON.stringify(errors)}`)
+        }), timeout)
+
       it.effect("setContent replaces a parsed document still waiting for deferred scripts", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -513,7 +545,9 @@ export const contents = (
             { waitUntil: "commit" }
           )
           assert.strictEqual(
-            yield* page.evaluateInMainWorld(() => document.readyState),
+            yield* page.evaluateInMainWorld(() =>
+              document.readyState
+            ),
             "interactive"
           )
           yield* page.setContent("<title>Replacement</title>", { waitUntil: "domContentLoaded" }).pipe(
