@@ -2556,6 +2556,43 @@ export const engine = (backend: Backend) =>
             )
           }), timeout)
 
+        it.effect("matches a text's scope element itself, and still the smallest element under it", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(backend, `<div class="row"><span class="badge">Resolved</span></div>`)
+            const className = (scope: string) =>
+              send({
+                op: "read",
+                steps: [{ _tag: "Css", selector: scope }, { _tag: "Text", matcher: text("Resolved") }],
+                read: { _tag: "Attribute", name: "class" }
+              })
+            assert.deepStrictEqual(yield* className(".row"), { _tag: "Read", value: "badge" })
+            assert.deepStrictEqual(yield* className(".badge"), { _tag: "Read", value: "badge" })
+          }), timeout)
+
+        it.effect("counts the candidate itself when a filter has a text", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(backend, `<div class="row"><span class="badge">Resolved</span></div>`)
+            const found = yield* send({
+              op: "count",
+              steps: [{ _tag: "Css", selector: "span" }, {
+                _tag: "Filter",
+                hasText: null,
+                hasNotText: null,
+                has: [{ _tag: "Text", matcher: text("Resolved") }],
+                hasNot: null,
+                visible: null
+              }]
+            })
+            assert.strictEqual(count(found), 1)
+          }), timeout)
+
+        it.effect("never matches a role's scope element itself", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(backend, `<button>Go</button>`)
+            const found = yield* send({ op: "count", steps: [{ _tag: "Css", selector: "button" }, role("button")] })
+            assert.strictEqual(count(found), 0)
+          }), timeout)
+
         it.effect("finds the element around a slot as the smallest that says a slotted text", () =>
           Effect.gen(function*() {
             const { send } = yield* open(
