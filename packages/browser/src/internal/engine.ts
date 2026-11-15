@@ -1158,13 +1158,6 @@ export function engine(render: (root: SnapNode) => string) {
   /** The parent in the flat tree, where inertness applies: the slot an element is assigned to, or its composed parent. */
   const flatParent = (element: Element): Element | null => dom.assignedSlot(element) ?? composedParent(element)
 
-  const flatContains = (ancestor: Element, element: Element): boolean => {
-    for (let current: Element | null = element; current !== null; current = flatParent(current)) {
-      if (current === ancestor) return true
-    }
-    return false
-  }
-
   /** What the document holds that makes anything inert, read once per call, so a page without it walks nothing. */
   let inertness: { readonly attribute: boolean; readonly modal: HTMLDialogElement | null } | undefined
   const inertnessOf = (): { readonly attribute: boolean; readonly modal: HTMLDialogElement | null } => {
@@ -1191,18 +1184,61 @@ export function engine(render: (root: SnapNode) => string) {
   const inertAncestor = (element: Element): Element | null => {
     const { attribute, modal } = inertnessOf()
     if (!attribute) return null
+    // Every element on the way shares the answer, so each ancestor is walked once per call
+    const path: Array<Element> = []
+    let found: Element | null = null
     for (let current: Element | null = element; current !== null; current = flatParent(current)) {
-      if (dom.hasAttribute(current, "inert")) return current
-      if (current === modal) return null
+      const known = inertAncestors.get(current)
+      if (known !== undefined) {
+        found = known
+        break
+      }
+      path.push(current)
+      if (dom.hasAttribute(current, "inert")) {
+        found = current
+        break
+      }
+      if (current === modal) break
     }
-    return null
+    for (const each of path) inertAncestors.set(each, found)
+    return found
   }
+  const inertAncestors = new Map<Element, Element | null>()
 
   /** The topmost modal dialog when `element` is outside it, which makes `element` inert. */
   const blockingModal = (element: Element): HTMLDialogElement | null => {
     const modal = topmostModal()
-    return modal === null || flatContains(modal, element) ? null : modal
+    if (modal === null) return null
+    const path: Array<Element> = []
+    let inside = false
+    for (let current: Element | null = element; current !== null; current = flatParent(current)) {
+      const known = insideModal.get(current)
+      if (known !== undefined) {
+        inside = known
+        break
+      }
+      path.push(current)
+      if (current === modal) {
+        inside = true
+        break
+      }
+    }
+    for (const each of path) insideModal.set(each, inside)
+    return inside ? null : modal
   }
+  const insideModal = new Map<Element, boolean>()
+
+  /** The topmost modal dialog's flat-tree ancestors, which it escapes the inertness of. */
+  const modalAncestors = (): ReadonlySet<Element> => {
+    if (escaped !== undefined) return escaped
+    escaped = new Set()
+    const modal = topmostModal()
+    for (let current = modal && flatParent(modal); current !== null; current = flatParent(current)) {
+      escaped.add(current)
+    }
+    return escaped
+  }
+  let escaped: Set<Element> | undefined
 
   /** HTML's inertness: `inert` on the element or a flat-tree ancestor, or outside the topmost open modal dialog. */
   const inert = (element: Element): boolean => inertAncestor(element) !== null || blockingModal(element) !== null
@@ -3254,6 +3290,9 @@ export function engine(render: (root: SnapNode) => string) {
     roleCache.clear()
     nameCache.clear()
     inertness = undefined
+    inertAncestors.clear()
+    insideModal.clear()
+    escaped = undefined
     namesFromContent.clear()
     namesFromFields.clear()
     provenance = false
@@ -3339,8 +3378,7 @@ export function engine(render: (root: SnapNode) => string) {
       if (dom.getAttribute(node, "aria-hidden") === "true") return
       if (inert(node)) {
         // An inert ancestor of the topmost modal dialog adds nothing of its own, but the dialog escapes it
-        const modal = topmostModal()
-        if (modal !== null && flatContains(node, modal)) {
+        if (modalAncestors().has(node)) {
           for (const child of flatChildNodes(node)) visit(child, false)
         }
         return
@@ -3677,6 +3715,9 @@ export function engine(render: (root: SnapNode) => string) {
       roleCache.clear()
       nameCache.clear()
       inertness = undefined
+      inertAncestors.clear()
+      insideModal.clear()
+      escaped = undefined
       const name = full ? accessibleName(element, true) : ""
       found.set(
         element,
