@@ -244,7 +244,7 @@ An entry with no marker is open.
 - **Kept**: the spec has no command to insert text.
 
 **Q76. Only Chromium can finish an HTML drag, and only when asked to** (Browser). Chromium starts an HTML drag from input only with `Input.setInterceptDrags` on, and only when each move names the button held (`button`, not just `buttons`); it then hands the drag to the client to finish with drag events. Firefox starts one from WebDriver actions and never drops it. WebKit's protocol has no drag commands.
-- *We:* the CDP adapter turns interception on with the first move that holds a button, and finishes the drags it intercepts. `input.dragAndDrop` is unsupported elsewhere, so `dragTo` from a draggable element fails there with `Unsupported` before anything is sent. Drags by pointer events work everywhere.
+- *We:* the CDP adapter turns interception on with the first move that holds a button, learns from the page whether that move started a drag (Q88), and finishes the drags it intercepts: `dragEnter` and `dragOver` at the move that starts one, `dragOver` at each later move, and `drop` at the release, which Chromium precedes with a `dragover` of its own. `input.dragAndDrop` is unsupported elsewhere, so `dragTo` from a draggable element fails there with `Unsupported` before anything is sent. Drags by pointer events work everywhere.
 - *Reconsider:* Firefox, if it starts dropping; and whether interception, once on, should stay on for the page's life.
 - **Kept**: Firefox starts drags it never drops; Strider refuses `dragTo` up front there.
 - **Resolved** in `64f94a7`: `dragTo(target, { html: "synthetic" })` has the page dispatch an HTML drag's events, untrusted, on every backend; the refusal of a native one names it.
@@ -1009,6 +1009,7 @@ An entry with no marker is open.
 - *We:* nothing yet.
 - *Reconsider:* waiting for the page's `dragstart` after the first held move, as Playwright does, and clearing a drag the release didn't end.
 - **Resolved** in `a7ee8dc`: a drag Chromium announces after its gesture's release is canceled (`dragCancel`) before the next gesture, which would otherwise continue it.
+- **Resolved** in `b4d6232`: Chromium announces the drag after the move's reply, in no fixed order with it, so a release sent first dropped nothing. After a held move with no drag known, the adapter asks the documents the press and the move land in whether the move fired an uncanceled trusted `dragstart`; if it did, it waits for the announcement under the operation's deadline, then sends `dragEnter` and `dragOver` at that move's point.
 
 **Q103. Chromium's `Fetch` stays enabled for every page, with a pattern nothing matches** (Ours). It keeps the interceptor installed, so a route declared on a live page is in force when its declaration returns (Q46).
 - *Seen:* one request in 40 went past a route under load before; none in 160 after.

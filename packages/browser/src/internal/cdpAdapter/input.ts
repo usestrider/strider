@@ -1,7 +1,7 @@
 /**
  * Input on CDP: the `Input` domain's mouse, wheel, key, text and touch events, in the page's coordinates on its
  * session, or, aimed into an out-of-process frame, in that frame's on its own; HTML drags, which headless Chromium starts none of, caught and finished with drag
- * events; and the elements input acts on by binding: an iframe's frame, a file input's files.
+ * events, a held move that starts one known from the page's `dragstart` and followed by its first drag events; and the elements input acts on by binding: an iframe's frame, a file input's files.
  */
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
