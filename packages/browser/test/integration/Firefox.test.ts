@@ -9,6 +9,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
 import { Browser as StriderBrowser } from "@usestrider/browser"
+import * as BidiBrowser from "@usestrider/browser/bidi-protocol/Browser"
 import * as BrowsingContext from "@usestrider/browser/bidi-protocol/BrowsingContext"
 import * as Script from "@usestrider/browser/bidi-protocol/Script"
 import * as Session from "@usestrider/browser/bidi-protocol/Session"
@@ -18,6 +19,7 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Stream from "effect/Stream"
+import * as Tracer from "effect/Tracer"
 import * as BidiAdapter from "../../src/internal/bidiAdapter.ts"
 import * as BidiWire from "../../src/internal/bidiWire.ts"
 import * as BrowserImpl from "../../src/internal/browser.ts"
@@ -100,6 +102,67 @@ describe("Firefox over WebDriver BiDi", () => {
           }),
         timeout
       )
+
+      it.effect(
+        "restores saved pointer preferences for a headed launch after a headless launch",
+        () =>
+          Effect.gen(function*() {
+            yield* useXvfb()
+            const fs = yield* FileSystem.FileSystem
+            const profile = yield* fs.makeTempDirectoryScoped({ prefix: "strider-firefox-pointer-" })
+            yield* fs.writeFileString(
+              `${profile}/prefs.js`,
+              FirefoxLauncher.userJs({
+                "ui.primaryPointerCapabilities": 0,
+                "ui.allPointerCapabilities": 0
+              })
+            )
+            const read = (headless: boolean) =>
+              Effect.scoped(Effect.gen(function*() {
+                const { launched, transport } = yield* FirefoxLauncher.launch({
+                  executablePath: executable,
+                  userDataDir: profile,
+                  headless
+                })
+                const bidi = yield* BidiConnection.make(transport)
+                const on = Protocol.on(bidi.session)
+                yield* Session.new_({ capabilities: {} }).pipe(on)
+                const { context } = yield* BrowsingContext.create({ type: "tab" }).pipe(on)
+                const result = yield* Script.evaluate({
+                  expression:
+                    "['(hover: hover)', '(any-hover: hover)', '(pointer: fine)', '(any-pointer: fine)'].map(q => matchMedia(q).matches).join(',')",
+                  target: { context },
+                  awaitPromise: false
+                }).pipe(on)
+                yield* BidiBrowser.close().pipe(on)
+                yield* launched.handle.exitCode
+                assert(result.type === "success")
+                return result.result
+              }))
+            assert.deepStrictEqual(yield* read(false), { type: "string", value: "false,false,false,false" })
+            assert.deepStrictEqual(yield* read(true), { type: "string", value: "true,true,true,true" })
+            assert.deepStrictEqual(yield* read(false), { type: "string", value: "false,false,false,false" })
+          }).pipe(Effect.scoped),
+        timeout
+      )
+
+      it.effect("records the headless pointer preferences on the launch span", () =>
+        Effect.gen(function*() {
+          const spans: Array<Tracer.NativeSpan> = []
+          const tracer = Tracer.make({
+            span(options) {
+              const span = new Tracer.NativeSpan(options)
+              spans.push(span)
+              return span
+            }
+          })
+          yield* Effect.scoped(FirefoxLauncher.launch({ executablePath: executable })).pipe(Effect.withTracer(tracer))
+          const launch = spans.find((span) => span.name === "Firefox.launch")
+          assert(launch !== undefined)
+          const attributes = JSON.stringify(Object.fromEntries(launch.attributes))
+          assert.include(attributes, "ui.primaryPointerCapabilities")
+          assert.include(attributes, "ui.allPointerCapabilities")
+        }), timeout)
 
       it.effect("keeps the preferences a profile directory of the caller's sets", () =>
         Effect.gen(function*() {
