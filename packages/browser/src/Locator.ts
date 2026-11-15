@@ -1243,7 +1243,8 @@ export interface Locator extends ReadonlyLocator {
    *   holds.
    * - The gesture is guarded: the first of its pointer, mouse, touch, and click events must land in the element. If
    *   the page covered it between the checks and the input, the gesture is stopped before the page's handlers see
-   *   it, and the action checks again.
+   *   it, and the action checks again. With `receivesPointer` disabled the gesture isn't guarded, and lands on
+   *   whatever covers the element.
    * - `modifiers` are pressed before the gesture and released after it. On a backend without
    *   `input.pointerModifiers`, an action with modifiers fails with `Unsupported` before anything is sent.
    *
