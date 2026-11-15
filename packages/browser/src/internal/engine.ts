@@ -1969,7 +1969,7 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   /** Oversized unions can have their centre in a gap between fragments; align an edge in that case. */
-  const scrollToFragments = (element: Element, inherited?: Clip) => {
+  const scrollToFragments = (element: Element, inherited?: Clip): void => {
     if (getComputedStyle(element).display === "contents") return scrollToContents(element, inherited)
     const rect = element.getBoundingClientRect()
     const bounds = viewportBounds(inherited)
@@ -1985,7 +1985,7 @@ export function engine(render: (root: SnapNode) => string) {
    * child element that renders something, or, holding only text, scrolls each scrolling ancestor, then the window, to
    * centre its text.
    */
-  const scrollToContents = (element: Element, inherited?: Clip) => {
+  const scrollToContents = (element: Element, inherited?: Clip): void => {
     for (const child of flatChildNodes(element)) {
       if (child instanceof Element && clientRects(child).length > 0) return scrollToFragments(child, inherited)
     }
