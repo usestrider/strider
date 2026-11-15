@@ -332,8 +332,8 @@ export interface LaunchOptions {
    * **Gotchas**
    *
    * On Chromium, an argument of your own that sets `--blink-settings` replaces the launch's, and on Firefox a
-   * profile that sets `ui.primaryPointerCapabilities` or `ui.allPointerCapabilities` keeps its value. A context that
-   * emulates a mobile device with touch matches `(hover: none)` and `(pointer: coarse)` instead.
+   * profile that sets `ui.primaryPointerCapabilities` or `ui.allPointerCapabilities` keeps its value. On Chromium, a
+   * context that emulates a mobile device with touch matches `(hover: none)` and `(pointer: coarse)` instead.
    *
    * @default true, except on WebKit, which opens a window
    */
