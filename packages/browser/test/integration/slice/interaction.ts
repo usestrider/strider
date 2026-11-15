@@ -1247,6 +1247,31 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }), timeout)
       }
 
+      // Input into a cross-site frame goes on its own session on Chromium, where the browser doesn't hit-test the
+      // parent: the parent's cover refuses the click before anything is sent
+      it.effect("refuses a click into a cross-site frame its parent covers", () =>
+        Effect.gen(function*() {
+          const { origin, crossSite } = yield* site
+          const inner =
+            `<!doctype html><style>body{margin:0}</style><button id="go" style="width:100px;height:40px">Go</button><output id="out"></output>${recordsClick}`
+          const html =
+            `<style>body{margin:0}iframe{position:absolute;left:20px;top:20px;width:300px;height:150px;border:0}</style><iframe src="${
+              fixtureUrl(crossSite, inner)
+            }"></iframe><div id="cover" style="position:absolute;left:0;top:0;width:400px;height:200px"></div>`
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(fixtureUrl(origin, html))
+            const frame = page.frame(page.locator("iframe"))
+            const error = yield* frame.locator("#go").click().pipe(Deadline.within("1 second"), Effect.flip)
+            assert(Deadline.isTimeout(error), String(error))
+            assert(error.history.some((e) => {
+              const value = e.value as { _tag: string; by?: string }
+              return value._tag === "Covered" && value.by?.includes("#cover")
+            }))
+            assert.strictEqual(yield* frame.locator("#out").readText, "")
+          }))
+        }), timeout)
+
       for (const mode of ["visible control", "explicit scroll control", "automatic scroll"] as const) {
         it.effect(`clicks a wholly hidden nested-scroller link: ${mode}`, () =>
           Effect.scoped(Effect.gen(function*() {

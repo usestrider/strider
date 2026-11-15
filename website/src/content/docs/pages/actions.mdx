@@ -162,11 +162,6 @@ With `rendered: false`, an action can succeed even when the page is not drawing.
 waiting, its timeout reports that readiness reason without the “page rendered no frame” hint. You can also
 set `rendered: false` on a pointer action when your application can tolerate routing against the last drawn frame.
 
-On Chromium, a pointer action into a cross-site frame also waits before it sends anything, until that frame, or a frame
-inside it, reports its first paint: until then, Chromium may send the input to the parent page's `iframe` element.
-`rendered: false` doesn't turn this wait off. An action into a frame where nothing paints times out without sending
-its input, and the timeout names the frame.
-
 An action needs its element reachable; visible means a person can see it. Actions accept an element with `opacity: 0` on itself or any ancestor. For that element, `isVisible` returns false, `Expect.toBeVisible` waits, and `filter({ visible: true })` excludes that element; `filter({ visible: false })` includes it. Opacity alone does not make an action wait for a fade-in.
 
 An action's `visible` check requires CSS visibility, content visibility, and a nonempty box. Pointer actions require their action point to receive the pointer, so a covering element blocks them. Non-pointer actions accept transparency without a pointer hit test: `fill` and `clear` require enabled, editable, and not inert; `focus`, `press`, and `pressSequentially` require not inert; `selectOption` requires enabled, the chosen options included; `selectText` requires only visibility; `scrollIntoView` requires stability. `setInputFiles` runs no readiness checks.
@@ -184,7 +179,9 @@ With the viewport check enabled, actions also scroll targets wholly clipped by a
 
 An element that never passes a check, such as a button that pulses forever, times out. Turn single checks off with
 `checks`, by key: `visible`, `stable`, `enabled`, `editable`, `notInert`, `inViewport`, and `receivesPointer`.
-There's no blanket `force`: turning off one check rather than all keeps the rest guarding the action. `trial: true`
+There's no blanket `force`: turning off one check rather than all keeps the rest guarding the action.
+On Chromium, a pointer action into a cross-site frame goes to that frame without the browser hit-testing the page
+around it, so with `receivesPointer` off, a click reaches the frame's element even where the parent page covers it. `trial: true`
 does the reverse, running the checks and sending nothing, to learn whether an action would go through without
 causing it:
 

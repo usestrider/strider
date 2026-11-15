@@ -1,6 +1,6 @@
 /**
- * Input on CDP: the `Input` domain's mouse, wheel, key, text and touch events in the page's coordinates, which reach
- * every frame, out of process too; HTML drags, which headless Chromium starts none of, caught and finished with drag
+ * Input on CDP: the `Input` domain's mouse, wheel, key, text and touch events, in the page's coordinates on its
+ * session, or, aimed into an out-of-process frame, in that frame's on its own; HTML drags, which headless Chromium starts none of, caught and finished with drag
  * events; and the elements input acts on by binding: an iframe's frame, a file input's files.
  */
 import * as Effect from "effect/Effect"
@@ -16,7 +16,16 @@ import * as Gestures from "../input.ts"
 import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
 import { heldButton, keyCode, keyLocation, modifierBits } from "./mapping.ts"
-import { documentOf, type Event, frameById, type FrameEntry, frameOf, pageOf, type State } from "./state.ts"
+import {
+  documentOf,
+  type Event,
+  frameById,
+  type FrameEntry,
+  frameOf,
+  type PageEntry,
+  pageOf,
+  type State
+} from "./state.ts"
 
 export const register = (handlers: Kit.Handlers<Event>) =>
   handlers.on(Input.dragIntercepted, (params, { state, target }) => {
@@ -27,11 +36,14 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     }
   })
 
-const mouseCommand = (event: Extract<Adapter.InputEvent, { _tag: "Mouse" }>) =>
+const mouseCommand = (
+  event: Extract<Adapter.InputEvent, { _tag: "Mouse" }>,
+  origin: { readonly x: number; readonly y: number }
+) =>
   Input.dispatchMouseEvent({
     type: event.type === "move" ? "mouseMoved" : event.type === "down" ? "mousePressed" : "mouseReleased",
-    x: event.x,
-    y: event.y,
+    x: event.x - origin.x,
+    y: event.y - origin.y,
     // Chromium starts an HTML drag only when the move names the button held.
     button: event.type === "move" ? heldButton(event.buttons) : event.button,
     buttons: event.buttons,
@@ -39,75 +51,54 @@ const mouseCommand = (event: Extract<Adapter.InputEvent, { _tag: "Mouse" }>) =>
     modifiers: modifierBits(event.modifiers)
   })
 
-/** Whether the frame's session reported the first paint of the frame's current document. */
-const painted = (frame: FrameEntry): boolean =>
-  frame.started !== undefined && frame.started.painted && frame.started.loaderId === frame.document?.loaderId
-
 /**
- * Whether the frame's current document has been drawn: it, or a document in a frame inside it, reported its first
- * paint. A document can't be drawn without the documents that embed it, so a painting descendant shows a document
- * that paints nothing was drawn too. A document whose start wasn't reported counts as drawn.
+ * The session pointer input aimed into a frame goes on, and the origin of that session's viewport in the page's.
+ * Chromium picks the target of input sent on the page's session from hit-test data that includes an out-of-process
+ * frame only once the frame has been drawn; until then, input aimed into it reaches the parent's iframe element.
+ * Input sent on the out-of-process frame's own session is hit-tested from that frame, and goes to it while the data
+ * doesn't include it yet. So input whose points all land in frames of one out-of-process session goes on that
+ * session, in the coordinates of its outermost frame; any other goes on the page's. Nothing hit-tests the parent
+ * documents for the frame's own session: the caller checks that the element receives the pointer there first.
  */
-const isDrawn = (frame: FrameEntry): boolean => {
-  if (frame.started === undefined || frame.started.loaderId !== frame.document?.loaderId) return true
-  const inside = (each: FrameEntry): boolean => painted(each) || Array.from(each.children).some(inside)
-  return inside(frame)
-}
-
-/** Whether the frame is out of process, or inside a frame that is. */
-const outOfProcess = (frame: FrameEntry): boolean => {
-  for (let each: FrameEntry | undefined = frame; each?.parent !== undefined; each = each.parent) {
-    if (each.owner !== each.parent.owner) return true
-  }
-  return false
-}
-
-/**
- * Waits until the frame's current document has been drawn, when the frame is out of process or inside one.
- * Chromium picks each pointer event's target in its browser process, from hit-test data that includes an
- * out-of-process frame only once the frame has been drawn; until then, input aimed into it reaches the parent's
- * iframe element. The operation's deadline ends the wait, with the frame in its history.
- */
-export const frameReady = Effect.fnUntraced(function*(state: State, id: L1Target.NavigableId) {
-  const frame = yield* frameById(state, id)
-  if (!outOfProcess(frame) || isDrawn(frame)) return
-  const record = yield* Operation.current
-  if (Option.isSome(record)) {
-    record.value.observe({ _tag: "FrameNotDrawn", frame: frame.id, url: frame.document?.url })
-  }
-  yield* state.buffer.waitFor(() => frame.removed || isDrawn(frame) ? true : undefined)
-  yield* frameById(state, id)
+const pointerSession = Effect.fnUntraced(function*(
+  page: PageEntry,
+  frame: Adapter.InputFrame | undefined,
+  lands: ReadonlyArray<FrameEntry>
+) {
+  const onPage = { target: page.target, x: 0, y: 0 }
+  if (frame === undefined || lands.length === 0) return onPage
+  const owner = lands[0]!.owner
+  if (owner === page.target || lands.some((each) => each.owner !== owner)) return onPage
+  let root = lands[0]!
+  while (root.parent !== undefined && root.parent.owner === owner) root = root.parent
+  const origin = frame.path.find((each) => each.frame === root.id)?.origin
+  return origin === undefined ? onPage : { target: owner, x: origin.x, y: origin.y }
 })
 
 /**
- * Page coordinates reach every frame; pages with child frames keep sequential acknowledgments. Pointer input into a
- * frame that hasn't been drawn is refused before anything is sent (`frameReady` waits for it).
+ * Input in the page's coordinates goes on the page's session; pages with child frames keep sequential
+ * acknowledgments. Pointer input aimed into frames of one out-of-process session goes on that session, in its own
+ * coordinates (`pointerSession`).
  */
 export const dispatchInput = Effect.fnUntraced(
   function*(
     state: State,
     id: L1Target.NavigableId,
     events: ReadonlyArray<Adapter.InputEvent>,
-    frame?: { readonly frame: L1Target.NavigableId },
-    drawn?: ReadonlyArray<L1Target.NavigableId>
+    frame?: Adapter.InputFrame,
+    lands?: ReadonlyArray<L1Target.NavigableId>
   ) {
     // Whatever fails before the first command is written sent nothing
     const page = yield* pageOf(state, id).pipe(Effect.mapError(Adapter.unsent))
     // Keys and text go to the focused element, with no hit testing
-    if (events.some((event) => event._tag !== "Key" && event._tag !== "InsertText")) {
-      for (const each of drawn ?? (frame === undefined ? [] : [frame.frame])) {
-        const entry = yield* frameById(state, each).pipe(Effect.mapError(Adapter.unsent))
-        if (outOfProcess(entry) && !isDrawn(entry)) {
-          return yield* Effect.fail(
-            new Adapter.AdapterError({
-              reason: { _tag: "FrameNotDrawn", frame: entry.id, url: entry.document?.url },
-              unsent: true
-            })
-          )
-        }
-      }
-    }
-    const on = Protocol.on(page.target.session)
+    const pointer = events.some((event) => event._tag !== "Key" && event._tag !== "InsertText")
+    const landed = !pointer ? [] : yield* Effect.forEach(
+      lands ?? (frame === undefined ? [] : [frame.frame]),
+      (each) => frameById(state, each).pipe(Effect.mapError(Adapter.unsent))
+    )
+    const sent = yield* pointerSession(page, frame, landed)
+    const on = Protocol.on(sent.target.session)
+    const onPageSession = Protocol.on(page.target.session)
     const click = Gestures.singleClick(events)
     if (
       click !== undefined && state.navigables.get(page.id)?.children.size === 0 &&
@@ -120,11 +111,11 @@ export const dispatchInput = Effect.fnUntraced(
       // The protocol marks that write before restoring interruption for replies: once written, cancellation
       // must only abandon the reply, since another release would deliver an extra mouseup to the page.
       let releaseWritten = false
-      const release = Kit.protocol(page.target.session.sendOrdered([mouseCommand(click[2])], () => {
+      const release = Kit.protocol(sent.target.session.sendOrdered([mouseCommand(click[2], sent)], () => {
         releaseWritten = true
       }))
       yield* Effect.gen(function*() {
-        yield* Kit.protocol(page.target.session.sendOrdered(click.slice(0, 2).map(mouseCommand)))
+        yield* Kit.protocol(sent.target.session.sendOrdered(click.slice(0, 2).map((each) => mouseCommand(each, sent))))
         yield* release
       }).pipe(
         // The release is owed until the browser is known to have accepted one: the caller's accounting records it
@@ -163,7 +154,12 @@ export const dispatchInput = Effect.fnUntraced(
             // A drag Chromium announced after its gesture's release belongs to no gesture: it is canceled before
             // this one, which would otherwise continue it (QUIRKS.md, Q88)
             state.drags.delete(page.id)
-            yield* Input.dispatchDragEvent({ type: "dragCancel", x: event.x, y: event.y, data: announced.data }).pipe(
+            yield* Input.dispatchDragEvent({
+              type: "dragCancel",
+              x: event.x - sent.x,
+              y: event.y - sent.y,
+              data: announced.data
+            }).pipe(
               on,
               Effect.ignore
             )
@@ -175,8 +171,8 @@ export const dispatchInput = Effect.fnUntraced(
               Kit.protocol(
                 Input.dispatchDragEvent({
                   type,
-                  x: event.x,
-                  y: event.y,
+                  x: event.x - sent.x,
+                  y: event.y - sent.y,
                   data: drag.data,
                   modifiers: modifierBits(event.modifiers)
                 }).pipe(on)
@@ -194,20 +190,22 @@ export const dispatchInput = Effect.fnUntraced(
             }
             break
           }
-          // A move with a button held may start an HTML drag, which only an interception lets finish
+          // A move with a button held may start an HTML drag, which only an interception lets finish. Chromium
+          // offers a drag to the sessions of the tab's main frame alone, wherever in the tab it starts, so the
+          // interception is the page's, and its drag events go where the gesture's mouse events go
           if (event.type === "move" && event.buttons !== 0 && !state.interceptingDrags.has(page.id)) {
             state.interceptingDrags.add(page.id)
-            yield* Kit.protocol(Input.setInterceptDrags({ enabled: true }).pipe(on))
+            yield* Kit.protocol(Input.setInterceptDrags({ enabled: true }).pipe(onPageSession))
           }
-          yield* Kit.protocol(mouseCommand(event).pipe(on))
+          yield* Kit.protocol(mouseCommand(event, sent).pipe(on))
           break
         }
         case "Wheel":
           yield* Kit.protocol(
             Input.dispatchMouseEvent({
               type: "mouseWheel",
-              x: event.x,
-              y: event.y,
+              x: event.x - sent.x,
+              y: event.y - sent.y,
               deltaX: event.deltaX,
               deltaY: event.deltaY,
               modifiers: modifierBits(event.modifiers)
@@ -227,12 +225,12 @@ export const dispatchInput = Effect.fnUntraced(
               location: keyLocation(event.code),
               ...(text === undefined ? {} : { text: Redacted.make(text), unmodifiedText: Redacted.make(text) }),
               ...(code === undefined ? {} : { windowsVirtualKeyCode: code, nativeVirtualKeyCode: code })
-            }).pipe(on)
+            }).pipe(onPageSession)
           )
           break
         }
         case "InsertText":
-          yield* Kit.protocol(Input.insertText({ text: Redacted.make(event.text) }).pipe(on))
+          yield* Kit.protocol(Input.insertText({ text: Redacted.make(event.text) }).pipe(onPageSession))
           break
         case "Touch":
           yield* Kit.protocol(
@@ -244,7 +242,7 @@ export const dispatchInput = Effect.fnUntraced(
                 : event.type === "end"
                 ? "touchEnd"
                 : "touchCancel",
-              touchPoints: event.points.map((point) => ({ x: point.x, y: point.y, id: point.id })),
+              touchPoints: event.points.map((point) => ({ x: point.x - sent.x, y: point.y - sent.y, id: point.id })),
               modifiers: modifierBits(event.modifiers)
             }).pipe(on)
           )

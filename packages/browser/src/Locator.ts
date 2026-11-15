@@ -918,6 +918,12 @@ export interface ReadonlyLocator
  * editable, and not inert; `focus`, `press`, and `pressSequentially` check not inert; `blur` has no checks by default; `selectOption` checks enabled;
  * `selectText` checks only visibility; `scrollIntoView` checks stability. `setInputFiles` runs no readiness checks.
  *
+ * **Gotchas**
+ *
+ * On Chromium, pointer input into a cross-site frame goes to that frame without the browser hit-testing the pages
+ * around it, so `receivesPointer` is what stops it at an element of a parent page drawn over the frame. With
+ * `receivesPointer` disabled, a click there reaches the frame's element even where the parent covers it.
+ *
  * **Example** (Clicking a button that keeps pulsing)
  *
  * ```ts import.meta.vitest

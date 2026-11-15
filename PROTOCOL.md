@@ -94,28 +94,20 @@ interface ErrorMatcher {
   Pages with child frames or HTML drag interception enabled, drags, multiple clicks, and other input sequences
   keep their sequential dispatch. The frame restriction also applies to coordinate clicks, whose target frame
   is unknown before dispatch. Generated commands and the public protocol session API are unchanged.
-- **Pointer input into an out-of-process frame waits for the frame to be drawn.** Chromium picks each pointer
-  event's target in its browser process, from hit-test data that includes an out-of-process frame only after the
-  frame has been drawn; an event sent earlier reaches the parent's iframe element, and a click can split between the
-  two documents. The CDP adapter keeps, per frame, the latest document whose `Page.lifecycleEvent` `init` its session
-  reported, and whether it has reported `firstPaint`. Before pointer input into a frame that is out of process or
-  inside one, it waits until the frame's current document has been drawn, as the signal `firstPaint` gives: it, or
-  a document in a frame inside it, has reported it. `firstPaint` is the signal Strider waits for, not a report of
-  the browser's hit-test data, which CDP doesn't expose: input has reached a child before its `firstPaint` arrived.
-  A document can't be drawn without the documents that embed it, so a painting descendant shows a wrapper that
-  paints nothing was drawn. A document whose start wasn't reported counts as drawn. A locator action waits through
-  the adapter's `frameReady`, a read, for every frame its gesture's points land in (a drag's source and
-  destination), before it releases earlier input or marks its own as sent. `dispatchInput` doesn't wait: it checks
-  those frames again as it writes, and refuses pointer input into one that isn't drawn, as when it navigated since
-  the wait, with `FrameNotDrawn`, before writing anything. Each adapter marks `unsent` the failures its
-  `dispatchInput` meets before writing any input: its lookups and its refusals, such as an undrawn frame or a key
-  stock WebKit's Automation can't type. Locator actions and the page's devices record such a failure as nothing
-  sent and leave nothing of it to release; any other failure, or an interruption, still counts as input that may
-  have been sent. On a refused frame the action checks the changed page again, under the same deadline. The deadline ends the wait, as it does the adapter's other
-  waits, and the operation's history names the frame (`FrameNotDrawn`). A frame whose document and
-  descendants paint nothing never reports `firstPaint`, so input into it runs out its deadline. Keys and text
-  aren't hit-tested and don't wait. Input that names no frame, such as `page.mouse`, doesn't wait, and can still
-  reach the parent's iframe element while an out-of-process frame hasn't been drawn.
+- **Pointer input into an out-of-process frame goes on that frame's session.** Chromium picks the target of input
+  sent on the page's session in its browser process, from hit-test data that includes an out-of-process frame only
+  after the frame has been drawn; an event sent earlier reaches the parent's iframe element, and a click can split
+  between the two documents. Input sent on the frame's own session is hit-tested from that frame, and reaches it
+  while the data doesn't include it yet. So the CDP adapter sends mouse, wheel and touch events whose points all land
+  in frames of one out-of-process session (a locator action names the frame its element is in and any other its
+  points land in, such as a drag's destination) on that session, in the coordinates of the session's outermost
+  frame, from the viewport origins L1 passes with the frame. Any other pointer input, such as a drag between the page
+  and a frame, goes on the page's session, in its coordinates. Keys and text go on the page's session, which sends
+  them to the focused element. Nothing hit-tests the parent documents for input on the frame's session: the
+  locator's pointer check does, before anything is sent. Each adapter marks `unsent` the failures its
+  `dispatchInput` meets before writing any input: its lookups and its refusals, such as a key stock WebKit's
+  Automation can't type. Locator actions and the page's devices record such a failure as nothing sent and leave
+  nothing of it to release; any other failure, or an interruption, still counts as input that may have been sent.
 - **Pending map.** Pending commands sit in a map from id to resumer. Interrupting the caller removes its entry and tombstones the id, so a late reply is dropped. Replies to commands that create resources are still passed to the late-reply handler, which releases them by default.
 - **No remote cancel.** No protocol can cancel a command; interruption only abandons the reply. Compensation metadata on generated commands tells L1 what to undo, for example releasing input or resolving a paused request.
 - **Timeouts** come from the operation deadline (L1), with a protocol-level fallback default for raw L0 use.
