@@ -57,8 +57,12 @@ const withProtocolScheduler = Effect.fnUntraced(function*<A, E, R>(
 })
 
 describe("CDP paused page initialization", () => {
-  for (const rejected of [false, true]) {
-    it.effect(`writes declarations before resume and handles the first request before renderer replies${rejected ? " when a declaration fails" : ""}`, () =>
+  for (
+    const [rejected, bridged] of [[false, false], [true, false], [false, true]] as const
+  ) {
+    it.effect(`writes declarations before resume and handles the first request before renderer replies${
+      rejected ? " when a declaration fails" : ""
+    }${bridged ? " with a script WebSocket route" : ""}`, () =>
       Effect.gen(function*() {
         const browser = yield* makeBrowser
         const ready = yield* Deferred.make<void>()
@@ -113,6 +117,21 @@ describe("CDP paused page initialization", () => {
               continue
             }
             if (command.method === "Runtime.runIfWaitingForDebugger") {
+              if (bridged) {
+                yield* browser.receive({
+                  sessionId: "S1",
+                  method: "Runtime.executionContextCreated",
+                  params: {
+                    context: {
+                      id: 1,
+                      origin: "://",
+                      name: "",
+                      uniqueId: "main-1",
+                      auxData: { isDefault: true, type: "default", frameId: "T1" }
+                    }
+                  }
+                })
+              }
               yield* browser.receive({
                 sessionId: "S1",
                 method: "Fetch.requestPaused",
@@ -161,6 +180,27 @@ describe("CDP paused page initialization", () => {
             after: []
           }).pipe(Scope.provide(scripts))
         }
+        if (bridged) {
+          // A context's script WebSocket route: its bridge's binding and capture script go out before the resume too.
+          yield* adapter.declare(context, {
+            _tag: "InitScript",
+            webSocket: {
+              name: "__striderWebSocket",
+              token: "token",
+              scope: scripts,
+              captured: () => Effect.void,
+              receive: () => false,
+              ended: () => {},
+              failed: () => {}
+            },
+            source: "self.bridged = true",
+            world: { _tag: "Main" },
+            phase: "environment",
+            workers: false,
+            timing: "beforeAuthorScript",
+            after: []
+          }).pipe(Scope.provide(scripts))
+        }
         yield* adapter.declare(context, {
           _tag: "Intercept",
           patterns: ["https://target.test/**"],
@@ -195,12 +235,17 @@ describe("CDP paused page initialization", () => {
             "Fetch.enable",
             "Emulation.setLocaleOverride",
             "Emulation.setUserAgentOverride",
-            "Emulation.setDeviceMetricsOverride"
+            "Emulation.setDeviceMetricsOverride",
+            ...(bridged ? ["Runtime.addBinding"] : [])
           ]
         ) {
           assert.include(sent, method)
         }
         assert.isBelow(sent.indexOf("Page.getFrameTree"), sent.indexOf("Runtime.enable"))
+        // The capture script calls the bridge's binding, so the binding exists before any script is installed.
+        if (bridged) {
+          assert.isBelow(sent.indexOf("Runtime.addBinding"), sent.indexOf("Page.addScriptToEvaluateOnNewDocument"))
+        }
         assert.isBelow(sent.indexOf("Page.getLayoutMetrics"), sent.indexOf("Emulation.setDeviceMetricsOverride"))
         assert.include(facts.map((fact) => fact._tag), rejected ? "PageInitializationFailed" : "PageReady")
         const firstScript = commands.find((command) => command.method === "Page.addScriptToEvaluateOnNewDocument")!
