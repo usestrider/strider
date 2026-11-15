@@ -256,12 +256,14 @@ const nodeHandleOf = Effect.fnUntraced(function*(state: State, node: Adapter.Nod
   if (Option.isNone(frameHandle)) {
     return yield* Effect.fail(Kit.gone({ _tag: "Document", id: node.document }, new L1Target.DocumentReplaced({})))
   }
-  // WebKit's binding is the element's object id, in the page's world
+  // WebKit's binding is the element's object id, in the page's world. Its path is the child index of each element
+  // down from the document, a list for each tree it is in: one for the document, and one more for each open shadow
+  // root it is inside, entered through its host
   const { result } = yield* (
     Runtime.callFunctionOn({
       objectId: node.binding as Runtime.RemoteObjectId,
       functionDeclaration:
-        "function() { const steps = []; for (let e = this; e && e.parentElement; e = e.parentElement) { const same = [...e.parentElement.children].filter((c) => c.localName === e.localName); steps.unshift(e.localName + ':nth-of-type(' + (same.indexOf(e) + 1) + ')') } return ':root > ' + steps.join(' > ') }",
+        "function() { const trees = []; for (let e = this; e;) { const steps = []; let n = e; for (; n.parentNode && n.parentNode.nodeType === 1; n = n.parentNode) steps.unshift([...n.parentNode.children].indexOf(n)); const root = n.parentNode; if (!root) return null; steps.unshift([...root.children].indexOf(n)); trees.unshift(steps); e = root.nodeType === 11 ? root.host : null } return JSON.stringify(trees) }",
       returnByValue: true
     }).pipe(
       Protocol.on(target.session),
@@ -277,7 +279,8 @@ const nodeHandleOf = Effect.fnUntraced(function*(state: State, node: Adapter.Nod
     Automation.evaluateJavaScriptFunction({
       browsingContextHandle: handle,
       frameHandle: frameHandle.value,
-      function: "function(path) { return document.querySelector(path) }",
+      function:
+        "function(path) { if (path === null) return null; let root = document, found = null; for (const steps of JSON.parse(path)) { if (!root) return null; for (const index of steps) { found = root.children[index]; if (!found) return null; root = found } root = found.shadowRoot } return found }",
       arguments: [JSON.stringify(result.value)]
     })
   )
