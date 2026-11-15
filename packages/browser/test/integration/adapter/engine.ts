@@ -2541,11 +2541,15 @@ export const engine = (backend: Backend) =>
 
         // HTML takes inert nodes out of the accessibility tree: `inert` on the element or a flat-tree ancestor, and,
         // while a modal dialog is open, everything outside the topmost one.
-        const roles = Effect.fnUntraced(function*(send: Effect.Success<ReturnType<typeof open>>["send"], step: Engine.Step) {
-          const found = yield* send({ op: "role", steps: [step] })
-          assert(found._tag === "Roles", JSON.stringify(found))
-          return found.roles.map((each) => each.name)
-        })
+        const roles = Effect.fnUntraced(
+          function*(send: Effect.Success<ReturnType<typeof open>>["send"], step: Engine.Step) {
+            const found = yield* send({ op: "role", steps: [step] })
+            assert(found._tag === "Roles", JSON.stringify(found))
+            return found.roles.map((each) =>
+              each.name
+            )
+          }
+        )
         const snapshotText = Effect.fnUntraced(function*(send: Effect.Success<ReturnType<typeof open>>["send"]) {
           const snapshot = yield* send({ op: "snapshot", steps: null, interactivity: false, depth: null })
           assert(snapshot._tag === "Snapshot", JSON.stringify(snapshot))
@@ -2567,10 +2571,17 @@ export const engine = (backend: Backend) =>
             )
             assert(attached._tag === "Value", attached._tag === "Exception" ? attached.text : "")
             assert.deepStrictEqual(yield* roles(send, role("button")), ["Shown"])
-            assert.deepStrictEqual(yield* roles(send, role("button", null, true)), ["Self", "Ancestor", "Shadow", "Shown"])
+            assert.deepStrictEqual(yield* roles(send, role("button", null, true)), [
+              "Self",
+              "Ancestor",
+              "Shadow",
+              "Shown"
+            ])
             const snapshot = yield* snapshotText(send)
             assert.include(snapshot, "Shown")
-            for (const name of ["Self", "Ancestor", "Shadow"]) assert.notInclude(snapshot, name)
+            for (const name of ["Self", "Ancestor", "Shadow"]) {
+              assert.notInclude(snapshot, name)
+            }
           }), timeout)
 
         it.effect("leaves inert descendants out of an accessible name", () =>
@@ -2592,7 +2603,9 @@ export const engine = (backend: Backend) =>
             assert.deepStrictEqual(yield* roles(send, role("button", null, true)), ["Outside", "Modeless", "Inside"])
             const snapshot = yield* snapshotText(send)
             assert.include(snapshot, "Inside")
-            for (const name of ["Outside", "Modeless"]) assert.notInclude(snapshot, name)
+            for (const name of ["Outside", "Modeless"]) {
+              assert.notInclude(snapshot, name)
+            }
           }), timeout)
 
         it.effect("lets only the topmost of several open modal dialogs block the rest", () =>
@@ -2627,7 +2640,9 @@ export const engine = (backend: Backend) =>
             assert.deepStrictEqual(yield* roles(send, role("button")), [])
             const snapshot = yield* snapshotText(send)
             assert.include(snapshot, "Inner")
-            for (const name of ["Under", "Outside"]) assert.notInclude(snapshot, name)
+            for (const name of ["Under", "Outside"]) {
+              assert.notInclude(snapshot, name)
+            }
             const focused = yield* send({
               ...point(0),
               checks: { ...all, stable: 0, receivesPointer: false },
