@@ -2537,6 +2537,47 @@ export const engine = (backend: Backend) =>
             )
           }), timeout)
 
+        it.effect("finds a display: contents element by role, unless aria-hidden or a display: none ancestor hides it", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<button id="shown" style="display:contents">Buy</button>
+<div aria-hidden="true"><button style="display:contents">Buy</button></div>
+<div style="display:none"><button style="display:contents">Buy</button></div>`
+            )
+            assert.strictEqual(count(yield* send({ op: "count", steps: [role("button", text("Buy", true))] })), 1)
+            assert.strictEqual(
+              count(yield* send({ op: "count", steps: [role("button", text("Buy", true), true)] })),
+              3
+            )
+          }), timeout)
+
+        it.effect("counts a display: contents element's text as visible, unless its visibility hides it", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<span id="shown" style="display:contents">hello</span>
+<span id="hidden" style="display:contents;visibility:hidden">hello</span>`
+            )
+            const shown = yield* send({ op: "visible", steps: [{ _tag: "Css", selector: "#shown" }] })
+            assert.deepStrictEqual(shown, { _tag: "Visible", count: 1, visible: true })
+            const hidden = yield* send({ op: "visible", steps: [{ _tag: "Css", selector: "#hidden" }] })
+            assert.deepStrictEqual(hidden, { _tag: "Visible", count: 1, visible: false })
+          }), timeout)
+
+        it.effect("leaves the text of a visibility: hidden display: contents element out of snapshots", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<p>public</p><span style="display:contents;visibility:hidden">secret</span>`
+            )
+            const snapshot = yield* send({ op: "snapshot", steps: null, interactivity: false, depth: null })
+            assert(snapshot._tag === "Snapshot")
+            const serialized = JSON.stringify(snapshot.root)
+            assert.include(serialized, "public")
+            assert.notInclude(serialized, "secret")
+          }), timeout)
+
         it.effect("finds the smallest element that says a text, outside head and scripts", () =>
           Effect.gen(function*() {
             const { send } = yield* open(
