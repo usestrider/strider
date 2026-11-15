@@ -50,6 +50,11 @@ export class ContextEntry {
   declare readonly isDefault: boolean
   /** Focus is emulated for the context's whole life: its pages are tabs, which render only with it. */
   declare focusEmulated?: boolean | undefined
+  /**
+   * The context's overrides whose releases were skipped because its removal was to follow, by kind, which a removal
+   * the browser refuses releases after all (`restoreContext`).
+   */
+  declare retiredOverrides?: Map<Adapter.Override["_tag"], Adapter.Declaration> | undefined
   declare removing: boolean
   declare disposed?: boolean | undefined
   declare lifecycleLock?: Semaphore.Semaphore | undefined

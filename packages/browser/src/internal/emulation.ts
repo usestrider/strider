@@ -156,6 +156,8 @@ export interface Owner {
   readonly scope: Adapter.DeclarationScope
   /** `Page.emulate`, `UserContext.emulate` or `Browser.newContext`. */
   readonly operation: string
+  /** Whether the owner's context is about to be removed as the overrides are released, so undoing them is skipped. */
+  readonly retiring?: (() => boolean) | undefined
 }
 
 /** Declares a list of overrides as one registration, for the caller's scope. */
@@ -189,7 +191,7 @@ export const declare = (
     const scope = yield* Scope.fork(yield* Effect.scope)
     yield* Effect.forEach(
       overrides,
-      (field) => adapter.declare(owner.scope, { _tag: "Override", override: field.override }),
+      (field) => adapter.declare(owner.scope, { _tag: "Override", override: field.override, retiring: owner.retiring }),
       {
         discard: true
       }

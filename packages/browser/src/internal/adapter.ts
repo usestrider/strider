@@ -583,7 +583,12 @@ export type Declaration =
     /** As on `Downloads`. */
     readonly retiring?: (() => boolean) | undefined
   }
-  | { readonly _tag: "Override"; readonly override: Override }
+  | {
+    readonly _tag: "Override"
+    readonly override: Override
+    /** As on `Downloads`. */
+    readonly retiring?: (() => boolean) | undefined
+  }
   | {
     readonly _tag: "Downloads"
     readonly behavior: { readonly _tag: "Allow"; readonly directory: string } | { readonly _tag: "Deny" }

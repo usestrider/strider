@@ -11,7 +11,9 @@
  * globals cannot supply the dimensions. A missing baseline does not prevent applying a viewport. If the original
  * dimensions are unknown, a restore fails, or the wait reaches its deadline, cleanup logs a warning and continues
  * without failing the scope. An ended session is quiet. A native window resize or navigation during the override
- * can prevent verification of the original dimensions.
+ * can prevent verification of the original dimensions. Closing a context removes it with its pages, so its
+ * `UserContext.Options.emulation` isn't restored first, and the close doesn't wait; a context handed off and left
+ * open restores it.
  *
  * @stability unstable
  * @since 0.1.0

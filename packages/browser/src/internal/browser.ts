@@ -765,8 +765,8 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         keyboardLayout: options?.keyboardLayout ?? settings.keyboardLayout
       })
       const scope: Adapter.DeclarationScope = { _tag: "UserContext", context: created }
-      // Set by the first finalizer to run, ahead of the declarations released below it: the context is removed
-      // when this scope closes unless it is handed off or not yet committed (the release above)
+      // Set by the first of this scope's finalizers to run, below the declarations, ahead of their releases: the
+      // context is removed when this scope closes unless it is handed off or not yet committed (the release above)
       let retiring = false
       // Where file choosers aren't reported, as on stock WebKit, the browser cancels them itself
       if (!adopt && reports("fileChooser")) {
@@ -817,11 +817,6 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         }).pipe(Effect.catch(failed))
         yield* Effect.annotateCurrentSpan("browser.context.downloads", downloads.value)
       }
-      yield* Effect.addFinalizer(() =>
-        Effect.sync(() => {
-          retiring = committed() && !(reclaimable && Handoff.leavesOpen(ownerScope))
-        })
-      )
       // The options that are declarations, held for the context's life, before its first page
       if (options?.emulation !== undefined || options?.focus === "emulated") {
         const fields = Emulation.fields(options.emulation ?? {})
@@ -829,7 +824,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
           return yield* Effect.fail(contextError(operation, fields as Reason.InvalidInput, id))
         }
         yield* Emulation.declare(
-          { runtime, scope, operation },
+          { runtime, scope, operation, retiring: () => retiring },
           options.focus === "emulated"
             ? [...fields, { capability: "emulation.focus", override: { _tag: "FocusEmulation", enabled: true } }]
             : fields,
@@ -840,6 +835,12 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
             : contextError(operation, asContextReason(Target.isTargetGone(error) ? error : error.reason), id)
         ))
       }
+      // Added after every declaration the context holds for its life, so it runs before their releases
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          retiring = committed() && !(reclaimable && Handoff.leavesOpen(ownerScope))
+        })
+      )
       if (options?.permissions !== undefined) {
         yield* Grants.grant(runtime, entry, operation, options.permissions, undefined).pipe(
           Effect.mapError((error) =>
