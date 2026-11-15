@@ -982,6 +982,39 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
+      it.effect(
+        "refuses a trial click through a shadow host's covering pseudo-element",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div id="outer" onclick="clickCount+=100"></div><script>
+            window.clickCount=0;
+            outer.attachShadow({mode:'open'}).innerHTML='<style>:host{position:relative;display:block;width:120px;height:40px}:host::before{content:"";position:absolute;inset:0;z-index:2;background:red}</style><button id="target" onclick="clickCount++" style="position:absolute;inset:0">Target</button>';
+            </script>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            const point = yield* page.evaluateInMainWorld(() => {
+              const rect = document.querySelector("#outer")!.shadowRoot!.querySelector("#target")!
+                .getBoundingClientRect()
+              return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
+            })
+            // Native input reaches only the host; a hit on the button would also increment its own counter.
+            yield* page.mouse.click(point)
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() => (globalThis as unknown as { clickCount: number }).clickCount),
+              100
+            )
+            const trial = yield* page.locator("#target").click({ trial: true }).pipe(
+              Deadline.within("3 seconds"),
+              Effect.exit
+            )
+            assert(Exit.isFailure(trial), "A trial click must refuse the button covered by its host")
+            assert.include(Cause.pretty(trial.cause), "covers")
+          })),
+        timeout
+      )
+
       /** A custom element whose shadow root wraps its slotted children in a link that counts its clicks. */
       const shadowLink = (content: string) =>
         `<!doctype html><script>window.clickCount=0;customElements.define("my-link",class extends HTMLElement{constructor(){super();this.attachShadow({mode:"open"}).innerHTML='<a href="#" id="inner-link" onclick="clickCount++"><slot></slot></a>'}})</script><my-link>${content}</my-link>`
