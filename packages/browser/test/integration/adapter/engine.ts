@@ -2572,18 +2572,21 @@ export const engine = (backend: Backend) =>
         it.effect("counts the candidate itself when a filter has a text", () =>
           Effect.gen(function*() {
             const { send } = yield* open(backend, `<div class="row"><span class="badge">Resolved</span></div>`)
-            const found = yield* send({
-              op: "count",
-              steps: [{ _tag: "Css", selector: "span" }, {
-                _tag: "Filter",
-                hasText: null,
-                hasNotText: null,
-                has: [{ _tag: "Text", matcher: text("Resolved") }],
-                hasNot: null,
-                visible: null
-              }]
-            })
-            assert.strictEqual(count(found), 1)
+            const resolved = [{ _tag: "Text", matcher: text("Resolved") }] as const
+            const filtered = (has: typeof resolved | null, hasNot: typeof resolved | null) =>
+              send({
+                op: "count",
+                steps: [{ _tag: "Css", selector: "span" }, {
+                  _tag: "Filter",
+                  hasText: null,
+                  hasNotText: null,
+                  has,
+                  hasNot,
+                  visible: null
+                }]
+              })
+            assert.strictEqual(count(yield* filtered(resolved, null)), 1)
+            assert.strictEqual(count(yield* filtered(null, resolved)), 0)
           }), timeout)
 
         it.effect("never matches a role's scope element itself", () =>
