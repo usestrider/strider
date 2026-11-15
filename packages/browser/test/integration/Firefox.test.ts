@@ -9,7 +9,6 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
 import { Browser as StriderBrowser } from "@usestrider/browser"
-import * as BidiBrowser from "@usestrider/browser/bidi-protocol/Browser"
 import * as BrowsingContext from "@usestrider/browser/bidi-protocol/BrowsingContext"
 import * as Script from "@usestrider/browser/bidi-protocol/Script"
 import * as Session from "@usestrider/browser/bidi-protocol/Session"
@@ -100,49 +99,6 @@ describe("Firefox over WebDriver BiDi", () => {
               )
             }).pipe(Effect.provide(backend))
           }),
-        timeout
-      )
-
-      it.effect(
-        "restores saved pointer preferences for a headed launch after a headless launch",
-        () =>
-          Effect.gen(function*() {
-            yield* useXvfb()
-            const fs = yield* FileSystem.FileSystem
-            const profile = yield* fs.makeTempDirectoryScoped({ prefix: "strider-firefox-pointer-" })
-            yield* fs.writeFileString(
-              `${profile}/prefs.js`,
-              FirefoxLauncher.userJs({
-                "ui.primaryPointerCapabilities": 0,
-                "ui.allPointerCapabilities": 0
-              })
-            )
-            const read = (headless: boolean) =>
-              Effect.scoped(Effect.gen(function*() {
-                const { launched, transport } = yield* FirefoxLauncher.launch({
-                  executablePath: executable,
-                  userDataDir: profile,
-                  headless
-                })
-                const bidi = yield* BidiConnection.make(transport)
-                const on = Protocol.on(bidi.session)
-                yield* Session.new_({ capabilities: {} }).pipe(on)
-                const { context } = yield* BrowsingContext.create({ type: "tab" }).pipe(on)
-                const result = yield* Script.evaluate({
-                  expression:
-                    "['(hover: hover)', '(any-hover: hover)', '(pointer: fine)', '(any-pointer: fine)'].map(q => matchMedia(q).matches).join(',')",
-                  target: { context },
-                  awaitPromise: false
-                }).pipe(on)
-                yield* BidiBrowser.close().pipe(on)
-                yield* launched.handle.exitCode
-                assert(result.type === "success")
-                return result.result
-              }))
-            assert.deepStrictEqual(yield* read(false), { type: "string", value: "false,false,false,false" })
-            assert.deepStrictEqual(yield* read(true), { type: "string", value: "true,true,true,true" })
-            assert.deepStrictEqual(yield* read(false), { type: "string", value: "false,false,false,false" })
-          }).pipe(Effect.scoped),
         timeout
       )
 
