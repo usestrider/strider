@@ -194,9 +194,10 @@ export const toBeHidden: Matcher<Locator.ReadonlyLocator> = (locator) => ExpectI
  *
  * **Details**
  *
- * An element inside a button, or inside an element with the role `button`, `checkbox` or `radio`, is read on the
- * nearest such control: a span inside a disabled button is disabled. Inputs, textareas, selects and editable content
- * are read on themselves. Native `disabled`, a disabled `fieldset` and `aria-disabled` all count.
+ * An element inside a button, or inside an element with the role `button`, `checkbox`, or `radio`, is read on the
+ * nearest such control, found through shadow roots and the slots the element is assigned to: a span inside a
+ * disabled button is disabled. Inputs, textareas, selects, and editable content are read on themselves. Native
+ * `disabled`, a disabled `fieldset`, and `aria-disabled` all count.
  *
  * **Example** (Checking that a complete form can be submitted)
  *
@@ -221,9 +222,10 @@ export const toBeEnabled: Matcher<Locator.ReadonlyLocator> = (locator) => Expect
  *
  * **Details**
  *
- * An element inside a button, or inside an element with the role `button`, `checkbox` or `radio`, is read on the
- * nearest such control: a span inside a disabled button is disabled. Inputs, textareas, selects and editable content
- * are read on themselves. Native `disabled`, a disabled `fieldset` and `aria-disabled` all count.
+ * An element inside a button, or inside an element with the role `button`, `checkbox`, or `radio`, is read on the
+ * nearest such control, found through shadow roots and the slots the element is assigned to: a span inside a
+ * disabled button is disabled. Inputs, textareas, selects, and editable content are read on themselves. Native
+ * `disabled`, a disabled `fieldset`, and `aria-disabled` all count.
  *
  * **Example** (Checking that a sold-out item can't be added)
  *
