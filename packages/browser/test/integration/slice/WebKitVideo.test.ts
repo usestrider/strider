@@ -2,7 +2,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, it } from "@effect/vitest"
-import { Browser, Capability, Trace, VideoWriter } from "@usestrider/browser"
+import { Browser, Capability, Deadline, Trace, VideoWriter } from "@usestrider/browser"
 import { WebKit } from "@usestrider/browser/webkit"
 import * as Deferred from "effect/Deferred"
 import type * as Duration from "effect/Duration"
@@ -370,7 +370,8 @@ describe("WebKit polled video", () => {
             ? yield* (yield* Browser.Browser).defaultContext.control
             : yield* Browser.newContext().pipe(Scope.provide(contextScope))
           const page = yield* context.newPage
-          const video = yield* page.capability(Capability.Video)
+          // The finish budget is read here, at acquisition.
+          const video = yield* page.capability(Capability.Video).pipe(Deadline.withDefaultBudget("2 seconds"))
           yield* Deferred.await(started)
           const before = performance.now()
           if (end === "connection") yield* group.first.close
@@ -379,7 +380,7 @@ describe("WebKit polled video", () => {
           const error = yield* Effect.flip(video.file)
           assert(Capability.isCapabilityError(error))
           assert.strictEqual(error.reason._tag, "BackendFailure")
-          assert.isBelow(performance.now() - before, 7000)
+          assert.isBelow(performance.now() - before, 4000)
           assert.isTrue(released)
         }).pipe(Effect.provide(backend))
       })), 60_000)
