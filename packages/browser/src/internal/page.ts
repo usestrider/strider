@@ -433,75 +433,131 @@ export const make = (owner: PageOwner): Page.Page => {
         const record = yield* Operation.record
         const waitUntil = options?.waitUntil ?? "load"
         const key = `__strider_setContent_${record.id}`
-        return yield* Effect.gen(function*() {
-          const realm = yield* Evaluation.pageRealm(runtime, entry, { _tag: "Main" }, record.id, record.budget.at)
-          const call = (fn: Function, args: ReadonlyArray<Adapter.LocalValue>, write: boolean, at = record.budget.at) =>
-            Evaluation.call(runtime, {
-              ...(write ? { dispatch: record } : {}),
-              realm,
-              functionDeclaration: fn.toString(),
-              arguments: args,
-              result: "value",
-              userActivation: false,
-              page: Option.some(entry),
-              at,
-              id: record.id
-            })
-          const args = yield* Evaluation.toLocal([html, waitUntil, key], realm)
-          const keyed = yield* Evaluation.toLocal([key], realm)
-          return yield* record.bound(
-            Effect.gen(function*() {
-              yield* entry.input.withPermit(call(
-                (html: string, waitUntil: string, key: string) => {
+        // Where the protocol reports the write's `document.open()`, the replacement's readiness is the model's,
+        // which needs no script in the page; where it doesn't, it is a listener's in the page, on a backend that
+        // can't turn the page's scripts off
+        const write = adapter.reportsDocumentOpen
+          ? Effect.gen(function*() {
+            const realm = yield* Evaluation.pageRealm(runtime, entry, { _tag: "Main" }, record.id, record.budget.at)
+            const args = yield* Evaluation.toLocal([html], realm)
+            // Read at the write, under the input permit: the model's document and its generation, which the
+            // browser's report of the write's `document.open()` increments, after every report of the old document
+            // and before every report of its replacement
+            const written = yield* record.bound(entry.input.withPermit(Effect.gen(function*() {
+              const status = (yield* entry.state.get).status
+              const current = status._tag === "Open" ? model.document(status.document.id) : Option.none()
+              const before = Option.isSome(current) ? Option.some(yield* current.value.state.get) : Option.none()
+              yield* Evaluation.call(runtime, {
+                dispatch: record,
+                realm,
+                functionDeclaration: ((html: string) => {
                   document.open()
-                  if (waitUntil !== "commit") {
-                    const target = waitUntil === "load" ? window : document
-                    const event = waitUntil === "load" ? "load" : "DOMContentLoaded"
-                    let finish!: () => void
-                    const ready = new Promise<void>((resolve) => {
-                      finish = () => {
-                        target.removeEventListener(event, finish)
-                        resolve()
-                      }
-                      target.addEventListener(event, finish, { once: true })
-                    })
-                    Reflect.set(globalThis, key, { ready, finish })
-                  }
                   document.write(html)
                   document.close()
-                },
-                args,
-                true
-              ))
-              if (waitUntil !== "commit") {
-                // Await in the same realm: a later navigation cannot satisfy this replacement's readiness.
-                yield* call((key: string) => Reflect.get(globalThis, key).ready, keyed, false)
-              }
-            }).pipe(Effect.ensuring(
-              waitUntil === "commit" ? Effect.void : Operation.detached(Effect.gen(function*() {
-                const at = yield* BrowserClock.after(1000)
-                const cleaned = yield* call(
-                  (key: string) => {
-                    const pending = Reflect.get(globalThis, key)
-                    if (pending !== undefined) {
-                      pending.finish()
-                      Reflect.deleteProperty(globalThis, key)
+                }).toString(),
+                arguments: args,
+                result: "value",
+                userActivation: false,
+                page: Option.some(entry),
+                at: record.budget.at,
+                id: record.id
+              })
+              return { current, before }
+            })))
+            const { before, current } = written
+            if (waitUntil === "commit" || Option.isNone(current) || Option.isNone(before)) return
+            // The replacement's readiness, from the browser's reports rather than a listener in the page, which
+            // doesn't run with scripting disabled: a newer generation's, so none of the old document's counts
+            const generation = before.value.generation
+            const ready = (state: Model.DocumentState) =>
+              state.generation > generation &&
+              (waitUntil === "load"
+                ? state.readiness === "complete"
+                : state.readiness === "interactive" || state.readiness === "complete")
+            // A document that ends first, as by a navigation, has nothing left to wait for
+            const reached = yield* current.value.state.changes.pipe(
+              Stream.filter(ready),
+              Stream.runHead,
+              Effect.raceFirst(Deferred.await(current.value.ended)),
+              BrowserClock.until(record.budget.at)
+            )
+            if (Option.isNone(reached)) return yield* Effect.fail({ _tag: "Deadline" as const })
+          })
+          : Effect.gen(function*() {
+            const realm = yield* Evaluation.pageRealm(runtime, entry, { _tag: "Main" }, record.id, record.budget.at)
+            const call = (
+              fn: Function,
+              args: ReadonlyArray<Adapter.LocalValue>,
+              write: boolean,
+              at = record.budget.at
+            ) =>
+              Evaluation.call(runtime, {
+                ...(write ? { dispatch: record } : {}),
+                realm,
+                functionDeclaration: fn.toString(),
+                arguments: args,
+                result: "value",
+                userActivation: false,
+                page: Option.some(entry),
+                at,
+                id: record.id
+              })
+            const args = yield* Evaluation.toLocal([html, waitUntil, key], realm)
+            const keyed = yield* Evaluation.toLocal([key], realm)
+            return yield* record.bound(
+              Effect.gen(function*() {
+                yield* entry.input.withPermit(call(
+                  (html: string, waitUntil: string, key: string) => {
+                    document.open()
+                    if (waitUntil !== "commit") {
+                      const target = waitUntil === "load" ? window : document
+                      const event = waitUntil === "load" ? "load" : "DOMContentLoaded"
+                      let finish!: () => void
+                      const ready = new Promise<void>((resolve) => {
+                        finish = () => {
+                          target.removeEventListener(event, finish)
+                          resolve()
+                        }
+                        target.addEventListener(event, finish, { once: true })
+                      })
+                      Reflect.set(globalThis, key, { ready, finish })
                     }
+                    document.write(html)
+                    document.close()
                   },
-                  keyed,
-                  false,
-                  at
-                ).pipe(Effect.exit)
-                record.noteCleanup(
-                  Exit.isSuccess(cleaned) ||
-                    Option.exists(Exit.findErrorOption(cleaned), (error) => error._tag === "Gone")
-                    ? { _tag: "Completed" }
-                    : { _tag: "Failed", cause: Exit.isFailure(cleaned) ? Cause.pretty(cleaned.cause) : "" }
-                )
-              }))
-            ))
-          )
-        }).pipe(Effect.mapError((failure) =>
+                  args,
+                  true
+                ))
+                if (waitUntil !== "commit") {
+                  // Await in the same realm: a later navigation cannot satisfy this replacement's readiness.
+                  yield* call((key: string) => Reflect.get(globalThis, key).ready, keyed, false)
+                }
+              }).pipe(Effect.ensuring(
+                waitUntil === "commit" ? Effect.void : Operation.detached(Effect.gen(function*() {
+                  const at = yield* BrowserClock.after(1000)
+                  const cleaned = yield* call(
+                    (key: string) => {
+                      const pending = Reflect.get(globalThis, key)
+                      if (pending !== undefined) {
+                        pending.finish()
+                        Reflect.deleteProperty(globalThis, key)
+                      }
+                    },
+                    keyed,
+                    false,
+                    at
+                  ).pipe(Effect.exit)
+                  record.noteCleanup(
+                    Exit.isSuccess(cleaned) ||
+                      Option.exists(Exit.findErrorOption(cleaned), (error) => error._tag === "Gone")
+                      ? { _tag: "Completed" }
+                      : { _tag: "Failed", cause: Exit.isFailure(cleaned) ? Cause.pretty(cleaned.cause) : "" }
+                  )
+                }))
+              ))
+            )
+          })
+        return yield* write.pipe(Effect.mapError((failure) =>
           failure._tag === "Timeout" ? failure : failure._tag === "Gone" ? failure.error : failure._tag === "Deadline"
             ? record.timeout(
               Option.some(

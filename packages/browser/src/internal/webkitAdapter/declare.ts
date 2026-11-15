@@ -38,9 +38,10 @@ const preferences: Readonly<
 // ── Applying ──────────────────────────────────────────────────────────────────────────────────────────────
 
 // Where each kind of override is applied: the page, or its targets. Stock WebKit has no Emulation domain: the
-// viewport is the window's size, launched, and JavaScript the page's own setting; any other the table says
+// viewport is the window's size, launched, and JavaScript a setting of each target's page, sent as the target is
+// configured, so a target that attaches later, as after a process swap, has it too; any other the table says
 // stock WebKit can't apply is refused as it's declared
-const pageKinds = new Set<Adapter.Override["_tag"]>(["Viewport", "JavaScriptEnabled"])
+const pageKinds = new Set<Adapter.Override["_tag"]>(["Viewport"])
 
 const applyPageOverride = (
   state: State,
@@ -61,14 +62,6 @@ const applyPageOverride = (
           if (natural !== undefined) yield* Viewport.confirm(process, handle, natural)
         }
       })
-    case "JavaScriptEnabled":
-      return page.target === undefined || page.target.ended
-        ? Effect.void
-        : Page.overrideSetting(
-          override?._tag === "JavaScriptEnabled"
-            ? { setting: "ScriptEnabled", value: override.enabled }
-            : { setting: "ScriptEnabled" }
-        ).pipe(Protocol.on(page.target.session))
     default:
       return Effect.void
   }
@@ -113,6 +106,12 @@ const applyTargetOverride = (
       return Network.setResourceCachingDisabled({
         disabled: override?._tag === "CacheDisabled" && override.disabled
       }).pipe(on)
+    case "JavaScriptEnabled":
+      return Page.overrideSetting(
+        override?._tag === "JavaScriptEnabled"
+          ? { setting: "ScriptEnabled", value: override.enabled }
+          : { setting: "ScriptEnabled" }
+      ).pipe(on)
     default:
       return Effect.void
   }

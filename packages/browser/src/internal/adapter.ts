@@ -969,6 +969,12 @@ export interface AdapterConnection {
    * in force, when `createPage` returns; what a backend can't pause is in its capabilities (`pauseOnStart.*`).
    */
   readonly pauseScope: PauseScope
+  /**
+   * Whether the protocol reports a `document.open()` in a page, ordered after the old document's readiness and
+   * before its replacement's, so `setContent` can wait for the replacement's readiness in the model. Where it
+   * doesn't, `setContent` waits on a listener in the page, which needs the page's scripts to run.
+   */
+  readonly reportsDocumentOpen: boolean
   /** The default context: it exists for the whole connection. */
   readonly defaultContext: UserContext.Id
   /** Waits as long as the connection lives. */

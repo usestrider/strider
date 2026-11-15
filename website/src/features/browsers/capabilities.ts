@@ -131,7 +131,8 @@ export const groups: ReadonlyArray<{ readonly label: string; readonly names: Rea
       "emulation.network.offline": "Offline",
       "emulation.network.throttling": "Network throttling",
       "emulation.cpuSlowdown": "CPU slowdown",
-      "emulation.javaScript": "Turning JavaScript off",
+      "emulation.javaScript": "Turning JavaScript on",
+      "emulation.javaScript.disabled": "Turning JavaScript off",
       "emulation.touch": "Touch",
       "emulation.focus": "Focus, `focus: \"emulated\"`"
     }

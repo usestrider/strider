@@ -45,8 +45,10 @@ writing and closing without a readiness wait. The operation returns no navigatio
 entry. There is no network-idle wait; observe the application condition you need instead.
 
 Interruption and deadlines stop waiting without undoing the replacement or stopping scripts and requests already
-started; a later call can replace the HTML again. A navigation during the call fails it with `TargetGone`. Don't run
-two replacements on one page at once.
+started; a later call can replace the HTML again. A navigation during the call can fail it with `TargetGone`; on Chromium, one while it waits for readiness ends the wait, and the call returns. Don't run two replacements on one page at
+once.
+
+On Chromium, readiness is what the browser reports of the replaced document, so `setContent` reaches it with JavaScript disabled. Firefox and WebKit don't report the replacement, so there it waits on a temporary listener in the page; Strider can't turn JavaScript off on either through emulation, so that listener runs under every emulation setting they support.
 
 Earlier resource requests can keep delaying load after another replacement. Choose parsing readiness when those
 requests need not finish; replacing the DOM does not cancel them.

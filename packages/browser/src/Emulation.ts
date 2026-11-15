@@ -251,8 +251,10 @@ export interface Geolocation {
  *
  * - Firefox can't emulate `media`, `touch`, `javaScript`, a mobile `viewport`, network throttling, a CPU
  *   slowdown, or an unavailable position.
- * - WebKit can emulate only `extraHTTPHeaders`, `media`, `javaScript`, and a `viewport`, which sizes the window, at a device scale of
- *   1 and not mobile. Attached, it can emulate nothing.
+ * - WebKit can emulate only `extraHTTPHeaders`, `media`, `javaScript: "enabled"`, and a `viewport`, which sizes the
+ *   window, at a device scale of 1 and not mobile. It refuses `javaScript: "disabled"`
+ *   (`emulation.javaScript.disabled`): with scripts off, it gives the page no script context, so nothing can read or
+ *   act on it. Attached, it can emulate nothing.
  * - Chromium can emulate every field.
  *
  * **Example** (Sending headers for a context's life)
@@ -306,7 +308,8 @@ export interface Emulation {
    */
   readonly cpuSlowdown?: number | undefined
   /**
-   * Whether the page's scripts run, from its next document.
+   * Whether the page's scripts run, from its next document. `"disabled"` is the capability
+   * `emulation.javaScript.disabled`, which Chromium alone supports.
    */
   readonly javaScript?: "enabled" | "disabled" | undefined
   /**

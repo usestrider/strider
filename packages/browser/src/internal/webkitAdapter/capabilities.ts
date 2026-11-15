@@ -169,6 +169,7 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
         "emulation.network.throttling",
         "emulation.cpuSlowdown",
         "emulation.javaScript",
+        "emulation.javaScript.disabled",
         "emulation.extraHTTPHeaders",
         "emulation.touch",
         "emulation.focus"
@@ -212,7 +213,7 @@ export const overrideCapability = (override: Adapter.Override): string | undefin
     case "CpuThrottling":
       return "emulation.cpuSlowdown"
     case "JavaScriptEnabled":
-      return "emulation.javaScript"
+      return override.enabled ? "emulation.javaScript" : "emulation.javaScript.disabled"
     case "ExtraHeaders":
       return "emulation.extraHTTPHeaders"
     case "Touch":
@@ -272,6 +273,9 @@ export const launchedCapabilities = (info: Browser.Info, video = false) => {
     "emulation.viewport": ["partial", ["the window is sized to it; no device scale or mobile viewport"]],
     "emulation.viewport.mobile": ["unsupported", ["no mobile viewport"]],
     "emulation.javaScript": ["supported", []],
+    "emulation.javaScript.disabled": ["unsupported", [
+      "with scripts off, stock WebKit gives the page no script context, so Strider can't read or act on it"
+    ]],
     "emulation.media": ["supported", []],
     "emulation.extraHTTPHeaders": ["supported", []],
     "emulation.focus": ["unsupported", ["each page is a window of its own"]],
