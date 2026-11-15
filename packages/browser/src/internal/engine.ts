@@ -702,6 +702,12 @@ export function engine(render: (root: SnapNode) => string) {
 
   // Text
   const collapse = (text: string): string => text.replace(/\s+/g, " ").trim()
+  /**
+   * accname's flat string: soft hyphens and zero-width spaces dropped, other whitespace runs collapsed to one space,
+   * non-breaking spaces kept, and the ends trimmed.
+   */
+  const flatString = (text: string): string =>
+    text.split("\u00a0").map((chunk) => chunk.replace(/[\u200b\u00ad]/g, "").replace(/\s+/g, " ")).join("\u00a0").trim()
 
   const buttonLikeInput = (element: Element): element is HTMLInputElement =>
     element instanceof HTMLInputElement && ["button", "submit", "reset"].includes(element.type)
@@ -837,6 +843,37 @@ export function engine(render: (root: SnapNode) => string) {
   ])
 
   /** Roles whose name comes from their content (accname 1.2, step 2F). */
+  /**
+   * Roles that also take their name from content as a descendant of the target's own content, after w3c/aria#1821,
+   * as Chromium and Firefox do. A descendant of another role, such as a nested tree item's group, contributes nothing.
+   */
+  const NAME_FROM_CONTENT_DESCENDANT = new Set([
+    "caption",
+    "code",
+    "contentinfo",
+    "definition",
+    "deletion",
+    "emphasis",
+    "generic",
+    "insertion",
+    "list",
+    "listitem",
+    "mark",
+    "none",
+    "paragraph",
+    "presentation",
+    "region",
+    "row",
+    "rowgroup",
+    "section",
+    "strong",
+    "subscript",
+    "superscript",
+    "table",
+    "term",
+    "time"
+  ])
+
   const NAME_FROM_CONTENT = new Set([
     "button",
     "cell",
@@ -1171,10 +1208,15 @@ export function engine(render: (root: SnapNode) => string) {
   // Accessible names (accname 1.2)
   interface NameContext {
     readonly visited: Set<Element>
-    /** Inside an `aria-labelledby` traversal, which includes hidden referenced nodes. */
+    /** Inside an `aria-labelledby` traversal, so `aria-labelledby` isn't followed again. */
     readonly labelledBy: boolean
-    /** Computing another element's name, not the root's. */
-    readonly traversal: boolean
+    /** The element a reference or label traversal started from was hidden, so its hidden descendants count. */
+    readonly hiddenReference: boolean
+    /**
+     * Where the node is: the target itself, a descendant in the target's own content, or inside a reference
+     * (`aria-labelledby`, a label, a legend or a caption), where every descendant counts.
+     */
+    readonly embedded: "self" | "descendant" | "reference"
     readonly includeHidden: boolean
     readonly contribution: { fieldContent: boolean }
   }
@@ -1186,23 +1228,49 @@ export function engine(render: (root: SnapNode) => string) {
       : null
   }
 
+  const RANGE_ROLES = new Set(["meter", "progressbar", "scrollbar", "slider", "spinbutton"])
   const embeddedControlRole = (role: string | null): boolean =>
-    role === "textbox" || role === "searchbox" || role === "combobox" || role === "listbox" ||
-    role === "slider" || role === "spinbutton"
+    role === "textbox" || role === "searchbox" || role === "combobox" || role === "listbox" || role === "menu" ||
+    (role !== null && RANGE_ROLES.has(role))
 
-  const embeddedValue = (element: Element, role: string | null): string => {
+  /** The elements an element contains or owns through `aria-owns`, in that order. */
+  const ownedDescendants = (element: Element): Array<Element> => {
+    const out = Array.from(dom.querySelectorAll(element, "*"))
+    for (const id of (dom.getAttribute(element, "aria-owns") ?? "").split(/\s+/)) {
+      const owned = id === "" ? null : byId(element, id)
+      if (owned !== null) out.push(owned, ...Array.from(dom.querySelectorAll(owned, "*")))
+    }
+    return out
+  }
+
+  /** What an embedded control contributes to another element's name (accname 2E). */
+  const embeddedValue = (element: Element, role: string | null, context: NameContext): string => {
     if (element instanceof HTMLInputElement && element.type === "password") return ""
-    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
-      if (role === "slider" || role === "spinbutton") {
-        return dom.getAttribute(element, "aria-valuetext") ?? dom.getAttribute(element, "aria-valuenow") ??
-          element.value
+    if (role !== null && RANGE_ROLES.has(role)) {
+      return dom.getAttribute(element, "aria-valuetext") ?? dom.getAttribute(element, "aria-valuenow") ??
+        (element instanceof HTMLInputElement ? element.value : dom.getAttribute(element, "value") ?? "")
+    }
+    if (role === "menu") return ""
+    if (role === "combobox" || role === "listbox") {
+      let selected: Array<Element>
+      if (element instanceof HTMLSelectElement) {
+        selected = Array.from(element.selectedOptions)
+        if (selected.length === 0 && element.options.length > 0) selected = [element.options[0]!]
+      } else {
+        const listbox = role === "combobox"
+          ? ownedDescendants(element).find((each) => roleOf(each) === "listbox")
+          : element
+        selected = listbox === undefined ?
+          [] :
+          ownedDescendants(listbox).filter((each) =>
+            roleOf(each) === "option" && (dom.getAttribute(each, "aria-selected") ?? "").toLowerCase() === "true"
+          )
       }
-      return element.value
+      if (selected.length === 0 && element instanceof HTMLInputElement) return element.value
+      return selected.map((option) => nameOfElement(option, { ...context, embedded: "descendant" })).join(" ")
     }
-    if (element instanceof HTMLSelectElement) {
-      return Array.from(element.selectedOptions).map((option) => textOf(option)).join(" ")
-    }
-    return dom.getAttribute(element, "aria-valuetext") ?? dom.getAttribute(element, "aria-valuenow") ?? textOf(element)
+    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) return element.value
+    return dom.textContent(element) ?? ""
   }
 
   const labelsOf = (element: Element): Array<HTMLLabelElement> => {
@@ -1211,10 +1279,94 @@ export function engine(render: (root: SnapNode) => string) {
     return list === null ? [] : Array.from(list)
   }
 
-  const pseudoContent = (element: Element, pseudo: "::before" | "::after"): string => {
-    const content = getComputedStyle(element, pseudo).content
-    const match = /^"(.*)"$/.exec(content)
-    return match === null ? "" : match[1]!
+  /**
+   * The text a computed CSS `content` value gives: its alternative text after `/` when there is one, otherwise its
+   * strings and `attr()` values joined. Anything else, such as `url()` or `counter()`, gives `undefined`, and so
+   * does any value on the element itself without alternative text.
+   */
+  const parseCssContent = (element: Element, value: string, pseudo: boolean): string | undefined => {
+    type Token = { readonly kind: "string" | "attr" | "slash" | "other"; readonly value: string }
+    const tokens: Array<Token> = []
+    // Skips a quoted string from its opening quote, returning its value and the index after it.
+    const string = (from: number): [string, number] => {
+      const quote = value[from]
+      let out = ""
+      let i = from + 1
+      while (i < value.length && value[i] !== quote) {
+        if (value[i] === "\\") {
+          const hex = /^[0-9a-fA-F]{1,6}[ \t\n]?/.exec(value.slice(i + 1))
+          if (hex !== null) {
+            out += String.fromCodePoint(Number.parseInt(hex[0].trim(), 16))
+            i += 1 + hex[0].length
+          } else {
+            out += value[i + 1] ?? ""
+            i += 2
+          }
+          continue
+        }
+        out += value[i]
+        i++
+      }
+      return [out, i + 1]
+    }
+    let i = 0
+    while (i < value.length) {
+      const c = value[i]!
+      if (/\s/.test(c)) {
+        i++
+      } else if (c === "\"" || c === "'") {
+        const [text, next] = string(i)
+        tokens.push({ kind: "string", value: text })
+        i = next
+      } else if (c === "/") {
+        tokens.push({ kind: "slash", value: c })
+        i++
+      } else {
+        const attr = /^attr\(\s*([-\w]+)\s*\)/i.exec(value.slice(i))
+        if (attr !== null) {
+          tokens.push({ kind: "attr", value: attr[1]! })
+          i += attr[0].length
+          continue
+        }
+        // Another value, such as url(…) or counter(…): up to the next space or slash outside parentheses
+        let depth = 0
+        while (i < value.length && (depth > 0 || !/[\s/]/.test(value[i]!))) {
+          if (value[i] === "\"" || value[i] === "'") {
+            i = string(i)[1]
+            continue
+          }
+          if (value[i] === "(") depth++
+          else if (value[i] === ")") depth--
+          i++
+        }
+        tokens.push({ kind: "other", value: "" })
+      }
+    }
+    const slash = tokens.findIndex((token) => token.kind === "slash")
+    if (slash === -1 && !pseudo) return undefined
+    const parts = slash === -1 ? tokens : tokens.slice(slash + 1)
+    let out = ""
+    for (const token of parts) {
+      if (token.kind === "string") out += token.value
+      else if (token.kind === "attr") out += dom.getAttribute(element, token.value) ?? ""
+      else return undefined
+    }
+    return out
+  }
+
+  /**
+   * The CSS content an element or one of its pseudo-elements contributes to a name, or `undefined` for none. A
+   * `display: none` or `visibility: hidden` pseudo-element contributes nothing, and one that isn't inline is
+   * separated by spaces.
+   */
+  const cssContent = (element: Element, pseudo?: "::before" | "::after"): string | undefined => {
+    const style = getComputedStyle(element, pseudo)
+    const value = style.content
+    if (value === "" || value === "none" || value === "normal") return undefined
+    if (style.display === "none" || style.visibility === "hidden") return undefined
+    const content = parseCssContent(element, value, pseudo !== undefined)
+    if (content === undefined || pseudo === undefined) return content
+    return style.display === "inline" || style.display === "" ? content : ` ${content} `
   }
 
   const nameOfNode = (node: Node, context: NameContext): string => {
@@ -1240,24 +1392,29 @@ export function engine(render: (root: SnapNode) => string) {
   const nameOfElementValue = (element: Element, context: NameContext): string => {
     if (context.visited.has(element)) return ""
     context.visited.add(element)
-    // 2A: hidden, unless referenced or asked for
-    if (!context.labelledBy && !(context.includeHidden && !context.traversal) && hiddenFromAccessibility(element)) {
-      return ""
-    }
+    // 2A: hidden, unless asked for or in a traversal from a hidden reference
+    if (!context.includeHidden && !context.hiddenReference && hiddenFromAccessibility(element)) return ""
     // 2B: aria-labelledby, not followed twice
     if (!context.labelledBy) {
       const ids = (dom.getAttribute(element, "aria-labelledby") ?? "").split(/\s+/).filter((id) => id !== "")
       const parts = ids.flatMap((id) => {
         const target = byId(element, id)
-        return target === null ? [] : [nameOfElement(target, { ...context, labelledBy: true, traversal: true })]
+        return target === null ? [] : [
+          nameOfElement(target, {
+            ...context,
+            labelledBy: true,
+            hiddenReference: hiddenFromAccessibility(target),
+            embedded: "reference"
+          })
+        ]
       })
       const joined = parts.join(" ")
       if (joined.trim() !== "") return joined
     }
     const role = roleOf(element)
     // 2E: an embedded control inside another element's name contributes its value
-    if (context.traversal && embeddedControlRole(role)) {
-      const value = embeddedValue(element, role)
+    if (context.embedded !== "self" && embeddedControlRole(role)) {
+      const value = embeddedValue(element, role, context)
       if (value.trim() !== "") context.contribution.fieldContent = true
       return value
     }
@@ -1269,19 +1426,32 @@ export function engine(render: (root: SnapNode) => string) {
       const native = nativeName(element, context)
       if (native.trim() !== "") return native
     }
-    // 2F: name from content
-    if (context.traversal || (role !== null && NAME_FROM_CONTENT.has(role))) {
-      let content = pseudoContent(element, "::before")
-      for (const child of flatChildNodes(element)) {
-        if (child instanceof Element && SKIPPED.has(dom.localName(child))) continue
-        const name = nameOfNode(child, { ...context, traversal: true })
-        const inline = !(child instanceof Element) || getComputedStyle(child).display.startsWith("inline")
-        content += inline ? name : ` ${name} `
+    // 2F: name from content. In the target's own content, only a descendant whose role allows it.
+    const fromContent = context.embedded === "reference" ||
+      (role !== null && NAME_FROM_CONTENT.has(role)) ||
+      (context.embedded === "descendant" && (role === null || NAME_FROM_CONTENT_DESCENDANT.has(role)))
+    if (fromContent) {
+      const child: NameContext = context.embedded === "self" ? { ...context, embedded: "descendant" } : context
+      let content = cssContent(element, "::before") ?? ""
+      const own = cssContent(element)
+      if (own !== undefined) {
+        // Content on the element itself replaces its children.
+        content += own
+      } else {
+        for (const node of flatChildNodes(element)) {
+          if (node instanceof Element && SKIPPED.has(dom.localName(node))) continue
+          const name = nameOfNode(node, child)
+          // Only an inline child runs into its neighbours; <br> always separates.
+          const inline = !(node instanceof Element) ||
+            (getComputedStyle(node).display === "inline" && dom.localName(node) !== "br")
+          content += inline ? name : ` ${name} `
+        }
       }
-      content += pseudoContent(element, "::after")
-      if (content.trim() !== "") {
-        if (provenance && !context.traversal && !context.labelledBy) namesFromContent.add(element)
-        if (inField(element)) context.contribution.fieldContent = true
+      content += cssContent(element, "::after") ?? ""
+      // Only the target's own name is trimmed: a descendant's whitespace separates its neighbours.
+      if (context.embedded === "self" ? content.trim() !== "" : content !== "") {
+        if (provenance && context.embedded === "self") namesFromContent.add(element)
+        if (inField(element) && content.trim() !== "") context.contribution.fieldContent = true
         return content
       }
     }
@@ -1294,6 +1464,13 @@ export function engine(render: (root: SnapNode) => string) {
     }
     return ""
   }
+
+  /** The context for a native label, legend or caption: a reference, hidden if it or an enclosing one is. */
+  const reference = (context: NameContext, element: Element): NameContext => ({
+    ...context,
+    hiddenReference: context.hiddenReference || hiddenFromAccessibility(element),
+    embedded: "reference"
+  })
 
   const nativeName = (element: Element, context: NameContext): string => {
     if (element instanceof HTMLInputElement) {
@@ -1316,7 +1493,7 @@ export function engine(render: (root: SnapNode) => string) {
     }
     const labels = labelsOf(element)
     if (labels.length > 0) {
-      return labels.map((label) => nameOfElement(label, { ...context, traversal: true })).join(" ")
+      return labels.map((label) => nameOfElement(label, reference(context, label))).join(" ")
     }
     if (element instanceof HTMLImageElement || element instanceof HTMLAreaElement) {
       const alt = dom.getAttribute(element, "alt") ?? ""
@@ -1326,15 +1503,15 @@ export function engine(render: (root: SnapNode) => string) {
     const first = (selector: string) => Array.from(dom.children(element)).find((child) => dom.matches(child, selector))
     if (element instanceof HTMLFieldSetElement) {
       const legend = first("legend")
-      return legend === undefined ? "" : nameOfElement(legend, { ...context, traversal: true })
+      return legend === undefined ? "" : nameOfElement(legend, reference(context, legend))
     }
     if (element instanceof HTMLTableElement) {
       const caption = first("caption")
-      return caption === undefined ? "" : nameOfElement(caption, { ...context, traversal: true })
+      return caption === undefined ? "" : nameOfElement(caption, reference(context, caption))
     }
     if (dom.localName(element) === "figure") {
       const caption = first("figcaption")
-      return caption === undefined ? "" : nameOfElement(caption, { ...context, traversal: true })
+      return caption === undefined ? "" : nameOfElement(caption, reference(context, caption))
     }
     if (element instanceof SVGSVGElement) {
       const title = first("title")
@@ -1349,17 +1526,27 @@ export function engine(render: (root: SnapNode) => string) {
   const namesFromFields = new Set<Element>()
   const namesFromContent = new Set<Element>()
   const nameCache = new Map<Element, string>()
+  const hiddenNameCache = new Map<Element, string>()
+  /** An element's accessible name, as a flat string. With `includeHidden`, hidden descendants count too. */
   const accessibleName = (element: Element, includeHidden: boolean): string => {
-    const cached = nameCache.get(element)
+    const cache = includeHidden ? hiddenNameCache : nameCache
+    const cached = cache.get(element)
     if (cached !== undefined) return cached
     const contribution = { fieldContent: false }
     const role = roleOf(element)
     // This restriction is on the root, not on descendants or references contributing to another element's name.
-    const name = role !== null && NAME_PROHIBITED.has(role) ? "" : collapse(
-      nameOfElement(element, { visited: new Set(), labelledBy: false, traversal: false, includeHidden, contribution })
+    const name = role !== null && NAME_PROHIBITED.has(role) ? "" : flatString(
+      nameOfElement(element, {
+        visited: new Set(),
+        labelledBy: false,
+        hiddenReference: false,
+        embedded: "self",
+        includeHidden,
+        contribution
+      })
     )
     if (provenance && contribution.fieldContent) namesFromFields.add(element)
-    nameCache.set(element, name)
+    cache.set(element, name)
     return name
   }
 
@@ -1483,7 +1670,7 @@ export function engine(render: (root: SnapNode) => string) {
       case "Role":
         return under.filter((element) =>
           roleOf(element) === step.role && (step.includeHidden || !hiddenFromAccessibility(element)) &&
-          (step.name === null || matches(step.name, accessibleName(element, step.includeHidden))) &&
+          (step.name === null || matches(step.name, collapse(accessibleName(element, step.includeHidden)))) &&
           (step.level === undefined || levelOf(element) === step.level) &&
           (step.checked === undefined || checkedState(element).state === step.checked) &&
           (step.pressed === undefined || pressedOf(element) === step.pressed) &&
@@ -2843,8 +3030,6 @@ export function engine(render: (root: SnapNode) => string) {
         return { passed: role === expectation.expected, observed: role }
       }
       case "AccessibleName": {
-        // Resolving an includeHidden role locator may have cached a name with different visibility rules.
-        nameCache.delete(element)
         const name = accessibleName(element, false)
         const matcher = expectation.expected
         const normalize = (text: string) => collapse(text.replace(/[\u200b\u00ad]/g, ""))
@@ -3218,6 +3403,7 @@ export function engine(render: (root: SnapNode) => string) {
     rawText.clear()
     roleCache.clear()
     nameCache.clear()
+    hiddenNameCache.clear()
     namesFromContent.clear()
     namesFromFields.clear()
     provenance = false
@@ -3477,7 +3663,7 @@ export function engine(render: (root: SnapNode) => string) {
       for (const element of elementsUnder(anchor ?? document)) {
         if (roleOf(element) !== last.role || hiddenFromAccessibility(element)) continue
         const name = accessibleName(element, false)
-        const lower = name.toLowerCase()
+        const lower = collapse(name).toLowerCase()
         if (name === "" || suggestions.some((each) => each.name === name)) continue
         if (lower.includes(wanted) || wanted.includes(lower) || distance(lower, wanted) <= 2) {
           suggestions.push({ role: last.role, name })
@@ -3632,7 +3818,8 @@ export function engine(render: (root: SnapNode) => string) {
       rawText.clear()
       roleCache.clear()
       nameCache.clear()
-      const name = full ? accessibleName(element, true) : ""
+      hiddenNameCache.clear()
+      const name = full ? accessibleName(element, hiddenFromAccessibility(element)) : ""
       found.set(
         element,
         `${roleOf(element)}${name === "" ? "" : ` ${JSON.stringify(name)}`} validationMessage=${
@@ -3709,7 +3896,8 @@ export function engine(render: (root: SnapNode) => string) {
               _tag: "Roles",
               roles: resolve(request.steps).map((element) => ({
                 role: roleOf(element),
-                name: accessibleName(element, true)
+                // A hidden element's name counts its hidden content; a shown one's, what a reader gets
+                name: accessibleName(element, hiddenFromAccessibility(element))
               }))
             } satisfies Response
           )
