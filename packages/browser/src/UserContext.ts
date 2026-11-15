@@ -294,6 +294,15 @@ export interface UserContext extends ObservedUserContext {
    * already underway without response interception may miss a later response route. Existing response pauses
    * select the current routes by precedence.
    *
+   * While a `"request"` or `"response"` route is in force, the context's requests bypass the browser's HTTP
+   * cache, so a request the route continues reaches the server. The cache is used again once the last such route
+   * is removed; an `"auth"` route leaves it alone.
+   *
+   * **Gotchas**
+   *
+   * On Firefox, the cache is set for the browser or for one page, not for a context: while a context's route is
+   * in force, other contexts' requests bypass the cache too.
+   *
    * The phase defaults to `"request"`. Response-only handlers require `{ phase: "response" }`, and
    * authentication handlers require `{ phase: "auth" }`. When options may omit the phase, the handler must
    * also handle `"request"`; union phases require a handler compatible with every possible phase.

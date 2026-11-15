@@ -221,7 +221,7 @@ const applyOverride = (
         // A tab in a context that emulates focus for its life renders only with it
         return Emulation.setFocusEmulationEnabled({ enabled: target.page?.context.focusEmulated === true }).pipe(on)
       case "CacheDisabled":
-        return Network.setCacheDisabled({ cacheDisabled: false }).pipe(on)
+        return Network.setCacheDisabled({ cacheDisabled: routed(state, target.page) }).pipe(on)
     }
   }
   switch (override._tag) {
@@ -265,9 +265,29 @@ const applyOverride = (
         enabled: override.enabled || target.page?.context.focusEmulated === true
       }).pipe(on)
     case "CacheDisabled":
-      return Network.setCacheDisabled({ cacheDisabled: override.disabled }).pipe(on)
+      return Network.setCacheDisabled({ cacheDisabled: override.disabled || routed(state, target.page) }).pipe(on)
   }
 }
+
+/**
+ * Whether a request- or response-phase intercept is in force for a page. Chromium looks in its HTTP cache after
+ * the request-stage pause, so a request an intercept continues would be answered from the cache, never reaching
+ * the server: while one is in force, the cache is off, whatever the `CacheDisabled` override says.
+ */
+const routed = (state: State, page: PageEntry | undefined) => {
+  if (page === undefined) return false
+  const intercepts = state.registry.intercepts(placement(page))
+  return intercepts.request.length > 0 || intercepts.response.length > 0
+}
+
+/** The cache setting, sent again where an intercept's declaration or release may have changed it. */
+const applyCache = (state: State, target: TargetEntry) =>
+  withOverrides(
+    target,
+    Effect.suspend(() =>
+      applyOverride(state, target, "CacheDisabled", state.registry.overrides(placement(target.page!)))
+    )
+  )
 
 const applyScripts = Effect.fnUntraced(function*(state: State, target: TargetEntry, page: PageEntry, setup?: Setup) {
   const on = setup?.send ?? Protocol.on(target.session)
@@ -360,12 +380,18 @@ const withOverrides = <A, E, R>(target: TargetEntry, effect: Effect.Effect<A, E,
 }
 
 /**
- * The kinds a new target is configured with: those declared for its page, and focus emulation where its context
- * holds it for its life, even when no declaration of it remains.
+ * The kinds a new target is configured with: those declared for its page, focus emulation where its context
+ * holds it for its life, even when no declaration of it remains, and the cache setting where an intercept turns
+ * the cache off.
  */
-const kindsFor = (page: PageEntry, overrides: ReadonlyMap<Adapter.Override["_tag"], Adapter.Override>) => {
+const kindsFor = (
+  state: State,
+  page: PageEntry,
+  overrides: ReadonlyMap<Adapter.Override["_tag"], Adapter.Override>
+) => {
   const kinds = [...overrides.keys()]
   if (page.context.focusEmulated === true && !overrides.has("FocusEmulation")) kinds.push("FocusEmulation")
+  if (routed(state, page) && !overrides.has("CacheDisabled")) kinds.push("CacheDisabled")
   return kinds
 }
 
@@ -379,7 +405,7 @@ export const configureTarget = Effect.fnUntraced(
           Effect.suspend(() => {
             const overrides = state.registry.overrides(placement(page))
             return Effect.forEach(
-              kindsFor(page, overrides),
+              kindsFor(state, page, overrides),
               (kind) => kind === "Viewport" ? Effect.void : applyOverride(state, target, kind, overrides),
               {
                 discard: true
@@ -400,7 +426,7 @@ export const configureTarget = Effect.fnUntraced(
           yield* (target.overrideLock ??= Semaphore.makeUnsafe(1)).takeScoped(1)
           const overrides = state.registry.overrides(placement(page))
           yield* Effect.forEach(
-            kindsFor(page, overrides),
+            kindsFor(state, page, overrides),
             (kind) => kind === "Viewport" ? Effect.void : applyOverride(state, target, kind, overrides, setup.send),
             {
               discard: true
@@ -449,6 +475,7 @@ const applyToTarget = (state: State, declaration: Adapter.Declaration, target: T
     case "InitScript":
       return applyScripts(state, target, page)
     case "Intercept":
+      return applyIntercepts(state, target, page).pipe(Effect.andThen(applyCache(state, target)))
     case "Challenges":
       return applyIntercepts(state, target, page)
     case "Override":
@@ -515,7 +542,7 @@ export const applyDownloads = (state: State, context: ContextEntry) =>
 /**
  * What the declarations in force say, sent again to a context's targets, after a removal the browser refused left
  * in place a context whose declarations' releases were skipped because it was to go. Each target's interception
- * and file chooser are reset on their own: a reset that fails is logged and the others still run.
+ * cache setting and file chooser are reset on their own: a reset that fails is logged and the others still run.
  */
 export const restoreContext = (state: State, context: ContextEntry) =>
   Effect.forEach(
@@ -524,6 +551,7 @@ export const restoreContext = (state: State, context: ContextEntry) =>
       // Each reset stands alone: one that fails is logged and leaves the others to run
       Effect.all([
         applyIntercepts(state, target, target.page!).pipe(releaseErrors),
+        applyCache(state, target).pipe(releaseErrors),
         target.kind === "page"
           ? Page.setInterceptFileChooserDialog({
             enabled: state.registry.fileChooser(placement(target.page!))

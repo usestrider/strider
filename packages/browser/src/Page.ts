@@ -1016,6 +1016,9 @@ export interface Page extends ReadonlyPage {
    * **Details**
    *
    * - The route is in force for requests that start after this declaration returns.
+   * - While a `"request"` or `"response"` route is in force, the page's requests bypass the browser's HTTP
+   *   cache, so a request the route continues reaches the server. The cache is used again once the last such
+   *   route is removed; an `"auth"` route leaves it alone.
    * - The page's routes are asked before its context's, the most recent first; `Route.fallthrough` passes the
    *   request to the next.
    * - `options.phase` (`"request"`, `"response"`, or `"auth"`) decides what the handler is given and may decide.

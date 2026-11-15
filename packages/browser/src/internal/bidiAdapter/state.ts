@@ -262,6 +262,11 @@ export interface State {
   >
   /** Contexts reported now existed before the connection: they are adopted. */
   adopting: boolean
+  /**
+   * The cache behavior last set: the session's, and each page's where it differs from it, by browsing context.
+   * Setting the session's clears every page's.
+   */
+  cache: { bypass: boolean; readonly pages: Map<string, boolean> }
 }
 
 /** A connection's empty state, with its default context mapped to BiDi's `"default"`. */
@@ -319,7 +324,8 @@ export const make = (options: {
     requestCollectors: new Map(),
     granted: new Map(),
     preloads: [],
-    adopting: true
+    adopting: true,
+    cache: { bypass: false, pages: new Map() }
   }
   return state
 }
