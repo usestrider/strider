@@ -319,7 +319,12 @@ describe("CdpAdapter state", () => {
     Effect.gen(function*() {
       const { page, state } = yield* withPage()
       state.heldButtons.set(page.id, 1)
-      state.drags.set(page.id, { data: { items: [], dragOperationsMask: 1 }, entered: true, stale: false })
+      state.drags.set(page.id, {
+        data: { items: [], dragOperationsMask: 1 },
+        entered: true,
+        at: undefined,
+        stale: false
+      })
       state.interceptingDrags.add(page.id)
       Tree.endPage(state, page, new Target.PageClosed({ by: "command" }), "test")
       assert.isFalse(state.heldButtons.has(page.id))

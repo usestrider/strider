@@ -273,6 +273,8 @@ export interface HandleEntry {
 export interface DragEntry {
   readonly data: Input.DragData
   entered: boolean
+  /** Where its last drag event went, on the session it went on, in that session's coordinates. */
+  at: { readonly target: TargetEntry; readonly x: number; readonly y: number } | undefined
   /** Announced after the gesture that started it was released (QUIRKS.md, Q88). */
   readonly stale: boolean
 }
@@ -340,6 +342,8 @@ export interface State {
   readonly interceptingDrags: Set<L1Target.NavigableId>
   /** The buttons each page's last mouse event left held, until the page ends. */
   readonly heldButtons: Map<L1Target.NavigableId, number>
+  /** Pages whose held Escape canceled an intercepted drag: its release is the drag's too, and isn't sent. */
+  readonly escapeCanceled: Set<L1Target.NavigableId>
   /** The frames each page's held press landed in, where its gesture named them, until every button is released. */
   readonly pressedIn: Map<L1Target.NavigableId, ReadonlyArray<FrameEntry>>
   /** A worker no page owns belongs to the context its target names. */
@@ -412,6 +416,7 @@ export const make = (options: {
     interceptingDrags: new Set(),
     heldButtons: new Map(),
     pressedIn: new Map(),
+    escapeCanceled: new Set(),
     workerContexts: new Map(),
     attachedAtConnect: true,
     defaultUserAgent: ""
