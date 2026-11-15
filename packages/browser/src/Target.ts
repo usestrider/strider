@@ -411,6 +411,27 @@ export class Vanished extends Schema.Error<Vanished>("@usestrider/browser/Target
  * - Connections: `NetworkConnectionClosed`, for a WebSocket or EventSource the page or the server closed.
  *   (`ConnectionLost` is the browser's connection.)
  *
+ * **Example** (Telling why a target ended)
+ *
+ * ```ts import.meta.vitest
+ * import { Target } from "@usestrider/browser"
+ *
+ * const describe = (reason: Target.CloseReason): string => {
+ *   switch (reason._tag) {
+ *     case "PageClosed":
+ *       return `The page closed, by ${reason.by}`
+ *     case "BrowserClosed":
+ *       return "The browser closed"
+ *     case "RealmDestroyed":
+ *       return "The page's document went"
+ *     default:
+ *       return reason.message
+ *   }
+ * }
+ *
+ * console.log(describe(new Target.PageClosed({ by: "command" })))
+ * ```
+ *
  * @stability unstable
  * @category schemas
  * @since 0.1.0
