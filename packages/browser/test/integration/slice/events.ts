@@ -299,7 +299,8 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
             // Held past the browser's own scope, so only the browser closing ends them
             const holder = yield* Scope.make()
             const browserScope = yield* Scope.make()
-            const services = yield* Layer.buildWithScope(backend, browserScope)
+            // Fresh, so the browser is its own and not the suite's shared one
+            const services = yield* Layer.buildWithScope(Layer.fresh(backend), browserScope)
             const held = yield* Effect.gen(function*() {
               const browser = yield* Browser.Browser
               const defaultContext = yield* browser.defaultContext.control
