@@ -1420,8 +1420,11 @@ export function engine(render: (root: SnapNode) => string) {
     // Marked only now, so an element whose aria-labelledby names itself still reaches its own aria-label
     context.visited.add(element)
     const role = roleOf(element)
-    // 2E: an embedded control inside another element's name contributes its value
-    if (context.embedded !== "self" && embeddedControlRole(role)) {
+    // 2E: an embedded control inside another element's name contributes its value, unless it names itself
+    const id = dom.id(element)
+    const namesItself = id !== "" &&
+      (dom.getAttribute(element, "aria-labelledby") ?? "").split(/\s+/).includes(id)
+    if (context.embedded !== "self" && !namesItself && embeddedControlRole(role)) {
       const value = embeddedValue(element, role, context)
       if (value.trim() !== "") context.contribution.fieldContent = true
       return value
@@ -1453,6 +1456,13 @@ export function engine(render: (root: SnapNode) => string) {
           const inline = !(node instanceof Element) ||
             (getComputedStyle(node).display === "inline" && dom.localName(node) !== "br")
           content += inline ? name : ` ${name} `
+        }
+        // Elements it owns through aria-owns follow its children
+        for (const owned of (dom.getAttribute(element, "aria-owns") ?? "").split(/\s+/)) {
+          const target = owned === "" ? null : byId(element, owned)
+          if (target === null) continue
+          const name = nameOfElement(target, child)
+          content += getComputedStyle(target).display === "inline" ? name : ` ${name} `
         }
       }
       content += cssContent(element, "::after") ?? ""
