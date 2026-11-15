@@ -1520,7 +1520,8 @@ export interface Locator extends ReadonlyLocator {
    *
    * - A text input, a textarea, or a `contenteditable` element is focused and its contents selected from an
    *   isolated world of Strider's, then the value is inserted as text, as an input method would: with no key
-   *   events, a cancelable `beforeinput` and then `input`. An editor that cancels the `beforeinput` and writes the
+   *   events, a cancelable `beforeinput` and then `input`. An empty value is the exception: the selected contents
+   *   are deleted by pressing Delete. An editor that cancels the `beforeinput` and writes the
    *   text itself is filled. Firefox's `beforeinput` here is dispatched by Strider, untrusted (`isTrusted` is
    *   `false`), since Firefox's editing command fires none; see `Keyboard.insertText`.
    * - An input whose value isn't typed (`date`, `time`, `color`, `range`, and their kin) has it set from that

@@ -1627,7 +1627,7 @@ response with no network behind it. `file:` URLs stay requests.
 
 ## Text is inserted with the page's editing command where a protocol has none
 
-`Keyboard.insertText` and `fill` insert text with no key events on every backend. CDP has `Input.insertText`;
+`Keyboard.insertText` and `fill` insert text with no key events on every backend (`fill("")` deletes by pressing Delete). CDP has `Input.insertText`;
 WebDriver BiDi has no such command, and stock WebKit's Automation inserts only by key (`InsertByKey`), so on Firefox
 and stock WebKit the engine inserts with the page's editing command, `execCommand("insertText")`, taken from
 `Document.prototype` at install, in the focused document. Firefox's command fires no `beforeinput`, so there the
