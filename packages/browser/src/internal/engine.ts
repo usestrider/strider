@@ -1645,8 +1645,9 @@ export function engine(render: (root: SnapNode) => string) {
     return out
   }
 
+  /** `aria-disabled` on the element or a flat-tree ancestor, so a slotted element inherits its slot's. */
   const ariaDisabled = (element: Element): boolean => {
-    for (let current: Element | null = element; current !== null; current = composedParent(current)) {
+    for (let current: Element | null = element; current !== null; current = flatParent(current)) {
       if (dom.getAttribute(current, "aria-disabled") === "true") return true
     }
     return false
@@ -3153,10 +3154,11 @@ export function engine(render: (root: SnapNode) => string) {
     const evidence: Array<string> = []
     if (element instanceof HTMLInputElement && element.type === "password") evidence.push("password")
     const parent = composedParent(element)
-    // `cursor` is inherited: only the element that sets it counts
+    // `cursor` is inherited, in the flat tree: only the element that sets it counts
+    const inheritsFrom = flatParent(element)
     if (
       getComputedStyle(element).cursor === "pointer" &&
-      (parent === null || getComputedStyle(parent).cursor !== "pointer")
+      (inheritsFrom === null || getComputedStyle(inheritsFrom).cursor !== "pointer")
     ) evidence.push("cursorPointer")
     if (dom.hasAttribute(element, "tabindex") && element instanceof HTMLElement && dom.tabIndex(element) >= 0) {
       evidence.push("tabindex")
@@ -3182,7 +3184,7 @@ export function engine(render: (root: SnapNode) => string) {
     return field
   }
 
-  // Naming follows assigned slots and shadow hosts without changing action/selector ancestry.
+  // The flat-tree parent of any node, text included, as `flatParent` is an element's: field ancestry follows it.
   const fieldParent = (node: Node): Node | null => {
     const slot = node instanceof Element ? dom.assignedSlot(node) : node instanceof Text ? node.assignedSlot : null
     if (slot !== null) return slot
