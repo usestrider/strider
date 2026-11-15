@@ -544,9 +544,15 @@ export function engine(render: (root: SnapNode) => string) {
     return root instanceof ShadowRoot ? root.host : null
   }
 
-  /** Whether `ancestor` contains `node` in the composed tree. */
-  const composedContains = (ancestor: Element, node: Element): boolean => {
-    for (let current: Element | null = node; current !== null; current = composedParent(current)) {
+  /**
+   * The parent in the flat tree: an assigned node's slot, otherwise its composed parent. Rendering, hit testing and
+   * event dispatch follow this tree, where slotted content sits under its slot rather than its host.
+   */
+  const flatParent = (element: Element): Element | null => element.assignedSlot ?? composedParent(element)
+
+  /** Whether `ancestor` contains `node` in the flat tree, which reaches every composed ancestor too. */
+  const flatContains = (ancestor: Element, node: Element): boolean => {
+    for (let current: Element | null = node; current !== null; current = flatParent(current)) {
       if (current === ancestor) return true
     }
     return false
@@ -1025,9 +1031,12 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   // Hidden, visible
-  /** Excluded from the accessibility tree: `aria-hidden`, `display: none`, `visibility: hidden`. */
+  /**
+   * Excluded from the accessibility tree: `aria-hidden` on it or a flat-tree ancestor, `display: none`,
+   * `visibility: hidden`.
+   */
   const hiddenFromAccessibility = (element: Element): boolean => {
-    for (let current: Element | null = element; current !== null; current = composedParent(current)) {
+    for (let current: Element | null = element; current !== null; current = flatParent(current)) {
       if (current.getAttribute("aria-hidden") === "true") return true
     }
     return !element.checkVisibility({ visibilityProperty: true })
@@ -1734,7 +1743,7 @@ export function engine(render: (root: SnapNode) => string) {
     for (
       let ancestor: Element | null = element;
       ancestor !== null && ancestor !== label;
-      ancestor = ancestor.assignedSlot ?? composedParent(ancestor)
+      ancestor = flatParent(ancestor)
     ) {
       if (interactiveLabelDescendant(ancestor)) return null
     }
@@ -1766,7 +1775,7 @@ export function engine(render: (root: SnapNode) => string) {
     for (
       let current: Element | null = element;
       current !== null;
-      current = current.assignedSlot ?? composedParent(current)
+      current = flatParent(current)
     ) {
       if (current.hasAttribute("inert")) return current
     }
@@ -1775,9 +1784,9 @@ export function engine(render: (root: SnapNode) => string) {
 
   const inertReason = (element: Element): NotReady | null => {
     const inert = inertAncestor(element)
-    // Dialogs outside the target, in shadow roots too
+    // Dialogs outside the target in the flat tree, in shadow roots too
     const dialogs = documentElements().filter((d) =>
-      (d instanceof HTMLDialogElement || d.hasAttribute("aria-modal")) && !composedContains(d, element)
+      (d instanceof HTMLDialogElement || d.hasAttribute("aria-modal")) && !flatContains(d, element)
     )
     if (inert !== null) {
       // An open modal: a native one, or a rendered `aria-modal` dialog that isn't inert itself
@@ -1832,7 +1841,7 @@ export function engine(render: (root: SnapNode) => string) {
         if (seen.has(root)) continue
         seen.add(root)
         for (const hit of root.elementsFromPoint(x, y)) {
-          if (composedContains(element, hit)) return true
+          if (flatContains(element, hit)) return true
           if (hit.shadowRoot !== null) roots.push(hit.shadowRoot)
         }
       }
@@ -1849,7 +1858,7 @@ export function engine(render: (root: SnapNode) => string) {
     onCancel?: (cancel: () => void) => void
   ): Promise<boolean | null> | null => {
     let margin = 0
-    for (let ancestor = composedParent(element); ancestor !== null; ancestor = composedParent(ancestor)) {
+    for (let ancestor = flatParent(element); ancestor !== null; ancestor = flatParent(ancestor)) {
       const style = getComputedStyle(ancestor)
       if (
         (/^(auto|scroll|hidden)$/.test(style.overflowX) && ancestor.scrollWidth > ancestor.clientWidth) ||
@@ -1922,7 +1931,7 @@ export function engine(render: (root: SnapNode) => string) {
         first ??= point
         if (!receivesPointer) return [point]
         const hit = hitTarget(point.x, point.y)
-        if (hit !== null && composedContains(element, hit)) {
+        if (hit !== null && flatContains(element, hit)) {
           if (clip === undefined) return [point]
           points.push(point)
         }
@@ -1937,11 +1946,20 @@ export function engine(render: (root: SnapNode) => string) {
     }]
   }
 
-  /** What the pointer would hit at a point, through open shadow roots. */
+  /**
+   * What the pointer would hit at a point, through open shadow roots. A shadow root can answer with its own host
+   * where the topmost node is slotted text, whose DOM parent is the host (Chromium does); the first element of the
+   * root's paint stack is then the hit when it belongs to that root.
+   */
   const hitTarget = (x: number, y: number): Element | null => {
     let hit = document.elementFromPoint(x, y)
     while (hit !== null && hit.shadowRoot !== null) {
-      const inner = hit.shadowRoot.elementFromPoint(x, y)
+      const root = hit.shadowRoot
+      let inner = root.elementFromPoint(x, y)
+      if (inner === hit) {
+        const first = root.elementsFromPoint(x, y)[0]
+        inner = first !== undefined && first.getRootNode() === root ? first : null
+      }
       if (inner === null || inner === hit) break
       hit = inner
     }
@@ -2029,7 +2047,7 @@ export function engine(render: (root: SnapNode) => string) {
       if (!decided) {
         decided = true
         const target = event.composedPath()[0]
-        if (!(target instanceof Element) || !composedContains(element, target)) {
+        if (!(target instanceof Element) || !flatContains(element, target)) {
           current.blocked = target instanceof Element ? describe(target) : "nothing at that point"
         }
       }
@@ -2112,7 +2130,7 @@ export function engine(render: (root: SnapNode) => string) {
       const elsewhere = ancestor ?
         (recipient instanceof Element ? describe(recipient) : "another document")
         : recipient instanceof Element && element !== null &&
-            !composedContains(recipient, element) && !composedContains(element, recipient)
+            !flatContains(recipient, element) && !flatContains(element, recipient)
         ? describe(recipient) :
         null
       const blocked = current.blocked ?? elsewhere ?? blocker()
@@ -2306,7 +2324,7 @@ export function engine(render: (root: SnapNode) => string) {
         if (point === null) reason = { _tag: "OutsideViewport" }
         else if (checks.receivesPointer) {
           const hit = hitTarget(point.x, point.y)
-          if (hit === null || !composedContains(element, hit)) reason = missed(element, hit)
+          if (hit === null || !flatContains(element, hit)) reason = missed(element, hit)
         }
       }
       if (reason === null && element !== undefined && action._tag === "Select") {

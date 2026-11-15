@@ -988,16 +988,20 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           })), timeout)
       }
 
-      it.effect("hides a slotted element under an aria-hidden shadow element from role queries", () =>
-        Effect.scoped(Effect.gen(function*() {
-          const { url } = yield* fixture(() =>
-            `<!doctype html><script>customElements.define("hidden-slot",class extends HTMLElement{constructor(){super();this.attachShadow({mode:"open"}).innerHTML='<div aria-hidden="true"><slot></slot></div>'}})</script><hidden-slot><button>Hidden</button></hidden-slot><button>Shown</button>`
-          )
-          const page = yield* newPage
-          yield* page.goto(url)
-          assert.strictEqual(yield* page.getByRole("button").count, 1)
-          assert.strictEqual(yield* page.getByRole("button", { name: "Shown" }).count, 1)
-        })), timeout)
+      it.effect(
+        "hides a slotted element under an aria-hidden shadow element from role queries",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<!doctype html><script>customElements.define("hidden-slot",class extends HTMLElement{constructor(){super();this.attachShadow({mode:"open"}).innerHTML='<div aria-hidden="true"><slot></slot></div>'}})</script><hidden-slot><button>Hidden</button></hidden-slot><button>Shown</button>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            assert.strictEqual(yield* page.getByRole("button").count, 1)
+            assert.strictEqual(yield* page.getByRole("button", { name: "Shown" }).count, 1)
+          })),
+        timeout
+      )
 
       it.effect("fills a transparent control under a cover, with no pointer to hit-test", () =>
         Effect.gen(function*() {
