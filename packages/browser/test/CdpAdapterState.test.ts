@@ -1334,6 +1334,30 @@ describe("CDP restoration cleanup", () => {
       assert.isBelow(tags.indexOf("DownloadEnded"), tags.indexOf("UserContextRemoved"))
     })))
 
+  it.effect("forgets a context's ended frames once its downloads declaration is released", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const mock = { ...session, ended: Effect.void } as unknown as ProtocolClient.Session
+      const { state, page, target } = yield* withPage(mock)
+      const context = new State.ContextEntry(state.ids.userContext(), "handed-off", false)
+      state.contexts.set(context.id, context)
+      state.contextsByCdp.set("handed-off", context)
+      ;(page as { context: State.ContextEntry }).context = context
+      const lifetime = yield* Scope.make()
+      yield* Declare.declare(state, { _tag: "UserContext", context: context.id }, {
+        _tag: "Downloads",
+        behavior: { _tag: "Allow", directory: "/tmp/downloads" }
+      }).pipe(Scope.provide(lifetime))
+      const child = Tree.addFrame(state, "child", state.frames.get("T1")!, target)
+      Tree.removeFrame(state, child, new Target.FrameDetached({}), "frame detached while downloads are allowed")
+      assert.strictEqual(state.retiredFrames.get("child"), context)
+      yield* Scope.close(lifetime, Exit.void)
+      assert.strictEqual(state.retiredFrames.size, 0)
+      assert.isUndefined(context.retiredFrames)
+      const later = Tree.addFrame(state, "later", state.frames.get("T1")!, target)
+      Tree.removeFrame(state, later, new Target.FrameDetached({}), "frame detached with no declared directory")
+      assert.strictEqual(state.retiredFrames.size, 0)
+    })))
+
   it.effect("does not retain detached frames of an externally discovered context", () =>
     Effect.scoped(Effect.gen(function*() {
       const { state, page, target } = yield* withPage()
