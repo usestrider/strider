@@ -519,6 +519,13 @@ didn't pay for two protocols.
 **`Browser.layerTest` emulates no DOM.** A fake browser with a DOM would be a second engine to keep honest, and real
 browsers are cheap to launch.
 
+**The scheduled integration run guards Strider's own rules.** Each case tests a rule of Strider's code, or a bug that
+escaped once, as Strider's own test on every backend, within the run's time goals, and only that run decides a
+release. Ports of Playwright's and Puppeteer's suites measure parity and find bugs: they run apart, on request, and
+what they find comes in as a native test of the rule it broke. Rejected: running the ports each night, which would turn
+the run into a parity scoreboard whose flakes and runtime block releases on behavior Strider doesn't claim; and copying
+ported cases in, which brings upstream code, and the assumptions of another implementation, into Strider's tests.
+
 
 ## Document observation and delayed attribution
 
