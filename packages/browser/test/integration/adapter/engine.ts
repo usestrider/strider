@@ -1445,8 +1445,10 @@ export const engine = (backend: Backend) =>
                 globalThis.fieldReads = 0
                 globalThis.editabilityReads = 0
                 const heading = document.querySelector("h2")
-                const editable = heading.isContentEditable
-                Object.defineProperty(heading, "isContentEditable", { get() { globalThis.editabilityReads++; return editable } })
+                const editable = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "isContentEditable")
+                Object.defineProperty(HTMLElement.prototype, "isContentEditable", {
+                  ...editable, get() { if (this === heading) globalThis.editabilityReads++; return editable.get.call(this) }
+                })
                 const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, "assignedSlot")
                 Object.defineProperty(Element.prototype, "assignedSlot", {
                   ...descriptor, get() { globalThis.fieldReads++; return descriptor.get.call(this) }
