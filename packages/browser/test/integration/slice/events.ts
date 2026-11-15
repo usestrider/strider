@@ -276,12 +276,12 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             yield* page.goto(url)
-            const evaluation = yield* page.evaluate(() => {
+            const evaluation = yield* page.evaluateInMainWorld(() => {
               ;(window as { __pending?: boolean }).__pending = true
               return new Promise(() => {})
             }).pipe(Effect.forkChild)
             // Closed only once the evaluation runs in the page
-            yield* page.evaluate(() => (window as { __pending?: boolean }).__pending === true).pipe(
+            yield* page.evaluateInMainWorld(() => (window as { __pending?: boolean }).__pending === true).pipe(
               Effect.repeat({ until: (started) => started })
             )
             yield* page.close()
