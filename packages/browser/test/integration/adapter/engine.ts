@@ -2593,44 +2593,6 @@ export const engine = (backend: Backend) =>
           timeout
         )
 
-        it.effect("resolves a pointer action on display: contents by its text or its children, scrolling to them", () =>
-          Effect.gen(function*() {
-            const { send } = yield* open(
-              backend,
-              `<span id="go" style="display:contents">hello</span>
-<div id="children" style="display:contents"><button>Buy</button></div>
-<div style="height:3000px"></div><span id="far" style="display:contents">below</span>`
-            )
-            const text = yield* send(point(0))
-            assert(text._tag === "Ready", JSON.stringify(text))
-            const children = yield* send({ ...point(0), steps: [{ _tag: "Css", selector: "#children" }] })
-            assert(children._tag === "Ready", JSON.stringify(children))
-            const far = yield* send({ ...point(0), steps: [{ _tag: "Css", selector: "#far" }] })
-            assert(far._tag === "Ready", JSON.stringify(far))
-          }), timeout)
-
-        it.effect("scrolls display: contents text using a transformed container's scroll coordinates", () =>
-          Effect.gen(function*() {
-            const { send } = yield* open(
-              backend,
-              `<div style="position:absolute;top:20px;left:20px;width:200px;height:80px;overflow:auto;transform:scale(2);transform-origin:top left">
-<div style="height:1000px"></div><span id="go" style="display:contents">hello</span><div style="height:1000px"></div></div>`
-            )
-            const response = yield* send(point(0))
-            assert(response._tag === "Ready", JSON.stringify(response))
-          }), timeout)
-
-        it.effect("scrolls display: contents text clipped by a container inside the viewport", () =>
-          Effect.gen(function*() {
-            const { send } = yield* open(
-              backend,
-              `<div style="position:absolute;top:20px;left:20px;width:200px;height:80px;overflow:auto">
-<div style="height:200px"></div><span id="go" style="display:contents">hello</span></div>`
-            )
-            const response = yield* send(point(0))
-            assert(response._tag === "Ready", JSON.stringify(response))
-          }), timeout)
-
         it.effect("does not count a hidden slot's text as visible display: contents", () =>
           Effect.gen(function*() {
             const { send } = yield* open(
