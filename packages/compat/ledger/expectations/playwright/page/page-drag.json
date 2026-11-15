@@ -1,6 +1,16 @@
 [
   {
     "tests": [
+      "DD-017"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "flaky",
+    "reason": "Flaky: expected [ mousemove at 50;50, …(4) ] to deeply equal [ mousemove at 50;50, …(3) ]: an extra mouse event in the drag sequence"
+  },
+  {
+    "tests": [
       "DD-013"
     ],
     "browsers": [

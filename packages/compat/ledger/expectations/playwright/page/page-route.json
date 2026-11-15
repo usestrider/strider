@@ -1,6 +1,16 @@
 [
   {
     "tests": [
+      "RO-002"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "flaky",
+    "reason": "Flaky: Recordings include the browser own favicon requests, which Playwright never reports"
+  },
+  {
+    "tests": [
       "RO-016"
     ],
     "browsers": [

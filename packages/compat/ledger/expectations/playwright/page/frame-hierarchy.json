@@ -1,6 +1,16 @@
 [
   {
     "tests": [
+      "FR-025"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "flaky",
+    "reason": "Flaky: A loaded iframe URL and navigations reach page.frames after the iframe own load event"
+  },
+  {
+    "tests": [
       "FR-031"
     ],
     "browsers": [
@@ -71,7 +81,6 @@
       "FR-025"
     ],
     "browsers": [
-      "firefox",
       "webkit"
     ],
     "status": "fails",

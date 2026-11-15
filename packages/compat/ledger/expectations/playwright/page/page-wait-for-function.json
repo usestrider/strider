@@ -1,6 +1,16 @@
 [
   {
     "tests": [
+      "WA-025"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "flaky",
+    "reason": "Flaky: A console message logged right after a reload commits can be missing, as in WA-024"
+  },
+  {
+    "tests": [
       "WA-024"
     ],
     "browsers": [

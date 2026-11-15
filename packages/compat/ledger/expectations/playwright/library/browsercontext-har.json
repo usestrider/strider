@@ -1,6 +1,16 @@
 [
   {
     "tests": [
+      "HA-088"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "flaky",
+    "reason": "Flaky: On Firefox, a replay of POST bodies recorded through the HAR aborts requests"
+  },
+  {
+    "tests": [
       "HA-081",
       "HA-082"
     ],
@@ -126,15 +136,5 @@
     ],
     "status": "fails",
     "reason": "Differs, pending a decision: Replay answers a recorded failed request with a failure where Playwright leaves it unanswered"
-  },
-  {
-    "tests": [
-      "HA-088"
-    ],
-    "browsers": [
-      "firefox"
-    ],
-    "status": "fails",
-    "reason": "On Firefox, a replay of POST bodies recorded through the HAR aborts requests"
   }
 ]
