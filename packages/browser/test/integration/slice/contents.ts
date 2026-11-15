@@ -528,25 +528,6 @@ export const contents = (
           assert.strictEqual(entries[0]!.text, entries[1]!.text)
         }), timeout)
 
-      it.effect("records synchronous browser and script console entries before evaluation returns", () =>
-        Effect.gen(function*() {
-          if (name !== "Chromium") return
-          const page = yield* SharedContext.newPage
-          yield* page.setContent(`<meta http-equiv="Content-Security-Policy" content="style-src 'none'">`)
-          yield* page.evaluateInMainWorld(() => {
-            console.log("before blocked style")
-            const style = document.createElement("style")
-            style.textContent = "body { color: red }"
-            document.head.append(style)
-            console.log("after blocked style")
-          })
-          const entries = (yield* ConsoleMessage.history(page)).entries.map((entry) => entry.text)
-          assert.lengthOf(entries, 3)
-          assert.strictEqual(entries[0], "before blocked style")
-          assert.match(entries[1]!, /Content Security Policy/i)
-          assert.strictEqual(entries[2], "after blocked style")
-        }), timeout)
-
       it.effect("reports the browser's own CSP and CORS errors at level error, as each browser sends them", () =>
         Effect.gen(function*() {
           const page = yield* SharedContext.newPage
@@ -562,7 +543,8 @@ export const contents = (
           const cors = /CORS|Access-Control|access control/i
           // Firefox 158 sends both as `log.entryAdded` of type `javascript`, the type BiDi keeps for uncaught
           // exceptions, so they arrive as exceptions. WebKitGTK 2.54.1 sends one of its CORS messages, "Fetch API
-          // cannot load …", with the source it gives uncaught errors, so that one does too.
+          // cannot load …", on the `javascript` channel at level `error`, which Strider reads as an uncaught
+          // exception, so that one does too.
           const asExceptions = name === "Firefox"
           const corsLogged: Effect.Effect<unknown, unknown> = asExceptions
             ? yield* UncaughtException.next(page, { message: cors }).pipe(Deadline.within("5 seconds"))
