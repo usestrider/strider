@@ -493,6 +493,9 @@ export const make = Effect.fnUntraced(function*() {
         Effect.andThen(fold.loseConnection(new Target.ConnectionLost({}))),
         Effect.forkScoped
       )
+      // Runs first as the browser's scope closes, before the browser is closed: what it reports ending as it shuts
+      // down ends with it
+      yield* Effect.addFinalizer(() => fold.closing(new Target.BrowserClosed({})))
       const release = (page: Target.NavigableId, by?: Scope.Scope) =>
         Effect.suspend(() => {
           const entry = fold.page(page)
