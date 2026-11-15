@@ -1625,11 +1625,13 @@ report both kinds as requests, and Firefox reports `data:` but not `blob:`. Repo
 rejected: the same page would report different requests on each backend, and a `data:` navigation would carry a
 response with no network behind it. `file:` URLs stay requests.
 
-## A Chromium HTML drag fires each drag event as Chromium's own drag does
+## A Chromium HTML drag enters where it starts and drops alone
 
-On Chromium, the move that starts an intercepted HTML drag sends `dragEnter` alone, each later move `dragOver`, and the
-release `drop` alone, so the page sees `dragenter`, `dragover` and `drop` once each, as a drag Chromium runs itself
-gives. Chromium's `drop` command fires a `dragover` before the `drop`, so no sequence of drag commands also gives a
+On Chromium, the move that starts an intercepted HTML drag sends `dragEnter` alone, each later move to a new point
+`dragOver`, and the release `drop` alone, so a drag of one held move fires `dragenter`, `dragover` and `drop` once
+each, as a drag Chromium runs itself does; a drag of more moves fires a `dragover` for each later move, and ends with
+two at its last point, its last move's and the drop's own. A move to the point of the last drag event sends nothing,
+since the pointer hasn't moved, though Chromium's own drag fires a `dragover` for it. Chromium's `drop` command fires a `dragover` before the `drop`, so no sequence of drag commands also gives a
 `dragover` while the button is still held after a single move: a drag of one held move shows its first `dragover` at
 the release or the next move. Sending `dragEnter` and `dragOver` at the move that starts the drag, which shows the
 drag over the target while the button is held, was rejected: every drop would then end with a second `dragover`,
