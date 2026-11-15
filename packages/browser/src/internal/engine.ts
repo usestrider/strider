@@ -1025,18 +1025,71 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   // Hidden, visible
-  /** Excluded from the accessibility tree: `aria-hidden`, `display: none`, `visibility: hidden`. */
+  /** An element's parent in the flat tree: the slot it is assigned to, else its composed parent. */
+  const flatParent = (element: Element): Element | null => element.assignedSlot ?? composedParent(element)
+
+  /**
+   * Whether a `display: contents` element shows what it holds. It has no box of its own, so it's judged by its
+   * computed `visibility` and by its nearest flat-tree ancestor with a box: that one must not be `display: none`,
+   * inside one, or skipping its content (`content-visibility: hidden`, or `auto` off screen with
+   * `contentVisibilityAuto`), and with `opacityProperty`, neither it nor its ancestors may have opacity 0.
+   */
+  const contentsShown = (
+    element: Element,
+    options?: { readonly contentVisibilityAuto?: boolean; readonly opacityProperty?: boolean }
+  ): boolean => {
+    if (getComputedStyle(element).visibility !== "visible") return false
+    for (let current = flatParent(element); current !== null; current = flatParent(current)) {
+      const style = getComputedStyle(current)
+      if (style.display === "contents") continue
+      return style.contentVisibility !== "hidden" && current.checkVisibility({
+        contentVisibilityAuto: options?.contentVisibilityAuto ?? false,
+        opacityProperty: options?.opacityProperty ?? false
+      })
+    }
+    return true
+  }
+
+  /**
+   * Excluded from the accessibility tree: `aria-hidden` on it or an ancestor, `display: none` on it or an
+   * ancestor, its own `visibility: hidden`, or content an ancestor skips. A `display: contents` element keeps its
+   * semantics, so what it holds doesn't decide it.
+   */
   const hiddenFromAccessibility = (element: Element): boolean => {
     for (let current: Element | null = element; current !== null; current = composedParent(current)) {
       if (current.getAttribute("aria-hidden") === "true") return true
     }
+    if (getComputedStyle(element).display === "contents") return !contentsShown(element)
     return !element.checkVisibility({ visibilityProperty: true })
   }
 
-  /** CONCEPTS.md §8: observations include opacity; action readiness ignores it. */
+  /** Text that takes up space on the page: non-blank, with a non-empty rect. */
+  const renderedText = (node: Text): boolean => {
+    if ((node.nodeValue ?? "").trim() === "") return false
+    const range = document.createRange()
+    range.selectNodeContents(node)
+    return Array.from(range.getClientRects()).some((rect) => rect.width > 0 && rect.height > 0)
+  }
+
+  /** The text nodes among a node's flat-tree children, through the slots among them. */
+  const flatChildTexts = (node: Node): Array<Text> => {
+    const out: Array<Text> = []
+    for (const child of flatChildNodes(node)) {
+      if (child instanceof Text) out.push(child)
+      else if (child instanceof HTMLSlotElement) out.push(...flatChildTexts(child))
+    }
+    return out
+  }
+
+  /**
+   * CONCEPTS.md §8: observations include opacity; action readiness ignores it. A `display: contents` element is
+   * rendered when one of its children is: an element, or text it shows.
+   */
   const rendered = (element: Element, opacityProperty: boolean): boolean => {
     if (getComputedStyle(element).display === "contents") {
-      return flatChildElements(element).some((child) => rendered(child, opacityProperty))
+      return flatChildElements(element).some((child) => rendered(child, opacityProperty)) ||
+        (flatChildTexts(element).some(renderedText) &&
+          contentsShown(element, { contentVisibilityAuto: true, opacityProperty }))
     }
     if (!element.checkVisibility({ contentVisibilityAuto: true, opacityProperty, visibilityProperty: true })) {
       return false
@@ -3151,7 +3204,7 @@ export function engine(render: (root: SnapNode) => string) {
       const display = getComputedStyle(node).display
       if (display === "none") return
       if (display !== "contents" && !node.checkVisibility()) return
-      const shown = display === "contents" || node.checkVisibility({ visibilityProperty: true })
+      const shown = display === "contents" ? contentsShown(node) : node.checkVisibility({ visibilityProperty: true })
       const made = shown ? elementNode(node, level, walk) : null
       if (made === null) {
         for (const child of flatChildNodes(node)) visit(child, shown)
