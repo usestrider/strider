@@ -2652,6 +2652,88 @@ export const engine = (backend: Backend) =>
             assert.strictEqual(focused._tag, "Ready", JSON.stringify(focused))
           }), timeout)
 
+        it.effect("refreshes inertness between role queries, readiness checks and snapshots", () =>
+          Effect.gen(function*() {
+            const { call, send } = yield* open(
+              backend,
+              `<button id="go">Outside</button><dialog id="modal"><button>Inside</button></dialog>`
+            )
+            for (const state of ["plain", "inert", "modal", "plain"]) {
+              yield* call(
+                `() => {
+                const button = document.getElementById("go")
+                const dialog = document.getElementById("modal")
+                dialog.close()
+                button.inert = ${state === "inert"}
+                ${state === "modal" ? "dialog.showModal()" : ""}
+              }`,
+                []
+              )
+              assert.deepStrictEqual(
+                yield* roles(send, role("button")),
+                state === "plain" ? ["Outside"] : state === "modal" ? ["Inside"] : []
+              )
+              const ready = yield* send({ ...point(0), checks: { ...all, stable: 0, receivesPointer: false } })
+              assert.strictEqual(ready._tag, state === "plain" ? "Ready" : "NotReady", JSON.stringify(ready))
+              const snapshot = yield* snapshotText(send)
+              assert.strictEqual(snapshot.includes("Outside"), state === "plain")
+              assert.strictEqual(snapshot.includes("Inside"), state === "modal")
+            }
+          }), timeout)
+
+        it.effect("finds an escaped modal through inert slots, shadow hosts and display contents", () =>
+          Effect.gen(function*() {
+            const { call, send } = yield* open(
+              backend,
+              `<div id="host" inert><dialog id="modal"><button>Inside</button></dialog><button>Outside</button></div>`
+            )
+            yield* call(
+              `() => {
+              document.getElementById("host").attachShadow({ mode: "open" }).innerHTML =
+                '<div style="display: contents">Hidden text<slot inert></slot></div>'
+              document.getElementById("modal").showModal()
+            }`,
+              []
+            )
+            assert.deepStrictEqual(yield* roles(send, role("button")), ["Inside"])
+            const snapshot = yield* snapshotText(send)
+            assert.include(snapshot, "Inside")
+            assert.notInclude(snapshot, "Outside")
+            assert.notInclude(snapshot, "Hidden text")
+          }), timeout)
+
+        it.effect("does not repeat every ancestor walk in snapshots when an unrelated inert element exists", () =>
+          Effect.gen(function*() {
+            const { call, send } = yield* open(
+              backend,
+              `<div inert></div>`,
+              `() => {
+              globalThis.inertParentReads = 0
+              const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, "assignedSlot")
+              Object.defineProperty(Element.prototype, "assignedSlot", {
+                ...descriptor, get() { globalThis.inertParentReads++; return descriptor.get.call(this) }
+              })
+            }`
+            )
+            const reads: Array<number> = []
+            for (const depth of [80, 160]) {
+              yield* call(
+                `() => {
+                document.body.innerHTML = '<div inert></div>' + '<div>'.repeat(${depth}) +
+                  '<button>Visible</button>' + '</div>'.repeat(${depth})
+                globalThis.inertParentReads = 0
+              }`,
+                []
+              )
+              assert.include(yield* snapshotText(send), "Visible")
+              const measured = yield* call(`() => globalThis.inertParentReads`, [])
+              assert(measured._tag === "Value" && measured.value.type === "number")
+              reads.push(Number(measured.value.value))
+            }
+            // Doubling a branch should not quadruple the work of classifying its inertness.
+            assert.isAtMost(reads[1]!, reads[0]! * 3, JSON.stringify(reads))
+          }), timeout)
+
         it.effect("finds the smallest element that says a text, outside head and scripts", () =>
           Effect.gen(function*() {
             const { send } = yield* open(
