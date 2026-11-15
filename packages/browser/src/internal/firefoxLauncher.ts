@@ -111,10 +111,13 @@ export const launch = Effect.fnUntraced(function*(options: Options) {
   const existing = options.userDataDir === undefined
     ? ""
     : yield* fs.readFileString(`${profile}/user.js`).pipe(Effect.orElseSucceed(() => ""))
-  yield* fs.writeFileString(
-    `${profile}/user.js`,
-    profileUserJs(existing, prefsFor(options))
-  ).pipe(
+  const prefs = prefsFor(options)
+  const args = argsFor(options, profile)
+  yield* Effect.annotateCurrentSpan({
+    "browser.launch.args": args,
+    "browser.launch.prefs": JSON.stringify(prefs)
+  })
+  yield* fs.writeFileString(`${profile}/user.js`, profileUserJs(existing, prefs)).pipe(
     Effect.catch((error) =>
       Launch.fail(
         new Browser.ConnectionFailed({ stage: "refused", hint: `Couldn't write the profile: ${error.message}` }),
@@ -122,7 +125,7 @@ export const launch = Effect.fnUntraced(function*(options: Options) {
       )
     )
   )
-  const launched = yield* Launch.spawn(path, argsFor(options, profile), profile, { coreDumps: options.coreDumps })
+  const launched = yield* Launch.spawn(path, args, profile, { coreDumps: options.coreDumps })
   const timeout = options.timeout ?? "30 seconds"
   const deadline = Launch.readinessDeadline(timeout)
   const listening = yield* launched.stderrLine(/WebDriver BiDi listening on (ws:\/\/\S+)/).pipe(

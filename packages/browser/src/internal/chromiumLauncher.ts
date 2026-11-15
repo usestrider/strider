@@ -76,7 +76,9 @@ export const launch: (
 > = Effect.fnUntraced(function*(options: Options) {
   const path = yield* Launch.executable(options.executablePath)
   const userDataDir = yield* Launch.profileDirectory(options.userDataDir, "strider-chromium-")
-  const launched = yield* Launch.spawn(path, argsFor(options, userDataDir, "pipe"), userDataDir, {
+  const args = argsFor(options, userDataDir, "pipe")
+  yield* Effect.annotateCurrentSpan("browser.launch.args", args)
+  const launched = yield* Launch.spawn(path, args, userDataDir, {
     additionalFds: Transport.pipeFds,
     coreDumps: options.coreDumps
   })
@@ -96,7 +98,9 @@ export const launchWithPort = Effect.fnUntraced(function*(
   const previous = yield* DevToolsActivePort.snapshot(userDataDir).pipe(
     Effect.catch((error) => Launch.refused(`Couldn't read the previous DevToolsActivePort: ${error.message}`))
   )
-  const launched = yield* Launch.spawn(path, argsFor(options, userDataDir, "port"), userDataDir, {
+  const args = argsFor(options, userDataDir, "port")
+  yield* Effect.annotateCurrentSpan("browser.launch.args", args)
+  const launched = yield* Launch.spawn(path, args, userDataDir, {
     coreDumps: options.coreDumps
   })
   const timeout = options.timeout ?? "30 seconds"
