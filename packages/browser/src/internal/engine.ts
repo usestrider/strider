@@ -6,10 +6,12 @@
  * source crosses into the page as text (`source`), where it is installed once per realm, out of the page's
  * reach. L1 sends it requests as JSON and reads JSON back (`Request`, `Response`).
  *
- * It reads an element's or a document's DOM members through the prototypes' own getters and methods, taken once as
- * it loads (`dom`), never through the object: a form's named controls are properties of the form that win over its
- * members (`<input name="localName">` makes `form.localName` the input), and where the engine shares the page's
- * world, as on stock WebKit, a document's named images, forms, embeds, objects and iframes do the same.
+ * It reads the DOM members of anything that can be any element, or the document, through the prototypes' own
+ * getters and methods, taken once as it loads (`dom`, and each labelable element's `labels`), never through the
+ * object: a form's named controls are properties of the form that win over its members (`<input name="localName">`
+ * makes `form.localName` the input), and where the engine shares the page's world, as on stock WebKit, a document's
+ * named images, forms, embeds, objects and iframes do the same. Members of a value already known not to be a form,
+ * such as an input's `value` or a shadow root's `activeElement`, are read directly.
  *
  * - **The tree** is the document's elements and those of every open shadow root, in tree order, a shadow
  *   root's elements right after its host. Closed shadow roots are invisible to scripts, so to the engine too;
@@ -556,10 +558,18 @@ export function engine(render: (root: SnapNode) => string) {
     classList: getter(Element.prototype, "classList"),
     outerHTML: getter(Element.prototype, "outerHTML"),
     children: getter(Element.prototype, "children"),
+    firstElementChild: getter(Element.prototype, "firstElementChild"),
+    nextElementSibling: getter(Element.prototype, "nextElementSibling"),
+    previousElementSibling: getter(Element.prototype, "previousElementSibling"),
+    scrollWidth: getter(Element.prototype, "scrollWidth"),
+    scrollHeight: getter(Element.prototype, "scrollHeight"),
+    clientWidth: getter(Element.prototype, "clientWidth"),
+    clientHeight: getter(Element.prototype, "clientHeight"),
     shadowRoot: getter(Element.prototype, "shadowRoot"),
     assignedSlot: getter(Element.prototype, "assignedSlot"),
     getAttribute: method(Element.prototype, "getAttribute"),
     hasAttribute: method(Element.prototype, "hasAttribute"),
+    hasAttributeNS: method(Element.prototype, "hasAttributeNS"),
     getAttributeNames: method(Element.prototype, "getAttributeNames"),
     matches: method(Element.prototype, "matches"),
     closest: method(Element.prototype, "closest"),
@@ -583,8 +593,19 @@ export function engine(render: (root: SnapNode) => string) {
     getElementById: method(Document.prototype, "getElementById"),
     elementFromPoint: method(Document.prototype, "elementFromPoint"),
     elementsFromPoint: method(Document.prototype, "elementsFromPoint"),
+    documentFirstElementChild: getter(Document.prototype, "firstElementChild"),
     documentQuerySelectorAll: method(Document.prototype, "querySelectorAll")
   }
+  // The labelable elements, each with its own `labels` getter
+  const nativeLabels = [
+    HTMLButtonElement,
+    HTMLInputElement,
+    HTMLMeterElement,
+    HTMLOutputElement,
+    HTMLProgressElement,
+    HTMLSelectElement,
+    HTMLTextAreaElement
+  ].map((type) => [type, Object.getOwnPropertyDescriptor(type.prototype, "labels")!.get!] as const)
   const htmlFocus = HTMLElement.prototype.focus
   const svgFocus = SVGElement.prototype.focus
   const htmlBlur = HTMLElement.prototype.blur
@@ -614,7 +635,15 @@ export function engine(render: (root: SnapNode) => string) {
   const elementsUnder = (root: Document | Element | ShadowRoot): Array<Element> => {
     const out: Array<Element> = []
     const visit = (node: Document | Element | ShadowRoot) => {
-      for (let child = node.firstElementChild; child !== null; child = child.nextElementSibling) {
+      for (
+        let child = node instanceof Element
+          ? dom.firstElementChild(node)
+          : node instanceof Document
+          ? dom.documentFirstElementChild(node)
+          : node.firstElementChild;
+        child !== null;
+        child = dom.nextElementSibling(child)
+      ) {
         out.push(child)
         const shadow = dom.shadowRoot(child)
         if (shadow !== null) visit(shadow)
@@ -1176,10 +1205,11 @@ export function engine(render: (root: SnapNode) => string) {
     return dom.getAttribute(element, "aria-valuetext") ?? dom.getAttribute(element, "aria-valuenow") ?? textOf(element)
   }
 
-  const labelsOf = (element: Element): Array<HTMLLabelElement> =>
-    "labels" in element && element.labels instanceof NodeList
-      ? Array.from(element.labels as NodeListOf<HTMLLabelElement>)
-      : []
+  const labelsOf = (element: Element): Array<HTMLLabelElement> => {
+    const labels = nativeLabels.find(([type]) => element instanceof type)
+    const list = labels === undefined ? null : call(labels[1], element, []) as NodeListOf<HTMLLabelElement> | null
+    return list === null ? [] : Array.from(list)
+  }
 
   const pseudoContent = (element: Element, pseudo: "::before" | "::after"): string => {
     const content = getComputedStyle(element, pseudo).content
@@ -1798,7 +1828,7 @@ export function engine(render: (root: SnapNode) => string) {
       "button, input, select, textarea, details, summary, iframe, frame, embed, object, a[href], area[href], img[usemap], audio[controls], video[controls]"
     ) || (
       dom.namespaceURI(element) === "http://www.w3.org/2000/svg" && dom.localName(element) === "a" &&
-      element.hasAttributeNS("http://www.w3.org/1999/xlink", "href")
+      dom.hasAttributeNS(element, "http://www.w3.org/1999/xlink", "href")
     ) || contentEditable(element) || (role !== null && LABEL_WIDGET_ROLES.has(role))
   }
 
@@ -1961,11 +1991,11 @@ export function engine(render: (root: SnapNode) => string) {
     for (let ancestor = composedParent(element); ancestor !== null; ancestor = composedParent(ancestor)) {
       const style = getComputedStyle(ancestor)
       if (
-        (/^(auto|scroll|hidden)$/.test(style.overflowX) && ancestor.scrollWidth > ancestor.clientWidth) ||
-        (/^(auto|scroll|hidden)$/.test(style.overflowY) && ancestor.scrollHeight > ancestor.clientHeight)
+        (/^(auto|scroll|hidden)$/.test(style.overflowX) && dom.scrollWidth(ancestor) > dom.clientWidth(ancestor)) ||
+        (/^(auto|scroll|hidden)$/.test(style.overflowY) && dom.scrollHeight(ancestor) > dom.clientHeight(ancestor))
       ) {
         const rect = dom.getBoundingClientRect(ancestor)
-        margin += ancestor.scrollWidth + ancestor.scrollHeight + Math.abs(rect.left) + Math.abs(rect.top) +
+        margin += dom.scrollWidth(ancestor) + dom.scrollHeight(ancestor) + Math.abs(rect.left) + Math.abs(rect.top) +
           rect.width + rect.height
       }
     }
@@ -3232,7 +3262,7 @@ export function engine(render: (root: SnapNode) => string) {
         ...(image !== null && inField(image) ? { fieldContent: true } : {})
       }
     }
-    const previous = element.previousElementSibling
+    const previous = dom.previousElementSibling(element)
     const nearby = previous === null ? "" : textOf(previous)
     if (nearby !== "" && nearby.length <= 40) {
       return {
