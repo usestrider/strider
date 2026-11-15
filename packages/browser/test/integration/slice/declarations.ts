@@ -1312,6 +1312,114 @@ export const declarations = (
           }))
         }), timeout)
 
+      it.effect("runs a timer scheduled by a second message during adjustment", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const page = yield* Browser.newPage()
+          yield* page.clock.install({ mode: "controlled", at: 1000 })
+          yield* page.evaluateInMainWorld(() => {
+            // Earlier callbacks exercise the same timer nesting as a page with an active clock.
+            for (let at = 1; at <= 6; at++) {
+              setTimeout(() => {}, at)
+            }
+            const channel = new MessageChannel()
+            let messages = 0
+            channel.port1.onmessage = () => {
+              if (++messages === 1) {
+                channel.port2.postMessage(null)
+              } else {
+                setTimeout(() =>
+                  Reflect.set(window, "__done", true), 100)
+                channel.port1.close()
+                channel.port2.close()
+              }
+            }
+            setTimeout(() =>
+              channel.port2.postMessage(null), 100)
+          })
+          yield* page.clock.adjust(1000)
+          assert.strictEqual(
+            yield* page.evaluateInMainWorld(() =>
+              Reflect.get(window, "__done") === true
+            ),
+            true
+          )
+        })), timeout)
+
+      it.effect("starts controlled performance time when replacing a fixed clock", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const page = yield* Browser.newPage()
+          const fixed = yield* page.clock.install({ mode: "fixed", at: 500 })
+          yield* fixed.remove
+          yield* page.clock.install({ mode: "controlled", at: 1000 })
+          yield* page.clock.adjust(100)
+          assert.deepStrictEqual(
+            yield* page.evaluateInMainWorld(() => [Date.now(), performance.now(), performance.timeOrigin]),
+            [1100, 100, 1000]
+          )
+        })), timeout)
+
+      it.effect("keeps resumed animation frame timestamps on the performance timeline", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const page = yield* Browser.newPage()
+          const { origin } = yield* site
+          yield* page.goto(fixtureUrl(origin, "<p>frame</p>"))
+          yield* page.clock.install({ mode: "controlled", at: 1000 })
+          yield* page.clock.adjust(1_000_000)
+          yield* page.evaluateInMainWorld(() => {
+            Reflect.set(
+              window,
+              "__frame",
+              new Promise((resolve) => {
+                requestAnimationFrame((at) =>
+                  resolve([at, performance.now()])
+                )
+              })
+            )
+          })
+          yield* page.clock.resume
+          const pending = yield* page.evaluateInMainWorld(() =>
+            Reflect.get(window, "__frame") as Promise<[number, number]>
+          )
+          const next = yield* page.evaluateInMainWorld(() =>
+            new Promise<[number, number]>((resolve) => {
+              requestAnimationFrame((at) =>
+                resolve([at, performance.now()])
+              )
+            })
+          )
+          for (const [at, now] of [pending, next]) {
+            assert(
+              at !== undefined && now !== undefined && at >= 1_000_000 && at <= now,
+              `frame ${at}, performance.now ${now}`
+            )
+          }
+        })), timeout)
+
+      it.effect("waits for every document when a timer throws a value without a string conversion", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const first = yield* Browser.newPage()
+          yield* first.context.clock.install({ mode: "controlled", at: 1000 })
+          const second = yield* first.context.newPage
+          const { origin } = yield* site
+          yield* second.goto(fixtureUrl(origin, "<p>second</p>"))
+          yield* first.evaluateInMainWorld(() => {
+            setTimeout(() => {
+              throw Object.create(null)
+            }, 1)
+          })
+          yield* second.evaluateInMainWorld(() => {
+            let count = 0
+            setInterval(() =>
+              Reflect.set(window, "__count", ++count), 1)
+          })
+          const error = yield* failure(first.context.clock.adjust(1000), "adjust over a throwing value")
+          assert.deepStrictEqual(
+            yield* second.evaluateInMainWorld(() => [Date.now(), Reflect.get(window, "__count")]),
+            [2000, 1000]
+          )
+          assert(PageClock.isPageClockError(error) && error.reason._tag === "EvaluationThrown", String(error))
+        })), timeout)
+
       // Playwright's controlled clock is the reference for the timeline's rules in these cases
 
       it.effect("runs the page's tasks between the timers an adjustment fires", () =>
