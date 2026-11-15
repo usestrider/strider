@@ -927,6 +927,37 @@ describe("Chromium adapter, CDP only", () => {
       )
 
       it.effect(
+        "watches documents added while the mouse button is held",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const order: Array<string> = []
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(dragFixture)}`)
+              yield* page.locator("#source").hover()
+              yield* Effect.scoped(Effect.gen(function*() {
+                const held = yield* page.mouse.hold("left")
+                yield* page.evaluateInMainWorld(() =>
+                  new Promise<void>((resolve) => {
+                    const iframe = document.createElement("iframe")
+                    iframe.style.cssText = "position:absolute;top:200px"
+                    iframe.onload = () => resolve()
+                    iframe.srcdoc = "<p>New document</p>"
+                    document.body.appendChild(iframe)
+                  })
+                )
+                yield* page.mouse.move({ x: 330, y: 40 })
+                yield* held.release
+              }))
+              const log = yield* page.evaluateInMainWorld(() => (window as any).log)
+              assert.strictEqual(log, "1234", order.join(", "))
+            }).pipe(Effect.provide(recordingDrags(order)))
+          }),
+        timeout
+      )
+
+      it.effect(
         "enters the target on a new HTML drag after Escape canceled the previous drag",
         () =>
           Effect.gen(function*() {
