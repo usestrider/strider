@@ -17,8 +17,10 @@ import {
   UncaughtException,
   UserContext
 } from "@usestrider/browser"
+import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Headers from "effect/http/Headers"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
@@ -36,6 +38,14 @@ import { site, tlsSite } from "../adapter/harness.ts"
 import { responseRouteInFlight, status, supports } from "./capabilities.ts"
 
 const timeout = 60_000
+
+/** The error `effect` failed with, or an assertion that names what succeeded. */
+const failure = <A, E, R>(effect: Effect.Effect<A, E, R>, what: string) =>
+  Effect.flatMap(Effect.exit(effect), (exit) => {
+    if (Exit.isSuccess(exit)) return Effect.die(new Error(`${what} succeeded`))
+    const error = Cause.findErrorOption(exit.cause)
+    return Option.isSome(error) ? Effect.succeed(error.value) : Effect.die(Cause.squash(exit.cause))
+  })
 
 const fixtureUrl = (origin: string, html: string) => `${origin}/fixture?html=${encodeURIComponent(html)}`
 
@@ -1299,6 +1309,158 @@ export const declarations = (
             const read = "return new Date().toISOString()"
             assert.strictEqual(yield* run(first, origin, read), "2026-03-03T04:03:03.000Z")
             assert.strictEqual(yield* run(second, origin, read), "2026-03-03T04:03:03.000Z")
+          }))
+        }), timeout)
+
+      // Playwright's controlled clock is the reference for the timeline's rules in these cases
+
+      it.effect("runs the page's tasks between the timers an adjustment fires", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.clock.install({ mode: "controlled", at: "2026-01-01T00:00:00Z" })
+            yield* page.goto(fixtureUrl(origin, "<p>clock</p>"))
+            // A timer hands off through a real task, which sets a timer due within the same adjustment
+            yield* page.evaluateInMainWorld(() => {
+              const channel = new MessageChannel()
+              channel.port1.onmessage = () =>
+                setTimeout(() =>
+                  Reflect.set(window, "__done", true), 100)
+              setTimeout(() =>
+                channel.port2.postMessage(null), 100)
+            })
+            yield* page.clock.adjust("1 second")
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() =>
+                Reflect.get(window, "__done") === true
+              ),
+              true
+            )
+          }))
+        }), timeout)
+
+      it.effect("gives a 0 ms timer set inside a timer at least 1 ms", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.clock.install({ mode: "controlled", at: "2026-01-01T00:00:00Z" })
+            yield* page.goto(fixtureUrl(origin, "<p>clock</p>"))
+            yield* page.evaluateInMainWorld(() => {
+              const log: Array<string> = []
+              Reflect.set(window, "__log", log)
+              setTimeout(() => {
+                log.push("outer")
+                setTimeout(() =>
+                  log.push("inner"), 0)
+              }, 1000)
+            })
+            const log = page.evaluateInMainWorld(() => [...(Reflect.get(window, "__log") as Array<string>)])
+            yield* page.clock.adjust(1000)
+            assert.deepStrictEqual(yield* log, ["outer"])
+            yield* page.clock.adjust(1)
+            assert.deepStrictEqual(yield* log, ["outer", "inner"])
+          }))
+        }), timeout)
+
+      it.effect("fails an adjustment with a timer's error, after running the rest and reporting it", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.clock.install({ mode: "controlled", at: "2026-01-01T00:00:00Z" })
+            yield* page.goto(fixtureUrl(origin, "<p>clock</p>"))
+            yield* page.evaluateInMainWorld(() => {
+              const reported: Array<string> = []
+              Reflect.set(window, "__reported", reported)
+              addEventListener("error", (event) =>
+                reported.push(String(event.error?.message)))
+              setTimeout(() => {
+                throw new Error("first")
+              }, 100)
+              setTimeout(() => {
+                throw new Error("second")
+              }, 200)
+              setTimeout(() =>
+                Reflect.set(window, "__after", true), 300)
+            })
+            const error = yield* failure(page.clock.adjust("1 second"), "adjust over a throwing timer")
+            assert(PageClock.isPageClockError(error), String(error))
+            const reason = error.reason as { readonly _tag: string; readonly exception?: { readonly message: string } }
+            assert.strictEqual(reason._tag, "EvaluationThrown", String(error))
+            assert.strictEqual(reason.exception?.message, "first")
+            assert.deepStrictEqual(
+              yield* page.evaluateInMainWorld(() => [
+                Reflect.get(window, "__reported"),
+                Reflect.get(window, "__after") === true,
+                new Date().toISOString()
+              ]),
+              [["first", "second"], true, "2026-01-01T00:00:01.000Z"]
+            )
+          }))
+        }), timeout)
+
+      it.effect("rejects durations that aren't finite, and negative adjustments", () =>
+        Effect.gen(function*() {
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            for (const by of [Number.NaN, Number.POSITIVE_INFINITY]) {
+              const error = yield* failure(
+                page.clock.install({ mode: "offset", by }),
+                `install({ mode: "offset", by: ${by} })`
+              )
+              assert(Declaration.isDeclarationError(error), `offset ${by}: ${String(error)}`)
+              assert.strictEqual(error.reason._tag, "InvalidInput", `offset ${by}`)
+            }
+            yield* page.clock.install({ mode: "controlled", at: "2026-01-01T00:00:00Z" })
+            for (const by of [Number.NaN, Number.POSITIVE_INFINITY, -5]) {
+              const error = yield* failure(page.clock.adjust(by), `adjust(${by})`)
+              assert(PageClock.isPageClockError(error), `adjust ${by}: ${String(error)}`)
+              assert.strictEqual(error.reason._tag, "InvalidInput", `adjust ${by}`)
+            }
+          }))
+        }), timeout)
+
+      it.effect("keeps Date.now() a whole millisecond after a fractional adjustment or offset", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const controlled = yield* page.clock.install({ mode: "controlled", at: 1000 })
+            yield* page.goto(fixtureUrl(origin, "<p>clock</p>"))
+            yield* page.clock.adjust(0.5)
+            // The adjustment rounds up to a whole millisecond
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() =>
+                Date.now()
+              ),
+              1001
+            )
+            yield* controlled.remove
+            const offset = yield* page.clock.install({ mode: "offset", by: 0.5 })
+            assert.strictEqual(
+              yield* run(page, origin, "return [Number.isInteger(Date.now()), Number.isInteger(new Date().getTime())]"),
+              [true, true]
+            )
+            yield* offset.remove
+          }))
+        }), timeout)
+
+      it.effect("counts performance.now() from 0 where the clock reaches a document, from its timeOrigin", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.clock.install({ mode: "controlled", at: 1000 })
+            yield* page.goto(fixtureUrl(origin, "<p>clock</p>"))
+            const read = page.evaluateInMainWorld(() => [performance.now(), performance.timeOrigin])
+            assert.deepStrictEqual(yield* read, [0, 1000])
+            yield* page.clock.adjust(1000)
+            assert.deepStrictEqual(yield* read, [1000, 1000])
+            // Setting the time moves neither
+            yield* page.clock.setTime(500)
+            assert.deepStrictEqual(yield* read, [1000, 1000])
           }))
         }), timeout)
     })
