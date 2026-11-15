@@ -1033,7 +1033,7 @@ export interface PointerOptions extends ActionOptions {
    * With no position, client rectangles are clipped by the viewport and all parent frames.
    * With `receivesPointer` enabled, the first centre hitting the target or a descendant and its iframe in every parent is selected
    * (for a target inside a `button`, `a`, or `role=button` or `role=link` element other than a form field or editable element,
-   * the nearest such element counts as the target, so a `pointer-events: none` label inside a button is clicked through the button),
+   * the nearest such element, found through shadow roots and slots, counts as the target, so a `pointer-events: none` label inside a button is clicked through the button),
    * allowing a later line when an earlier one is covered. Only centres are probed; if none hits, the check reports `Covered`.
    * Candidates are produced anew under the input permit.
    * Disabling `receivesPointer` uses the first geometric centre without coverage probes.

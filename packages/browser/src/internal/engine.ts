@@ -27,7 +27,9 @@
  * - **Actions** take an initial stability sample immediately, then check at each animation frame until the
  *   checks pass or the round's cap runs out. The checks (CONCEPTS.md §8) are visible, enabled, notInert,
  *   inViewport (scrolling into view once), stable across `frames` rendering updates, and receivesPointer at
- *   the action point, which the target, or its nearest enclosing button or link, must receive. The rendered check independently gates the first check on a rendering update.
+ *   the action point, which the target's nearest enclosing button or link in the flat tree, or else the target,
+ *   must receive; an `input`, `textarea`, `select`, or editable target must receive it itself. The rendered check
+ *   independently gates the first check on a rendering update.
  */
 
 import * as Schema from "effect/Schema"
@@ -1895,15 +1897,24 @@ export function engine(render: (root: SnapNode) => string) {
       : null
 
   /**
-   * The element that must receive the pointer for an action on `element`: its nearest enclosing button or link,
-   * itself included, since the browser hands a click on a pointer-events: none descendant to it. A form field or an
-   * editable element must receive the pointer itself.
+   * The element that must receive the pointer for an action on `element`: its nearest enclosing button or link in
+   * the flat tree, through shadow roots and slots, itself included, since the browser hands a click on a
+   * pointer-events: none descendant to it. A form field or an editable element must receive the pointer itself.
    */
-  const pointerRecipient = (element: Element): Element =>
-    dom.matches(element, "input, textarea, select") ||
+  const pointerRecipient = (element: Element): Element => {
+    if (
+      dom.matches(element, "input, textarea, select") ||
       (element instanceof HTMLElement && dom.isContentEditable(element))
-      ? element
-      : dom.closest(element, "button, [role=button], a, [role=link]") ?? element
+    ) return element
+    for (
+      let current: Element | null = element;
+      current !== null;
+      current = dom.assignedSlot(current) ?? composedParent(current)
+    ) {
+      if (dom.matches(current, "button, [role=button], a, [role=link]")) return current
+    }
+    return element
+  }
 
   const missed = (element: Element, hit: Element | null): NotReady =>
     getComputedStyle(element).pointerEvents === "none"
