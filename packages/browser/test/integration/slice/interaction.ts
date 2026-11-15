@@ -6433,7 +6433,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 )
               )
               const frame = page.frame(page.locator("iframe"))
-              yield* frame.locator("#field").focus()
+              yield* frame.locator("#field").click()
               yield* page.keyboard.insertText("嗨")
               assert.strictEqual(yield* frame.locator("#field").readValue, "嗨")
               assert.strictEqual(yield* frame.locator("#keys").readText, "0")
@@ -6456,17 +6456,21 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             assert.strictEqual(yield* page.locator("#out").readText, "nothing yet")
           })), timeout)
 
-        it.effect("inserts the same when the page replaces execCommand", () =>
-          Effect.scoped(Effect.gen(function*() {
-            const { url } = yield* fixture(() =>
-              `<input id="field"><script>Document.prototype.execCommand=document.execCommand=function(){document.getElementById("field").value="replaced";return true}</script>`
-            )
-            const page = yield* newPage
-            yield* page.goto(url)
-            yield* page.locator("#field").focus()
-            yield* page.keyboard.insertText("x")
-            assert.strictEqual(yield* page.locator("#field").readValue, "x")
-          })), timeout)
+        it.effect(
+          "inserts the same when the page replaces document.execCommand",
+          () =>
+            Effect.scoped(Effect.gen(function*() {
+              const { url } = yield* fixture(() =>
+                `<input id="field"><script>document.execCommand=function(){document.getElementById("field").value="replaced";return true}</script>`
+              )
+              const page = yield* newPage
+              yield* page.goto(url)
+              yield* page.locator("#field").focus()
+              yield* page.keyboard.insertText("x")
+              assert.strictEqual(yield* page.locator("#field").readValue, "x")
+            })),
+          timeout
+        )
       })
 
       it.effect("acts on a page after another opens in its context", () =>
