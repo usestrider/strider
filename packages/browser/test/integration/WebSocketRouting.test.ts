@@ -2,12 +2,13 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser, Condition, ConsoleMessage, Expect, Popup, WebSocketRoute } from "@usestrider/browser"
+import { Browser, Condition, ConsoleMessage, Expect, Popup, Route, WebSocketRoute } from "@usestrider/browser"
 import { Chromium } from "@usestrider/browser/chromium"
 import { Firefox } from "@usestrider/browser/firefox"
 import { WebKit } from "@usestrider/browser/webkit"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
 import * as Stream from "effect/Stream"
@@ -537,6 +538,38 @@ for (const [name, backend] of backends) {
             yield* popup.locator("#out").pipe(Expect.toHaveText("first author script"))
           }
         }), 60_000)
+
+      it.effect(
+        "keeps a context's HTTP routes and headers on a target=_blank popup's first navigation",
+        () =>
+          Effect.gen(function*() {
+            // Stock WebKit refuses popups, so only the backends that open them run this case.
+            if (name === "WebKit") return
+            const page = yield* Browser.newPage({ emulation: { extraHTTPHeaders: { "x-popup-init": "configured" } } })
+            let popupHeader: string | undefined
+            yield* page.context.route("https://**/*", ({ request }) => {
+              if (request.url.endsWith("/popup")) popupHeader = request.headers["x-popup-init"]
+              return Route.fulfill(HttpServerResponse.text(
+                request.url.endsWith("/popup")
+                  ? "<h1>Routed popup</h1>"
+                  : `<a href="https://other.test/popup" target="_blank">Open</a>`,
+                { contentType: "text/html" }
+              ))
+            })
+            yield* page.context.routeWebSocket("**/socket", (connection) => connection.open({}), {
+              implementation: "script",
+              timing: "beforeAuthorScript"
+            })
+            yield* page.goto("https://routed.test/")
+            const opened = yield* Popup.next(page)
+            yield* page.getByRole("link", { name: "Open" }).click()
+            const popup = yield* opened
+            yield* popup.pipe(Expect.toHaveURL("https://other.test/popup"))
+            yield* popup.getByRole("heading", { name: "Routed popup" }).pipe(Expect.toBeVisible)
+            assert.strictEqual(popupHeader, "configured")
+          }),
+        60_000
+      )
 
       it.effect(
         "enforces one registration reservation ceiling across origins and releases destroyed realms",
