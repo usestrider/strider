@@ -68,7 +68,8 @@ describe("PageClock duration input", () => {
     const [label, duration] of [
       ["a NaN object field", { milliseconds: Number.NaN }],
       ["a NaN tuple field", [0, Number.NaN]],
-      ["opposite infinite fields", { seconds: Infinity, minutes: -Infinity }]
+      ["opposite infinite fields", { seconds: Infinity, minutes: -Infinity }],
+      ["a duration overflowing millisecond conversion", 10n ** 400n]
     ] as const
   ) {
     for (const operation of ["offset", "adjust"] as const) {
