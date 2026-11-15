@@ -7,7 +7,8 @@
  *   reports `Lax` for it. `priority` is Chromium's alone, and only CDP reports a partition.
  * - **`remove`** sets each match again with an expiry in the past, which every backend removes.
  * - **`listFor`** filters the context's cookies as a top-level request to the URL would send them: by domain, path,
- *   `Secure` and expiry, and a partitioned cookie only in its own top-level site.
+ *   `Secure` and expiry, and a partitioned cookie only in its own top-level site. `Secure` admits `https:` and `wss:`,
+ *   and a local host over http, as the browsers do: `localhost`, a host under it, 127.0.0.0/8 and `[::1]`.
  */
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
@@ -155,11 +156,21 @@ const pathMatches = (requestPath: string, cookiePath: string) =>
   requestPath === cookiePath ||
   (requestPath.startsWith(cookiePath) && (cookiePath.endsWith("/") || requestPath[cookiePath.length] === "/"))
 
+/**
+ * Whether a URL is a secure context's, to which browsers send `Secure` cookies: `https:` or `wss:`, or a local host
+ * over any scheme, which is `localhost`, a host under `localhost`, 127.0.0.0/8 or `[::1]`.
+ */
+const secure = (url: URL) => {
+  if (url.protocol === "https:" || url.protocol === "wss:") return true
+  const host = url.hostname
+  return host === "localhost" || host.endsWith(".localhost") || host === "[::1]" || /^127\.\d+\.\d+\.\d+$/.test(host)
+}
+
 /** Whether a top-level request to `url` sends the cookie. */
 const sends = (url: URL, cookie: CookieJar.Cookie, now: number) => {
   if (!domainMatches(url.hostname, cookie.domain)) return false
   if (!pathMatches(url.pathname === "" ? "/" : url.pathname, cookie.path)) return false
-  if (cookie.secure && url.protocol !== "https:" && url.protocol !== "wss:") return false
+  if (cookie.secure && !secure(url)) return false
   if (Option.isSome(cookie.expires) && DateTime.toEpochMillis(cookie.expires.value) <= now) return false
   if (cookie.partitionKey._tag === "Partitioned") {
     // A partitioned cookie is sent only in its own top-level site, which a top-level request is in

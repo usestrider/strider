@@ -210,6 +210,11 @@ export interface CookieJar {
   /**
    * The cookies a request to `url` would send.
    *
+   * **Details**
+   *
+   * A `Secure` cookie is sent over `https:` and `wss:`, and, as browsers send it, over plain http to a local host:
+   * `localhost`, a host under `localhost`, 127.0.0.0/8 and `[::1]`.
+   *
    * **Example** (Listing what a request would send)
    *
    * ```ts import.meta.vitest
