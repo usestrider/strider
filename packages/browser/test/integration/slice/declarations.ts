@@ -1370,26 +1370,21 @@ export const declarations = (
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             yield* page.clock.install({ mode: "controlled", at: "2026-01-01T00:00:00Z" })
-            yield* page.goto(fixtureUrl(origin, "<p>clock</p>"))
-            yield* page.evaluateInMainWorld(() => {
-              const reported: Array<string> = []
-              Reflect.set(window, "__reported", reported)
-              addEventListener("error", (event) =>
-                reported.push(String(event.error?.message)))
-              setTimeout(() => {
-                throw new Error("first")
-              }, 100)
-              setTimeout(() => {
-                throw new Error("second")
-              }, 200)
-              setTimeout(() =>
-                Reflect.set(window, "__after", true), 300)
-            })
+            // The page's own script: Chromium hides from the page the errors of functions an evaluation made
+            yield* page.goto(fixtureUrl(
+              origin,
+              `<script>
+                window.__reported = []
+                addEventListener("error", (event) => window.__reported.push(String(event.error?.message)))
+                setTimeout(() => { throw new Error("first") }, 100)
+                setTimeout(() => { throw new Error("second") }, 200)
+                setTimeout(() => { window.__after = true }, 300)
+              </script>`
+            ))
             const error = yield* failure(page.clock.adjust("1 second"), "adjust over a throwing timer")
             assert(PageClock.isPageClockError(error), String(error))
-            const reason = error.reason as { readonly _tag: string; readonly exception?: { readonly message: string } }
-            assert.strictEqual(reason._tag, "EvaluationThrown", String(error))
-            assert.strictEqual(reason.exception?.message, "first")
+            assert(error.reason._tag === "EvaluationThrown", String(error))
+            assert.strictEqual(error.reason.exception.message, "first")
             assert.deepStrictEqual(
               yield* page.evaluateInMainWorld(() => [
                 Reflect.get(window, "__reported"),
@@ -1439,7 +1434,7 @@ export const declarations = (
             )
             yield* controlled.remove
             const offset = yield* page.clock.install({ mode: "offset", by: 0.5 })
-            assert.strictEqual(
+            assert.deepStrictEqual(
               yield* run(page, origin, "return [Number.isInteger(Date.now()), Number.isInteger(new Date().getTime())]"),
               [true, true]
             )
@@ -1458,9 +1453,16 @@ export const declarations = (
             assert.deepStrictEqual(yield* read, [0, 1000])
             yield* page.clock.adjust(1000)
             assert.deepStrictEqual(yield* read, [1000, 1000])
-            // Setting the time moves neither
+            // Setting the time back moves neither; forward, it passes time, as an adjustment does
             yield* page.clock.setTime(500)
             assert.deepStrictEqual(yield* read, [1000, 1000])
+            yield* page.clock.setTime(3000)
+            assert.deepStrictEqual(yield* read, [3500, 1000])
+            // After resuming, it carries on in real time from there
+            yield* page.clock.resume
+            const [now, timeOrigin] = yield* read
+            assert(now! >= 3500 && now! < 3500 + 60_000, String(now))
+            assert.strictEqual(timeOrigin, 1000)
           }))
         }), timeout)
     })
