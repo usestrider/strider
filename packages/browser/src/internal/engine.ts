@@ -1857,39 +1857,10 @@ export function engine(render: (root: SnapNode) => string) {
     bottom: Math.min(innerHeight, inherited?.bottom ?? innerHeight)
   })
 
-  /**
-   * The rects an element renders. An element with `display: contents` has none of its own, so its rects are those
-   * of its flat-tree children: their elements' rects, and its text's line boxes.
-   */
-  const clientRects = (element: Element): Array<DOMRect> => {
-    if (getComputedStyle(element).display !== "contents") return Array.from(element.getClientRects())
-    const out: Array<DOMRect> = []
-    for (const child of flatChildNodes(element)) {
-      if (child instanceof Element) out.push(...clientRects(child))
-      else if (child instanceof Text) {
-        const range = document.createRange()
-        range.selectNodeContents(child)
-        for (const rect of range.getClientRects()) if (rect.width > 0 && rect.height > 0) out.push(rect)
-      }
-    }
-    return out
-  }
-
-  /** The union of what an element renders, as `getBoundingClientRect` gives it for an element with a box. */
-  const boundingRect = (element: Element): DOMRect => {
-    const rects = getComputedStyle(element).display === "contents" ? clientRects(element) : []
-    if (rects.length === 0) return element.getBoundingClientRect()
-    const left = Math.min(...rects.map((rect) => rect.left))
-    const top = Math.min(...rects.map((rect) => rect.top))
-    const right = Math.max(...rects.map((rect) => rect.right))
-    const bottom = Math.max(...rects.map((rect) => rect.bottom))
-    return new DOMRect(left, top, right - left, bottom - top)
-  }
-
   const fragments = (element: Element, inherited?: Clip): Array<Clip> => {
     const bounds = viewportBounds(inherited)
     const result: Array<Clip> = []
-    for (const rect of clientRects(element)) {
+    for (const rect of element.getClientRects()) {
       const left = Math.max(bounds.left, rect.left)
       const top = Math.max(bounds.top, rect.top)
       const right = Math.min(bounds.right, rect.right)
@@ -1969,46 +1940,12 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   /** Oversized unions can have their centre in a gap between fragments; align an edge in that case. */
-  const scrollToFragments = (element: Element, inherited?: Clip): void => {
-    if (getComputedStyle(element).display === "contents") return scrollToContents(element, inherited)
+  const scrollToFragments = (element: Element, inherited?: Clip) => {
     const rect = element.getBoundingClientRect()
     const bounds = viewportBounds(inherited)
     element.scrollIntoView({
       block: rect.height > bounds.bottom - bounds.top ? "start" : "center",
       inline: rect.width > bounds.right - bounds.left ? "start" : "center",
-      behavior: "instant"
-    })
-  }
-
-  /**
-   * `scrollIntoView` does nothing for an element without a box, so a `display: contents` element scrolls to its first
-   * child element that renders something, or, holding only text, scrolls each scrolling ancestor, then the window, to
-   * centre its text.
-   */
-  const scrollToContents = (element: Element, inherited?: Clip): void => {
-    for (const child of flatChildNodes(element)) {
-      if (child instanceof Element && clientRects(child).length > 0) return scrollToFragments(child, inherited)
-    }
-    if (clientRects(element).length === 0) return
-    const centre = (rect: DOMRect) => ({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 })
-    for (let ancestor = flatParent(element); ancestor !== null; ancestor = flatParent(ancestor)) {
-      const style = getComputedStyle(ancestor)
-      const scrolls = (/^(auto|scroll|hidden)$/.test(style.overflowX) && ancestor.scrollWidth > ancestor.clientWidth) ||
-        (/^(auto|scroll|hidden)$/.test(style.overflowY) && ancestor.scrollHeight > ancestor.clientHeight)
-      if (!scrolls || ancestor === document.scrollingElement) continue
-      const box = ancestor.getBoundingClientRect()
-      const target = centre(boundingRect(element))
-      ancestor.scrollBy({
-        left: target.x - (box.left + box.width / 2),
-        top: target.y - (box.top + box.height / 2),
-        behavior: "instant"
-      })
-    }
-    const bounds = viewportBounds(inherited)
-    const target = centre(boundingRect(element))
-    scrollBy({
-      left: target.x - (bounds.left + bounds.right) / 2,
-      top: target.y - (bounds.top + bounds.bottom) / 2,
       behavior: "instant"
     })
   }
@@ -2046,13 +1983,11 @@ export function engine(render: (root: SnapNode) => string) {
       }
       return points.length > 0 ? points : first === null ? [] : [first]
     }
-    const rect = boundingRect(element)
+    const rect = element.getBoundingClientRect()
     const style = getComputedStyle(element)
-    // An element with `display: contents` has no border: its position is from the corner of what it renders
-    const contents = style.display === "contents"
     return [{
-      x: rect.left + (contents ? 0 : parseFloat(style.borderLeftWidth)) + position.x,
-      y: rect.top + (contents ? 0 : parseFloat(style.borderTopWidth)) + position.y
+      x: rect.left + parseFloat(style.borderLeftWidth) + position.x,
+      y: rect.top + parseFloat(style.borderTopWidth) + position.y
     }]
   }
 
@@ -2404,7 +2339,7 @@ export function engine(render: (root: SnapNode) => string) {
           state.scrolled = true
         }
       } else if (checks.stable > 0) {
-        const rect = boundingRect(element)
+        const rect = element.getBoundingClientRect()
         state.rects.push(rect)
         if (state.rects.length > checks.stable + 1) state.rects.shift()
         const unchanged = evidence !== null && evidence.element === element && evidence.frames === checks.stable &&
