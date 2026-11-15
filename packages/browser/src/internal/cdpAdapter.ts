@@ -197,7 +197,8 @@ export const capabilities = (
       entry("emulation.network.offline", "supported"),
       entry("emulation.network.throttling", "supported"),
       entry("emulation.cpuSlowdown", "supported"),
-      entry("emulation.javaScript", "supported", ["a document already loaded keeps running its scripts"]),
+      entry("emulation.javaScript", "supported"),
+      entry("emulation.javaScript.disabled", "supported", ["a document already loaded keeps running its scripts"]),
       entry("emulation.extraHTTPHeaders", "supported"),
       entry("emulation.touch", "supported", ["touch event handlers appear at the next document"]),
       entry("emulation.focus", "supported"),
@@ -376,6 +377,8 @@ export const connect: (
       capabilities: capabilitySet,
       pauseScope: options.ownership === "launched" ? "browser" : "related",
       closing: Kit.closing(state),
+      // `Page.documentOpened`
+      reportsDocumentOpen: true,
       defaultContext: state.defaultContext,
       closed: client.closed,
       createUserContext: (options) => Contexts.createUserContext(state, options),

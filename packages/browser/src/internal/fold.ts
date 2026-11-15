@@ -619,7 +619,7 @@ export const make = Effect.fnUntraced(function*(options: {
           documents.set(fact.document, {
             id: fact.document,
             navigable: fact.navigable,
-            state: yield* cell<Model.DocumentState>({ url: fact.url, readiness: "loading" }),
+            state: yield* cell<Model.DocumentState>({ url: fact.url, readiness: "loading", generation: 0 }),
             ended: yield* Deferred.make<Target.CloseReason>()
           })
           if (page === undefined) {
@@ -684,7 +684,10 @@ export const make = Effect.fnUntraced(function*(options: {
                 ? { ...open, document: { ...open.document, readiness: "loading" } }
                 : open)
           }
-          yield* update(document.state, (state) => ({ ...state, readiness: "loading" as const }))
+          yield* update(
+            document.state,
+            (state) => ({ ...state, readiness: "loading" as const, generation: fact.generation })
+          )
           return
         }
         case "DocumentReadiness": {
