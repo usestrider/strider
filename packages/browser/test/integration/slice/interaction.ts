@@ -5160,6 +5160,24 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
+      it.effect(
+        "reads a disabled option without borrowing an enclosing button's enabled state",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div role="button" id="outer"><select><option id="go" disabled>Unavailable</option></select></div>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              assert.isTrue(yield* page.locator("#outer").isEnabled)
+              assert.isFalse(yield* page.locator("#go").isEnabled)
+              yield* page.locator("#go").pipe(Expect.toBeDisabled, Deadline.within("2 seconds"))
+            }))
+          }),
+        timeout
+      )
+
       for (const boundary of ["shadow root", "assigned slot"] as const) {
         it.effect(`reads the disabled enclosing button through ${boundary}`, () =>
           Effect.gen(function*() {
