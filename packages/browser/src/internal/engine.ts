@@ -1032,19 +1032,25 @@ export function engine(render: (root: SnapNode) => string) {
    * Whether a `display: contents` element shows what it holds. It has no box of its own, so it's judged by its
    * computed `visibility` and by its nearest flat-tree ancestor with a box: that one must not be `display: none`,
    * inside one, or skipping its content (`content-visibility: hidden`, or `auto` off screen with
-   * `contentVisibilityAuto`), and with `opacityProperty`, neither it nor its ancestors may have opacity 0.
+   * `contentVisibilityAuto`). With `opacityProperty`, opacity 0 hides it too: its own, a `display: contents`
+   * ancestor's on the way up, or that boxed ancestor's or one above it.
    */
   const contentsShown = (
     element: Element,
     options?: { readonly contentVisibilityAuto?: boolean; readonly opacityProperty?: boolean }
   ): boolean => {
-    if (getComputedStyle(element).visibility !== "visible") return false
+    const opacityProperty = options?.opacityProperty ?? false
+    const own = getComputedStyle(element)
+    if (own.visibility !== "visible" || (opacityProperty && own.opacity === "0")) return false
     for (let current = flatParent(element); current !== null; current = flatParent(current)) {
       const style = getComputedStyle(current)
-      if (style.display === "contents") continue
+      if (style.display === "contents") {
+        if (opacityProperty && style.opacity === "0") return false
+        continue
+      }
       return style.contentVisibility !== "hidden" && current.checkVisibility({
         contentVisibilityAuto: options?.contentVisibilityAuto ?? false,
-        opacityProperty: options?.opacityProperty ?? false
+        opacityProperty
       })
     }
     return true
