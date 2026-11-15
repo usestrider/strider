@@ -12,10 +12,8 @@
  */
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
-import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
-import * as Stream from "effect/Stream"
 import * as Debugger from "../../cdp/Debugger.ts"
 import * as Fetch from "../../cdp/Fetch.ts"
 import * as Inspector from "../../cdp/Inspector.ts"
@@ -29,7 +27,6 @@ import * as Kit from "../adapterKit.ts"
 import type * as ProtocolClient from "../protocolClient.ts"
 import * as Urls from "../urls.ts"
 import { configureTarget, type Setup } from "./declare.ts"
-import * as Evaluation from "./evaluation.ts"
 import { frameUrl, targetKind } from "./mapping.ts"
 import {
   ContextEntry,
@@ -439,67 +436,20 @@ const workerGate = Effect.fnUntraced(function*(state: State, target: TargetEntry
 ContextEntry.prototype.gate = gate
 ContextEntry.prototype.workerGate = workerGate
 
+// A context with a script WebSocket route gates its pages as any other context does: the bridge's bindings and
+// capture script are part of the staged setup, so a page that opens with no URL, such as a popup, gets them with its
+// routes, headers and overrides before its one resume. Its first navigation is then intercepted like any other.
+// Bridge calls that arrived before their realm was known are delivered once the snapshot is installed.
 export const webSocketGate: import("./state.ts").ContextGate = Effect.fnUntraced(
   function*(state, target, page, waiting, adopted) {
-    if (target.kind !== "page" || target.url !== "" || page === undefined) {
-      return yield* gate(state, target, page, waiting, adopted)
+    const synced = yield* gate(state, target, page, waiting, adopted)
+    return {
+      through: synced.through,
+      apply: synced.apply.pipe(Effect.andThen(Effect.suspend(() => {
+        WebSocketBridge.flush(state, target)
+        return state.buffer.flush
+      })))
     }
-    const bundles = state.registry.bundles(placement(page))
-    const bridges = bundles.get("")?.webSockets
-    if (bridges === undefined) return yield* gate(state, target, page, waiting, adopted)
-    const scope = yield* Scope.fork(state.cleanupScope)
-    const contexts: Array<Runtime.ExecutionContextCreatedParams> = []
-    const main = yield* Deferred.make<void>()
-    const events = yield* target.session.subscribe(Runtime.executionContextCreated).pipe(Scope.provide(scope))
-    yield* events.pipe(
-      Stream.runForEach((event) =>
-        Effect.sync(() => {
-          contexts.push(event)
-          if ((event.context.auxData as { isDefault?: boolean } | undefined)?.isDefault) {
-            Deferred.doneUnsafe(main, Effect.void)
-          }
-        })
-      ),
-      Effect.forkIn(scope)
-    )
-    return yield* Effect.gen(function*() {
-      const on = Protocol.on(target.session)
-      const bindings = yield* WebSocketBridge.prepare(state, target, bridges, false)
-      yield* Effect.all([
-        Page.enable().pipe(on),
-        Runtime.enable().pipe(on),
-        ...bindings.map((binding) => binding.pipe(on)),
-        ...[...bundles].map(([key, bundle]) =>
-          Page.addScriptToEvaluateOnNewDocument({
-            source: bundle.source,
-            ...(bundle.world._tag === "Isolated" ? { worldName: bundle.world.name } : {})
-          }).pipe(on, Effect.tap(({ identifier }) => Effect.sync(() => target.scripts.set(key, identifier))))
-        ),
-        Runtime.runIfWaitingForDebugger().pipe(on)
-      ], { concurrency: "unbounded", discard: true })
-      yield* Deferred.await(main)
-      const synced = yield* gate(state, target, page, waiting, adopted)
-      const live: Array<Runtime.ExecutionContextCreatedParams> = []
-      for (const event of contexts) {
-        if (
-          Exit.isSuccess(
-            yield* Runtime.evaluate({ expression: "0", uniqueContextId: event.context.uniqueId }).pipe(on, Effect.exit)
-          )
-        ) live.push(event)
-      }
-      return {
-        through: synced.through,
-        apply: synced.apply.pipe(Effect.andThen(Effect.suspend(() => {
-          for (const event of live) {
-            if (event.context.uniqueId === undefined || !state.realmsByUnique.has(event.context.uniqueId)) {
-              Evaluation.contextCreated(event, { state, target })
-            }
-          }
-          WebSocketBridge.flush(state, target)
-          return state.buffer.flush
-        })))
-      }
-    }).pipe(Effect.ensuring(Scope.close(scope, Exit.void)))
   }
 )
 
