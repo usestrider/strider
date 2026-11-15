@@ -2620,6 +2620,63 @@ export const engine = (backend: Backend) =>
             ])
           }), timeout)
 
+        it.effect("a native select in a label contributes its chosen option's label, or its first option's", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<label for="flash">Flash <select><option>1</option><option selected label="Two">2</option></select> times</label><input data-t id="flash">
+<label for="size">Size <select><option>Small</option><option>Large</option></select></label><input data-t id="size">`
+            )
+            assert.deepStrictEqual(namesOf(yield* send(marked)), ["Flash Two times", "Size Small"])
+          }), timeout)
+
+        it.effect("title doesn't name a presentational element", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(backend, `<button data-t>Go <span role="none" title="Bryan"></span></button>`)
+            assert.deepStrictEqual(namesOf(yield* send(marked)), ["Go"])
+          }), timeout)
+
+        it.effect("an element that lists itself in aria-labelledby gives its own label there", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<span id="file">Documentation.pdf</span><button data-t id="self" aria-label="Delete" aria-labelledby="self file">x</button>
+<input data-t id="search" value="typed" aria-label="Search" aria-labelledby="search">`
+            )
+            assert.deepStrictEqual(namesOf(yield* send(marked)), ["Delete Documentation.pdf", "Search"])
+          }), timeout)
+
+        it.effect("names from content follow aria-owns after the children", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<button data-t aria-owns="extra">Open</button><div id="extra">menu</div>`
+            )
+            assert.deepStrictEqual(namesOf(yield* send(marked)), ["Open menu"])
+          }), timeout)
+
+        it.effect("snapshot text includes ::before and ::after content", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<style>#p::before { content: "Hello " } #p::after { content: " world" }</style><p id="p">there</p>`
+            )
+            const snapshot = yield* send({ op: "snapshot", steps: null, interactivity: false, depth: null })
+            assert(snapshot._tag === "Snapshot")
+            assert.include(JSON.stringify(snapshot.root), `"Hello there world"`)
+          }), timeout)
+
+        it.effect("snapshot names show a non-breaking space as a space, and names keep it", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(backend, `<button data-t>a&nbsp;b</button>`)
+            assert.deepStrictEqual(namesOf(yield* send(marked)), ["a\u00a0b"])
+            const snapshot = yield* send({ op: "snapshot", steps: null, interactivity: false, depth: null })
+            assert(snapshot._tag === "Snapshot")
+            const name = snapshot.root.children[0]!.name
+            assert(name._tag === "Accessible", JSON.stringify(name))
+            assert.strictEqual(name.value, "a b")
+          }), timeout)
+
         it.effect("finds by role and name: substring by default, exact when asked, hidden only when asked", () =>
           Effect.gen(function*() {
             const { send } = yield* open(
