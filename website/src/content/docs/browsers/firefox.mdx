@@ -35,6 +35,9 @@ const AdasFirefox = Firefox.layer({
 
 - It runs `--headless` (unless `headless: false`), `--remote-debugging-port=0`, `--no-remote`, `--profile` with a
   temporary profile, then your `args`.
+- Headless Firefox has no pointing device, so a headless launch also writes `ui.primaryPointerCapabilities` and
+  `ui.allPointerCapabilities` as 6, whatever the launch profile, unless the profile sets them: a page matches
+  `(hover: hover)` and `(pointer: fine)`, as it does with a mouse.
 - No endpoint within 30 seconds fails the layer with [`ConnectionFailed`](/docs/api/browser/Browser#ConnectionFailed), or
   [`ProcessExited`](/docs/api/browser/Browser#ProcessExited) if Firefox exited.
 - On Firefox, a launch profile is the preferences it writes to the profile's `user.js`; its Chromium switches are
