@@ -18,6 +18,7 @@ import {
   Route,
   Snapshot,
   StorageState,
+  UncaughtException,
   Url
 } from "@usestrider/browser"
 import * as Deferred from "effect/Deferred"
@@ -506,7 +507,7 @@ export const contents = (
           ])
         }), timeout)
 
-      it.effect("reports the browser's own CSP and CORS errors as console messages at level error", () =>
+      it.effect("reports the browser's own CSP and CORS errors at level error, as each browser sends them", () =>
         Effect.gen(function*() {
           const page = yield* SharedContext.newPage
           yield* page.route("https://csp.test/**", () =>
@@ -519,9 +520,18 @@ export const contents = (
           // Each browser words these itself; what they share is the policy each names.
           const csp = /Content.Security.Policy/i
           const cors = /CORS|Access-Control|access control/i
-          const corsLogged = yield* ConsoleMessage.next(page, { level: "error", text: cors }).pipe(
-            Deadline.within("5 seconds")
-          )
+          // Firefox 158 sends both as `log.entryAdded` of type `javascript`, the type BiDi keeps for uncaught
+          // exceptions, so they arrive as exceptions. WebKitGTK 2.54.1 sends one of its CORS messages, "Fetch API
+          // cannot load …", with the source it gives uncaught errors, so that one does too.
+          const asExceptions = name === "Firefox"
+          const corsLogged: Effect.Effect<unknown, unknown> = asExceptions
+            ? yield* UncaughtException.next(page, { message: cors }).pipe(Deadline.within("5 seconds"))
+            : yield* ConsoleMessage.next(page, { level: "error", text: cors }).pipe(Deadline.within("5 seconds"))
+          const fetchRejected: Effect.Effect<unknown, unknown> = name === "WebKit"
+            ? yield* UncaughtException.next(page, { message: /Fetch API cannot load/ }).pipe(
+              Deadline.within("5 seconds")
+            )
+            : Effect.void
           yield* page.goto("https://csp.test/")
           yield* page.evaluateInMainWorld(() =>
             fetch("https://cors.test/data").then(() =>
@@ -529,11 +539,26 @@ export const contents = (
               "blocked")
           )
           yield* Effect.exit(corsLogged)
+          yield* Effect.exit(fetchRejected)
           const errors = (yield* ConsoleMessage.history(page, { level: "error" })).entries.map((entry) =>
             entry.text
           )
-          assert.isTrue(errors.some((text) => csp.test(text)), `a CSP error among ${JSON.stringify(errors)}`)
-          assert.isTrue(errors.some((text) => cors.test(text)), `a CORS error among ${JSON.stringify(errors)}`)
+          const exceptions = (yield* UncaughtException.history(page)).entries.map((entry) =>
+            `${entry.name}: ${entry.message}`
+          )
+          const reported = asExceptions ? exceptions : errors
+          assert.isTrue(reported.some((text) => csp.test(text)), `a CSP error among ${JSON.stringify(reported)}`)
+          assert.isTrue(reported.some((text) => cors.test(text)), `a CORS error among ${JSON.stringify(reported)}`)
+          if (name === "Firefox") {
+            assert.deepStrictEqual(errors, [])
+          } else {
+            assert.deepStrictEqual(
+              exceptions.filter((text) => !/Fetch API cannot load/.test(text)),
+              [],
+              "no other exception"
+            )
+            assert.strictEqual(exceptions.length, name === "WebKit" ? 1 : 0, JSON.stringify(exceptions))
+          }
         }), timeout)
 
       it.effect("setContent replaces a parsed document still waiting for deferred scripts", () =>
