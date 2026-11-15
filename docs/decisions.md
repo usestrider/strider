@@ -1624,3 +1624,14 @@ these, Playwright's `goto` and `reload` resolve to `null` for them, and the brow
 report both kinds as requests, and Firefox reports `data:` but not `blob:`. Reporting each browser's own events was
 rejected: the same page would report different requests on each backend, and a `data:` navigation would carry a
 response with no network behind it. `file:` URLs stay requests.
+
+## Names from content follow the descendant rule of w3c/aria#1821
+
+When an element is named from its content, a descendant in that content contributes only if its role allows it: the
+roles always named from content, no role, and the structural roles w3c/aria#1821 lists, such as `generic`, `list`,
+`paragraph`, and `table`. Inside an `aria-labelledby` target or a native label, every descendant counts. Chromium,
+Firefox, and Playwright compute names this way, so a nested tree item's group or a heading's `alert` adds nothing.
+Names keep U+00A0 as accname's flat string does, while name matching collapses whitespace on both sides and folds it
+into a space, as Playwright's role selector does. Rejected: recursing into every child, which gave names no browser
+reports, and exact matches that tell a non-breaking space from a space, which would make a name typed with an ordinary
+space miss a `&nbsp;` the page author chose for layout.

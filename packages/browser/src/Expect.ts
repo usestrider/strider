@@ -361,7 +361,8 @@ export const toHaveText: DualMatcher<
  *
  * **Details**
  *
- * Strings match the whole name after whitespace is collapsed. Regular expressions test the computed name.
+ * Strings match the whole name after whitespace is collapsed on both sides, so a non-breaking space matches a
+ * space. Regular expressions test the computed name, which keeps non-breaking spaces.
  * `ignoreCase` overrides a regular expression's `i` flag when supplied; otherwise strings are case-sensitive
  * and regular expressions keep their flags. Hidden elements have an empty name; hidden labels can name a
  * visible element. Roles that prohibit naming, such as generic, paragraph, and code, have an empty name;
