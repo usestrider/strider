@@ -31,6 +31,7 @@ import type * as Scope from "effect/Scope"
 import * as Tracer from "effect/Tracer"
 import * as zlib from "node:zlib"
 import { vi } from "vitest"
+import * as Engine from "../../../src/internal/engine.ts"
 import { LocatorImpl } from "../../../src/internal/locator.ts"
 import * as Runtime from "../../../src/internal/runtime.ts"
 import * as Protocol from "../../../src/protocol/Protocol.ts"
@@ -273,29 +274,44 @@ export const contents = (
           const target = page.frame(page.locator("iframe")).locator("#target")
           assert(target instanceof LocatorImpl)
           const adapter = target.owner.runtime.model.adapter
-          const original = adapter.dispatchInput
           const ready = yield* Deferred.make<void>()
           const release = yield* Deferred.make<void>()
           let held = false
-          const dispatchInput: typeof original = Effect.fnUntraced(function*(...args: Parameters<typeof original>) {
-            if (!held) {
-              held = true
-              yield* Deferred.succeed(ready, undefined)
-              yield* Deferred.await(release)
+          const hold = Effect.suspend(() => {
+            if (held) {
+              return Effect.void
             }
-            return yield* original(...args)
+            held = true
+            return Deferred.succeed(ready, undefined).pipe(Effect.andThen(Deferred.await(release)))
           })
+          // The insertion is held where it reaches the page: the protocol's command where the backend has one,
+          // otherwise the engine's insert request
+          const native = adapter.textInsertion === "native"
+          const original = { dispatchInput: adapter.dispatchInput, evaluate: adapter.evaluate }
+          const dispatchInput: typeof original.dispatchInput = (...args) =>
+            hold.pipe(Effect.andThen(original.dispatchInput(...args)))
+          const evaluate: typeof original.evaluate = (realm, call) => {
+            const argument = call.arguments[0]
+            const request = call.functionDeclaration === Engine.run && argument?._tag === "Value" &&
+                argument.value.type === "string"
+              ? JSON.parse(argument.value.value) as Engine.Request :
+              undefined
+            return request?.op === "insert"
+              ? hold.pipe(Effect.andThen(original.evaluate(realm, call)))
+              : original.evaluate(realm, call)
+          }
           const replacement = `<input id="other" value="replacement"><script>
             const other = document.getElementById("other"); other.focus(); other.setSelectionRange(11, 11);
           </script>`
           yield* Effect.acquireUseRelease(
             Effect.sync(() =>
-              Object.assign(adapter, { dispatchInput })
+              Object.assign(adapter, native ? { dispatchInput } : { evaluate })
             ),
             () =>
               Effect.gen(function*() {
                 const fill = yield* target.fill("new").pipe(Deadline.within("2 seconds"), Effect.forkScoped)
-                yield* Deferred.await(ready).pipe(Deadline.within("2 seconds"))
+                // Deadline.within bounds operations only: a hold that never comes must fail the case in seconds
+                yield* Deferred.await(ready).pipe(Effect.timeout("2 seconds"))
                 const replaced = yield* page.setContent(replacement).pipe(Deadline.within("250 millis"), Effect.exit)
                 yield* Deferred.succeed(release, undefined)
                 const filled = yield* Fiber.await(fill).pipe(Deadline.within("2 seconds"))
@@ -320,7 +336,7 @@ export const contents = (
             () =>
               Deferred.succeed(release, undefined).pipe(
                 Effect.andThen(Effect.sync(() =>
-                  Object.assign(adapter, { dispatchInput: original })
+                  Object.assign(adapter, original)
                 ))
               )
           )

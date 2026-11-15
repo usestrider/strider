@@ -2651,7 +2651,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 result: "Success",
                 timeout: false,
                 value: "new",
-                events: "input;input;input;"
+                events: "input;"
               })
               return
             }
@@ -2683,7 +2683,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 }
                 // This asserts WebKit's unchanged typing path, not a post-focus transition.
                 if (name === "WebKit" && !state.events.startsWith("focus;")) {
-                  assert.deepStrictEqual(state, { result: "Success", value: "new", events: "input;input;input;" })
+                  assert.deepStrictEqual(state, { result: "Success", value: "new", events: "input;" })
                   return
                 }
                 if (mode === "blocked") {
@@ -2697,7 +2697,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   assert.deepStrictEqual(state, {
                     result: "Success",
                     value: "new",
-                    events: name === "Chromium" ? "focus;editable;input;" : "focus;editable;input;input;input;"
+                    events: "focus;editable;input;"
                   })
                   assert.strictEqual(yield* page.locator("#before").readText, "old|focus;")
                 } else {
@@ -2747,7 +2747,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   // Stock WebKit may leave the target unfocused; then the transition is unexercised.
                   if (name === "WebKit" && !state.events.startsWith("focus;")) {
                     assert.strictEqual(result._tag, "Success")
-                    assert.deepStrictEqual(state, { notEditable: false, value: "new", events: "input;input;input;" })
+                    assert.deepStrictEqual(state, { notEditable: false, value: "new", events: "input;" })
                     return
                   }
                   assert.strictEqual(result._tag, editable ? "Failure" : "Success")
@@ -3221,11 +3221,9 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             document.documentElement.dataset.nativeEvents = "[]";
             for (const type of ["keydown", "keypress", "keyup", "beforeinput", "input"]) {
               window.addEventListener(type, event => {
-                if (event.isTrusted) {
-                  nativeEvents.push({ type, target: event.target.tagName,
-                    inputType: event.inputType || null, data: event.data || null });
-                  document.documentElement.dataset.nativeEvents = JSON.stringify(nativeEvents);
-                }
+                nativeEvents.push({ type, target: event.target.tagName, trusted: event.isTrusted,
+                  inputType: event.inputType || null, data: event.data || null });
+                document.documentElement.dataset.nativeEvents = JSON.stringify(nativeEvents);
               }, true);
             }
           </script>`
@@ -3247,10 +3245,13 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             )
             const childEvents = JSON.parse(
               Option.getOrThrow(yield* frame.locator("html").readAttribute("data-native-events"))
-            ) as Array<{ type: string; target: string; data: string | null }>
+            ) as Array<{ type: string; target: string; trusted: boolean; data: string | null }>
             console.info("native design-mode frame evidence", JSON.stringify({ parentEvents, childEvents }))
-            assert(childEvents.some((event) => event.type === "beforeinput"))
-            assert(childEvents.some((event) => event.type === "input"))
+            // Where the browser's editing command fires no beforeinput (input.insertText partial, Firefox), Strider
+            // dispatches it itself, untrusted
+            const trustedBeforeInput = yield* fullySupports("input.insertText")
+            assert(childEvents.some((event) => event.type === "beforeinput" && event.trusted === trustedBeforeInput))
+            assert(childEvents.some((event) => event.type === "input" && event.trusted))
             assert(!parentEvents.some((event) => event.type === "beforeinput" || event.type === "input"))
             assert.strictEqual(yield* target.readText, "new")
             assert.strictEqual(yield* page.locator("#other").readValue, "other")
