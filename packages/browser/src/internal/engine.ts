@@ -1838,11 +1838,19 @@ export function engine(render: (root: SnapNode) => string) {
     return label
   }
 
+  // An element inside a button, or an element with a button's or a checkbox's role, stands for that control: the
+  // browser delivers no click to a disabled button's subtree, and selection takes the control's text. Fields and
+  // editable content stand for themselves.
+  const enclosingControl = (element: Element): Element => {
+    if (dom.matches(element, "input, textarea, select") || contentEditable(element)) return element
+    return dom.closest(element, "button, [role=button], [role=checkbox], [role=radio]") ?? element
+  }
+
+  // Enabled as a user sees it: a span inside a disabled button is as disabled as the button
+  const enabledControl = (element: Element): boolean => enabled(enclosingControl(element))
+
   const textSelectionTarget = (element: Element): Element => {
-    let target = element
-    if (!dom.matches(target, "input, textarea, select") && !contentEditable(target)) {
-      target = dom.closest(target, "button, [role=button], [role=checkbox], [role=radio]") ?? target
-    }
+    let target = enclosingControl(element)
     if (
       !dom.matches(
         target,
@@ -2419,8 +2427,8 @@ export function engine(render: (root: SnapNode) => string) {
       else if (checks.visible && !rendered(element, false)) reason = { _tag: "NotVisible" }
       else if (
         checks.enabled && (
-          !enabled(element) || (action._tag === "Point" && action.checked === true &&
-            !enabled(checkableForAction(element) ?? element))
+          !enabledControl(element) || (action._tag === "Point" && action.checked === true &&
+            !enabledControl(checkableForAction(element) ?? element))
         )
       ) reason = { _tag: "Disabled" }
       else if (checks.editable && readOnly(element)) reason = { _tag: "ReadOnly" }
@@ -2728,7 +2736,7 @@ export function engine(render: (root: SnapNode) => string) {
       case "Editable":
         return { _tag: "Read", value: editableKind(element) && enabled(element) && !readOnly(element) }
       case "Enabled":
-        return { _tag: "Read", value: enabled(element) }
+        return { _tag: "Read", value: enabledControl(element) }
       case "Checked": {
         const control = request.read.followLabel ? checkableForAction(element) : element
         const checked = control === null ? null : checkedOf(control)
@@ -2814,9 +2822,9 @@ export function engine(render: (root: SnapNode) => string) {
     const element = found[0]!
     switch (expectation._tag) {
       case "Enabled":
-        return { passed: enabled(element), observed: enabled(element) ? "enabled" : "disabled" }
+        return { passed: enabledControl(element), observed: enabledControl(element) ? "enabled" : "disabled" }
       case "Disabled":
-        return { passed: !enabled(element), observed: enabled(element) ? "enabled" : "disabled" }
+        return { passed: !enabledControl(element), observed: enabledControl(element) ? "enabled" : "disabled" }
       case "Checked": {
         const checked = checkedOf(element)
         return {
