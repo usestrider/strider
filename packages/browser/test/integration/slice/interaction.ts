@@ -960,6 +960,34 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         )
       }
 
+      /** A custom element whose shadow root wraps its slotted children in a link that counts its clicks. */
+      const shadowLink = (content: string) =>
+        `<!doctype html><script>window.clickCount=0;customElements.define("my-link",class extends HTMLElement{constructor(){super();this.attachShadow({mode:"open"}).innerHTML='<a href="#" id="inner-link" onclick="clickCount++"><slot></slot></a>'}})</script><my-link>${content}</my-link>`
+
+      for (
+        const [label, content] of [["slotted text", "Sign up"], ["a slotted element", "<span>Sign up</span>"]] as const
+      ) {
+        it.effect(`clicks a link in a shadow root whose label is ${label}`, () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() => shadowLink(content))
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.locator("#inner-link").click().pipe(Deadline.within("3 seconds"))
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() => (globalThis as unknown as { clickCount: number }).clickCount),
+              1
+            )
+          })), timeout)
+
+        it.effect(`names a link in a shadow root by its label, ${label}`, () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() => shadowLink(content))
+            const page = yield* newPage
+            yield* page.goto(url)
+            assert.strictEqual(yield* page.getByRole("link", { name: "Sign up" }).count, 1)
+          })), timeout)
+      }
+
       it.effect("fills a transparent control under a cover, with no pointer to hit-test", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
