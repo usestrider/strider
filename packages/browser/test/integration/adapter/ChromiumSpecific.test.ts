@@ -927,6 +927,56 @@ describe("Chromium adapter, CDP only", () => {
       )
 
       it.effect(
+        "enters the target on a new HTML drag after Escape canceled the previous drag",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const order: Array<string> = []
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(dragFixture)}`)
+              yield* page.locator("#source").hover()
+              yield* Effect.scoped(Effect.gen(function*() {
+                const held = yield* page.mouse.hold("left")
+                yield* page.locator("#target").hover()
+                yield* page.keyboard.press("Escape")
+                yield* held.release
+              }))
+              yield* page.evaluateInMainWorld(() => {
+                ;(window as any).log = ""
+              })
+              yield* page.locator("#source").dragTo(page.locator("#target"))
+              const log = yield* page.evaluateInMainWorld(() => (window as any).log)
+              assert.strictEqual(log, "1234", order.join(", "))
+            }).pipe(Effect.provide(recordingDrags(order)))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "drops an HTML drag after hovering the same target twice",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const order: Array<string> = []
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(dragFixture)}`)
+              yield* page.locator("#source").hover()
+              yield* Effect.scoped(Effect.gen(function*() {
+                const held = yield* page.mouse.hold("left")
+                yield* page.locator("#target").hover()
+                yield* page.locator("#target").hover()
+                yield* held.release
+              }))
+              const log = yield* page.evaluateInMainWorld(() => (window as any).log)
+              assert.strictEqual(log, "1234", order.join(", "))
+            }).pipe(Effect.provide(recordingDrags(order)))
+          }),
+        timeout
+      )
+
+      it.effect(
         "enters the target while the button is held, leaving its dragover to the drop",
         () =>
           Effect.gen(function*() {
@@ -1011,6 +1061,105 @@ describe("Chromium adapter, CDP only", () => {
         timeout
       )
 
+      it.effect("keeps Escape cancellation separate from the next gesture", () =>
+        Effect.gen(function*() {
+          const served = yield* site
+          const order: Array<string> = []
+          yield* Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(dragFixture)}`)
+            yield* page.evaluateInMainWorld(() => {
+              ;(window as any).keys = []
+              for (const type of ["keydown", "keyup"]) addEventListener(type, () => (window as any).keys.push(type))
+            })
+            yield* page.keyboard.press("Escape")
+            assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => (window as any).keys), ["keydown", "keyup"])
+            yield* page.locator("#source").hover()
+            yield* Effect.scoped(Effect.gen(function*() {
+              const mouse = yield* page.mouse.hold("left")
+              yield* page.locator("#target").hover()
+              const escape = yield* page.keyboard.hold("Escape")
+              yield* mouse.release
+              yield* page.locator("#source").dragTo(page.locator("#target"))
+              yield* escape.release
+            }))
+            assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => (window as any).keys), ["keydown", "keyup"])
+            yield* page.keyboard.press("Escape")
+            assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => (window as any).keys), [
+              "keydown",
+              "keyup",
+              "keydown",
+              "keyup"
+            ])
+          }).pipe(Effect.provide(recordingDrags(order)))
+        }), timeout)
+
+      it.effect("finishes a held move when dragstart removes the source", () =>
+        Effect.gen(function*() {
+          const served = yield* site
+          const order: Array<string> = []
+          yield* Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const fixture = dragFixture.replace("log+='1'", "log+='1';this.remove()")
+            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(fixture)}`)
+            yield* page.locator("#source").hover()
+            yield* Effect.scoped(Effect.gen(function*() {
+              const held = yield* page.mouse.hold("left")
+              yield* page.locator("#target").hover().pipe(Deadline.within("3 seconds"))
+              yield* held.release
+            }))
+            assert.strictEqual(yield* page.evaluateInMainWorld(() => (window as any).log), "1", order.join(", "))
+          }).pipe(Effect.provide(recordingDrags(order)))
+        }), timeout)
+
+      for (const replacement of ["navigation", "setContent"] as const) {
+        it.effect(`watches dragstart after ${replacement}`, () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const order: Array<string> = []
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const url = `${served.origin}/fixture?html=${encodeURIComponent(dragFixture)}`
+              yield* page.goto(url)
+              yield* page.locator("#source").dragTo(page.locator("#target"))
+              if (replacement === "navigation") yield* page.goto(url + "&again=1")
+              else yield* page.setContent(dragFixture)
+              yield* page.locator("#source").hover()
+              yield* Effect.scoped(Effect.gen(function*() {
+                const held = yield* page.mouse.hold("left")
+                yield* page.locator("#target").hover()
+                assert.strictEqual(yield* page.evaluateInMainWorld(() => (window as any).log), "12", order.join(", "))
+                yield* held.release
+              }))
+            }).pipe(Effect.provide(recordingDrags(order)))
+          }), timeout)
+      }
+
+      for (
+        const [kind, source] of [
+          ["cleared data", `<div draggable="true" ondragstart="event.dataTransfer.clearData()">Source</div>`],
+          ["default link", `<a href="/destination">Source</a>`],
+          [
+            "default image",
+            `<img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='60'%3E%3Crect width='60' height='60' fill='red'/%3E%3C/svg%3E">`
+          ]
+        ]
+      ) {
+        it.effect(`drops an HTML drag with ${kind}`, () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const order: Array<string> = []
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const fixture =
+                `<style>#source>*{display:block;width:60px;height:60px}#source{position:absolute;left:10px;top:10px}</style><script>window.log=''</script><div id="source">${source}</div><div id="target" ondragover="event.preventDefault()" ondrop="event.preventDefault();log='drop'" style="position:absolute;left:300px;top:10px;width:60px;height:60px">Target</div>`
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(fixture)}`)
+              yield* page.locator("#source > *").dragTo(page.locator("#target")).pipe(Deadline.within("3 seconds"))
+              assert.strictEqual(yield* page.evaluateInMainWorld(() => (window as any).log), "drop", order.join(", "))
+            }).pipe(Effect.provide(recordingDrags(order)))
+          }), timeout)
+      }
+
       it.effect(
         "drops an HTML drag from a cross-site frame onto its parent",
         () =>
@@ -1034,6 +1183,42 @@ describe("Chromium adapter, CDP only", () => {
               yield* frame.locator("#source").dragTo(page.locator("#target")).pipe(Deadline.within("10 seconds"))
               const log = yield* page.evaluateInMainWorld(() => (window as any).log)
               assert.strictEqual(log, "234", order.join(", "))
+            }).pipe(Effect.provide(recordingDrags(order)))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "releases cross-site mouse capture after an HTML drop",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const order: Array<string> = []
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const fixture = (origin: string, html: string) => `${origin}/fixture?html=${encodeURIComponent(html)}`
+              const child = fixture(
+                served.crossSite,
+                `<div id="source" draggable="true" style="position:absolute;left:10px;top:10px;width:40px;height:40px;background:red">Source</div>`
+              )
+              yield* page.goto(
+                fixture(
+                  served.origin,
+                  `<script>window.log=''</script><iframe style="margin:30px;width:300px;height:200px" src="${child}"></iframe><div id="target" ondragenter="log+='2'" ondragover="event.preventDefault();log+='3'" ondrop="event.preventDefault();log+='4'" style="position:absolute;left:500px;top:50px;width:80px;height:80px;background:gray">Target</div>`
+                )
+              )
+              const frame = page.frame(page.locator("iframe"))
+              yield* frame.locator("#source").dragTo(page.locator("#target")).pipe(Deadline.within("10 seconds"))
+              const log = yield* page.evaluateInMainWorld(() => (window as any).log)
+              assert.strictEqual(log, "234", order.join(", "))
+              yield* page.evaluateInMainWorld(() => {
+                ;(window as any).moved = false
+                document.querySelector("#target")!.addEventListener("mousemove", () => {
+                  ;(window as any).moved = true
+                })
+              })
+              yield* page.locator("#target").hover()
+              assert.strictEqual(yield* page.evaluateInMainWorld(() => (window as any).moved), true, order.join(", "))
             }).pipe(Effect.provide(recordingDrags(order)))
           }),
         timeout
