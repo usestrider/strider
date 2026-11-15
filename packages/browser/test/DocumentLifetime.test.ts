@@ -56,3 +56,38 @@ it.effect("ends a frame document when its page closes before the frame removal a
       retained: false
     })
   }))
+
+it.effect("keeps a document replacement's reason while the browser is closing", () =>
+  Effect.gen(function*() {
+    const fold = yield* Fold.make({ release: () => Effect.void })
+    const page = "page" as Target.NavigableId
+    const first = "first-document" as Target.DocumentId
+    const second = "second-document" as Target.DocumentId
+    yield* fold.sink({
+      _tag: "PageAdded",
+      page,
+      context: "context" as UserContext.Id,
+      kind: "tab",
+      origin: { _tag: "Created" },
+      url: "about:blank" as Url.Url
+    })
+    const committed = (document: Target.DocumentId, replaced: Option.Option<Target.DocumentId>) => ({
+      _tag: "DocumentCommitted" as const,
+      document,
+      navigable: page,
+      url: "https://example.test/" as Url.Url,
+      origin: "https://example.test",
+      createdBy: { _tag: "Adopted" as const },
+      replaced,
+      evidence: "navigation commit"
+    })
+    yield* fold.sink(committed(first, Option.none()))
+    const oldDocument = Option.getOrThrow(fold.document(first))
+    yield* fold.closing(new Target.BrowserClosed({}))
+    // An in-flight navigation can commit before the adapter is torn down. The replacement supplies its cause.
+    yield* fold.sink(committed(second, Option.some(first)))
+    const currentDocument = Option.getOrThrow(fold.document(second))
+    yield* fold.loseConnection(new Target.BrowserClosed({}))
+    assert.deepStrictEqual(yield* Deferred.await(oldDocument.ended), new Target.DocumentReplaced({}))
+    assert.deepStrictEqual(yield* Deferred.await(currentDocument.ended), new Target.BrowserClosed({}))
+  }))

@@ -292,6 +292,36 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
         }), timeout)
 
       it.effect(
+        "fails a pending evaluation with BrowserClosed when the browser's scope closes",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(connect)
+            const holder = yield* Scope.make()
+            const browserScope = yield* Scope.make()
+            yield* Effect.addFinalizer(() => Scope.close(holder, Exit.void))
+            yield* Effect.addFinalizer(() => Scope.close(browserScope, Exit.void))
+            const services = yield* Layer.buildWithScope(Layer.fresh(backend), browserScope)
+            const page = yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              return page
+            }).pipe(Scope.provide(holder), Effect.provideContext(services))
+            const evaluation = yield* page.evaluateInMainWorld(() => {
+              ;(window as { __pending?: boolean }).__pending = true
+              return new Promise(() => {})
+            }).pipe(Effect.forkChild)
+            yield* page.evaluateInMainWorld(() => (window as { __pending?: boolean }).__pending === true).pipe(
+              Effect.repeat({ until: (started) => started })
+            )
+            yield* Scope.close(browserScope, Exit.void)
+            const error = yield* Fiber.join(evaluation).pipe(Effect.flip, Effect.timeout("10 seconds"))
+            assert(Target.isTargetGone(error), String(error))
+            assert.deepStrictEqual(error.reason, new Target.BrowserClosed({}))
+          }),
+        timeout
+      )
+
+      it.effect(
         "ends a context and a page still held with BrowserClosed when the browser's scope closes",
         () =>
           Effect.gen(function*() {
