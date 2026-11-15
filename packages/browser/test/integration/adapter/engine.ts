@@ -2553,7 +2553,7 @@ export const engine = (backend: Backend) =>
               backend,
               `<button data-t>1&shy;2&#8203;3</button><button data-t>a&nbsp;b</button>`
             )
-            assert.deepStrictEqual(namesOf(yield* send(marked)), ["123", "a b"])
+            assert.deepStrictEqual(namesOf(yield* send(marked)), ["123", "a\u00a0b"])
             // A name still matches as text does, a non-breaking space as a space
             assert.strictEqual(count(yield* send({ op: "count", steps: [role("button", text("a b", true))] })), 1)
           }), timeout)
@@ -2577,6 +2577,15 @@ export const engine = (backend: Backend) =>
 <label for="colour">Colour <div role="listbox"><div role="option">Red</div><div role="option" aria-selected="true">Blue</div></div></label><input data-t id="colour">`
             )
             assert.deepStrictEqual(namesOf(yield* send(marked)), ["Size Medium", "Colour Blue"])
+          }), timeout)
+
+        it.effect("names with hidden elements included keep the hidden descendants", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(backend, `<button><span style="display:none">Save</span></button>`)
+            assert.strictEqual(
+              count(yield* send({ op: "count", steps: [role("button", text("Save", true), true)] })),
+              1
+            )
           }), timeout)
 
         it.effect("names read CSS content: alternative text, attr(), the element's own, hidden and block pseudos", () =>
