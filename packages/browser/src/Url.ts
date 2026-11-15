@@ -95,7 +95,9 @@ export const Pattern = Schema.String.pipe(Schema.brand("~@usestrider/browser/Url
  *
  * - With `*`, it's a glob over the whole URL: `**` matches anything, and `*` anything but `/`.
  * - Starting with a scheme and containing `:name` groups, it's a `URLPattern`.
- * - Anything else matches that exact URL.
+ * - Anything else matches that exact URL, compared as the browser writes a URL: `"ws://localhost:8080"` matches
+ *   `ws://localhost:8080/`, and `"HTTP://Example.com:80"` matches `http://example.com/`. A string that isn't an
+ *   absolute URL is compared as it is.
  *
  * An invalid pattern fails with `InvalidInput` at once.
  *
