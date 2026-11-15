@@ -302,6 +302,11 @@ export interface Queries<L> {
    * substring, or with `exact` as the whole text, case-sensitively; a `RegExp` is tested as given. The document's
    * `head` isn't searched.
    *
+   * Chained from a locator, it searches the locator's own element as well as the elements inside it, so
+   * `page.locator(".badge").getByText("Resolved")` finds the badge that says "Resolved". The other `getBy*` queries
+   * search only inside the locator's element. The same holds for `getByText` in a filter's `has` and `hasNot`:
+   * the element being tested counts.
+   *
    * **Example** (Reading an order number)
    *
    * ```ts import.meta.vitest
