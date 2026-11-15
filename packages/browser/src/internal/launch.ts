@@ -168,8 +168,9 @@ export const command = (
  * Closes a browser a layer launched, as the scope that connected to it closes: sends `close`, and waits up to five
  * seconds on the browser's clock for `exited`, the process's exit, before the scope's later finalizers, such as the
  * process release's signals, run. It waits for the exit, not the reply: Firefox answers `browser.close` before it
- * has written its profile's cookies and localStorage. A close that fails, a lost connection or an exit by a signal
- * ends the wait as an exit does; a hung browser ends it at the deadline, which the caller's deadline doesn't shorten.
+ * has written its profile's cookies and localStorage. Only the exit, by a signal too, or the five seconds end the
+ * wait: a close that fails or a connection lost first doesn't, since the browser may still be writing its profile.
+ * Neither the caller's interruption nor its deadline shortens the five seconds.
  */
 export const closeGracefully: (
   name: string,

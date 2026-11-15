@@ -1,5 +1,6 @@
 /** How the BiDi adapter closes a browser it launched, played over a fake transport, without launching one. */
 import { assert, describe, it } from "@effect/vitest"
+import { Deadline } from "@usestrider/browser"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -28,13 +29,24 @@ const results: Record<string, unknown> = {
 
 describe("BiDi owned Firefox shutdown", () => {
   for (
-    const mode of ["order", "hung child", "signal exit", "failed handshake", "attached"] as const
+    const mode of [
+      "order",
+      "no reply",
+      "disconnect before exit",
+      "hung child",
+      "signal exit",
+      "interrupted caller",
+      "expired deadline",
+      "failed handshake",
+      "attached"
+    ] as const
   ) {
     it.effect(mode, () =>
       withProtocolScheduler((drain) =>
         Effect.gen(function*() {
           const browser = yield* makeBrowser
           const exited = yield* Deferred.make<void, string>()
+          const closeSent = yield* Deferred.make<void>()
           const scope = yield* Scope.make()
           const commands: Array<string> = []
           let fallback = false
@@ -50,8 +62,9 @@ describe("BiDi owned Firefox shutdown", () => {
               commands.push(command.method)
               if (command.method === "browser.close") {
                 assert.strictEqual(fallback, false)
+                yield* Deferred.succeed(closeSent, undefined)
                 // Firefox answers before it has written its profile: the exit, not the reply, ends shutdown
-                yield* browser.receive({ type: "success", id: command.id, result: {} })
+                if (mode !== "no reply") yield* browser.receive({ type: "success", id: command.id, result: {} })
                 continue
               }
               if (mode === "failed handshake" && command.method === "session.subscribe") {
@@ -80,12 +93,41 @@ describe("BiDi owned Firefox shutdown", () => {
             assert.strictEqual(fallback, true)
             return
           }
-          const closing = yield* Scope.close(scope, Exit.void).pipe(Effect.forkChild)
+          assert(Exit.isSuccess(acquisition))
+          let connectionLost = false
+          yield* acquisition.value.closed.pipe(
+            Effect.tap(() =>
+              Effect.sync(() => {
+                connectionLost = true
+              })
+            ),
+            Effect.forkScoped
+          )
+          const closing = yield* (mode === "interrupted caller"
+            ? Effect.gen(function*() {
+              yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))
+              return yield* Effect.never
+            }).pipe(Effect.scoped, Effect.forkChild)
+            : Scope.close(scope, Exit.void).pipe(
+              mode === "expired deadline" ? Deadline.within("0 millis") : (self) => self,
+              Effect.forkChild
+            ))
           yield* drain
+          const interrupted = mode === "interrupted caller"
+            ? yield* Fiber.interrupt(closing).pipe(Effect.forkChild)
+            : undefined
+          yield* drain
+          yield* Deferred.await(closeSent)
           // `browser.close` ends the session itself, so it goes before `session.end`, which waits for the exit
           assert.deepStrictEqual(commands.slice(-1), ["browser.close"])
+          assert.strictEqual(connectionLost, false)
           assert.strictEqual(fallback, false)
-          if (mode === "hung child") {
+          if (mode === "disconnect before exit") {
+            yield* browser.lose("closed before process exit")
+            yield* drain
+            assert.strictEqual(fallback, false)
+          }
+          if (mode === "hung child" || mode === "expired deadline") {
             yield* TestClock.adjust("4999 millis")
             assert.strictEqual(fallback, false)
             yield* TestClock.adjust("1 millis")
@@ -95,8 +137,12 @@ describe("BiDi owned Firefox shutdown", () => {
             yield* Deferred.succeed(exited, undefined)
           }
           yield* drain
-          yield* browser.lose("the browser exited")
-          yield* Fiber.join(closing)
+          // The browser's exit closes its socket; `session.end` then fails at once rather than waiting
+          if (mode !== "disconnect before exit") yield* browser.lose("the browser exited")
+          if (interrupted !== undefined) yield* Fiber.join(interrupted)
+          else yield* Fiber.join(closing)
+          yield* drain
+          assert.strictEqual(connectionLost, true)
           assert.strictEqual(fallback, true)
         }).pipe(onTestClock)
       ))
