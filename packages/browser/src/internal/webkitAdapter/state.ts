@@ -78,6 +78,8 @@ export interface TargetEntry {
   /** The last message, which a repeat count update repeats. */
   lastConsole: Console.ConsoleMessage | undefined
   ended: boolean
+  /** Held from reading the bootstrap script's bundle through sending it. */
+  bootstrapLock?: Semaphore.Semaphore | undefined
 }
 
 export interface WorkerEntry {

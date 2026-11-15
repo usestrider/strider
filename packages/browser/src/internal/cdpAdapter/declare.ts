@@ -269,7 +269,16 @@ const applyOverride = (
   }
 }
 
-const applyScripts = Effect.fnUntraced(function*(state: State, target: TargetEntry, page: PageEntry, setup?: Setup) {
+// Two applications that overlap on a target would both remove the same identifier, which Chromium rejects the
+// second time, and the identifier one of them added would be overwritten, its script left to run in every later
+// document. So the registry is read under the target's permit, held until each identifier is recorded: in a new
+// target's gate, until the gate's scope closes, after the replies.
+const scriptLock = (target: TargetEntry) => target.scriptLock ??= Semaphore.makeUnsafe(1)
+
+const applyScripts = (state: State, target: TargetEntry, page: PageEntry) =>
+  scriptLock(target).withPermits(1)(writeScripts(state, target, page))
+
+const writeScripts = Effect.fnUntraced(function*(state: State, target: TargetEntry, page: PageEntry, setup?: Setup) {
   const on = setup?.send ?? Protocol.on(target.session)
   const bundles = state.registry.bundles(placement(page))
   for (const [key, identifier] of Array.from(target.scripts)) {
@@ -283,6 +292,7 @@ const applyScripts = Effect.fnUntraced(function*(state: State, target: TargetEnt
     const previous = target.scripts.get(key)
     if (previous !== undefined) {
       yield* Page.removeScriptToEvaluateOnNewDocument({ identifier: previous as Page.ScriptIdentifier }).pipe(on)
+      target.scripts.delete(key)
     }
     const command = Page.addScriptToEvaluateOnNewDocument({
       source: bundle.source,
@@ -427,7 +437,11 @@ export const configureTarget = Effect.fnUntraced(
         })
       ], { concurrency: "unbounded", discard: true })
     }
-    yield* applyScripts(state, target, page, setup)
+    if (setup === undefined) yield* applyScripts(state, target, page)
+    else {
+      yield* scriptLock(target).takeScoped(1)
+      yield* writeScripts(state, target, page, setup)
+    }
     yield* applyIntercepts(state, target, page, setup?.send)
     yield* keepBodies(state, target, page, setup?.send)
     if (state.registry.fileChooser(placement(page)) && target.kind === "page") {

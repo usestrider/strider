@@ -87,12 +87,14 @@ export interface TargetEntry {
   scriptLoaded?: Deferred.Deferred<void> | undefined
   /** The intercept patterns last applied, so a change is applied once. */
   intercepts: string
+  /** Each init script bundle's identifier in Chromium, by its key, written under `scriptLock`. */
   readonly scripts: Map<string, string>
   ended: boolean
   /** Original renderer dimensions, retained until restoration completes; null means the original is unknown. */
   viewport?: { readonly width: number; readonly height: number } | null | undefined
   overrideLock?: Semaphore.Semaphore | undefined
   viewportLock?: Semaphore.Semaphore | undefined
+  scriptLock?: Semaphore.Semaphore | undefined
 }
 
 export interface PageEntry {
