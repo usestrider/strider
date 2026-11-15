@@ -1476,7 +1476,11 @@ export function engine(render: (root: SnapNode) => string) {
         return under.filter((element) => found.has(element))
       }
       case "Text": {
-        const candidates = under.filter((element) => !inHead(element) && !SKIPPED.has(dom.localName(element)))
+        // A slot is transparent here as in the flat tree: what it renders, its assigned nodes or its fallback
+        // content, is its parent's text, so the slot itself is never the smallest element that says it.
+        const candidates = under.filter((element) =>
+          !(element instanceof HTMLSlotElement) && !inHead(element) && !SKIPPED.has(dom.localName(element))
+        )
         const says = (element: Element) => matches(step.matcher, textOf(element))
         return candidates.filter((element) => says(element) && !flatChildElements(element).some(says))
       }
