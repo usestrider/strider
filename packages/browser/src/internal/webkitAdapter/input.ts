@@ -88,8 +88,8 @@ export const dispatchInputLaunched = Effect.fnUntraced(
     const process = yield* processOfContext(state, page.context).pipe(Effect.mapError(Adapter.unsent))
     let wheel = state.wheelStates.get(process.key)
     if (wheel === undefined) state.wheelStates.set(process.key, wheel = { width: 0, height: 0 })
-    // The events up to text to insert, as one sequence: a sequence's end forgets a click, so a second click
-    // in another is never a double click (QUIRKS.md, Q223)
+    // The events as one sequence: a sequence's end forgets a click, so a second click in another is never a
+    // double click (QUIRKS.md, Q223)
     let steps: Array<ReadonlyArray<Record<string, unknown>>> = []
     const flush = Effect.suspend(() => {
       if (steps.length === 0) return Effect.void
@@ -104,9 +104,6 @@ export const dispatchInputLaunched = Effect.fnUntraced(
         })
       ).pipe(Effect.andThen(settleDialog(state, page, handle, process)))
     })
-    const insert = (interactions: ReadonlyArray<Automation.KeyboardInteraction>) =>
-      automationOf(process, Automation.performKeyboardInteractions({ handle, interactions: [...interactions] }))
-        .pipe(Effect.andThen(settleDialog(state, page, handle, process)))
     for (const event of events) {
       switch (event._tag) {
         case "Mouse": {
@@ -148,16 +145,9 @@ export const dispatchInputLaunched = Effect.fnUntraced(
           }])
           break
         }
-        case "InsertText": {
-          yield* flush
-          // WebKitGTK types no newline: each is pressed as Enter (QUIRKS.md, Q223)
-          const lines = event.text.split(/\r\n|\r|\n/)
-          yield* insert(lines.flatMap((line, index): Array<Automation.KeyboardInteraction> => [
-            ...(index === 0 ? [] : [{ type: "InsertByKey", key: "Enter" } as Automation.KeyboardInteraction]),
-            ...(line === "" ? [] : [{ type: "InsertByKey", text: line } as Automation.KeyboardInteraction])
-          ]))
-          break
-        }
+        case "InsertText":
+          // Automation inserts text only by key: L1 inserts it through the engine (`textInsertion`)
+          return yield* Effect.die(new Error("Stock WebKit inserts text through the engine, never as input"))
       }
     }
     yield* flush

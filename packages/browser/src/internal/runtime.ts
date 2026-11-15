@@ -946,6 +946,61 @@ export const sendToDocument = (
     promptBlocked(page)
   )
 
+/** The text of input that is one `InsertText` alone, for a backend that inserts it through the engine. */
+export const insertsInPage = (
+  runtime: Runtime,
+  events: ReadonlyArray<Adapter.InputEvent>
+): Option.Option<{ readonly text: string; readonly beforeInput: boolean }> => {
+  const insertion = runtime.model.adapter.textInsertion
+  const event = events[0]
+  return insertion === "native" || events.length !== 1 || event?._tag !== "InsertText"
+    ? Option.none()
+    : Option.some({ text: event.text, beforeInput: insertion === "beforeInputAndEditingCommand" })
+}
+
+/**
+ * Inserts text through the page's editing command, in the document that has focus, the deepest across frames,
+ * for a backend whose protocol has no command to insert text (`Adapter.textInsertion`). With `beforeInput`, the
+ * engine first dispatches the cancelable `beforeinput` the browser leaves out of the command, and inserts nothing
+ * when the page cancels it.
+ */
+export const insertText = (
+  runtime: Runtime,
+  page: Model.PageEntry,
+  text: string,
+  beforeInput: boolean,
+  id: Diagnostics.OperationId
+): Effect.Effect<void, SendFailure> =>
+  Effect.gen(function*() {
+    let document = (yield* openState(page, id)).document.id
+    // Each round goes one frame deeper; a document that ends on the way starts the walk again from the top
+    while (true) {
+      const answer = yield* sendToDocument(runtime, page, document, { op: "insert", text, beforeInput }, id)
+      if (Option.isNone(answer)) {
+        document = (yield* openState(page, id)).document.id
+        continue
+      }
+      if (answer.value._tag !== "InFrame") return
+      const found = yield* elementIn(
+        runtime,
+        document,
+        [
+          { _tag: "Css", selector: "iframe, frame" },
+          { _tag: "Nth", index: answer.value.index }
+        ],
+        null,
+        id
+      )
+      if (Option.isNone(found) || found.value._tag !== "Found") return
+      const frame = yield* runtime.model.adapter.contentFrame(found.value.node).pipe(
+        Effect.mapError((error) => fromAdapter(error, id, runtime.backend))
+      )
+      const next = Option.isNone(frame) ? Option.none() : yield* runtime.model.documentOf(frame.value)
+      if (Option.isNone(next)) return
+      document = next.value
+    }
+  })
+
 /**
  * Idempotent engine cleanup in its original document, including while a dialog is open. Unlike a read, release
  * must remain queued until the document can execute it. Run apart in an owning scope; never wait for it in a
