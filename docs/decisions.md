@@ -572,6 +572,17 @@ The viewport is applied, measured and cleared on top-level page targets only. Ch
 out-of-process iframe's target, whose size comes from its frame in the parent page, and an iframe waiting for the debugger
 resumes only after its setup, so a measurement there waits for a reply the paused renderer can't send.
 
+A popup that opens as a tab of its opener's window, as a `target=_blank` link's does, takes its opener's recorded
+dimensions instead of measuring its own. Chromium starts such a tab's renderer at its opener's current size, which
+is the override while the opener emulates a viewport, and lays it out at the window's size only once the override
+is cleared, so its gate's measurement is the override and its restore would wait for a size it never returns to.
+The windows are compared with `Browser.getWindowForTarget` while the popup waits for the debugger, a reply from the
+browser process alone. A popup in a window of its own, as `window.open` with window features opens, is laid out at
+that window's size before its gate and keeps its own measurement; if the windows can't be compared, its baseline is
+unknown. Rejected: taking the size after the clear as the baseline, which would confirm without the renderer having
+taken the original size, and skipping a removed context's restore, which would leave a released `context.emulate`
+waiting on the same popup.
+
 Measure in the named `__strider_viewport` isolated world for the target's main frame,
 passing the returned execution context id explicitly to `Runtime.evaluate`. Create or retrieve that world for each
 measurement rather than caching an execution context across navigation. Main-world lexical bindings and numeric

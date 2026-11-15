@@ -88,13 +88,15 @@ const attached = (state: State, parent: TargetEntry | undefined, params: Target.
   switch (kind) {
     case "page": {
       const context = contextFor(state, info.browserContextId)
-      const opener = info.openerId === undefined ? undefined : state.targetsById.get(info.openerId)?.page
+      const openerTarget = info.openerId === undefined ? undefined : state.targetsById.get(info.openerId)
+      const opener = openerTarget?.page
       const target = newTarget(state, kind, info, session, undefined, undefined)
       const page: PageEntry = {
         id: state.ids.navigable(),
         targetId: info.targetId,
         context,
         target,
+        opener: openerTarget,
         ready: Deferred.makeUnsafe(),
         closing: undefined,
         closeRequested: false,

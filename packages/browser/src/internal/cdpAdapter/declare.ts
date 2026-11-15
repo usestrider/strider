@@ -18,6 +18,7 @@ import * as Fetch from "../../cdp/Fetch.ts"
 import * as Network from "../../cdp/Network.ts"
 import * as Page from "../../cdp/Page.ts"
 import * as Runtime from "../../cdp/Runtime.ts"
+import type * as Target from "../../cdp/Target.ts"
 import type * as Deadline from "../../Deadline.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
 import type * as Adapter from "../adapter.ts"
@@ -369,6 +370,30 @@ const kindsFor = (page: PageEntry, overrides: ReadonlyMap<Adapter.Override["_tag
   return kinds
 }
 
+/**
+ * A popup's own dimensions, when its gate can't measure them. Chromium starts a tab's renderer at its opener's
+ * size, which is the opener's override while the opener emulates a viewport, until the tab is laid out in its
+ * window. A popup that opens as a tab of its opener's window, as one a `target=_blank` link opens does, has the
+ * opener's own size, so it takes the opener's recorded one. Undefined means the gate's measurement holds: the page
+ * has no emulated opener, or it opened in a window of its own, which is laid out at its own size before its gate.
+ * Null means the windows couldn't be compared, so the size is unknown.
+ */
+const openerBaseline = Effect.fnUntraced(function*(state: State, target: TargetEntry, page: PageEntry) {
+  const opener = page.opener
+  if (opener === undefined || opener.viewport === undefined) return undefined
+  const windows = yield* Effect.all(
+    [target.targetId, opener.targetId].map((targetId) =>
+      BrowserCdp.getWindowForTarget({ targetId: targetId as Target.TargetID }).pipe(
+        Protocol.on(state.root()),
+        Effect.map(({ windowId }) => windowId)
+      )
+    ),
+    { concurrency: "unbounded" }
+  ).pipe(Effect.option)
+  if (Option.isNone(windows)) return null
+  return windows.value[0] === windows.value[1] ? opener.viewport : undefined
+})
+
 /** What a new page or frame gets before its scripts run: the declarations in force for its page. */
 export const configureTarget = Effect.fnUntraced(
   function*(state: State, target: TargetEntry, page: PageEntry, setup?: Setup) {
@@ -413,11 +438,16 @@ export const configureTarget = Effect.fnUntraced(
           if (override?._tag !== "Viewport") {
             return
           }
-          // The initial blank document has no scrollbars. Queue its dimensions before changing them, without
-          // creating an isolated world whose identifier would require a renderer reply before resume.
-          yield* setup.send(Page.getLayoutMetrics(), ({ cssLayoutViewport }) => {
-            target.viewport = { width: cssLayoutViewport.clientWidth, height: cssLayoutViewport.clientHeight }
-          })
+          const inherited = yield* openerBaseline(state, target, page)
+          if (inherited !== undefined) {
+            target.viewport = inherited
+          } else {
+            // The initial blank document has no scrollbars. Queue its dimensions before changing them, without
+            // creating an isolated world whose identifier would require a renderer reply before resume.
+            yield* setup.send(Page.getLayoutMetrics(), ({ cssLayoutViewport }) => {
+              target.viewport = { width: cssLayoutViewport.clientWidth, height: cssLayoutViewport.clientHeight }
+            })
+          }
           yield* setup.send(Emulation.setDeviceMetricsOverride({
             width: override.width,
             height: override.height,

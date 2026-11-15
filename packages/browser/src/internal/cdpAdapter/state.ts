@@ -100,6 +100,8 @@ export interface PageEntry {
   readonly targetId: string
   readonly context: ContextEntry
   readonly target: TargetEntry
+  /** The target of the page that opened it, for a popup. */
+  readonly opener?: TargetEntry | undefined
   readonly ready: Deferred.Deferred<void, Adapter.AdapterError>
   closing: L1Target.CloseReason | undefined
   /**
