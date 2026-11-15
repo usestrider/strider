@@ -1624,3 +1624,18 @@ these, Playwright's `goto` and `reload` resolve to `null` for them, and the brow
 report both kinds as requests, and Firefox reports `data:` but not `blob:`. Reporting each browser's own events was
 rejected: the same page would report different requests on each backend, and a `data:` navigation would carry a
 response with no network behind it. `file:` URLs stay requests.
+
+## Text is inserted with the page's editing command where a protocol has none
+
+`Keyboard.insertText` and `fill` insert text with no key events on every backend. CDP has `Input.insertText`;
+WebDriver BiDi has no such command, and stock WebKit's Automation inserts only by key (`InsertByKey`), so on Firefox
+and stock WebKit the engine inserts with the page's editing command, `execCommand("insertText")`, taken from
+`Document.prototype` at install, in the focused document. Firefox's command fires no `beforeinput`, so there the
+engine dispatches a cancelable one first, untrusted, and inserts nothing when the page cancels it: every other
+backend gives a page that event before the text, and editors that apply text in their `beforeinput` handler need
+it. Strider dispatches an untrusted event only to fill a gap a protocol leaves in an event order every other backend
+gives, never as a substitute for input it could send; `input.insertText` is `partial` on Firefox to say so. Rejected:
+the editing command alone, which would leave a Firefox page's `beforeinput` handler never run, so a rich-text
+editor would get nothing from `fill`; typing each character as a key, which sends key events `insertText` promises
+not to, loses the text when a page cancels a `keydown`, and runs a `beforeinput` handler once per character; and
+refusing `insertText` on those backends, which breaks callers for a gap Strider can fill.

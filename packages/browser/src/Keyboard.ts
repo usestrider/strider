@@ -181,7 +181,20 @@ export interface Keyboard {
     options?: TypeOptions | undefined
   ): Effect.Effect<void, KeyboardError | Target.TargetGone | Deadline.Timeout>
   /**
-   * Inserts text without key events, as an input method would. On Firefox, each character is typed as a key.
+   * Inserts text without key events, as an input method would, into the focused element, in whichever frame
+   * holds the focus.
+   *
+   * **Details**
+   *
+   * The page gets a cancelable `beforeinput` (`insertText`, with the whole text) and then `input`; a page that
+   * cancels the `beforeinput` gets nothing inserted. A newline goes into a textarea or a contenteditable element as
+   * a line break, and never submits a form. Chromium inserts the text with its own command. Firefox and stock
+   * WebKit insert it with the page's editing command (`execCommand("insertText")`).
+   *
+   * **Gotchas**
+   *
+   * - Firefox's editing command fires no `beforeinput`, so on Firefox Strider dispatches it itself, and it is
+   *   untrusted: its `isTrusted` is `false`.
    *
    * **Example** (Entering text an input method composes)
    *

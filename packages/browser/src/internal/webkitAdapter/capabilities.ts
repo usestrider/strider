@@ -252,7 +252,9 @@ export const launchedCapabilities = (info: Browser.Info, video = false) => {
     ]],
     "input.topLevelDesignMode": ["supported", []],
     "input.native": ["supported", ["Automation's simulated input, which the page trusts"]],
-    "input.insertText": ["supported", []],
+    "input.insertText": ["supported", [
+      "Automation inserts text only by key, so Strider inserts it with the page's editing command, which fires a trusted beforeinput and input and no key events"
+    ]],
     "input.keyboardLayout": ["unsupported", [
       "Automation types characters and named keys, not a layout's physical keys"
     ]],

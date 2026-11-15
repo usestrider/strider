@@ -193,7 +193,7 @@ export const connect: (
       realm: (document, world) => Evaluation.realmFor(state, document, world),
       evaluate: (realm, call) => Evaluation.evaluate(state, realm, call),
       releaseHandles: (list) => Evaluation.releaseHandles(state, list),
-      textInsertion: "editingCommand",
+      textInsertion: "native",
       dispatchInput: refuse("input.native", "stock WebKit's inspector protocol has no Input domain"),
       resolve: (obligation, decision) => Obligations.resolve(state, obligation, decision),
       declare: (scope, declaration) => Declare.declare(state, scope, declaration),
