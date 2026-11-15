@@ -1334,6 +1334,67 @@ describe("CDP restoration cleanup", () => {
       assert.isBelow(tags.indexOf("DownloadEnded"), tags.indexOf("UserContextRemoved"))
     })))
 
+  for (const closedPage of [false, true]) {
+    it.effect(`waits for a download reported after its ${closedPage ? "page closed" : "frame detached"}, before disposal`, () =>
+      Effect.scoped(Effect.gen(function*() {
+        const sent: Array<string> = []
+        const mock = {
+          ...session,
+          ended: Effect.void,
+          send: (command: { readonly method: string; readonly params: { readonly behavior?: string } }) =>
+            Effect.sync(() => {
+              sent.push(
+                command.method === "Browser.setDownloadBehavior"
+                  ? `${command.method} ${command.params.behavior}`
+                  : command.method
+              )
+              return {}
+            })
+        } as unknown as ProtocolClient.Session
+        const { state, page, target, facts } = yield* withPage(mock)
+        const context = new State.ContextEntry(state.ids.userContext(), "scoped", false)
+        state.contexts.set(context.id, context)
+        state.contextsByCdp.set("scoped", context)
+        ;(page as { context: State.ContextEntry }).context = context
+        yield* Declare.declare(state, { _tag: "UserContext", context: context.id }, {
+          _tag: "Downloads",
+          behavior: { _tag: "Allow", directory: "/tmp/downloads" },
+          retiring: () => context.removing
+        })
+        const frameId = closedPage ? "T1" : "child"
+        if (closedPage) {
+          Tree.endPage(state, page, new Target.PageClosed({ by: "script" }), "page closed before download announcement")
+        } else {
+          const child = Tree.addFrame(state, frameId, state.frames.get("T1")!, target)
+          Tree.removeFrame(state, child, new Target.FrameDetached({}), "frame detached before download announcement")
+        }
+        const handlers = Contexts.register(Kit.handlers<State.Event>())
+        handlers.apply("Browser.downloadWillBegin", {
+          frameId,
+          guid: "G1",
+          url: "https://example.test/file",
+          suggestedFilename: "file"
+        }, { state, target })
+        yield* state.buffer.flush
+        sent.length = 0
+        yield* Contexts.removeUserContext(state, context.id)
+        assert.include(sent, "Target.disposeBrowserContext")
+        for (let i = 0; i < 10; i++) yield* Effect.yieldNow
+        assert.isTrue(state.contexts.has(context.id), "the download hasn't ended")
+        assert.notInclude(facts.map((fact) => fact._tag), "UserContextRemoved")
+        handlers.apply("Browser.downloadProgress", {
+          guid: "G1",
+          totalBytes: 15,
+          receivedBytes: 15,
+          state: "canceled"
+        }, { state, target })
+        yield* state.buffer.flush
+        yield* state.buffer.waitFor(() => state.contexts.has(context.id) ? undefined : true)
+        const tags = facts.map((fact) => fact._tag)
+        assert.isBelow(tags.indexOf("DownloadEnded"), tags.indexOf("UserContextRemoved"))
+      })))
+  }
+
   const declarationSession = (sent: Array<string>, refuseDisposal = false) =>
     ({
       ...session,
