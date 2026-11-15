@@ -15,7 +15,9 @@ const sentOver = (host: string) =>
 
 describe("CookieJar.listFor", () => {
   // Browsers treat these hosts as secure contexts, and send Secure cookies to them over http
-  for (const host of ["localhost", "app.localhost", "127.0.0.1", "127.1.2.3", "[::1]"]) {
+  for (
+    const host of ["localhost", "app.localhost", "localhost.", "app.localhost.", "127.0.0.1", "127.1.2.3", "[::1]"]
+  ) {
     it.effect(`includes a Secure cookie over http on ${host}`, () =>
       Effect.gen(function*() {
         assert.deepStrictEqual(yield* sentOver(host), ["plain", "secure"])
