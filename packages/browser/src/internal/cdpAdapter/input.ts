@@ -272,7 +272,16 @@ export const dispatchInput = Effect.fnUntraced(
               Effect.ignore
             )
           }
-          if (event.type === "down") state.pressedIn.set(page.id, landed)
+          if (event.type === "down") {
+            state.pressedIn.set(page.id, landed)
+            // A real mouse is captured by the frame its press went to, until every button is released; Chromium
+            // routes input sent on the page's session by its point alone, so a held move or a release out of an
+            // out-of-process frame that got the press goes on that frame's session, in its coordinates
+            const into = frame === undefined ? undefined : landed.find((each) => each.id === frame.frame)
+            state.pressedOn.set(page.id, into === undefined ? sent : yield* pointerSession(page, frame, [into]))
+          }
+          const captured = state.pressedOn.get(page.id) ?? sent
+          const onCaptured = Protocol.on(captured.target.session)
           const drag = state.drags.get(page.id)
           if (drag !== undefined && event.type !== "down") {
             // An intercepted HTML drag: moves are drag events, and the release drops it
@@ -288,8 +297,12 @@ export const dispatchInput = Effect.fnUntraced(
             yield* Kit.protocol(Input.setInterceptDrags({ enabled: true }).pipe(onPageSession))
           }
           if (!held) {
-            if (event.type === "up" && event.buttons === 0) state.pressedIn.delete(page.id)
-            yield* Kit.protocol(mouseCommand(event, sent).pipe(on))
+            if (event.type === "up" && event.buttons === 0) {
+              state.pressedIn.delete(page.id)
+              state.pressedOn.delete(page.id)
+            }
+            const to = event.type === "down" ? sent : captured
+            yield* Kit.protocol(mouseCommand(event, to).pipe(Protocol.on(to.target.session)))
             break
           }
           // Chromium announces the drag a held move starts after the move's reply, in no fixed order with it, but
@@ -297,7 +310,7 @@ export const dispatchInput = Effect.fnUntraced(
           // the move started a drag, and one that started is owed its announcement before the next event
           const documents = dragDocuments(state, page, state.pressedIn.get(page.id), landed)
           yield* Effect.forEach(documents, (document) => watchDragStart(state, document), { concurrency: "unbounded" })
-          yield* Kit.protocol(mouseCommand(event, sent).pipe(on))
+          yield* Kit.protocol(mouseCommand(event, captured).pipe(onCaptured))
           const started = yield* Effect.forEach(documents, (document) => dragStarted(state, document), {
             concurrency: "unbounded"
           })

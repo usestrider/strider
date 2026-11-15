@@ -342,6 +342,14 @@ export interface State {
   readonly interceptingDrags: Set<L1Target.NavigableId>
   /** The buttons each page's last mouse event left held, until the page ends. */
   readonly heldButtons: Map<L1Target.NavigableId, number>
+  /**
+   * The session each page's held press went to, with the origin of its viewport in the page's, until every button
+   * is released: the frame the press reached keeps the mouse, as a real mouse's frame does.
+   */
+  readonly pressedOn: Map<
+    L1Target.NavigableId,
+    { readonly target: TargetEntry; readonly x: number; readonly y: number }
+  >
   /** Pages whose held Escape canceled an intercepted drag: its release is the drag's too, and isn't sent. */
   readonly escapeCanceled: Set<L1Target.NavigableId>
   /** The frames each page's held press landed in, where its gesture named them, until every button is released. */
@@ -416,6 +424,7 @@ export const make = (options: {
     interceptingDrags: new Set(),
     heldButtons: new Map(),
     pressedIn: new Map(),
+    pressedOn: new Map(),
     escapeCanceled: new Set(),
     workerContexts: new Map(),
     attachedAtConnect: true,

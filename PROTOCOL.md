@@ -102,7 +102,10 @@ interface ErrorMatcher {
   in frames of one out-of-process session (a locator action names the frame its element is in and any other its
   points land in, such as a drag's destination) on that session, in the coordinates of the session's outermost
   frame, from the viewport origins L1 passes with the frame. Any other pointer input, such as a drag between the page
-  and a frame, goes on the page's session, in its coordinates. Keys and text go on the page's session, which sends
+  and a frame, goes on the page's session, in its coordinates. A real mouse stays with the frame its press reached until
+  every button is released, but Chromium routes input on the page's session by its point alone, so held moves and the
+  release after a press that went to an out-of-process frame go on that frame's session, in its coordinates; an
+  intercepted drag's events still go where the gesture's points land. Keys and text go on the page's session, which sends
   them to the focused element. Nothing hit-tests the parent documents for input on the frame's session: the
   locator's pointer check does, before anything is sent. Each adapter marks `unsent` the failures its
   `dispatchInput` meets before writing any input: its lookups and its refusals, such as a key stock WebKit's
