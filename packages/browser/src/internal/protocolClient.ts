@@ -400,6 +400,8 @@ interface Pending {
   readonly reply: Deferred.Deferred<unknown, Protocol.ProtocolError>
   /** The receive sequence number of the reply. */
   received: number
+  /** The last message queued for the worker when the reply arrived, which the caller waits to be handled. */
+  through: number | undefined
   onReceipt?: ((received: number) => void) | undefined
   onOutcome?: ((outcome: "success" | "failure" | "sessionEnded") => void) | undefined
   replied: boolean
@@ -504,6 +506,7 @@ export const make: (
       release,
       reply: Deferred.makeUnsafe(),
       received: 0,
+      through: undefined,
       replied: false,
       raw: undefined,
       late: undefined
@@ -623,6 +626,9 @@ export const make: (
         )
       ),
       reply: awaited.pipe(
+        // The caller resumes only once every event received before the reply has been folded and published.
+        Effect.tap(() => caughtUp(entry)),
+        Effect.tapError(() => caughtUp(entry)),
         Effect.flatMap((raw) => decode === undefined ? Effect.succeed(undefined as A) : decode(raw)),
         Effect.map((result) => {
           consumed = true
@@ -639,6 +645,9 @@ export const make: (
           : exchange
     }
   })
+
+  const caughtUp = (entry: Pending): Effect.Effect<void> =>
+    Effect.suspend(() => entry.through === undefined ? Effect.void : ingestion.caughtUp(entry.through))
 
   const send = Effect.fnUntraced(function*<M extends string, P, A>(
     state: SessionState,
@@ -809,6 +818,7 @@ export const make: (
         if (entry === undefined) return
         unregister(entry)
         entry.received = received
+        entry.through = ingestion.queued()
         entry.onReceipt?.(received)
         settle(entry, incoming._tag === "Reply" ? "success" : "failure")
         if (incoming._tag === "ErrorReply") {
