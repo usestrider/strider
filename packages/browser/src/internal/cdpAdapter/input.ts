@@ -15,16 +15,21 @@ import * as Kit from "../adapterKit.ts"
 import * as Gestures from "../input.ts"
 import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
+import * as Evaluation from "./evaluation.ts"
 import { heldButton, keyCode, keyLocation, modifierBits } from "./mapping.ts"
 import {
+  type DocumentEntry,
   documentOf,
+  type DragEntry,
   type Event,
   frameById,
   type FrameEntry,
   frameOf,
   type PageEntry,
   pageOf,
-  type State
+  realmOf,
+  type State,
+  type TargetEntry
 } from "./state.ts"
 
 export const register = (handlers: Kit.Handlers<Event>) =>
@@ -50,6 +55,105 @@ const mouseCommand = (
     clickCount: event.clickCount,
     modifiers: modifierBits(event.modifiers)
   })
+
+/**
+ * The drag events a mouse event of an intercepted drag sends. Chromium's \`dragEnter\` fires only \`dragenter\`, so a
+ * move that enters the drag drags over its point too, as a real drag does; its \`drop\` fires a \`dragover\` at its
+ * point before the \`drop\`, so the release sends nothing else, but for a \`dragEnter\` when no move entered the drag.
+ */
+const dragEvents = Effect.fnUntraced(function*(
+  state: State,
+  page: PageEntry,
+  drag: DragEntry,
+  event: Extract<Adapter.InputEvent, { _tag: "Mouse" }>,
+  sent: { readonly target: TargetEntry; readonly x: number; readonly y: number }
+) {
+  const dragEvent = (type: "dragEnter" | "dragOver" | "drop") =>
+    Kit.protocol(
+      Input.dispatchDragEvent({
+        type,
+        x: event.x - sent.x,
+        y: event.y - sent.y,
+        data: drag.data,
+        modifiers: modifierBits(event.modifiers)
+      }).pipe(Protocol.on(sent.target.session))
+    )
+  if (event.type === "up") state.drags.delete(page.id)
+  if (!drag.entered) {
+    drag.entered = true
+    yield* dragEvent("dragEnter")
+  }
+  yield* dragEvent(event.type === "up" ? "drop" : "dragOver")
+})
+
+/**
+ * The documents a held move's drag may start in: those the press and the move land in, or, where the gesture names
+ * none, every document of the page.
+ */
+const dragDocuments = (
+  state: State,
+  page: PageEntry,
+  pressed: ReadonlyArray<FrameEntry> | undefined,
+  landed: ReadonlyArray<FrameEntry>
+): ReadonlyArray<DocumentEntry> => {
+  const frames = pressed === undefined || pressed.length === 0 || landed.length === 0
+    ? [...state.frames.values()].filter((frame) => frame.page === page)
+    : [...new Set([...pressed, ...landed])]
+  return frames.flatMap((frame) => frame.document === undefined ? [] : [frame.document])
+}
+
+const dragWorld = { _tag: "Isolated", name: "__strider_utility__" } as const
+
+/** Documents whose \`dragstart\` is watched, by their realm of Strider's own world, which outlives no document. */
+const watching = new WeakSet<object>()
+
+const dragCall = (functionDeclaration: string): Adapter.EvaluationCall => ({
+  functionDeclaration,
+  arguments: [],
+  awaitPromise: false,
+  result: "value",
+  userActivation: false
+})
+
+/**
+ * Watches a document for the trusted \`dragstart\` a held move fires. A document that is gone, or ends meanwhile,
+ * starts no drag, so it is left out.
+ */
+const watchDragStart = Effect.fnUntraced(
+  function*(state: State, document: DocumentEntry) {
+    const id = yield* Evaluation.realm(state, document.id, dragWorld)
+    const realm = yield* realmOf(state, id)
+    if (watching.has(realm)) return
+    yield* Evaluation.evaluate(
+      state,
+      id,
+      dragCall(
+        "function(){const s=globalThis.__striderDrag;if(s!==undefined){s.event=undefined;return}" +
+          "const w=globalThis.__striderDrag={event:undefined};" +
+          "addEventListener('dragstart',(e)=>{if(e.isTrusted)w.event=e},true)}"
+      )
+    )
+    watching.add(realm)
+  },
+  Effect.catchIf((error) => error.reason._tag === "Gone", () => Effect.void)
+)
+
+/** Whether a watched document fired a \`dragstart\` since it was last asked, one its listeners didn't cancel. */
+const dragStarted = Effect.fnUntraced(
+  function*(state: State, document: DocumentEntry) {
+    const id = yield* Evaluation.realm(state, document.id, dragWorld)
+    const result = yield* Evaluation.evaluate(
+      state,
+      id,
+      dragCall(
+        "function(){const s=globalThis.__striderDrag;const e=s?.event;if(s!==undefined)s.event=undefined;" +
+          "return e!==undefined&&!e.defaultPrevented}"
+      )
+    )
+    return result._tag === "Value" && result.value.type === "boolean" && result.value.value === true
+  },
+  Effect.catchIf((error) => error.reason._tag === "Gone", () => Effect.succeed(false))
+)
 
 /**
  * The session pointer input aimed into a frame goes on, and the origin of that session's viewport in the page's.
@@ -164,40 +268,40 @@ export const dispatchInput = Effect.fnUntraced(
               Effect.ignore
             )
           }
+          if (event.type === "down") state.pressedIn.set(page.id, landed)
           const drag = state.drags.get(page.id)
           if (drag !== undefined && event.type !== "down") {
             // An intercepted HTML drag: moves are drag events, and the release drops it
-            const dragEvent = (type: "dragEnter" | "dragOver" | "drop") =>
-              Kit.protocol(
-                Input.dispatchDragEvent({
-                  type,
-                  x: event.x - sent.x,
-                  y: event.y - sent.y,
-                  data: drag.data,
-                  modifiers: modifierBits(event.modifiers)
-                }).pipe(on)
-              )
-            if (!drag.entered) {
-              drag.entered = true
-              yield* dragEvent("dragEnter")
-            }
-            if (event.type === "move") {
-              yield* dragEvent("dragOver")
-            } else {
-              state.drags.delete(page.id)
-              yield* dragEvent("dragOver")
-              yield* dragEvent("drop")
-            }
+            yield* dragEvents(state, page, drag, event, sent)
             break
           }
           // A move with a button held may start an HTML drag, which only an interception lets finish. Chromium
           // offers a drag to the sessions of the tab's main frame alone, wherever in the tab it starts, so the
           // interception is the page's, and its drag events go where the gesture's mouse events go
-          if (event.type === "move" && event.buttons !== 0 && !state.interceptingDrags.has(page.id)) {
+          const held = event.type === "move" && event.buttons !== 0
+          if (held && !state.interceptingDrags.has(page.id)) {
             state.interceptingDrags.add(page.id)
             yield* Kit.protocol(Input.setInterceptDrags({ enabled: true }).pipe(onPageSession))
           }
+          if (!held) {
+            if (event.type === "up" && event.buttons === 0) state.pressedIn.delete(page.id)
+            yield* Kit.protocol(mouseCommand(event, sent).pipe(on))
+            break
+          }
+          // Chromium announces the drag a held move starts after the move's reply, in no fixed order with it, but
+          // has fired its \`dragstart\` before replying: the documents the press and the move land in say whether
+          // the move started a drag, and one that started is owed its announcement before the next event
+          const documents = dragDocuments(state, page, state.pressedIn.get(page.id), landed)
+          yield* Effect.forEach(documents, (document) => watchDragStart(state, document), { concurrency: "unbounded" })
           yield* Kit.protocol(mouseCommand(event, sent).pipe(on))
+          const started = yield* Effect.forEach(documents, (document) => dragStarted(state, document), {
+            concurrency: "unbounded"
+          })
+          if (!started.includes(true)) break
+          const owed = yield* state.buffer.waitFor(() => page.ended ? ("ended" as const) : state.drags.get(page.id))
+          if (owed === "ended") break
+          // The move that started the drag is its first drag event, at the move's own point
+          yield* dragEvents(state, page, owed, event, sent)
           break
         }
         case "Wheel":

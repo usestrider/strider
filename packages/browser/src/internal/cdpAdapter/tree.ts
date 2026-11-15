@@ -114,6 +114,7 @@ export const endPage = (state: State, page: PageEntry, reason: L1Target.CloseRea
   state.credentialsAttempted.delete(pageCredentialsScope(page))
   state.pages.delete(page.id)
   state.heldButtons.delete(page.id)
+  state.pressedIn.delete(page.id)
   state.drags.delete(page.id)
   state.interceptingDrags.delete(page.id)
   for (const [id, obligation] of state.obligations) {

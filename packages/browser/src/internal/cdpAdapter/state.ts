@@ -340,6 +340,8 @@ export interface State {
   readonly interceptingDrags: Set<L1Target.NavigableId>
   /** The buttons each page's last mouse event left held, until the page ends. */
   readonly heldButtons: Map<L1Target.NavigableId, number>
+  /** The frames each page's held press landed in, where its gesture named them, until every button is released. */
+  readonly pressedIn: Map<L1Target.NavigableId, ReadonlyArray<FrameEntry>>
   /** A worker no page owns belongs to the context its target names. */
   readonly workerContexts: Map<TargetEntry, ContextEntry>
   /** Targets attached now existed before the connection: they are adopted. */
@@ -409,6 +411,7 @@ export const make = (options: {
     drags: new Map(),
     interceptingDrags: new Set(),
     heldButtons: new Map(),
+    pressedIn: new Map(),
     workerContexts: new Map(),
     attachedAtConnect: true,
     defaultUserAgent: ""
