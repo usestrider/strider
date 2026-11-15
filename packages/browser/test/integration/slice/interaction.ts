@@ -5160,6 +5160,28 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
+      for (const boundary of ["shadow root", "assigned slot"] as const) {
+        it.effect(`reads the disabled enclosing button through ${boundary}`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              boundary === "shadow root"
+                ? `<button id="b" disabled><span id="host"></span></button><script>
+                    document.getElementById("host").attachShadow({mode: "open"}).innerHTML = '<span id="go">Go</span>'
+                  </script>`
+                : `<div id="host"><span id="go">Go</span></div><script>
+                    document.getElementById("host").attachShadow({mode: "open"}).innerHTML = '<button id="b" disabled><slot></slot></button>'
+                  </script>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              assert.isFalse(yield* page.locator("#b").isEnabled)
+              assert.isFalse(yield* page.locator("#go").isEnabled)
+              yield* page.locator("#go").pipe(Expect.toBeDisabled, Deadline.within("2 seconds"))
+            }))
+          }), timeout)
+      }
+
       // State belongs to the control; pointer input still belongs to the label.
       for (const association of ["explicit", "wrapping"] as const) {
         for (const checked of [true, false]) {
