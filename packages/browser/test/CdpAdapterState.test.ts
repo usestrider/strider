@@ -315,6 +315,22 @@ const play = Effect.fnUntraced(function*(order: ReadonlyArray<readonly [string, 
 })
 
 describe("CdpAdapter state", () => {
+  it.effect("forgets the captured mouse session when its frame detaches", () =>
+    Effect.gen(function*() {
+      const { page, state, target } = yield* withPage()
+      const parent = state.frames.get("T1")!
+      const owner = { ...target, targetId: "child" }
+      const child = Tree.newFrame({ frameId: "child", id: state.ids.navigable(), page, parent, owner })
+      state.frames.set("child", child)
+      state.navigables.set(child.id, child)
+      parent.children.add(child)
+      state.pressedIn.set(page.id, [child])
+      state.pressedOn.set(page.id, { target: owner, x: 30, y: 30 })
+      Tree.removeFrame(state, child, new Target.FrameDetached({}), "cdp:Page.frameDetached")
+      assert.isFalse(state.pressedOn.has(page.id), "the detached target must receive no later mouse input")
+      assert.isFalse(state.pressedIn.get(page.id)?.includes(child) ?? false)
+    }))
+
   it.effect("forgets a page's held buttons, drag and drag interception when the page ends", () =>
     Effect.gen(function*() {
       const { page, state } = yield* withPage()
