@@ -1312,7 +1312,7 @@ export const declarations = (
           }))
         }), timeout)
 
-      it.effect("runs a timer scheduled by a second message during adjustment", () =>
+      it.effect("runs a timer scheduled by a chain of messages during adjustment", () =>
         Effect.scoped(Effect.gen(function*() {
           const page = yield* Browser.newPage()
           yield* page.clock.install({ mode: "controlled", at: 1000 })
@@ -1324,7 +1324,7 @@ export const declarations = (
             const channel = new MessageChannel()
             let messages = 0
             channel.port1.onmessage = () => {
-              if (++messages === 1) {
+              if (++messages < 8) {
                 channel.port2.postMessage(null)
               } else {
                 setTimeout(() =>
