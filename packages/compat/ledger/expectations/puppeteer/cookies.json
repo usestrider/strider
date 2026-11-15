@@ -99,15 +99,5 @@
     ],
     "status": "fails",
     "reason": "CookieJar.listFor leaves out Secure cookies for localhost and loopback addresses over http"
-  },
-  {
-    "tests": [
-      "[cookies.test] Cookie specs Page.setCookie should set secure same-site cookies from a frame"
-    ],
-    "browsers": [
-      "firefox"
-    ],
-    "status": "fails",
-    "reason": "Port: Port: a script's `iframe.onload = fulfill` resolves with the load Event, which Strider can't return"
   }
 ]

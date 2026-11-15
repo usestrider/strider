@@ -62,12 +62,5 @@
     "status": "needsFeature",
     "matrix": "option-locator-evaluatehandle-exposefunctions",
     "reason": "Passing a function the element's script calls back to a locator's evaluateHandle, through exposeFunctions. Strider's locator evaluateHandle takes by-value arguments only, and a function inside an argument is left out (one on its own is refused as NotSerializable)"
-  },
-  {
-    "tests": [
-      "EV-112"
-    ],
-    "status": "fails",
-    "reason": "Port: Port: tests assert Puppeteer's and Playwright's lossy or permissive serialization where Strider fails fast with NotSerializable"
   }
 ]

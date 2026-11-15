@@ -47,6 +47,10 @@
  * - Puppeteer's `pageerror` and `exception` events are Strider's one `UncaughtException`. Its structured stack frames are read
  *   from the stack text, its rendered text is the name and message, and its location is the first frame. The tests that
  *   need the event's remote handle, or the location of a syntax error, which has no stack, aren't ported (see the ledger).
+ * - "PageError should fire" reads the global frame's column for WebKit from Playwright's own expectation for it (column 2),
+ *   since Puppeteer doesn't run on WebKit. "PageError should fire for all value types" expects the exception's kind the
+ *   browser's capability table promises (`exceptions.kind`): `unknown` on Firefox, where BiDi reports a throw and a
+ *   rejection alike.
  * - "Page.metrics" tests aren't ported: Strider has no page metrics (see the ledger).
  * - Puppeteer's "should work with no timeout" uses `timeout: 0`. Strider's wait has no deadline of its own, so it has the
  *   harness's 30-second budget for the test, as the Playwright port of the same test does.
@@ -840,7 +844,7 @@ upstream(import.meta.filename, {}, (test) => {
       assert(Exit.isFailure(exit) && Exit.hasInterrupts(exit), `the wait was interrupted, got ${String(exit)}`)
     }))
 
-  test("Page Page.Events.PageError should fire", ({ page, server }) =>
+  test("Page Page.Events.PageError should fire", ({ page, server, browserName }) =>
     Effect.gen(function*() {
       // The subscription is made before the navigation, as Puppeteer's `waitEvent` is
       const thrown = yield* UncaughtException.next(page, { message: "Fancy" })
@@ -849,7 +853,9 @@ upstream(import.meta.filename, {}, (test) => {
       assert.include(error.message, "Fancy")
       // The stack's last line is the outermost frame, which is the script's own location
       const stack = Option.getOrUndefined(error.stack) ?? ""
-      assert.include(stack.split("\n").at(-1) ?? "", "error.html:3:1")
+      // Puppeteer doesn't run on WebKit, so the column is Playwright's own for it: its WebKit counts the page's global
+      // code from column 2 (`at global code (…/error.html:3:2)`), where Chromium and Firefox say 1
+      assert.include(stack.split("\n").at(-1) ?? "", browserName === "webkit" ? "error.html:3:2" : "error.html:3:1")
     }))
 
   test("Page Page.Events.PageError should fire for all value types", ({ page, server }) =>
@@ -860,7 +866,12 @@ upstream(import.meta.filename, {}, (test) => {
       // there is no stack. A thrown empty string would read the same, which is as far as the exception tells them apart.
       yield* page.goto(server.PREFIX + "/error-primitive.html", { waitUntil: "load" })
       const error = yield* bounded("the uncaught primitive error")(thrown)
-      assert.strictEqual(error.kind, "thrown")
+      // Where the browser reports a throw and an unhandled rejection the same way, as Firefox does over BiDi, the kind is
+      // `unknown`: the capability table says which browsers tell them apart (`exceptions.kind`)
+      const capabilities = yield* (yield* Browser.Browser).capabilities
+      const kinds = capabilities.entries.find((entry) => entry.name === "exceptions.kind")
+      assert.isDefined(kinds, "exceptions.kind is in the capability table")
+      assert.strictEqual(error.kind, kinds.status === "supported" ? "thrown" : "unknown")
       assert.strictEqual(error.message, "")
       assert.isTrue(Option.isNone(error.stack), "a thrown primitive has no stack")
     }))

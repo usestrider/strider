@@ -1033,21 +1033,24 @@ upstream(import.meta.filename, {}, (test) => {
 
   // The original skips headed WebKit, which has no favicon feature; the stock WebKit Strider launches requests none, so
   // the test would wait for a request that never comes.
-  test("HA-048", { page: false, browsers: ["chromium", "firefox"] }, ({ server }) =>
-    Effect.scoped(Effect.gen(function*() {
-      const directory = yield* scratch
-      const context = yield* Browser.newContext()
-      const page = yield* context.newPage
-      const har = yield* recordContext(context)
-      // Browsers cache favicons, so the path is busted with a prefix to keep the test isolated.
-      const favicon = `/no-cache-2/favicon.ico`
-      const hashedFaviconUrl = `/favicon-hashed.ico`
-      server.setRedirect(favicon, hashedFaviconUrl)
-      server.setRoute(hashedFaviconUrl, (_req, res) => {
-        serveFile(res, assetPath("playwright", "media-query-prefers-color-scheme.svg"), "image/svg+xml")
-      })
-      server.setRoute("/page.html", (_req, res) => {
-        res.end(`
+  test(
+    "HA-048",
+    { page: false, browsers: ["chromium", "firefox"] },
+    ({ server }) =>
+      Effect.scoped(Effect.gen(function*() {
+        const directory = yield* scratch
+        const context = yield* Browser.newContext()
+        const page = yield* context.newPage
+        const har = yield* recordContext(context)
+        // Browsers cache favicons, so the path is busted with a prefix to keep the test isolated.
+        const favicon = `/no-cache-2/favicon.ico`
+        const hashedFaviconUrl = `/favicon-hashed.ico`
+        server.setRedirect(favicon, hashedFaviconUrl)
+        server.setRoute(hashedFaviconUrl, (_req, res) => {
+          serveFile(res, assetPath("playwright", "media-query-prefers-color-scheme.svg"), "image/svg+xml")
+        })
+        server.setRoute("/page.html", (_req, res) => {
+          res.end(`
       <!DOCTYPE html>
       <html>
         <head>
@@ -1060,21 +1063,22 @@ upstream(import.meta.filename, {}, (test) => {
         </body>
       </html>
 `)
-      })
-      const faviconRequest = yield* server.waitForRequest(favicon)
-      const hashedRequest = yield* server.waitForRequest(hashedFaviconUrl)
-      yield* page.goto(server.PREFIX + "/page.html", { waitUntil: "load" })
-      yield* faviconRequest
-      yield* hashedRequest
-      // The original's fixed wait, ported as written.
-      yield* Effect.sleep("500 millis")
-      // Text still being around ensures we haven't actually lost our browser to a crash.
-      yield* Expect.toBeVisible(page.getByText("favicons"))
-      const log = yield* exportLog(har, directory)
-      // favicon and 302 redirects to favicons should be filtered out of request logs
-      assert.strictEqual(log.entries.length, 1)
-      assert.strictEqual(nth(log.entries, 0).request.url, server.PREFIX + "/page.html")
-    })))
+        })
+        const faviconRequest = yield* server.waitForRequest(favicon)
+        const hashedRequest = yield* server.waitForRequest(hashedFaviconUrl)
+        yield* page.goto(server.PREFIX + "/page.html", { waitUntil: "load" })
+        yield* faviconRequest
+        yield* hashedRequest
+        // The original's fixed wait, ported as written.
+        yield* Effect.sleep("500 millis")
+        // Text still being around ensures we haven't actually lost our browser to a crash.
+        yield* Expect.toBeVisible(page.getByText("favicons"))
+        const log = yield* exportLog(har, directory)
+        // favicon and 302 redirects to favicons should be filtered out of request logs
+        assert.strictEqual(log.entries.length, 1)
+        assert.strictEqual(nth(log.entries, 0).request.url, server.PREFIX + "/page.html")
+      }))
+  )
 
   test("HA-049", { page: false }, () =>
     Effect.scoped(Effect.gen(function*() {

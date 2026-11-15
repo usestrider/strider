@@ -140,8 +140,10 @@ const proxyServer = (target: number, options: { readonly removePrefix?: string |
           ? url.pathname.slice(prefix.length)
           : url.pathname
         const tunnel = net.connect(target, "127.0.0.1", () => {
-          const headers = request.rawHeaders.reduce((text, value, index) =>
-            index % 2 === 0 ? `${text}${value}: ` : `${text}${value}\r\n`, "")
+          const headers = request.rawHeaders.reduce(
+            (text, value, index) => index % 2 === 0 ? `${text}${value}: ` : `${text}${value}\r\n`,
+            ""
+          )
           tunnel.write(`${request.method} ${pathname}${url.search} HTTP/1.1\r\n${headers}\r\n`)
           tunnel.write(head)
           tunnel.pipe(socket)

@@ -29,6 +29,9 @@
  * - The original's `fetch` to `http://wat` needs a name that doesn't resolve. The file's launch maps `wat` to
  *   `~NOTFOUND`, so the lookup fails in Chromium without the network, where the original relies on the network failing
  *   to resolve it. The `domain1.test` to `domain3.test` hosts are the runner's, as the other Puppeteer ports use.
+ * - "should trigger correct Log" uses the fixture server's two hosts, `localhost` and `127.0.0.1`, as its two origins:
+ *   the runner's `domain1.test` and `domain2.test` resolve only in its Chromium and Firefox (Puppeteer's Firefox sets
+ *   `network.dns.localDomains`), and stock WebKit has no counterpart.
  * - The `console.trace`, `console.dir`, timing, and group tests check the level the call has: the point of each is the
  *   message's type, so they're ported and fail where Strider reports a coarser level. The timing and group tests wait for
  *   their messages (`collect`), which arrive after the evaluation returns. The `console.trace` and `console.dir` tests
@@ -238,11 +241,14 @@ upstream(import.meta.filename, { launch: { chromium: { args: chromiumArgs } } },
 
   test("console should trigger correct Log", ({ page, server, browserName }) =>
     Effect.gen(function*() {
-      yield* page.goto(`http://domain1.test:${server.PORT}/empty.html`)
+      // The original's two origins are `domain1.test` and `domain2.test`, names the runner's Chromium maps to the fixture
+      // server. Neither Firefox nor stock WebKit has that mapping, so the origins are the fixture server's own two:
+      // `localhost` and `127.0.0.1`. The fetch is cross-origin either way.
+      yield* page.goto(server.EMPTY_PAGE)
       const logged = yield* ConsoleMessage.next(page)
       yield* page.evaluateInMainWorld(async (url: string) => {
         await fetch(url).catch(() => {})
-      }, `http://domain2.test:${server.PORT}/empty.html`)
+      }, server.CROSS_PROCESS_PREFIX + "/empty.html")
       const message = yield* logged
       assert.include(message.text, "Access-Control-Allow-Origin")
       // Chromium reports the blocked request as an error; Firefox reports it as a warning, which Puppeteer calls `warn`

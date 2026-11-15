@@ -30,6 +30,8 @@
  * - `attachFrame` is the harness's, which appends the iframe in the main world and waits for its load.
  * - `page.on("console")` and the messages it collects are `ConsoleMessage.history(page)`. A message arrives after the
  *   click it logs in, so the port polls the history with `Expect.that`, as `expect.poll` does.
+ * - CL-003 clicks a page and its popup at once, so it runs with Chromium's focus emulated, as Playwright's pages are: the
+ *   opener of a popup otherwise draws no frames on Chromium, and the clicks on it wait for one.
  * - `page.mouse.down()` and `page.mouse.up()` are a held button in a scope: `hold("left")`, released by closing the
  *   scope. `page.keyboard.down()` and `up()` are the same with `keyboard.hold`.
  * - `{ signal }` and `controller.abort()` (CL-090, CL-092) are a click in a child fiber and `Fiber.interrupt`, which is how
@@ -189,7 +191,7 @@ upstream(import.meta.filename, {}, (test) => {
       assert.strictEqual(yield* frameGlobal(page, "frame", "result"), "Clicked")
     }))
 
-  test("CL-003", ({ page, server }) =>
+  test("CL-003", { emulateFocus: true }, ({ page, server }) =>
     Effect.gen(function*() {
       yield* page.goto(server.PREFIX + "/counter.html", { waitUntil: "load" })
       // The popup's listener starts before the `window.open` that opens it, as Playwright's `waitForEvent` does

@@ -1,6 +1,16 @@
 [
   {
     "tests": [
+      "SS-095"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "notApplicable",
+    "reason": "The integration environment has no software GL (Mesa), so Firefox gets no WebGL context"
+  },
+  {
+    "tests": [
       "SS-003",
       "SS-004"
     ],
@@ -255,7 +265,7 @@
       "webkit"
     ],
     "status": "notApplicable",
-    "reason": "Stock WebKit leaves document.fonts.status 'loading' after a screenshot of a page with an unused @font-face whose local() source fails"
+    "reason": "WebKitGTK 2.54.1 leaves `document.fonts.status` at 'loading' after a screenshot of a page whose unused @font-face has a failing `local()` source: the original marks the test `it.fixme` on WebKit, citing an upstream WebKit fix this build lacks"
   },
   {
     "tests": [
@@ -265,6 +275,6 @@
       "webkit"
     ],
     "status": "notApplicable",
-    "reason": "Stock WebKit's MiniBrowser hangs on a page that creates a WebGL context in the compat environment"
+    "reason": "The integration environment has no software GL (Mesa), so a page that creates a WebGL context never finishes loading in the MiniBrowser"
   }
 ]

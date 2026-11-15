@@ -50,11 +50,19 @@ const videoWriter = () => {
 }
 
 /**
+ * The screen of a headed browser's X server. A window can't be taller than its screen, and stock WebKit's viewport is
+ * its window's, so a viewport of 1280×800 needs a window of that height plus the browser's own chrome. The
+ * integration environment's default screen, 1280×800, can't hold it, and the page's emulation is refused after its
+ * five-second confirmation.
+ */
+const screen = "1920x1200x24"
+
+/**
  * An X server for a headed browser: the integration environment has no display, so a launch with `headless: false`
  * gets an Xvfb of its own, as the MiniBrowser always does. It comes up before the browser, and goes after it.
  */
 const displayFor = (headless: boolean | undefined) =>
-  headless === false ? Layer.effectDiscard(useXvfb()).pipe(Layer.provide(NodeServices.layer)) : Layer.empty
+  headless === false ? Layer.effectDiscard(useXvfb(screen)).pipe(Layer.provide(NodeServices.layer)) : Layer.empty
 
 export const backend = (name: BrowserName, launch: Launch | undefined): Layer.Layer<Browser.Browser, unknown> => {
   switch (name) {

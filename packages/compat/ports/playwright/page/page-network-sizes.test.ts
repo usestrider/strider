@@ -6,7 +6,9 @@
  * - Strider reports sizes only for a context that opts in (`requestSizes`), so each test opens its own page with it;
  *   Playwright reports them always. The sizes are read with `NetworkRequest.sizes` after the request, which reads what
  *   the browser has observed so far, where Playwright's `request.sizes()` waits for the response to finish. Each test
- *   has finished its request before reading, as the original's `await` does.
+ *   has finished its request before reading, as the original's `await` does. NE-060 and NE-064 also wait for the response's
+ *   body to end (`NetworkResponse.next` with a body decoder, armed before the fetch), since Firefox and stock WebKit report the
+ *   final body counts on the finished event, which can follow the page's own completion of the fetch.
  * - A count Strider reports is an `Option`: a count the browser doesn't give is `None`, never zero. `known` asserts the
  *   count is there and returns it. The browsers' columns are in `NetworkRequest.Sizes`, and on Chromium the request
  *   counts, the header counts, and the transferred body are `None`, so the tests that read them are in the ledger for
@@ -77,10 +79,12 @@ upstream(import.meta.filename, {}, (test) => {
       })
       yield* page.goto(server.EMPTY_PAGE)
       const sent = yield* NetworkRequest.next(page, { url: "**/get" })
+      const finished = yield* NetworkResponse.next(page, { url: "**/get", body: (message) => message.text })
       const serverSaw = yield* server.waitForRequest("/get")
       yield* page.evaluateInMainWorld(() => fetch("./get").then((r) => r.text()))
       const request = yield* sent
       yield* serverSaw
+      yield* finished
       const sizes = yield* NetworkRequest.sizes(page, request)
       assert.strictEqual(known(sizes.responseBodySize, "responseBodySize"), 6)
       assert.isAtLeast(known(sizes.responseHeadersSize, "responseHeadersSize"), 100)
@@ -145,8 +149,10 @@ upstream(import.meta.filename, {}, (test) => {
       server.enableGzip("/simplezip.json")
       yield* page.goto(server.EMPTY_PAGE)
       const sent = yield* NetworkRequest.next(page, { url: "**/simplezip.json" })
+      const finished = yield* NetworkResponse.next(page, { url: "**/simplezip.json", body: (message) => message.text })
       yield* page.evaluateInMainWorld(() => fetch("./simplezip.json").then((r) => r.text()))
       const request = yield* sent
+      yield* finished
       const sizes = yield* NetworkRequest.sizes(page, request)
       const gzipped = zlib.gzipSync(fs.readFileSync(assetPath("playwright", "simplezip.json")))
       assert.strictEqual(known(sizes.responseBodySize, "responseBodySize"), gzipped.length)

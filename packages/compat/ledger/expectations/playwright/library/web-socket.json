@@ -1,6 +1,17 @@
 [
   {
     "tests": [
+      "WS-012"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "notApplicable",
+    "reason": "The original is `it.fixme`: going offline doesn't close or block a WebSocket that is already open in Chromium or Firefox"
+  },
+  {
+    "tests": [
       "WS-005"
     ],
     "status": "needsFeature",

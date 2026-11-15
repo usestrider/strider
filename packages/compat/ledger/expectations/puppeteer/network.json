@@ -1,6 +1,17 @@
 [
   {
     "tests": [
+      "[network.test] network Network Events Page.Events.RequestFailed for blocked requests"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "Firefox and stock WebKit report no failure for a blocked mixed-content request: Puppeteer marks the test as failing under WebDriver BiDi, and neither browser reports a block reason"
+  },
+  {
+    "tests": [
       "[network.test] network Request.initiator should return the initiator"
     ],
     "status": "needsFeature",

@@ -49,7 +49,7 @@
     "browsers": [
       "webkit"
     ],
-    "status": "fails",
-    "reason": "Port: Port: exception tests assert Chromium's or Playwright's browser-specific details where Strider documents a difference"
+    "status": "notApplicable",
+    "reason": "WebKit ignores `//# sourceURL` in an error's stack and reports the document's URL: the original marks the test `it.fail` on WebKit"
   }
 ]

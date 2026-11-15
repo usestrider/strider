@@ -35,18 +35,6 @@
   },
   {
     "tests": [
-      "NE-060",
-      "NE-064"
-    ],
-    "browsers": [
-      "firefox",
-      "webkit"
-    ],
-    "status": "fails",
-    "reason": "Port: Reading sizes right after the page finishes a request finds the response counts not yet delivered on Firefox and WebKit"
-  },
-  {
-    "tests": [
       "NE-061",
       "NE-062"
     ],

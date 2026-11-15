@@ -52,6 +52,6 @@
       "webkit"
     ],
     "status": "notApplicable",
-    "reason": "Stock WebKit: file: URLs fail to load, so goto and frames of a local file fail"
+    "reason": "A `file:` URL doesn't load in the MiniBrowser in the integration environment (`Frame load interrupted`): its shell has no shared MIME database to type an HTML file, so the load is treated as a download"
   }
 ]

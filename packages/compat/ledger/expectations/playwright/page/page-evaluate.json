@@ -123,8 +123,8 @@
     "browsers": [
       "webkit"
     ],
-    "status": "fails",
-    "reason": "Port: Port: EV-099 needs `using`, which stock WebKit 2.54.1 doesn't parse"
+    "status": "notApplicable",
+    "reason": "WebKitGTK 2.54.1's JavaScriptCore doesn't parse `using` declarations (`SyntaxError: Unexpected identifier`); the original skips WebKit"
   },
   {
     "tests": [

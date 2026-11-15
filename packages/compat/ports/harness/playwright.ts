@@ -2,7 +2,7 @@
  * Strider's versions of the helpers Playwright's tests share (`tests/config/utils.ts`), for the Playwright ports.
  */
 import { assert } from "@effect/vitest"
-import { Deadline, Expect, type Locator, type Page } from "@usestrider/browser"
+import { Deadline, Expect, type Locator, NetworkRequest, type Page } from "@usestrider/browser"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
@@ -34,6 +34,19 @@ export const attachFrame = Effect.fnUntraced(function*(page: Page.Page, id: stri
     url
   )
   return page.frame(page.locator(`#${id}`))
+})
+
+/**
+ * `attachFrame` for a test that reads the page's request history as soon as the frame has loaded. Playwright delivers a
+ * frame's `request` event before the frame's `load`; Strider's request can reach the history a moment after the frame's
+ * load has returned, on Firefox. The wait for the frame's request is armed before the frame is attached and finished
+ * before the history is read, so the read sees the request as the original's listener has.
+ */
+export const attachFrameWithRequest = Effect.fnUntraced(function*(page: Page.Page, id: string, url: string) {
+  const requested = yield* NetworkRequest.next(page, { url })
+  const frame = yield* attachFrame(page, id, url)
+  yield* requested
+  return frame
 })
 
 /**

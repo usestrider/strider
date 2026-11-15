@@ -149,6 +149,6 @@
       "webkit"
     ],
     "status": "notApplicable",
-    "reason": "Stock WebKit in the test environment has no capture devices, so getUserMedia fails with OverconstrainedError, not NotAllowedError"
+    "reason": "Stock WebKit has no camera or microphone in the integration environment, so `getUserMedia` fails with OverconstrainedError before the permission check; Playwright's WebKit build has mock capture devices"
   }
 ]

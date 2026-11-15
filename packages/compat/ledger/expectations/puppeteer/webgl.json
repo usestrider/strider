@@ -8,6 +8,6 @@
       "webkit"
     ],
     "status": "notApplicable",
-    "reason": "Firefox headless has no WebGL context in the compat environment"
+    "reason": "The integration environment has no software GL (Mesa): Firefox gets no WebGL context, and stock WebKit hangs creating one"
   }
 ]

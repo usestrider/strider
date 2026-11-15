@@ -67,15 +67,5 @@
     ],
     "status": "fails",
     "reason": "The frame tree has no frame names"
-  },
-  {
-    "tests": [
-      "[frame.test] Frame specs Frame Management should support lazy frames"
-    ],
-    "browsers": [
-      "webkit"
-    ],
-    "status": "notApplicable",
-    "reason": "Stock WebKit: a viewport of 1000x1000 isn't confirmed on the integration display"
   }
 ]

@@ -1,6 +1,17 @@
 [
   {
     "tests": [
+      "NE-029"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "Firefox and stock WebKit make the request and block it afterwards, so it doesn't fail: the original skips them (\"FF and WK actually succeed with the request, and block afterwards\")"
+  },
+  {
+    "tests": [
       "NE-012",
       "NE-013"
     ],

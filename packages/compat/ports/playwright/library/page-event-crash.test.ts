@@ -3,10 +3,13 @@
  * closing its context or page does afterwards.
  *
  * What the port changes:
- * - Strider has no crash API, and the public API offers no way to send `Page.crash` to a page. The only trigger the
- *   port uses is Chromium's `chrome://crash` navigation, which the original uses on Chromium. So each test runs on
- *   Chromium only, and the ledger marks Firefox and WebKit needsFeature. The original's `page.goto('chrome://crash')`
- *   isn't awaited, so `crash` starts it and ignores its failure.
+ * - Strider has no crash API, and the public API offers no way to send `Page.crash` to a page. The original navigates to
+ *   `chrome://crash` on Chromium, which on Chromium 155 ends the navigation with `net::ERR_ABORTED` and leaves the
+ *   renderer running. So the port crashes the page the way Chromium's own tooling does: a connection of its own to the
+ *   browser's debugging port (the file's launch opens one, as session.test.ts's does) sends `Page.crash` to the page's
+ *   target, which it finds among the pages of the contexts the tests made (the default context's first tab is left
+ *   alone). Each test runs on Chromium only, and the ledger marks Firefox and WebKit needsFeature. The original's
+ *   `page.goto('chrome://crash')` isn't awaited, so `crash` starts the command and doesn't wait for its reply.
  * - `page.on('crash')` and `page.waitForEvent('crash')` are the page's `closed` signal, which gives the reason the page
  *   ended. A crash's reason is `PageCrashed`.
  * - Where the original checks an error's message for "crashed", the port checks Strider's typed failure: a
@@ -26,21 +29,53 @@
  * - The original skips Chromium on Ubuntu 24.04 and WebKit on Debian 13 for hosts that never dispatch the crash event.
  *   The port runs on the pinned environment, which is neither host, so those skips don't apply.
  */
+import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert } from "@effect/vitest"
 import { Browser, Expect, NetworkResponse, Page, Target } from "@usestrider/browser"
+import { Page as CdpPage, Target as CdpTarget } from "@usestrider/browser/cdp"
+import { CdpConnection, Protocol, Transport } from "@usestrider/browser/protocol"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Result from "effect/Result"
+import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import { failureOf, startWaiting } from "../../harness/playwright.ts"
 import { upstream } from "../../harness/upstream.ts"
 
+/** The debugging port the file's Chromium listens on. Each file's browser stops before the next one starts. */
+const debuggingPort = 9444
+
 /**
- * The original's `page.goto('chrome://crash').catch(e => {})` on Chromium: started without waiting for it. It's detached,
- * so the test doesn't wait for the navigation to end; the page closing ends it.
+ * The original's `page.goto('chrome://crash').catch(e => {})` on Chromium: `Page.crash`, sent over a connection of the
+ * port's own to every page target of a context the tests made, without waiting for the reply (the command can stay
+ * pending while the page ends). The connection stays open until the test's scope ends.
  */
-const crash = (page: Page.Page) => Effect.forkDetach(page.goto("chrome://crash").pipe(Effect.ignore))
+const crash = Effect.fnUntraced(function*(_page: Page.Page) {
+  const json = yield* Effect.promise(() =>
+    fetch(`http://127.0.0.1:${debuggingPort}/json/version`).then((response) => response.json() as Promise<unknown>)
+  )
+  const { webSocketDebuggerUrl } = Schema.decodeUnknownSync(Schema.Struct({ webSocketDebuggerUrl: Schema.String }))(
+    json
+  )
+  const transport = yield* Transport.webSocket(webSocketDebuggerUrl).pipe(
+    Effect.provide(NodeSocket.layerWebSocketConstructor)
+  )
+  const cdp = yield* CdpConnection.make(transport)
+  const { browserContextIds } = yield* CdpTarget.getBrowserContexts().pipe(Protocol.on(cdp.browser))
+  const { targetInfos } = yield* CdpTarget.getTargets().pipe(Protocol.on(cdp.browser))
+  const targets = targetInfos.filter((info) =>
+    info.type === "page" && info.browserContextId !== undefined && browserContextIds.includes(info.browserContextId)
+  )
+  assert.isAbove(targets.length, 0, "no page target to crash")
+  for (const target of targets) {
+    const { sessionId } = yield* CdpTarget.attachToTarget({ targetId: target.targetId, flatten: true }).pipe(
+      Protocol.on(cdp.browser)
+    )
+    const session = yield* cdp.session(sessionId)
+    yield* Effect.forkDetach(CdpPage.crash().pipe(Protocol.on(session), Effect.ignore))
+  }
+})
 
 /** The original's `expect(error.message).toContain('crashed')`: a failure of a page that crashed, by its reason. */
 const crashedFailure = (failure: unknown) => {
@@ -52,7 +87,9 @@ const crashedFailure = (failure: unknown) => {
 const parsedAt = (url: string) => (status: Page.Status) =>
   status._tag === "Open" && status.url === url && status.document.readiness !== "loading"
 
-upstream(import.meta.filename, {}, (test) => {
+upstream(import.meta.filename, {
+  launch: { chromium: { args: [`--remote-debugging-port=${debuggingPort}`] } }
+}, (test) => {
   test("ER-014", { browsers: ["chromium"] }, ({ page }) =>
     Effect.gen(function*() {
       yield* page.setContent(`<div>This page should crash</div>`)
@@ -76,10 +113,8 @@ upstream(import.meta.filename, {}, (test) => {
     Effect.gen(function*() {
       // `expect(page.getByText('child')).toBeVisible()` isn't awaited; the crash ends it
       const expectation = yield* startWaiting(Expect.toBeVisible(page.getByText("child")))
-      const t0 = Date.now()
       yield* crash(page)
       const result = yield* Fiber.join(expectation.fiber).pipe(Effect.result)
-      console.log("PROBE expect ended", Date.now() - t0, JSON.stringify(result).slice(0, 500))
       assert.isTrue(Result.isFailure(result), "the expectation succeeded after the page crashed")
     }))
 

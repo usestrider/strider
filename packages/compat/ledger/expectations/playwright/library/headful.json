@@ -1,6 +1,17 @@
 [
   {
     "tests": [
+      "HE-015",
+      "HE-016"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "notApplicable",
+    "reason": "Headed Chromium takes its font hinting and subpixel settings from the display's toolkit, which the integration environment's bare Xvfb doesn't define, where headless Chromium uses fontconfig's: the two render the same text differently there (31,614 pixels differ; a hyphenated block is 21.01 px tall headed and 20 headless)"
+  },
+  {
+    "tests": [
       "HE-010"
     ],
     "browsers": [
@@ -61,12 +72,21 @@
   },
   {
     "tests": [
-      "HE-011",
+      "HE-011"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Unsupported: Strider refuses emulation.focus on Firefox: WebDriver BiDi has no focus emulation"
+  },
+  {
+    "tests": [
       "HE-015",
       "HE-016"
     ],
     "browsers": [
-      "chromium",
       "firefox"
     ],
     "status": "fails",

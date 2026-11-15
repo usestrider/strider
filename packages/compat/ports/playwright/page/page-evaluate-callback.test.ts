@@ -8,6 +8,7 @@
  *   typed reason and path, where the original asserts Playwright's message. Strider doesn't refuse a function inside an
  *   object argument: it leaves the member out, as `JSHandle.Serialized` does, so the page's `cb` is undefined and the
  *   call fails inside the page. The port keeps the original's assertion, which fails on that.
+ * - Playwright's `page.evaluate` runs in the page's main world, so it's `page.evaluateInMainWorld`.
  * - Every other test passes a function the page calls back, through `exposeFunctions: true`, and the page then calls
  *   it and gets its result. Strider has no such callback and no `exposeFunction` or `exposeBinding` either, so those
  *   tests are `needsFeature` in the ledger, each naming its matrix row, and are not ported.
@@ -24,7 +25,7 @@ upstream(import.meta.filename, {}, (test) => {
       // Playwright rejects a function argument without `exposeFunctions`, at the position "cb". Strider's refusal, if it
       // had one, would be NotSerializable at `args[0].cb`, the argument's path.
       const error = yield* failureOf(
-        page.evaluate(({ cb }: { cb: () => void }) => cb(), { cb: () => {} }),
+        page.evaluateInMainWorld(({ cb }: { cb: () => void }) => cb(), { cb: () => {} }),
         "the evaluation"
       )
       assert(Page.isPageError(error), `expected a PageError, got ${String(error)}`)

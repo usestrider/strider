@@ -116,16 +116,6 @@
       "webkit"
     ],
     "status": "notApplicable",
-    "reason": "Stock WebKit: an input never matches :focus after a click"
-  },
-  {
-    "tests": [
-      "[waittask.test] waittask specs Frame.waitForFunction should survive navigations"
-    ],
-    "browsers": [
-      "firefox"
-    ],
-    "status": "fails",
-    "reason": "Port: A wait that reads through a navigation ends with the realm's destruction in two ports that the survivingNavigation fix missed"
+    "reason": "Stock WebKit's window never gets focus in the integration environment's Xvfb, which has no window manager, so an input never matches `:focus` after a click"
   }
 ]

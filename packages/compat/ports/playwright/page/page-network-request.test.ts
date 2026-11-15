@@ -15,6 +15,9 @@
  *   `page.frames` gives each frame's id. Strider has no frame object that can fail to resolve, so NE-027 compares the
  *   initiator with the popup's id where the original expects `frame()` to throw while the popup's frame is unknown
  *   (matrix row `method-request-frame`).
+ * - Where the test reads the request history right after `attachFrame` (NE-002), the harness's `attachFrameWithRequest`
+ *   arms the wait for the frame's request before the frame is attached and finishes it before the read: Playwright's
+ *   `request` event comes before the frame's `load`, and Strider's can follow it on Firefox.
  * - `request.headers()` is the request's `headers`, the headers its event gives, which leave out what the network adds
  *   (`Cookie` on Chromium and WebKit). `request.allHeaders()` is `NetworkRequest.headersSent`, the headers the request was
  *   sent with, which waits until the browser can attribute them. A response's `allHeaders()` is its `headers`.
@@ -63,7 +66,7 @@ import { HttpClientRequest, HttpServerResponse, UrlParams } from "effect/http"
 import * as Option from "effect/Option"
 import * as fs from "node:fs"
 import type * as http from "node:http"
-import { assetPath, attachFrame, startWaiting } from "../../harness/playwright.ts"
+import { assetPath, attachFrameWithRequest, startWaiting } from "../../harness/playwright.ts"
 import { upstream } from "../../harness/upstream.ts"
 
 /** The response a navigation carried, when it had one. */
@@ -161,7 +164,7 @@ upstream(import.meta.filename, {}, (test) => {
     Effect.gen(function*() {
       yield* page.goto(server.EMPTY_PAGE, { waitUntil: "load" })
       const mark = (yield* requestsOf(page)).length
-      yield* attachFrame(page, "frame1", server.EMPTY_PAGE)
+      yield* attachFrameWithRequest(page, "frame1", server.EMPTY_PAGE)
       const requests = yield* requestsSince(page, mark)
       assert.strictEqual(requests.length, 1)
       // Playwright's `page.frames()[1]`: the main frame's first child, in the tree's order

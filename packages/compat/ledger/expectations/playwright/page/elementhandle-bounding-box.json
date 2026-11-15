@@ -17,6 +17,6 @@
       "webkit"
     ],
     "status": "notApplicable",
-    "reason": "Stock WebKit's window cannot be 250 px wide"
+    "reason": "The MiniBrowser window has a minimum width of 341 px, so a 250 px viewport can't be confirmed"
   }
 ]

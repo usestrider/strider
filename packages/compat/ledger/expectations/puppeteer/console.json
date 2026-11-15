@@ -1,6 +1,17 @@
 [
   {
     "tests": [
+      "[console.test] console should trigger correct Log",
+      "[console.test] console should have location when fetch fails"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "notApplicable",
+    "reason": "Puppeteer skips these under WebDriver BiDi: BiDi has no counterpart of Chromium's Log domain, so the browser's own console entries for a blocked or failed fetch aren't reported"
+  },
+  {
+    "tests": [
       "[console.test] console should work",
       "[console.test] console should return remote objects",
       "[console.test] console should not dispose handles when page has listeners"

@@ -9,6 +9,9 @@
  *   and response histories, which hold what the page sent since it was created. A test that adds its listener after a
  *   navigation takes the history's length at that point as its mark (`requestsSince`). A history that dropped entries
  *   fails the port, since a missing entry would prove nothing.
+ * - Where the test reads the request history right after `attachFrame` ("should fire for iframes" and "Request.frame should work for subframe navigation request"), the harness's `attachFrameWithRequest`
+ *   arms the wait for the frame's request before the frame is attached and finishes it before the read: Playwright's
+ *   `request` event comes before the frame's `load`, and Strider's can follow it on Firefox.
  * - Chromium's own `/favicon.ico` request is left out, as Puppeteer's `isFavicon` leaves it out.
  * - `page.goto`, `page.reload`, and `page.waitForNavigation` wait for `load` in Puppeteer. Strider's `goto` resolves at
  *   commit, so each one the original relies on the default for passes `waitUntil: "load"`.
@@ -75,7 +78,7 @@ import * as Scope from "effect/Scope"
 import * as fs from "node:fs"
 import type * as http from "node:http"
 import * as zlib from "node:zlib"
-import { assetPath, attachFrame, failureOf } from "../harness/playwright.ts"
+import { assetPath, attachFrame, attachFrameWithRequest, failureOf } from "../harness/playwright.ts"
 import { upstream } from "../harness/upstream.ts"
 
 type Committed = Extract<PageNavigation.PageNavigation, { readonly _tag: "Committed" }>
@@ -232,7 +235,7 @@ upstream(import.meta.filename, {}, (test) => {
   test("network Page.Events.Request should fire for iframes", ({ page, server }) =>
     Effect.gen(function*() {
       yield* page.goto(server.EMPTY_PAGE, { waitUntil: "load" })
-      yield* attachFrame(page, "frame1", server.EMPTY_PAGE)
+      yield* attachFrameWithRequest(page, "frame1", server.EMPTY_PAGE)
       assert.strictEqual((yield* requestsOf(page)).length, 2)
     }))
 
@@ -257,7 +260,7 @@ upstream(import.meta.filename, {}, (test) => {
     Effect.gen(function*() {
       yield* page.goto(server.EMPTY_PAGE, { waitUntil: "load" })
       const mark = (yield* requestsOf(page)).length
-      yield* attachFrame(page, "frame1", server.EMPTY_PAGE)
+      yield* attachFrameWithRequest(page, "frame1", server.EMPTY_PAGE)
       const requests = yield* requestsSince(page, mark)
       assert.strictEqual(requests.length, 1)
       // Puppeteer's `page.frames()[1]`: the main frame's first child, in the tree's order

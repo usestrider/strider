@@ -1,6 +1,61 @@
 [
   {
     "tests": [
+      "CA-005",
+      "CA-006"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "A `file:` page doesn't load in the MiniBrowser in the integration environment, whose shell has no shared MIME database to type an HTML file, so the page has no `<video>`"
+  },
+  {
+    "tests": [
+      "CA-007",
+      "CA-010"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "Audio and video playback hangs in the MiniBrowser in the integration environment, which has no GStreamer plugins to decode the media"
+  },
+  {
+    "tests": [
+      "CA-008",
+      "CA-009"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "The integration environment has no software GL (Mesa): `getContext('webgl')` returns null on Firefox and hangs on stock WebKit"
+  },
+  {
+    "tests": [
+      "CA-012"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "WebKitGTK doesn't define `navigator.storage.getDirectory` (the origin private file system), where the original expects Safari's `UnknownError`"
+  },
+  {
+    "tests": [
+      "CA-016",
+      "CA-019"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "`window.safari` and `GestureEvent` are Safari's: WebKitGTK doesn't define them"
+  },
+  {
+    "tests": [
       "CA-001"
     ],
     "browsers": [
@@ -60,44 +115,6 @@
     ],
     "status": "fails",
     "reason": "Stock WebKit: a document with Cross-Origin-Opener-Policy fails goto with \"Load request cancelled\""
-  },
-  {
-    "tests": [
-      "CA-005",
-      "CA-006",
-      "CA-007",
-      "CA-010",
-      "CA-012",
-      "CA-016",
-      "CA-019"
-    ],
-    "browsers": [
-      "webkit"
-    ],
-    "status": "notApplicable",
-    "reason": "Stock WebKit (WebKitGTK MiniBrowser) lacks Safari-only and media features the capability tests probe"
-  },
-  {
-    "tests": [
-      "CA-008",
-      "CA-009"
-    ],
-    "browsers": [
-      "firefox",
-      "webkit"
-    ],
-    "status": "notApplicable",
-    "reason": "Stock WebKit (WebKitGTK MiniBrowser) lacks Safari-only and media features the capability tests probe"
-  },
-  {
-    "tests": [
-      "CA-011"
-    ],
-    "browsers": [
-      "chromium"
-    ],
-    "status": "fails",
-    "reason": "Port: showDirectoryPicker's rejection on Chromium 155 words its AbortError differently from the test's pattern"
   },
   {
     "tests": [

@@ -12,6 +12,8 @@
  * - `page.waitForFunction("…")` is `Expect.that` on the same read, polled until its condition holds. `expect.poll` for
  *   `window.lastEvent` is the same poll, reading the event once it is there.
  * - `page.goto(url)` returns at commit in Strider, so MO-020 waits for `load`, which is Playwright's default.
+ * - MO-018 runs with Chromium's focus emulated, as Playwright's pages are: after the popup opens, a Chromium page in the
+ *   background draws no frames, which the wheel input waits for.
  * - MO-018 opens a popup from a script. Strider keeps the browser's popup blocking, so `window.open` runs as a user
  *   gesture (`Page.withUserGesture`), and `waitForEvent("popup")` is `Popup.next`, subscribed before the call.
  * - The original's `ignoreDelta` (Chromium on macOS reports deltas scaled by the host's device scale factor) applies
@@ -116,7 +118,7 @@ upstream(import.meta.filename, {}, (test) => {
       }, ignoreDelta)
     }))
 
-  test("MO-018", ({ page, browserName }) =>
+  test("MO-018", { emulateFocus: true }, ({ page, browserName }) =>
     Effect.gen(function*() {
       const ignoreDelta = ignoreDeltaOn(browserName)
       yield* page.setContent(pageOfDivs)

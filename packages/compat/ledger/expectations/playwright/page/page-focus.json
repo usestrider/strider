@@ -1,6 +1,17 @@
 [
   {
     "tests": [
+      "FO-008",
+      "FO-009"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "notApplicable",
+    "reason": "Playwright's Firefox has browser chrome that takes focus when Tab leaves the last element; headless stock Firefox keeps it on the page and wraps differently, so the focus order the original expects doesn't occur"
+  },
+  {
+    "tests": [
       "FO-006"
     ],
     "browsers": [
@@ -28,7 +39,7 @@
       "webkit"
     ],
     "status": "notApplicable",
-    "reason": "Stock WebKit's window has no focus, so focus and blur events do not fire"
+    "reason": "Stock WebKit's window never gets focus in the integration environment's Xvfb, which has no window manager, so `document.hasFocus()` is false and focus and blur events don't fire"
   },
   {
     "tests": [
@@ -36,11 +47,10 @@
       "FO-009"
     ],
     "browsers": [
-      "firefox",
       "webkit"
     ],
     "status": "notApplicable",
-    "reason": "Stock WebKit's window has no focus, so focus and blur events do not fire"
+    "reason": "Stock WebKit's window never gets focus in the integration environment's Xvfb, which has no window manager, so `document.hasFocus()` is false and focus and blur events don't fire"
   },
   {
     "tests": [

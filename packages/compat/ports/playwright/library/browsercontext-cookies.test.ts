@@ -32,6 +32,8 @@
  * - CO-016's frame reads (`frame.evaluate`) are `locator.evaluate` on the frame's `body`, which runs in the frame's isolated
  *   world: the DOM is the frame's, but stock WebKit has no isolated worlds, so CO-016 fails there with `Unsupported`, as
  *   selectors-frame's SE-106 does. CO-016 is ported for Firefox and stock WebKit only (the original skips Chromium).
+ * - CO-016 runs on a Firefox with Playwright's content-blocking preference (`playwrightFirefox`), since the original's
+ *   expectations for Firefox are those of a Firefox without cookie blocking.
  * - CO-014 runs once per host, registered with `{ variant }`, as the original's loop does.
  * - Routes are `page.route`, and `Route.fulfill(HttpServerResponse.text(...))` carries a fulfilled document's headers.
  * - `frameLocator("iframe").locator("body")` is `page.frame(page.locator("iframe")).locator("body")`.
@@ -42,7 +44,7 @@
  * - CO-018's cookie is set by a fulfilled response, and its frame is the page's `iframe`.
  */
 import { assert } from "@effect/vitest"
-import { CookieJar, Expect, Route, type UserContext } from "@usestrider/browser"
+import { CookieJar, Expect, LaunchProfile, Route, type UserContext } from "@usestrider/browser"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import { HttpServerResponse } from "effect/http"
@@ -97,7 +99,22 @@ const listForAll = (context: UserContext.UserContext, urls: ReadonlyArray<string
  */
 const unsetSameSite = (browserName: string) => browserName === "webkit" ? "lax" : undefined
 
-upstream(import.meta.filename, {}, (test) => {
+/**
+ * Firefox as Playwright's own BiDi Firefox runs: its preferences (`firefoxPrefs.ts`, from Puppeteer's) set
+ * `browser.contentblocking.features.standard` to `-tp,tpPrivate,cookieBehavior0,-cm,-fp`, which turns off the cookie
+ * blocking CO-016's `hasStorageAccess()` and cross-site request depend on. Strider's own profile leaves it as Firefox
+ * ships it.
+ */
+const playwrightFirefox = new LaunchProfile.LaunchProfile({
+  name: "automation",
+  args: LaunchProfile.automation.args,
+  prefs: {
+    ...LaunchProfile.automation.prefs,
+    "browser.contentblocking.features.standard": "-tp,tpPrivate,cookieBehavior0,-cm,-fp"
+  }
+})
+
+upstream(import.meta.filename, { launch: { firefox: { profile: playwrightFirefox } } }, (test) => {
   test("CO-001", ({ page }) =>
     Effect.gen(function*() {
       assert.deepStrictEqual(yield* page.context.cookies.list, [])

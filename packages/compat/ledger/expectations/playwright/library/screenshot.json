@@ -79,16 +79,5 @@
     ],
     "status": "fails",
     "reason": "Unsupported: Strider refuses screenshot.cssScale on Firefox: WebDriver BiDi captures device pixels only"
-  },
-  {
-    "tests": [
-      "SS-078",
-      "SS-085"
-    ],
-    "browsers": [
-      "webkit"
-    ],
-    "status": "notApplicable",
-    "reason": "Stock WebKit cannot show a viewport taller than the Xvfb screen it runs in"
   }
 ]

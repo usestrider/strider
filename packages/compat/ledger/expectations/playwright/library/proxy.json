@@ -1,6 +1,17 @@
 [
   {
     "tests": [
+      "PR-015"
+    ],
+    "browsers": [
+      "chromium",
+      "firefox"
+    ],
+    "status": "notApplicable",
+    "reason": "The original is `it.fixme`: a proxy's CONNECT request is made by the network stack with the browser's own User-Agent, not the emulated one"
+  },
+  {
+    "tests": [
       "PR-007",
       "PR-008",
       "PR-009"
@@ -38,8 +49,6 @@
       "PR-015"
     ],
     "browsers": [
-      "chromium",
-      "firefox",
       "webkit"
     ],
     "status": "needsFeature",

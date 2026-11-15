@@ -57,6 +57,13 @@ export interface TestOptions {
   /** Open no page: the test makes its own contexts. @default true */
   readonly page?: boolean | undefined
   /**
+   * Emulate focus for the test's page on Chromium, as Playwright does for every page it creates: a page that opens a
+   * popup then keeps rendering behind it, where Chromium would otherwise draw no frames for it. Firefox and stock WebKit
+   * can't emulate focus, so the option leaves their page as it is.
+   * @default false
+   */
+  readonly emulateFocus?: boolean | undefined
+  /**
    * The browsers this one test runs on, within the file's: a test the original runs on one browser only (`it.skip`
    * for the others) says `["webkit"]`. Its ledger file marks the others, so the report doesn't count them as not run.
    * @default the file's browsers
@@ -141,7 +148,10 @@ export const upstream = (portFile: string, options: Options, define: (test: Test
                 yield* server.reset
                 const page = testOptions.page === false
                   ? undefined
-                  : yield* Browser.newPage({ emulation: { viewport: { width: 1280, height: 720 } } })
+                  : yield* Browser.newPage({
+                    emulation: { viewport: { width: 1280, height: 720 } },
+                    ...(testOptions.emulateFocus === true && browserName === "chromium" ? { focus: "emulated" } : {})
+                  })
                 yield* body({
                   get page() {
                     if (page === undefined) throw new Error(`${fullKey} asked for no page`)

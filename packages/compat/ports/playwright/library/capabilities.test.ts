@@ -27,6 +27,10 @@
  * - Playwright's `server.HOST` is `localhost:<port>`, the host of `server.PREFIX`.
  * - CA-029 uses `context.credentials.install()`, which Strider has no counterpart of, so it isn't ported (see the
  *   ledger).
+ * - CA-011's abort says `Intercepted by Page.setInterceptFileChooserDialog()` on Chromium 155, because Strider's page
+ *   intercepts every file chooser dialog (it is how `FileChooser.next` hears one), where Playwright's intercepts only while
+ *   a `filechooser` listener exists. The pattern keeps the original's alternatives and adds that wording of the same
+ *   `AbortError`.
  * - CA-001's context accepts the test server's self-signed certificate with `acceptInsecureCerts`, which Strider
  *   supports on Firefox and launched WebKit only, and refuses on Chromium.
  * - CA-004 sets the CSP header on the fixture server's route, as the original does on its own.
@@ -172,9 +176,14 @@ upstream(import.meta.filename, {}, (test) => {
       })
       // The dialog will not be accepted, so we just wait for some time to give the browser a chance to crash.
       yield* Effect.sleep("3 seconds")
-      // In headless it throws (aborted), in headed it stalls and waits for the picker to be accepted.
+      // In headless it throws (aborted), in headed it stalls and waits for the picker to be accepted. Strider's page
+      // intercepts every file chooser dialog, so the abort Chromium reports says so, where the original's says the user
+      // aborted the request.
       const error = yield* page.evaluateInMainWorld(() => (window as any).__pickerError ?? "stalled")
-      assert.match(error, /((DOMException|AbortError): .*The user aborted a request|stalled)/)
+      assert.match(
+        error,
+        /((DOMException|AbortError): .*(The user aborted a request|Intercepted by Page\.setInterceptFileChooserDialog\(\))|stalled)/
+      )
     }))
 
   test("CA-012", ({ page, server, browserName }) =>

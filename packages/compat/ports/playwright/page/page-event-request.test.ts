@@ -18,6 +18,9 @@
  *   has no request (matrix rows `method-response-text` and `method-response-request`), so the port matches the two by
  *   hop. `response.finished()` is not ported as a call: the body decoder resolves once the body has ended, which is the
  *   same wait.
+ * - `attachFrame` is the harness's `attachFrameWithRequest` where the test reads the request history right after the frame
+ *   loads (NE-092): the wait for the frame's request is armed before the frame is attached and finished before the read, since
+ *   Playwright's `request` event comes before the frame's `load` and Strider's can follow it.
  * - `request.failure()` is `NetworkRequest.failure`, which reads the request's original observation immediately.
  * - `requestfailed`, `requestfinished`, and `serviceWorker()`-based tests are in the ledger: Strider has no request
  *   failure or finish event (matrix rows `event-page-requestfailed` and `event-page-requestfinished`).
@@ -36,7 +39,7 @@ import { assert } from "@effect/vitest"
 import { NetworkRequest, NetworkResponse, type Page, PageNavigation, Route } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
-import { attachFrame } from "../../harness/playwright.ts"
+import { attachFrameWithRequest } from "../../harness/playwright.ts"
 import { upstream } from "../../harness/upstream.ts"
 
 /**
@@ -83,7 +86,7 @@ upstream(import.meta.filename, {}, (test) => {
   test("NE-092", ({ page, server }) =>
     Effect.gen(function*() {
       yield* page.goto(server.EMPTY_PAGE, { waitUntil: "load" })
-      yield* attachFrame(page, "frame1", server.EMPTY_PAGE)
+      yield* attachFrameWithRequest(page, "frame1", server.EMPTY_PAGE)
       assert.strictEqual((yield* requestsOf(page)).length, 2)
     }))
 

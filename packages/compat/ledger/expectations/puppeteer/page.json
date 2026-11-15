@@ -1,6 +1,16 @@
 [
   {
     "tests": [
+      "[page.test] Page Page.Events.error should throw when page crashes"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "notApplicable",
+    "reason": "Puppeteer skips it under WebDriver BiDi: BiDi has no event for a renderer crash, and Firefox can't navigate to about:crashcontent over it"
+  },
+  {
+    "tests": [
       "[page.test] Page Page.newPage should open pages in a new window",
       "[page.test] Page Page.newPage should open pages in a new window at the specified position",
       "[page.test] Page Page.newPage should open pages in a new window in maximized state"
@@ -475,15 +485,5 @@
     ],
     "status": "fails",
     "reason": "UncaughtException.stack is built differently on each backend"
-  },
-  {
-    "tests": [
-      "[page.test] Page Page.Events.PageError should fire"
-    ],
-    "browsers": [
-      "webkit"
-    ],
-    "status": "fails",
-    "reason": "Port: Port: exception tests assert Chromium's or Playwright's browser-specific details where Strider documents a difference"
   }
 ]

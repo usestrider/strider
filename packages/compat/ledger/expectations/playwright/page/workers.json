@@ -1,6 +1,16 @@
 [
   {
     "tests": [
+      "WO-020"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "notApplicable",
+    "reason": "The original is `it.fixme` on WebKit (a worker started by a worker isn't reported): stock WebKit reports one worker where two are expected"
+  },
+  {
+    "tests": [
       "WO-002"
     ],
     "status": "needsFeature",
