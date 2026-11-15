@@ -212,8 +212,9 @@ export interface CookieJar {
    *
    * **Details**
    *
-   * A `Secure` cookie is sent over `https:` and `wss:`, and, as browsers send it, over plain http to a local host:
-   * `localhost`, a host under `localhost`, 127.0.0.0/8 and `[::1]`.
+   * A `Secure` cookie is sent to an `https:` or `wss:` URL, and, as browsers send it, to any URL on a local host, such
+   * as plain http: `localhost`, a host under `localhost`, either written with a final dot (`localhost.`),
+   * 127.0.0.0/8 and `[::1]`.
    *
    * **Example** (Listing what a request would send)
    *
