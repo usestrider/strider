@@ -973,6 +973,11 @@ export interface AdapterConnection {
   readonly defaultContext: UserContext.Id
   /** Waits as long as the connection lives. */
   readonly closed: Effect.Effect<Transport.ConnectionLost>
+  /**
+   * Marks the browser closing, before its scope's cleanup closes it: what the adapter ends from then on, a page, a
+   * realm or a pending call, ends with `reason` rather than as the shutdown makes it look.
+   */
+  readonly closing: (reason: Target.CloseReason) => Effect.Effect<void>
 
   // Contexts and pages
   readonly createUserContext: (

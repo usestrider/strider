@@ -124,8 +124,6 @@ export interface Fold {
    * nothing once something has ended it.
    */
   readonly loseConnection: (reason: Target.CloseReason) => Effect.Effect<void>
-  /** The browser is closing, for `reason`: what ends from now on ends with it. */
-  readonly closing: (reason: Target.CloseReason) => Effect.Effect<void>
 }
 
 /** One input: a step of the fold, and who waits for it to be applied. */
@@ -278,13 +276,8 @@ export const make = Effect.fnUntraced(function*(options: {
 
   // ── Ending things ──
 
-  // The browser's own reason, once it is closing: what ends as it shuts down, a page or a context the adapter
-  // reports gone, ends with the browser
-  let browserEnd: Target.CloseReason | undefined
-
-  const endDocument = (id: Target.DocumentId, ended: Target.CloseReason) =>
+  const endDocument = (id: Target.DocumentId, reason: Target.CloseReason) =>
     Effect.suspend(() => {
-      const reason = browserEnd ?? ended
       const entry = documents.get(id)
       if (entry === undefined) return Effect.void
       documents.delete(id)
@@ -322,8 +315,7 @@ export const make = Effect.fnUntraced(function*(options: {
     }
   })
 
-  const endWorker = Effect.fnUntraced(function*(worker: Model.WorkerEntry, ended: Target.CloseReason) {
-    const reason = browserEnd ?? ended
+  const endWorker = Effect.fnUntraced(function*(worker: Model.WorkerEntry, reason: Target.CloseReason) {
     if (!workers.delete(worker.realm)) return
     realmOwners.delete(worker.realm)
     for (const hop of hops.values()) {
@@ -343,8 +335,7 @@ export const make = Effect.fnUntraced(function*(options: {
     yield* Deferred.succeed(worker.closed, reason)
   })
 
-  const endConnection = Effect.fnUntraced(function*(connection: Model.ConnectionEntry, ended: Target.CloseReason) {
-    const reason = browserEnd ?? ended
+  const endConnection = Effect.fnUntraced(function*(connection: Model.ConnectionEntry, reason: Target.CloseReason) {
     if (!connections.delete(connection.id)) return
     Events.end(connection.frames, endOf(reason))
     yield* Deferred.succeed(connection.closed, reason)
@@ -358,8 +349,7 @@ export const make = Effect.fnUntraced(function*(options: {
         state.status._tag === "InProgress" ? { ...state, status: { _tag: "Canceled" } } : state
     )
 
-  const endPage = Effect.fnUntraced(function*(page: Model.PageEntry, ended: Target.CloseReason) {
-    const reason = browserEnd ?? ended
+  const endPage = Effect.fnUntraced(function*(page: Model.PageEntry, reason: Target.CloseReason) {
     if (page.contextEntry.timings !== undefined) {
       for (const hop of hops.values()) {
         if (Option.getOrUndefined(hop.page) === page) page.contextEntry.timings.delete(hop.request.hop)
@@ -444,8 +434,7 @@ export const make = Effect.fnUntraced(function*(options: {
     return entry
   })
 
-  const endContext = Effect.fnUntraced(function*(entry: Model.ContextEntry, ended: Target.CloseReason) {
-    const reason = browserEnd ?? ended
+  const endContext = Effect.fnUntraced(function*(entry: Model.ContextEntry, reason: Target.CloseReason) {
     entry.timings?.clear()
     entry.sizes?.clear()
     contexts.delete(entry.id)
@@ -1157,11 +1146,7 @@ export const make = Effect.fnUntraced(function*(options: {
       apply(
         Effect.sync(() => publish(owner, event, (events) => events.autoResolution, (events) => events.autoResolution))
       ),
-    loseConnection: (reason) => apply(loseConnection(reason)),
-    closing: (reason) =>
-      apply(Effect.sync(() => {
-        browserEnd ??= reason
-      }))
+    loseConnection: (reason) => apply(loseConnection(reason))
   }
   return self
 })

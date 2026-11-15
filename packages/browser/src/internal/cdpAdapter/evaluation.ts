@@ -241,12 +241,12 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       if (target === undefined || params.executionContextUniqueId === undefined) return
       const realm = state.realmsByUnique.get(params.executionContextUniqueId)
       // Chromium destroys a closing page's realms before its session ends, and they end with the page
-      if (realm !== undefined) removeRealm(state, realm, realmEnd(realm))
+      if (realm !== undefined) removeRealm(state, realm, realmEnd(state, realm))
     })
     .on(Runtime.executionContextsCleared, (_params, { state, target }) => {
       for (const realm of Array.from(state.realms.values())) {
         if (realm.target === target && realm.frame !== undefined) {
-          removeRealm(state, realm, realmEnd(realm))
+          removeRealm(state, realm, realmEnd(state, realm))
         }
       }
     })
@@ -358,7 +358,7 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
     ? Duration.millis(yield* BrowserClock.left(deadline.value))
     : yield* Protocol.CommandTimeout
   const at = Option.isSome(deadline) ? deadline.value : yield* BrowserClock.after(Duration.toMillis(timeout))
-  const failed = Kit.realmFailure(realm, closingOf(realm))
+  const failed = Kit.realmFailure(realm, closingOf(state, realm))
   // Install cleanup before acquiring the first node. Each interruptible wire wait returns into the mask,
   // so its object ids are recorded before interruption can skip ownership registration.
   const nodes = new Map<string, string>()

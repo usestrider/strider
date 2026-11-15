@@ -375,6 +375,7 @@ export const connect: (
       info,
       capabilities: capabilitySet,
       pauseScope: options.ownership === "launched" ? "browser" : "related",
+      closing: Kit.closing(state),
       defaultContext: state.defaultContext,
       closed: client.closed,
       createUserContext: (options) => Contexts.createUserContext(state, options),

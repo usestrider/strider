@@ -144,7 +144,11 @@ export const endedEvent = (
   if (worker !== undefined) {
     state.workers.delete(session)
     if (worker.realm !== undefined) {
-      removeRealm(state, worker.realm, reason.why === "connectionLost" ? Kit.closed() : new L1Target.RealmDestroyed({}))
+      removeRealm(
+        state,
+        worker.realm,
+        reason.why === "connectionLost" ? Kit.closed(state) : state.browserEnd ?? new L1Target.RealmDestroyed({})
+      )
     }
     return
   }
@@ -159,13 +163,13 @@ export const endedEvent = (
     // A closing page's target takes its realms with the page, for the page's reason; one that ends as the page
     // swaps processes destroys them
     const closing = page.closing ??
-      (page.context.removing ? new L1Target.PageClosed({ by: "userContextRemoved" }) : undefined)
+      (page.context.removing ? new L1Target.PageClosed({ by: "userContextRemoved" }) : state.browserEnd)
     for (const realm of Array.from(state.realms.values())) {
       if (realm.target === target) {
         removeRealm(
           state,
           realm,
-          reason.why === "connectionLost" ? Kit.closed() : closing ?? new L1Target.RealmDestroyed({})
+          reason.why === "connectionLost" ? Kit.closed(state) : closing ?? new L1Target.RealmDestroyed({})
         )
       }
     }
@@ -181,13 +185,13 @@ export const endedEvent = (
   const page = proxyPage?.session === session ? proxyPage : undefined
   if (page === undefined) return
   const why: L1Target.CloseReason = reason.why === "connectionLost"
-    ? Kit.closed()
+    ? Kit.closed(state)
     : reason.why === "modelUnavailable"
     ? new L1Target.ModelUnavailable({})
     : page.closing ??
       (page.context.removing
         ? new L1Target.PageClosed({ by: "userContextRemoved" })
-        : new L1Target.PageClosed({ by: "script" }))
+        : state.browserEnd ?? new L1Target.PageClosed({ by: "script" }))
   endPage(state, page, why, `webkit: the page proxy's session ended (${reason.why})`)
 }
 

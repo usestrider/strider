@@ -46,7 +46,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         navigable,
         navigable.parent !== undefined
           ? new L1Target.FrameDetached({})
-          : closingReason(navigable) ?? new L1Target.PageClosed({ by: "script" }),
+          : closingReason(state, navigable) ?? new L1Target.PageClosed({ by: "script" }),
         "bidi:browsingContext.contextDestroyed"
       )
     })

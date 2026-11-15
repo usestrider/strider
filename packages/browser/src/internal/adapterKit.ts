@@ -76,8 +76,19 @@ export const foreign = (id: string): Adapter.AdapterError =>
 export const unsupported = (capability: string, hint: string): Adapter.AdapterError =>
   new Adapter.AdapterError({ reason: { _tag: "Unsupported", capability, hint } })
 
-/** Why targets end when the connection does. */
-export const closed = (): Target.CloseReason => (new Target.ConnectionLost({}))
+/** What a connection's state knows of its browser's end: the reason, once the browser is closing. */
+export interface Ending {
+  browserEnd?: Target.CloseReason | undefined
+}
+
+/** Why targets end when the connection does: the browser's reason once it is closing, else `ConnectionLost`. */
+export const closed = (ending: Ending): Target.CloseReason => ending.browserEnd ?? new Target.ConnectionLost({})
+
+/** Marks the browser closing, for `reason`: what ends from then on, as it shuts down, ends with it. */
+export const closing = (ending: Ending) => (reason: Target.CloseReason): Effect.Effect<void> =>
+  Effect.sync(() => {
+    ending.browserEnd ??= reason
+  })
 
 /** A protocol failure as an adapter error (`Adapter.protocolError`). */
 export const protocolError = Adapter.protocolError

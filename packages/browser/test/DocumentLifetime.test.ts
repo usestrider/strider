@@ -83,8 +83,8 @@ it.effect("keeps a document replacement's reason while the browser is closing", 
     })
     yield* fold.sink(committed(first, Option.none()))
     const oldDocument = Option.getOrThrow(fold.document(first))
-    yield* fold.closing(new Target.BrowserClosed({}))
-    // An in-flight navigation can commit before the adapter is torn down. The replacement supplies its cause.
+    // An in-flight navigation can commit while the browser is closing, before the adapter is torn down. The
+    // replacement supplies its cause, which the browser closing does not override.
     yield* fold.sink(committed(second, Option.some(first)))
     const currentDocument = Option.getOrThrow(fold.document(second))
     yield* fold.loseConnection(new Target.BrowserClosed({}))

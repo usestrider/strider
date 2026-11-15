@@ -200,17 +200,18 @@ export const ended = (state: State, session: ProtocolClient.Session, reason: Pro
   const why: L1Target.CloseReason | undefined = page === undefined
     ? undefined
     : reason.why === "connectionLost"
-    ? Kit.closed()
+    ? Kit.closed(state)
     : reason.why === "modelUnavailable"
     ? new L1Target.ModelUnavailable({})
-    : closingReason(page) ?? new L1Target.PageClosed({ by: "script" })
+    : closingReason(state, page) ?? new L1Target.PageClosed({ by: "script" })
   // A page's realms end with it, for its reason; a worker's or a frame's are destroyed
   for (const realm of Array.from(state.realms.values())) {
     if (realm.target === target) {
       removeRealm(
         state,
         realm,
-        why ?? (reason.why === "connectionLost" ? Kit.closed() : new L1Target.RealmDestroyed({}))
+        why ??
+          (reason.why === "connectionLost" ? Kit.closed(state) : state.browserEnd ?? new L1Target.RealmDestroyed({}))
       )
     }
   }

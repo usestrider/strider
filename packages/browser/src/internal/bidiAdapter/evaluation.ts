@@ -15,7 +15,7 @@ import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as Operation from "../operation.ts"
 import * as Urls from "../urls.ts"
-import { closingReason, documentOf, type Event, navigableOf, type RealmEntry, realmOf, type State } from "./state.ts"
+import { closingOf, documentOf, type Event, navigableOf, type RealmEntry, realmOf, type State } from "./state.ts"
 import { addWindowRealm, removeRealm } from "./tree.ts"
 
 // ── Remote values ─────────────────────────────────────────────────────────────────────────────────────────
@@ -218,8 +218,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       // One created and destroyed before its document committed never reached the model. Firefox destroys a closing
       // page's realms before its context, and they end with the page
       if (realm !== undefined) {
-        const closing = realm.navigable === undefined ? undefined : closingReason(realm.navigable.page)
-        removeRealm(state, realm, closing ?? new L1Target.RealmDestroyed({}))
+        removeRealm(state, realm, closingOf(state, realm)() ?? new L1Target.RealmDestroyed({}))
       }
     })
     .on(Log.entryAdded, (params, { state }) => {
@@ -358,12 +357,12 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
       return (missing
         ? state.buffer.run(() => removeRealm(state, realm, new L1Target.RealmDestroyed({})))
         : Effect.void).pipe(
-          Effect.andThen(Effect.suspend(() => Effect.fail(Kit.realmFailure(realm)(error))))
+          Effect.andThen(Effect.suspend(() => Effect.fail(Kit.realmFailure(realm, closingOf(state, realm))(error))))
         )
     }),
     Effect.raceFirst(
       state.buffer.waitFor(() => realm.ended ? true : undefined).pipe(
-        Effect.flatMap(() => Effect.fail(Kit.realmGone(realm)))
+        Effect.flatMap(() => Effect.fail(Kit.realmGone(realm, closingOf(state, realm))))
       )
     )
   )

@@ -484,9 +484,11 @@ export const make = Effect.fnUntraced(function*() {
   yield* Effect.addFinalizer(() => fold.loseConnection(new Target.BrowserClosed({})))
   yield* Obligations.run({ fold, connected: ownership.connected }).pipe(Effect.forkIn(modelScope))
 
+  let attached: Adapter.AdapterConnection | undefined
   /** Gives the model its adapter, once connected, and folds the connection's loss when it comes. */
   const attach = (connected: Adapter.AdapterConnection): Effect.Effect<Model, never, Scope.Scope> =>
     Effect.gen(function*() {
+      attached = connected
       const bounded = BoundedAdapter.make(connected)
       yield* ownership.attach(connected, bounded.claims)
       yield* connected.closed.pipe(
@@ -535,6 +537,8 @@ export const make = Effect.fnUntraced(function*() {
     })
 
   /** Marks the browser closing, for `BrowserClosed`: what ends from then on, as it shuts down, ends with it. */
-  const closing = fold.closing(new Target.BrowserClosed({}))
+  const closing = Effect.suspend(() =>
+    attached === undefined ? Effect.void : attached.closing(new Target.BrowserClosed({}))
+  )
   return { sink: fold.sink, attach, closing }
 })

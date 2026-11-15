@@ -173,6 +173,7 @@ export const connect: (
       info,
       capabilities,
       pauseScope: "browser",
+      closing: Kit.closing(state),
       defaultContext: state.defaultContext,
       closed: client.closed,
       createUserContext: refuse("userContexts", noPages),
