@@ -972,11 +972,15 @@ export const insertText = (
   id: Diagnostics.OperationId
 ): Effect.Effect<void, SendFailure> =>
   Effect.gen(function*() {
+    const { at } = yield* Operation.budget
     let document = (yield* openState(page, id)).document.id
-    // Each round goes one frame deeper; a document that ends on the way starts the walk again from the top
+    // Each round goes one frame deeper; a document that ends on the way starts the walk again from the top, until
+    // the operation's deadline
     while (true) {
+      if ((yield* BrowserClock.left(at)) <= 0) return yield* Effect.fail<SendFailure>({ _tag: "Deadline" })
       const answer = yield* sendToDocument(runtime, page, document, { op: "insert", text, beforeInput }, id)
       if (Option.isNone(answer)) {
+        yield* Effect.yieldNow
         document = (yield* openState(page, id)).document.id
         continue
       }
