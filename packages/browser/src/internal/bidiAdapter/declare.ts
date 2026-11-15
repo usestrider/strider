@@ -272,8 +272,6 @@ export const applyKind = (
   }
 }
 
-let cacheLocks: WeakMap<State, Semaphore.Semaphore> | undefined
-
 /**
  * Whether a placement's requests bypass the cache: where a `CacheDisabled` override says so, or a request- or
  * response-phase intercept is in force. Firefox looks in its HTTP cache after the request pause, so a request an
@@ -290,17 +288,10 @@ const bypass = (state: State, at: Declarations.Placement) => {
  * Sets the cache behavior the declarations in force say. WebDriver BiDi sets it for the session or for top-level
  * browsing contexts, not for a user context: where a context or the browser wants the cache bypassed, the session
  * bypasses it, so the context's later pages do from their first request, and each page that wants otherwise is set
- * on its own. A page opened in another context while the session bypasses the cache bypasses it too, until a
- * declaration next changes it.
+ * on its own, as the adapter first sees it and again whenever a declaration changes what it wants.
  */
-const applyCache = (state: State): Effect.Effect<void, Protocol.ProtocolError> => {
-  cacheLocks ??= new WeakMap()
-  let lock = cacheLocks.get(state)
-  if (lock === undefined) {
-    lock = Semaphore.makeUnsafe(1)
-    cacheLocks.set(state, lock)
-  }
-  return lock.withPermits(1)(Effect.gen(function*() {
+export const applyCache = (state: State): Effect.Effect<void, Protocol.ProtocolError> =>
+  state.cache.lock.withPermits(1)(Effect.gen(function*() {
     const session = [...state.contexts.values()].some((context) =>
       !context.removing && bypass(state, { context: context.id })
     )
@@ -324,7 +315,6 @@ const applyCache = (state: State): Effect.Effect<void, Protocol.ProtocolError> =
       else state.cache.pages.set(key, wanted)
     }
   }))
-}
 
 const addIntercept = Effect.fnUntraced(function*(
   state: State,

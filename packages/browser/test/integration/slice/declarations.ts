@@ -593,6 +593,29 @@ export const declarations = (
         timeout
       )
 
+      it.effect(
+        "answers a cacheable URL from the cache in a context without routes while another context's route is in force",
+        () =>
+          Effect.gen(function*() {
+            const { origin, served } = yield* site
+            yield* Effect.scoped(Effect.gen(function*() {
+              const routed = yield* Browser.newContext()
+              yield* routed.route(`${origin}/cached.js*`, () => Route.continue)
+              const other = yield* Browser.newContext()
+              const page = yield* other.newPage
+              const result = yield* run(
+                page,
+                origin,
+                `const read = () => fetch('/cached.js?other').then((r) => r.status); return [await read(), await read()]`
+              )
+              assert.deepStrictEqual(result, [200, 200])
+              const requested = served.filter((request) => request.path === "/cached.js?other")
+              assert.strictEqual(requested.length, cachesFetches[name] ? 1 : 2)
+            }))
+          }),
+        timeout
+      )
+
       it.effect("rejects an invalid HTTP credential origin without exposing credentials", () =>
         Effect.gen(function*() {
           const error = yield* Browser.newContext({

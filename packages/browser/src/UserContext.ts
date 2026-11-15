@@ -300,8 +300,8 @@ export interface UserContext extends ObservedUserContext {
    *
    * **Gotchas**
    *
-   * On Firefox, the cache is set for the browser or for one page, not for a context: while a context's route is
-   * in force, other contexts' requests bypass the cache too.
+   * On Firefox, a popup another context opens while this route is in force may send its first requests past the
+   * cache too, before it gets its own context's setting.
    *
    * The phase defaults to `"request"`. Response-only handlers require `{ phase: "response" }`, and
    * authentication handlers require `{ phase: "auth" }`. When options may omit the phase, the handler must

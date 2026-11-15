@@ -18,7 +18,7 @@ import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as Urls from "../urls.ts"
 import * as Cleanup from "./cleanup.ts"
-import { applyKind, recoverViewport } from "./declare.ts"
+import { applyCache, applyKind, recoverViewport } from "./declare.ts"
 import {
   type ContextEntry,
   contextOf,
@@ -35,7 +35,13 @@ import { addNavigable, endNavigation, removeNavigable } from "./tree.ts"
 export const register = (handlers: Kit.Handlers<Event>) =>
   handlers
     .on(BrowsingContext.contextCreated, (params, { state }) => {
-      addNavigable(state, params, state.adopting)
+      const known = state.navigables.has(params.context)
+      const navigable = addNavigable(state, params, state.adopting)
+      // A page the session's cache setting doesn't suit, as one in a context without routes while another
+      // context's bypass the cache, gets its own once the fold has delivered it
+      if (!known && navigable !== undefined && navigable.parent === undefined) {
+        state.buffer.later(applyCache(state))
+      }
     })
     .on(BrowsingContext.contextDestroyed, (params, { state }) => {
       const navigable = state.navigables.get(params.context)
@@ -280,6 +286,8 @@ export const createPage = Effect.fnUntraced(function*(state: State, id: UserCont
   if (navigable === undefined) {
     return yield* Effect.fail(Kit.gone({ _tag: "Browser" }, new L1Target.Vanished({})))
   }
+  // Its cache setting is in place before the caller's first navigation
+  yield* Kit.protocol(applyCache(state))
   return navigable.id
 })
 
