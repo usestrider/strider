@@ -282,7 +282,7 @@ const fold = (state: State.State): ProtocolClient.Fold => ({
       if (reason.why === "connectionLost") State.releaseProxy(state)
       if (reason.why === "connectionLost" || reason.why === "modelUnavailable") {
         const why: L1Target.CloseReason = reason.why === "connectionLost"
-          ? Kit.closed()
+          ? Kit.closed(state)
           : new L1Target.ModelUnavailable({})
         for (const navigable of Array.from(state.navigables.values())) {
           if (navigable.parent === undefined) {
@@ -372,6 +372,7 @@ export const connect: (
       info,
       capabilities: capabilitySet,
       pauseScope: "context",
+      closing: Kit.closing(state),
       // Its `historyUpdated` is also what a `history.pushState` to the same URL sends
       reportsDocumentOpen: false,
       defaultContext: state.defaultContext,

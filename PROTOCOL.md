@@ -324,8 +324,16 @@ interface AdapterConnection {
   resolve(obligation: Obligation, decision: Decision): Effect<Acknowledged, ProtocolError>
   dispatchInput(page: NavigableId, gesture: CompiledGesture): Effect<GestureEvidence, ProtocolError>
   evaluate(realm: RealmId, call: EvaluationCall): Effect<RemoteResult, ProtocolError>
+  closing(reason: CloseReason): Effect<void>                     // the browser is closing: records its reason
 }
 ```
+
+`closing` is how an adapter learns that its browser is closing. The browser's layer calls it as the layer's scope
+starts to close, before the adapter's own scope does, so before the adapter's cleanup closes the browser or ends
+its targets. It only records the reason: it sends nothing, closes no transport, and waits for nothing. From then
+on the adapter uses the reason where it has no more particular one, for a page, a realm, a pending call or the
+connection ending as the browser shuts down. A cause the adapter knows keeps precedence: a realm's recorded end, a
+page closed by command or by its context's removal, a document replaced by a navigation.
 
 Element geometry is a readonly adapter request naming a node binding and returning its coordinate document.
 Targets use their browser `getBoundingClientRect`, not reconstructed corners. Frame mapping composes that

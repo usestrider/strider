@@ -190,14 +190,16 @@ export const register = <E, R>(
     let live = true
     const blocked = new Set<Target.RealmId>()
     const destroying = new Set<Target.RealmId>()
-    const faults = yield* Queue.unbounded<{ realm: Target.RealmId; destroyed: boolean }>()
+    const faults = yield* Queue.unbounded<
+      { realm: Target.RealmId; destroyed: boolean; reason?: Target.CloseReason | undefined }
+    >()
     const fault = (realm: Target.RealmId) => {
       if (blocked.has(realm)) return
       blocked.add(realm)
       Queue.offerUnsafe(faults, { realm, destroyed: false })
     }
     /** A realm that ended: its payloads stop, and its connections and installation are released. */
-    const retire = (realm: Target.RealmId) => {
+    const retire = (realm: Target.RealmId, reason?: Target.CloseReason | undefined) => {
       if (destroying.has(realm)) return
       let known = realms.has(realm) || unconfirmed.has(realm)
       for (const item of owned) {
@@ -209,7 +211,8 @@ export const register = <E, R>(
       destroying.add(realm)
       Deferred.doneUnsafe(reference(realm), Effect.void)
       realms.delete(realm)
-      Queue.offerUnsafe(faults, { realm, destroyed: true })
+      // Why it ended, where its adapter said, goes with its cleanup: its page's or the browser's reason
+      Queue.offerUnsafe(faults, { realm, destroyed: true, reason })
     }
     const mapped = (error: Adapter.AdapterError | Deadline.Timeout) => {
       const failure = Operation.fromAdapter(error, record.id, runtime.backend)
@@ -258,7 +261,12 @@ export const register = <E, R>(
           })
         )
       )
-    const forget = Effect.fnUntraced(function*(connection: Connection, destroyed: boolean, uncertain = false) {
+    const forget = Effect.fnUntraced(function*(
+      connection: Connection,
+      destroyed: boolean,
+      uncertain = false,
+      ended?: Target.CloseReason | undefined
+    ) {
       if (connection.released) return
       connection.released = true
       yield* SubscriptionRef.set(connection.status, "closed")
@@ -269,7 +277,7 @@ export const register = <E, R>(
         unconfirmed.set(connection.realm, held)
       } else if (destroyed) accounting.destroy(connection.lease.owner, connection.lease.generation)
       else accounting.leave(connection.lease)
-      const reason = new Target.RealmDestroyed({})
+      const reason = ended ?? new Target.RealmDestroyed({})
       yield* Deferred.fail(
         connection.opened,
         new Target.TargetGone({
@@ -760,7 +768,7 @@ export const register = <E, R>(
           }
           for (const connection of connections.values()) {
             if (connection.realm !== event.realm) continue
-            if (event.destroyed) yield* forget(connection, true)
+            if (event.destroyed) yield* forget(connection, true, false, event.reason)
             else yield* terminate(connection, "bridge overflow")
           }
           if (event.destroyed) {

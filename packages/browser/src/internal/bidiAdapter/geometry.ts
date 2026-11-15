@@ -1,6 +1,5 @@
 import * as Effect from "effect/Effect"
 import * as Script from "../../bidi-protocol/Script.ts"
-import * as Target from "../../Target.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as Geometry from "../geometry.ts"
@@ -27,10 +26,10 @@ export const read = Effect.fnUntraced(function*(state: State, node: Adapter.Node
       serializationOptions: { maxObjectDepth: 4, maxDomDepth: 0 },
       userActivation: false
     })).pipe(
-      Effect.mapError(Kit.realmFailure(id, () => realm.ended)),
+      Effect.mapError(Kit.realmFailure(realm)),
       Effect.raceFirst(
         state.buffer.waitFor(() => realm.ended ? true : undefined).pipe(
-          Effect.flatMap(() => Effect.fail(Kit.gone({ _tag: "Realm", id }, new Target.RealmDestroyed({}))))
+          Effect.flatMap(() => Effect.fail(Kit.realmGone(realm)))
         )
       )
     )
