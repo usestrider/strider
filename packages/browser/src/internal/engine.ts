@@ -1838,16 +1838,32 @@ export function engine(render: (root: SnapNode) => string) {
     return label
   }
 
-  // An element inside a button, or an element with a button's or a checkbox's role, stands for that control: the
-  // browser delivers no click to a disabled button's subtree, and selection takes the control's text. Fields and
-  // editable content stand for themselves.
-  const enclosingControl = (element: Element): Element => {
-    if (dom.matches(element, "input, textarea, select") || contentEditable(element)) return element
-    return dom.closest(element, "button, [role=button], [role=checkbox], [role=radio]") ?? element
+  const CONTROL = "button, [role=button], [role=checkbox], [role=radio]"
+
+  const standsForItself = (element: Element): boolean =>
+    dom.matches(element, "input, textarea, select") || contentEditable(element)
+
+  // Selection takes the text of the control an element is in, found among its DOM ancestors. Fields and editable
+  // content stand for themselves.
+  const enclosingControl = (element: Element): Element =>
+    standsForItself(element) ? element : dom.closest(element, CONTROL) ?? element
+
+  // The browser delivers no click to a disabled button's subtree on the flat tree, so Enabled climbs it: through
+  // assigned slots and out of shadow roots. Fields and editable content stand for themselves.
+  const flatEnclosingControl = (element: Element): Element => {
+    if (standsForItself(element)) return element
+    for (
+      let current: Element | null = element;
+      current !== null;
+      current = dom.assignedSlot(current) ?? composedParent(current)
+    ) {
+      if (dom.matches(current, CONTROL)) return current
+    }
+    return element
   }
 
   // Enabled as a user sees it: a span inside a disabled button is as disabled as the button
-  const enabledControl = (element: Element): boolean => enabled(enclosingControl(element))
+  const enabledControl = (element: Element): boolean => enabled(flatEnclosingControl(element))
 
   const textSelectionTarget = (element: Element): Element => {
     let target = enclosingControl(element)
