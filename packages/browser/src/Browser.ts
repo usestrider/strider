@@ -323,6 +323,18 @@ export interface LaunchOptions {
   /**
    * Run without a visible window. WebKit has no headless mode, so `true` fails there with `InvalidInput`.
    *
+   * **Details**
+   *
+   * A headless browser has no pointing device of its own, so a headless launch of Chromium or Firefox tells its
+   * pages it has a fine pointer that can hover: they match `(hover: hover)` and `(pointer: fine)`, as they would
+   * with a mouse. This holds whatever the profile. A launch with a window reports the machine's own devices.
+   *
+   * **Gotchas**
+   *
+   * On Chromium, an argument of your own that sets `--blink-settings` replaces the launch's, and on Firefox a
+   * profile that sets `ui.primaryPointerCapabilities` or `ui.allPointerCapabilities` keeps its value. A context that
+   * emulates a mobile device with touch matches `(hover: none)` and `(pointer: coarse)` instead.
+   *
    * @default true, except on WebKit, which opens a window
    */
   readonly headless?: boolean | undefined

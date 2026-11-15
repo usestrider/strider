@@ -1624,3 +1624,15 @@ these, Playwright's `goto` and `reload` resolve to `null` for them, and the brow
 report both kinds as requests, and Firefox reports `data:` but not `blob:`. Reporting each browser's own events was
 rejected: the same page would report different requests on each backend, and a `data:` navigation would carry a
 response with no network behind it. `file:` URLs stay requests.
+
+## A headless launch states a fine pointer with hover
+
+A headless launch of Chromium or Firefox tells its pages they have a fine pointer that can hover: Chromium with
+`--blink-settings` for primary and available hover and pointer types, Firefox with `ui.primaryPointerCapabilities` and
+`ui.allPointerCapabilities` set to 6. Headless Chromium and Firefox have no pointing device, so a page Strider drives
+with a mouse would otherwise match `(hover: none)` and `(pointer: none)` and render its touch layout. The settings go
+with `headless`, not with a launch profile: headless is what takes the device away, and `--headless` is added whatever
+the profile, `stock` included; a launch with a window reports the machine's own devices. Putting them in the
+automation profile was rejected: a `stock` headless launch would still report no pointer, which no desktop browser
+does. A caller's own `--blink-settings`, or a profile's own pointer preferences, win, and Chromium's mobile touch
+emulation still overrides them.
