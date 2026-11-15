@@ -99,5 +99,15 @@
     ],
     "status": "fails",
     "reason": "CookieJar.listFor leaves out Secure cookies for localhost and loopback addresses over http"
+  },
+  {
+    "tests": [
+      "[cookies.test] Cookie specs Page.setCookie should set secure same-site cookies from a frame"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "CookieJar.set doesn't make a cookie Secure when its scope is an https URL, so Firefox rejects a SameSite=None cookie for an https URL with a BackendFailure"
   }
 ]

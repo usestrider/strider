@@ -102,15 +102,5 @@
     ],
     "status": "fails",
     "reason": "The first goto on a persistent profile's first tab, an adopted page, times out with no outcome"
-  },
-  {
-    "tests": [
-      "DC-004"
-    ],
-    "browsers": [
-      "webkit"
-    ],
-    "status": "fails",
-    "reason": "Differs, pending a decision: Stock WebKit confirms a viewport only up to its window and refuses a 456x789 viewport on the 1280x800 display"
   }
 ]

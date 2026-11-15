@@ -44,7 +44,6 @@
       "CL-003"
     ],
     "browsers": [
-      "chromium",
       "webkit"
     ],
     "status": "needsFeature",

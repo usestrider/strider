@@ -58,5 +58,16 @@
     "status": "needsFeature",
     "reason": "The request body and the response headers counts are None on WebKit, and the request counts on Firefox, so sizes tests that read them fail",
     "matrix": "method-request-sizes"
+  },
+  {
+    "tests": [
+      "NE-064"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Firefox and stock WebKit report the response body size of a gzipped, chunked response with its chunked-transfer framing: 75 bytes where the compressed body is 64"
   }
 ]

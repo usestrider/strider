@@ -73,7 +73,6 @@
       "NE-002"
     ],
     "browsers": [
-      "firefox",
       "webkit"
     ],
     "status": "fails",

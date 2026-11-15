@@ -56,5 +56,15 @@
     ],
     "status": "fails",
     "reason": "CookieJar.listFor leaves out Secure cookies for localhost and loopback addresses over http"
+  },
+  {
+    "tests": [
+      "CO-016"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "fails",
+    "reason": "Port: document.hasStorageAccess() in the cross-site iframe is still false on Firefox 158 after the launch profile sets browser.contentblocking.features.standard as Playwright's Firefox does, so the port's Firefox doesn't have the cookie behavior the original expects"
   }
 ]

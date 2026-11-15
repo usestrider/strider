@@ -1,6 +1,16 @@
 [
   {
     "tests": [
+      "BU-009"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "flaky",
+    "reason": "Flaky: Page.close({ runBeforeUnload: true }) can stay unconfirmed until its deadline on Chromium after a handler dismissed the page's beforeunload prompt, where the original's close is refused with the prompt"
+  },
+  {
+    "tests": [
       "BU-005"
     ],
     "status": "needsFeature",

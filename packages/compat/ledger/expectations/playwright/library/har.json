@@ -113,9 +113,18 @@
   },
   {
     "tests": [
-      "HA-010",
       "HA-028",
       "HA-043"
+    ],
+    "status": "fails",
+    "reason": "Recordings include the browser's own favicon requests, which Playwright never reports"
+  },
+  {
+    "tests": [
+      "HA-010"
+    ],
+    "browsers": [
+      "firefox"
     ],
     "status": "fails",
     "reason": "Recordings include the browser's own favicon requests, which Playwright never reports"

@@ -1,6 +1,26 @@
 [
   {
     "tests": [
+      "DD-013"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "flaky",
+    "reason": "Flaky: On Chromium a drag made with the mouse can miss dragenter and drop, so the source doesn't end up in the target"
+  },
+  {
+    "tests": [
+      "DD-019"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "flaky",
+    "reason": "Flaky: On Chromium an HTML drag made with the mouse misses dragenter, repeats dragover, and does not drop or cancel as expected"
+  },
+  {
+    "tests": [
       "DD-016"
     ],
     "browsers": [
@@ -14,7 +34,6 @@
       "DD-013"
     ],
     "browsers": [
-      "chromium",
       "firefox",
       "webkit"
     ],
@@ -52,8 +71,18 @@
       "DD-003",
       "DD-004",
       "DD-005",
-      "DD-006",
+      "DD-006"
+    ],
+    "status": "fails",
+    "reason": "On Chromium an HTML drag made with the mouse misses dragenter, repeats dragover, and does not drop or cancel as expected"
+  },
+  {
+    "tests": [
       "DD-019"
+    ],
+    "browsers": [
+      "firefox",
+      "webkit"
     ],
     "status": "fails",
     "reason": "On Chromium an HTML drag made with the mouse misses dragenter, repeats dragover, and does not drop or cancel as expected"

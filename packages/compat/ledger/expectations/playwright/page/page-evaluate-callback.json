@@ -62,5 +62,12 @@
     "status": "needsFeature",
     "matrix": "option-locator-evaluatehandle-exposefunctions",
     "reason": "Passing a function the element's script calls back to a locator's evaluateHandle, through exposeFunctions. Strider's locator evaluateHandle takes by-value arguments only, and a function inside an argument is left out (one on its own is refused as NotSerializable)"
+  },
+  {
+    "tests": [
+      "EV-112"
+    ],
+    "status": "fails",
+    "reason": "A function inside an object argument is left out of what the page receives instead of being refused, so the page's callback is undefined and the evaluation fails inside the page with EvaluationThrown, where a NotSerializable refusal at args[0].cb is expected"
   }
 ]

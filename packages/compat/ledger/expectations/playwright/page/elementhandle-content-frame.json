@@ -4,6 +4,16 @@
       "EH-019"
     ],
     "browsers": [
+      "firefox"
+    ],
+    "status": "flaky",
+    "reason": "Flaky: On Firefox a loaded iframe's url in page.frames can still be about:blank after the iframe's load event"
+  },
+  {
+    "tests": [
+      "EH-019"
+    ],
+    "browsers": [
       "chromium"
     ],
     "status": "flaky",
@@ -26,15 +36,5 @@
     "status": "needsFeature",
     "matrix": "method-frame-evaluatehandle",
     "reason": "Evaluates inside a frame to get an element of the top document, then asks for that element's content frame. A frame has no `evaluateHandle` in Strider, and a handle can't cross from one frame's realm to another, so the frame's element can't be reached from inside it"
-  },
-  {
-    "tests": [
-      "EH-019"
-    ],
-    "browsers": [
-      "firefox"
-    ],
-    "status": "fails",
-    "reason": "On Firefox a loaded iframe's url in page.frames is about:blank"
   }
 ]

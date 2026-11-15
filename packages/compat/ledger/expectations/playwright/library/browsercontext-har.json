@@ -1,6 +1,17 @@
 [
   {
     "tests": [
+      "HA-081",
+      "HA-082"
+    ],
+    "browsers": [
+      "firefox"
+    ],
+    "status": "flaky",
+    "reason": "Flaky: Firefox: a page that loaded a replayed HAR redirect doesn't always show https://www.theverge.com/ when the test expects it, after the redirect or after going back"
+  },
+  {
+    "tests": [
       "HA-076"
     ],
     "status": "needsFeature",
@@ -84,11 +95,19 @@
   },
   {
     "tests": [
-      "HA-081",
       "HA-082"
     ],
     "browsers": [
-      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Differs, pending a decision: Stock WebKit doesn't follow a redirect that a route fulfills, so a replayed HAR redirect stops at the 301"
+  },
+  {
+    "tests": [
+      "HA-081"
+    ],
+    "browsers": [
       "webkit"
     ],
     "status": "fails",

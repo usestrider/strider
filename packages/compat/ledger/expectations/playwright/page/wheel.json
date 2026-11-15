@@ -4,7 +4,6 @@
       "MO-018"
     ],
     "browsers": [
-      "chromium",
       "webkit"
     ],
     "status": "needsFeature",

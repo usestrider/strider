@@ -118,11 +118,19 @@
   },
   {
     "tests": [
-      "[network.test] network Page.Events.Request should fire for iframes",
       "[network.test] network Request.frame should work for subframe navigation request"
     ],
     "browsers": [
-      "firefox",
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Subframe navigation requests are missing from the history on WebKit"
+  },
+  {
+    "tests": [
+      "[network.test] network Page.Events.Request should fire for iframes"
+    ],
+    "browsers": [
       "webkit"
     ],
     "status": "fails",

@@ -1,6 +1,26 @@
 [
   {
     "tests": [
+      "WA-024"
+    ],
+    "browsers": [
+      "chromium"
+    ],
+    "status": "flaky",
+    "reason": "Flaky: An evaluation can return before the console messages it logged reach ConsoleMessage.history, so the last message is missing from a read right after the evaluation"
+  },
+  {
+    "tests": [
+      "WA-024"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "An evaluation can return before the console messages it logged reach ConsoleMessage.history, so the last message is missing from a read right after the evaluation"
+  },
+  {
+    "tests": [
       "WA-002",
       "WA-022"
     ],

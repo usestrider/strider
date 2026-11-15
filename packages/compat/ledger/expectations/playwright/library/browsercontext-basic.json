@@ -128,16 +128,5 @@
     ],
     "status": "fails",
     "reason": "Unsupported: Strider refuses isolatedWorlds on stock WebKit: stock WebKit) (stock WebKit's inspector makes no worlds"
-  },
-  {
-    "tests": [
-      "BC-006",
-      "BC-007"
-    ],
-    "browsers": [
-      "webkit"
-    ],
-    "status": "fails",
-    "reason": "Differs, pending a decision: Stock WebKit's viewport is its window: sizes below the window's minimum width or above the screen's height are refused as not confirmed"
   }
 ]

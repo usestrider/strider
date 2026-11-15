@@ -67,5 +67,15 @@
     ],
     "status": "fails",
     "reason": "The frame tree has no frame names"
+  },
+  {
+    "tests": [
+      "[frame.test] Frame specs Frame Management should support lazy frames"
+    ],
+    "browsers": [
+      "webkit"
+    ],
+    "status": "fails",
+    "reason": "Port: On stock WebKit the frame tree has two frames where the port expects three, the lazy frame included at about:blank: WebKit either creates no frame for a lazy iframe below the fold until it starts loading or the tree misses it, and the port can't tell which"
   }
 ]
