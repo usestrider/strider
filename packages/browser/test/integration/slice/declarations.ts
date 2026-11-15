@@ -463,9 +463,9 @@ export const declarations = (
           }))
         }), timeout)
 
-      // A route sees every request it matches, a cacheable one too: a cache hit would answer before the browser
-      // pauses the request, past the route and the server
-      it.effect("routes each fetch of a cacheable URL on a page with a route, and the server sees each", () =>
+      // A request a route continues goes to the server, a cacheable one too: the browser looks in its cache only
+      // after the pause, so a cache hit would answer it there, and the server would never see it
+      it.effect("sends each fetch of a cacheable URL a page's route continues to the server", () =>
         Effect.gen(function*() {
           const { origin, served } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
@@ -478,35 +478,37 @@ export const declarations = (
               `const read = () => fetch('/cached.js?page').then((r) => r.status); return [await read(), await read()]`
             )
             assert.deepStrictEqual(result, [200, 200])
-            assert.strictEqual(yield* route.hits, 2)
             const requested = served.filter((request) =>
               request.path === "/cached.js?page"
             )
-            assert.strictEqual(requested.length, 2)
+            assert.deepStrictEqual({ routed: yield* route.hits, served: requested.length }, { routed: 2, served: 2 })
           }))
         }), timeout)
 
-      it.effect("routes each fetch of a cacheable URL on a page opened after its context's route", () =>
-        Effect.gen(function*() {
-          const { origin, served } = yield* site
-          yield* Effect.scoped(Effect.gen(function*() {
-            const context = yield* Browser.newContext()
-            const route = yield* context.route(`${origin}/cached.js*`, () =>
-              Route.continue)
-            const page = yield* context.newPage
-            const result = yield* run(
-              page,
-              origin,
-              `const read = () => fetch('/cached.js?context').then((r) => r.status); return [await read(), await read()]`
-            )
-            assert.deepStrictEqual(result, [200, 200])
-            assert.strictEqual(yield* route.hits, 2)
-            const requested = served.filter((request) =>
-              request.path === "/cached.js?context"
-            )
-            assert.strictEqual(requested.length, 2)
-          }))
-        }), timeout)
+      it.effect(
+        "sends each fetch of a cacheable URL a context's route continues to the server, on a page opened after it",
+        () =>
+          Effect.gen(function*() {
+            const { origin, served } = yield* site
+            yield* Effect.scoped(Effect.gen(function*() {
+              const context = yield* Browser.newContext()
+              const route = yield* context.route(`${origin}/cached.js*`, () =>
+                Route.continue)
+              const page = yield* context.newPage
+              const result = yield* run(
+                page,
+                origin,
+                `const read = () => fetch('/cached.js?context').then((r) => r.status); return [await read(), await read()]`
+              )
+              assert.deepStrictEqual(result, [200, 200])
+              const requested = served.filter((request) =>
+                request.path === "/cached.js?context"
+              )
+              assert.deepStrictEqual({ routed: yield* route.hits, served: requested.length }, { routed: 2, served: 2 })
+            }))
+          }),
+        timeout
+      )
 
       it.effect("rejects an invalid HTTP credential origin without exposing credentials", () =>
         Effect.gen(function*() {
@@ -714,8 +716,7 @@ export const declarations = (
           }
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
-            yield* page.route(`${origin}/auth`, () =>
-              Route.continue, { phase: "auth" })
+            yield* page.route(`${origin}/auth`, () => Route.continue, { phase: "auth" })
             yield* page.goto(`${origin}/auth`)
             yield* page.getByText("who are you?").pipe(Expect.toBeVisible)
           }))
