@@ -594,10 +594,13 @@ export const make: (
     entry.onOutcome = onOutcome
     entry.onReceipt = yield* ReplyReceived
     let consumed = false
+    let abandoned = false
     // The caller stopped waiting. A reply still to come is dropped, or handed to the late-reply handler; one
-    // that arrived but wasn't consumed goes straight to the handler.
+    // that arrived but wasn't consumed goes straight to the handler. Only the first call gives the reply up, so
+    // the timeout, a staged command's scope and an ordered command's failure never hand it off twice.
     const abandon = Effect.sync(() => {
-      if (consumed) return
+      if (consumed || abandoned) return
+      abandoned = true
       if (pending.get(entry.id) === entry) {
         if (onLate === undefined) unregister(entry)
         else entry.late = onLate
