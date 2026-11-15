@@ -1032,6 +1032,28 @@ export const declarations = (
           }))
         }), timeout)
 
+      it.effect("reports a fine pointer with hover to a page of a default context", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            // Strider drives the page with a mouse, so a desktop page sees one, headless or not
+            assert.deepStrictEqual(
+              yield* run(
+                page,
+                origin,
+                "return ['(hover: hover)', '(any-hover: hover)', '(pointer: fine)', '(any-pointer: fine)'].map((query) => [query, matchMedia(query).matches])"
+              ),
+              [
+                ["(hover: hover)", true],
+                ["(any-hover: hover)", true],
+                ["(pointer: fine)", true],
+                ["(any-pointer: fine)", true]
+              ]
+            )
+          }))
+        }), timeout)
+
       it.effect("emulates each field, or fails naming what the backend can't", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
