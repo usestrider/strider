@@ -319,7 +319,10 @@ export const contentFrameLaunched = Effect.fnUntraced(function*(state: State, no
   return Option.some(matched.value.id)
 })
 
-/** A file input's files, through the element Automation finds by its path: nothing is clicked or marked. */
+/**
+ * A file input's files, through the element Automation finds by its path: nothing is clicked, and the element's
+ * identity is confirmed by a temporary mark (`nodeHandleOf`).
+ */
 export const setInputFilesLaunched = Effect.fnUntraced(function*(
   state: State,
   node: Adapter.NodeBinding,
