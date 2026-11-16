@@ -85,7 +85,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           const url = yield* fixture(files)
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             yield* page.getByLabel("Files").setInputFiles(made)
             yield* page.getByText("a.txt:text/plain:5:hello|b.csv:text/csv:3:x,y").pipe(Expect.toBeVisible)
             // Browser-host paths cannot be combined with caller-side files
@@ -105,7 +105,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           const url = yield* fixture(files)
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             // A backend that reports no chooser says so (`modules.ts` checks the refusal)
             if (!(yield* supports("fileChooser"))) return
             const handler = yield* FileChooser.handle(page, FileChooser.choose(made))
@@ -137,7 +137,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                   attached ? made[1]! : FileInput.remote(FilePath.Remote.make(path.join(directory, "b.csv")))
                 ]
                 const page = yield* Browser.newPage()
-                yield* page.goto(url)
+                yield* page.goto(url, { waitUntil: "load" })
                 if (chooser) {
                   const handler = yield* FileChooser.handle(page, FileChooser.choose(inputs))
                   yield* page.getByRole("button", { name: "Choose" }).click()
@@ -188,7 +188,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             fs.writeFileSync(file, "on host")
             const remote = FileInput.remote(FilePath.Remote.make(file))
             const page = yield* Browser.newPage()
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             const input = page.getByLabel("Files")
             const out = page.locator("#out")
             // Host-path MIME comes from the browser; transferred files use our MIME inference.
@@ -274,7 +274,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             </script>`)
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* Browser.newPage()
-              yield* page.goto(url)
+              yield* page.goto(url, { waitUntil: "load" })
               const input = page.getByLabel("File")
               yield* input.setInputFiles(made[0]!)
               yield* page.locator("#out").pipe(Expect.toHaveText("1:1"))
@@ -302,7 +302,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           </script>`)
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             yield* page.getByLabel("File").setInputFiles(made[0]!)
             yield* page.locator("#out").pipe(Expect.toHaveText("true"))
           }))
@@ -319,7 +319,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             fs.writeFileSync(first, "first")
             fs.writeFileSync(second, "second")
             const page = yield* Browser.newPage()
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             const input = page.getByLabel("Files")
             const out = page.locator("#out")
             // Both calls use the same native operation as pre-transfer absolute Local uploads.
@@ -355,7 +355,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             const file = path.join(directory, "host.txt")
             fs.writeFileSync(file, "on host")
             const page = yield* Browser.newPage()
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             // This unchanged adapter path was also used by absolute Local inputs before caller transfer.
             yield* page.getByLabel("Files").setInputFiles(FileInput.remote(FilePath.Remote.make(file)))
             yield* page.locator("#out").pipe(Expect.toHaveText(/^host\.txt:[^:]*:7:on host$/))
@@ -383,7 +383,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           </script>`)
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             yield* FileChooser.handle(page, FileChooser.choose(FileInput.local(import.meta.filename)))
             yield* page.getByRole("button", { name: "Choose" }).click()
             yield* page.locator("#out").pipe(Expect.toHaveText("tooling.ts:1"))
@@ -402,7 +402,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-chunks-"))
           yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
           const page = yield* Browser.newPage()
-          yield* page.goto(url)
+          yield* page.goto(url, { waitUntil: "load" })
           for (const length of [0, 1, 65535, 65536, 65537, 131073]) {
             const data = Uint8Array.from({ length }, (_, index) => (index * 17 + 23) % 256)
             const file = path.join(directory, "boundary.bin")
@@ -426,7 +426,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             }
           </script>`)
             const page = yield* Browser.newPage()
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             yield* page.getByLabel("File").setInputFiles(FileInput.bytes("one.txt", "text/plain", text("1")))
             yield* page.locator("#out").pipe(Expect.toHaveText("one.txt"))
             const refused = yield* page.getByLabel("File").setInputFiles(made).pipe(Effect.flip)
@@ -471,7 +471,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               }
               fs.utimesSync(file, new Date(978307200000), new Date(978307200000))
               const page = yield* Browser.newPage()
-              yield* page.goto(url)
+              yield* page.goto(url, { waitUntil: "load" })
               const baseline = process.memoryUsage()
               const peak = { ...baseline }
               const descendantBaselineRss = descendantRss()
@@ -569,7 +569,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             )
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* Browser.newPage()
-              yield* page.goto(url)
+              yield* page.goto(url, { waitUntil: "load" })
               // A page prompts before unloading only after the user has interacted with it
               yield* page.getByRole("button", { name: "Edit" }).click()
               if (!(yield* supports("close.runBeforeUnload"))) {
