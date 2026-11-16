@@ -1362,7 +1362,9 @@ export function engine(render: (root: SnapNode) => string) {
           roleOf(each) === "option" && (dom.getAttribute(each, "aria-selected") ?? "").toLowerCase() === "true"
         )
       if (selected.length === 0 && element instanceof HTMLInputElement) return element.value
-      return selected.map((option) => nameOfElement(option, { ...context, embedded: "descendant" })).join(" ")
+      // An embedded control is never the target itself, so its options keep the traversal they're in: a
+      // reference's every descendant counts, and the target's own content keeps the descendant role rule
+      return selected.map((option) => nameOfElement(option, context)).join(" ")
     }
     if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) return element.value
     return dom.textContent(element) ?? ""
