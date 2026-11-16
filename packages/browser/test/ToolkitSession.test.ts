@@ -3,7 +3,7 @@
  * and the digest calls a page by the name it has as each line is noted.
  */
 import { assert, describe, it } from "@effect/vitest"
-import { Browser, Snapshot, Target } from "@usestrider/browser"
+import { Browser, Dialog, Snapshot, Target } from "@usestrider/browser"
 import { CapturePolicy } from "@usestrider/browser/ai"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -720,7 +720,7 @@ describe("Session's digest", () => {
       assert.includeMembers(lines, [
         "store navigated to https://example.test/cart",
         "popup p2 opened from store",
-        "dialog alert on store",
+        "dialog alert on store dismissed by policy",
         "store closed: PageClosed"
       ])
       assert.isFalse(lines.some((line) => /\b(p1|shop)\b/.test(line)), lines.join("\n"))
@@ -729,16 +729,15 @@ describe("Session's digest", () => {
 
 describe("Session's digest, dialogs", () => {
   // One line for each dialog, naming what decided it: a registration by its handle, or the context's policy
-  const dialogLines = (session: ToolkitImpl.Session) =>
-    Effect.gen(function*() {
-      yield* TestClock.adjust("20 millis")
-      const lines: Array<string> = []
-      for (let turn = 0; turn < 20; turn++) {
-        yield* Effect.yieldNow
-        lines.push(...(yield* sinceLast(session)))
-      }
-      return lines.filter((line) => line.startsWith("dialog"))
-    })
+  const dialogLines = Effect.fnUntraced(function*(session: ToolkitImpl.Session) {
+    yield* TestClock.adjust("20 millis")
+    const lines: Array<string> = []
+    for (let turn = 0; turn < 20; turn++) {
+      yield* Effect.yieldNow
+      lines.push(...(yield* sinceLast(session)))
+    }
+    return lines.filter((line) => line.startsWith("dialog"))
+  })
 
   it.effect("names the dialog registration that decided a dialog, in one line", () =>
     Effect.gen(function*() {
@@ -760,6 +759,7 @@ describe("Session's digest, dialogs", () => {
       yield* session.name(page, "main")
       assert.deepStrictEqual(yield* dialogLines(session), ["dialog confirm on main dismissed by policy"])
     }).pipe(Effect.scoped, Effect.provide(Browser.layerTest("-dialog(confirm)"))))
+
 })
 
 describe("Session.open", () => {

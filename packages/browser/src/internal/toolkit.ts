@@ -271,6 +271,9 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
   const digest: Array<
     { readonly line: string; readonly navigation?: PageNavigation.Id; readonly page?: Target.NavigableId }
   > = []
+  // Dialogs whose line is noted and not yet decided, and dialogs decided before their opening was recorded
+  const openDialogs = new Map<Dialog.PromptId, { line: string; readonly page: Target.NavigableId }>()
+  const decidedDialogs = new Map<Dialog.PromptId, Target.NavigableId>()
   // Results that came before their event, which the event is then not reported for
   const reportedNavigations = new Map<Target.NavigableId, Set<PageNavigation.Id>>()
   // Navigations a call's digest already delivered, kept only while a call is running, since only a running call
@@ -326,6 +329,8 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
       const grant = controlled.get(page.id)
       reportedNavigations.delete(page.id)
       deliveredNavigations.delete(page.id)
+      for (const [id, open] of openDialogs) if (open.page === page.id) openDialogs.delete(id)
+      for (const [id, each] of decidedDialogs) if (each === page.id) decidedDialogs.delete(id)
       watching.delete(page.id)
       controlled.delete(page.id)
       return (watcher === undefined ? Effect.void : Scope.close(watcher, Exit.void)).pipe(
@@ -392,6 +397,29 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
       : `console ${message.level} on ${where} (text not sent)`
   const originName = (origin: Target.EventOrigin) => origin._tag === "Page" ? nameOfEntry(origin.page) : "a worker"
 
+  // One line for each dialog, naming what decided it. A dialog's line is noted as it opens, saying it's open, and
+  // its decision completes it while no result has taken it yet; once one has, the decision is a line of its own.
+  // Either can be recorded first, since each comes from a channel of its own.
+  const dialogLine = (prompt: Model.PromptEvent) =>
+    `dialog ${prompt.kind}${prompt.message === "" ? "" : ` "${prompt.message}"`} on ${nameOfEntry(prompt.page)}`
+  const dialogOpened = (prompt: Model.PromptEvent) => {
+    if (decidedDialogs.delete(prompt.prompt)) return
+    const entry = { line: `${dialogLine(prompt)}, open`, page: prompt.page }
+    openDialogs.set(prompt.prompt, entry)
+    digest.push(entry)
+  }
+  const dialogDecided = (prompt: Model.PromptEvent, decision: string, by: string) => {
+    const line = `${dialogLine(prompt)} ${decision} by ${by}`
+    const open = openDialogs.get(prompt.prompt)
+    if (open === undefined) {
+      decidedDialogs.set(prompt.prompt, prompt.page)
+      return note(line)
+    }
+    openDialogs.delete(prompt.prompt)
+    if (digest.includes(open)) open.line = line
+    else note(line)
+  }
+
   /** A page's name as it is now, which `page name` may have changed since `named` was given. */
   const nameNow = (page: Page.Page, named: string) => nameById.get(page.id) ?? named
 
@@ -437,11 +465,20 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
                 }`)
               }))
         }), within)
-      yield* drain(
-        pageEntry.events.dialog,
-        (prompt) => note(`dialog ${prompt.kind}${prompt.message === "" ? "" : ` "${prompt.message}"`} on ${name()}`),
-        within
-      )
+      yield* drain(pageEntry.events.dialog, dialogOpened, within)
+      yield* drain(pageEntry.events.handledDialog, (handled) =>
+        dialogDecided(
+          handled.prompt,
+          handled.decision._tag !== "Accept"
+            ? "dismissed"
+            : Option.isSome(handled.decision.promptText)
+            ? "answered"
+            : "accepted",
+          Option.match(registrationName(handled.registration), {
+            onNone: () => "a handler",
+            onSome: (id) => id
+          })
+        ), within)
       yield* Effect.forkIn(
         // Cleanup must be a sibling: closing this watcher from its own fiber would interrupt cleanup itself.
         Effect.flatMap(page.closed, () => Effect.forkIn(forget(page), scope).pipe(Effect.uninterruptible)),
@@ -453,11 +490,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
     yield* drain(events.autoResolution, (resolution) => {
       switch (resolution._tag) {
         case "Dialog":
-          note(
-            `dialog ${resolution.prompt.kind} on ${
-              nameOfEntry(resolution.prompt.page)
-            } ${resolution.decision}ed by policy`
-          )
+          dialogDecided(resolution.prompt, `${resolution.decision}ed`, "policy")
           return
         case "FileChooser":
           note(`file chooser on ${nameOfEntry(resolution.chooser.navigable)} canceled by policy`)
@@ -566,6 +599,10 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
   const registrations = new Map<string, Declaration.Registration>()
   let waitCount = 0
   let registrationCount = 0
+  const registrationName = (registration: Declaration.Registration): Option.Option<string> => {
+    for (const [id, each] of registrations) if (each === registration) return Option.some(id)
+    return Option.none()
+  }
   const register = (registration: Declaration.Registration) =>
     Effect.sync(() => {
       const id = `r${++registrationCount}`
