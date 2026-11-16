@@ -19,7 +19,7 @@ import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
-import type { TestContext } from "vitest"
+import type { TestContext, TestOptions } from "vitest"
 import type * as Adapter from "../../../src/internal/adapter.ts"
 import type * as BoundedAdapter from "../../../src/internal/boundedAdapter.ts"
 import * as BrowserClock from "../../../src/internal/browserClock.ts"
@@ -268,6 +268,12 @@ export const readStorage = (
     )
   )
 
+/** The shared context itself, for a case that declares on it; what it declares must end with the case's scope. */
+export const current = Effect.gen(function*() {
+  const shared = yield* Shared
+  return yield* shared.current
+})
+
 /**
  * A page in the shared context, closed with the scope. Before it closes, the context's cookies and storage are read
  * from it, while its document is still there to read them from.
@@ -290,7 +296,7 @@ export const guard = <R>(it: { readonly effect: Vitest.Tester<R | Shared | Scope
   effect: <A, E>(
     name: string,
     self: (context: TestContext) => Effect.Effect<A, E, R | Shared | Scope.Scope>,
-    timeout?: number
+    timeout?: number | TestOptions
   ) =>
     it.effect(name, (context) =>
       Effect.gen(function*() {

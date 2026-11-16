@@ -1418,7 +1418,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 mode === "visible control" ? 0 : 120
               }px}#tail{height:160px}</style><div id="s"><a id="go" href="#go">Click me</a><div id="tail"></div></div><output id="out"></output><script>document.querySelector('#go').addEventListener('click',e=>{e.preventDefault();document.querySelector('#out').textContent=String(e.isTrusted)})</script>`
             )
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url, { waitUntil: "load" })
             const geometry = () =>
               page.evaluateInMainWorld(() => {
@@ -1507,7 +1507,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   mode === "overlay" ? "<div style=\"position:fixed;inset:0;background:white\"></div>" : ""
                 }<output id="out"></output><script>go.onclick=e=>{e.preventDefault();out.textContent=JSON.stringify({trusted:e.isTrusted,x:e.offsetX,y:e.offsetY,clientY:e.clientY,top:go.getBoundingClientRect().top})}</script>`
               )
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               yield* page.goto(url, { waitUntil: "load" })
               const scrolls = () =>
                 page.evaluateInMainWorld(() =>
@@ -1564,7 +1564,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             const { url } = yield* fixture(() =>
               `<!doctype html><style>body{margin:0}#go{position:absolute;left:20px;top:110.5px;display:block;width:100px;height:24px}</style><a id="go" href="#">Go</a><output id="out"></output><script>go.onpointerdown=e=>window.pointerY=e.clientY;go.onclick=e=>{e.preventDefault();out.textContent=JSON.stringify({trusted:e.isTrusted,x:e.offsetX,y:e.offsetY,clientY:e.clientY,pointerY:window.pointerY,top:go.getBoundingClientRect().top})}</script>`
             )
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url, { waitUntil: "load" })
             yield* page.locator("#go").click({ position: { x: 7, y: 9 } })
             const click = JSON.parse(yield* page.locator("#out").readText)
@@ -1600,7 +1600,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             const { url } = yield* fixture(() =>
               `<!doctype html><style>body{margin:0}#s{position:absolute;left:20px;top:100px;width:240px;height:150px;overflow:auto}#clip{display:flow-root;margin-top:80px;width:200px;height:40px;${clipping}}#go{display:block;margin-top:120px;width:100px;height:24px}#tail{height:600px}</style><div id="s"><div id="clip"><a id="go" href="#">Go</a></div><div id="tail"></div></div><output id="out"></output><script>go.onclick=e=>{e.preventDefault();out.textContent=String(e.isTrusted)}</script>`
             )
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const before = yield* page.evaluateInMainWorld(() => document.getElementById("s")!.scrollTop)
             const clipped = yield* page.evaluateInMainWorld(() => {
@@ -1631,7 +1631,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 `<style>body{margin:0}#s{position:absolute;left:20px;top:100px;width:240px;height:60px;overflow:auto}iframe{display:block;margin-top:120px;width:200px;height:40px;border:0}#tail{height:300px}</style><div id="s"><iframe src="${
                   fixtureUrl(crossSite, leaf)
                 }"></iframe><div id="tail"></div></div>`
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               yield* page.goto(fixtureUrl(origin, html), { waitUntil: "load" })
               const frame = page.frame(page.locator("iframe"))
               const error = yield* frame.locator("#go").click({ checks: { inViewport: viewport } }).pipe(
@@ -1660,7 +1660,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             const { url } = yield* fixture(() =>
               `<!doctype html><style>body{margin:0}#s{position:absolute;left:20px;top:100px;width:240px;height:60px;overflow:auto}iframe{display:block;margin-top:120px;width:200px;height:40px;border:0}#tail{height:300px}</style><div id="s"><iframe srcdoc='<style>body{margin:0}</style><a id="go" href="#">Go</a><output id="out"></output><script>go.onclick=e=>{e.preventDefault();out.textContent=String(e.isTrusted)}</script>'></iframe><div id="tail"></div></div>`
             )
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url, { waitUntil: "load" })
             // The frame lies inside the document viewport but wholly below the scroller's client area.
             const geometry = yield* page.evaluateInMainWorld(() => {
@@ -5243,7 +5243,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                       </script>`
                     )
                     yield* Effect.scoped(Effect.gen(function*() {
-                      const page = yield* Browser.newPage()
+                      const page = yield* SharedContext.newPage
                       yield* page.goto(url, { waitUntil: "load" })
                       const selected = page.locator(`#${target}`)
                       // An explicit label point keeps its nested span from becoming the hit target.
@@ -5317,7 +5317,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               <output id="out"></output><script>document.addEventListener("pointerdown", () => out.textContent = "sent", true)</script>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               yield* page.goto(url, { waitUntil: "load" })
               const go = page.locator("#go")
               // A completed trial establishes the engine and selected target's pointer readiness.
@@ -5356,7 +5356,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               <output id="out"></output><script>document.addEventListener("pointerdown", () => out.textContent = "sent", true)</script>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               yield* page.goto(url, { waitUntil: "load" })
               const go = page.locator("#go")
               yield* go.click({ trial: true, checks: { enabled: false } })

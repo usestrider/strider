@@ -157,7 +157,8 @@ export const declarations = (
   backend: Layer.Layer<Browser.Browser, unknown>
 ) =>
   describe(`${name} declarations`, () => {
-    layer(backend, { excludeTestServices: true, timeout })((it) => {
+    layer(SharedContext.layer(backend), { excludeTestServices: true, timeout })((suite) => {
+      const it = SharedContext.guard(suite)
       it.effect("accepts untrusted HTTPS only in the opted-in context, or refuses without changing siblings", () =>
         Effect.gen(function*() {
           const { origin } = yield* tlsSite
@@ -474,7 +475,7 @@ export const declarations = (
       it.effect("applies and releases a route immediately before navigation on a live page", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
-          const page = yield* Browser.newPage()
+          const page = yield* SharedContext.newPage
           yield* page.goto(`${origin}/hello`)
           for (let n = 0; n < 10; n++) {
             yield* Effect.scoped(Effect.gen(function*() {
@@ -492,7 +493,7 @@ export const declarations = (
       it.effect("continues a paused request when its last route is removed", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
-          const page = yield* Browser.newPage()
+          const page = yield* SharedContext.newPage
           const entered = yield* Deferred.make<void>()
           const interrupted = yield* Deferred.make<void>()
           const route = yield* page.route(`${origin}/json*`, () =>
@@ -601,7 +602,7 @@ export const declarations = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const blocked = yield* page.route(`${origin}/analytics/**`, () =>
               Route.abort())
             const result = yield* run(
@@ -618,7 +619,7 @@ export const declarations = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.context.route(`${origin}/api/**`, () =>
               Route.fulfill(json({ from: "context" })))
             yield* page.route(
@@ -648,7 +649,7 @@ export const declarations = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const bodies: Array<string> = []
             yield* page.route(`${origin}/echo*`, (intercepted) =>
               Effect.flatMap(intercepted.requestBody, (body) => {
@@ -673,7 +674,7 @@ export const declarations = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(`${origin}/hello`)
             yield* page.route(`${origin}/json*`, () =>
               Effect.fail("no answer"))
@@ -690,7 +691,7 @@ export const declarations = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const seen: Array<string> = []
             yield* page.route(`${origin}/json*`, (intercepted) =>
               Effect.gen(function*() {
@@ -710,7 +711,7 @@ export const declarations = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.route(
               `${origin}/json*`,
               ({ response }) =>
@@ -734,7 +735,7 @@ export const declarations = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const route = yield* page.route(origin, () =>
               Route.fulfill(HttpServerResponse.html("<title>routed</title>")))
             yield* page.goto(`${origin}/`)
@@ -761,7 +762,7 @@ export const declarations = (
         Effect.gen(function*() {
           const { origin, served } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const route = yield* page.route(`${origin}/cached.js*`, () =>
               Route.continue)
             const result = yield* run(
@@ -783,10 +784,10 @@ export const declarations = (
           Effect.gen(function*() {
             const { origin, served } = yield* site
             yield* Effect.scoped(Effect.gen(function*() {
-              const context = yield* Browser.newContext()
+              const context = yield* SharedContext.current
               const route = yield* context.route(`${origin}/cached.js*`, () =>
                 Route.continue)
-              const page = yield* context.newPage
+              const page = yield* SharedContext.newPage
               const result = yield* run(
                 page,
                 origin,
@@ -805,7 +806,7 @@ export const declarations = (
       it.effect("sends each fetch of a cacheable URL from a new cross-site frame to the server", () =>
         Effect.gen(function*() {
           const { crossSite, origin, served } = yield* site
-          const page = yield* Browser.newPage()
+          const page = yield* SharedContext.newPage
           const route = yield* page.route(`${crossSite}/cached.js*`, () =>
             Route.continue)
           const child = fixtureUrl(
@@ -834,7 +835,7 @@ export const declarations = (
           () =>
             Effect.gen(function*() {
               const { origin, served } = yield* site
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               yield* (scope === "page" ? page : page.context).route(`${origin}/cached.js*`, () =>
                 Route.continue)
               const script =
@@ -862,7 +863,7 @@ export const declarations = (
         Effect.gen(function*() {
           const { origin, served } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const fetched = () =>
               served.filter((request) =>
                 request.path === "/cached.js?released"
@@ -884,7 +885,7 @@ export const declarations = (
         "sends each fetch of a cacheable URL to the server from a document whose navigation was held as its route was declared",
         () =>
           Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             let arrived!: () => void
             const arrival = new Promise<void>((resolve) => {
               arrived = resolve
@@ -1134,7 +1135,7 @@ export const declarations = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const registered = page.route(
               `${origin}/auth`,
               () => Route.provideCredentials({ username: "strider", password: Redacted.make("secret") }),
@@ -1160,7 +1161,7 @@ export const declarations = (
             return
           }
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.route(`${origin}/auth`, () => Route.continue, { phase: "auth" })
             yield* page.goto(`${origin}/auth`)
             yield* page.getByText("who are you?").pipe(Expect.toBeVisible)
@@ -1172,7 +1173,7 @@ export const declarations = (
           const { origin } = yield* site
           const challenges = yield* status("network.challenges")
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             if (challenges === "unsupported") {
               // The browser waits on its own answer, and the navigation never commits
               const waited = yield* Effect.flip(page.goto(`${origin}/auth`).pipe(Deadline.within("2 seconds")))
@@ -1198,7 +1199,7 @@ export const declarations = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.route(`${origin}/blocked*`, () =>
               Route.abort())
             const failed = yield* Effect.flip(page.goto(`${origin}/blocked`))
@@ -1221,7 +1222,7 @@ export const declarations = (
       it.effect("rejects a pattern that doesn't compile", () =>
         Effect.gen(function*() {
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const error = yield* Effect.flip(
               page.route("https://example.com/:id(", () =>
                 Route.continue)
@@ -1318,7 +1319,7 @@ export const declarations = (
           Effect.gen(function*() {
             const { origin } = yield* site
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               yield* page.context.addInitScript({ source: "window.__launchedTiming = 'before'" }, { timing })
               yield* page.goto(
                 fixtureUrl(origin, "<h1><script>document.write(window.__launchedTiming ?? 'missing')</script></h1>")
@@ -1334,7 +1335,7 @@ export const declarations = (
           const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "strider-init-")), "script.js")
           fs.writeFileSync(file, "(window.order = window.order || []).push('path')")
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const helper = yield* page.context.addInitScript(() => {
               ;(window as unknown as { order: Array<string> }).order = ["helper"]
             })
@@ -1367,7 +1368,7 @@ export const declarations = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const helper = yield* page.addInitScript({ source: "window.order = ['helper']" })
             yield* page.addInitScript({ source: "window.order.push('dependent')" }, { after: [helper] })
             assert.deepStrictEqual(yield* run(page, origin, "return window.order"), ["helper", "dependent"])
@@ -1389,7 +1390,7 @@ export const declarations = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const first = yield* page.addInitScript({ source: "(window.ran ??= []).push('first')" })
             const second = yield* page.addInitScript({ source: "(window.ran ??= []).push('second')" })
             assert.deepStrictEqual(yield* run(page, origin, "return window.ran"), ["first", "second"])
@@ -1402,7 +1403,7 @@ export const declarations = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const expected: Array<string> = []
             for (let i = 0; i < 10; i++) {
               expected.push(`a${i}`, `b${i}`)
@@ -1421,7 +1422,7 @@ export const declarations = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const added = page.addInitScript({ source: "window.isolatedRan = true" }, { world: "isolated" })
             if (name === "WebKit") {
               const error = yield* Effect.flip(added)
@@ -1443,7 +1444,7 @@ export const declarations = (
             emulation: { extraHTTPHeaders: { "X-Strider": "context", "x-context": "yes" } }
           })
           const sibling = yield* page.context.newPage
-          const isolated = yield* Browser.newPage()
+          const isolated = yield* SharedContext.newPage
           const read = (target: Page.Page) =>
             target.evaluateInMainWorld(() =>
               fetch("/headers").then((r) =>
@@ -1508,7 +1509,7 @@ export const declarations = (
 
       it.effect("rejects invalid extra headers before applying any field", () =>
         Effect.gen(function*() {
-          const page = yield* Browser.newPage()
+          const page = yield* SharedContext.newPage
           const width = yield* page.evaluateInMainWorld(() =>
             innerWidth
           )
@@ -1619,7 +1620,7 @@ export const declarations = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             if (!(yield* supports("permissions"))) {
               const error = yield* Effect.flip(page.context.grant(["geolocation"], { origin }))
               assert(Declaration.isDeclarationError(error) && error.reason._tag === "Unsupported", String(error))
@@ -1645,7 +1646,7 @@ export const declarations = (
           const { origin } = yield* site
           const query = "return navigator.permissions.query({ name: 'notifications' }).then((p) => p.state)"
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             if (!(yield* supports("permissions"))) {
               const error = yield* Effect.flip(page.context.grant(["notifications"], { origin }))
               assert(Declaration.isDeclarationError(error) && error.reason._tag === "Unsupported", String(error))
@@ -1700,7 +1701,7 @@ export const declarations = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const script = page.addInitScript({ source: "self.__marked = 'yes'" }, { workers: true })
             const clock = page.clock.install({ mode: "controlled", at: "2030-01-02T03:04:05Z" }, { workers: true })
             if (name === "Firefox") {
@@ -1743,7 +1744,7 @@ export const declarations = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.clock.install({ mode: "controlled", at: "2026-01-01T09:00:00Z" })
             yield* page.goto(fixtureUrl(
               origin,
@@ -1765,7 +1766,7 @@ export const declarations = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.clock.install({ mode: "controlled", at: "2026-01-01T00:00:00Z" })
             yield* page.setContent("<p>clock</p>")
             for (let i = 0; i < 20; i++) {
@@ -1784,7 +1785,7 @@ export const declarations = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const notInstalled = yield* Effect.flip(page.clock.adjust("1 second"))
             assert(PageClock.isPageClockError(notInstalled) && notInstalled.reason._tag === "NotInstalled")
             const fixed = yield* page.clock.install({ mode: "fixed", at: "2030-05-05T05:05:05Z" })
@@ -1821,7 +1822,7 @@ export const declarations = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const first = yield* Browser.newPage()
+            const first = yield* SharedContext.newPage
             yield* first.context.clock.install({ mode: "controlled", at: "2026-03-03T03:03:03Z" })
             const second = yield* first.context.newPage
             yield* first.context.clock.adjust("1 hour")
