@@ -18,6 +18,7 @@ import * as Fetch from "../../cdp/Fetch.ts"
 import * as Network from "../../cdp/Network.ts"
 import * as Page from "../../cdp/Page.ts"
 import * as Runtime from "../../cdp/Runtime.ts"
+import type * as Target from "../../cdp/Target.ts"
 import type * as Deadline from "../../Deadline.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
 import type * as Adapter from "../adapter.ts"
@@ -379,6 +380,54 @@ const kindsFor = (page: PageEntry, overrides: ReadonlyMap<Adapter.Override["_tag
   return kinds
 }
 
+/** The browser window that holds a page target, read once and kept. */
+const windowOf = (state: State, target: TargetEntry) =>
+  target.windowId !== undefined
+    ? Effect.succeed(target.windowId)
+    : BrowserCdp.getWindowForTarget({ targetId: target.targetId as Target.TargetID }).pipe(
+      Protocol.on(state.root()),
+      Effect.map(({ windowId }) => {
+        target.windowId = windowId
+        return windowId
+      })
+    )
+
+type Dimensions = { readonly width: number; readonly height: number }
+
+/**
+ * A popup's original dimensions, decided at its gate, or undefined for a page with no opener, which measures its
+ * own. Chromium starts a tab's renderer at its opener's layout, which is the override's while the opener emulates a
+ * viewport, and lays it out at its window's size only once the override is cleared, so a popup's gate measures a
+ * size it may never return to. Only a page of its window says what that size is: a window that `window.open` opens
+ * as a popup holds no tabs, so a popup that shares its window with another page of its context is a tab, and tabs
+ * in one window have one size. It takes that page's recorded dimensions. A popup alone in its window, beside no page
+ * with recorded dimensions, or whose window can't be read has unknown dimensions (null), so its restore clears the
+ * override without confirming it.
+ */
+const popupBaseline = Effect.fnUntraced(function*(
+  state: State,
+  target: TargetEntry,
+  page: PageEntry
+): Effect.fn.Return<Dimensions | null | undefined> {
+  if (page.openerId === undefined) return undefined
+  const own = yield* windowOf(state, target).pipe(Effect.option)
+  if (Option.isNone(own)) return null
+  const others = [...state.targets.values()].filter((other) =>
+    other !== target && other.kind === "page" && !other.ended && other.page !== undefined &&
+    other.page.context === page.context && other.viewport !== undefined && other.viewport !== null
+  )
+  const windows = yield* Effect.forEach(
+    others,
+    (other) => windowOf(state, other).pipe(Effect.option),
+    { concurrency: "unbounded" }
+  )
+  const mate = others.find((_, index) => {
+    const window = windows[index]!
+    return Option.isSome(window) && window.value === own.value
+  })
+  return mate?.viewport ?? null
+})
+
 /** What a new page or frame gets before its scripts run: the declarations in force for its page. */
 export const configureTarget = Effect.fnUntraced(
   function*(state: State, target: TargetEntry, page: PageEntry, setup?: Setup) {
@@ -423,11 +472,16 @@ export const configureTarget = Effect.fnUntraced(
           if (override?._tag !== "Viewport") {
             return
           }
-          // The initial blank document has no scrollbars. Queue its dimensions before changing them, without
-          // creating an isolated world whose identifier would require a renderer reply before resume.
-          yield* setup.send(Page.getLayoutMetrics(), ({ cssLayoutViewport }) => {
-            target.viewport = { width: cssLayoutViewport.clientWidth, height: cssLayoutViewport.clientHeight }
-          })
+          const baseline = yield* popupBaseline(state, target, page)
+          if (baseline !== undefined) {
+            target.viewport = baseline
+          } else {
+            // The initial blank document has no scrollbars. Queue its dimensions before changing them, without
+            // creating an isolated world whose identifier would require a renderer reply before resume.
+            yield* setup.send(Page.getLayoutMetrics(), ({ cssLayoutViewport }) => {
+              target.viewport = { width: cssLayoutViewport.clientWidth, height: cssLayoutViewport.clientHeight }
+            })
+          }
           yield* setup.send(Emulation.setDeviceMetricsOverride({
             width: override.width,
             height: override.height,

@@ -1,5 +1,28 @@
 # @usestrider/browser
 
+## 0.12.0
+
+### Breaking changes
+
+- **`fill` and `insertText` send no key events on Firefox and stock WebKit** (#366). Text goes into the focused element, in whichever frame has focus, through the page's editing command, as Chromium's `Input.insertText` does: the page gets one cancelable `beforeinput` with the whole text, then `input`, and a canceled `beforeinput` inserts nothing. On Firefox, whose editing command fires no `beforeinput`, Strider dispatches that event itself, untrusted, and `input.insertText` is `partial` there. On stock WebKit a newline goes into a textarea as a line break instead of pressing Enter. Code that needs key events should type with `pressSequentially` or `keyboard.press`.
+- **Role queries, accessible names, and snapshots leave out inert elements** (#355): an element under `inert`, and, while a `showModal()` dialog is open, everything outside the topmost one. Readiness follows the same rule, so a modal dialog opened inside an inert subtree escapes it, and only the topmost open modal blocks the rest. A role locator that matched a button behind an open modal now matches nothing; pass `includeHidden: true` to match it on purpose.
+- **An element inside a disabled control is disabled** (#359). `isEnabled`, `toBeEnabled`, `toBeDisabled`, and the enabled check actions run read the nearest enclosing button, or element with the role `button`, `checkbox`, or `radio`, through shadow roots and slots. A click on a span inside `<button disabled>` used to report success with nothing clicked; it now waits for the button to be enabled.
+- **A chained `getByText` matches the locator's own element** (#362), as Playwright's does: `page.locator(".badge").getByText("Resolved")` finds the badge. A `filter` whose `has` or `hasNot` is built on `getByText` counts the element being tested. Search only inside with `locator.locator("*").getByText(…)`.
+- **`strider page new`, `goto`, the MCP tools, and `BrowserToolkit` wait for the parsed document** (#367), `domContentLoaded`, instead of returning at commit; `--wait-until` (`waitUntil` on the tools) chooses another point, and `export test` writes it. `find` reads the page on every call, so an early empty read no longer sticks. `Page.goto` still returns at commit.
+- **The `strider` digest reports each dialog in one line naming what decided it** (#368): a registration by its handle, another handler, or the context's policy. A handler's decision wasn't reported before, and a policy's was reported twice.
+
+### Fixed
+
+- **Chromium and stock WebKit report the browser's own console messages** (#358), such as a Content Security Policy violation, a request blocked by CORS, or a failed load, as `ConsoleMessage`s. Firefox sends them as script errors, so they arrive there as `UncaughtException`s, as its `console` capability says.
+- **`display: contents` elements are found by role** (#364), names that come through a `<slot>` are no longer empty, and such an element's text counts as visible.
+- **Firefox keeps a profile's cookies and localStorage** (#353): closing a launched Firefox asks it to close and waits up to five seconds for it to exit, as Chromium's does, so a `userDataDir` you own keeps what was written just before the close.
+- **Closing a Chromium context made with `emulation` no longer waits 30 seconds** to restore a viewport its removal discards (#354), and **releasing a viewport while a popup is open no longer waits for a size the popup never had** (#365).
+- **Headless Chromium and Firefox report a fine pointer with hover** (#357), so pages show their desktop layout under Strider's default launch.
+- **Overlapping `page.clock` calls and init scripts declared at once on Chromium** no longer fail with "Script not found" or leave a replaced script running (#356).
+- **A click with `receivesPointer` off lands on whatever covers the element** (#351), instead of being stopped by its own guard and retried until it timed out.
+- **A video writer gets `Deadline.DefaultBudget` to finish** after the recording ends (#361), 30 seconds unless set, instead of a fixed five, so a recording no longer fails while the encoder catches up.
+- **A `Timeout` with nothing observed names the call the browser left unanswered** (#363): "The browser didn't answer the call into the page before the deadline".
+
 ## 0.11.0
 
 ### Breaking changes

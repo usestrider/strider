@@ -12,6 +12,10 @@
  *   creation);
  * - a release is cleanup, never bounded by an operation, so a page or context still closes after a deadline passed.
  *
+ * A call the browser leaves unanswered at the deadline, whether it timed out or was interrupted once the deadline had
+ * passed, is noted on the operation's record with its `Timeout`'s hint. A `Timeout` the operation builds later, as an
+ * action does from what it observed, keeps that hint where it has none of its own.
+ *
  * Outside an operation, as in the model's own fibers and finalizers, a call is the adapter's, under
  * `CommandTimeout`.
  */
@@ -20,7 +24,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
-import type * as Deadline from "../Deadline.ts"
+import * as Deadline from "../Deadline.ts"
 import type * as Target from "../Target.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as Adapter from "./adapter.ts"
@@ -138,6 +142,24 @@ const hint = (kind: Kind) => (): Option.Option<string> =>
   )
 
 /**
+ * `call`, noting on the record when the browser leaves it unanswered at the deadline: when it gets no reply by then,
+ * or is interrupted once the deadline has passed, as when the operation's own wait for the deadline ends first. An
+ * error the operation builds then, with nothing more specific to say, says what the browser didn't answer.
+ */
+const noting = <A, E, R>(record: Operation.Record, kind: Kind, call: Effect.Effect<A, E, R>) =>
+  call.pipe(
+    Effect.onExit((exit) =>
+      Effect.sync(() => {
+        if (Exit.isSuccess(exit)) return
+        const unanswered = Cause.hasInterrupts(exit.cause)
+          ? record.left() <= 0
+          : exit.cause.reasons.some((reason) => Cause.isFailReason(reason) && Deadline.isTimeout(reason.error))
+        if (unanswered) record.noteUnanswered(Option.getOrThrow(hint(kind)()))
+      })
+    )
+  )
+
+/**
  * A creation, bounded: it runs in a fiber of its own, which the operation waits for until its deadline. If the
  * operation stops waiting first, what the creation makes is closed once it exists.
  */
@@ -150,10 +172,14 @@ const creating = <A, E, R>(
   Effect.gen(function*() {
     record.markSent()
     const fiber = yield* Effect.forkDetach(call)
-    return yield* record.bound(Operation.answered(record, Fiber.join(fiber)), () => {
-      record.noteCleanup({ _tag: "Pending" })
-      return hint(kind)()
-    }).pipe(
+    return yield* noting(
+      record,
+      kind,
+      record.bound(Operation.answered(record, Fiber.join(fiber)), () => {
+        record.noteCleanup({ _tag: "Pending" })
+        return hint(kind)()
+      })
+    ).pipe(
       Effect.onExit((exit) =>
         Exit.isSuccess(exit)
           ? Effect.void
@@ -194,11 +220,11 @@ export const make = (adapter: Connection): Bounded => {
         )
         switch (kind._tag) {
           case "Read":
-            return record.bound(unbounded, hint(kind))
+            return noting(record, kind, record.bound(unbounded, hint(kind)))
           case "Write":
             return Effect.suspend(() => {
               record.markSent()
-              return record.bound(Operation.answered(record, unbounded), hint(kind))
+              return noting(record, kind, record.bound(Operation.answered(record, unbounded), hint(kind)))
             })
           case "Create":
             return creating(record, kind, unbounded, (made) => close!(adapter, made as never))
@@ -213,12 +239,16 @@ export const make = (adapter: Connection): Bounded => {
         if (Option.isNone(current)) return call
         const record = current.value
         if (kind._tag === "Write") record.markSent()
-        return record.bound(
-          (kind._tag === "Write" ? Operation.answered(record, call) : call).pipe(
-            Effect.provideService(ProtocolClient.CommandDeadline, Option.some(record.budget.at)),
-            Effect.mapError((error) => noReply(error) ? record.timeout(hint(kind)()) : error)
-          ),
-          hint(kind)
+        return noting(
+          record,
+          kind,
+          record.bound(
+            (kind._tag === "Write" ? Operation.answered(record, call) : call).pipe(
+              Effect.provideService(ProtocolClient.CommandDeadline, Option.some(record.budget.at)),
+              Effect.mapError((error) => noReply(error) ? record.timeout(hint(kind)()) : error)
+            ),
+            hint(kind)
+          )
         )
       })
     bounded.claims = {
