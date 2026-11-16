@@ -315,6 +315,22 @@ const play = Effect.fnUntraced(function*(order: ReadonlyArray<readonly [string, 
 })
 
 describe("CdpAdapter state", () => {
+  it.effect("keeps mouse capture when an unrelated frame in the same session detaches", () =>
+    Effect.gen(function*() {
+      const { page, state, target } = yield* withPage()
+      const parent = state.frames.get("T1")!
+      const owner = { ...target, targetId: "outer" }
+      const outer = Tree.addFrame(state, "outer", parent, owner)
+      owner.frame = outer
+      const inner = Tree.addFrame(state, "inner", outer, owner)
+      const captured = { target: owner, x: 30, y: 30 }
+      state.pressedIn.set(page.id, [outer])
+      state.pressedOn.set(page.id, captured)
+      Tree.removeFrame(state, inner, new Target.FrameDetached({}), "cdp:Page.frameDetached")
+      assert.strictEqual(state.pressedOn.get(page.id), captured)
+      assert.deepStrictEqual(state.pressedIn.get(page.id), [outer])
+    }))
+
   it.effect("forgets the captured mouse session when its frame detaches", () =>
     Effect.gen(function*() {
       const { page, state, target } = yield* withPage()
