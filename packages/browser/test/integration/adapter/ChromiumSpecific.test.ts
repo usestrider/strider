@@ -1093,6 +1093,33 @@ describe("Chromium adapter, CDP only", () => {
         timeout
       )
 
+      it.effect(
+        "enters an HTML drag when dragstart turns off draggability",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const order: Array<string> = []
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(
+                `${served.origin}/fixture?html=${
+                  encodeURIComponent(dragFixture.replace("log+='1'", "log+='1';this.draggable=false"))
+                }`
+              )
+              yield* page.locator("#source").hover()
+              yield* Effect.scoped(Effect.gen(function*() {
+                const held = yield* page.mouse.hold("left")
+                yield* page.locator("#target").hover()
+                assert.strictEqual(yield* page.evaluateInMainWorld(() => (window as any).log), "12", order.join(", "))
+                yield* held.release
+              }))
+              const log = yield* page.evaluateInMainWorld(() => (window as any).log)
+              assert.strictEqual(log, "1234", order.join(", "))
+            }).pipe(Effect.provide(recordingDrags(order)))
+          }),
+        timeout
+      )
+
       it.effect("keeps Escape cancellation separate from the next gesture", () =>
         Effect.gen(function*() {
           const served = yield* site
@@ -1155,6 +1182,29 @@ describe("Chromium adapter, CDP only", () => {
               const page = yield* Browser.newPage()
               const fixture =
                 `<script>window.log='';addEventListener('dragstart',e=>console.log('drag source',e.target.id,e.composedPath()[0].id),true)</script><div id="host"></div><script>host.attachShadow({mode:'closed'}).innerHTML=\`<div id="source" draggable="true" ondragend="console.log('source dragend')" ondragstart="window.log+='1';this.remove()" style="position:absolute;left:10px;top:10px;width:60px;height:60px;background:red">Source</div>\`</script><div id="target" style="position:absolute;left:300px;top:10px;width:60px;height:60px">Target</div>`
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(fixture)}`)
+              yield* page.mouse.move({ x: 40, y: 40 })
+              yield* Effect.scoped(Effect.gen(function*() {
+                const held = yield* page.mouse.hold("left")
+                yield* page.locator("#target").hover().pipe(Deadline.within("3 seconds"))
+                yield* held.release
+              }))
+              assert.strictEqual(yield* page.evaluateInMainWorld(() => (window as any).log), "1", order.join(", "))
+            }).pipe(Effect.provide(recordingDrags(order)))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "finishes a held move when dragstart removes a closed-shadow-tree source inside a draggable host",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const order: Array<string> = []
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const fixture =
+                `<script>window.log='';addEventListener('dragstart',e=>console.log('drag source',e.target.id,e.composedPath()[0].id),true)</script><div id="host" draggable="true"></div><script>host.attachShadow({mode:'closed'}).innerHTML=\`<div id="source" draggable="true" ondragend="console.log('source dragend')" ondragstart="window.log+='1';this.remove()" style="position:absolute;left:10px;top:10px;width:60px;height:60px;background:red">Source</div>\`</script><div id="target" style="position:absolute;left:300px;top:10px;width:60px;height:60px">Target</div>`
               yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(fixture)}`)
               yield* page.mouse.move({ x: 40, y: 40 })
               yield* Effect.scoped(Effect.gen(function*() {
