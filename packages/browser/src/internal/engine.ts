@@ -1862,8 +1862,10 @@ export function engine(render: (root: SnapNode) => string) {
     return element
   }
 
-  // Enabled as a user sees it: a span inside a disabled button is as disabled as the button
-  const enabledControl = (element: Element): boolean => enabled(flatEnclosingControl(element))
+  // Enabled as a user sees it: an element is enabled only when it and its enclosing control both are, so a span inside
+  // a disabled button is disabled, and a disabled option stays disabled whatever encloses its select
+  const enabledControl = (element: Element): boolean =>
+    enabled(element) && enabled(flatEnclosingControl(element))
 
   const textSelectionTarget = (element: Element): Element => {
     let target = enclosingControl(element)
