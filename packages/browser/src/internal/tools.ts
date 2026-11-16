@@ -78,10 +78,16 @@ export const pages = tool(
   "reads"
 )
 
+/** How far a navigation goes before the tool returns: the document committed, parsed, or loaded. */
+export const WaitUntil = Schema.Literals(["commit", "domContentLoaded", "load"]).annotate({
+  description:
+    "When the navigation returns: commit, when the new document exists but may have no content yet; domContentLoaded (the default), once its HTML is parsed; or load, once its images and other resources have loaded too"
+})
+
 export const newPage = tool(
   "newPage",
-  "Opens a page in the context, named as given or p1, p2…, and navigates it when a URL is given. A page whose navigation fails is closed again, so the name stays free.",
-  { name: Schema.optional(Schema.String), url: Schema.optional(Schema.String) },
+  "Opens a page in the context, named as given or p1, p2…, and navigates it when a URL is given, returning once the document's HTML is parsed (waitUntil, domContentLoaded by default). A page whose navigation fails is closed again, so the name stays free.",
+  { name: Schema.optional(Schema.String), url: Schema.optional(Schema.String), waitUntil: Schema.optional(WaitUntil) },
   Schema.Struct({ page: Schema.String, url: Schema.String }),
   "adds"
 )
@@ -116,8 +122,8 @@ export const release = tool(
 
 export const goto = tool(
   "goto",
-  "Navigates a page to a URL; returns when the document commits.",
-  { page: PageName, url: Schema.String },
+  "Navigates a page to a URL; returns once the new document's HTML is parsed (waitUntil, domContentLoaded by default).",
+  { page: PageName, url: Schema.String, waitUntil: Schema.optional(WaitUntil) },
   Schema.Struct({ url: Schema.String, status: Schema.optional(Schema.Number) }),
   "acts"
 )
