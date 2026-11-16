@@ -727,6 +727,41 @@ describe("Session's digest", () => {
     }).pipe(Effect.scoped, Effect.provide(Browser.layerTest("-popup-dialog(alert)-|"))))
 })
 
+describe("Session's digest, dialogs", () => {
+  // One line for each dialog, naming what decided it: a registration by its handle, or the context's policy
+  const dialogLines = (session: ToolkitImpl.Session) =>
+    Effect.gen(function*() {
+      yield* TestClock.adjust("20 millis")
+      const lines: Array<string> = []
+      for (let turn = 0; turn < 20; turn++) {
+        yield* Effect.yieldNow
+        lines.push(...(yield* sinceLast(session)))
+      }
+      return lines.filter((line) => line.startsWith("dialog"))
+    })
+
+  it.effect("names the dialog registration that decided a dialog, in one line", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const page = yield* context.newPage
+      const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+      yield* session.name(page, "main")
+      yield* session.toolkit.handle("dialog", { page: "main", decision: "accept" }).pipe(
+        Effect.flatMap(Stream.runDrain)
+      )
+      assert.deepStrictEqual(yield* dialogLines(session), ["dialog confirm on main accepted by r1"])
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest("-dialog(confirm)"))))
+
+  it.effect("reports a dialog the policy decided in one line", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const page = yield* context.newPage
+      const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+      yield* session.name(page, "main")
+      assert.deepStrictEqual(yield* dialogLines(session), ["dialog confirm on main dismissed by policy"])
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest("-dialog(confirm)"))))
+})
+
 describe("Session.open", () => {
   it.effect("checks the name before it opens a page, so a name that's taken opens none", () =>
     Effect.gen(function*() {
