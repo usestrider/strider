@@ -112,7 +112,7 @@ describe("Scoped redirect evidence", () => {
       const redirectError4 = yield* Effect.flip(links.to(missing))
       assert(redirectError4.reason._tag === "RedirectUnavailable")
       assert.strictEqual(redirectError4.reason.why, "unavailable")
-      yield* fold.loseConnection
+      yield* fold.loseConnection(new Target.ConnectionLost({}))
       const redirectError5 = yield* Effect.flip(links.from(missing))
       assert(redirectError5.reason._tag === "RedirectUnavailable")
       assert.strictEqual(redirectError5.reason.why, "targetClosed")
@@ -357,7 +357,7 @@ describe("Scoped redirect evidence", () => {
       const redirectError9 = yield* Effect.flip(seen(links.to(first)))
       assert(redirectError9.reason._tag === "RedirectUnavailable")
       assert.strictEqual(redirectError9.reason.why, "evicted")
-      yield* fold.loseConnection
+      yield* fold.loseConnection(new Target.ConnectionLost({}))
       const redirectError10 = yield* Effect.flip(seen(links.to(first)))
       assert(redirectError10.reason._tag === "RedirectUnavailable")
       assert.strictEqual(redirectError10.reason.why, "targetClosed")

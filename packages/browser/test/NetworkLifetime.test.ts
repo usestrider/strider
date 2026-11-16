@@ -97,7 +97,7 @@ describe("Request header lifetime", () => {
         } else if (terminal === "context removal") {
           yield* fold.sink({ _tag: "UserContextRemoved", context })
         } else {
-          yield* fold.loseConnection
+          yield* fold.loseConnection(new Target.ConnectionLost({}))
           assert.isTrue(Deferred.isDoneUnsafe(hop.end))
         }
         assert.isTrue(Deferred.isDoneUnsafe(hop.sentKnown), "owner loss must release the existing header waiter")
@@ -260,7 +260,7 @@ describe("Request response lifetime", () => {
         const wait = yield* NetworkRequest.response(target, sent)
         const fiber = running ? yield* wait.pipe(Effect.forkScoped) : undefined
         if (running) yield* Effect.yieldNow
-        yield* fold.loseConnection
+        yield* fold.loseConnection(new Target.ConnectionLost({}))
         const error = yield* Effect.flip(fiber === undefined ? wait : Fiber.join(fiber))
         assert.strictEqual(unavailableWhy(error), "targetClosed")
       })))

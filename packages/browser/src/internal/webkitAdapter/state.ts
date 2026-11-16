@@ -78,6 +78,8 @@ export interface TargetEntry {
   /** The last message, which a repeat count update repeats. */
   lastConsole: Console.ConsoleMessage | undefined
   ended: boolean
+  /** Held from reading the bootstrap script's bundle through sending it. */
+  bootstrapLock?: Semaphore.Semaphore | undefined
 }
 
 export interface WorkerEntry {
@@ -121,6 +123,11 @@ export interface RealmEntry extends Kit.RealmNode {
   readonly document: DocumentEntry | undefined
   readonly world: Adapter.World
 }
+
+/** Why a realm's page is closing, once a close command or its context's removal closes it. */
+export const closingOf = (state: State, realm: RealmEntry) => (): L1Target.CloseReason | undefined =>
+  realm.target.page.closing ??
+    (realm.target.page.context.removing ? new L1Target.PageClosed({ by: "userContextRemoved" }) : state.browserEnd)
 
 export interface NavigationEntry extends Kit.NavigationNode {
   readonly frame: FrameEntry
@@ -201,7 +208,7 @@ export interface HandleEntry {
 
 // ── The state ─────────────────────────────────────────────────────────────────────────────────────────────
 
-export interface State {
+export interface State extends Kit.Ending {
   readonly handlers: Kit.Handlers<Event>
   readonly options: Adapter.ConnectOptions
   readonly ids: Kit.Ids

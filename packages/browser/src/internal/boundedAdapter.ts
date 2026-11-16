@@ -37,6 +37,7 @@ type Method = {
 /** The methods that are cleanup. */
 type Release =
   | "releaseNodes"
+  | "closing"
   | "releaseAuthenticator"
   | "removeUserContext"
   | "closePage"
@@ -59,6 +60,7 @@ const methods: { readonly [K in Method]: K extends Release ? typeof release : Ki
   removeUserContext: release,
   createPage: { _tag: "Create", what: "creating the page" },
   closePage: release,
+  closing: release,
   viewportSize: read("the configured viewport"),
   activatePage: write("bringing the page forward"),
   navigate: write("the navigation"),

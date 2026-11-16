@@ -169,7 +169,8 @@ An action's `visible` check requires CSS visibility, content visibility, and a n
 With the viewport check enabled, actions also scroll targets wholly clipped by a scrollable container. This includes containers around a frame in its parent page. An overlay or clipping by a container that cannot scroll does not trigger scrolling. Turning off the pointer check keeps this scrolling; turning off the viewport check disables it.
 
 - "Stable": stopped moving. "In the viewport": scrolled there. "Receives the pointer": nothing covers the point.
-  "Not inert": not under an `inert` attribute, nor outside an open modal dialog.
+  "Not inert": not under an `inert` attribute, nor outside the topmost open modal dialog, the one last in the
+  document. That dialog and its content aren't inert even when an ancestor has `inert`.
 - After the checks pass, it checks once more and sends. If something covers a click's target in between, the page
   never sees the click, and the action checks again.
 - A timeout's hint names the last failed check:

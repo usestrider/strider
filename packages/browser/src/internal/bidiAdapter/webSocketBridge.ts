@@ -7,7 +7,7 @@ import * as Stream from "effect/Stream"
 import * as Script from "../../bidi-protocol/Script.ts"
 import * as Adapter from "../adapter.ts"
 import * as Declarations from "../declarations.ts"
-import { placement, type State } from "./state.ts"
+import { closingOf, placement, type RealmEntry, type State } from "./state.ts"
 
 export const channel = (bridge: Adapter.WebSocketBridge): Script.ChannelValue => ({
   type: "channel",
@@ -15,7 +15,8 @@ export const channel = (bridge: Adapter.WebSocketBridge): Script.ChannelValue =>
 })
 export const prepare = Effect.fnUntraced(
   function*(state: State, scope: Adapter.DeclarationScope, bridge: Adapter.WebSocketBridge) {
-    const known = new Map<string, import("../../Target.ts").RealmId>()
+    // The realm entries it learned, kept past their removal from the table: an ended one records why it ended
+    const known = new Map<string, RealmEntry>()
     const messages = yield* state.root().subscribe(Script.message).pipe(Scope.provide(bridge.scope))
     yield* messages.pipe(
       Stream.runForEach((event) =>
@@ -25,7 +26,7 @@ export const prepare = Effect.fnUntraced(
           if (realm === undefined || realm.ended) {
             return
           }
-          known.set(event.source.realm, realm.id)
+          known.set(event.source.realm, realm)
           if (event.data.type === "object" && event.data.handle !== undefined) {
             const handle = state.ids.handle()
             state.handles.set(handle, { handle: event.data.handle, realm: realm.bidi })
@@ -44,7 +45,7 @@ export const prepare = Effect.fnUntraced(
       ),
       Effect.onExit((exit) =>
         Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause) ? Effect.void : Effect.sync(() => {
-          for (const realm of known.values()) bridge.failed(realm)
+          for (const realm of known.values()) bridge.failed(realm.id)
         })
       ),
       Effect.forkIn(bridge.scope)
@@ -56,7 +57,8 @@ export const prepare = Effect.fnUntraced(
           const realm = known.get(event.realm)
           if (realm !== undefined) {
             known.delete(event.realm)
-            bridge.ended(realm)
+            // The fold has already removed it, with the reason it chose
+            bridge.ended(realm.id, realm.endedWith ?? closingOf(state, realm)())
           }
         })
       ),
