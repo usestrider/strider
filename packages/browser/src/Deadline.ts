@@ -198,8 +198,10 @@ const TimeoutTypeId = "~@usestrider/browser/Deadline/Timeout"
  * Replies must arrive before the deadline to enter history. If none arrives, history can be empty.
  * Late replies cannot change it.
  * `hint` explains common causes, such as a download that started before `Download.next` subscribed, or an element
- * that is inert because of an ancestor with the `inert` attribute and a modal dialog that's open. The message ends
- * with the hint when there is one, so the failure says what the operation waited on wherever it's printed.
+ * that is inert because of an ancestor with the `inert` attribute and a modal dialog that's open. When nothing the
+ * operation observed or sent explains it, and the browser left a call unanswered at the deadline, the hint names that
+ * call, such as "The browser didn't answer the call into the page before the deadline". The message ends with the
+ * hint when there is one, so the failure says what the operation waited on wherever it's printed.
  *
  * **Example** (Recovering when a click may have happened)
  *

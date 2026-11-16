@@ -88,8 +88,8 @@ export const dispatchInputLaunched = Effect.fnUntraced(
     const process = yield* processOfContext(state, page.context).pipe(Effect.mapError(Adapter.unsent))
     let wheel = state.wheelStates.get(process.key)
     if (wheel === undefined) state.wheelStates.set(process.key, wheel = { width: 0, height: 0 })
-    // The events up to text to insert, as one sequence: a sequence's end forgets a click, so a second click
-    // in another is never a double click (QUIRKS.md, Q223)
+    // The events as one sequence: a sequence's end forgets a click, so a second click in another is never a
+    // double click (QUIRKS.md, Q223)
     let steps: Array<ReadonlyArray<Record<string, unknown>>> = []
     const flush = Effect.suspend(() => {
       if (steps.length === 0) return Effect.void
@@ -104,9 +104,6 @@ export const dispatchInputLaunched = Effect.fnUntraced(
         })
       ).pipe(Effect.andThen(settleDialog(state, page, handle, process)))
     })
-    const insert = (interactions: ReadonlyArray<Automation.KeyboardInteraction>) =>
-      automationOf(process, Automation.performKeyboardInteractions({ handle, interactions: [...interactions] }))
-        .pipe(Effect.andThen(settleDialog(state, page, handle, process)))
     for (const event of events) {
       switch (event._tag) {
         case "Mouse": {
@@ -148,16 +145,9 @@ export const dispatchInputLaunched = Effect.fnUntraced(
           }])
           break
         }
-        case "InsertText": {
-          yield* flush
-          // WebKitGTK types no newline: each is pressed as Enter (QUIRKS.md, Q223)
-          const lines = event.text.split(/\r\n|\r|\n/)
-          yield* insert(lines.flatMap((line, index): Array<Automation.KeyboardInteraction> => [
-            ...(index === 0 ? [] : [{ type: "InsertByKey", key: "Enter" } as Automation.KeyboardInteraction]),
-            ...(line === "" ? [] : [{ type: "InsertByKey", text: line } as Automation.KeyboardInteraction])
-          ]))
-          break
-        }
+        case "InsertText":
+          // Automation inserts text only by key: L1 inserts it through the engine (`textInsertion`)
+          return yield* Effect.die(new Error("Stock WebKit inserts text through the engine, never as input"))
       }
     }
     yield* flush
@@ -266,12 +256,16 @@ const nodeHandleOf = Effect.fnUntraced(function*(state: State, node: Adapter.Nod
   if (Option.isNone(frameHandle)) {
     return yield* Effect.fail(Kit.gone({ _tag: "Document", id: node.document }, new L1Target.DocumentReplaced({})))
   }
-  // WebKit's binding is the element's object id, in the page's world
-  const { result } = yield* (
+  // WebKit's binding is the element's object id, in the page's world. Its path is the child index of each element
+  // down from the document, a list for each tree it is in: one for the document, and one more for each open shadow
+  // root it is inside, entered through its host. The page can change between the two calls, so the element is also
+  // marked, and Automation's resolver takes only the element that carries the mark: the path finds it, the mark
+  // confirms it is the bound one. The mark is removed once the element is resolved, or not.
+  const mark = JSON.stringify(`__strider_node_${crypto.randomUUID().replaceAll("-", "")}`)
+  const onNode = (functionDeclaration: string) =>
     Runtime.callFunctionOn({
       objectId: node.binding as Runtime.RemoteObjectId,
-      functionDeclaration:
-        "function() { const steps = []; for (let e = this; e && e.parentElement; e = e.parentElement) { const same = [...e.parentElement.children].filter((c) => c.localName === e.localName); steps.unshift(e.localName + ':nth-of-type(' + (same.indexOf(e) + 1) + ')') } return ':root > ' + steps.join(' > ') }",
+      functionDeclaration,
       returnByValue: true
     }).pipe(
       Protocol.on(target.session),
@@ -281,19 +275,26 @@ const nodeHandleOf = Effect.fnUntraced(function*(state: State, node: Adapter.Nod
           : Kit.protocolError(error)
       )
     )
-  )
-  const found = yield* automationOf(
-    process,
-    Automation.evaluateJavaScriptFunction({
-      browsingContextHandle: handle,
-      frameHandle: frameHandle.value,
-      function: "function(path) { return document.querySelector(path) }",
-      arguments: [JSON.stringify(result.value)]
-    })
+  const found = yield* onNode(
+    `function() { Object.defineProperty(this, ${mark}, { value: true, configurable: true }); const trees = []; for (let e = this; e;) { const steps = []; let n = e; for (; n.parentNode && n.parentNode.nodeType === 1; n = n.parentNode) steps.unshift([...n.parentNode.children].indexOf(n)); const root = n.parentNode; if (!root) return null; steps.unshift([...root.children].indexOf(n)); trees.unshift(steps); e = root.nodeType === 11 ? root.host : null } return JSON.stringify(trees) }`
+  ).pipe(
+    Effect.flatMap(({ result }) =>
+      automationOf(
+        process,
+        Automation.evaluateJavaScriptFunction({
+          browsingContextHandle: handle,
+          frameHandle: frameHandle.value,
+          function:
+            `function(path) { if (path === null) return null; let root = document, found = null; for (const steps of JSON.parse(path)) { if (!root) return null; for (const index of steps) { found = root.children[index]; if (!found) return null; root = found } root = found.shadowRoot } return Object.hasOwn(found, ${mark}) ? found : null }`,
+          arguments: [JSON.stringify(result.value)]
+        })
+      )
+    ),
+    Effect.ensuring(onNode(`function() { delete this[${mark}] }`).pipe(Effect.ignore))
   )
   const reference = Option.getOrNull(resultOf(found.result)) as Record<string, string> | null
   const nodeHandle = reference === null ? undefined : Object.values(reference)[0]
-  // An element its document no longer holds
+  // An element its document no longer holds, or no longer at its path
   if (nodeHandle === undefined) {
     return yield* Effect.fail(Kit.gone({ _tag: "Document", id: node.document }, new L1Target.DocumentReplaced({})))
   }
@@ -318,7 +319,10 @@ export const contentFrameLaunched = Effect.fnUntraced(function*(state: State, no
   return Option.some(matched.value.id)
 })
 
-/** A file input's files, through the element Automation finds by its path: nothing is clicked or marked. */
+/**
+ * A file input's files, through the element Automation finds by its path: nothing is clicked, and the element's
+ * identity is confirmed by a temporary mark (`nodeHandleOf`).
+ */
 export const setInputFilesLaunched = Effect.fnUntraced(function*(
   state: State,
   node: Adapter.NodeBinding,

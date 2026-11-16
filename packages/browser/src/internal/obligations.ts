@@ -103,8 +103,8 @@ const logUnhandled = (message: string) =>
   )
 
 /**
- * A dialog: the handler the fold chose; else, or if it doesn't decide, the context's policy, reported as an
- * `AutoResolution`; else nothing, and operations on the page fail with `PromptBlocking`.
+ * A dialog: the handler the fold chose, its applied decision published on the page's `handledDialog`; else, or if
+ * it doesn't decide, the context's policy, reported as an `AutoResolution`; else nothing, and operations on the page fail with `PromptBlocking`.
  */
 const decidePrompt = Effect.fnUntraced(function*(
   fold: Fold.Fold,
@@ -116,9 +116,15 @@ const decidePrompt = Effect.fnUntraced(function*(
     if (Option.isSome(decision)) {
       const sent = yield* Effect.exit(adapter.resolve(obligation, decision.value))
       if (Exit.isSuccess(sent)) {
-        // A stay, which a `close` waiting on the prompt fails with
-        if (prompt.kind === "beforeunload" && decision.value._tag === "Dismiss" && Option.isSome(page)) {
-          yield* fold.stayed(page.value)
+        if (Option.isSome(page)) {
+          // A stay, which a `close` waiting on the prompt fails with
+          if (prompt.kind === "beforeunload" && decision.value._tag === "Dismiss") yield* fold.stayed(page.value)
+          yield* fold.handledPrompt(page.value, {
+            prompt,
+            decision: decision.value,
+            registration: handler.value.registration,
+            at: Adapter.now()
+          })
         }
         return
       }

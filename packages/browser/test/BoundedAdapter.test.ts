@@ -14,9 +14,11 @@ import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import * as Adapter from "../src/internal/adapter.ts"
 import * as BoundedAdapter from "../src/internal/boundedAdapter.ts"
+import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as Input from "../src/internal/input.ts"
 import * as Operation from "../src/internal/operation.ts"
 import * as ProtocolClient from "../src/internal/protocolClient.ts"
+import type * as MonotonicInstant from "../src/MonotonicInstant.ts"
 import type * as Target from "../src/Target.ts"
 import type * as UserContext from "../src/UserContext.ts"
 
@@ -698,4 +700,79 @@ describe("BoundedAdapter", () => {
       assert(Deadline.isTimeout(timeout), String(timeout))
       assert.strictEqual(timeout.operation, "CookieJar.list")
     }))
+})
+
+/** A browser clock that moves only when the test moves it, and whose deadlines never fire by themselves. */
+const manualClock = () => {
+  let at = 0
+  const clock: BrowserClock.BrowserClock = {
+    now: () => at as MonotonicInstant.MonotonicInstant,
+    sleep: () => Effect.never
+  }
+  return { clock, advance: (millis: number) => (at += millis * 1e6) }
+}
+
+describe("a call the browser leaves unanswered at the deadline", () => {
+  const read = "The browser didn't answer the cookie read before the deadline"
+
+  for (const passed of [true, false]) {
+    it.effect(
+      `${passed ? "gives" : "doesn't give"} its hint to a Timeout built without one, when interrupted ${
+        passed ? "after" : "before"
+      } the deadline`,
+      () =>
+        Effect.gen(function*() {
+          const { advance, clock } = manualClock()
+          const sent = yield* Deferred.make<void>()
+          const stop = yield* Deferred.make<void>()
+          const adapter = stub({ cookies: () => Effect.andThen(Deferred.succeed(sent, undefined), Effect.never) })
+          // The operation's own wait ends first, as an action's bound does when both reach the deadline together
+          const pending = yield* Effect.gen(function*() {
+            const record = yield* Operation.record
+            yield* Effect.raceFirst(adapter.cookies(context), Deferred.await(stop))
+            return record.timeout(Option.none())
+          }).pipe(
+            Operation.named("CookieJar.list"),
+            Deadline.within("100 millis"),
+            Effect.provideService(BrowserClock.CurrentClock, clock),
+            Effect.forkChild
+          )
+          yield* Deferred.await(sent)
+          advance(passed ? 100 : 50)
+          yield* Deferred.succeed(stop, undefined)
+          const timeout = yield* Fiber.join(pending)
+          assert.deepStrictEqual(timeout.hint, passed ? Option.some(read) : Option.none())
+        })
+    )
+  }
+
+  it.effect("leaves a hint the caller gives in place", () =>
+    Effect.gen(function*() {
+      const adapter = stub({})
+      const timeout = yield* Effect.gen(function*() {
+        const record = yield* Operation.record
+        yield* Effect.ignore(adapter.cookies(context))
+        return record.timeout(Option.some("Waiting for the element"))
+      }).pipe(Operation.named("CookieJar.list"), Deadline.within("100 millis"))
+      assert.deepStrictEqual(timeout.hint, Option.some("Waiting for the element"))
+    }))
+
+  for (const shared of [true, false]) {
+    it.effect(
+      `${shared ? "gives" : "doesn't give"} a step's unanswered call to an enclosing operation ${
+        shared ? "sharing its deadline" : "with a later deadline"
+      }`,
+      () =>
+        Effect.gen(function*() {
+          const adapter = stub({})
+          const step = adapter.cookies(context).pipe(Operation.named("Step"))
+          const timeout = yield* Effect.gen(function*() {
+            const record = yield* Operation.record
+            yield* Effect.ignore(shared ? step : Deadline.within("100 millis")(step))
+            return record.timeout(Option.none())
+          }).pipe(Operation.named("CookieJar.list"), Deadline.within(shared ? "100 millis" : "10 seconds"))
+          assert.deepStrictEqual(timeout.hint, shared ? Option.some(read) : Option.none())
+        })
+    )
+  }
 })
