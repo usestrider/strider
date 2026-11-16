@@ -164,6 +164,21 @@ export const slice = (
           }))
         }), timeout)
 
+      it.effect("fails at once on a URL whose scheme the browser can't navigate to", () =>
+        Effect.gen(function*() {
+          const served = yield* site
+          // `localhost:<port>/…` is a URL whose scheme is `localhost:`: no browser loads it, nor `nosuchscheme:`
+          const urls = [`${new URL(served.crossSite).host}/fixture?html=x`, "nosuchscheme:x"]
+          for (const url of urls) {
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* SharedContext.newPage
+              const failed = yield* page.goto(url).pipe(Deadline.within("1 second"), Effect.flip)
+              assert(failed._tag === "PageError", `${url}: ${String(failed)}`)
+              assert.strictEqual(failed.reason._tag, "NavigationFailed", url)
+            }))
+          }
+        }), timeout)
+
       it.effect("commits a data: or blob: URL, and a reload of it, with no response", () =>
         Effect.gen(function*() {
           const url = yield* fixture("<p>site</p>")
