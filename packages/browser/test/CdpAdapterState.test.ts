@@ -324,6 +324,7 @@ describe("CdpAdapter state", () => {
       owner.frame = outer
       const inner = Tree.addFrame(state, "inner", outer, owner)
       const captured = { target: owner, x: 30, y: 30 }
+      state.heldButtons.set(page.id, 1)
       state.pressedIn.set(page.id, [outer])
       state.pressedOn.set(page.id, captured)
       Tree.removeFrame(state, inner, new Target.FrameDetached({}), "cdp:Page.frameDetached")
