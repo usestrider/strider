@@ -51,7 +51,7 @@ for (const [name, backend] of backends) {
                 })
               };
             </script>`
-            yield* page.goto(`${origin}/fixture?html=${encodeURIComponent(html)}`)
+            yield* page.goto(`${origin}/fixture?html=${encodeURIComponent(html)}`, { waitUntil: "load" })
             const registration = yield* page.context.routeWebSocket("**/socket", (connection) =>
               connection.open({
                 fromPage: (_, endpoint) => endpoint.send({ _tag: "Text", data: "routed reply" })

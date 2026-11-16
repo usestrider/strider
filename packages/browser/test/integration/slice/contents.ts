@@ -1965,7 +1965,7 @@ export const contents = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(origin, shop))
+            yield* page.goto(fixtureUrl(origin, shop), { waitUntil: "load" })
             const snapshot = yield* page.snapshot()
             const refOf = (role: string, name: string) =>
               [...snapshot.refs].find(([, node]) =>
@@ -2538,7 +2538,7 @@ document.getElementById("form").addEventListener("submit", (event) => {
 </script>`
           const json = yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
-            yield* page.goto(fixtureUrl(origin, login))
+            yield* page.goto(fixtureUrl(origin, login), { waitUntil: "load" })
             yield* page.frame(page.locator("#widget")).locator("#out").pipe(Expect.toHaveText("w1"))
             yield* page.getByLabel("Email").fill("me@example.com")
             yield* page.getByLabel("Password").fill(Redacted.make("hunter2"))

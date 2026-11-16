@@ -947,7 +947,7 @@ for (const mode of ["open", "closed"]) {
   window[mode + "Field"] = root.querySelector("input")
 }
 </script>`
-              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`, { waitUntil: "load" })
               yield* page.evaluateInMainWorld(async () => {
                 const frame = document.querySelector("iframe")!
                 if (frame.contentDocument?.querySelector("input") === null) {
@@ -1161,7 +1161,7 @@ for (const mode of ["open", "closed"]) {
                 window.keys.push(event.key + ":" + event.metaKey + ":" + (event.target.id || event.target.localName))
               })
             </script>`
-            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`, { waitUntil: "load" })
             const tools = yield* BrowserToolkit.make({
               context: page.context,
               secrets: {},
@@ -1337,7 +1337,7 @@ for (const mode of ["open", "closed"]) {
           const url = `${served.origin}/fixture?html=${encodeURIComponent(app)}`
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             yield* page.getByRole("button", { name: "Sign in" }).click()
             const strict = yield* BrowserToolkit.make({
               context: page.context,
