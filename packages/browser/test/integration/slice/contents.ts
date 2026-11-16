@@ -492,6 +492,32 @@ export const contents = (
           )
         }), timeout)
 
+      it.effect("an evaluation's console messages are in the history once it returns", () =>
+        Effect.gen(function*() {
+          const page = yield* SharedContext.newPage
+          yield* page.evaluateInMainWorld(() => console.log("first"))
+          yield* page.evaluateInMainWorld(() => console.log("second"))
+          yield* page.evaluateInMainWorld(() => console.log("third"))
+          assert.deepStrictEqual((yield* ConsoleMessage.history(page)).entries.map((entry) => entry.text), [
+            "first",
+            "second",
+            "third"
+          ])
+          yield* page.evaluateInMainWorld(() => {
+            for (let i = 0; i <= 300; i++) console.log(`message${i}`)
+          })
+          const history = yield* ConsoleMessage.history(page)
+          assert.deepStrictEqual(
+            history.entries.map((entry) => entry.text),
+            Array.from({ length: 301 }, (_, i) => `message${i}`).slice(-100)
+          )
+          const { origin } = yield* site
+          yield* page.goto(fixtureUrl(origin, "<title>Console</title>"))
+          yield* page.reload({ waitUntil: "load" })
+          yield* page.evaluateInMainWorld(() => console.log("after reload"))
+          assert.strictEqual((yield* ConsoleMessage.history(page)).entries.at(-1)?.text, "after reload")
+        }), timeout)
+
       it.effect("setContent settles when the page silences console.debug", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -1224,7 +1250,9 @@ export const contents = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(origin, `<script>window.secret = 42</script><p id="x">hello</p>`))
+            yield* page.goto(fixtureUrl(origin, `<script>window.secret = 42</script><p id="x">hello</p>`), {
+              waitUntil: "load"
+            })
             if (
               yield* isolatedRefused(page.evaluate(() =>
                 1
@@ -2060,7 +2088,7 @@ export const contents = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(origin, shop))
+            yield* page.goto(fixtureUrl(origin, shop), { waitUntil: "load" })
             const snapshot = yield* page.snapshot()
             const refOf = (role: string, name: string) =>
               [...snapshot.refs].find(([, node]) =>
@@ -2468,7 +2496,9 @@ export const contents = (
           const { crossSite, origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
-            yield* page.goto(fixtureUrl(origin, `<script>document.cookie = "plain=1; path=/"</script><p>hi</p>`))
+            yield* page.goto(fixtureUrl(origin, `<script>document.cookie = "plain=1; path=/"</script><p>hi</p>`), {
+              waitUntil: "load"
+            })
             const jar = page.context.cookies
             if (!(yield* fullySupports("cookies"))) {
               // Where a context's list is the cookies its pages are sent (QUIRKS.md, Q225), one shows once a page is
@@ -2570,7 +2600,8 @@ export const contents = (
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             yield* page.goto(
-              fixtureUrl(origin, `<script>localStorage.setItem("a", "1"); sessionStorage.setItem("s", "x")</script>`)
+              fixtureUrl(origin, `<script>localStorage.setItem("a", "1"); sessionStorage.setItem("s", "x")</script>`),
+              { waitUntil: "load" }
             )
             assert.deepStrictEqual(yield* page.localStorage.get("a"), Option.some("1"))
             assert.deepStrictEqual(yield* page.localStorage.get("missing"), Option.none())
@@ -2630,7 +2661,7 @@ document.getElementById("form").addEventListener("submit", (event) => {
 </script>`
           const json = yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
-            yield* page.goto(fixtureUrl(origin, login))
+            yield* page.goto(fixtureUrl(origin, login), { waitUntil: "load" })
             yield* page.frame(page.locator("#widget")).locator("#out").pipe(Expect.toHaveText("w1"))
             yield* page.getByLabel("Email").fill("me@example.com")
             yield* page.getByLabel("Password").fill(Redacted.make("hunter2"))

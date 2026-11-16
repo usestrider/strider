@@ -290,7 +290,12 @@ const writeScripts = Effect.fnUntraced(function*(state: State, target: TargetEnt
     }
   }
   for (const [key, bundle] of bundles) {
-    if (bundle.webSockets !== undefined) yield* WebSocketBridge.prepare(state, target, bundle.webSockets)
+    if (bundle.webSockets !== undefined) {
+      // The bridge's bindings go before its capture script, which calls them; a paused page queues them with the
+      // rest of its setup, so they reach the page before it resumes.
+      const bindings = yield* WebSocketBridge.prepare(state, target, bundle.webSockets, setup === undefined)
+      if (setup !== undefined) { for (const binding of bindings) yield* setup.send(binding) }
+    }
     const previous = target.scripts.get(key)
     if (previous !== undefined) {
       yield* Page.removeScriptToEvaluateOnNewDocument({ identifier: previous as Page.ScriptIdentifier }).pipe(on)
