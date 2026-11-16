@@ -106,7 +106,9 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       entry("network.challenges", "supported"),
       entry("bodies", "supported", ["only with a body collection declared before the request"]),
       entry("console", "partial", [
-        "a dedicated worker's messages are attributed to its page, and shared and service workers' aren't reported"
+        "a dedicated worker's messages are attributed to its page, and shared and service workers' aren't reported",
+        "the browser's own messages, such as a CSP violation or a CORS failure, arrive as uncaught exceptions, as " +
+        "Firefox sends them as script errors"
       ]),
       entry("prompts", "supported"),
       entry("prompts.kind", "supported"),
@@ -155,11 +157,14 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       entry("pdf", "supported"),
       entry("evaluation.userActivation", "supported"),
       entry("input.insertText", "partial", [
-        "WebDriver BiDi has no command for it, so each character is typed as a key"
+        "WebDriver BiDi has no command for it, so Strider inserts the text with the page's editing command, which sends no key events, and dispatches the beforeinput before it itself, untrusted (isTrusted is false), since WebDriver BiDi sends none"
       ]),
       entry("input.pointerModifiers", "supported", ["modifiers are held as keys; a mouse event's flags are ignored"]),
       entry("input.fractionalPointer", "partial", [
         "Strider sends the exact point, but Firefox delivers pointer events at whole pixels, up to half a pixel away"
+      ]),
+      entry("hitTest.shadowHostBoxes", "partial", [
+        "inside a shadow root, Firefox's hit test leaves out the host's own boxes, so content under a host's covering pseudo-element counts as ready in a trial or readiness check; a real click is still stopped when its first event lands on the host"
       ]),
       entry("input.keyboardLayout", "partial", [
         "WebDriver BiDi sends a key as its value: the code is Firefox's for that key on a US keyboard, and there is no AltGr or dead key"
@@ -406,6 +411,7 @@ export const connect: (
       realm: (document, world) => Evaluation.realm(state, document, world),
       evaluate: (realm, call) => Evaluation.evaluate(state, realm, call),
       releaseHandles: (list) => Evaluation.releaseHandles(state, list),
+      textInsertion: "beforeInputAndEditingCommand",
       dispatchInput: (page, events, frame) => Input.dispatchInput(state, page, events, frame),
       contentFrame: (node) => Input.contentFrame(state, node),
       releaseNodes: () => Effect.void,

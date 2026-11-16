@@ -15,6 +15,7 @@ import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as Operation from "../operation.ts"
 import * as Urls from "../urls.ts"
+import { confirmFrameRemoval } from "./contexts.ts"
 import { closingOf, documentOf, type Event, navigableOf, type RealmEntry, realmOf, type State } from "./state.ts"
 import { addWindowRealm, removeRealm } from "./tree.ts"
 
@@ -218,7 +219,13 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       // One created and destroyed before its document committed never reached the model. Firefox destroys a closing
       // page's realms before its context, and they end with the page
       if (realm !== undefined) {
-        removeRealm(state, realm, closingOf(state, realm)() ?? new L1Target.RealmDestroyed({}))
+        const closing = closingOf(state, realm)()
+        removeRealm(state, realm, closing ?? new L1Target.RealmDestroyed({}))
+        // A child frame's window ends when it navigates or is removed; Firefox can lose the removal's event
+        if (
+          closing === undefined && realm.world._tag === "Main" && !realm.pending &&
+          realm.navigable?.parent !== undefined
+        ) state.buffer.later(confirmFrameRemoval(state, realm.navigable))
       }
     })
     .on(Log.entryAdded, (params, { state }) => {
@@ -241,7 +248,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         if (realm === undefined) return
         state.buffer.emitFrom(realm, {
           _tag: "ConsoleMessage",
-          realm: realm.id,
+          realm: Option.some(realm.id),
           message: new ConsoleMessage.ConsoleMessage({
             // The console method says what the page wrote; BiDi's level is coarser (`console.log` is `info`)
             level: Kit.consoleLevel("method" in params ? params.method : "log"),
