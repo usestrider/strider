@@ -178,6 +178,10 @@ export interface NextFilter extends Filter {
  * `PageError` that `goto` would give, such as `NavigationFailed`. `url` matches where the page went, after any
  * redirects, or, for a navigation that failed, where it was going.
  *
+ * On a page the program didn't open, such as a persistent profile's first tab or a tab open in a browser it
+ * attached to, the wait starts once Strider has read the page's frames. A navigation the page finishes before then
+ * is the document it opens with, not a navigation the wait receives.
+ *
  * **Example** (Waiting for the navigation a click causes)
  *
  * ```ts import.meta.vitest
@@ -242,6 +246,13 @@ export const stream = <PE = never, PR = never>(
 
 /**
  * Reads the successful navigations still in the page's event log, as `stream` emits them; never waits.
+ *
+ * **Details**
+ *
+ * An operation returns only after the events the browser sent before answering it have been handled, so what
+ * it caused is here once it returns, as far as the browser reported it by then and the log still keeps it.
+ * The exception is a target whose state is still being read, as when it has just attached or its events
+ * overflowed: its events reach the log once that read completes.
  *
  * **Example** (The URLs a page has visited)
  *

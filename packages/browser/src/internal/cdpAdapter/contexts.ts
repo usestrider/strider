@@ -29,6 +29,7 @@ import {
   forgetRetiredFrames,
   frameOf,
   keepEndedFramesIfDeclared,
+  pageNow,
   pageOf,
   type State
 } from "./state.ts"
@@ -237,7 +238,10 @@ export const createPage = Effect.fnUntraced(function*(state: State, id: UserCont
 
 export const closePage = Effect.fnUntraced(
   function*(state: State, id: L1Target.NavigableId, options: { readonly runBeforeUnload: boolean }) {
-    const page = yield* pageOf(state, id)
+    // A close that runs `beforeunload` can open a prompt, an event the page's initial sync would hold while Chromium
+    // withholds the frame tree, so it waits for the sync. A forced close causes nothing the model needs, and must
+    // not wait on a sync a paused request or an open prompt holds up.
+    const page = yield* (options.runBeforeUnload ? pageOf : pageNow)(state, id)
     if (options.runBeforeUnload) {
       page.closeRequested = true
       yield* Kit.protocol(whileSwapping(Page.close().pipe(Protocol.on(page.target.session)))).pipe(

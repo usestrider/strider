@@ -25,6 +25,7 @@ import {
   type State,
   type TargetEntry
 } from "./state.ts"
+import * as WebSocketBridge from "./webSocketBridge.ts"
 
 // ── Ending things ─────────────────────────────────────────────────────────────────────────────────────────
 
@@ -78,6 +79,7 @@ export const adoptPending = (state: State, frame: FrameEntry, document: Document
       origin: realm.origin,
       kind: { _tag: "Window", navigable: frame.id, document: document.id, world: realm.world }
     })
+    WebSocketBridge.flush(state, realm.target)
   }
 }
 
@@ -126,6 +128,7 @@ export const endPage = (state: State, page: PageEntry, reason: L1Target.CloseRea
     }
   }
   Deferred.doneUnsafe(page.ready, Effect.fail(Kit.gone({ _tag: "Page", id: page.id }, reason)))
+  Deferred.doneUnsafe(page.treeRead, Effect.void)
 }
 
 // ── Documents and navigations ─────────────────────────────────────────────────────────────────────────────
