@@ -520,7 +520,7 @@ export const declarations = (
           `respects response interception capability after ${transition} while the server holds a response`,
           () =>
             Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               let arrived!: () => void
               const arrival = new Promise<void>((resolve) => {
                 arrived = resolve
@@ -748,7 +748,7 @@ export const declarations = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.route(`${origin}/:name(json)`, () =>
               Route.fulfill(json({ routed: true })))
             const result = yield* run(page, origin, `return fetch('/json').then((r) => r.json())`)

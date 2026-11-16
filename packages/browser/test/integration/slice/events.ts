@@ -124,7 +124,7 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
           if (yield* popupsRefused()) return
           const { url } = yield* fixture(connect)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const popups = yield* Popup.next(page)
             yield* page.getByText("Connect account").click()
