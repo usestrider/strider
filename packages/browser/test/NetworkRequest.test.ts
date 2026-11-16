@@ -205,7 +205,7 @@ describe("NetworkRequest.failure", () => {
           yield* fold.sink({ _tag: "RealmRemoved", realm, reason: new Target.ConnectionLost({}) })
         } else if (terminal === "context") {
           yield* fold.sink({ _tag: "UserContextRemoved", context: contextId })
-        } else yield* fold.loseConnection
+        } else yield* fold.loseConnection(new Target.ConnectionLost({}))
         const error = yield* NetworkRequest.failure(target, request).pipe(Effect.flip)
         assert.strictEqual(error.reason._tag, "RequestUnavailable")
       }))
@@ -214,7 +214,7 @@ describe("NetworkRequest.failure", () => {
   it.effect("refuses a synthetic disconnect failure instead of exposing it", () =>
     Effect.gen(function*() {
       const { fold, page, request } = yield* setup()
-      yield* fold.loseConnection
+      yield* fold.loseConnection(new Target.ConnectionLost({}))
       const error = yield* NetworkRequest.failure(page, request).pipe(Effect.flip)
       assert.strictEqual(error.reason._tag, "RequestUnavailable")
     }))

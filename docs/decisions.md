@@ -519,6 +519,13 @@ didn't pay for two protocols.
 **`Browser.layerTest` emulates no DOM.** A fake browser with a DOM would be a second engine to keep honest, and real
 browsers are cheap to launch.
 
+**The scheduled integration run guards Strider's own rules.** Each case tests a rule of Strider's code, or a bug that
+escaped once, as Strider's own test on every backend, within the run's time goals, and only that run decides a
+release. Ports of Playwright's and Puppeteer's suites measure parity and find bugs: they run apart, on request, and
+what they find comes in as a native test of the rule it broke. Rejected: running the ports each night, which would turn
+the run into a parity scoreboard whose flakes and runtime block releases on behavior Strider doesn't claim; and copying
+ported cases in, which brings upstream code, and the assumptions of another implementation, into Strider's tests.
+
 
 ## Document observation and delayed attribution
 
@@ -612,6 +619,14 @@ page or absent compositor frame cannot hold cleanup indefinitely: at the deadlin
 reply wait are released, a warning records the incomplete restoration, and scope cleanup continues. Session end
 also closes the wait and is quiet. The original dimensions remain recorded after incomplete restoration so a
 later override does not mistake stale dimensions for the native viewport.
+
+A context the library created and removes as its scope closes skips releasing the overrides it holds for its life,
+its emulation and its focus emulation, as it skips its file chooser, challenge, credential and download
+declarations: the removal follows, so nothing can observe the restore, and the wait is the one cleanup that can
+last its whole budget, on a renderer blocked by a script or whose size never matches its recorded baseline. If the
+browser refuses the removal, those overrides are released after all. A context handed off and left open, and an
+`emulate` registration released with its own scope, still restore and wait. Rejected: restoring on close with a
+shorter bound, which still spends it on every close that cannot be confirmed and warns for a page about to go.
 
 Rejected: `dontSetVisibleSize: true`. It passed restoration and viewport/full-page capture checks, but Chromium
 screencast frames remained at the native 780x493 instead of an overridden 640x480. Keeping native resizing preserves
@@ -1218,7 +1233,7 @@ session cookie, while closing that startup page first exposed the same loss. Iso
 session cookies. This is an observed boundary while the browser remains alive, not a traced Chromium cause or
 a claim about other session-only state. It affects default contexts with temporary as well as supplied profile
 directories, so preserving the window only for `userDataDir` would leave part of the behavior change in place.
-It is distinct from shutdown of a connected Chromium layer, which now attempts graceful close before signals.
+It is distinct from shutdown of a connected Chromium layer, which attempts graceful close before signals.
 
 Without a startup window, initial `strider tabs` and the `tabs` tool return empty listings. Existing callers
 would have to create a page explicitly. Retain the current initial-page behavior and the session-cookie guard;
@@ -1229,16 +1244,18 @@ silently changing session-cookie lifetime and initial tab listings; enabling it 
 which still changes temporary default contexts; and treating the saving as evidence that the startup page has
 no behavioral role. Caller opt-in keeps that trade explicit.
 
-## Owned Chromium attempts graceful close before termination
+## Owned Chromium and Firefox attempt graceful close before termination
 
-A successfully connected, owned Chromium launch sends Browser.close while the protocol client is alive and waits
-for actual process exit for up to five seconds on the browser clock, independently of the caller's deadline.
-The existing signal termination and five-second force-kill fallback follow, so a hung process can take roughly
-ten seconds plus process-group cleanup. This best effort helps preserve recent supplied-profile storage without
-promising durability on crashes or forced termination. Signal-only teardown was rejected because the reproduced
-normal shutdown lost a recent write; an unbounded wait could hang scope closure, and a caller-configurable budget
-would add public configuration for a bounded internal cleanup policy. Attached browsers and failed connections
-retain their existing release behavior.
+A successfully connected, owned Chromium or Firefox launch sends its protocol's close command (CDP's Browser.close,
+BiDi's browser.close, before session.end, which it ends itself) while the protocol client is alive and waits for
+actual process exit for up to five seconds on the browser clock, independently of the caller's deadline. Both
+adapters share the one finalizer. The wait is on the exit, not the reply: Firefox 158.0 answers browser.close
+before it writes the profile's cookies and localStorage. The existing signal termination and five-second force-kill
+fallback follow, so a hung process can take roughly ten seconds plus process-group cleanup. This best effort helps
+preserve recent supplied-profile storage without promising durability on crashes or forced termination. Signal-only
+teardown was rejected because the reproduced normal shutdown lost a recent write on both browsers; an unbounded
+wait could hang scope closure, and a caller-configurable budget would add public configuration for a bounded
+internal cleanup policy. Attached browsers and failed connections retain their existing release behavior.
 
 ## Chromium screencast ownership belongs to the session
 
@@ -1311,8 +1328,11 @@ scaled to fit, centred, and padded black. The writer owns pixel fitting because 
 that policy, timestamps, acknowledgements, and lifetimes. `layerFfmpeg`'s quality is fixed rather than an option: constrained-quality VP8 (CRF 8, quantizer 0 to 50, a 4 Mbit/s average target that bursts allow exceeding) in real-time mode with `-cpu-used 8` keeps small text legible at desktop size, where libvpx's 256 kbit/s default does not; Chromium's screencast asks for JPEG quality 90, which also enlarges native trace frames. An option is rejected for now because a caller with another trade-off can provide a `VideoWriter`, and adding one later is additive. Reusable writer conformance checks decode changing and odd-sized
 inputs to verify output dimensions and padding. Its file lives in the context's downloads directory on Chromium,
 or the explicitly named output directory on WebKit. Scope closure
-or normal source termination ends input and allows five seconds on the browser clock to finish a started writer,
-even while the caller scope stays open. An empty recording fails promptly without starting a writer; source failures
+or normal source termination ends input and allows `Deadline.DefaultBudget`, as read when the capability is
+acquired, on the browser clock to finish a started writer, even while the caller scope stays open. The finish stays
+bounded because scope close waits for the writer; a fixed five seconds is rejected because what is left to encode
+at the end depends on the machine's load, not on Strider, and a limit only while input is read is rejected because
+the writer's progress after input ends is not visible. An empty recording fails promptly without starting a writer; source failures
 retain their errors. A failed or unfinished writer fails
 `file` with `BackendFailure`. Native traces select video when available. Rejected: adding the writer to the
 capability's requirement channel, which would require Firefox callers to provide an unused service; naming the
@@ -1642,3 +1662,17 @@ these, Playwright's `goto` and `reload` resolve to `null` for them, and the brow
 report both kinds as requests, and Firefox reports `data:` but not `blob:`. Reporting each browser's own events was
 rejected: the same page would report different requests on each backend, and a `data:` navigation would carry a
 response with no network behind it. `file:` URLs stay requests.
+
+## A headless launch states a fine pointer with hover
+
+A headless launch of Chromium or Firefox tells its pages they have a fine pointer that can hover: Chromium with
+`--blink-settings` for primary and available hover and pointer types, Firefox with `ui.primaryPointerCapabilities` and
+`ui.allPointerCapabilities` set to 6. Headless Chromium and Firefox have no pointing device, so a page Strider drives
+with a mouse would otherwise match `(hover: none)` and `(pointer: none)` and render its touch layout. The settings go
+with `headless`, not with a launch profile: headless is what takes the device away, and `--headless` is added whatever
+the profile, `stock` included; a launch with a window reports the machine's own devices. Putting them in the
+automation profile was rejected: a `stock` headless launch would still report no pointer, which no desktop browser
+does. A caller's own `--blink-settings`, or a profile's own pointer preferences, win, and Chromium's mobile touch
+emulation still overrides them. On Firefox they're user values, as a launch profile's are, so in a profile directory
+the caller keeps, Firefox saves them into `prefs.js` and a later launch there, headed too, keeps them. Writing them
+as default values with `pref()`, which Firefox doesn't save, was rejected: Firefox 158 ignores them there.

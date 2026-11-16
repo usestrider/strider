@@ -384,7 +384,11 @@ export type Fact =
       | { readonly _tag: "Completed"; readonly path: Option.Option<string> }
       | { readonly _tag: "Canceled" }
   }
-  | { readonly _tag: "ConsoleMessage"; readonly realm: Target.RealmId; readonly message: ConsoleMessage.ConsoleMessage }
+  | {
+    readonly _tag: "ConsoleMessage"
+    readonly realm: Option.Option<Target.RealmId>
+    readonly message: ConsoleMessage.ConsoleMessage
+  }
   | {
     readonly _tag: "UncaughtException"
     readonly realm: Option.Option<Target.RealmId>
@@ -552,7 +556,8 @@ export interface WebSocketBridge {
     // isAlive reads the originating adapter realm entry, never a replacement entry.
     ownership: { readonly isAlive: () => boolean; readonly release?: Effect.Effect<void> | undefined }
   ) => boolean
-  readonly ended: (realm: Target.RealmId) => void
+  /** A realm that ended, with why where the adapter knows: its page's or the browser's reason. */
+  readonly ended: (realm: Target.RealmId, reason?: Target.CloseReason | undefined) => void
   readonly failed: (realm: Target.RealmId) => void
 }
 
@@ -582,7 +587,12 @@ export type Declaration =
     /** As on `Downloads`. */
     readonly retiring?: (() => boolean) | undefined
   }
-  | { readonly _tag: "Override"; readonly override: Override }
+  | {
+    readonly _tag: "Override"
+    readonly override: Override
+    /** As on `Downloads`. */
+    readonly retiring?: (() => boolean) | undefined
+  }
   | {
     readonly _tag: "Downloads"
     readonly behavior: { readonly _tag: "Allow"; readonly directory: string } | { readonly _tag: "Deny" }
@@ -979,6 +989,13 @@ export interface AdapterConnection {
   readonly defaultContext: UserContext.Id
   /** Waits as long as the connection lives. */
   readonly closed: Effect.Effect<Transport.ConnectionLost>
+  /**
+   * Records that the browser is closing, for `reason`. The browser's layer calls it before the adapter's scope
+   * closes. It sends nothing and waits for nothing. Afterwards, a page, a realm, a pending call or the connection
+   * that ends with no more particular cause ends with `reason`; a known cause, such as a realm's recorded end, a
+   * page closed by command or by its context's removal, or a replaced document, keeps precedence.
+   */
+  readonly closing: (reason: Target.CloseReason) => Effect.Effect<void>
 
   // Contexts and pages
   readonly createUserContext: (

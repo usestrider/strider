@@ -76,6 +76,32 @@ for (const [name, backend] of backends) {
           }),
         60_000
       )
+      it.effect("routes a socket by an exact URL written without its trailing slash", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* Browser.newPage()
+          yield* page.goto(`${origin}/fixture?html=${encodeURIComponent("<title>socket</title>")}`)
+          const registration = yield* page.context.routeWebSocket(
+            origin.replace("http:", "ws:"),
+            (connection) =>
+              connection.open({ fromPage: (_, endpoint) => endpoint.send({ _tag: "Text", data: "routed" }) }),
+            { implementation: "script", timing: name === "WebKit" ? "bestEffort" : "beforeAuthorScript" }
+          )
+          const reply = yield* page.evaluateInMainWorld(() =>
+            new Promise<string>((resolve) => {
+              const socket = new WebSocket(location.origin.replace("http:", "ws:"))
+              socket.onopen = () => socket.send("ping")
+              socket.onmessage = (event) => {
+                resolve(String(event.data))
+                socket.close()
+              }
+              socket.onerror = () => resolve("socket error")
+              setTimeout(() => resolve("no reply"), 5_000)
+            })
+          )
+          yield* registration.remove
+          assert.strictEqual(reply, "routed")
+        }), 60_000)
       it.effect(
         "mocks binary sends in order and keeps bridge envelopes out of public console events",
         () =>
