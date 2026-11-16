@@ -1,0 +1,5 @@
+---
+"@usestrider/browser": minor
+---
+
+`Keyboard.insertText` and `Locator.fill` no longer send key events to insert text on Firefox and stock WebKit (`fill("")` still clears by pressing Delete). They typed the text as a key per character, so a page saw `keydown`, `keypress` and `keyup` for each, a canceled `keydown` lost the text, a `beforeinput` handler ran once per character, and on stock WebKit a newline was pressed as Enter, which submitted an input's form. The text now goes into the focused element, in whichever frame has focus, through the page's editing command, `execCommand("insertText")`. The page gets one cancelable `beforeinput` with the whole text and then `input`, as on Chromium. A canceled `beforeinput` inserts nothing. A newline goes into a textarea as a line break. On Firefox, whose command fires no `beforeinput`, Strider dispatches that event itself, untrusted (`isTrusted` is `false`). Code that relied on key events during `fill` or `insertText` on those browsers sees none now.

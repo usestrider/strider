@@ -332,8 +332,9 @@ const moveToDone = Effect.fn("moveToDone")(function*(page: Page.Page, title: str
 ## The keyboard and the mouse
 
 `page.keyboard` types into whatever has focus, for a shortcut the page itself handles. Its `insertText` adds text
-at the caret with no key events, as an input method would, where `fill` replaces the field's contents; on Firefox,
-which has no command for it, each character is typed as a key.
+at the caret with no key events, as an input method would, where `fill` replaces the field's contents. The page
+gets a `beforeinput` it can cancel, then `input`. On Firefox, which has no command for it, Strider dispatches that
+`beforeinput` itself, so its `isTrusted` is `false`.
 `page.mouse` acts at coordinates, for canvases and maps. Neither checks anything. Holding a key or button is
 scoped, so a failed step never leaves it held:
 

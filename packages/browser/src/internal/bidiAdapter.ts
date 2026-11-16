@@ -157,7 +157,7 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       entry("pdf", "supported"),
       entry("evaluation.userActivation", "supported"),
       entry("input.insertText", "partial", [
-        "WebDriver BiDi has no command for it, so each character is typed as a key"
+        "WebDriver BiDi has no command for it, so Strider inserts the text with the page's editing command, which sends no key events, and dispatches the beforeinput before it itself, untrusted (isTrusted is false), since WebDriver BiDi sends none"
       ]),
       entry("input.pointerModifiers", "supported", ["modifiers are held as keys; a mouse event's flags are ignored"]),
       entry("input.fractionalPointer", "partial", [
@@ -408,6 +408,7 @@ export const connect: (
       realm: (document, world) => Evaluation.realm(state, document, world),
       evaluate: (realm, call) => Evaluation.evaluate(state, realm, call),
       releaseHandles: (list) => Evaluation.releaseHandles(state, list),
+      textInsertion: "beforeInputAndEditingCommand",
       dispatchInput: (page, events, frame) => Input.dispatchInput(state, page, events, frame),
       contentFrame: (node) => Input.contentFrame(state, node),
       releaseNodes: () => Effect.void,
