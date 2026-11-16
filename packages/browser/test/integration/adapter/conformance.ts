@@ -780,6 +780,124 @@ export const conformance = (backend: Backend) =>
             yield* clicked.pipe(Effect.retry({ times: 30, schedule: Schedule.spaced("100 millis") }))
           }), timeout)
 
+        // The pointer crossing a cross-site frame's edge, either way or straight into another, updates both sides: the
+        // document it leaves sees it leave, the one it enters sees it enter, and the parent's hover follows it to the
+        // iframe element
+        it.effect("moves the hover across cross-site frame edges in both documents", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            const { page } = yield* newPage(world)
+            const fixture = (origin: string, html: string) =>
+              `${origin}/fixture?html=${encodeURIComponent(html)}`
+            const child = (name: string) =>
+              `<!doctype html><body style="margin:0" data-name="${name}"><button style="position:absolute;left:0;top:0;width:100%;height:100%" onmouseenter="parent.postMessage('${name}:enter', '*')" onmouseleave="parent.postMessage('${name}:leave', '*')">${name}</button><script>parent.postMessage('${name}:loaded', '*')</script></body>`
+            const iframe = (id: string, left: number, name: string) =>
+              `<iframe id="${id}" src="${
+                fixture(world.site.crossSite, child(name))
+              }" style="position:absolute;left:${left}px;top:0;width:100px;height:60px;border:0"></iframe>`
+            yield* goto(
+              world,
+              page,
+              fixture(
+                world.site.origin,
+                `<!doctype html><body style="margin:0"><script>window.got = []; addEventListener('message', (e) => got.push(e.data)); for (const type of ['mouseover', 'mouseout', 'mouseenter', 'mouseleave']) document.addEventListener(type, (e) => { if (e.target.id) got.push(e.target.id + ':' + type) }, true)</script><div id="parent" style="position:absolute;left:0;top:0;width:80px;height:60px"></div>${
+                  iframe("a", 100, "A")
+                }${iframe("b", 220, "B")}</body>`
+              )
+            )
+            const frameOf = Effect.fnUntraced(function*(name: string) {
+              const marker = encodeURIComponent(`data-name="${name}"`)
+              const committed = yield* world.facts.when("DocumentCommitted", (fact) =>
+                fact.navigable !== page && fact.url.includes(marker))
+              return committed.navigable
+            })
+            const a = yield* frameOf("A")
+            const b = yield* frameOf("B")
+            yield* evaluate(
+              world,
+              page,
+              "() => new Promise((resolve) => { const done = () => got.includes('A:loaded') && got.includes('B:loaded') && resolve(true); done(); addEventListener('message', done) })"
+            )
+            const none = { alt: false, control: false, meta: false, shift: false }
+            const move = (x: number, y: number) =>
+              ({ _tag: "Mouse", type: "move", x, y, button: "none", clickCount: 0, modifiers: none, buttons: 0 }) as const
+            const into = (frame: Target.NavigableId, left: number) => {
+              const origin = { x: left, y: 0 }
+              return { frame, origin, path: [{ frame, origin }] }
+            }
+            const state = Effect.gen(function*() {
+              return {
+                got: (yield* evaluate(world, page, "() => got.splice(0)")) as ReadonlyArray<string>,
+                hover: yield* evaluate(
+                  world,
+                  page,
+                  "() => [...document.querySelectorAll(':hover')].map((e) => e.id).filter(Boolean)"
+                ),
+                a: yield* evaluate(world, a, "() => document.querySelector('button').matches(':hover')"),
+                b: yield* evaluate(world, b, "() => document.querySelector('button').matches(':hover')")
+              }
+            })
+            // Each crossing's events, and the hover it leaves in the parent and in each frame
+            const crossings = [
+              {
+                name: "to the parent's element",
+                input: world.adapter.dispatchInput(page, [move(40, 30)]),
+                events: ["parent:mouseover", "parent:mouseenter"],
+                hover: ["parent"],
+                a: false,
+                b: false
+              },
+              {
+                name: "from the parent's element into frame A",
+                input: world.adapter.dispatchInput(page, [move(150, 30)], into(a, 100)),
+                events: ["parent:mouseout", "parent:mouseleave", "a:mouseover", "a:mouseenter", "A:enter"],
+                hover: ["a"],
+                a: true,
+                b: false
+              },
+              {
+                name: "from frame A into frame B",
+                input: world.adapter.dispatchInput(page, [move(270, 30)], into(b, 220)),
+                events: ["a:mouseout", "a:mouseleave", "A:leave", "b:mouseover", "b:mouseenter", "B:enter"],
+                hover: ["b"],
+                a: false,
+                b: true
+              },
+              {
+                name: "from frame B back to the parent's element",
+                input: world.adapter.dispatchInput(page, [move(40, 30)]),
+                events: ["b:mouseout", "b:mouseleave", "B:leave", "parent:mouseover", "parent:mouseenter"],
+                hover: ["parent"],
+                a: false,
+                b: false
+              }
+            ]
+            const failures: Array<string> = []
+            for (const crossing of crossings) {
+              yield* crossing.input
+              const seen: Array<string> = []
+              const settled = (current: Effect.Success<typeof state>) =>
+                crossing.events.every((event) => seen.includes(event)) &&
+                JSON.stringify(current.hover) === JSON.stringify(crossing.hover) && current.a === crossing.a &&
+                current.b === crossing.b
+              let last = yield* state
+              seen.push(...last.got)
+              for (let attempt = 0; attempt < 20 && !settled(last); attempt++) {
+                yield* Effect.sleep("100 millis")
+                last = yield* state
+                seen.push(...last.got)
+              }
+              if (!settled(last)) {
+                failures.push(
+                  `${crossing.name}: events ${JSON.stringify(seen)}, parent :hover ${
+                    JSON.stringify(last.hover)
+                  }, A :hover ${last.a}, B :hover ${last.b}`
+                )
+              }
+            }
+            assert.deepStrictEqual(failures, [])
+          }), timeout)
+
         it.effect("sends input into a cross-site frame that has not drawn its first frame yet", () =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
