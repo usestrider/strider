@@ -379,6 +379,20 @@ export const cases: ReadonlyArray<Case> = [
     verify: equals("1")
   })),
   {
+    name: "mouse-click-in-cross-site-frame",
+    description: "Click a button by its coordinates inside a cross-site frame, then read the frame's counter",
+    fixture: "/benchmark-mouse?frame",
+    strider: Effect.fnUntraced(function*(page) {
+      yield* page.mouse.click({ x: 260, y: 25 })
+      return yield* page.frame(page.locator("#frame")).locator("#count").readText
+    }),
+    playwright: async (page) => {
+      await page.mouse.click(260, 25)
+      return page.frameLocator("#frame").locator("#count").textContent()
+    },
+    verify: equals("1")
+  },
+  {
     name: "fill",
     description: "Fill a labeled input with default actionability, then read its value",
     strider: Effect.fnUntraced(function*(page) {
