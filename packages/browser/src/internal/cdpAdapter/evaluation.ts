@@ -11,6 +11,7 @@ import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import * as DOM from "../../cdp/DOM.ts"
+import * as Log from "../../cdp/Log.ts"
 import * as Page from "../../cdp/Page.ts"
 import * as Runtime from "../../cdp/Runtime.ts"
 import * as ConsoleMessage from "../../ConsoleMessage.ts"
@@ -257,7 +258,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       const top = params.stackTrace?.callFrames[0]
       state.buffer.emitFrom(realm, {
         _tag: "ConsoleMessage",
-        realm: realm.id,
+        realm: Option.some(realm.id),
         message: new ConsoleMessage.ConsoleMessage({
           level: Kit.consoleLevel(params.type),
           text: ConsoleFormat.format(params.args.map(Kit.argumentOf)),
@@ -274,6 +275,54 @@ export const register = (handlers: Kit.Handlers<Event>) =>
           at: Adapter.now()
         })
       })
+    })
+    // What the browser itself writes to the console, such as a CSP violation, a blocked or failed load, or a
+    // deprecation. An entry names no execution context, so it belongs to its worker or else to its page
+    .on(Log.entryAdded, (params, { state, target }) => {
+      if (target === undefined) return
+      const entry = params.entry
+      if (entry.args !== undefined && entry.args.length > 0) {
+        const on = Protocol.on(target.session)
+        for (const arg of entry.args) {
+          if (arg.objectId !== undefined) {
+            state.buffer.later(Runtime.releaseObject({ objectId: arg.objectId }).pipe(on, Effect.ignore))
+          }
+        }
+      }
+      // A worker's own console calls come again on its page's session as `worker` entries
+      if (entry.source === "worker") return
+      // Only a worker's target has a realm of its own
+      const realm = target.realm
+      const page = target.page
+      if (realm === undefined && page === undefined) return
+      const top = entry.stackTrace?.callFrames[0]
+      // CDP's lines and columns are 0-based; a location is 1-based. An entry with no stack names only a line
+      const location = top !== undefined
+        ? Option.map(Urls.reportedOption(top.url), (url) => ({
+          url,
+          line: top.lineNumber + 1,
+          column: top.columnNumber + 1
+        }))
+        : Option.map(Urls.reportedOption(entry.url ?? ""), (url) => ({
+          url,
+          line: (entry.lineNumber ?? 0) + 1,
+          column: 1
+        }))
+      const fact: Adapter.Fact = {
+        _tag: "ConsoleMessage",
+        realm: Option.fromUndefinedOr(realm?.id),
+        message: new ConsoleMessage.ConsoleMessage({
+          level: entry.level === "verbose" ? "debug" : Kit.consoleLevel(entry.level),
+          text: entry.text,
+          location,
+          origin: realm !== undefined
+            ? { _tag: "Worker", realm: realm.id }
+            : { _tag: "Page", page: page!.id },
+          at: Adapter.now()
+        })
+      }
+      if (realm === undefined) state.buffer.emit(fact)
+      else state.buffer.emitFrom(realm, fact)
     })
     .on(Runtime.exceptionThrown, (params, { state, target }) => {
       if (target === undefined) return
