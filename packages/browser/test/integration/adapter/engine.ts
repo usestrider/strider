@@ -27,9 +27,18 @@ const timeout = 60_000
 const string = (value: string): Adapter.LocalValue => ({ _tag: "Value", value: { type: "string", value } })
 
 /** A page showing `html`, and a function that sends the engine a request in the world the library would use. */
-const open = Effect.fnUntraced(function*(_backend: Backend, html: string, beforeInstall?: string, origin?: string) {
+const open = Effect.fnUntraced(function*(
+  _backend: Backend,
+  html: string,
+  beforeInstall?: string,
+  origin?: string,
+  context?: "fresh"
+) {
   const served = origin === undefined ? yield* site : { origin }
-  const { adapter, page, context, facts } = yield* (yield* Connection.Shared).page
+  const connection = yield* Connection.Shared
+  const { adapter, page, context: userContext, facts } = yield* (context === "fresh"
+    ? connection.freshPage
+    : connection.page)
   const navigation = yield* adapter.navigate(
     page,
     `${served.origin}/fixture?html=${encodeURIComponent(html)}`,
@@ -69,7 +78,7 @@ const open = Effect.fnUntraced(function*(_backend: Backend, html: string, before
     // Decoded as the library decodes it, so every answer the tests see is one the schema accepts
     return yield* Engine.decodeResponse(result.value.value).pipe(Effect.orDie)
   })
-  return { send, call, adapter, page, context, document, realm }
+  return { send, call, adapter, page, context: userContext, document, realm }
 })
 
 const text = (value: string, exact = false): Engine.TextMatcher => ({ _tag: "String", value, exact })
@@ -3070,11 +3079,12 @@ document.getElementById("outer").attachShadow({ mode: "open" }).innerHTML =
             assert(twice._tag === "Strict")
             assert.strictEqual(twice.count, 4)
           }), timeout)
+        // About the harness's contexts themselves, so each half opens a context of its own
         it.effect("keeps raw-engine documents, realms and storage private to each scoped context", () =>
           Effect.gen(function*() {
             const { origin } = yield* site
             const first = yield* Effect.scoped(Effect.gen(function*() {
-              const opened = yield* open(backend, "<p>First</p>", undefined, origin)
+              const opened = yield* open(backend, "<p>First</p>", undefined, origin, "fresh")
               const written = yield* opened.call(
                 `() => {
                 localStorage.setItem("engine-fixture", "first");
@@ -3097,7 +3107,7 @@ document.getElementById("outer").attachShadow({ mode: "open" }).innerHTML =
               return opened
             }))
             yield* Effect.scoped(Effect.gen(function*() {
-              const second = yield* open(backend, "<p>Second</p>", undefined, origin)
+              const second = yield* open(backend, "<p>Second</p>", undefined, origin, "fresh")
               assert.strictEqual(first.adapter, second.adapter)
               assert.notStrictEqual(first.context, second.context)
               assert.notStrictEqual(first.page, second.page)
