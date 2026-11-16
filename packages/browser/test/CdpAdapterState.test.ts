@@ -1402,6 +1402,40 @@ describe("CDP restoration cleanup", () => {
         assert.isUndefined(context.retiredFrames)
       })).pipe(Effect.provideService(BrowserClock.CurrentClock, BrowserClock.fromClock(clock)))))
 
+  it.effect("denies a retiring context's downloads before disposing it, its declaration already released", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const sent: Array<string> = []
+      const mock = {
+        ...session,
+        ended: Effect.void,
+        send: (command: { readonly method: string; readonly params: { readonly behavior?: string } }) =>
+          Effect.sync(() => {
+            sent.push(
+              command.method === "Browser.setDownloadBehavior"
+                ? `${command.method} ${command.params.behavior}`
+                : command.method
+            )
+            return {}
+          })
+      } as unknown as ProtocolClient.Session
+      const { state, page } = yield* withPage(mock)
+      const context = new State.ContextEntry(state.ids.userContext(), "retiring", false)
+      state.contexts.set(context.id, context)
+      state.contextsByCdp.set("retiring", context)
+      ;(page as { context: State.ContextEntry }).context = context
+      const lifetime = yield* Scope.make()
+      yield* Declare.declare(state, { _tag: "UserContext", context: context.id }, {
+        _tag: "Downloads",
+        behavior: { _tag: "Allow", directory: "/tmp/downloads" },
+        retiring: () => true
+      }).pipe(Scope.provide(lifetime))
+      // A context the library created releases its declarations, as retiring, before it is removed
+      yield* Scope.close(lifetime, Exit.void)
+      sent.length = 0
+      yield* Contexts.removeUserContext(state, context.id)
+      assert.deepStrictEqual(sent, ["Browser.setDownloadBehavior deny", "Target.disposeBrowserContext"])
+    })))
+
   it.effect("attributes a late download after a retiring context releases its declarations", () =>
     Effect.scoped(Effect.gen(function*() {
       const { state, page, target } = yield* withPage()
