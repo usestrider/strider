@@ -86,6 +86,9 @@ const pointerSession = Effect.fnUntraced(function*(
  * inside three for each level. A point that hits nothing ends the search where it is.
  */
 const framelessSession = Effect.fnUntraced(function*(state: State, page: PageEntry, x: number, y: number) {
+  // The frame tree is read after every event already received on the page's session is folded: a reply the caller
+  // acted on can arrive with, and be delivered before, a frame's attachment that came ahead of it
+  yield* page.target.session.drainObserved
   let sent: PointerTarget = { target: page.target, x: 0, y: 0 }
   while (true) {
     const target = sent.target
