@@ -230,7 +230,12 @@ clock for a real browser, even under `TestClock`, and Effect's clock for `Browse
 `Timeout`, and each command waits for its reply until that instant rather than for `Protocol.CommandTimeout`. Each
 adapter method is classified once by what it does to the browser: a read, a write (marked sent before it goes), a
 creation (run to completion apart, and closed if it finishes after the deadline), or a release (never bounded by an
-operation, so cleanup happens after a deadline passed). A new method doesn't compile until it's classified.
+operation, so cleanup happens after a deadline passed). A new method doesn't compile until it's classified. One
+write runs apart: a CDP target's init-script write, whose record of script identifiers a command cut short between
+its request and its reply would leave untrue. It runs to its end in work the connection owns, each command under
+`Protocol.CommandTimeout`, while the caller waits for it only until its deadline. A script removal that gets no
+reply even then is kept as unconfirmed and sent again by the next write, on CDP and BiDi alike, and for that
+identifier alone the browser's "not found" answer settles it as removed.
 
 - **Why.** Each operation bounded its own calls by hand, and 32 of 44 didn't: a cookie read, a declaration, or a
   page's creation waited for the protocol's 30 seconds whatever the deadline, then failed as a `BackendFailure` the
@@ -238,7 +243,9 @@ operation, so cleanup happens after a deadline passed). A new method doesn't com
   has to end by itself, so the deadline is the command's, not only a race around the call.
 - **Rejected:** bounding each call site by hand, the pattern that missed them; keeping `CommandTimeout` inside
   operations, which cuts a command short of a longer deadline and needs a reason of its own for "no reply"; and
-  marking a read as sent, which would tell the caller something may have changed when nothing did.
+  marking a read as sent, which would tell the caller something may have changed when nothing did. For the script
+  write: forgetting an identifier before its removal is sent, which loses track of a script the browser never
+  removed, and ignoring every "not found", which would hide a record that went wrong some other way.
 
 **Late resources are released.** When a caller stops waiting for a resource-producing protocol command, the
 library uses the protocol client's default late handler to release any resource the reply returns. BiDi script
