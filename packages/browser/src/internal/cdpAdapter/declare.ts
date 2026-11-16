@@ -304,8 +304,10 @@ const scriptNotFound = (error: Protocol.ProtocolError) =>
   error.reason._tag === "Rejected" && error.reason.description === "Script not found"
 
 /**
- * Removes an init script, recorded under `key` or unconfirmed, and updates the record by the answer. A new target's
- * gate has nothing recorded, so it sends no removal, and every removal waits for its reply.
+ * Removes an init script, recorded under `key` or unconfirmed, and updates the record by the answer. Every removal
+ * waits for its reply, in a target's gate too: a new target's gate has nothing recorded, except a page with WebSocket
+ * routes, whose scripts `webSocketGate` installs and records before the ordinary gate replaces them, once the renderer
+ * has resumed, so that wait doesn't hold up a paused renderer.
  */
 const removeScript = (target: TargetEntry, identifier: string, key?: string) => {
   const unconfirmed = target.unconfirmedScripts ??= new Set()
