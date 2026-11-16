@@ -14,9 +14,11 @@
  * - **What it covers**: `Date`, `performance.now`, and in controlled mode `performance.timeOrigin`, `setTimeout`,
  *   `setInterval`, `requestAnimationFrame` and their clears. Not CSS animations or `document.timeline`.
  * - **The timeline's rules** are Playwright's clock's: controlled time moves by whole milliseconds, and
- *   `performance.now()` counts it from 0 where the clock reaches a document. An operation runs one due timer at a
- *   time, then lets the page's queued tasks run, so the evaluation that drives it awaits a promise; a timer set
- *   during that turn with no delay waits 1 ms. A timer that throws is reported to the page and the rest still run;
+ *   `performance.now()` counts it from 0 where the clock reaches a document, or where a document's clock becomes
+ *   controlled. An operation runs one due timer at a time, then lets the page's queued tasks run, so the evaluation
+ *   that drives it awaits a promise: it waits on its own port while the page keeps posting messages, counted by
+ *   wrapping `postMessage`, until the host's deadline, then for one real timer. A timer set during that turn with
+ *   no delay waits 1 ms. After `resume`, animation frames carry times on the timeline `performance.now()` reads. A timer that throws is reported to the page and the rest still run;
  *   the operation then fails with the first error. A document runs its controls one after another, since a host
  *   deadline can leave one running when the next arrives.
  * - **Workers**, when installed with `workers: true`: the init script runs in the scope's dedicated
@@ -33,6 +35,7 @@ import * as Declaration from "../Declaration.ts"
 import * as PageClock from "../PageClock.ts"
 import * as Reason from "../Reason.ts"
 import type * as Adapter from "./adapter.ts"
+import * as DurationInput from "./durationInput.ts"
 import * as InitScripts from "./initScripts.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
@@ -72,6 +75,29 @@ const shim = (key: string, initial: State, version: number): string => {
   const report = (error: unknown) => {
     if (typeof global.reportError === "function") global.reportError(error)
   }
+  /**
+   * The messages the page has posted, to a port or to this window: the evidence that it has tasks queued. Counting
+   * leaves what each call does unchanged.
+   */
+  let posted = 0
+  const Port = global.MessagePort
+  const realPortPost: ((...args: Array<unknown>) => void) | undefined = typeof Port === "function"
+    ? Port.prototype.postMessage
+    : undefined
+  if (realPortPost !== undefined) {
+    Port.prototype.postMessage = function postMessage(this: unknown, ...args: Array<unknown>) {
+      posted++
+      return realPortPost.apply(this, args)
+    }
+  }
+  // A worker's `postMessage` goes to the page that made it, not to its own queue
+  if (typeof global.Window === "function" && global instanceof global.Window) {
+    const realWindowPost = global.postMessage
+    global.postMessage = function postMessage(this: unknown, ...args: Array<unknown>) {
+      posted++
+      return realWindowPost.apply(this, args)
+    }
+  }
   // The real timers, for the engine where it shares this world (`engine.ts`): the first shim's, which found them
   const real = Symbol.for("@usestrider/browser/clock/real")
   if (global[real] === undefined) {
@@ -101,6 +127,16 @@ const shim = (key: string, initial: State, version: number): string => {
   let ticks = 0
   /** After `resume`, what `performance.now()` adds to the real one, so it carries on from `ticks`. */
   let perfBy: number | undefined = undefined
+  /** After `resume`, the time it resumed at: no animation frame of the resumed clock is earlier. */
+  let resumedAt = 0
+  const realOrigin = performance.timeOrigin
+  /** A controlled clock's `performance.timeOrigin`: the timeline's wall time where it reached this document. */
+  let origin: number | undefined = initial.mode === "controlled" ? initial.wall : undefined
+  Object.defineProperty(performance, "timeOrigin", {
+    get: () => origin === undefined ? realOrigin : origin,
+    configurable: true,
+    enumerable: true
+  })
   /** Whether a timer is running, or the page's tasks after it: a timer set then waits at least 1 ms. */
   let duringTick = false
   /** The controls run one after another: a host deadline can leave one running when the next arrives. */
@@ -132,19 +168,29 @@ const shim = (key: string, initial: State, version: number): string => {
     }
   }
   /**
+   * Until when, on the real monotonic clock, the current control lets the page's tasks run: the host's deadline.
+   * Past it, the remaining timers run without waiting, so a page that posts messages without end can't keep its
+   * clock busy after the operation timed out.
+   */
+  let until = Infinity
+  /**
    * Lets the page's queued tasks run: a message through a channel of our own, which arrives after the ones the page
-   * posted before it, then a real timer.
+   * posted before it, again while the page posted more since, then a real timer.
    */
   const yieldToPage = async () => {
-    if (typeof global.MessageChannel === "function") {
+    if (realPortPost !== undefined && typeof global.MessageChannel === "function") {
       const channel = new global.MessageChannel()
-      await new Promise((resolve) => {
-        channel.port1.onmessage = resolve
-        channel.port2.postMessage(null)
-      })
+      let seen: number
+      do {
+        seen = posted
+        await new Promise((resolve) => {
+          channel.port1.onmessage = resolve
+          realPortPost.call(channel.port2, null)
+        })
+      } while (posted !== seen && realPerf() < until)
       channel.port1.close()
     }
-    await new Promise((resolve) => realSetTimeout(resolve, 0))
+    if (realPerf() < until) await new Promise((resolve) => realSetTimeout(resolve, 0))
   }
   /** The first error the timers of one control threw, as the host reads it. */
   let thrown: { readonly error: unknown } | undefined = undefined
@@ -157,7 +203,7 @@ const shim = (key: string, initial: State, version: number): string => {
     try {
       const result = run(timer)
       if (thrown === undefined) thrown = result
-      await yieldToPage()
+      if (realPerf() < until) await yieldToPage()
     } finally {
       duringTick = false
     }
@@ -217,6 +263,12 @@ const shim = (key: string, initial: State, version: number): string => {
     if (real.frame) realCancelFrame(real.real)
     else realClearTimeout(real.real)
   }
+  /**
+   * A real animation frame's time on the timeline `performance.now()` reads: not before the clock resumed, nor
+   * after now, which Firefox's coarser `performance.now()` can otherwise read as earlier than the frame.
+   */
+  const frameTime = (at: number): number =>
+    perfBy === undefined ? at : Math.min(perf(), Math.max(resumedAt, at + perfBy))
   /** Real time again: the controlled timers waiting move to real ones. */
   const release = () => {
     for (const timer of timers.values()) {
@@ -224,7 +276,7 @@ const shim = (key: string, initial: State, version: number): string => {
       const real = timer.frame
         ? realFrame((at: number) => {
           moved.delete(timer.id)
-          timer.callback.call(global, at)
+          timer.callback.call(global, frameTime(at))
         })
         : realSetTimeout(() => {
           if (timer.every === undefined) {
@@ -253,11 +305,6 @@ const shim = (key: string, initial: State, version: number): string => {
   Object.defineProperty(FakeDate, "name", { value: "Date" })
   global.Date = FakeDate
   performance.now = () => perf()
-  // A controlled clock's monotonic time starts here, at the timeline's wall time now, which stays its origin
-  if (initial.mode === "controlled") {
-    const origin = initial.wall
-    Object.defineProperty(performance, "timeOrigin", { get: () => origin, configurable: true, enumerable: true })
-  }
   global.setTimeout = (callback: unknown, delay?: unknown, ...args: Array<unknown>) =>
     state.mode === "controlled"
       ? schedule(callback, delay, args, false, false)
@@ -273,7 +320,11 @@ const shim = (key: string, initial: State, version: number): string => {
   }
   if (frames) {
     global.requestAnimationFrame = (callback: unknown) =>
-      state.mode === "controlled" ? schedule(callback, 0, [], false, true) : realFrame(callback)
+      state.mode === "controlled"
+        ? schedule(callback, 0, [], false, true)
+        : perfBy !== undefined && typeof callback === "function"
+        ? realFrame((at: number) => callback.call(global, frameTime(at)))
+        : realFrame(callback)
     global.cancelAnimationFrame = (id: unknown) => {
       if (timers.has(Number(id)) || moved.has(Number(id))) clear(id)
       else realCancelFrame(id)
@@ -283,26 +334,60 @@ const shim = (key: string, initial: State, version: number): string => {
   /** Moves controlled real time to an offset one, `performance.now()` carrying on from where it is. */
   const toReal = () => {
     perfBy = ticks - realPerf()
+    resumedAt = ticks
     release()
+  }
+  /** Starts a controlled timeline in this document, from 0 at the timeline's wall time `wall`. */
+  const toControlled = (wall: number) => {
+    ticks = 0
+    perfBy = undefined
+    origin = wall
+  }
+  /**
+   * What the host can read of a thrown value without running the page's code: a property read, a conversion and
+   * even `instanceof` can run a getter or a proxy's trap, which can throw again.
+   */
+  const describe = (error: unknown) => {
+    const attempt = <A>(read: () => A): A | undefined => {
+      try {
+        return read()
+      } catch {
+        return undefined
+      }
+    }
+    const text = (read: () => unknown) => {
+      const value = attempt(read)
+      return typeof value === "string" ? value : undefined
+    }
+    if (typeof error !== "object" && typeof error !== "function") {
+      return { name: "Error", message: typeof error === "symbol" ? error.toString() : String(error), stack: null }
+    }
+    if (error === null) return { name: "Error", message: "null", stack: null }
+    const isError = attempt(() => error instanceof Error) === true
+    return {
+      name: (isError ? text(() => (error as Error).name) : undefined) ?? "Error",
+      message: (isError ? text(() => (error as Error).message) : undefined)
+        ?? text(() => Object.prototype.toString.call(error))
+        ?? "a value that can't be read",
+      stack: (isError ? text(() => (error as Error).stack) : undefined) ?? null
+    }
   }
   /**
    * Runs a control after the ones before it. It resolves to `"done"`, or to the first error a timer threw, as
    * `"threw "` and the JSON of its name, message, and stack.
    */
-  const queue = (control: () => void | Promise<void>): Promise<string> => {
+  const queue = (control: () => void | Promise<void>, budget = Infinity): Promise<string> => {
+    // The budget counts from when the host sent the control, not from when the ones before it finish
+    const stop = realPerf() + budget
     const next = chain.then(async () => {
       thrown = undefined
+      until = stop
       await control()
       // `thrown` is set inside `control`, which narrowing can't see
       const result = thrown as { readonly error: unknown } | undefined
       thrown = undefined
       if (result === undefined) return "done"
-      const error = result.error
-      return "threw " + JSON.stringify(
-        error instanceof Error
-          ? { name: error.name, message: error.message, stack: error.stack ?? null }
-          : { name: "Error", message: String(error), stack: null }
-      )
+      return "threw " + JSON.stringify(describe(result.error))
     })
     chain = next.catch(() => undefined)
     return next
@@ -318,15 +403,16 @@ const shim = (key: string, initial: State, version: number): string => {
         if (at <= current) return
         current = at
         if (state.mode === "controlled" && next.mode !== "controlled") toReal()
+        if (state.mode !== "controlled" && next.mode === "controlled") toControlled(next.wall)
         // A controlled document keeps the time that passed in it: the timeline's wall time is now `next.wall`
         state = next.mode === "controlled" ? { mode: "controlled", wall: next.wall - ticks } : next
       }),
-    adjust: (by: number, at: number) =>
+    adjust: (by: number, at: number, budget: number) =>
       queue(async () => {
         current = Math.max(current, at)
         await advance(ticks + by)
-      }),
-    setTime: (to: number, at: number) =>
+      }, budget),
+    setTime: (to: number, at: number, budget: number) =>
       queue(async () => {
         current = Math.max(current, at)
         if (state.mode === "fixed") state = { mode: "fixed", wall: to }
@@ -335,7 +421,7 @@ const shim = (key: string, initial: State, version: number): string => {
           if (delta > 0) await jump(ticks + delta)
           state = { mode: "controlled", wall: to - ticks }
         }
-      }),
+      }, budget),
     resume: (at: number) =>
       queue(() => {
         current = Math.max(current, at)
@@ -362,10 +448,11 @@ const operationSource = (
   argument: number | undefined,
   version: number
 ) =>
+(budget: number) =>
   `function() {
   const clock = globalThis[Symbol.for(${JSON.stringify(key)})];
   if (clock === undefined) return "missing";
-  return clock.${name}(${argument === undefined ? "" : `${argument}, `}${version});
+  return clock.${name}(${argument === undefined ? "" : `${argument}, `}${version}, ${budget});
 }`
 
 /** A timer's error in one document, from the JSON the shim resolved to. */
@@ -419,11 +506,10 @@ const stateOf = (mode: PageClock.Mode): State | string => {
       return Option.isSome(wall) ? { mode: "controlled", wall: wall.value } : `${String(mode.at)} isn't a time`
     }
     case "offset": {
-      // A whole millisecond, as `Date.now()` is
-      // `Duration.fromInput` reads NaN as zero
-      const by = Number.isNaN(mode.by) ? Option.none() : Option.filter(Duration.fromInput(mode.by), Duration.isFinite)
+      // A whole millisecond, as `Date.now()` is, truncated toward zero
+      const by = DurationInput.toFiniteMillis(mode.by)
       return Option.isSome(by)
-        ? { mode: "offset", by: Math.trunc(Duration.toMillis(by.value)) }
+        ? { mode: "offset", by: Math.trunc(by.value) }
         : `${String(mode.by)} isn't a finite duration`
     }
   }
@@ -434,12 +520,17 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
   const timeline = { installed: Option.none<Installed>() }
   owner.runtime.timelines.set(key, timeline)
   const token = `@usestrider/browser/clock/${crypto.randomUUID()}`
+  /**
+   * The newest version any install of this clock declared: a document keeps the shim of an earlier install, under
+   * the same symbol, and takes only a newer state.
+   */
+  let latest = 0
   const adapter = owner.runtime.model.adapter
 
   /**
    * Evaluates in the main world of every current document of the timeline's pages, and with `workers` in their
    * dedicated workers; a document or worker that ends is skipped. Every one runs to its end, and the errors their
-   * timers threw are returned, by where they threw.
+   * timers threw are returned, by where they threw; then it fails with the first that failed, if any did.
    */
   const broadcast = (functionDeclaration: string, workers: boolean, awaitPromise: boolean) =>
     Effect.flatMap(
@@ -487,11 +578,17 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
                   : error.reason._tag === "Gone"
                   ? Effect.succeed([])
                   : Effect.fail(error.message)
-              )
+              ),
+              Effect.exit
             ),
           { concurrency: "unbounded" }
         )
-    ).pipe(Effect.map((each) => each.flat()))
+    ).pipe(Effect.flatMap((exits) => {
+      const failed = exits.find(Exit.isFailure)
+      return failed === undefined
+        ? Effect.succeed(exits.flatMap((exit) => Exit.isSuccess(exit) ? exit.value : []))
+        : Effect.failCause(failed.cause)
+    }))
 
   const declare = Effect.fnUntraced(function*(installed: Installed) {
     const script = yield* Scope.fork(installed.scope)
@@ -538,12 +635,18 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
    * Applies an operation to every document now, then declares the timeline's new state for later ones, which the
    * timeline has whether or not the documents took it. Fails with the first error a page's timer threw.
    */
-  const apply = (operation: string, installed: Installed, next: State, run: string) =>
+  const apply = (operation: string, installed: Installed, next: State, run: (budget: number) => string) =>
     Effect.gen(function*() {
       installed.version++
+      latest = installed.version
       installed.state = next
+      // The page stops waiting for its own tasks once the operation's time is up, so its clock stays usable
+      const budget = Option.match(yield* Deadline.remaining, {
+        onNone: () => Infinity,
+        onSome: (left) => Math.max(0, Duration.toMillis(left))
+      })
       const applied = yield* Effect.exit(
-        broadcast(run, installed.workers, true).pipe(
+        broadcast(run(budget), installed.workers, true).pipe(
           Effect.mapError((hint) =>
             Deadline.isTimeout(hint) ? hint : clockError(operation, backendFailure("evaluate", hint))
           )
@@ -606,7 +709,7 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
         const workers = options?.workers === true
         if (workers) yield* InitScripts.inWorkers(owner.runtime).pipe(Effect.mapError(fail))
         const scope = yield* Scope.fork(yield* Effect.scope)
-        const installed: Installed = { state, version: 1, workers, scope, script: scope }
+        const installed: Installed = { state, version: ++latest, workers, scope, script: scope }
         installed.script = yield* declare(installed).pipe(
           Effect.mapError((error) =>
             Deadline.isTimeout(error) ? error : fail(backendFailure("declare", error.message))
@@ -628,11 +731,7 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
     adjust: Effect.fnUntraced(function*(duration: Duration.Input) {
       const operation = `${owner.name}.adjust`
       const installed = yield* require(operation, ["controlled"])
-      // `Duration.fromInput` reads NaN as zero
-      const by = Number.isNaN(duration) ? Option.none() : Option.filter(
-        Duration.fromInput(duration),
-        (by) => Duration.isFinite(by) && !Duration.isNegative(by)
-      )
+      const by = Option.filter(DurationInput.toFiniteMillis(duration), (ms) => ms >= 0)
       if (Option.isNone(by)) {
         return yield* Effect.fail(clockError(
           operation,
@@ -644,7 +743,7 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
         ))
       }
       // Up to a whole millisecond, as timers and `Date.now()` count
-      const ms = Math.ceil(Duration.toMillis(by.value))
+      const ms = Math.ceil(by.value)
       const state = installed.state as Extract<State, { mode: "controlled" }>
       yield* apply(
         operation,

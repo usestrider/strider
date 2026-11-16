@@ -1634,3 +1634,17 @@ error and the document it threw in. Playwright's clock rethrows the first error 
 too. Succeeding and leaving the error to the page alone was rejected: a test that moves time past a broken timer
 would pass without seeing it. Stopping at the first error was rejected: the timeline would stop short of the time
 the caller asked for, with other documents already past it.
+
+## The page clock waits for the page's messages between timers
+
+After each timer a controlled page clock fires, it lets the page's queued tasks run, and decides how long from
+evidence: it counts the messages the page posts, to a `MessagePort` or to its own window, and passes a message
+through a channel of its own again while the page has posted any since the last one, then waits for one real timer.
+So a chain of messages, as schedulers built on `MessageChannel` hand work on, completes before the next timer
+whatever its length. The operation's deadline bounds the wait: past it, the remaining due timers run without
+waiting, the clock reaches its time, and the operation fails with `Timeout`, so a page that posts messages without
+end leaves its clock usable. Playwright's clock waits for one real `setTimeout(0)`, a fixed window that a
+browser's timer clamping makes 4 ms after nested timers and that a longer chain outlasts; that was rejected as a
+settling window. Waiting for nothing between timers was rejected because a timer a task sets would miss the
+adjustment (#343). The cost is real time per timer, so a long adjustment over a frequent interval can outlast the
+default deadline.

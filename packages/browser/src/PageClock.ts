@@ -46,10 +46,22 @@ import type * as Target from "./Target.ts"
  * **Details**
  *
  * - `fixed`: wall time frozen at `at`; timers still run.
- * - `offset`: wall time shifted by `by`, in whole milliseconds; everything else real. A `by` that isn't finite
- *   fails with `InvalidInput`.
+ * - `offset`: wall time shifted by `by`, truncated toward zero to a whole millisecond; everything else real. A
+ *   `by` that isn't finite, or has a part that isn't, such as `{ seconds: NaN }`, fails with `InvalidInput`.
  * - `controlled`: wall time, monotonic time, timers, and animation frames move only when you call `adjust` or
  *   `setTime`.
+ *
+ * **Example** (Running a page a week ahead)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const nextWeek = Effect.fn("nextWeek")(function*(page: Page.Page) {
+ *   yield* page.clock.install({ mode: "offset", by: "7 days" })
+ *   yield* page.goto("https://app.example.com/calendar")
+ * })
+ * ```
  *
  * @stability unstable
  * @category models
@@ -133,16 +145,22 @@ export interface PageClock {
    *
    * **Details**
    *
-   * A fractional duration is rounded up to a whole millisecond. Between two timers, the page's queued tasks run,
-   * such as a message a timer posted, so a timer they set fires within the same call if it falls due. A timer set
-   * by a timer, or by those tasks, with no delay waits 1 ms, so it fires in a later call. A duration that is
-   * negative or isn't finite fails with `InvalidInput`.
+   * A fractional duration is rounded up to a whole millisecond. After each timer, the page's queued tasks run:
+   * the clock waits for the messages the page posted, to a port or to its window, for as long as it keeps posting
+   * them, then for one real timer. A timer those tasks set fires within the same call if it falls due. A timer set
+   * by a timer, or by those tasks, with no delay waits 1 ms, so it fires in this call only if that 1 ms is within
+   * it. A duration that is negative or isn't finite, or has a part that isn't, fails with `InvalidInput`.
    *
    * **Gotchas**
    *
    * - A timer that throws is reported to the page, as an uncaught error is, and the other timers still run. Once
    *   the clock has reached its time, `adjust` fails with `EvaluationThrown`, naming the first error and the
    *   document it threw in.
+   * - Each timer costs real time, for the page's tasks after it: a long adjustment over a frequent interval, such
+   *   as a day over a 16 ms animation loop, can outlast the operation's deadline. `setTime` fires each due timer
+   *   once instead.
+   * - A page that keeps posting messages keeps the clock waiting until the operation's deadline. Then the
+   *   remaining due timers run without waiting, the clock reaches its time, and `adjust` fails with `Timeout`.
    *
    * **Example** (Letting a toast time out)
    *
@@ -189,7 +207,7 @@ export interface PageClock {
    * Lets the clock run in real time again, from the time it shows now: it becomes an `offset` clock, and the
    * timers waiting on a controlled clock become real timers.
    *
-   * **Example** (Advancing a day, then running in real time)
+   * **Example** (Jumping to the next day, then running in real time)
    *
    * ```ts import.meta.vitest
    * import { Page } from "@usestrider/browser"
@@ -198,7 +216,7 @@ export interface PageClock {
    * const tomorrow = Effect.fn("tomorrow")(function*(page: Page.Page) {
    *   yield* page.clock.install({ mode: "controlled", at: "2026-06-01T09:00:00Z" })
    *   yield* page.goto("https://app.example.com/calendar")
-   *   yield* page.clock.adjust("1 day")
+   *   yield* page.clock.setTime("2026-06-02T09:00:00Z")
    *   yield* page.clock.resume
    * })
    * ```
@@ -241,6 +259,23 @@ export class WrongMode extends Schema.Error<WrongMode>("@usestrider/browser/Page
 
 /**
  * Schema for the reasons a clock operation can fail.
+ *
+ * **Example** (Reading the error a page's timer threw)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const pastTheTimers = Effect.fn("pastTheTimers")(function*(page: Page.Page) {
+ *   yield* page.clock.adjust("1 minute").pipe(
+ *     Effect.catchReason(
+ *       "PageClockError",
+ *       "EvaluationThrown",
+ *       (reason) => Effect.logWarning(`A timer threw: ${reason.exception.message}`)
+ *     )
+ *   )
+ * })
+ * ```
  *
  * @stability unstable
  * @category schemas
