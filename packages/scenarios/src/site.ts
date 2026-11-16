@@ -85,13 +85,24 @@ const routes: Record<
     )
   }),
   // A button at a fixed point, with a cross-site frame beside it when `frame` is set, holding the same page without
-  // a frame: the frame's origin is localhost, the page's 127.0.0.1
+  // a frame: the frame's origin is localhost, the page's 127.0.0.1. With `frame=drawn`, the frame tells the page
+  // once it has run two animation frames, and the page shows it in #drawn
   "/benchmark-mouse": (url) => ({
     body: page(
       "Mouse benchmark",
-      `<button style="position:fixed;left:10px;top:10px;width:100px;height:30px" onclick="document.querySelector('#count').textContent = String(Number(document.querySelector('#count').textContent) + 1)">Increment</button><p id="count" style="position:fixed;left:10px;top:60px">0</p><p id="hit" style="position:fixed;left:10px;top:90px"></p><script>addEventListener('mousedown', () => { document.querySelector('#hit').textContent = 'hit' })</script>${
+      `<button style="position:fixed;left:10px;top:10px;width:100px;height:30px" onclick="document.querySelector('#count').textContent = String(Number(document.querySelector('#count').textContent) + 1)">Increment</button><p id="count" style="position:fixed;left:10px;top:60px">0</p>${
+        url.searchParams.has("drawn")
+          ? `<script>requestAnimationFrame(() => requestAnimationFrame(() => parent.postMessage('drawn', '*')))</script>`
+          : ""
+      }${
         url.searchParams.has("frame")
-          ? `<iframe id="frame" style="position:fixed;left:200px;top:10px;width:400px;height:200px;border:0"></iframe><script>document.querySelector('#frame').src = 'http://localhost:' + location.port + '/benchmark-mouse'</script>`
+          ? `<iframe id="frame" style="position:fixed;left:200px;top:10px;width:400px;height:200px;border:0"></iframe><script>document.querySelector('#frame').src = 'http://localhost:' + location.port + '/benchmark-mouse${
+            url.searchParams.get("frame") === "drawn" ? "?drawn" : ""
+          }'</script>`
+          : ""
+      }${
+        url.searchParams.get("frame") === "drawn"
+          ? `<p id="drawn" style="position:fixed;left:10px;top:90px"></p><script>addEventListener('message', (e) => { if (e.data === 'drawn') document.querySelector('#drawn').textContent = 'drawn' }, { once: true })</script>`
           : ""
       }`
     )

@@ -381,28 +381,12 @@ export const cases: ReadonlyArray<Case> = [
   {
     name: "mouse-click-in-cross-site-frame",
     description: "Click a button by its coordinates inside a cross-site frame, then read the frame's counter",
-    fixture: "/benchmark-mouse?frame",
+    fixture: "/benchmark-mouse?frame=drawn",
     // A click into a cross-site frame that hasn't drawn yet can reach the page's iframe element instead, so the
-    // frame is clicked away from its button until a press reaches it: the timed click then measures the frame
-    // once it has drawn
-    prepareStrider: Effect.fnUntraced(function*(page) {
-      const hit = page.frame(page.locator("#frame")).locator("#hit")
-      for (let attempt = 0; attempt < 100; attempt++) {
-        yield* page.mouse.click({ x: 500, y: 160 })
-        if ((yield* hit.readText) === "hit") return
-        yield* Effect.sleep("50 millis")
-      }
-      return yield* Effect.fail(new Error("No click reached the cross-site frame"))
-    }),
-    preparePlaywright: async (page) => {
-      const hit = page.frameLocator("#frame").locator("#hit")
-      for (let attempt = 0; attempt < 100; attempt++) {
-        await page.mouse.click(500, 160)
-        if ((await hit.textContent()) === "hit") return
-        await new Promise((resolve) => setTimeout(resolve, 50))
-      }
-      throw new Error("No click reached the cross-site frame")
-    },
+    // timed click waits until the frame has run two animation frames. The frame reports that itself, with no input,
+    // so the condition is the same whichever way input is routed
+    prepareStrider: (page) => page.locator("#drawn").pipe(Expect.toHaveText("drawn")),
+    preparePlaywright: (page) => page.locator("#drawn").filter({ hasText: "drawn" }).waitFor(),
     strider: Effect.fnUntraced(function*(page) {
       yield* page.mouse.click({ x: 260, y: 25 })
       return yield* page.frame(page.locator("#frame")).locator("#count").readText
