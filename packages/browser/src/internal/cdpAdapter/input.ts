@@ -83,34 +83,34 @@ const pointerSession = Effect.fnUntraced(function*(
  * it lands on the element of a frame another session owns (`DOM.describeNode`), input goes on that session, from the
  * element's content box (`DOM.getBoxModel`). A session that owns no out-of-process frame of the page is hit-tested
  * no further, so a page without one costs no call, a point outside its out-of-process frames two, and a point
- * inside three for each level. A point that hits nothing, or a node gone before it is described, ends the search
- * where it is.
+ * inside three for each level. A point that hits nothing ends the search where it is.
  */
 const framelessSession = Effect.fnUntraced(function*(state: State, page: PageEntry, x: number, y: number) {
   let sent: PointerTarget = { target: page.target, x: 0, y: 0 }
   while (true) {
     const target = sent.target
+    // Sessions are told apart by target id: a frame's owner and its page's target needn't be one entry
     const ownsRemote = [...state.frames.values()].some((each) =>
-      each.page === page && each.owner !== target && each.parent?.owner === target
+      each.page === page && each.owner.targetId !== target.targetId && each.parent?.owner.targetId === target.targetId
     )
     if (!ownsRemote) return sent
     const on = Protocol.on(target.session)
     const found = yield* Kit.protocol(
       Effect.gen(function*() {
+        // A point the session's document doesn't cover hits no node
         const hit = yield* DOM.getNodeForLocation({
           x: x - sent.x,
           y: y - sent.y,
           includeUserAgentShadowDOM: true,
           ignorePointerEventsNone: false
-        }).pipe(on)
+        }).pipe(on, Effect.catchIf((error) => error.reason._tag === "Rejected", () => Effect.succeed(undefined)))
+        if (hit === undefined) return undefined
         const described = yield* DOM.describeNode({ backendNodeId: hit.backendNodeId }).pipe(on)
         const child = frameOf(state, described.node.frameId)
-        if (child === undefined || child.page !== page || child.owner === target) return undefined
+        if (child === undefined || child.page !== page || child.owner.targetId === target.targetId) return undefined
         const box = yield* DOM.getBoxModel({ backendNodeId: hit.backendNodeId }).pipe(on)
         return { target: child.owner, x: sent.x + box.model.content[0]!, y: sent.y + box.model.content[1]! }
-      }).pipe(
-        Effect.catchIf((error) => error.reason._tag === "Rejected", () => Effect.succeed(undefined))
-      )
+      })
     )
     if (found === undefined) return sent
     sent = found
@@ -147,10 +147,14 @@ export const dispatchInput = Effect.fnUntraced(
     const aim = (x: number, y: number) =>
       aimed !== undefined && aimed.x === x && aimed.y === y
         ? Effect.succeed(aimed.sent)
-        : framelessSession(state, page, x, y).pipe(Effect.map((found) => {
-          aimed = { x, y, sent: found }
-          return found
-        }))
+        : framelessSession(state, page, x, y).pipe(
+          // A lookup before the call's first event is written fails with nothing sent
+          Effect.mapError((error) => written ? error : Adapter.unsent(error)),
+          Effect.map((found) => {
+            aimed = { x, y, sent: found }
+            return found
+          })
+        )
     const on = <M extends string, P, A>(command: Protocol.Command<M, P, A>) => Protocol.on(command, sent.target.session)
     const onPageSession = Protocol.on(page.target.session)
     const click = Gestures.singleClick(events)
@@ -199,7 +203,9 @@ export const dispatchInput = Effect.fnUntraced(
       )
       return
     }
+    let written = false
     for (const event of events) {
+      written ||= event !== events[0]
       switch (event._tag) {
         case "Mouse": {
           if (frame === undefined) {

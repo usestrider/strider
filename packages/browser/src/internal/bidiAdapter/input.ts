@@ -24,14 +24,15 @@ export interface PointerTarget {
 
 /**
  * The context pointer input that names no frame goes on at a point in the page's coordinates, and its origin.
- * Firefox doesn't deliver page coordinates into a cross-site frame, so in a context with child frames the point is
- * hit-tested in a sandbox, one call a level, and where it lands on a frame's element, input goes to that frame's
- * context, from the element's content box. A context without child frames costs no call; a point that hits no frame
- * element ends the search where it is.
+ * Firefox delivers page coordinates into a frame of the page's origin but not into one of another, so in a context
+ * holding a frame whose origin isn't its parent's (`crossesOrigin`) the point is hit-tested in a sandbox, one call a
+ * level, through open shadow roots, and where it lands on a frame's element, input goes to that frame's context,
+ * from the element's content box. A context holding none costs no call; a point that hits no frame element ends the
+ * search where it is.
  */
 const framelessContext = Effect.fnUntraced(function*(state: State, page: NavigableEntry, x: number, y: number) {
   let sent: PointerTarget = { navigable: page, x: 0, y: 0, width: Infinity, height: Infinity }
-  while (sent.navigable.children.size > 0) {
+  while (crossesOrigin(sent.navigable)) {
     const reply = yield* Kit.protocol(state.send(Script.callFunction({
       functionDeclaration: hitFrame,
       target: { context: sent.navigable.bidi, sandbox: "__strider_utility__" },
@@ -55,9 +56,33 @@ const framelessContext = Effect.fnUntraced(function*(state: State, page: Navigab
   return sent
 })
 
-/** The window of the frame element at a point, and its content box: left, top, width and height. */
+/** The origin of a context's document; one at `about:` has its parent's, as `about:blank` and `srcdoc` do. */
+const originOf = (navigable: NavigableEntry): string | undefined => {
+  const url = navigable.document?.url
+  if (url === undefined || url.startsWith("about:")) {
+    return navigable.parent === undefined ? undefined : originOf(navigable.parent)
+  }
+  return URL.parse(url)?.origin
+}
+
+/**
+ * Whether a context holds, at any depth, a frame whose origin isn't its parent's. Origin is narrower than site, so
+ * this also holds for a frame of the same site and another origin, which costs a call it didn't need.
+ */
+const crossesOrigin = (navigable: NavigableEntry): boolean =>
+  [...navigable.children].some((child) => originOf(child) !== originOf(navigable) || crossesOrigin(child))
+
+/**
+ * The window of the frame element at a point, through open shadow roots, and its content box: left, top, width and
+ * height.
+ */
 const hitFrame = `(x, y) => {
-  const element = document.elementFromPoint(x, y)
+  let element = document.elementFromPoint(x, y)
+  while (element !== null && element.shadowRoot !== null) {
+    const inner = element.shadowRoot.elementFromPoint(x, y)
+    if (inner === null || inner === element) break
+    element = inner
+  }
   if (element === null || (element.localName !== "iframe" && element.localName !== "frame") || element.contentWindow === null) return null
   const rect = element.getBoundingClientRect()
   const style = getComputedStyle(element)
@@ -101,7 +126,7 @@ export const dispatchInput = Effect.fnUntraced(
   ) {
     // Whatever fails before the actions are written sent nothing
     const navigable = yield* navigableById(state, id).pipe(Effect.mapError(Adapter.unsent))
-    // Firefox doesn't deliver page coordinates into a cross-site frame, so input aimed inside a frame goes to
+    // Firefox doesn't deliver page coordinates into a frame of another origin, so input aimed inside a frame goes to
     // the frame's own context, in its own coordinates
     const target = frame === undefined ? undefined : state.navigablesById.get(frame.frame)
     const named: PointerTarget = {
@@ -121,7 +146,12 @@ export const dispatchInput = Effect.fnUntraced(
       const held = capture.get(navigable.page.id)
       if (held !== undefined) return held
       if (aimed === undefined || aimed.x !== x || aimed.y !== y) {
-        aimed = { x, y, sent: yield* framelessContext(state, navigable.page, x, y) }
+        // Every action is written after the loop, so a lookup fails with nothing sent
+        aimed = {
+          x,
+          y,
+          sent: yield* framelessContext(state, navigable.page, x, y).pipe(Effect.mapError(Adapter.unsent))
+        }
       }
       return aimed.sent
     })
