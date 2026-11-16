@@ -985,7 +985,7 @@ describe("Chromium adapter, CDP only", () => {
       )
 
       it.effect(
-        "drops an HTML drag after hovering the same target twice",
+        "fires a dragover for each hover of the same target, as Chromium's own drag does",
         () =>
           Effect.gen(function*() {
             const served = yield* site
@@ -1001,7 +1001,8 @@ describe("Chromium adapter, CDP only", () => {
                 yield* held.release
               }))
               const log = yield* page.evaluateInMainWorld(() => (window as any).log)
-              assert.strictEqual(log, "1234", order.join(", "))
+              // Chromium's own drag fires a dragover for every move, even one to the same point
+              assert.strictEqual(log, "12334", order.join(", "))
             }).pipe(Effect.provide(recordingDrags(order)))
           }),
         timeout

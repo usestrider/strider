@@ -58,11 +58,10 @@ const mouseCommand = (
   })
 
 /**
- * The drag events a mouse event of an intercepted drag sends. The move that starts the drag enters it, later moves
- * to a new point drag over, and the release drops it. Chromium's `drop` fires a `dragover` at its point before the
- * `drop`, so a drag of one move fires `dragenter`, `dragover` and `drop` once each, as a drag of Chromium's own does,
- * where a `dragover` sent where the drag enters would make it two; a drag of more moves ends with two `dragover`s at
- * its last point, its last move's and the drop's.
+ * The drag events a mouse event of an intercepted drag sends. The move that starts the drag enters it, each later
+ * move drags over, even to the same point, and the release drops it. Chromium's `drop` fires a `dragover` before the
+ * `drop`, so the page sees the drag events a drag of Chromium's own fires, in the same number; only the first
+ * `dragover` comes at the next move or the drop, where Chromium's own drag fires it with the `dragenter`.
  */
 const dragEvents = Effect.fnUntraced(function*(
   state: State,
@@ -81,15 +80,11 @@ const dragEvents = Effect.fnUntraced(function*(
         modifiers: modifierBits(event.modifiers)
       }).pipe(Protocol.on(sent.target.session))
     )
-  const at = { target: sent.target, x: event.x - sent.x, y: event.y - sent.y }
-  const still = drag.at !== undefined && drag.at.target === at.target && drag.at.x === at.x && drag.at.y === at.y
   if (event.type === "up") {
     state.drags.delete(page.id)
     if (event.buttons === 0) releasePress(state, page)
   }
-  drag.at = at
-  // A move to where the last drag event was moves nothing, so it sends no drag event
-  if (event.type === "move" && drag.entered && still) return
+  drag.at = { target: sent.target, x: event.x - sent.x, y: event.y - sent.y }
   if (!drag.entered) {
     drag.entered = true
     yield* dragEvent("dragEnter")

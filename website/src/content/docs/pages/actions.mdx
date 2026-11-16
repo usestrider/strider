@@ -314,7 +314,8 @@ An upload through a file chooser, not an input, is answered with
 
 `dragTo` drags with the pointer. A native HTML drag (`draggable="true"`) works only on Chromium, and fails
 elsewhere with `Unsupported` before anything is sent. On Chromium, the target sees `dragenter` on the first move
-that reaches it, `dragover` on each move after, and `dragover` then `drop` at the release. Pressing Escape before
+that reaches it, `dragover` on each move after, and `dragover` then `drop` at the release: the events of a drag
+Chromium runs itself, in the same number, with the first `dragover` one move later. Pressing Escape before
 the release cancels the drag: the target sees `dragleave`, the source `dragend`,
 and nothing sees a `drop`. `html: "synthetic"` has the page dispatch the
 drag's events instead, on every browser. They're untrusted: their `isTrusted` is `false`, so a page that checks it
