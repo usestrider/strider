@@ -668,7 +668,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                 capture: CapturePolicy.local
               })
               yield* call(tools, "newPage", { name: "shop", url })
-              const clicked = yield* call(tools, "click", { page: "shop", target: `role=button[name="Pay"]` }).pipe(
+              const clicked = yield* call(tools, "click", { page: "shop", target: "css=#app button" }).pipe(
                 Deadline.within("1 second")
               )
               assert.isTrue(clicked.failed, JSON.stringify(clicked.value))

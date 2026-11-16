@@ -162,6 +162,15 @@ variants only where the browsers handle them differently. What the code decides 
 set of roles, is one rule: sample it, don't enumerate it. A suite whose cases keep nothing in their context opens its
 pages in one, which checks after each case that it still holds nothing (`slice/sharedContext.ts`).
 
+The scheduled integration run guards Strider's own behavior; it doesn't measure parity with Playwright or Puppeteer. A
+case belongs in it when a rule of Strider's code needs guarding, or when a bug escaped once and its fix needs a test
+that keeps it fixed, and it is written as Strider's own test of that rule. A port of another project's suite stays
+outside the run, and what a port finds comes in as a native test of the rule it broke, with no upstream code copied. A
+case that fails only sometimes is a bug to trace, never retried or loosened; one that can't be made to pass every time
+doesn't belong. The run has a budget, the operating goals above: a pull request that adds integration time says how
+much, and once the run is over its goals, consolidate before adding. A ported case moves in only when it covers a rule
+no existing case does, has passed ten runs in a row, and is cheap. Only the scheduled run decides a release.
+
 Failed integration tests name their traces in `.data/integration-failures/`; CI retains them alongside
 `integration.log` for 14 days. Capture details, bounds and limitations are documented at the top of
 `packages/browser/test/integration/failureTrace.ts`.

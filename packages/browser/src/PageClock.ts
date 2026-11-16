@@ -17,6 +17,9 @@
  * the clock reached it, and `performance.timeOrigin` is the clock's time then, which never moves. After `resume`,
  * `performance.now()` carries on in real time from where it was. Controlled time moves by whole milliseconds.
  *
+ * Calls on one clock that run at the same time take turns, in the order they start: each applies to the time the
+ * one before it left.
+ *
  * **Gotchas**
  *
  * - Workers keep real time unless the clock is installed with `workers: true`, which Firefox can't do. CSS

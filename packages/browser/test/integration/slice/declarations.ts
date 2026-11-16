@@ -461,6 +461,19 @@ export const declarations = (
           }))
         }), timeout)
 
+      it.effect("routes an exact origin written without its trailing slash", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const route = yield* page.route(origin, () =>
+              Route.fulfill(HttpServerResponse.html("<title>routed</title>")))
+            yield* page.goto(`${origin}/`)
+            assert.strictEqual(yield* page.title, "routed")
+            assert.strictEqual(yield* route.hits, 1)
+          }))
+        }), timeout)
+
       it.effect("matches a URLPattern route, pausing only the URLs under its fixed prefix", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -917,6 +930,25 @@ export const declarations = (
           }))
         }), timeout)
 
+      it.effect("runs each of the init scripts declared at once exactly once in a new document", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const expected: Array<string> = []
+            for (let i = 0; i < 10; i++) {
+              expected.push(`a${i}`, `b${i}`)
+              yield* Effect.all([
+                page.addInitScript({ source: `(window.ran ??= []).push('a${i}')` }),
+                page.addInitScript({ source: `(window.ran ??= []).push('b${i}')` })
+              ], { concurrency: "unbounded", discard: true })
+            }
+            const ran = (yield* run(page, origin, "return window.ran")) as Array<string>
+            assert.sameMembers(ran, expected)
+            assert.strictEqual(ran.length, expected.length)
+          }))
+        }), timeout)
+
       it.effect("runs a script in the isolated world, apart from the page's, where the backend can", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -1038,6 +1070,28 @@ export const declarations = (
             assert.deepStrictEqual(
               yield* run(page, origin, "return [navigator.language, Intl.DateTimeFormat().resolvedOptions().timeZone]"),
               ["de-DE", "Asia/Tokyo"]
+            )
+          }))
+        }), timeout)
+
+      it.effect("reports a fine pointer with hover to a page of a default context", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            // Strider drives the page with a mouse, so a desktop page sees one, headless or not
+            assert.deepStrictEqual(
+              yield* run(
+                page,
+                origin,
+                "return ['(hover: hover)', '(any-hover: hover)', '(pointer: fine)', '(any-pointer: fine)'].map((query) => [query, matchMedia(query).matches])"
+              ),
+              [
+                ["(hover: hover)", true],
+                ["(any-hover: hover)", true],
+                ["(pointer: fine)", true],
+                ["(any-pointer: fine)", true]
+              ]
             )
           }))
         }), timeout)
@@ -1261,6 +1315,25 @@ export const declarations = (
           }))
         }), timeout)
 
+      it.effect("applies overlapping adjustments and settings of a controlled clock, each one", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.clock.install({ mode: "controlled", at: "2026-01-01T00:00:00Z" })
+            yield* page.setContent("<p>clock</p>")
+            for (let i = 0; i < 20; i++) {
+              yield* Effect.all([
+                page.clock.adjust("16 millis"),
+                page.clock.setTime(Date.UTC(2026, 0, 1, 0, 0, i + 1))
+              ], { concurrency: "unbounded", discard: true })
+            }
+            // A new document starts at the timeline's last setting, which no earlier one overrides
+            yield* page.clock.setTime(Date.UTC(2026, 0, 2))
+            assert.strictEqual(yield* run(page, origin, "return new Date().toISOString()"), "2026-01-02T00:00:00.000Z")
+          }))
+        }), timeout)
+
       it.effect("freezes, shifts and resumes time, and says what's wrong", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -1378,44 +1451,56 @@ export const declarations = (
           )
         })), timeout)
 
-      it.effect("times out over a page that posts messages without end, after running its timers", () =>
-        Effect.scoped(Effect.gen(function*() {
-          const page = yield* Browser.newPage()
-          const { origin } = yield* site
-          yield* page.clock.install({ mode: "controlled", at: 1000 })
-          yield* page.goto(fixtureUrl(origin, `<p id="later">pending</p>`))
-          yield* page.evaluateInMainWorld(() => {
-            const channel = new MessageChannel()
-            channel.port1.onmessage = () => {
-              if (Reflect.get(window, "__stop") !== true) {
-                channel.port2.postMessage(null)
-              }
-            }
-            setTimeout(() =>
-              channel.port2.postMessage(null), 100)
-            setTimeout(() => {
-              document.getElementById("later")!.textContent = "fired"
-            }, 500)
-          })
-          const error = yield* failure(
-            page.clock.adjust(1000).pipe(Deadline.within("1 second")),
-            "adjust over endless messages"
-          )
-          assert(Deadline.isTimeout(error), String(error))
-          // Past the deadline, the page stops waiting for its messages and runs the remaining timers
-          yield* Expect.that(
-            page.locator("#later").readText,
-            Condition.make("fired", (text: string) =>
-              text === "fired")
-          )
-          assert.strictEqual(
+      it.effect(
+        "times out over a page that posts messages without end, after running its timers, and keeps its clock usable",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const { origin } = yield* site
+            yield* page.clock.install({ mode: "controlled", at: 1000 })
+            yield* page.goto(fixtureUrl(origin, `<p id="later">pending</p>`))
             yield* page.evaluateInMainWorld(() => {
-              Reflect.set(window, "__stop", true)
-              return Date.now()
-            }),
-            2000
-          )
-        })), timeout)
+              const channel = new MessageChannel()
+              channel.port1.onmessage = () => {
+                if (Reflect.get(window, "__stop") !== true) {
+                  channel.port2.postMessage(null)
+                }
+              }
+              setTimeout(() =>
+                channel.port2.postMessage(null), 100)
+              setTimeout(() => {
+                document.getElementById("later")!.textContent = "fired"
+              }, 500)
+            })
+            const error = yield* failure(
+              page.clock.adjust(1000).pipe(Deadline.within("1 second")),
+              "adjust over endless messages"
+            )
+            assert(Deadline.isTimeout(error), String(error))
+            // Past the deadline, the page stops waiting for its messages and runs the remaining timers
+            yield* Expect.that(
+              page.locator("#later").readText,
+              Condition.make("fired", (text: string) =>
+                text === "fired")
+            )
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() => {
+                Reflect.set(window, "__stop", true)
+                return Date.now()
+              }),
+              2000
+            )
+            // The clock is usable again: the next adjustment runs once the page stops posting
+            yield* page.clock.adjust(1)
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() =>
+                Date.now()
+              ),
+              2001
+            )
+          })),
+        timeout
+      )
 
       it.effect("starts controlled performance time when replacing a fixed clock", () =>
         Effect.scoped(Effect.gen(function*() {

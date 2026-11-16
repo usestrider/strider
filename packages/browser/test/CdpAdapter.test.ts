@@ -1,7 +1,6 @@
 /** Deterministic CDP event ordering regressions, without launching a browser. */
 import { assert, describe, it } from "@effect/vitest"
 import { Browser, Capability, Deadline, NetworkRequest, Reason, VideoWriter } from "@usestrider/browser"
-import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -11,7 +10,6 @@ import * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
-import * as Scheduler from "effect/Scheduler"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
@@ -30,31 +28,7 @@ import * as Readable from "../src/internal/readable.ts"
 import * as Protocol from "../src/protocol/Protocol.ts"
 import captured from "./fixtures/redirect-extra-info.ts"
 import { makeBrowser, type Sent } from "./utils/FakeBrowser.ts"
-
-// Share one dispatcher across the protocol fibers so a checkpoint drains all runnable work,
-// stopping only at an actual protocol reply or permit wait, without counting scheduler turns.
-const withProtocolScheduler = Effect.fnUntraced(function*<A, E, R>(
-  run: (drain: Effect.Effect<void>) => Effect.Effect<A, E, R>
-) {
-  const parent = yield* Scheduler.Scheduler
-  const dispatcher = parent.makeDispatcher()
-  const checkpoint = parent.makeDispatcher()
-  const drain = Effect.callback<void>((resume) => {
-    checkpoint.scheduleTask(() => {
-      dispatcher.flush()
-      resume(Effect.void)
-    }, 0)
-  })
-  return yield* run(drain).pipe(
-    Effect.forkChild,
-    Effect.flatMap(Fiber.join),
-    Effect.provideService(Scheduler.Scheduler, {
-      executionMode: parent.executionMode,
-      shouldYield: (fiber) => parent.shouldYield(fiber),
-      makeDispatcher: () => dispatcher
-    })
-  )
-})
+import { onTestClock, withProtocolScheduler } from "./utils/ProtocolScheduler.ts"
 
 describe("CDP paused page initialization", () => {
   for (const rejected of [false, true]) {
@@ -1283,19 +1257,6 @@ const sentHeaders = Effect.fnUntraced(
     }
   }
 )
-
-/** Advance deadlines without delays, retaining the live epoch used by the real protocol client's command deadline. */
-const onTestClock = <A, E, R>(self: Effect.Effect<A, E, R>) =>
-  Clock.clockWith((clock) =>
-    Effect.suspend(() => {
-      const test = BrowserClock.fromClock(clock)
-      const origin = BrowserClock.live.now() - test.now()
-      return Effect.provideService(self, BrowserClock.CurrentClock, {
-        now: () => (origin + test.now()) as ReturnType<typeof test.now>,
-        sleep: test.sleep
-      })
-    })
-  )
 
 describe("Chromium public sent-header waiting", () => {
   it.effect("returns the snapshot for a new lookup after eviction while releasing an existing waiter", () =>

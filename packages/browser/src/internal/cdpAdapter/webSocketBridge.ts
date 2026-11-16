@@ -14,7 +14,15 @@ import type * as Kit from "../adapterKit.ts"
 import * as Declarations from "../declarations.ts"
 import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
-import { contextKey, type Event, placement, type RealmEntry, type State, type TargetEntry } from "./state.ts"
+import {
+  closingReason,
+  contextKey,
+  type Event,
+  placement,
+  type RealmEntry,
+  type State,
+  type TargetEntry
+} from "./state.ts"
 
 const origin = (realm: RealmEntry): import("../../WebSocketRoute.ts").Initiator =>
   realm.frame === undefined
@@ -214,7 +222,7 @@ export const prepare = Effect.fnUntraced(
             const id = known.get(event.executionContextUniqueId ?? "")
             if (id !== undefined) {
               known.delete(event.executionContextUniqueId ?? "")
-              bridge.ended(id)
+              bridge.ended(id, target.page === undefined ? state.browserEnd : closingReason(state, target.page))
             }
           })
         ),
@@ -226,7 +234,8 @@ export const prepare = Effect.fnUntraced(
       yield* cleared.pipe(
         Stream.runForEach(() =>
           Effect.sync(() => {
-            for (const realm of known.values()) bridge.ended(realm)
+            const reason = target.page === undefined ? state.browserEnd : closingReason(state, target.page)
+            for (const realm of known.values()) bridge.ended(realm, reason)
             known.clear()
           })
         ),

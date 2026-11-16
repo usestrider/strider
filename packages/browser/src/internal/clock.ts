@@ -30,6 +30,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
+import * as Semaphore from "effect/Semaphore"
 import * as Deadline from "../Deadline.ts"
 import * as Declaration from "../Declaration.ts"
 import * as PageClock from "../PageClock.ts"
@@ -526,6 +527,8 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
    */
   let latest = 0
   const adapter = owner.runtime.model.adapter
+  // One operation at a time reads the timeline and replaces its init script, so each closes the one it replaced
+  const permit = Semaphore.makeUnsafe(1)
 
   /**
    * Evaluates in the main world of every current document of the timeline's pages, and with `workers` in their
@@ -633,10 +636,18 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
 
   /**
    * Applies an operation to every document now, then declares the timeline's new state for later ones, which the
-   * timeline has whether or not the documents took it. Fails with the first error a page's timer threw.
+   * timeline has whether or not the documents took it. Fails with the first error a page's timer threw. `step`
+   * reads the timeline under the permit, so an operation waiting on another sees what that one left.
    */
-  const apply = (operation: string, installed: Installed, next: State, run: (budget: number) => string) =>
-    Effect.gen(function*() {
+  const apply = (
+    operation: string,
+    modes: ReadonlyArray<State["mode"]>,
+    step: (installed: Installed) => { readonly next: State; readonly run: (budget: number) => string }
+  ) =>
+    permit.withPermits(1)(Effect.gen(function*() {
+      const installed = yield* require(operation, modes)
+      const { next, run } = step(installed)
+      yield* Effect.annotateCurrentSpan("browser.clock.mode", next.mode)
       installed.version++
       latest = installed.version
       installed.state = next
@@ -678,13 +689,11 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
           })
         ))
       }
-    }).pipe(Operation.named(operation, {
-      attributes: { ...Spans.scopeAttributes(owner.scope), "browser.clock.mode": next.mode }
-    }))
+    })).pipe(Operation.named(operation, { attributes: Spans.scopeAttributes(owner.scope) }))
 
   return {
     install: (mode, options) =>
-      Effect.gen(function*() {
+      permit.withPermits(1)(Effect.gen(function*() {
         const operation = `${owner.name}.install`
         const { id } = yield* Operation.record
         const fail = (reason: Declaration.DeclarationErrorReason) =>
@@ -725,12 +734,11 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
         // Removing it affects later documents only: those it reached keep the shim (CONCEPTS.md §7)
         yield* Scope.addFinalizer(scope, Effect.sync(() => (timeline.installed = Option.none())))
         return { remove: Scope.close(scope, Exit.void) } satisfies Declaration.Registration
-      }).pipe(Operation.named(`${owner.name}.install`, {
+      })).pipe(Operation.named(`${owner.name}.install`, {
         attributes: { ...Spans.scopeAttributes(owner.scope), "browser.clock.mode": mode.mode }
       })),
     adjust: Effect.fnUntraced(function*(duration: Duration.Input) {
       const operation = `${owner.name}.adjust`
-      const installed = yield* require(operation, ["controlled"])
       const by = Option.filter(DurationInput.toFiniteMillis(duration), (ms) => ms >= 0)
       if (Option.isNone(by)) {
         return yield* Effect.fail(clockError(
@@ -744,17 +752,13 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
       }
       // Up to a whole millisecond, as timers and `Date.now()` count
       const ms = Math.ceil(by.value)
-      const state = installed.state as Extract<State, { mode: "controlled" }>
-      yield* apply(
-        operation,
-        installed,
-        { mode: "controlled", wall: state.wall + ms },
-        operationSource(token, "adjust", ms, installed.version + 1)
-      )
+      yield* apply(operation, ["controlled"], (installed) => ({
+        next: { mode: "controlled", wall: (installed.state as Extract<State, { mode: "controlled" }>).wall + ms },
+        run: operationSource(token, "adjust", ms, installed.version + 1)
+      }))
     }),
     setTime: Effect.fnUntraced(function*(at: DateTime.DateTime.Input) {
       const operation = `${owner.name}.setTime`
-      const installed = yield* require(operation, ["fixed", "controlled"])
       const wall = Option.map(DateTime.make(at), DateTime.toEpochMillis)
       if (Option.isNone(wall)) {
         return yield* Effect.fail(clockError(
@@ -762,24 +766,18 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
           new Reason.InvalidInput({ input: "at", expected: "a time", hint: `${String(at)} isn't one` })
         ))
       }
-      yield* apply(
-        operation,
-        installed,
-        { mode: installed.state.mode as "fixed" | "controlled", wall: wall.value },
-        operationSource(token, "setTime", wall.value, installed.version + 1)
-      )
+      yield* apply(operation, ["fixed", "controlled"], (installed) => ({
+        next: { mode: installed.state.mode as "fixed" | "controlled", wall: wall.value },
+        run: operationSource(token, "setTime", wall.value, installed.version + 1)
+      }))
     }),
-    resume: Effect.gen(function*() {
-      const operation = `${owner.name}.resume`
-      const installed = yield* require(operation, ["fixed", "offset", "controlled"])
+    resume: apply(`${owner.name}.resume`, ["fixed", "offset", "controlled"], (installed) => {
       const now = Date.now()
       const wall = installed.state.mode === "offset" ? now + installed.state.by : installed.state.wall
-      yield* apply(
-        operation,
-        installed,
-        { mode: "offset", by: wall - now },
-        operationSource(token, "resume", undefined, installed.version + 1)
-      )
+      return {
+        next: { mode: "offset", by: wall - now },
+        run: operationSource(token, "resume", undefined, installed.version + 1)
+      }
     })
   }
 }
