@@ -4874,6 +4874,66 @@ describe("BiDi frame removal without contextDestroyed", () => {
       assert.isEmpty(removed())
     }))
 
+  it.effect("waits for the parent reply and observed events before reading the tree", () =>
+    Effect.gen(function*() {
+      const reply = yield* Deferred.make<unknown>()
+      const drained = yield* Deferred.make<void>()
+      let draining = false
+      const { commands, destroyRealms, frame, state } = yield* withFrame({
+        "script.evaluate": Deferred.await(reply),
+        "browsingContext.getTree": tree([])
+      })
+      Object.assign(state.root(), {
+        drainObserved: Effect.sync(() => {
+          draining = true
+        }).pipe(Effect.andThen(Deferred.await(drained)))
+      })
+      yield* destroyRealms()
+      yield* settle
+      assert.strictEqual(commands.length, 1)
+      assert.isFalse(draining)
+      yield* Deferred.succeed(reply, evaluated)
+      yield* settle
+      assert.isTrue(draining)
+      assert.strictEqual(commands.length, 1)
+      assert.isFalse(frame.removed)
+      yield* Deferred.succeed(drained, undefined)
+      yield* settle
+      assert.strictEqual(commands.length, 2)
+      assert.isTrue(frame.removed)
+    }))
+
+  for (const method of ["script.evaluate", "browsingContext.getTree"] as const) {
+    it.effect(`keeps the frame without logging when ${method} fails`, () => {
+      const messages: Array<unknown> = []
+      return Effect.gen(function*() {
+        const { commands, destroyRealms, frame, removed } = yield* withFrame({
+          "script.evaluate": evaluated,
+          "browsingContext.getTree": tree([])
+        }, {
+          [method]: () =>
+            new Protocol.ProtocolError({
+              reason: new Protocol.Rejected({
+                method,
+                reason: "Unrecognized",
+                code: "unknown error",
+                description: "The browser could not complete the command"
+              })
+            })
+        })
+        yield* destroyRealms()
+        yield* settle
+        assert.strictEqual(commands.length, method === "script.evaluate" ? 1 : 2)
+        assert.isFalse(frame.removed)
+        assert.isEmpty(removed())
+        assert.isEmpty(messages)
+      }).pipe(Effect.provideService(
+        Logger.CurrentLoggers,
+        new Set([Logger.make((entry) => messages.push(entry.message))])
+      ))
+    })
+  }
+
   for (const phase of ["parent reply", "tree reply"] as const) {
     it.effect(`keeps the frame when its page starts closing before the ${phase}`, () =>
       Effect.gen(function*() {
