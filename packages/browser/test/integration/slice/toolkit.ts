@@ -938,7 +938,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               const page = yield* Browser.newPage()
               const html = `<input id="field" aria-label="private-label" value="private-value">
 <button onclick="field.checkValidity();field.reportValidity()">Check</button><button>Quiet</button>`
-              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`, { waitUntil: "load" })
               yield* page.evaluateInMainWorld(() => {
                 ;(document.getElementById("field") as HTMLInputElement).setCustomValidity("private-message")
               })
