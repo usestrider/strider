@@ -830,3 +830,116 @@ describe("Session press refusals", () => {
       assert.strictEqual(prefixes[1], prefixes[0])
     }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
 })
+
+/** A snapshot of a document holding the buttons named, each with a ref of its own. */
+const snapshotOf = (document: string, ...buttons: ReadonlyArray<string>) =>
+  new Snapshots.SnapshotImpl({
+    document: Schema.decodeUnknownSync(Target.DocumentId)(document),
+    generation: Schema.decodeUnknownSync(Snapshot.Generation)(1),
+    root: {
+      ref: Option.none(),
+      role: { _tag: "Aria", role: "document" },
+      name: { _tag: "None" },
+      states: new Set(),
+      validationMessage: Option.none(),
+      children: buttons.map((button, index) => ({
+        ref: Option.some(Schema.decodeUnknownSync(Snapshot.RefId)(`e${index + 1}`)),
+        role: { _tag: "Aria" as const, role: "button" },
+        name: { _tag: "Accessible" as const, value: button },
+        states: new Set(),
+        validationMessage: Option.none(),
+        children: []
+      }))
+    } as any,
+    text: document
+  })
+
+const found = (session: ToolkitImpl.Session, query: string) =>
+  Effect.map(
+    Effect.flatMap(session.toolkit.handle("find", { page: "main", query }), Stream.runLast),
+    (last) =>
+      (Option.getOrThrow(last).result as { readonly outcome: ReadonlyArray<{ readonly name: string }> })
+        .outcome.map((each) => each.name)
+  )
+
+describe("Session's find", () => {
+  it.effect("reads the page again after a find that came back empty, and keeps that as the latest", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+      const { page } = yield* session.open({ name: "main" })
+      let current = snapshotOf("document")
+      Object.defineProperty(page, "snapshot", { value: () => Effect.sync(() => current) })
+      assert.deepStrictEqual(yield* found(session, "Confirm"), [])
+      current = snapshotOf("document", "Confirm")
+      assert.deepStrictEqual(yield* found(session, "Confirm"), ["Confirm"])
+      assert.strictEqual(Option.getOrThrow(session.latest("main")), current)
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+
+  it.effect("after goto to another page, searches the new page, not the previous page's snapshot", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+      const { page } = yield* session.open({ name: "main" })
+      const pages: Record<string, Snapshots.SnapshotImpl> = {
+        "https://example.test/one": snapshotOf("one", "First"),
+        "https://example.test/two": snapshotOf("two", "Second")
+      }
+      let at = "https://example.test/one"
+      Object.defineProperty(page, "snapshot", { value: () => Effect.sync(() => pages[at]!) })
+      Object.defineProperty(page, "goto", {
+        value: (url: string) =>
+          Effect.sync(() => {
+            at = url
+            return {
+              _tag: "Committed" as const,
+              id: Schema.decodeUnknownSync(PageNavigation.Id)(url),
+              frame: page.id,
+              url: Schema.decodeUnknownSync(Url.Url)(url),
+              document: Schema.decodeUnknownSync(Target.DocumentId)(url),
+              response: Option.none()
+            }
+          })
+      })
+      assert.deepStrictEqual(yield* found(session, "First"), ["First"])
+      yield* session.toolkit.handle("goto", { page: "main", url: "https://example.test/two" }).pipe(
+        Effect.flatMap(Stream.runDrain)
+      )
+      assert.deepStrictEqual(yield* found(session, "Second"), ["Second"])
+      assert.deepStrictEqual(yield* found(session, "First"), [])
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+})
+
+describe("Session's navigations", () => {
+  for (
+    const [given, expected] of [[undefined, "domContentLoaded"], ["commit", "commit"], ["load", "load"]] as const
+  ) {
+    it.effect(`goto waits for ${expected} when waitUntil is ${given ?? "not given"}`, () =>
+      Effect.gen(function*() {
+        const context = yield* Browser.newContext()
+        const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+        const { page } = yield* session.open({ name: "main" })
+        const asked: Array<unknown> = []
+        Object.defineProperty(page, "goto", {
+          value: (url: string, options?: { readonly waitUntil?: string }) =>
+            Effect.sync(() => {
+              asked.push(options?.waitUntil)
+              return {
+                _tag: "Committed" as const,
+                id: Schema.decodeUnknownSync(PageNavigation.Id)("own"),
+                frame: page.id,
+                url: Schema.decodeUnknownSync(Url.Url)(url),
+                document: Schema.decodeUnknownSync(Target.DocumentId)("document"),
+                response: Option.none()
+              }
+            })
+        })
+        yield* session.toolkit.handle("goto", {
+          page: "main",
+          url: "https://example.test/",
+          ...(given === undefined ? {} : { waitUntil: given })
+        } as any).pipe(Effect.flatMap(Stream.runDrain))
+        assert.deepStrictEqual(asked, [expected])
+      }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+  }
+})
