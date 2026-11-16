@@ -5,6 +5,7 @@ import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import * as Clock from "../src/internal/clock.ts"
+import * as DurationInput from "../src/internal/durationInput.ts"
 import type * as Model from "../src/internal/model.ts"
 import type * as Runtime from "../src/internal/runtime.ts"
 
@@ -64,9 +65,15 @@ describe("PageClock broadcast", () => {
 })
 
 describe("PageClock duration input", () => {
+  it("accepts finite duration fields alongside unrelated metadata", () => {
+    const input = { seconds: 1, label: "one second" }
+    assert.deepStrictEqual(DurationInput.toFiniteMillis(input), Option.some(1000))
+  })
+
   for (
     const [label, duration] of [
       ["a NaN object field", { milliseconds: Number.NaN }],
+      ["an inherited NaN duration field", Object.create({ milliseconds: Number.NaN }) as { milliseconds: number }],
       ["a NaN tuple field", [0, Number.NaN]],
       ["opposite infinite fields", { seconds: Infinity, minutes: -Infinity }],
       ["a duration overflowing millisecond conversion", 10n ** 400n]

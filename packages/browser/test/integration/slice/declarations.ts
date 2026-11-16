@@ -1418,6 +1418,54 @@ export const declarations = (
           )
         })), timeout)
 
+      it.effect("drains messages exchanged with a frame before advancing the clock", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const page = yield* Browser.newPage()
+          yield* page.evaluateInMainWorld(async () => {
+            const frame = document.createElement("iframe")
+            frame.srcdoc = `<script>onmessage = event => {
+              const port = event.ports[0];
+              port.onmessage = event => port.postMessage(event.data);
+              port.postMessage("ready");
+            }</script>`
+            const loaded = new Promise((resolve) =>
+              frame.onload = resolve
+            )
+            document.body.append(frame)
+            await loaded
+            const channel = new MessageChannel()
+            const ready = new Promise((resolve) =>
+              channel.port1.onmessage = resolve
+            )
+            frame.contentWindow!.postMessage("connect", "*", [channel.port2])
+            await ready
+            Reflect.set(window, "__port", channel.port1)
+          })
+          yield* page.clock.install({ mode: "controlled", at: 1000 })
+          yield* page.evaluateInMainWorld(() => {
+            const port = Reflect.get(window, "__port") as MessagePort
+            let count = 0
+            port.onmessage = () => {
+              if (++count < 200) {
+                port.postMessage(null)
+              } else {
+                setTimeout(() =>
+                  Reflect.set(window, "__done", true), 100)
+                port.close()
+              }
+            }
+            setTimeout(() =>
+              port.postMessage(null), 100)
+          })
+          yield* page.clock.adjust(1000)
+          assert.strictEqual(
+            yield* page.evaluateInMainWorld(() =>
+              Reflect.get(window, "__done") === true
+            ),
+            true
+          )
+        })), timeout)
+
       it.effect("runs a timer scheduled at the end of a long chain of messages", () =>
         Effect.scoped(Effect.gen(function*() {
           const page = yield* Browser.newPage()
