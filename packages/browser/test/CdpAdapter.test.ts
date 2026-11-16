@@ -43,6 +43,7 @@ describe("CDP paused page initialization", () => {
           const browser = yield* makeBrowser
           const ready = yield* Deferred.make<void>()
           const paused = yield* Deferred.make<void>()
+          const resumeSeen = yield* Deferred.make<void>()
           const facts: Array<Adapter.Fact> = []
           const commands: Array<Sent> = []
           const held: Array<Sent> = []
@@ -124,6 +125,9 @@ describe("CDP paused page initialization", () => {
                     }
                   }
                 })
+                // A declaration that overlaps the gate's, made before its script identifiers arrive, waits for them
+                yield* Deferred.succeed(resumeSeen, undefined)
+                yield* Effect.yieldNow
                 // The browser cannot create the renderer to answer these commands until its route can run.
                 yield* Deferred.await(paused)
                 resumed = true
@@ -145,6 +149,20 @@ describe("CDP paused page initialization", () => {
           const context = { _tag: "UserContext", context: adapter.defaultContext } as const
           const scripts = yield* Scope.make()
           yield* Effect.addFinalizer(() => Scope.close(scripts, Exit.void))
+          const overlapping = yield* Deferred.await(resumeSeen).pipe(
+            Effect.andThen(adapter.declare(context, {
+              _tag: "InitScript",
+              source: "self.overlapping = true",
+              world: { _tag: "Main" },
+              phase: "user",
+              workers: false,
+              timing: "beforeAuthorScript",
+              after: []
+            })),
+            Scope.provide(scripts),
+            Effect.exit,
+            Effect.forkScoped
+          )
           for (const world of [{ _tag: "Main" }, { _tag: "Isolated", name: "isolated" }] as const) {
             yield* adapter.declare(context, {
               _tag: "InitScript",
@@ -202,11 +220,15 @@ describe("CDP paused page initialization", () => {
             }
           })
           yield* Deferred.await(ready)
-          const sent = commands.filter((command) => command.sessionId === "S1").map((command) => command.method)
-          assert.strictEqual(sent.at(-1), "Runtime.runIfWaitingForDebugger")
+          yield* Fiber.join(overlapping)
+          const onPage = commands.filter((command) => command.sessionId === "S1")
+          const sent = onPage.map((command) => command.method)
           assert.strictEqual(sent.filter((method) => method === "Runtime.runIfWaitingForDebugger").length, 1)
+          const resumedAt = sent.indexOf("Runtime.runIfWaitingForDebugger")
+          // The page's whole configuration goes out before its one resume
           for (
             const method of [
+              "Log.enable",
               "Page.addScriptToEvaluateOnNewDocument",
               "Fetch.enable",
               "Emulation.setLocaleOverride",
@@ -215,8 +237,20 @@ describe("CDP paused page initialization", () => {
               ...(bridged ? ["Runtime.addBinding"] : [])
             ]
           ) {
-            assert.include(sent, method)
+            assert.include(sent.slice(0, resumedAt), method)
           }
+          // The gate holds the target's script permit until its identifiers arrive, so the overlapping declaration
+          // writes only after the resume, and replaces the main world's script the gate installed rather than
+          // leaving it in place
+          const gateScript = onPage.find((command) =>
+            command.method === "Page.addScriptToEvaluateOnNewDocument" && command.params?.worldName === undefined
+          )!
+          assert.isBelow(onPage.indexOf(gateScript), resumedAt)
+          const replaced = onPage.findIndex((command) =>
+            command.method === "Page.removeScriptToEvaluateOnNewDocument" &&
+            command.params?.identifier === `script-${gateScript.id}`
+          )
+          assert.isAbove(replaced, resumedAt)
           assert.isBelow(sent.indexOf("Page.getFrameTree"), sent.indexOf("Runtime.enable"))
           // The capture script calls the bridge's binding, so the binding exists before any script is installed.
           if (bridged) {
