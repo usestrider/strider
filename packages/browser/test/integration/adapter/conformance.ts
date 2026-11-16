@@ -900,7 +900,7 @@ export const conformance = (backend: Backend) =>
         )
 
         it.effect(
-          "sends a release that names no frame outside a cross-site frame to the frame that got the press",
+          "sends a release that names no frame outside a cross-site frame in a shadow root to the frame that got the press",
           () =>
             Effect.gen(function*() {
               const world = yield* setup(backend)
@@ -914,9 +914,13 @@ export const conformance = (backend: Backend) =>
                 page,
                 fixture(
                   world.site.origin,
-                  `<body style="margin:0"><script>window.got = []; addEventListener('message', (e) => got.push(e.data)); addEventListener('mouseup', () => got.push('parent up'))</script><iframe src="${
-                    fixture(world.site.crossSite, child)
-                  }" style="position:absolute;left:100px;top:50px;width:200px;height:100px;border:0"></iframe></body>`
+                  `<body style="margin:0"><div id="host"></div><script>window.got = []; addEventListener('message', (e) => got.push(e.data)); addEventListener('mouseup', () => got.push('parent up')); document.querySelector('#host').attachShadow({ mode: 'open' }).innerHTML = ${
+                    JSON.stringify(
+                      `<iframe src="${
+                        fixture(world.site.crossSite, child)
+                      }" style="position:absolute;left:100px;top:50px;width:200px;height:100px;border:0"></iframe>`
+                    ).replaceAll("<", "\\x3c")
+                  }</script></body>`
                 )
               )
               const realm = yield* mainRealm(world, page)
