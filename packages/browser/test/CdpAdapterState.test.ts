@@ -37,6 +37,7 @@ import * as Targets from "../src/internal/cdpAdapter/targets.ts"
 import * as Tree from "../src/internal/cdpAdapter/tree.ts"
 import * as CdpWire from "../src/internal/cdpWire.ts"
 import * as Cleanup from "../src/internal/declarationCleanup.ts"
+import * as Handoff from "../src/internal/handoff.ts"
 import * as Ingestion from "../src/internal/ingestion.ts"
 import * as Input from "../src/internal/input.ts"
 import * as Groups from "../src/internal/objectGroups.ts"
@@ -1356,6 +1357,76 @@ describe("CDP restoration cleanup", () => {
       const later = Tree.addFrame(state, "later", state.frames.get("T1")!, target)
       Tree.removeFrame(state, later, new Target.FrameDetached({}), "frame detached with no declared directory")
       assert.strictEqual(state.retiredFrames.size, 0)
+    })))
+
+  it.effect("forgets retired frames when handoff times out waiting for the context lock", () =>
+    Effect.flatMap(Clock.Clock, (clock) =>
+      Effect.scoped(Effect.gen(function*() {
+        const sent = yield* Deferred.make<void>()
+        const reply = yield* Deferred.make<void>()
+        let hold = false
+        const mock = {
+          ...session,
+          ended: Effect.void,
+          send: (command: { readonly method: string }) =>
+            command.method === "Browser.setDownloadBehavior" && hold
+              ? Deferred.succeed(sent, undefined).pipe(Effect.andThen(Deferred.await(reply)), Effect.as({}))
+              : Effect.succeed({})
+        } as unknown as ProtocolClient.Session
+        const { state, page, target } = yield* withPage(mock)
+        const context = new State.ContextEntry(state.ids.userContext(), "handed-off", false)
+        state.contexts.set(context.id, context)
+        state.contextsByCdp.set("handed-off", context)
+        ;(page as { context: State.ContextEntry }).context = context
+        const lifetime = yield* Scope.make()
+        yield* Declare.declare(state, { _tag: "UserContext", context: context.id }, {
+          _tag: "Downloads",
+          behavior: { _tag: "Allow", directory: "/tmp/downloads" }
+        }).pipe(Scope.provide(lifetime))
+        const child = Tree.addFrame(state, "child", state.frames.get("T1")!, target)
+        Tree.removeFrame(state, child, new Target.FrameDetached({}), "frame detached before handoff")
+        assert.strictEqual(state.retiredFrames.get("child"), context)
+        hold = true
+        const applying = yield* Declare.applyDownloads(state, context).pipe(Effect.forkScoped)
+        yield* Deferred.await(sent)
+        Handoff.allow(lifetime)
+        const handingOff = yield* Handoff.handoff(lifetime).pipe(Effect.forkChild({ startImmediately: true }))
+        yield* TestClock.adjust("1 second")
+        yield* Fiber.join(handingOff)
+        assert.isTrue(Option.isNone(state.registry.downloads(context.id)), "the declaration was removed locally")
+        yield* Deferred.succeed(reply, undefined)
+        yield* Fiber.join(applying)
+        yield* state.buffer.flush
+        assert.isTrue(state.contexts.has(context.id), "handoff leaves the context open")
+        assert.strictEqual(state.retiredFrames.size, 0, "expired browser cleanup must not retain local frame history")
+        assert.isUndefined(context.retiredFrames)
+      })).pipe(Effect.provideService(BrowserClock.CurrentClock, BrowserClock.fromClock(clock)))))
+
+  it.effect("attributes a late download after a retiring context releases its declarations", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { state, page, target } = yield* withPage()
+      const context = new State.ContextEntry(state.ids.userContext(), "retiring", false)
+      state.contexts.set(context.id, context)
+      state.contextsByCdp.set("retiring", context)
+      ;(page as { context: State.ContextEntry }).context = context
+      const lifetime = yield* Scope.make()
+      yield* Declare.declare(state, { _tag: "UserContext", context: context.id }, {
+        _tag: "Downloads",
+        behavior: { _tag: "Allow", directory: "/tmp/downloads" },
+        retiring: () => true
+      }).pipe(Scope.provide(lifetime))
+      yield* Scope.close(lifetime, Exit.void)
+      assert.isTrue(Option.isNone(state.registry.downloads(context.id)))
+      Tree.endPage(state, page, new Target.PageClosed({ by: "script" }), "page ended during context retirement")
+      const handlers = Contexts.register(Kit.handlers<State.Event>())
+      handlers.apply("Browser.downloadWillBegin", {
+        frameId: "T1",
+        guid: "late",
+        url: "https://example.test/file",
+        suggestedFilename: "file"
+      }, { state, target })
+      yield* state.buffer.flush
+      assert.strictEqual(state.downloads.get("late")?.context, context, "retirement still needs download attribution")
     })))
 
   it.effect("does not retain detached frames of an externally discovered context", () =>
