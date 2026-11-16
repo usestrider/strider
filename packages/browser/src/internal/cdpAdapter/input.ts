@@ -86,12 +86,13 @@ const pointerSession = Effect.fnUntraced(function*(
  * inside three for each level. A point that hits nothing ends the search where it is.
  */
 const framelessSession = Effect.fnUntraced(function*(state: State, page: PageEntry, x: number, y: number) {
-  // The frame tree is read after every event already received on the page's session is folded: a reply the caller
-  // acted on can arrive with, and be delivered before, a frame's attachment that came ahead of it
-  yield* page.target.session.drainObserved
   let sent: PointerTarget = { target: page.target, x: 0, y: 0 }
   while (true) {
     const target = sent.target
+    // Whether this session owns an out-of-process frame is read after every event already received on it is
+    // folded: a reply the caller acted on can arrive with, and be delivered before, a frame's attachment that came
+    // ahead of it, and a nested frame's attachment is folded on its parent frame's session
+    yield* target.session.drainObserved
     // Sessions are told apart by target id: a frame's owner and its page's target needn't be one entry
     const ownsRemote = [...state.frames.values()].some((each) =>
       each.page === page && each.owner.targetId !== target.targetId && each.parent?.owner.targetId === target.targetId
