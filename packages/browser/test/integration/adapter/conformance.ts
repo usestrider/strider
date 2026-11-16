@@ -900,6 +900,101 @@ export const conformance = (backend: Backend) =>
         )
 
         it.effect(
+          "sends a release that names no frame outside a cross-site frame to the frame that got the press",
+          () =>
+            Effect.gen(function*() {
+              const world = yield* setup(backend)
+              const { page } = yield* newPage(world)
+              const fixture = (origin: string, html: string) =>
+                `${origin}/fixture?html=${encodeURIComponent(html)}`
+              const child =
+                `<body style="margin:0;height:100vh"><script>addEventListener('mousedown', () => parent.postMessage('down', '*')); addEventListener('mouseup', () => parent.postMessage('up', '*')); parent.postMessage('loaded', '*')</script></body>`
+              yield* goto(
+                world,
+                page,
+                fixture(
+                  world.site.origin,
+                  `<body style="margin:0"><script>window.got = []; addEventListener('message', (e) => got.push(e.data)); addEventListener('mouseup', () => got.push('parent up'))</script><iframe src="${
+                    fixture(world.site.crossSite, child)
+                  }" style="position:absolute;left:100px;top:50px;width:200px;height:100px;border:0"></iframe></body>`
+                )
+              )
+              const realm = yield* mainRealm(world, page)
+              const loaded = yield* world.adapter.evaluate(realm, {
+                functionDeclaration:
+                  "() => window.got.includes('loaded') || new Promise((resolve) => addEventListener('message', (e) => { if (e.data === 'loaded') resolve(true) }))",
+                arguments: [],
+                awaitPromise: true,
+                result: "value",
+                userActivation: false
+              })
+              assert(loaded._tag === "Value" && json(loaded.value) === true)
+              const none = { alt: false, control: false, meta: false, shift: false }
+              const send = (event: Adapter.InputEvent) =>
+                world.adapter.dispatchInput(page, [event])
+              yield* send({
+                _tag: "Mouse",
+                type: "move",
+                x: 150,
+                y: 80,
+                button: "none",
+                clickCount: 0,
+                modifiers: none,
+                buttons: 0
+              })
+              yield* send({
+                _tag: "Mouse",
+                type: "down",
+                x: 150,
+                y: 80,
+                button: "left",
+                clickCount: 1,
+                modifiers: none,
+                buttons: 1
+              })
+              yield* send({
+                _tag: "Mouse",
+                type: "move",
+                x: 20,
+                y: 20,
+                button: "none",
+                clickCount: 0,
+                modifiers: none,
+                buttons: 1
+              })
+              yield* send({
+                _tag: "Mouse",
+                type: "up",
+                x: 20,
+                y: 20,
+                button: "left",
+                clickCount: 1,
+                modifiers: none,
+                buttons: 0
+              })
+              const got = Effect.flatMap(
+                world.adapter.evaluate(realm, {
+                  functionDeclaration: "() => window.got.join(',')",
+                  arguments: [],
+                  awaitPromise: false,
+                  result: "value",
+                  userActivation: false
+                }),
+                (result) =>
+                  result._tag === "Value" && json(result.value) === "loaded,down,up"
+                    ? Effect.void
+                    : Effect.fail(
+                      `the frame got no release: ${
+                        result._tag === "Value" ? JSON.stringify(json(result.value)) : result.text
+                      }`
+                    )
+              )
+              yield* got.pipe(Effect.retry({ times: 30, schedule: Schedule.spaced("100 millis") }))
+            }),
+          timeout
+        )
+
+        it.effect(
           "sends input to a transparent element in a cross-site frame that paints nothing but holds a painted frame",
           () =>
             Effect.gen(function*() {
@@ -990,8 +1085,7 @@ export const conformance = (backend: Backend) =>
             assert.deepStrictEqual(result.value, { type: "string", value: "Strider" })
             const closed = yield* world.facts.when("PromptClosed")
             assert.isTrue(closed.accepted)
-            yield* world.facts.when("ObligationEnded", (fact) =>
-              fact.obligation === opened.obligation)
+            yield* world.facts.when("ObligationEnded", (fact) => fact.obligation === opened.obligation)
           }), timeout)
 
         it.effect("intercepts requests: fulfill, fail, continue with new headers", () =>
@@ -1007,8 +1101,7 @@ export const conformance = (backend: Backend) =>
             const fulfilled = yield* evaluate(world, page, "() => fetch('/json').then((r) => r.text())").pipe(
               Effect.forkChild
             )
-            const first = yield* world.facts.when("ObligationOpened", (fact) =>
-              fact.subject._tag === "PausedRequest")
+            const first = yield* world.facts.when("ObligationOpened", (fact) => fact.subject._tag === "PausedRequest")
             assert(first.subject._tag === "PausedRequest")
             assert.strictEqual(first.subject.request.url, `${world.site.origin}/json`)
             yield* world.adapter.resolve(first.obligation, {
