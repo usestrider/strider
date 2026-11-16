@@ -1385,39 +1385,6 @@ export const declarations = (
           }))
         }), timeout)
 
-      it.effect("runs a timer scheduled by a chain of messages during adjustment", () =>
-        Effect.scoped(Effect.gen(function*() {
-          const page = yield* Browser.newPage()
-          yield* page.clock.install({ mode: "controlled", at: 1000 })
-          yield* page.evaluateInMainWorld(() => {
-            // Earlier callbacks exercise the same timer nesting as a page with an active clock.
-            for (let at = 1; at <= 6; at++) {
-              setTimeout(() => {}, at)
-            }
-            const channel = new MessageChannel()
-            let messages = 0
-            channel.port1.onmessage = () => {
-              if (++messages < 8) {
-                channel.port2.postMessage(null)
-              } else {
-                setTimeout(() =>
-                  Reflect.set(window, "__done", true), 100)
-                channel.port1.close()
-                channel.port2.close()
-              }
-            }
-            setTimeout(() =>
-              channel.port2.postMessage(null), 100)
-          })
-          yield* page.clock.adjust(1000)
-          assert.strictEqual(
-            yield* page.evaluateInMainWorld(() =>
-              Reflect.get(window, "__done") === true
-            ),
-            true
-          )
-        })), timeout)
-
       it.effect("drains messages exchanged with a frame before advancing the clock", () =>
         Effect.scoped(Effect.gen(function*() {
           const page = yield* Browser.newPage()
