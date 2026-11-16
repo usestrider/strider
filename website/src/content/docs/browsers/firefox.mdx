@@ -153,8 +153,10 @@ cache shows up as a request.
 **Console text is Firefox's own formatting,** which writes `%f` as printf does: `1.250000`.
 
 **Typing is key by key.** [Keyboard layouts](/docs/pages/actions#keys) send no AltGr or dead keys, and the page
-sees a US key's `code`. [`insertText`](/docs/pages/actions#the-keyboard-and-the-mouse) types each character as a
-key.
+sees a US key's `code`. [`insertText`](/docs/pages/actions#the-keyboard-and-the-mouse) and `fill` send no key
+events to insert text, but the `beforeinput` before the text is Strider's own, since Firefox fires none: its
+`isTrusted` is `false`. `fill("")` clears a field by pressing Delete, so that deletion's `beforeinput` is
+Firefox's own.
 
 **HTML drag and drop needs [`html: "synthetic"`](/docs/pages/actions#dragging):** Firefox starts a native drag but never drops it.
 

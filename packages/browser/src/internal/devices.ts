@@ -21,7 +21,7 @@ import * as Input from "./input.ts"
 import * as Keys from "./keys.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
-import type * as Runtime from "./runtime.ts"
+import * as Runtime from "./runtime.ts"
 
 type Failure = Reason.InvalidInput | Reason.Unsupported | Reason.BackendFailure
 
@@ -64,6 +64,22 @@ const sending = <E>(
       }
       const events = build(state)
       if (!Array.isArray(events)) return yield* Effect.fail(fail(events as Failure, id))
+      const inserted = Runtime.insertsInPage(owner.runtime, events as ReadonlyArray<Adapter.InputEvent>)
+      if (Option.isSome(inserted)) {
+        return yield* Runtime.insertText(owner.runtime, owner.page, inserted.value.text, inserted.value.beforeInput, id)
+          .pipe(Effect.mapError((failure) =>
+            failure._tag === "Gone"
+              ? failure.error
+              : failure._tag === "Deadline"
+              ? record.timeout(Option.fromUndefinedOr(failure.hint))
+              : fail(
+                failure.reason._tag === "PromptBlocking"
+                  ? new Reason.BackendFailure({ kind: "Rejected", method: "insertText", hint: failure.reason.hint })
+                  : failure.reason,
+                id
+              )
+          ))
+      }
       yield* owner.runtime.model.adapter.dispatchInput(owner.page.id, events as ReadonlyArray<Adapter.InputEvent>).pipe(
         Effect.tapError((error) =>
           Effect.sync(() => {

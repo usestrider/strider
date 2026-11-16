@@ -119,6 +119,8 @@ export interface Fold {
   readonly undecided: (page: Model.PageEntry, prompt: Model.PromptEvent) => Effect.Effect<void>
   /** Publishes a decision a policy or the default made, on the page's and the context's channels. */
   readonly autoResolved: (owner: Model.Owner, event: Model.AutoResolutionEvent) => Effect.Effect<void>
+  /** Publishes a handler's decision for a dialog, which the browser applied, on the page's channel. */
+  readonly handledPrompt: (page: Model.PageEntry, event: Model.HandledPromptEvent) => Effect.Effect<void>
   /**
    * Ends everything the browser held, with `reason`: when its connection is lost, or once it has closed. Does
    * nothing once something has ended it.
@@ -541,6 +543,7 @@ export const make = Effect.fnUntraced(function*(options: {
             events: {
               popup: Events.make(target, cap),
               dialog: Events.make(target, cap),
+              handledDialog: Events.make(target, cap),
               fileChooser: Events.make(target, cap),
               autoResolution: Events.make(target, cap),
               navigation: Events.make(target, cap),
@@ -1151,6 +1154,7 @@ export const make = Effect.fnUntraced(function*(options: {
       apply(
         Effect.sync(() => publish(owner, event, (events) => events.autoResolution, (events) => events.autoResolution))
       ),
+    handledPrompt: (page, event) => apply(Effect.sync(() => Events.publish(page.events.handledDialog, event))),
     loseConnection: (reason) => apply(loseConnection(reason))
   }
   return self

@@ -378,6 +378,7 @@ export const connect: (
       realm: (document, world) => Evaluation.realm(state, document, world),
       evaluate: (realm, call) => Evaluation.evaluate(state, realm, call),
       releaseHandles: (list) => Evaluation.releaseHandles(state, list),
+      textInsertion: "native",
       dispatchInput: (page, events, frame, lands) => Input.dispatchInput(state, page, events, frame, lands),
       contentFrame: (node) => Input.contentFrame(state, node),
       releaseNodes: () => Effect.void,
