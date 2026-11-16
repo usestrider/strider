@@ -4,6 +4,7 @@
  * to be removed skips the release of its own file chooser, challenge, credential, download and override
  * declarations; if the removal is refused, `restoreContext` reconciles its targets with the declarations that remain.
  */
+import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -27,7 +28,7 @@ import * as Cleanup from "../declarationCleanup.ts"
 import * as Declarations from "../declarations.ts"
 import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
-import { contextLock } from "./state.ts"
+import { contextLock, downloadDirectory, forgetRetiredFrames } from "./state.ts"
 import { type ContextEntry, type PageEntry, placement, type State, type TargetEntry } from "./state.ts"
 import { installWebSocketGates } from "./targets.ts"
 import * as WebSocketBridge from "./webSocketBridge.ts"
@@ -682,8 +683,19 @@ const applyToTarget = (state: State, declaration: Adapter.Declaration, target: T
   }
 }
 
+// A page in its initial sync discards the events received before the frame tree's reply, so a declaration writes
+// to it only once that reply is in: one sent before could pause a request that no one continues, which also keeps
+// Chromium from answering the tree. It doesn't wait for the rest of the sync, which can be held up by a dialog or
+// the renderer. A release doesn't wait at all, since what it sends causes no events the model needs.
 const applyDeclaration = (state: State, declaration: Adapter.Declaration, scope: Adapter.DeclarationScope) =>
-  Effect.forEach(targetsInScope(state, scope), (target) => applyToTarget(state, declaration, target), {
+  Effect.forEach(targetsInScope(state, scope), (target) => {
+    const read = target.page!.treeRead
+    return Deferred.isDoneUnsafe(read)
+      ? applyToTarget(state, declaration, target)
+      : Deferred.await(read).pipe(
+        Effect.andThen(Effect.suspend(() => target.ended ? Effect.void : applyToTarget(state, declaration, target)))
+      )
+  }, {
     concurrency: "unbounded",
     discard: true
   })
@@ -782,6 +794,15 @@ export const declare = Effect.fnUntraced(function*(
   }
   const id = state.ids.registration()
   state.registry.add(scope, declaration, id)
+  const downloadsIn = () =>
+    scope._tag === "UserContext"
+      ? [state.contexts.get(scope.context)].filter((context) => context !== undefined)
+      : [...state.contexts.values()]
+  if (declaration._tag === "Downloads" && declaration.behavior._tag === "Allow") {
+    for (const context of downloadsIn()) {
+      if (!context.isDefault) context.keepsEndedFrames = true
+    }
+  }
   const registrationContext = yield* Effect.context<never>()
   yield* Scope.addFinalizer(
     yield* Effect.scope,
@@ -792,7 +813,15 @@ export const declare = Effect.fnUntraced(function*(
       const unconfirmed = yield* Cleanup.Unconfirmed
       // Registry removal is synchronous, before any caller stops waiting or prior settings are restored.
       state.registry.remove(id)
-      const release = "retiring" in declaration && declaration.retiring?.() === true
+      const retiring = "retiring" in declaration && declaration.retiring?.() === true
+      // A context left open no longer needs its ended frames once no declaration gives its downloads a directory,
+      // whatever the browser's reset below comes to; one retiring keeps them until it is removed
+      if (declaration._tag === "Downloads" && !retiring) {
+        for (const context of downloadsIn()) {
+          if (Option.isNone(downloadDirectory(state, context.id))) forgetRetiredFrames(state, context)
+        }
+      }
+      const release = retiring
         // The context is removed right after: undoing the declaration would only add a round trip, or for a
         // viewport a wait on a renderer that may never report its size again
         ? Effect.sync(() => retire(state, scope, declaration))
