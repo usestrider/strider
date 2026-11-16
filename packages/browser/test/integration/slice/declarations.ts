@@ -401,6 +401,53 @@ export const declarations = (
           }
         }), timeout)
 
+      it.effect(
+        "releases a context's viewport after a popup window opens a tab with mobile emulation once the original page closed",
+        () =>
+          Effect.gen(function*() {
+            if (!(yield* supports("emulation.viewport.mobile")) || !(yield* supports("popups.opener"))) {
+              return
+            }
+            const { origin } = yield* site
+            const { warnings } = yield* withWarnings(Effect.scoped(Effect.gen(function*() {
+              const context = yield* Browser.newContext()
+              const page = yield* context.newPage
+              const declared = yield* context.emulate({ viewport: { width: 640, height: 480, mobile: true } })
+              const target = fixtureUrl(origin, "<h1>Popup</h1>")
+              yield* page.goto(fixtureUrl(
+                origin,
+                `<button onclick="window.open('${target}', '_blank', 'width=400,height=300')">Open popup</button>`
+              ))
+              const opened = yield* Popup.next(page)
+              yield* page.getByRole("button", { name: "Open popup" }).click()
+              const popup = yield* opened
+              yield* popup.getByRole("heading").pipe(Expect.toHaveText("Popup"))
+              yield* page.close()
+              yield* popup.activate
+              // The tab can't join the popup's window, so it opens alone in a new one
+              const tab = yield* openPopup(popup, origin)
+              const started = Date.now()
+              yield* declared.remove
+              const elapsed = Date.now() - started
+              assert.isBelow(elapsed, 5_000, `the viewport's release took ${elapsed} ms`)
+              assert.deepStrictEqual(yield* tab.viewportSize, Option.none())
+            })))
+            assert.deepStrictEqual(
+              warnings.filter((warning) =>
+                warning.includes("Failed to release")
+              ),
+              []
+            )
+            if (name === "Chromium") {
+              // The tab measured the size it inherited before its window laid it out, so its own size is unknown
+              assert.isTrue(warnings.some((warning) =>
+                warning.includes("could not be verified")
+              ))
+            }
+          }),
+        timeout
+      )
+
       // ── Routes ──
 
       it.effect("applies and releases a route immediately before navigation on a live page", () =>
