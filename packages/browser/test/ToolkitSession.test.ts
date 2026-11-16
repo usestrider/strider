@@ -3,7 +3,7 @@
  * and the digest calls a page by the name it has as each line is noted.
  */
 import { assert, describe, it } from "@effect/vitest"
-import { Browser, Snapshot, Target } from "@usestrider/browser"
+import { Browser, Declaration, Dialog, Snapshot, Target } from "@usestrider/browser"
 import { CapturePolicy } from "@usestrider/browser/ai"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -720,11 +720,87 @@ describe("Session's digest", () => {
       assert.includeMembers(lines, [
         "store navigated to https://example.test/cart",
         "popup p2 opened from store",
-        "dialog alert on store",
+        "dialog alert on store dismissed by policy",
         "store closed: PageClosed"
       ])
       assert.isFalse(lines.some((line) => /\b(p1|shop)\b/.test(line)), lines.join("\n"))
     }).pipe(Effect.scoped, Effect.provide(Browser.layerTest("-popup-dialog(alert)-|"))))
+})
+
+describe("Session's digest, dialogs", () => {
+  // One line for each dialog, naming what decided it: a registration by its handle, or the context's policy
+  const dialogLines = Effect.fnUntraced(function*(session: ToolkitImpl.Session) {
+    yield* TestClock.adjust("20 millis")
+    const lines: Array<string> = []
+    for (let turn = 0; turn < 20; turn++) {
+      yield* Effect.yieldNow
+      lines.push(...(yield* sinceLast(session)))
+    }
+    return lines.filter((line) => line.startsWith("dialog"))
+  })
+
+  it.effect("names the dialog registration that decided a dialog, in one line", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const page = yield* context.newPage
+      const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+      yield* session.name(page, "main")
+      yield* session.toolkit.handle("dialog", { page: "main", decision: "accept" }).pipe(
+        Effect.flatMap(Stream.runDrain)
+      )
+      assert.deepStrictEqual(yield* dialogLines(session), ["dialog confirm on main accepted by r1"])
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest("-dialog(confirm)"))))
+
+  it.effect("keeps the registration name when it is removed after choosing a decision", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const page = yield* context.newPage
+      const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+      yield* session.name(page, "main")
+      yield* session.toolkit.handle("dialog", { page: "main", decision: "accept" }).pipe(
+        Effect.flatMap(Stream.runDrain)
+      )
+      const registration = Handles.page(page).entry.state.getUnsafe().promptHandlers.at(-1)!
+        .registration as Declaration.HandlerRegistration
+      const removed = yield* registration.handled.waitFor((count) => count === 1).pipe(
+        Effect.andThen(session.remove("r1")),
+        Effect.forkChild
+      )
+      const lines = yield* dialogLines(session)
+      yield* Fiber.join(removed)
+      assert.deepStrictEqual(lines, ["dialog confirm on main accepted by r1"])
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest("-dialog(confirm)"))))
+
+  it.effect("reports a dialog the policy decided in one line", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const page = yield* context.newPage
+      const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+      yield* session.name(page, "main")
+      assert.deepStrictEqual(yield* dialogLines(session), ["dialog confirm on main dismissed by policy"])
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest("-dialog(confirm)"))))
+
+  it.effect("says a handler decided a dialog when no registration of the session did", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const page = yield* context.newPage
+      const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+      yield* session.name(page, "main")
+      yield* Dialog.handle(page, Dialog.acceptAll)
+      assert.deepStrictEqual(yield* dialogLines(session), ["dialog confirm on main accepted by a handler"])
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest("-dialog(confirm)"))))
+
+  it.effect("reports a dialog still open when a result takes it, and its decision as a line of its own", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const page = yield* context.newPage
+      const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+      yield* session.name(page, "main")
+      yield* Dialog.handle(page, (pending) => Effect.andThen(Effect.sleep("100 millis"), Dialog.dismissAll(pending)))
+      assert.deepStrictEqual(yield* dialogLines(session), ["dialog confirm on main, open"])
+      yield* TestClock.adjust("100 millis")
+      assert.deepStrictEqual(yield* dialogLines(session), ["dialog confirm on main dismissed by a handler"])
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest("-dialog(confirm)"))))
 })
 
 describe("Session.open", () => {

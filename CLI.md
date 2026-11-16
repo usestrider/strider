@@ -183,7 +183,7 @@ and tools to expose.
 
 ```
 clicked button "Add to cart" on shop · 412 ms
-since last: navigated to /cart · popup p2 opened · dialog "Leave site?" dismissed by policy
+since last: navigated to /cart · popup p2 opened · dialog confirm "Remove item?" on shop dismissed by policy
 ```
 
 ```ts
@@ -239,6 +239,7 @@ A page the segment opens itself belongs to the segment's scope, and closes with 
 - **Decisions are declarative commands.** `strider route <pattern> abort | continue | fulfill …` and `strider dialog handle accept | dismiss` register scoped handlers in the session and print a registration handle; `strider remove r1` ends one. A decision that needs logic belongs in a segment or a program.
 - **Targets** are a bare ref (`e9`), checked against the named page's latest snapshot (a ref from another page's snapshot fails with a hint naming that page), or a locator string that maps to exactly one `getBy*`: `role=button[name="Sign in"]`, `text="Add to cart"`, `label=Email`, `testid=cart`, `css=…`. Strings are parsed at the boundary, so a bad one fails immediately.
 - **Events work across commands.** `strider next` subscribes in the session's scope and prints a wait handle, and `strider await` collects it. The wait's deadline starts at `next` (`--within`, or the default budget), so a wait an agent leaves too long reports `Timeout` when collected. The since-last digest is `history`, read from where the previous command stopped. A successful `page new`, `goto`, or `back` reports its own navigation in its result, so that navigation is omitted from the digest, even if its event is delivered later. A later navigation, including another visit to the same URL, is still reported.
+- **A dialog in the digest** is one line, naming what decided it: `dialog confirm "Remove item?" on shop accepted by r1` for a `dialog handle` registration, `… by a handler` for a handler a segment or program registered, and `… dismissed by policy` for the context's policy. A handler's decision is `accepted`, `answered` (accepted with text), or `dismissed`. A dialog nothing has decided when a command reads the digest is `dialog confirm "Remove item?" on shop, open`, and its decision, once made, is a line of a later command's digest. No command waits for a decision.
 - **A failed request in the digest** got no response (a network, DNS, or TLS error, or blocked by CORS, CSP, or mixed content) or a status of 400 or more. Canceled requests, superseded by a navigation or aborted by the app, are not failures. Nothing is filtered by resource type, which would be a heuristic (rule 23). Identical failures are grouped with a count, and a long list shows the first few, then "+N more · `strider history network --failed`".
 - **Validation during a click.** A click's digest reports `validation observed during click` once per affected control when an `invalid`
   event occurs during that click operation. This is temporal evidence only: page handlers can call
