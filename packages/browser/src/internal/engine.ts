@@ -325,6 +325,11 @@ export type Request =
   | { readonly op: "disarm" }
   | { readonly op: "fillGuard"; readonly steps: ReadonlyArray<Step>; readonly ancestor: boolean }
   | { readonly op: "fillDisarm" }
+  /**
+   * Inserts text with the editing command in this document's focused element, after a cancelable `beforeinput`
+   * when `beforeInput` is set; answers `InFrame` when the focus is in a frame's document instead.
+   */
+  | { readonly op: "insert"; readonly text: string; readonly beforeInput: boolean }
   | { readonly op: "read"; readonly steps: ReadonlyArray<Step>; readonly read: Read }
   | {
     readonly op: "expect"
@@ -417,6 +422,9 @@ export const Response = Schema.Union([
   }),
   Schema.TaggedStruct("Final", { final: Final }),
   Schema.TaggedStruct("Guarded", { blocked: Schema.NullOr(Schema.String) }),
+  Schema.TaggedStruct("Inserted", { inserted: Schema.Boolean }),
+  /** The focused element is the `index`th of the document's frames, in the order a `"iframe, frame"` query finds them. */
+  Schema.TaggedStruct("InFrame", { index: Schema.Number }),
   Schema.TaggedStruct("FillGuard", {
     blocked: Schema.NullOr(Schema.String),
     unsafe: Schema.Boolean,
@@ -591,6 +599,7 @@ export function engine(render: (root: SnapNode) => string) {
     doctype: getter(Document.prototype, "doctype"),
     title: getter(Document.prototype, "title"),
     designMode: getter(Document.prototype, "designMode"),
+    execCommand: method(Document.prototype, "execCommand"),
     createRange: method(Document.prototype, "createRange"),
     getElementById: method(Document.prototype, "getElementById"),
     elementFromPoint: method(Document.prototype, "elementFromPoint"),
@@ -676,7 +685,8 @@ export function engine(render: (root: SnapNode) => string) {
 
   /**
    * The parent in the flat tree: an assigned node's slot, otherwise its composed parent. Rendering, hit testing and
-   * event dispatch follow this tree, where slotted content sits under its slot rather than its host.
+   * event dispatch follow this tree, where slotted content sits under its slot rather than its host. Hit testing and
+   * pointer containment, inertness, and a `display: contents` element's visibility all walk it.
    */
   const flatParent = (element: Element): Element | null => dom.assignedSlot(element) ?? composedParent(element)
 
@@ -1162,12 +1172,46 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   // Hidden, visible
-  /** Excluded from the accessibility tree: `aria-hidden`, inert, `display: none`, `visibility: hidden`. */
+  /**
+   * Whether a `display: contents` element shows what it holds. It has no box of its own, so it's judged by its
+   * computed `visibility` and by its nearest flat-tree ancestor with a box: that one must not be `display: none`,
+   * inside one, or skipping its content (`content-visibility: hidden`, or `auto` off screen with
+   * `contentVisibilityAuto`). With `opacityProperty`, opacity 0 hides it too: its own, a `display: contents`
+   * ancestor's on the way up, or that boxed ancestor's or one above it.
+   */
+  const contentsShown = (
+    element: Element,
+    options?: { readonly contentVisibilityAuto?: boolean; readonly opacityProperty?: boolean }
+  ): boolean => {
+    const opacityProperty = options?.opacityProperty ?? false
+    const own = getComputedStyle(element)
+    if (own.visibility !== "visible" || (opacityProperty && own.opacity === "0")) return false
+    for (let current = flatParent(element); current !== null; current = flatParent(current)) {
+      const style = getComputedStyle(current)
+      if (style.display === "contents") {
+        if (opacityProperty && style.opacity === "0") return false
+        continue
+      }
+      return style.contentVisibility !== "hidden" && dom.checkVisibility(current, {
+        contentVisibilityAuto: options?.contentVisibilityAuto ?? false,
+        opacityProperty
+      })
+    }
+    return true
+  }
+
+  /**
+   * Excluded from the accessibility tree: `aria-hidden` on it or an ancestor, inert, `display: none` on it or an
+   * ancestor, its own `visibility: hidden`, or content an ancestor skips. A `display: contents` element keeps its
+   * semantics, so what it holds doesn't decide it.
+   */
   const hiddenFromAccessibility = (element: Element): boolean => {
     for (let current: Element | null = element; current !== null; current = composedParent(current)) {
       if (dom.getAttribute(current, "aria-hidden") === "true") return true
     }
-    return inert(element) || !dom.checkVisibility(element, { visibilityProperty: true })
+    if (inert(element)) return true
+    if (getComputedStyle(element).display === "contents") return !contentsShown(element)
+    return !dom.checkVisibility(element, { visibilityProperty: true })
   }
 
   // Inertness
@@ -1256,10 +1300,28 @@ export function engine(render: (root: SnapNode) => string) {
   /** HTML's inertness: `inert` on the element or a flat-tree ancestor, or outside the topmost open modal dialog. */
   const inert = (element: Element): boolean => inertAncestor(element) !== null || blockingModal(element) !== null
 
-  /** CONCEPTS.md §8: observations include opacity; action readiness ignores it. */
+  /** Text that takes up space on the page: non-blank, with a non-empty rect. */
+  const renderedText = (node: Text): boolean => {
+    if ((dom.nodeValue(node) ?? "").trim() === "") return false
+    const range = dom.createRange(document)
+    range.selectNodeContents(node)
+    return Array.from(range.getClientRects()).some((rect) => rect.width > 0 && rect.height > 0)
+  }
+
+  /**
+   * CONCEPTS.md §8: observations include opacity; action readiness ignores it. A `display: contents` element is
+   * rendered when one of its flat-tree children is: an element, or text it shows. A slot among them is judged as an
+   * element of its own, so the text it holds is shown or hidden by the slot's style, which that text inherits.
+   */
   const rendered = (element: Element, opacityProperty: boolean): boolean => {
     if (getComputedStyle(element).display === "contents") {
-      return flatChildElements(element).some((child) => rendered(child, opacityProperty))
+      let text = false
+      for (const child of flatChildNodes(element)) {
+        if (child instanceof Element) {
+          if (rendered(child, opacityProperty)) return true
+        } else if (child instanceof Text) text ||= renderedText(child)
+      }
+      return text && contentsShown(element, { contentVisibilityAuto: true, opacityProperty })
     }
     if (!dom.checkVisibility(element, { contentVisibilityAuto: true, opacityProperty, visibilityProperty: true })) {
       return false
@@ -1579,8 +1641,9 @@ export function engine(render: (root: SnapNode) => string) {
       }
       case "Text": {
         // A slot is transparent here as in the flat tree: what it renders, its assigned nodes or its fallback
-        // content, is its parent's text, so the slot itself is never the smallest element that says it.
-        const candidates = under.filter((element) =>
+        // content, is its parent's text, so the slot itself is never the smallest element that says it. An
+        // element scope is a candidate itself, ahead of its descendants: the text it says may be its own.
+        const candidates = (scope instanceof Element ? [scope, ...under] : under).filter((element) =>
           !(element instanceof HTMLSlotElement) && !inHead(element) && !SKIPPED.has(dom.localName(element))
         )
         const says = (element: Element) => matches(step.matcher, textOf(element))
@@ -1944,11 +2007,36 @@ export function engine(render: (root: SnapNode) => string) {
     return label
   }
 
-  const textSelectionTarget = (element: Element): Element => {
-    let target = element
-    if (!dom.matches(target, "input, textarea, select") && !contentEditable(target)) {
-      target = dom.closest(target, "button, [role=button], [role=checkbox], [role=radio]") ?? target
+  const CONTROL = "button, [role=button], [role=checkbox], [role=radio]"
+
+  const standsForItself = (element: Element): boolean =>
+    dom.matches(element, "input, textarea, select") || contentEditable(element)
+
+  // Selection takes the text of the control an element is in, found among its DOM ancestors. Fields and editable
+  // content stand for themselves.
+  const enclosingControl = (element: Element): Element =>
+    standsForItself(element) ? element : dom.closest(element, CONTROL) ?? element
+
+  // The browser delivers no click to a disabled button's subtree on the flat tree, so Enabled climbs it: through
+  // assigned slots and out of shadow roots. Fields and editable content stand for themselves.
+  const flatEnclosingControl = (element: Element): Element => {
+    if (standsForItself(element)) return element
+    for (
+      let current: Element | null = element;
+      current !== null;
+      current = dom.assignedSlot(current) ?? composedParent(current)
+    ) {
+      if (dom.matches(current, CONTROL)) return current
     }
+    return element
+  }
+
+  // Enabled as a user sees it: an element is enabled only when it and its enclosing control both are, so a span inside
+  // a disabled button is disabled, and a disabled option stays disabled whatever encloses its select
+  const enabledControl = (element: Element): boolean => enabled(element) && enabled(flatEnclosingControl(element))
+
+  const textSelectionTarget = (element: Element): Element => {
+    let target = enclosingControl(element)
     if (
       !dom.matches(
         target,
@@ -2297,8 +2385,16 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   // Native insertion is a separate protocol command. In a design-mode document a timer can refocus a
-  // form control after selection, so validate at the cancellable native event, before its default mutation.
-  let fillGuard: { remove: () => void; blocked: string | null; unsafe: boolean; accepted: boolean } | null = null
+  // form control after selection, so validate at the cancellable native event, before its default mutation, or,
+  // where the engine inserts the text itself, at the insertion, before it dispatches anything (`insert`).
+  let fillGuard: {
+    remove: () => void
+    blocked: string | null
+    unsafe: boolean
+    accepted: boolean
+    inserting: boolean
+    check: () => string | null
+  } | null = null
   const fillDisarm = () => {
     const current = fillGuard
     fillGuard = null
@@ -2322,7 +2418,14 @@ export function engine(render: (root: SnapNode) => string) {
       blocked: null as string | null,
       unsafe: false,
       accepted: false,
-      inserting: false
+      inserting: false,
+      // At an insertion the engine makes itself: an ancestor's focus must still be on the guarded frame, as the
+      // trusted events a native insertion sends would show it
+      check: (): string | null => {
+        if (!ancestor) return blocker()
+        const active = deepActive()
+        return active === element ? null : active === null ? "another document" : describe(active)
+      }
     }
     const blocker = (): string | null => {
       // Ancestors should receive no insertion event: correct input reaches the target document instead.
@@ -2395,6 +2498,45 @@ export function engine(render: (root: SnapNode) => string) {
     if (current.blocked === null) { for (const type of types) addEventListener(type, handler, true) }
     fillGuard = current
     return { _tag: "FillGuard" as const, blocked: current.blocked, unsafe: false, accepted: false }
+  }
+
+  /**
+   * Inserts text where the focus is, with the document's editing command, which sends no key events: the
+   * engine's own `execCommand`, taken from `Document.prototype` at install, so a page's replacement isn't called.
+   * Where the browser's command dispatches no `beforeinput` (Firefox), `beforeInput` dispatches it first, as the
+   * other browsers do, and a page that cancels it gets nothing inserted. An armed fill guard checks the target here,
+   * before anything is dispatched.
+   */
+  const insert = (text: string, beforeInput: boolean): Response => {
+    const active = deepActive()
+    const guard = fillGuard
+    // An armed guard, in an ancestor document too, decides before anything goes further or is dispatched
+    const blocked = (): boolean => {
+      if (guard === null) return false
+      guard.blocked ??= guard.check()
+      return guard.blocked !== null
+    }
+    if (blocked()) return { _tag: "Inserted", inserted: false }
+    if (active instanceof HTMLIFrameElement || active instanceof HTMLFrameElement) {
+      return { _tag: "InFrame", index: resolve([{ _tag: "Css", selector: "iframe, frame" }]).indexOf(active) }
+    }
+    if (beforeInput && active !== null) {
+      const event = new InputEvent("beforeinput", {
+        inputType: "insertText",
+        data: text,
+        bubbles: true,
+        cancelable: true,
+        composed: true
+      })
+      if (!dom.dispatchEvent(active, event)) return { _tag: "Inserted", inserted: false }
+      // Its handlers may have moved the focus or the selection
+      if (blocked()) return { _tag: "Inserted", inserted: false }
+    }
+    if (guard !== null) {
+      guard.accepted = true
+      guard.inserting = true
+    }
+    return { _tag: "Inserted", inserted: dom.execCommand(document, "insertText", false, text) }
   }
 
   // Actions
@@ -2523,8 +2665,8 @@ export function engine(render: (root: SnapNode) => string) {
       else if (checks.visible && !rendered(element, false)) reason = { _tag: "NotVisible" }
       else if (
         checks.enabled && (
-          !enabled(element) || (action._tag === "Point" && action.checked === true &&
-            !enabled(checkableForAction(element) ?? element))
+          !enabledControl(element) || (action._tag === "Point" && action.checked === true &&
+            !enabledControl(checkableForAction(element) ?? element))
         )
       ) reason = { _tag: "Disabled" }
       else if (checks.editable && readOnly(element)) reason = { _tag: "ReadOnly" }
@@ -2832,7 +2974,7 @@ export function engine(render: (root: SnapNode) => string) {
       case "Editable":
         return { _tag: "Read", value: editableKind(element) && enabled(element) && !readOnly(element) }
       case "Enabled":
-        return { _tag: "Read", value: enabled(element) }
+        return { _tag: "Read", value: enabledControl(element) }
       case "Checked": {
         const control = request.read.followLabel ? checkableForAction(element) : element
         const checked = control === null ? null : checkedOf(control)
@@ -2918,9 +3060,9 @@ export function engine(render: (root: SnapNode) => string) {
     const element = found[0]!
     switch (expectation._tag) {
       case "Enabled":
-        return { passed: enabled(element), observed: enabled(element) ? "enabled" : "disabled" }
+        return { passed: enabledControl(element), observed: enabledControl(element) ? "enabled" : "disabled" }
       case "Disabled":
-        return { passed: !enabled(element), observed: enabled(element) ? "enabled" : "disabled" }
+        return { passed: !enabledControl(element), observed: enabledControl(element) ? "enabled" : "disabled" }
       case "Checked": {
         const checked = checkedOf(element)
         return {
@@ -3419,7 +3561,9 @@ export function engine(render: (root: SnapNode) => string) {
       const display = getComputedStyle(node).display
       if (display === "none") return
       if (display !== "contents" && !dom.checkVisibility(node)) return
-      const shown = display === "contents" || dom.checkVisibility(node, { visibilityProperty: true })
+      const shown = display === "contents"
+        ? contentsShown(node)
+        : dom.checkVisibility(node, { visibilityProperty: true })
       const made = shown ? elementNode(node, level, walk) : null
       if (made === null) {
         for (const child of flatChildNodes(node)) visit(child, shown)
@@ -3801,6 +3945,8 @@ export function engine(render: (root: SnapNode) => string) {
           return JSON.stringify(armFill(request.steps, request.ancestor) satisfies Response)
         case "fillDisarm":
           return JSON.stringify(fillDisarm() satisfies Response)
+        case "insert":
+          return JSON.stringify(insert(request.text, request.beforeInput) satisfies Response)
         case "disarm":
           return JSON.stringify({ _tag: "Guarded", blocked: disarm() } satisfies Response)
         case "read":

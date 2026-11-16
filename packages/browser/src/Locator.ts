@@ -1,10 +1,10 @@
 /**
  * Locators: how to find elements on a page, and the actions and reads that use them.
  *
- * A locator describes how to find elements and is resolved again on every attempt, so it never goes stale. A query
- * on a locator searches inside its matches. Reads happen once and never retry; the expectations that retry are
- * `Expect`. A ref from a snapshot is the exception: it's pinned to one node, and fails with `StaleRef` rather than
- * finding another.
+ * A locator describes how to find elements and is resolved again on every attempt, so it never goes stale. A query on a
+ * locator searches inside its matches, and `getByText` the matches themselves too. Reads happen once and never retry;
+ * the expectations that retry are `Expect`. A ref from a snapshot is the exception: it's pinned to one node, and fails
+ * with `StaleRef` rather than finding another.
  *
  * Before acting, a locator checks that its element is ready: visible, stable, enabled, and the rest of the action's
  * checks, tested in the page together on each attempt. The checks are named, can be turned off per call with
@@ -306,6 +306,11 @@ export interface Queries<L> {
    * isn't `innerText`, which depends on layout and differs between browsers. A string matches as a case-insensitive
    * substring, or with `exact` as the whole text, case-sensitively; a `RegExp` is tested as given. The document's
    * `head` isn't searched.
+   *
+   * Chained from a locator, it searches the locator's own element as well as the elements inside it, so
+   * `page.locator(".badge").getByText("Resolved")` finds the badge that says "Resolved". The other `getBy*` queries
+   * search only inside the locator's element. The same holds for `getByText` in a filter's `has` and `hasNot`:
+   * the element being tested counts.
    *
    * **Example** (Reading an order number)
    *
@@ -768,6 +773,13 @@ export interface ReadonlyLocator
   /**
    * Whether the one match is enabled now.
    *
+   * **Details**
+   *
+   * An element inside a button, or inside an element with the role `button`, `checkbox`, or `radio`, is enabled only
+   * when it and the nearest such control both are. The control is found through shadow roots and the slots the
+   * element is assigned to: a span inside a disabled button is disabled. Inputs, textareas, selects, and editable
+   * content are read on themselves alone. Native `disabled`, a disabled `fieldset`, and `aria-disabled` all count.
+   *
    * **Example** (Reading whether checkout is available)
    *
    * ```ts import.meta.vitest
@@ -920,7 +932,8 @@ export interface ReadonlyLocator
  * `filter({ visible: true })` excludes it, and `filter({ visible: false })` includes it. Opacity alone does
  * not make an action wait for a fade-in.
  *
- * The action's `visible` check requires CSS visibility, content visibility, and a nonempty box. Pointer actions
+ * The action's `visible` check requires CSS visibility, content visibility, and a nonempty box. An element with
+ * `display: contents` has no box, so it needs a visible child element or visible text instead. Pointer actions
  * also check that the point receives input. Non-pointer actions do not hit-test: `fill` and `clear` check enabled,
  * editable, and not inert; `focus`, `press`, and `pressSequentially` check not inert; `blur` has no checks by default; `selectOption` checks enabled;
  * `selectText` checks only visibility; `scrollIntoView` checks stability. `setInputFiles` runs no readiness checks.
@@ -1531,7 +1544,11 @@ export interface Locator extends ReadonlyLocator {
    * **Details**
    *
    * - A text input, a textarea, or a `contenteditable` element is focused and its contents selected from an
-   *   isolated world of Strider's, then the value is inserted as text, as an input method would.
+   *   isolated world of Strider's, then the value is inserted as text, as an input method would: with no key
+   *   events, a cancelable `beforeinput` and then `input`. An empty value is the exception: the selected contents
+   *   are deleted by pressing Delete. An editor that cancels the `beforeinput` and writes the
+   *   text itself is filled. Firefox's `beforeinput` here is dispatched by Strider, untrusted (`isTrusted` is
+   *   `false`), since Firefox's editing command fires none; see `Keyboard.insertText`.
    * - An input whose value isn't typed (`date`, `time`, `color`, `range`, and their kin) has it set from that
    *   world, with `input` then `change` dispatched. Equivalent browser serialization is accepted, such as
    *   lowercase color hex or omitted zero seconds. A malformed value, or a range value changed by clamping

@@ -995,6 +995,60 @@ describe("strider", () => {
     )
   }
 
+  // The document's head arrives at once and its body three seconds later, so the document commits well before
+  // it is parsed: page new waits for domContentLoaded unless told to return at commit
+  for (const waitUntil of [undefined, "commit"] as const) {
+    it.live(
+      `page new ${
+        waitUntil === undefined
+          ? "waits for the parsed document by default"
+          : "--wait-until commit returns before the body"
+      }`,
+      () =>
+        Effect.scoped(Effect.gen(function*() {
+          const server = http.createServer((_, response) => {
+            response.writeHead(200, { "content-type": "text/html; charset=utf-8" })
+            response.write(`<!doctype html><title>delayed</title>${" ".repeat(2048)}`)
+            const timer = setTimeout(() => response.end("<body><button>Delayed</button></body>"), 3000)
+            response.on("close", () => clearTimeout(timer))
+          })
+          yield* Effect.acquireRelease(
+            Effect.callback<void>((resume) => void server.listen(0, "127.0.0.1", () => resume(Effect.void))),
+            () =>
+              Effect.promise(() =>
+                new Promise<void>((resolve) => {
+                  server.closeAllConnections()
+                  server.close(() => resolve())
+                })
+              )
+          )
+          const { port } = server.address() as { readonly port: number }
+          const env = environment()
+          const run = (...args: ReadonlyArray<string>) => strider(env, "-s", "delayed", ...args)
+          const started = yield* strider(env, "start", "--name", "delayed", "--chromium", chromium.executable)
+          assert.strictEqual(started.code, 0, started.err)
+          try {
+            const opened = yield* run(
+              "page",
+              "new",
+              "--name",
+              "main",
+              ...(waitUntil === undefined ? [] : ["--wait-until", waitUntil]),
+              `http://127.0.0.1:${port}/`
+            )
+            assert.strictEqual(opened.code, 0, opened.err)
+            const found = yield* run("-p", "main", "find", "Delayed")
+            assert.strictEqual(found.code, 0, found.err)
+            if (waitUntil === undefined) assert.include(found.out, "button \"Delayed\"")
+            else assert.include(found.out, "nothing in the latest snapshot matches \"Delayed\"")
+          } finally {
+            yield* run("stop")
+          }
+        })),
+      timeout
+    )
+  }
+
   // The CLI's click has the default 30 second deadline: there is no flag to shorten it
   it.live(
     "a click that timed out on an inert page prints the inert element and the open dialog",
@@ -1247,19 +1301,23 @@ describe("strider", () => {
         assert.include(exported, `yield* ${returned}.locator("p").pipe(Expect.toBeVisible)\n`)
         assert.include(
           exported,
-          `const side = yield* context.newPage\n        yield* side.goto(${JSON.stringify(url)})\n`
+          `const side = yield* context.newPage\n        yield* side.goto(${
+            JSON.stringify(url)
+          }, { waitUntil: "domContentLoaded" })\n`
         )
         // The URL's secret is built in from its config, where the session put it
         const password = `\${Redacted.value(yield* Config.Redacted("SECRET_PW"))}`
         assert.include(
           exported,
-          `yield* shop.goto(\`${html(`<p id="pw">`, "</p>").replace("%password%", () => password)}\`)\n`
+          `yield* shop.goto(\`${
+            html(`<p id="pw">`, "</p>").replace("%password%", () => password)
+          }\`, { waitUntil: "domContentLoaded" })\n`
         )
         assert.include(
           exported,
           `const vault = yield* context.newPage\n        yield* vault.goto(\`${
             html(`<p id="pw">`, "</p>").replace("%password%", () => password)
-          }\`)\n`
+          }\`, { waitUntil: "domContentLoaded" })\n`
         )
         // The check of the secret's text is left out, since a failure would print it
         assert.include(
@@ -1268,7 +1326,7 @@ describe("strider", () => {
         )
         assert.notInclude(exported, `Expect.toContainText("%password%")`)
         // A percent-escaped URL is the text the session sent
-        assert.include(exported, `yield* shop.goto(${JSON.stringify(cafe)})\n`)
+        assert.include(exported, `yield* shop.goto(${JSON.stringify(cafe)}, { waitUntil: "domContentLoaded" })\n`)
         assert.include(exported, "// %pasword% names no secret")
         assert.notInclude(exported, "%C3% names no secret")
         // The page's own script holds the password it checks, so the statement is what is checked
@@ -1796,7 +1854,7 @@ describe("strider", () => {
             )
           )
           assert.include(exported, `: a segment runs only in a session; put its steps here, declaring kept\n`)
-          assert.include(exported, `yield* kept.goto(${JSON.stringify(url)})\n`)
+          assert.include(exported, `yield* kept.goto(${JSON.stringify(url)}, { waitUntil: "domContentLoaded" })\n`)
           // Downloads go to the session's own directory
           const downloads = path.join(env.XDG_RUNTIME_DIR, "strider", "tools", "downloads")
           yield* tools(

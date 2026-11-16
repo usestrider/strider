@@ -62,6 +62,22 @@ export const argsFor = (options: Settings, profile: string): ReadonlyArray<strin
   "about:blank"
 ]
 
+/**
+ * What a headless launch states of its input devices: a fine pointer that can hover (6), the mouse Strider drives the
+ * page with. Headless Firefox reports no pointer, so a page would otherwise match `(hover: none)` and
+ * `(pointer: none)`; a headed launch reports the machine's own.
+ */
+export const headlessPointerPrefs: Prefs = {
+  "ui.primaryPointerCapabilities": 6,
+  "ui.allPointerCapabilities": 6
+}
+
+/** The preferences a launch writes: the profile's, and when headless, its pointer's, unless the profile sets them. */
+export const prefsFor = (options: Settings): Prefs => {
+  const profile = options.profilePrefs ?? profilePrefs[options.profile ?? "automation"]
+  return options.headless ?? true ? { ...headlessPointerPrefs, ...profile } : profile
+}
+
 /** A `user.js` that sets preferences. */
 export const userJs = (prefs: Prefs): string =>
   Object.entries(prefs).map(([name, value]) => `user_pref(${JSON.stringify(name)}, ${JSON.stringify(value)});\n`)
@@ -95,10 +111,13 @@ export const launch = Effect.fnUntraced(function*(options: Options) {
   const existing = options.userDataDir === undefined
     ? ""
     : yield* fs.readFileString(`${profile}/user.js`).pipe(Effect.orElseSucceed(() => ""))
-  yield* fs.writeFileString(
-    `${profile}/user.js`,
-    profileUserJs(existing, options.profilePrefs ?? profilePrefs[options.profile ?? "automation"])
-  ).pipe(
+  const prefs = prefsFor(options)
+  const args = argsFor(options, profile)
+  yield* Effect.annotateCurrentSpan({
+    "browser.launch.args": args,
+    "browser.launch.prefs": JSON.stringify(prefs)
+  })
+  yield* fs.writeFileString(`${profile}/user.js`, profileUserJs(existing, prefs)).pipe(
     Effect.catch((error) =>
       Launch.fail(
         new Browser.ConnectionFailed({ stage: "refused", hint: `Couldn't write the profile: ${error.message}` }),
@@ -106,7 +125,7 @@ export const launch = Effect.fnUntraced(function*(options: Options) {
       )
     )
   )
-  const launched = yield* Launch.spawn(path, argsFor(options, profile), profile, { coreDumps: options.coreDumps })
+  const launched = yield* Launch.spawn(path, args, profile, { coreDumps: options.coreDumps })
   const timeout = options.timeout ?? "30 seconds"
   const deadline = Launch.readinessDeadline(timeout)
   const listening = yield* launched.stderrLine(/WebDriver BiDi listening on (ws:\/\/\S+)/).pipe(

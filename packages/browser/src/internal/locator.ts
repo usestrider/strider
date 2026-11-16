@@ -1876,6 +1876,16 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
               ))
             }
             record.markSent()
+            const inserted = Runtime.insertsInPage(owner.runtime, events)
+            if (Option.isSome(inserted)) {
+              return Runtime.insertText(
+                owner.runtime,
+                owner.page,
+                inserted.value.text,
+                inserted.value.beforeInput,
+                id
+              ).pipe(Effect.mapError((failure) => this.sendFailure(operation, failure, record)))
+            }
             return owner.runtime.model.adapter.dispatchInput(
               owner.page.id,
               events,
