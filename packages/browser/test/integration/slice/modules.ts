@@ -231,12 +231,13 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
 
       // Chromium answers a context's disposal before the downloads in it end, and finishes or cancels them after:
       // the closer to its completion a download is as its context closes, the likelier its file lands in the
-      // directory while it is being removed, so the case closes several in turn
+      // directory while it is being removed, so the case closes ten in turn: without waiting for them, five already
+      // fail
       it.effect("closes a context whose download has received its whole body", () =>
         Effect.gen(function*() {
           if (yield* refused("downloads", (page) => Download.next(page))) return
           const { origin } = yield* downloadSite(false)
-          yield* Effect.forEach(Array.from({ length: name === "Chromium" ? 20 : 1 }), () =>
+          yield* Effect.forEach(Array.from({ length: name === "Chromium" ? 10 : 1 }), () =>
             Effect.gen(function*() {
               const scope = yield* Scope.make()
               yield* Effect.gen(function*() {
