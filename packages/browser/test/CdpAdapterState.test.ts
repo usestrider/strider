@@ -332,6 +332,24 @@ describe("CdpAdapter state", () => {
       assert.deepStrictEqual(state.pressedIn.get(page.id), [outer])
     }))
 
+  it.effect("keeps mouse capture when the drag destination in the same session detaches", () =>
+    Effect.gen(function*() {
+      const { page, state, target } = yield* withPage()
+      const parent = state.frames.get("T1")!
+      const owner = { ...target, targetId: "outer" }
+      const outer = Tree.addFrame(state, "outer", parent, owner)
+      owner.frame = outer
+      const inner = Tree.addFrame(state, "inner", outer, owner)
+      const captured = { target: owner, x: 30, y: 30 }
+      state.heldButtons.set(page.id, 1)
+      // A drag gesture names both its source and destination documents.
+      state.pressedIn.set(page.id, [outer, inner])
+      state.pressedOn.set(page.id, captured)
+      Tree.removeFrame(state, inner, new Target.FrameDetached({}), "cdp:Page.frameDetached")
+      assert.strictEqual(state.pressedOn.get(page.id), captured)
+      assert.deepStrictEqual(state.pressedIn.get(page.id), [outer])
+    }))
+
   it.effect("forgets the captured mouse session when its frame detaches", () =>
     Effect.gen(function*() {
       const { page, state, target } = yield* withPage()
