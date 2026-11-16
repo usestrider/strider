@@ -1011,7 +1011,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               100
             )
             const trial = yield* page.locator("#target").click({ trial: true }).pipe(
-              Deadline.within("3 seconds"),
+              Deadline.within("1 second"),
               Effect.exit
             )
             if (yield* fullySupports("hitTest.shadowHostBoxes")) {
