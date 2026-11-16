@@ -98,10 +98,6 @@ export const prepare = Effect.fnUntraced(
         const table: Kit.Handlers<Event> = {
           ...base,
           apply: (method, params, event) => {
-            if (method === Runtime.executionContextCreated.method) {
-              const context = (params as Runtime.ExecutionContextCreatedParams).context
-              if (context.uniqueId !== undefined && state.realmsByUnique.has(context.uniqueId)) return
-            }
             if (method === Runtime.consoleAPICalled.method) {
               const message = params as Runtime.ConsoleAPICalledParams
               const marker = message.args[0]?.value
