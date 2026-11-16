@@ -1462,6 +1462,8 @@ export const engine = (backend: Backend) =>
                 })
               }`
             )
+            // Ordinary snapshots read assigned slots too, for the flat tree: field ancestry is what a masking one adds
+            let ordinaryReads: number | undefined
             for (const provenance of [false, true, false, true]) {
               yield* call(`() => { globalThis.fieldReads = 0; globalThis.editabilityReads = 0 }`, [])
               const response = yield* send(
@@ -1476,8 +1478,11 @@ export const engine = (backend: Backend) =>
               const reads = yield* call(`() => String(globalThis.fieldReads)`, [])
               assert(reads._tag === "Value" && reads.value.type === "string")
               if (provenance) {
-                assert.isAbove(Number(reads.value.value), 0)
-              } else assert.strictEqual(Number(reads.value.value), 0)
+                assert.isAbove(Number(reads.value.value), ordinaryReads!)
+              } else {
+                ordinaryReads ??= Number(reads.value.value)
+                assert.strictEqual(Number(reads.value.value), ordinaryReads)
+              }
               const classifications = yield* call(`() => String(globalThis.editabilityReads)`, [])
               assert(classifications._tag === "Value" && classifications.value.type === "string")
               if (provenance) {

@@ -11,7 +11,8 @@
  * An action checks in rounds in the page, at each frame, until its checks pass; then it takes the page's input
  * permit, checks once more and does its part in the page (focus, select, scroll), and sends its input, built from
  * the page's input state (`input.ts`). A pointer gesture is guarded while its receivesPointer check is on: if its first
- * trusted event lands outside the element, the page never sees it, and the action checks again. With the check off,
+ * trusted event lands outside the element that must receive the pointer (the element's nearest enclosing button or
+ * link in the flat tree, or else the element, which a form field or editable element always is), the page never sees it, and the action checks again. With the check off,
  * nothing is armed, and the input lands on whatever is at the point.
  */
 import * as Duration from "effect/Duration"
@@ -1875,6 +1876,16 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
               ))
             }
             record.markSent()
+            const inserted = Runtime.insertsInPage(owner.runtime, events)
+            if (Option.isSome(inserted)) {
+              return Runtime.insertText(
+                owner.runtime,
+                owner.page,
+                inserted.value.text,
+                inserted.value.beforeInput,
+                id
+              ).pipe(Effect.mapError((failure) => this.sendFailure(operation, failure, record)))
+            }
             return owner.runtime.model.adapter.dispatchInput(
               owner.page.id,
               events,

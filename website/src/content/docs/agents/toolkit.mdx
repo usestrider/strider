@@ -87,7 +87,9 @@ A busy document may retain listeners until it executes the queued release or end
   `text="Add to cart"`, `label=Email`, `testid=cart`, `css=…`. A ref from another page's snapshot is refused.
 - **Waits for later events are explicit.** `next` subscribes and `await` collects; `expect` waits for a condition.
   Action tools do not add a wait for later page events, but they await browser/protocol completion, which can
-  include navigation or a busy page responding. Input completion is not guaranteed to be immediate.
+  include navigation or a busy page responding. Input completion is not guaranteed to be immediate. `newPage` and
+  `goto` return once the new document's HTML is parsed; their `waitUntil` chooses `"commit"` or `"load"` instead.
+  `snapshot` and `find` read the page afresh on each call and never wait.
 - **Each result has the outcome and what happened since the last call:** navigations, popups, dialogs and who
   decided them, file choosers the policy canceled, closed pages, downloads, uncaught exceptions, failed requests,
   validation observed during clicks, and console errors where the [capture policy](#capture-policy) allows them.

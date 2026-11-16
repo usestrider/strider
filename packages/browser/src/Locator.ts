@@ -1057,7 +1057,9 @@ export interface PointerOptions extends ActionOptions {
   /**
    * Where to point, from the top left of the element's padding box.
    * With no position, client rectangles are clipped by the viewport and all parent frames.
-   * With `receivesPointer` enabled, the first centre hitting the target or a descendant and its iframe in every parent is selected,
+   * With `receivesPointer` enabled, the first centre hitting the target or a descendant and its iframe in every parent is selected
+   * (for a target inside a `button`, `a`, or `role=button` or `role=link` element other than a form field or editable element,
+   * the nearest such element, found through shadow roots and slots, counts as the target, so a `pointer-events: none` label inside a button is clicked through the button),
    * allowing a later line when an earlier one is covered. Only centres are probed; if none hits, the check reports `Covered`.
    * Candidates are produced anew under the input permit.
    * Disabling `receivesPointer` uses the first geometric centre without coverage probes.
@@ -1267,8 +1269,10 @@ export interface Locator extends ReadonlyLocator {
    *
    * - The click is a move to the action point, then a press and a release, carrying the keys and buttons the page
    *   holds.
-   * - The gesture is guarded: the first of its pointer, mouse, touch, and click events must land in the element. If
-   *   the page covered it between the checks and the input, the gesture is stopped before the page's handlers see
+   * - The gesture is guarded: the first of its pointer, mouse, touch, and click events must land in the element that
+   *   receives the pointer for it: its nearest enclosing `button`, `[role=button]`, `a`, or `[role=link]`, found
+   *   through shadow roots and slots, or else the element itself, which an `input`, `textarea`, `select`, or
+   *   editable element always is. If the page covered it between the checks and the input, the gesture is stopped before the page's handlers see
    *   it, and the action checks again. With `receivesPointer` disabled the gesture isn't guarded, and lands on
    *   whatever covers the element.
    * - `modifiers` are pressed before the gesture and released after it. On a backend without
@@ -1546,7 +1550,11 @@ export interface Locator extends ReadonlyLocator {
    * **Details**
    *
    * - A text input, a textarea, or a `contenteditable` element is focused and its contents selected from an
-   *   isolated world of Strider's, then the value is inserted as text, as an input method would.
+   *   isolated world of Strider's, then the value is inserted as text, as an input method would: with no key
+   *   events, a cancelable `beforeinput` and then `input`. An empty value is the exception: the selected contents
+   *   are deleted by pressing Delete. An editor that cancels the `beforeinput` and writes the
+   *   text itself is filled. Firefox's `beforeinput` here is dispatched by Strider, untrusted (`isTrusted` is
+   *   `false`), since Firefox's editing command fires none; see `Keyboard.insertText`.
    * - An input whose value isn't typed (`date`, `time`, `color`, `range`, and their kin) has it set from that
    *   world, with `input` then `change` dispatched. Equivalent browser serialization is accepted, such as
    *   lowercase color hex or omitted zero seconds. A malformed value, or a range value changed by clamping

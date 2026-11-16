@@ -45,6 +45,7 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
       entry("userContexts.proxy", "unsupported", ["an attached process cannot be reconfigured"]),
       entry("userContexts.proxy.credentials", "unsupported", ["stock WebKit does not support proxy credentials"]),
       entry("boundingBox.frameTransforms", "supported"),
+      entry("hitTest.shadowHostBoxes", "supported"),
       entry("isolatedWorlds", "unsupported", [
         "stock WebKit's inspector makes no worlds, so Strider's engine runs in the page's own"
       ]),
@@ -256,7 +257,9 @@ export const launchedCapabilities = (info: Browser.Info, video = false) => {
     ]],
     "input.topLevelDesignMode": ["supported", []],
     "input.native": ["supported", ["Automation's simulated input, which the page trusts"]],
-    "input.insertText": ["supported", []],
+    "input.insertText": ["supported", [
+      "Automation inserts text only by key, so Strider inserts it with the page's editing command, which fires a trusted beforeinput and input and no key events"
+    ]],
     "input.keyboardLayout": ["unsupported", [
       "Automation types characters and named keys, not a layout's physical keys"
     ]],

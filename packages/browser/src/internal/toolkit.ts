@@ -8,7 +8,9 @@
  * - **The digest.** The context's and each page's event channels are recorded from the start, and each result
  *   takes what they recorded since the previous call: navigations, popups, dialogs and who decided them,
  *   downloads, uncaught exceptions, console errors, failed requests and validation observed during clicks.
- *   No tool waits for later page events after it acts.
+ *   No tool waits for later page events after it acts. A dialog is one line, naming its decider: a registration
+ *   by its handle (`accepted by r1`), `a handler` the session didn't register, or `policy`; one still undecided
+ *   when a result takes it says `open`, and its decision comes in a later result as a line of its own.
  * - **Secrets.** A `%name%` in a parameter, for a name among the secrets, is the secret's value at dispatch, and
  *   every result and digest line has the values put back as `%name%`. Other text between `%` signs, such as a
  *   URL's `%C3%`, is sent as written.
@@ -101,6 +103,12 @@ export type Seen =
 export const Opened = Context.Reference<(page: string) => void>("@usestrider/browser/internal/toolkit/Opened", {
   defaultValue: () => () => {}
 })
+
+/**
+ * How far `newPage` and `goto` wait when not told: the document's HTML parsed, so a snapshot straight after has its
+ * content. The library's own `Page.goto` returns at commit.
+ */
+export const defaultWaitUntil: PageNavigation.LoadState = "domContentLoaded"
 
 const failed = (error: string, message: string, reason?: string) =>
   new Tools.ToolFailure({ error, message, ...(reason === undefined ? {} : { reason }) })
@@ -199,11 +207,16 @@ export interface Session {
   readonly name: (page: Page.Page, given?: string) => Effect.Effect<string, Tools.ToolFailure>
   /**
    * Opens a page in the context, named `name`, which must be free, or the next `p1`, `p2`…, and navigates it to
-   * `url` when one is given, with its secrets put in. The name is checked before the page opens; a page whose
-   * navigation fails is closed and its name freed, so a failed open leaves nothing behind.
+   * `url` when one is given, with its secrets put in, waiting for `waitUntil` (`"domContentLoaded"` by default). The
+   * name is checked before the page opens; a page whose navigation fails is closed and its name freed, so a failed
+   * open leaves nothing behind.
    */
   readonly open: (
-    options: { readonly name?: string | undefined; readonly url?: string | undefined }
+    options: {
+      readonly name?: string | undefined
+      readonly url?: string | undefined
+      readonly waitUntil?: PageNavigation.LoadState | undefined
+    }
   ) => Effect.Effect<{ readonly page: Page.Page; readonly name: string }, Tools.ToolFailure>
   /** Renames a page. */
   readonly rename: (from: string, to: string) => Effect.Effect<void, Tools.ToolFailure>
@@ -271,6 +284,9 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
   const digest: Array<
     { readonly line: string; readonly navigation?: PageNavigation.Id; readonly page?: Target.NavigableId }
   > = []
+  // Dialogs whose line is noted and not yet decided, and dialogs decided before their opening was recorded
+  const openDialogs = new Map<Dialog.PromptId, { line: string; readonly page: Target.NavigableId }>()
+  const decidedDialogs = new Map<Dialog.PromptId, Target.NavigableId>()
   // Results that came before their event, which the event is then not reported for
   const reportedNavigations = new Map<Target.NavigableId, Set<PageNavigation.Id>>()
   // Navigations a call's digest already delivered, kept only while a call is running, since only a running call
@@ -326,6 +342,8 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
       const grant = controlled.get(page.id)
       reportedNavigations.delete(page.id)
       deliveredNavigations.delete(page.id)
+      for (const [id, open] of openDialogs) if (open.page === page.id) openDialogs.delete(id)
+      for (const [id, each] of decidedDialogs) if (each === page.id) decidedDialogs.delete(id)
       watching.delete(page.id)
       controlled.delete(page.id)
       return (watcher === undefined ? Effect.void : Scope.close(watcher, Exit.void)).pipe(
@@ -392,6 +410,29 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
       : `console ${message.level} on ${where} (text not sent)`
   const originName = (origin: Target.EventOrigin) => origin._tag === "Page" ? nameOfEntry(origin.page) : "a worker"
 
+  // One line for each dialog, naming what decided it. A dialog's line is noted as it opens, saying it's open, and
+  // its decision completes it while no result has taken it yet; once one has, the decision is a line of its own.
+  // Either can be recorded first, since each comes from a channel of its own.
+  const dialogLine = (prompt: Model.PromptEvent) =>
+    `dialog ${prompt.kind}${prompt.message === "" ? "" : ` "${prompt.message}"`} on ${nameOfEntry(prompt.page)}`
+  const dialogOpened = (prompt: Model.PromptEvent) => {
+    if (decidedDialogs.delete(prompt.prompt)) return
+    const entry = { line: `${dialogLine(prompt)}, open`, page: prompt.page }
+    openDialogs.set(prompt.prompt, entry)
+    digest.push(entry)
+  }
+  const dialogDecided = (prompt: Model.PromptEvent, decision: string, by: string) => {
+    const line = `${dialogLine(prompt)} ${decision} by ${by}`
+    const open = openDialogs.get(prompt.prompt)
+    if (open === undefined) {
+      decidedDialogs.set(prompt.prompt, prompt.page)
+      return note(line)
+    }
+    openDialogs.delete(prompt.prompt)
+    if (digest.includes(open)) open.line = line
+    else note(line)
+  }
+
   /** A page's name as it is now, which `page name` may have changed since `named` was given. */
   const nameNow = (page: Page.Page, named: string) => nameById.get(page.id) ?? named
 
@@ -437,11 +478,20 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
                 }`)
               }))
         }), within)
-      yield* drain(
-        pageEntry.events.dialog,
-        (prompt) => note(`dialog ${prompt.kind}${prompt.message === "" ? "" : ` "${prompt.message}"`} on ${name()}`),
-        within
-      )
+      yield* drain(pageEntry.events.dialog, dialogOpened, within)
+      yield* drain(pageEntry.events.handledDialog, (handled) =>
+        dialogDecided(
+          handled.prompt,
+          handled.decision._tag !== "Accept"
+            ? "dismissed"
+            : Option.isSome(handled.decision.promptText)
+            ? "answered"
+            : "accepted",
+          Option.match(registrationName(handled.registration), {
+            onNone: () => "a handler",
+            onSome: (id) => id
+          })
+        ), within)
       yield* Effect.forkIn(
         // Cleanup must be a sibling: closing this watcher from its own fiber would interrupt cleanup itself.
         Effect.flatMap(page.closed, () => Effect.forkIn(forget(page), scope).pipe(Effect.uninterruptible)),
@@ -453,11 +503,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
     yield* drain(events.autoResolution, (resolution) => {
       switch (resolution._tag) {
         case "Dialog":
-          note(
-            `dialog ${resolution.prompt.kind} on ${
-              nameOfEntry(resolution.prompt.page)
-            } ${resolution.decision}ed by policy`
-          )
+          dialogDecided(resolution.prompt, `${resolution.decision}ed`, "policy")
           return
         case "FileChooser":
           note(`file chooser on ${nameOfEntry(resolution.chooser.navigable)} canceled by policy`)
@@ -566,10 +612,15 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
   const registrations = new Map<string, Declaration.Registration>()
   let waitCount = 0
   let registrationCount = 0
+  // Each registration's handle, kept after `remove` so a decision its handler made before then still names it
+  const registrationNames = new WeakMap<Declaration.Registration, string>()
+  const registrationName = (registration: Declaration.Registration): Option.Option<string> =>
+    Option.fromUndefinedOr(registrationNames.get(registration))
   const register = (registration: Declaration.Registration) =>
     Effect.sync(() => {
       const id = `r${++registrationCount}`
       registrations.set(id, registration)
+      registrationNames.set(registration, id)
       return { registration: id }
     })
   const within = (input: string | undefined): Effect.Effect<Option.Option<Duration.Duration>, Tools.ToolFailure> =>
@@ -597,7 +648,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
 
   const taken = (name: string) => failed("InvalidInput", `A page is already named ${name}`)
   const open: Session["open"] = Effect.fnUntraced(
-    function*({ name, url }) {
+    function*({ name, url, waitUntil }) {
       yield* pruneClosed
       // Checked first, so a name that's taken opens nothing
       if (name !== undefined && byName.has(name)) return yield* Effect.fail(taken(name))
@@ -615,7 +666,7 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
       // out, so the page goes with it
       if (url !== undefined) {
         yield* counted(
-          page.goto(reveal(url)).pipe(
+          page.goto(reveal(url), { waitUntil: waitUntil ?? defaultWaitUntil }).pipe(
             Effect.tap((navigation) => Effect.sync(() => reportNavigation(page, navigation)))
           )
         ).pipe(
@@ -693,15 +744,18 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
         return yield* Effect.forEach(pages, (page) =>
           Effect.map(page.url, (url) => ({ page: nameById.get(page.id)!, url: String(url) })))
       })),
-    newPage: ({ name, url }) =>
+    newPage: ({ name, url, waitUntil }) =>
       run(Effect.gen(function*() {
-        const opened = yield* open({ name, url })
+        const opened = yield* open({ name, url, waitUntil })
         return { page: opened.name, url: String(yield* opened.page.url) }
       })),
-    goto: ({ page: name, url }) =>
+    goto: ({ page: name, url, waitUntil }) =>
       onPage(name, (page) =>
         Effect.gen(function*() {
-          const navigation = reportNavigation(page, yield* page.goto(reveal(url)))
+          const navigation = reportNavigation(
+            page,
+            yield* page.goto(reveal(url), { waitUntil: waitUntil ?? defaultWaitUntil })
+          )
           return navigation._tag === "Committed" && Option.isSome(navigation.response)
             ? { url: navigation.url, status: navigation.response.value.status }
             : { url: navigation.url }
@@ -727,11 +781,10 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
     find: ({ page: name, query, role, exact }) =>
       onPage(name, (page) =>
         Effect.gen(function*() {
-          let snapshot = snapshots.get(name)
-          if (snapshot === undefined) {
-            snapshot = yield* takeSnapshot(page)
-            if (byName.get(name) === page && !closed(page)) snapshots.set(name, snapshot)
-          }
+          // Each find reads the page as it is now, so neither a read taken before the page had its content nor one of
+          // the document before a navigation answers it; refs stay the same while their document lives
+          const snapshot = yield* takeSnapshot(page)
+          if (byName.get(name) === page && !closed(page)) snapshots.set(name, snapshot)
           const wanted = exact === true ? query : query.toLowerCase()
           const matches = (text: string) => exact === true ? text === wanted : text.toLowerCase().includes(wanted)
           const found: Array<{ ref: string; role: string; name: string; path: string }> = []

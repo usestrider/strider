@@ -78,10 +78,17 @@ export const pages = tool(
   "reads"
 )
 
+/** How far a navigation goes before the tool returns: the document committed, parsed, or loaded. */
+export const WaitUntil = Schema.Literals(["commit", "domContentLoaded", "load"]).annotate({
+  default: "domContentLoaded",
+  description:
+    "When the navigation returns: commit, when the new document exists but may have no content yet; domContentLoaded (the default), once its HTML is parsed; or load, once its images and other resources have loaded too"
+})
+
 export const newPage = tool(
   "newPage",
-  "Opens a page in the context, named as given or p1, p2…, and navigates it when a URL is given. A page whose navigation fails is closed again, so the name stays free.",
-  { name: Schema.optional(Schema.String), url: Schema.optional(Schema.String) },
+  "Opens a page in the context, named as given or p1, p2…, and navigates it when a URL is given, returning once the document's HTML is parsed (waitUntil, domContentLoaded by default). A page whose navigation fails is closed again, so the name stays free.",
+  { name: Schema.optional(Schema.String), url: Schema.optional(Schema.String), waitUntil: Schema.optional(WaitUntil) },
   Schema.Struct({ page: Schema.String, url: Schema.String }),
   "adds"
 )
@@ -116,8 +123,8 @@ export const release = tool(
 
 export const goto = tool(
   "goto",
-  "Navigates a page to a URL; returns when the document commits.",
-  { page: PageName, url: Schema.String },
+  "Navigates a page to a URL; returns once the new document's HTML is parsed (waitUntil, domContentLoaded by default).",
+  { page: PageName, url: Schema.String, waitUntil: Schema.optional(WaitUntil) },
   Schema.Struct({ url: Schema.String, status: Schema.optional(Schema.Number) }),
   "acts"
 )
@@ -260,7 +267,7 @@ export const history = tool(
 
 export const find = tool(
   "find",
-  "Searches the page's latest snapshot, taking one if there is none, for elements whose name, text, or inferred password designation contains the query (case-insensitive), or equals it with exact (case-sensitive); narrows by role. Inferred password controls use role editable; explicit ARIA roles are preserved. Returns their refs, which are targets, each with its role, name, and the named elements it is in.",
+  "Takes a fresh snapshot of the page, which becomes its latest, and searches it for elements whose name, text, or inferred password designation contains the query (case-insensitive), or equals it with exact (case-sensitive); narrows by role. Inferred password controls use role editable; explicit ARIA roles are preserved. Returns their refs, which are targets, each with its role, name, and the named elements it is in. It doesn't wait: content a script adds later needs expect.",
   {
     page: PageName,
     query: Schema.String,

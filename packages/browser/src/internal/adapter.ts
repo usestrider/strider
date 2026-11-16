@@ -1054,6 +1054,14 @@ export interface AdapterConnection {
 
   // Input
   /**
+   * How the backend inserts text (`InsertText`): with the protocol's own command (CDP's `Input.insertText`), or,
+   * where the protocol has none that sends no key events, with the page's editing command, which L1 runs in the
+   * focused document (`"editingCommand"`, stock WebKit), after a `beforeinput` the engine dispatches where the
+   * browser's command fires none (`"beforeInputAndEditingCommand"`, WebDriver BiDi on Firefox). An adapter that
+   * doesn't insert natively is never sent `InsertText`.
+   */
+  readonly textInsertion: "native" | "editingCommand" | "beforeInputAndEditingCommand"
+  /**
    * Sends input to a page, in its viewport's coordinates. Input aimed inside a frame names it, with the viewport
    * origin, in the page's coordinates, of it and each frame it is inside: a backend that can't deliver page
    * coordinates into a frame sends the frame's own (BiDi). `lands` names the frames the gesture's points land in,
