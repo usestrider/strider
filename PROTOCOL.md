@@ -388,8 +388,8 @@ Adapter responsibilities:
 - **Script WebSocket routing** adds private transport metadata to an environment init script only in the
   requesting context. CDP installs Runtime bindings and realm-event subscriptions only on covered targets.
   Contexts share ordinary gate methods by prototype; opting in replaces only that context’s gate methods.
-  Native targets reuse a cached dispatch context with a shared ordinary table; an opted-in target's table only
-  holds back the bridge's capture messages. Dedicated-worker bindings are armed before its existing before-script
+  Native targets reuse a cached dispatch context with a shared ordinary table; an opted-in target's table skips
+  an execution context it already knows, and holds back the bridge's capture messages. Dedicated-worker bindings are armed before its existing before-script
   breakpoint. A paused page, such as an empty-URL popup, gets the bindings in its ordinary staged setup, ahead of
   the preloads and with its intercepts, headers and overrides, all before its one resume; its realms are ingested as
   ordinary sequenced events after the frame-tree snapshot. At most 64 early
