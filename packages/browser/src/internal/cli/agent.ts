@@ -122,7 +122,7 @@ Session commands select a session with \`-s NAME\` (or \`STRIDER_SESSION\`, with
 
 ## Reading, acting, and checking
 
-A snapshot gives an accessibility tree with element refs such as \`e3\`. A ref belongs to that page's latest snapshot, not to another page or a later snapshot. \`find\` searches the stored snapshot, taking one if none exists; a new \`snapshot\` refreshes it after the page changes.
+A snapshot gives an accessibility tree with element refs such as \`e3\`. A ref belongs to that page's latest snapshot, not to another page or a later snapshot. Each \`snapshot\` or \`find\` reads the page afresh, and that read becomes its latest snapshot.
 
 ${example(examples.actions)}
 
@@ -134,7 +134,7 @@ These command forms come from the CLI's definitions. All take the session and pa
 
 ${syntax}
 
-An action returning does not mean all its effects have finished. \`expect TARGET STATE\` waits for a condition, such as \`visible\`, instead of waiting an arbitrary amount of time. \`strider expect --help\` lists the states and text checks. \`snapshot\` and \`find\` read what is available; they do not wait for a future page state.
+An action returning does not mean all its effects have finished. \`expect TARGET STATE\` waits for a condition, such as \`visible\`, instead of waiting an arbitrary amount of time. \`strider expect --help\` lists the states and text checks. \`snapshot\` and \`find\` read what is available; they do not wait for a future page state. \`page new\` and \`goto\` return once the document's HTML is parsed (\`--wait-until commit|domContentLoaded|load\`).
 
 ## Events across commands
 

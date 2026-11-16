@@ -124,6 +124,10 @@ export interface MakeOptions {
  * - Pages are named when they're created (`newPage`'s `name`, or `p1`, `p2`…) or first seen, as a popup is.
  * - A target is a ref from the page's latest snapshot (`e12`), or `role=button[name="Save"]`, `text="Add to cart"`,
  *   `label=Email`, `testid=cart`, or `css=…`; a bad one fails at once.
+ * - `newPage` and `goto` return once the new document's HTML is parsed; their `waitUntil` chooses `"commit"`, which
+ *   may return before the page has any content, or `"load"`. `Page.goto` itself returns at commit by default.
+ * - `snapshot` and `find` read the page afresh each call, and that read becomes the page's latest snapshot. Neither
+ *   waits: content a script adds later needs `expect`.
  * - Each result is the call's outcome and `sinceLast`: what happened since the previous call, including
  *   navigations, popups, dialogs and who decided them. A successful `newPage`, `goto`, or `back` reports its own
  *   navigation in its outcome and omits that event from the digest, including when delivered later. Other events include
