@@ -147,6 +147,11 @@ export interface Mouse {
   /**
    * Moves the pointer to a point.
    *
+   * **Gotchas**
+   *
+   * On Firefox, while a button pressed in a cross-site frame is held, a move outside that frame isn't sent: the
+   * frame sees no moves there, and the release is sent at the pointer's last point inside the frame.
+   *
    * **Example** (Hovering over a chart)
    *
    * ```ts import.meta.vitest
@@ -198,6 +203,11 @@ export interface Mouse {
    * Presses a button at the pointer and holds it until the returned handle is released or its scope closes, so
    * moves meanwhile are a drag.
    *
+   * **Gotchas**
+   *
+   * On Firefox, while a button pressed in a cross-site frame is held, a move outside that frame isn't sent: the
+   * frame sees no moves there, and the release is sent at the pointer's last point inside the frame.
+   *
    * **Example** (Drawing a line on a canvas)
    *
    * ```ts import.meta.vitest
@@ -216,6 +226,11 @@ export interface Mouse {
   hold(button: Button): Effect.Effect<HeldButton, MouseError | Target.TargetGone | Deadline.Timeout, Scope.Scope>
   /**
    * Scrolls by a delta in CSS pixels, at the pointer's position.
+   *
+   * **Details**
+   *
+   * The wheel goes to what is under the pointer, even while a button is held, as a browser sends it, a cross-site
+   * frame included.
    *
    * **Example** (Zooming a map with the wheel)
    *

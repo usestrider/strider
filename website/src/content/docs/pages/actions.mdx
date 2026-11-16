@@ -375,7 +375,10 @@ const zoomMap = Effect.fn("zoomMap")(function*(page: Page.Page) {
 })
 ```
 
-A click while Shift is held is a Shift-click; moves while a button is held are a drag. Input to one page goes one
+A click while Shift is held is a Shift-click; moves while a button is held are a drag. A drag that starts in a frame
+stays with that frame until the button is released, as a real pointer's does; on Firefox, moves outside a cross-site
+frame aren't sent, and the release lands at the last point inside it
+([Firefox](/docs/browsers/firefox)). The wheel always goes to what is under the pointer. Input to one page goes one
 gesture at a time, so two fibers acting on one page never interleave their presses: the second
 [waits its turn](/docs/deadlines#setting-a-deadline), within its deadline.
 
