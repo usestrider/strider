@@ -214,13 +214,15 @@ export interface RoleOptions {
 
   /**
    * The accessible name. A string matches as a case-insensitive substring unless `exact` is set; a `RegExp`
-   * is used as given.
+   * is used as given. Both sides have their whitespace collapsed first, so a non-breaking space in a name matches
+   * a space.
    *
    * @default any name
    */
   readonly name?: string | RegExp | undefined
   /**
-   * Match `name` exactly and case-sensitively.
+   * Match `name` exactly and case-sensitively. Whitespace is still collapsed on both sides, so a non-breaking space in
+   * a name matches a space.
    *
    * @default false
    */
@@ -271,11 +273,16 @@ export interface Queries<L> {
    * An element's role is the first token of its `role` attribute that Strider knows, or else its implicit
    * role under HTML-AAM, and its name is computed under accname 1.2. Elements outside the accessibility tree
    * (`aria-hidden`, `display: none`, `visibility: hidden`, the `hidden` attribute, and inert elements) aren't
-   * matched unless `includeHidden` is set. An element is inert when it or an ancestor has the `inert` attribute,
-   * or, while a modal dialog opened with `showModal()` is open, when it is outside the topmost one. The topmost
-   * modal dialog isn't inert because of its ancestors, so it and its content stay matched inside an inert subtree.
-   * The topmost is the open modal dialog that comes last in document order, open shadow roots included, which isn't
-   * always the one opened last.
+   * matched unless `includeHidden` is set, which also counts hidden descendants in their names. An element is inert
+   * when it or an ancestor has the `inert` attribute, or, while a modal dialog opened with `showModal()` is open,
+   * when it is outside the topmost one. The topmost modal dialog isn't inert because of its ancestors, so it and its
+   * content stay matched inside an inert subtree. The topmost is the open modal dialog that comes last in document
+   * order, open shadow roots included, which isn't always the one opened last.
+   *
+   * A name from content takes only the descendants whose role gives their text, as Chromium and Firefox do: text,
+   * generic and structural elements such as lists and paragraphs, and roles named from content. A nested tree
+   * item's group, or an `alert` inside a heading, adds nothing. An embedded combobox or listbox adds its selected
+   * options. Soft hyphens and zero-width spaces are dropped from a name, and non-breaking spaces are kept.
    *
    * Roles that prohibit naming, such as generic, paragraph, and code, have an empty name even with an author
    * label. Their descendants and referenced labels can still contribute to another element's name; an explicit
