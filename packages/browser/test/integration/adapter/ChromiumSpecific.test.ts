@@ -254,7 +254,7 @@ describe("Chromium adapter, CDP only", () => {
                     Object.defineProperty(globalThis, "fromInit", { value: "ready" })
                   })
                   const page = yield* context.newPage
-                  yield* page.goto(`${served.origin}/init`, { waitUntil: "load" })
+                  yield* page.goto(`${served.origin}/init`)
                   assert.strictEqual(
                     yield* page.evaluateInMainWorld(() => Reflect.get(globalThis, "seenByAuthor")),
                     "string"
