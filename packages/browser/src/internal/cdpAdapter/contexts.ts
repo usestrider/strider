@@ -147,7 +147,9 @@ export const removeUserContext = Effect.fnUntraced(function*(state: State, id: U
     context.removing = true
     const inContext = [...state.pages.values()].filter((page) => page.context === context)
     const behavior = state.registry.downloads(context.id)
-    const allowed = Option.isSome(behavior) && behavior.value._tag === "Allow"
+    // A retiring context's downloads declaration is released before this, but Chromium keeps its behavior until the
+    // disposal
+    const allowed = context.keepsEndedFrames === true || (Option.isSome(behavior) && behavior.value._tag === "Allow")
     yield* Effect.gen(function*() {
       // While the context has pages or frames that ended, Chromium can still start a download in it, during the
       // disposal too; denied, none starts. A refused disposal applies the declarations' behavior again

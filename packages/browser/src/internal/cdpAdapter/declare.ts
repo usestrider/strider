@@ -501,8 +501,6 @@ const releaseDeclaration = (state: State, declaration: Adapter.Declaration, scop
 export const applyDownloads = (state: State, context: ContextEntry) =>
   contextLock(context).withPermits(1)(Effect.suspend(() => {
     if (context.disposed) return Effect.void
-    // A download can no longer land in a declared directory, which its frames that ended were kept for
-    if (Option.isNone(downloadDirectory(state, context.id))) forgetRetiredFrames(state, context)
     const behavior = state.registry.downloads(context.id)
     return BrowserCdp.setDownloadBehavior({
       behavior: Option.isNone(behavior) ? "default" : behavior.value._tag === "Allow" ? "allowAndName" : "deny",
@@ -560,6 +558,15 @@ export const declare = Effect.fnUntraced(function*(
   }
   const id = state.ids.registration()
   state.registry.add(scope, declaration, id)
+  const downloadsIn = () =>
+    scope._tag === "UserContext"
+      ? [state.contexts.get(scope.context)].filter((context) => context !== undefined)
+      : [...state.contexts.values()]
+  if (declaration._tag === "Downloads" && declaration.behavior._tag === "Allow") {
+    for (const context of downloadsIn()) {
+      if (!context.isDefault) context.keepsEndedFrames = true
+    }
+  }
   const registrationContext = yield* Effect.context<never>()
   yield* Scope.addFinalizer(
     yield* Effect.scope,
@@ -570,7 +577,15 @@ export const declare = Effect.fnUntraced(function*(
       const unconfirmed = yield* Cleanup.Unconfirmed
       // Registry removal is synchronous, before any caller stops waiting or prior settings are restored.
       state.registry.remove(id)
-      const release = "retiring" in declaration && declaration.retiring?.() === true
+      const retiring = "retiring" in declaration && declaration.retiring?.() === true
+      // A context left open no longer needs its ended frames once no declaration gives its downloads a directory,
+      // whatever the browser's reset below comes to; one retiring keeps them until it is removed
+      if (declaration._tag === "Downloads" && !retiring) {
+        for (const context of downloadsIn()) {
+          if (Option.isNone(downloadDirectory(state, context.id))) forgetRetiredFrames(state, context)
+        }
+      }
+      const release = retiring
         // The context is removed right after: undoing the declaration would only add a round trip
         ? Effect.void
         : declaration._tag === "Downloads"

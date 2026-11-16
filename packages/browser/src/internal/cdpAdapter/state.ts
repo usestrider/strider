@@ -53,6 +53,12 @@ export class ContextEntry {
   declare removing: boolean
   declare disposed?: boolean | undefined
   declare lifecycleLock?: Semaphore.Semaphore | undefined
+  /**
+   * A declaration gave its downloads a directory, and the context still answers for it: set as the declaration is
+   * registered, kept while the context retires, and cleared when the declaration is released with the context left
+   * open or when the context is removed.
+   */
+  declare keepsEndedFrames?: boolean | undefined
   /** The ids of its frames that have ended, which `State.retiredFrames` holds (`retireFrame`). */
   declare retiredFrames?: Set<string> | undefined
   declare gate: ContextGate
@@ -334,9 +340,9 @@ export interface State {
   readonly obligations: Map<Adapter.ObligationId, ObligationEntry>
   readonly downloads: Map<string, DownloadEntry>
   /**
-   * The context of each ended frame, by frame id, of a context whose downloads go to a directory a declaration
-   * names, while they do and until the context is removed: Chromium can announce a download after the frame that
-   * started it has gone, and removing the context waits for it before the directory is removed.
+   * The context of each ended frame, by frame id, of a context that keeps them (`ContextEntry.keepsEndedFrames`),
+   * until it stops or is removed: Chromium can announce a download after the frame that started it has gone, and
+   * removing the context waits for it before the directory is removed.
    */
   readonly retiredFrames: Map<string, ContextEntry>
   readonly downloadsById: Map<Download.Id, DownloadEntry>
@@ -472,18 +478,22 @@ export const downloadDirectory = (state: State, context: UserContext.Id) => {
 }
 
 /**
- * Keeps which context a frame that ended belonged to, while the context's downloads go to a declared directory: a
- * download Chromium announces after the frame has gone is that context's. Nothing is kept for the default context,
- * which is never removed, or for one already disposed.
+ * Keeps which context a frame that ended belonged to, while a declaration has given the context's downloads a
+ * directory, through the context's retirement: a download Chromium announces after the frame has gone is that
+ * context's. Nothing is kept for the default context, which is never removed, or for one already disposed.
  */
 export const retireFrame = (state: State, context: ContextEntry, frameId: string) => {
-  if (context.isDefault || context.disposed || Option.isNone(downloadDirectory(state, context.id))) return
+  if (context.isDefault || context.disposed || context.keepsEndedFrames !== true) return
   state.retiredFrames.set(frameId, context)
   ;(context.retiredFrames ??= new Set()).add(frameId)
 }
 
-/** Forgets the frames of `context` that ended, once its downloads no longer go to a declared directory or it goes. */
+/**
+ * Forgets the frames of `context` that ended, and stops keeping them: when the declaration that gave its downloads a
+ * directory is released with the context left open, and when the context is removed.
+ */
 export const forgetRetiredFrames = (state: State, context: ContextEntry) => {
+  context.keepsEndedFrames = false
   for (const frameId of context.retiredFrames ?? []) state.retiredFrames.delete(frameId)
   context.retiredFrames = undefined
 }
