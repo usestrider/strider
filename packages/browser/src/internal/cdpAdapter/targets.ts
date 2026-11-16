@@ -17,6 +17,7 @@ import * as Scope from "effect/Scope"
 import * as Debugger from "../../cdp/Debugger.ts"
 import * as Fetch from "../../cdp/Fetch.ts"
 import * as Inspector from "../../cdp/Inspector.ts"
+import * as Log from "../../cdp/Log.ts"
 import * as Network from "../../cdp/Network.ts"
 import * as Page from "../../cdp/Page.ts"
 import * as Runtime from "../../cdp/Runtime.ts"
@@ -29,6 +30,7 @@ import * as Urls from "../urls.ts"
 import { configureTarget, type Setup } from "./declare.ts"
 import { frameUrl, targetKind } from "./mapping.ts"
 import {
+  closingReason,
   ContextEntry,
   credentialsScope,
   dispatchContext,
@@ -192,24 +194,30 @@ export const ended = (state: State, session: ProtocolClient.Session, reason: Pro
   state.targets.delete(session)
   if (state.targetsById.get(target.targetId) === target) state.targetsById.delete(target.targetId)
   state.workerContexts.delete(target)
+  const page = target.kind === "page" ? target.page : undefined
+  const why: L1Target.CloseReason | undefined = page === undefined
+    ? undefined
+    : reason.why === "connectionLost"
+    ? Kit.closed(state)
+    : reason.why === "modelUnavailable"
+    ? new L1Target.ModelUnavailable({})
+    : closingReason(state, page) ?? new L1Target.PageClosed({ by: "script" })
+  // A page's realms end with it, for its reason; a worker's or a frame's are destroyed
   for (const realm of Array.from(state.realms.values())) {
     if (realm.target === target) {
-      removeRealm(state, realm, reason.why === "connectionLost" ? Kit.closed() : new L1Target.RealmDestroyed({}))
+      removeRealm(
+        state,
+        realm,
+        why ??
+          (reason.why === "connectionLost" ? Kit.closed(state) : state.browserEnd ?? new L1Target.RealmDestroyed({}))
+      )
     }
   }
   switch (target.kind) {
     case "page": {
-      const page = target.page!
-      const why: L1Target.CloseReason = reason.why === "connectionLost"
-        ? Kit.closed()
-        : reason.why === "modelUnavailable"
-        ? new L1Target.ModelUnavailable({})
-        : page.closing ?? (page.context.removing
-          ? new L1Target.PageClosed({ by: "userContextRemoved" })
-          : page.closeRequested
-          ? new L1Target.PageClosed({ by: "command" })
-          : new L1Target.PageClosed({ by: "script" }))
-      endPage(state, page, why, `cdp: the page's session ended (${reason.why})`)
+      if (page !== undefined && why !== undefined) {
+        endPage(state, page, why, `cdp: the page's session ended (${reason.why})`)
+      }
       return
     }
     case "iframe": {
@@ -324,6 +332,8 @@ const snapshot = Effect.fnUntraced(function*(
       const tree = yield* target.session.start(Page.getFrameTree(), scope)
       // Runtime's replay follows the tree on the wire, so its contexts survive the snapshot's boundary.
       replies.push((yield* target.session.start(Runtime.enable(), scope)).pipe(Effect.asVoid))
+      // What the browser writes to the console itself comes only through the Log domain
+      yield* enable(Log.enable())
       // Browser-owned workers must not wait on a second session here.
       replies.push((yield* target.session.start(autoAttach, scope)).pipe(Effect.asVoid))
       const written = page === undefined ? Effect.void : configureTarget(state, target, page, setup)
@@ -346,7 +356,7 @@ const snapshot = Effect.fnUntraced(function*(
         Network.enable({}).pipe(on)
       ], { concurrency: "unbounded", discard: true })
       const tree = yield* target.session.sendSequenced(Page.getFrameTree())
-      yield* Runtime.enable().pipe(on)
+      yield* Effect.all([Runtime.enable().pipe(on), Log.enable().pipe(on)], { concurrency: "unbounded", discard: true })
       yield* autoAttach.pipe(on)
       const failure = yield* (configure && page !== undefined ? configureTarget(state, target, page) : Effect.void)
         .pipe(Effect.flip, Effect.option)
@@ -425,7 +435,12 @@ const workerGate = Effect.fnUntraced(function*(state: State, target: TargetEntry
       Debugger.setInstrumentationBreakpoint({ instrumentation: "beforeScriptExecution" }).pipe(on)
     ], { discard: true }).pipe(Effect.ignore)
   }
-  yield* Effect.all([Runtime.enable().pipe(on), Network.enable({}).pipe(on), resume(target.session, waiting)], {
+  yield* Effect.all([
+    Runtime.enable().pipe(on),
+    Log.enable().pipe(on),
+    Network.enable({}).pipe(on),
+    resume(target.session, waiting)
+  ], {
     concurrency: "unbounded",
     discard: true
   }).pipe(Effect.ignore)

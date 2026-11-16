@@ -116,7 +116,7 @@ describe("request timing lifecycle", () => {
       }
       const owner = Option.getOrThrow(Option.getOrThrow(a.fold.hop(a.request.hop)).context)
       yield* a.fold.sink({ _tag: "HopTiming", hop: a.request.hop, timing: empty() })
-      yield* a.fold.loseConnection
+      yield* a.fold.loseConnection(new Target.ConnectionLost({}))
       assert.strictEqual(owner.timings?.size, 0)
       const error = yield* NetworkRequest.timing(a.page, a.request).pipe(Effect.flip)
       assert.deepInclude(error.reason, { _tag: "RequestUnavailable", why: "ownerLost" })
