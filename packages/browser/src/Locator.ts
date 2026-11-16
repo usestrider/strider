@@ -2,8 +2,8 @@
  * Locators: how to find elements on a page, and the actions and reads that use them.
  *
  * A locator describes how to find elements and is resolved again on every attempt, so it never goes stale. A query
- * on a locator searches inside its matches. Reads happen once and never retry; the expectations that retry are
- * `Expect`. A ref from a snapshot is the exception: it's pinned to one node, and fails with `StaleRef` rather than
+ * on a locator searches inside its matches, and `getByText` the matches themselves too. Reads happen once and never
+ * retry; the expectations that retry are `Expect`. A ref from a snapshot is the exception: it's pinned to one node, and fails with `StaleRef` rather than
  * finding another.
  *
  * Before acting, a locator checks that its element is ready: visible, stable, enabled, and the rest of the action's
