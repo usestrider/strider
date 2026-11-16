@@ -399,16 +399,38 @@ export class Vanished extends Schema.Error<Vanished>("@usestrider/browser/Target
  * **Details**
  *
  * - Browser-wide: `BrowserClosed`, `BrowserCrashed`, `ConnectionLost`, `ModelUnavailable` (Strider lost track
- *   of the browser's state).
+ *   of the browser's state). A context or page still held when its browser's scope closes ends with
+ *   `BrowserClosed`.
  * - Context and access: `UserContextRemoved`, `AccessReleased`.
  * - Pages and frames: `PageClosed` (with what closed it), `PageCrashed`, `FrameDetached`.
  * - Dialogs, file choosers, paused requests, downloads, and request hops: `ObligationEnded` (a dialog, file chooser,
  *   or paused request), `DownloadEnded`, `HopEnded`.
  * - No cause seen: `Vanished`, for a target Strider knows is gone but not why.
  * - Documents and realms: `DocumentReplaced`, `DocumentEvicted`, `DocumentDestroyed`, `DocumentUnloaded`,
- *   `RealmDestroyed`.
+ *   `RealmDestroyed`. A realm that ends with its page carries the page's reason instead, such as `PageClosed`.
  * - Connections: `NetworkConnectionClosed`, for a WebSocket or EventSource the page or the server closed.
  *   (`ConnectionLost` is the browser's connection.)
+ *
+ * **Example** (Telling why a target ended)
+ *
+ * ```ts import.meta.vitest
+ * import { Target } from "@usestrider/browser"
+ *
+ * const describe = (reason: Target.CloseReason): string => {
+ *   switch (reason._tag) {
+ *     case "PageClosed":
+ *       return `The page closed, by ${reason.by}`
+ *     case "BrowserClosed":
+ *       return "The browser closed"
+ *     case "RealmDestroyed":
+ *       return "The page's document went"
+ *     default:
+ *       return reason.message
+ *   }
+ * }
+ *
+ * console.log(describe(new Target.PageClosed({ by: "command" })))
+ * ```
  *
  * @stability unstable
  * @category schemas

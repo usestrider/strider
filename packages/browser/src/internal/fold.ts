@@ -119,8 +119,11 @@ export interface Fold {
   readonly undecided: (page: Model.PageEntry, prompt: Model.PromptEvent) => Effect.Effect<void>
   /** Publishes a decision a policy or the default made, on the page's and the context's channels. */
   readonly autoResolved: (owner: Model.Owner, event: Model.AutoResolutionEvent) => Effect.Effect<void>
-  /** Ends everything the connection held, when it is lost. */
-  readonly loseConnection: Effect.Effect<void>
+  /**
+   * Ends everything the browser held, with `reason`: when its connection is lost, or once it has closed. Does
+   * nothing once something has ended it.
+   */
+  readonly loseConnection: (reason: Target.CloseReason) => Effect.Effect<void>
 }
 
 /** One input: a step of the fold, and who waits for it to be applied. */
@@ -1041,8 +1044,8 @@ export const make = Effect.fnUntraced(function*(options: {
       }
     })
 
-  const loseConnection = Effect.gen(function*() {
-    const reason: Target.CloseReason = new Target.ConnectionLost({})
+  const loseConnection = Effect.fnUntraced(function*(reason: Target.CloseReason) {
+    if (Deferred.isDoneUnsafe(lost)) return
     for (const page of Array.from(pages.values())) yield* endPage(page, reason)
     for (const document of Array.from(documents.keys())) yield* endDocument(document, reason)
     for (const worker of Array.from(workers.values())) yield* endWorker(worker, reason)
@@ -1146,7 +1149,7 @@ export const make = Effect.fnUntraced(function*(options: {
       apply(
         Effect.sync(() => publish(owner, event, (events) => events.autoResolution, (events) => events.autoResolution))
       ),
-    loseConnection: apply(loseConnection)
+    loseConnection: (reason) => apply(loseConnection(reason))
   }
   return self
 })

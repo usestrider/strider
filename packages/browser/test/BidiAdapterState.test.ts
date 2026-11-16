@@ -33,6 +33,7 @@ import * as Network from "../src/internal/bidiAdapter/network.ts"
 import * as Obligations from "../src/internal/bidiAdapter/obligations.ts"
 import * as State from "../src/internal/bidiAdapter/state.ts"
 import * as Tree from "../src/internal/bidiAdapter/tree.ts"
+import * as WebSocketBridge from "../src/internal/bidiAdapter/webSocketBridge.ts"
 import * as BidiWire from "../src/internal/bidiWire.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as Fold from "../src/internal/fold.ts"
@@ -4642,3 +4643,92 @@ it.effect("rejects a sandbox realm created in a replacement document while acqui
       }
     }
   }).pipe(Effect.scoped))
+
+it.effect("keeps the browser's closing reason when Firefox rejects a pending call before realmDestroyed", () =>
+  Effect.gen(function*() {
+    const browser = yield* makeBrowser
+    const client = yield* ProtocolClient.make(browser.transport, BidiWire.wire)
+    const { realm, state } = yield* withPage({}, {}, client.root)
+    const running = yield* Evaluation.evaluate(state, realm.id, {
+      functionDeclaration: "() => new Promise(() => {})",
+      arguments: [],
+      awaitPromise: true,
+      result: "value",
+      userActivation: false
+    }).pipe(Effect.flip, Effect.forkChild)
+    const sent = yield* browser.next
+    yield* Kit.closing(state)(new Target.BrowserClosed({}))
+    // Firefox can reject a call naming a destroyed realm before its realmDestroyed event arrives.
+    yield* browser.receive({
+      type: "error",
+      id: sent.id,
+      error: "no such frame",
+      message: `Realm with id ${realm.bidi} not found`
+    })
+    const error = yield* Fiber.join(running)
+    assert.strictEqual(error.reason._tag, "Gone")
+    if (error.reason._tag === "Gone") {
+      assert.deepStrictEqual(error.reason.reason, new Target.BrowserClosed({}))
+    }
+    assert.deepStrictEqual(realm.endedWith, new Target.BrowserClosed({}))
+  }))
+
+it.effect("passes a closing page's reason to the WebSocket bridge after the realm is folded away", () =>
+  Effect.gen(function*() {
+    const browser = yield* makeBrowser
+    const handlers = Evaluation.register(Kit.handlers<State.Event>())
+    let state: State.State
+    const client = yield* ProtocolClient.make(browser.transport, BidiWire.wire, {
+      fold: () => ({
+        events: handlers.events,
+        apply: (_session, method, params) => Effect.sync(() => handlers.apply(method, params, { state })),
+        lost: () => Effect.void,
+        ended: () => Effect.void
+      })
+    })
+    const fixture = yield* withPage({}, {}, client.root)
+    state = fixture.state
+    const received = yield* Deferred.make<void>()
+    const ended = yield* Deferred.make<Target.CloseReason | undefined>()
+    const bridge: Adapter.WebSocketBridge = {
+      name: "test-channel",
+      token: "test-token",
+      scope: yield* Effect.scope,
+      captured: () => Effect.void,
+      receive: () => {
+        Deferred.doneUnsafe(received, Effect.void)
+        return true
+      },
+      ended: (_realm, reason) => {
+        Deferred.doneUnsafe(ended, Effect.succeed(reason))
+      },
+      failed: () => {}
+    }
+    const preparing = yield* WebSocketBridge.prepare(state, { _tag: "Browser" }, bridge).pipe(Effect.forkChild)
+    const command = yield* browser.next
+    yield* browser.receive({
+      type: "success",
+      id: command.id,
+      result: { type: "success", realm: fixture.realm.bidi, result: { type: "undefined" } }
+    })
+    yield* Fiber.join(preparing)
+    yield* browser.receive({
+      type: "event",
+      method: "script.message",
+      params: {
+        channel: bridge.name,
+        data: { type: "string", value: "payload" },
+        source: { realm: fixture.realm.bidi, context: fixture.page.bidi }
+      }
+    })
+    yield* Deferred.await(received)
+    fixture.page.closing = new Target.PageClosed({ by: "command" })
+    yield* browser.receive({
+      type: "event",
+      method: "script.realmDestroyed",
+      params: { realm: fixture.realm.bidi }
+    })
+    const reason = yield* Deferred.await(ended)
+    assert.isFalse(state.realms.has(fixture.realm.bidi))
+    assert.deepStrictEqual(reason, new Target.PageClosed({ by: "command" }))
+  }))

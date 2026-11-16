@@ -32,6 +32,7 @@ import { configureTarget, type Setup } from "./declare.ts"
 import * as Evaluation from "./evaluation.ts"
 import { frameUrl, targetKind } from "./mapping.ts"
 import {
+  closingReason,
   ContextEntry,
   credentialsScope,
   dispatchContext,
@@ -195,24 +196,30 @@ export const ended = (state: State, session: ProtocolClient.Session, reason: Pro
   state.targets.delete(session)
   if (state.targetsById.get(target.targetId) === target) state.targetsById.delete(target.targetId)
   state.workerContexts.delete(target)
+  const page = target.kind === "page" ? target.page : undefined
+  const why: L1Target.CloseReason | undefined = page === undefined
+    ? undefined
+    : reason.why === "connectionLost"
+    ? Kit.closed(state)
+    : reason.why === "modelUnavailable"
+    ? new L1Target.ModelUnavailable({})
+    : closingReason(state, page) ?? new L1Target.PageClosed({ by: "script" })
+  // A page's realms end with it, for its reason; a worker's or a frame's are destroyed
   for (const realm of Array.from(state.realms.values())) {
     if (realm.target === target) {
-      removeRealm(state, realm, reason.why === "connectionLost" ? Kit.closed() : new L1Target.RealmDestroyed({}))
+      removeRealm(
+        state,
+        realm,
+        why ??
+          (reason.why === "connectionLost" ? Kit.closed(state) : state.browserEnd ?? new L1Target.RealmDestroyed({}))
+      )
     }
   }
   switch (target.kind) {
     case "page": {
-      const page = target.page!
-      const why: L1Target.CloseReason = reason.why === "connectionLost"
-        ? Kit.closed()
-        : reason.why === "modelUnavailable"
-        ? new L1Target.ModelUnavailable({})
-        : page.closing ?? (page.context.removing
-          ? new L1Target.PageClosed({ by: "userContextRemoved" })
-          : page.closeRequested
-          ? new L1Target.PageClosed({ by: "command" })
-          : new L1Target.PageClosed({ by: "script" }))
-      endPage(state, page, why, `cdp: the page's session ended (${reason.why})`)
+      if (page !== undefined && why !== undefined) {
+        endPage(state, page, why, `cdp: the page's session ended (${reason.why})`)
+      }
       return
     }
     case "iframe": {

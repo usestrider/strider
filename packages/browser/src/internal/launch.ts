@@ -18,6 +18,7 @@ import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import * as Reason from "../Reason.ts"
 import { now } from "./adapter.ts"
 import * as BrowserClock from "./browserClock.ts"
+import * as Operation from "./operation.ts"
 import * as Paths from "./paths.ts"
 import * as Spans from "./spans.ts"
 
@@ -164,9 +165,36 @@ export const command = (
     : ["/bin/sh", ["-c", "ulimit -c 0; exec \"$@\"", "sh", executable, ...args]]
 
 /**
+ * Closes a browser a layer launched, as the scope that connected to it closes: sends `close`, and waits up to five
+ * seconds on the browser's clock for `exited`, the process's exit, before the scope's later finalizers, such as the
+ * process release's signals, run. It waits for the exit, not the reply: Firefox answers `browser.close` before it
+ * has written its profile's cookies and localStorage. Only the exit, by a signal too, or the five seconds end the
+ * wait: a close that fails or a connection lost first doesn't, since the browser may still be writing its profile.
+ * Neither the caller's interruption nor its deadline shortens the five seconds.
+ */
+export const closeGracefully: (
+  name: string,
+  close: Effect.Effect<unknown, unknown>,
+  exited: Effect.Effect<unknown, unknown>
+) => Effect.Effect<void> = Effect.fnUntraced(
+  function*(_name: string, close: Effect.Effect<unknown, unknown>, exited: Effect.Effect<unknown, unknown>) {
+    const closing = yield* close.pipe(Effect.ignore, Effect.interruptible, Effect.forkChild)
+    yield* Effect.exit(exited).pipe(Effect.ensuring(Fiber.interrupt(closing)))
+  },
+  (effect, name) =>
+    effect.pipe(
+      Effect.interruptible,
+      BrowserClock.timeoutOption(5000),
+      Operation.apart(name, Duration.seconds(5)),
+      Effect.ignore
+    )
+)
+
+/**
  * Starts the browser in the scope. Closing the scope terminates it, killing it after `forceKillAfter` if it
- * hasn't exited. This raw process release sends a signal immediately; Chromium's connected layer attempts
- * graceful closure first, with its own five-second budget. Core dumps are off unless `coreDumps` is true (see `command`).
+ * hasn't exited. This raw process release sends a signal immediately; a connected Chromium or Firefox layer first
+ * asks the browser to close and waits for it to exit (`closeGracefully`), with its own five-second budget. Core
+ * dumps are off unless `coreDumps` is true (see `command`).
  */
 export const spawn = Effect.fnUntraced(function*(
   executable: string,

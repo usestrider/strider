@@ -1630,6 +1630,25 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
+      // With receivesPointer off, the click is sent to the first geometric centre and lands on whatever is there
+      it.effect("clicks through to a cover when receivesPointer is disabled", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<!doctype html><style>body{margin:0}#go{position:absolute;left:20px;top:20px;width:100px;height:40px}#cover{position:absolute;left:0;top:0;width:300px;height:200px}</style><button id="go">Go</button><div id="cover"></div><script>window.clicks=[];go.addEventListener('click',()=>clicks.push('go'));cover.addEventListener('click',()=>clicks.push('cover'))</script>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.locator("#go").click({ checks: { receivesPointer: false } }).pipe(Deadline.within("1 second"))
+            assert.deepStrictEqual(
+              yield* page.evaluateInMainWorld(() => (window as unknown as { clicks: Array<string> }).clicks),
+              [
+                "cover"
+              ]
+            )
+          }))
+        }), timeout)
+
       it.effect("clicks a wrapped link whose first line a scrolling ancestor clips", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
