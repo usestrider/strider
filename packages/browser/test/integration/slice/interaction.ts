@@ -998,7 +998,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             </script>`
             )
             const page = yield* newPage
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             const point = yield* page.evaluateInMainWorld(() => {
               const rect = document.querySelector("#outer")!.shadowRoot!.querySelector("#target")!
                 .getBoundingClientRect()
@@ -1601,7 +1601,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               `<!doctype html><style>body{margin:0}#s{position:absolute;left:20px;top:100px;width:240px;height:150px;overflow:auto}#clip{display:flow-root;margin-top:80px;width:200px;height:40px;${clipping}}#go{display:block;margin-top:120px;width:100px;height:24px}#tail{height:600px}</style><div id="s"><div id="clip"><a id="go" href="#">Go</a></div><div id="tail"></div></div><output id="out"></output><script>go.onclick=e=>{e.preventDefault();out.textContent=String(e.isTrusted)}</script>`
             )
             const page = yield* Browser.newPage()
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             const before = yield* page.evaluateInMainWorld(() => document.getElementById("s")!.scrollTop)
             const clipped = yield* page.evaluateInMainWorld(() => {
               const target = document.getElementById("go")!.getBoundingClientRect()
@@ -4233,7 +4233,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             )
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* newPage
-              yield* page.goto(url)
+              yield* page.goto(url, { waitUntil: "load" })
               assert.isAbove(
                 yield* page.evaluateInMainWorld(() => document.getElementById("label")!.getClientRects().length),
                 1
@@ -6113,7 +6113,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           )
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* newPage
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             // Native parsing and focus are checked independently of the role expectation.
             const focus = yield* page.evaluateInMainWorld(() =>
               Array.from(document.querySelectorAll<HTMLElement>("[data-tabindex-case]"), (element) => {
@@ -6546,7 +6546,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           )
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* newPage
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             yield* page.evaluateInMainWorld(() => {
               document.querySelector<HTMLTextAreaElement>("#textarea")!.value = ""
             })

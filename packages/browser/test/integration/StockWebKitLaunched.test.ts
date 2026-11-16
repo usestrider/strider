@@ -245,7 +245,8 @@ describe("Stock WebKit, launched in automation mode", () => {
                   fixtureUrl(
                     origin,
                     "<div id=\"remove\"></div><input type=\"file\" id=\"target\"><input type=\"file\" id=\"other\">"
-                  )
+                  ),
+                  { waitUntil: "load" }
                 )
                 yield* page.evaluateInMainWorld(() => {
                   ;(window as any).retained = document.getElementById("target")
@@ -821,7 +822,7 @@ describe("Stock WebKit, launched in automation mode", () => {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
-            yield* page.goto(`${origin}/csp?html=${encodeURIComponent(cspPage)}`)
+            yield* page.goto(`${origin}/csp?html=${encodeURIComponent(cspPage)}`, { waitUntil: "load" })
             // The policy holds: the page's inline script never ran
             assert.strictEqual(yield* page.evaluateInMainWorld(() => document.title), "Policy")
             // The engine's install is larger than one message, so it's compiled in the page in parts

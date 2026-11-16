@@ -1925,7 +1925,7 @@ export const declarations = (
             const page = yield* SharedContext.newPage
             const { origin } = yield* site
             yield* page.clock.install({ mode: "controlled", at: 1000 })
-            yield* page.goto(fixtureUrl(origin, `<p id="later">pending</p>`))
+            yield* page.goto(fixtureUrl(origin, `<p id="later">pending</p>`), { waitUntil: "load" })
             yield* page.evaluateInMainWorld(() => {
               const channel = new MessageChannel()
               channel.port1.onmessage = () => {
