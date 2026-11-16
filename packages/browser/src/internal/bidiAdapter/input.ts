@@ -93,6 +93,22 @@ const hitFrame = `(x, y) => {
   return [element.contentWindow, left, top, width, height]
 }`
 
+/**
+ * Where a page's held input went, while the context it went to is still there. A context destroyed while it holds
+ * the pointer ends the capture, and the input after goes by its point again.
+ */
+const captured = (
+  state: State,
+  capture: Map<L1Target.NavigableId, PointerTarget>,
+  page: L1Target.NavigableId
+): PointerTarget | undefined => {
+  const held = capture.get(page)
+  if (held === undefined) return undefined
+  if (!held.navigable.removed && state.navigablesById.get(held.navigable.id) === held.navigable) return held
+  capture.delete(page)
+  return undefined
+}
+
 /** A source of actions as it is built, its actions added in order. */
 type Building =
   | {
@@ -145,9 +161,13 @@ export const dispatchInput = Effect.fnUntraced(
     // Pointer input that names no frame goes to the context under each event's point, once for consecutive events
     // at one point; from a press until every button is up, or from a touch's start until its end, it goes where the
     // press or the start went
-    const aim = Effect.fnUntraced(function*(x: number, y: number, capture: Map<L1Target.NavigableId, PointerTarget>) {
+    const aim = Effect.fnUntraced(function*(
+      x: number,
+      y: number,
+      capture?: Map<L1Target.NavigableId, PointerTarget>
+    ) {
       if (!frameless) return named
-      const held = capture.get(navigable.page.id)
+      const held = capture === undefined ? undefined : captured(state, capture, navigable.page.id)
       if (held !== undefined) return held
       if (aimed === undefined || aimed.x !== x || aimed.y !== y) {
         // Every action is written after the loop, so a lookup fails with nothing sent
@@ -210,8 +230,8 @@ export const dispatchInput = Effect.fnUntraced(
           break
         }
         case "Wheel":
-          sent = yield* aim(event.x, event.y, state.mouseCapture)
-          if (!inside(event.x, event.y)) sent = named
+          // A wheel goes to what is under its point, a button held or not
+          sent = yield* aim(event.x, event.y)
           wheel().push({
             type: "scroll",
             x: Math.round(event.x - dx()),
@@ -240,7 +260,7 @@ export const dispatchInput = Effect.fnUntraced(
         case "Touch": {
           const first = event.points[0]
           sent = first === undefined
-            ? state.touchCapture.get(navigable.page.id) ?? named
+            ? captured(state, state.touchCapture, navigable.page.id) ?? named
             : yield* aim(first.x, first.y, state.touchCapture)
           if (frameless) {
             if (event.type === "end" || event.type === "cancel") state.touchCapture.delete(navigable.page.id)

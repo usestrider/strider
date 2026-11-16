@@ -119,6 +119,23 @@ const framelessSession = Effect.fnUntraced(function*(state: State, page: PageEnt
 })
 
 /**
+ * Where a page's held input went, while its session is still attached. A session that ends while it holds the
+ * pointer, as a frame's does when the frame is removed or navigates to another process, ends the capture, and the
+ * input after goes by its point again.
+ */
+const captured = (
+  state: State,
+  capture: Map<L1Target.NavigableId, PointerTarget>,
+  page: L1Target.NavigableId
+): PointerTarget | undefined => {
+  const held = capture.get(page)
+  if (held === undefined) return undefined
+  if (state.targets.get(held.target.session) === held.target) return held
+  capture.delete(page)
+  return undefined
+}
+
+/**
  * Input in the page's coordinates goes on the page's session; pages with child frames keep sequential
  * acknowledgments. Pointer input aimed into frames of one out-of-process session goes on that session, in its own
  * coordinates (`pointerSession`). Pointer input that names no frame goes on the session under each event's point
@@ -213,7 +230,7 @@ export const dispatchInput = Effect.fnUntraced(
       switch (event._tag) {
         case "Mouse": {
           if (frameless) {
-            sent = state.mouseCapture.get(page.id) ?? (yield* aim(event.x, event.y))
+            sent = captured(state, state.mouseCapture, page.id) ?? (yield* aim(event.x, event.y))
             if (event.buttons === 0) state.mouseCapture.delete(page.id)
             else state.mouseCapture.set(page.id, sent)
           }
@@ -270,7 +287,8 @@ export const dispatchInput = Effect.fnUntraced(
           break
         }
         case "Wheel":
-          if (frameless) sent = state.mouseCapture.get(page.id) ?? (yield* aim(event.x, event.y))
+          // A wheel goes to what is under its point, a button held or not
+          if (frameless) sent = yield* aim(event.x, event.y)
           yield* Kit.protocol(
             Input.dispatchMouseEvent({
               type: "mouseWheel",
@@ -305,7 +323,7 @@ export const dispatchInput = Effect.fnUntraced(
         case "Touch":
           if (frameless) {
             const first = event.points[0]
-            sent = state.touchCapture.get(page.id) ??
+            sent = captured(state, state.touchCapture, page.id) ??
               (first === undefined ? { target: page.target, x: 0, y: 0 } : yield* aim(first.x, first.y))
             if (event.type === "end" || event.type === "cancel") state.touchCapture.delete(page.id)
             else state.touchCapture.set(page.id, sent)

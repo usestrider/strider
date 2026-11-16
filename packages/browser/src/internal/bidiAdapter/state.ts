@@ -230,7 +230,7 @@ export interface State extends Kit.Ending {
   readonly navigables: Map<string, NavigableEntry>
   /**
    * The context, and its origin and size, that a page's pointer input naming no frame went to when a button was
-   * pressed, until every button is up; the mouse and wheel input between goes there too.
+   * pressed, until every button is up; the mouse input between goes there too, while it lasts.
    */
   readonly mouseCapture: Map<L1Target.NavigableId, import("./input.ts").PointerTarget>
   /** The same for a touch, from its start until it ends or is canceled. */

@@ -375,7 +375,7 @@ export interface State extends Kit.Ending {
   readonly heldButtons: Map<L1Target.NavigableId, number>
   /**
    * The session, and its origin in the page's coordinates, that a page's pointer input naming no frame went on when
-   * a button was pressed, until every button is up; the mouse and wheel input between goes there too.
+   * a button was pressed, until every button is up; the mouse input between goes there too, while it lasts.
    */
   readonly mouseCapture: Map<L1Target.NavigableId, PointerTarget>
   /** The same for a touch, from its start until it ends or is canceled. */
