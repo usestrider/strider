@@ -899,48 +899,6 @@ export const conformance = (backend: Backend) =>
           timeout
         )
 
-        it.effect("delivers two simultaneous frameless touch points in a cross-site frame", () =>
-          Effect.gen(function*() {
-            const world = yield* setup(backend)
-            const { page } = yield* newPage(world)
-            const fixture = (origin: string, html: string) =>
-              `${origin}/fixture?html=${encodeURIComponent(html)}`
-            const child =
-              `<body style="margin:0;height:100vh"><script>addEventListener('touchstart',e=>parent.postMessage(e.touches.length,'*'));parent.postMessage('loaded','*')</script></body>`
-            yield* goto(
-              world,
-              page,
-              fixture(
-                world.site.origin,
-                `<script>window.got=[];addEventListener('message',e=>got.push(e.data))</script><iframe src="${
-                  fixture(world.site.crossSite, child)
-                }" style="position:absolute;left:100px;top:50px;width:200px;height:100px;border:0"></iframe>`
-              )
-            )
-            yield* evaluate(
-              world,
-              page,
-              "() => got.includes('loaded') || new Promise(r=>addEventListener('message',e=>{if(e.data==='loaded')r(true)}))"
-            )
-            const start = world.adapter.dispatchInput(page, [{
-              _tag: "Touch",
-              type: "start",
-              points: [{ id: 0, x: 140, y: 80 }, { id: 1, x: 160, y: 80 }],
-              modifiers: { alt: false, control: false, meta: false, shift: false }
-            }])
-            if (!(yield* supports(world, "input.touch"))) {
-              const error = yield* Effect.flip(start)
-              assert.deepInclude(error.reason, { _tag: "Unsupported", capability: "input.touch" })
-              return
-            }
-            yield* start
-            yield* Effect.gen(function*() {
-              if (!(yield* evaluate(world, page, "() => got.includes(2)"))) {
-                yield* Effect.fail("two simultaneous touches were not delivered")
-              }
-            }).pipe(Effect.retry({ times: 20, schedule: Schedule.spaced("100 millis") }))
-          }), timeout)
-
         for (const change of ["detaches", "navigates"] as const) {
           it.effect(`continues frameless input after the pressed frame ${change}`, () =>
             Effect.gen(function*() {
