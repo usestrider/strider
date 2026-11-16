@@ -104,8 +104,9 @@ export const register = (handlers: Kit.Handlers<Event>) =>
  */
 export const confirmFrameRemoval = (state: State, navigable: NavigableEntry) => {
   const parent = navigable.parent
+  // A page that starts closing meanwhile ends the frame with its own reason
   const awaitsRealm = () =>
-    !navigable.removed &&
+    !navigable.removed && closingReason(state, navigable.page) === undefined &&
     !Array.from(navigable.document?.realms ?? []).some((realm) => realm.world._tag === "Main" && !realm.ended) &&
     !navigable.pendingRealms.some((realm) => realm.world._tag === "Main" && !realm.ended)
   if (parent === undefined || !awaitsRealm()) return Effect.void
