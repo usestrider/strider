@@ -1301,19 +1301,23 @@ describe("strider", () => {
         assert.include(exported, `yield* ${returned}.locator("p").pipe(Expect.toBeVisible)\n`)
         assert.include(
           exported,
-          `const side = yield* context.newPage\n        yield* side.goto(${JSON.stringify(url)})\n`
+          `const side = yield* context.newPage\n        yield* side.goto(${
+            JSON.stringify(url)
+          }, { waitUntil: "domContentLoaded" })\n`
         )
         // The URL's secret is built in from its config, where the session put it
         const password = `\${Redacted.value(yield* Config.Redacted("SECRET_PW"))}`
         assert.include(
           exported,
-          `yield* shop.goto(\`${html(`<p id="pw">`, "</p>").replace("%password%", () => password)}\`)\n`
+          `yield* shop.goto(\`${
+            html(`<p id="pw">`, "</p>").replace("%password%", () => password)
+          }\`, { waitUntil: "domContentLoaded" })\n`
         )
         assert.include(
           exported,
           `const vault = yield* context.newPage\n        yield* vault.goto(\`${
             html(`<p id="pw">`, "</p>").replace("%password%", () => password)
-          }\`)\n`
+          }\`, { waitUntil: "domContentLoaded" })\n`
         )
         // The check of the secret's text is left out, since a failure would print it
         assert.include(
@@ -1322,7 +1326,7 @@ describe("strider", () => {
         )
         assert.notInclude(exported, `Expect.toContainText("%password%")`)
         // A percent-escaped URL is the text the session sent
-        assert.include(exported, `yield* shop.goto(${JSON.stringify(cafe)})\n`)
+        assert.include(exported, `yield* shop.goto(${JSON.stringify(cafe)}, { waitUntil: "domContentLoaded" })\n`)
         assert.include(exported, "// %pasword% names no secret")
         assert.notInclude(exported, "%C3% names no secret")
         // The page's own script holds the password it checks, so the statement is what is checked
@@ -1850,7 +1854,7 @@ describe("strider", () => {
             )
           )
           assert.include(exported, `: a segment runs only in a session; put its steps here, declaring kept\n`)
-          assert.include(exported, `yield* kept.goto(${JSON.stringify(url)})\n`)
+          assert.include(exported, `yield* kept.goto(${JSON.stringify(url)}, { waitUntil: "domContentLoaded" })\n`)
           // Downloads go to the session's own directory
           const downloads = path.join(env.XDG_RUNTIME_DIR, "strider", "tools", "downloads")
           yield* tools(
