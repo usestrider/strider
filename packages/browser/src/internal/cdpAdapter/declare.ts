@@ -273,10 +273,24 @@ const applyOverride = (
 // second time, and the identifier one of them added would be overwritten, its script left to run in every later
 // document. So the registry is read under the target's permit, held until each identifier is recorded: in a new
 // target's gate, until the gate's scope closes, after the replies.
+//
+// A write cut short between a command and its reply would leave the record untrue: a removed identifier still
+// recorded, which the next write removes again, or an added one not recorded. So outside a gate the write runs to
+// its end in a fiber the connection owns, apart from the operation that asked for it, each command waiting under
+// `Protocol.CommandTimeout`; the caller waits for it until its own deadline, and the next write, which waits for the
+// permit, reads what the browser did. In a gate, a reply the gate's scope abandons goes to the late-reply handler,
+// which removes the script an add installed, so the identifier left unrecorded matches the browser too.
 const scriptLock = (target: TargetEntry) => target.scriptLock ??= Semaphore.makeUnsafe(1)
 
-const applyScripts = (state: State, target: TargetEntry, page: PageEntry) =>
-  scriptLock(target).withPermits(1)(writeScripts(state, target, page))
+const applyScripts = Effect.fnUntraced(function*(state: State, target: TargetEntry, page: PageEntry) {
+  const write = scriptLock(target).withPermits(1)(writeScripts(state, target, page)).pipe(
+    Operation.detached,
+    Effect.provideService(ProtocolClient.CommandDeadline, Option.none())
+  )
+  // A connection already tearing down cannot own a new fiber; its commands end with its transport.
+  if (state.cleanupScope.state._tag === "Closed") return yield* write
+  return yield* Fiber.join(yield* write.pipe(Effect.forkIn(state.cleanupScope)))
+})
 
 const writeScripts = Effect.fnUntraced(function*(state: State, target: TargetEntry, page: PageEntry, setup?: Setup) {
   const on = setup?.send ?? Protocol.on(target.session)
