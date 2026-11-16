@@ -3473,7 +3473,10 @@ describe("Chromium init-script writes cut short by a deadline", () => {
       yield* TestClock.adjust("0 millis")
       const next = yield* Effect.exit(h.page.addInitScript({ source: "self.third = true" }))
       assert(Exit.isSuccess(next), `the next declaration failed: ${Exit.isFailure(next) ? String(next.cause) : ""}`)
-      assert.deepStrictEqual(h.rejected, [], "a script was removed twice")
+      // Nothing told Strider the removal took effect, so the next write asked again, and Chromium's answer settled it.
+      assert.deepStrictEqual(h.rejected, ["script-1"], "the unanswered removal was not asked again exactly once")
+      yield* h.page.addInitScript({ source: "self.fourth = true" })
+      assert.deepStrictEqual(h.rejected, ["script-1"], "a settled removal was sent again")
     }).pipe(onTestClock))
 
   it.effect("removes on release the script an add whose reply came after the deadline installed", () =>

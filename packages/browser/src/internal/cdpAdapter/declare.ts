@@ -4,6 +4,7 @@
  * to be removed skips the release of its own file chooser, challenge, credential, download and override
  * declarations; if the removal is refused, `restoreContext` reconciles its targets with the declarations that remain.
  */
+import * as Cause from "effect/Cause"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -274,12 +275,14 @@ const applyOverride = (
 // document. So the registry is read under the target's permit, held until each identifier is recorded: in a new
 // target's gate, until the gate's scope closes, after the replies.
 //
-// A write cut short between a command and its reply would leave the record untrue: a removed identifier still
-// recorded, which the next write removes again, or an added one not recorded. So outside a gate the write runs to
-// its end in a fiber the connection owns, apart from the operation that asked for it, each command waiting under
-// `Protocol.CommandTimeout`; the caller waits for it until its own deadline, and the next write, which waits for the
-// permit, reads what the browser did. In a gate, a reply the gate's scope abandons goes to the late-reply handler,
-// which removes the script an add installed, so the identifier left unrecorded matches the browser too.
+// Outside a gate, the write runs to its end in a fiber the connection owns, apart from the operation that asked for
+// it: each command waits for its reply under `Protocol.CommandTimeout`, not the operation's deadline, and the caller
+// waits for the write only until its own deadline. A removal that gets no reply even then may or may not have taken
+// effect, so its identifier is kept as unconfirmed, and each later write removes it again; for that identifier alone,
+// Chromium's "Script not found" settles it as removed. An add that gets no reply has no identifier to keep: if its
+// reply comes late, the protocol client's late-reply handler removes the script it installed; if none ever comes,
+// the script stays until the target ends, as Chromium has no command that lists a target's scripts. In a gate, a
+// reply the gate's scope abandons goes to the same late-reply handler.
 const scriptLock = (target: TargetEntry) => target.scriptLock ??= Semaphore.makeUnsafe(1)
 
 const applyScripts = Effect.fnUntraced(function*(state: State, target: TargetEntry, page: PageEntry) {
@@ -292,22 +295,50 @@ const applyScripts = Effect.fnUntraced(function*(state: State, target: TargetEnt
   return yield* Fiber.join(yield* write.pipe(Effect.forkIn(state.cleanupScope)))
 })
 
+/** Whether a removal failed without an answer, so may still have taken effect. */
+const unanswered = (cause: Cause.Cause<Protocol.ProtocolError>) =>
+  Cause.hasInterrupts(cause) ||
+  Option.exists(Cause.findErrorOption(cause), (error) => error.reason._tag === "NoReply")
+
+const scriptNotFound = (error: Protocol.ProtocolError) =>
+  error.reason._tag === "Rejected" && error.reason.description === "Script not found"
+
+/**
+ * Removes an init script, recorded under `key` or unconfirmed, and updates the record by the answer. A new target's
+ * gate has nothing recorded, so it sends no removal, and every removal waits for its reply.
+ */
+const removeScript = (target: TargetEntry, identifier: string, key?: string) => {
+  const unconfirmed = target.unconfirmedScripts ??= new Set()
+  const settled = Effect.sync(() => {
+    unconfirmed.delete(identifier)
+    if (key !== undefined) target.scripts.delete(key)
+  })
+  return Page.removeScriptToEvaluateOnNewDocument({ identifier: identifier as Page.ScriptIdentifier }).pipe(
+    Protocol.on(target.session),
+    Effect.catchIf((error) => unconfirmed.has(identifier) && scriptNotFound(error), () => Effect.void),
+    Effect.onExit((exit) =>
+      Exit.isSuccess(exit)
+        ? settled
+        : unanswered(exit.cause)
+        ? Effect.sync(() => {
+          unconfirmed.add(identifier)
+          if (key !== undefined) target.scripts.delete(key)
+        })
+        : Effect.void
+    )
+  )
+}
+
 const writeScripts = Effect.fnUntraced(function*(state: State, target: TargetEntry, page: PageEntry, setup?: Setup) {
-  const on = setup?.send ?? Protocol.on(target.session)
   const bundles = state.registry.bundles(placement(page))
+  for (const identifier of Array.from(target.unconfirmedScripts ?? [])) yield* removeScript(target, identifier)
   for (const [key, identifier] of Array.from(target.scripts)) {
-    if (!bundles.has(key)) {
-      target.scripts.delete(key)
-      yield* Page.removeScriptToEvaluateOnNewDocument({ identifier: identifier as Page.ScriptIdentifier }).pipe(on)
-    }
+    if (!bundles.has(key)) yield* removeScript(target, identifier, key)
   }
   for (const [key, bundle] of bundles) {
     if (bundle.webSockets !== undefined) yield* WebSocketBridge.prepare(state, target, bundle.webSockets)
     const previous = target.scripts.get(key)
-    if (previous !== undefined) {
-      yield* Page.removeScriptToEvaluateOnNewDocument({ identifier: previous as Page.ScriptIdentifier }).pipe(on)
-      target.scripts.delete(key)
-    }
+    if (previous !== undefined) yield* removeScript(target, previous, key)
     const command = Page.addScriptToEvaluateOnNewDocument({
       source: bundle.source,
       ...(bundle.world._tag === "Isolated" ? { worldName: bundle.world.name } : {})

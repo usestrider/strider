@@ -3,6 +3,7 @@
  * Viewport precedence is resolved through the declaration registry rather than native scope layering.
  * What Firefox cannot do is refused before anything is declared.
  */
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
@@ -30,20 +31,42 @@ const ranKey = "@usestrider/browser/initScripts/ran"
 
 let scriptLocks: WeakMap<State, Semaphore.Semaphore> | undefined
 
+/** Whether a removal failed without an answer, so may still have taken effect. */
+const unanswered = (cause: Cause.Cause<Protocol.ProtocolError>) =>
+  Cause.hasInterrupts(cause) ||
+  Option.exists(Cause.findErrorOption(cause), (error) => error.reason._tag === "NoReply")
+
+const noSuchScript = (cause: Cause.Cause<Protocol.ProtocolError>) =>
+  Option.exists(
+    Cause.findErrorOption(cause),
+    (error) => error.reason._tag === "Rejected" && error.reason.code === "no such script"
+  )
+
+/**
+ * Removes the preload scripts, and sends again the removals Firefox never answered; returns the scripts it refused to
+ * remove. A removal that gets no answer may or may not have taken effect, so its script is kept as unconfirmed rather
+ * than registered, and for that script alone Firefox's "no such script" settles it as removed.
+ */
 const removePreloads = Effect.fnUntraced(function*(state: State, scripts: State["preloads"]) {
   const retained: Array<State["preloads"][number]> = []
+  const unconfirmed: Array<Script.PreloadScript> = []
+  const pending = state.unconfirmedPreloads
   // One budget for the whole loop: a stalled browser cannot hold an operation five seconds per preload.
   const exits = yield* Cleanup.boundedEach(
-    scripts,
-    (script) => state.send(Script.removePreloadScript({ script: script.script }))
+    [...pending, ...scripts.map(({ script }) => script)],
+    (script) => state.send(Script.removePreloadScript({ script }))
   )
   for (const [index, exit] of exits.entries()) {
     if (Exit.isSuccess(exit)) continue
-    retained.push(scripts[index]!)
+    const entry = index < pending.length ? undefined : scripts[index - pending.length]!
+    if (entry === undefined && noSuchScript(exit.cause)) continue
+    if (entry === undefined || unanswered(exit.cause)) unconfirmed.push(entry?.script ?? pending[index]!)
+    else retained.push(entry)
     yield* Cleanup.report(Effect.failCause(exit.cause), "BiDi preload cleanup could not confirm removal").pipe(
       Effect.catchCause((cause) => Effect.logWarning("BiDi preload cleanup failed", cause))
     )
   }
+  state.unconfirmedPreloads = unconfirmed
   return retained
 })
 

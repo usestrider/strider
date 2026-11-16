@@ -4772,4 +4772,8 @@ it.effect("does not retain a preload removed before its reply timed out", () =>
     yield* TestClock.adjust("5 seconds")
     yield* Fiber.join(replacing)
     assert.deepStrictEqual(state.preloads.map(({ script }) => script).sort(), [...native].sort())
+    // The next reconciliation asks again, and Firefox's "no such script" settles the removal.
+    yield* Declare.declare(state, { _tag: "Browser" }, preload("third"))
+    assert.deepStrictEqual(state.preloads.map(({ script }) => script).sort(), [...native].sort())
+    assert.deepStrictEqual(state.unconfirmedPreloads, [])
   }).pipe(Effect.provideServiceEffect(BrowserClock.CurrentClock, Effect.map(Clock.Clock, BrowserClock.fromClock))))
