@@ -6855,12 +6855,15 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               const { origin } = yield* site
               const child = fixtureUrl(origin, `<input id="field">`)
               const page = yield* newPage
-              yield* page.goto(fixtureUrl(
-                origin,
-                `<iframe></iframe><div id="host"></div>
+              yield* page.goto(
+                fixtureUrl(
+                  origin,
+                  `<iframe></iframe><div id="host"></div>
               <script>document.getElementById("host").attachShadow({mode:"open"}).innerHTML =
                 ${JSON.stringify(`<iframe id="chosen" src="${child}"></iframe>`)}</script>`
-              ))
+                ),
+                { waitUntil: "load" }
+              )
               yield* page.evaluateInMainWorld(async () => {
                 const frame = document.getElementById("host")!.shadowRoot!.querySelector("iframe")!
                 if (!frame.contentDocument?.getElementById("field")) {
