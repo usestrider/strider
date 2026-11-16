@@ -3454,6 +3454,28 @@ describe("Chromium init-script writes cut short by a deadline", () => {
       assert.deepStrictEqual(h.rejected, [], "a script was removed twice")
     }).pipe(onTestClock))
 
+  it.effect("keeps the next declaration working after a remove whose reply also misses CommandTimeout", () =>
+    Effect.gen(function*() {
+      const h = yield* initScriptPage()
+      yield* h.page.addInitScript({ source: "self.first = true" })
+      const remove = yield* h.hold("Page.removeScriptToEvaluateOnNewDocument")
+      const replacing = yield* Effect.forkScoped(
+        h.page.addInitScript({ source: "self.second = true" }).pipe(
+          Protocol.withCommandTimeout("10 millis"),
+          Effect.exit
+        )
+      )
+      const reply = yield* remove
+      // Wait for the independent write's real command timer, not the operation's test clock.
+      assert(Exit.isFailure(yield* Fiber.join(replacing)))
+      // Chromium removed the script; its reply comes after the command wait ended.
+      yield* reply
+      yield* TestClock.adjust("0 millis")
+      const next = yield* Effect.exit(h.page.addInitScript({ source: "self.third = true" }))
+      assert(Exit.isSuccess(next), `the next declaration failed: ${Exit.isFailure(next) ? String(next.cause) : ""}`)
+      assert.deepStrictEqual(h.rejected, [], "a script was removed twice")
+    }).pipe(onTestClock))
+
   it.effect("removes on release the script an add whose reply came after the deadline installed", () =>
     Effect.gen(function*() {
       const h = yield* initScriptPage()
