@@ -96,9 +96,12 @@ export const removeFrame = (state: State, frame: FrameEntry, reason: L1Target.Cl
     state.navigables.delete(frame.id)
     // A held mouse kept by a frame that is gone goes back to the page, and the frame starts no drag
     const pressed = state.pressedIn.get(frame.page.id)
-    if (pressed?.includes(frame)) state.pressedIn.set(frame.page.id, pressed.filter((each) => each !== frame))
-    if (state.pressedOn.get(frame.page.id)?.target === frame.owner && frame.owner !== frame.page.target) {
-      state.pressedOn.delete(frame.page.id)
+    if (pressed?.includes(frame)) {
+      state.pressedIn.set(frame.page.id, pressed.filter((each) => each !== frame))
+      // Only the frame the press went to keeps the mouse, not another that shares its session
+      if (state.pressedOn.get(frame.page.id)?.target === frame.owner && frame.owner !== frame.page.target) {
+        state.pressedOn.delete(frame.page.id)
+      }
     }
     if (frame.document !== undefined) {
       for (const realm of frame.document.realms) removeRealm(state, realm, reason)

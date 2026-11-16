@@ -132,9 +132,9 @@ const dragCall = (functionDeclaration: string): Adapter.EvaluationCall => ({
 })
 
 /**
- * Watches a document for the trusted `dragstart` a held move fires, and the `dragend` that follows when Chromium
- * abandons the drag at once, as it does when `dragstart` removes its source: a source out of the document gets
- * that `dragend` itself, so it is watched too. A document that is gone, or
+ * Watches a document for the trusted `dragstart` a held move fires, and its source, the event's first target before
+ * any shadow tree retargets it. Chromium abandons a drag whose `dragstart` removes or hides its source, or replaces
+ * its document, and fires `dragend` on the source, which a source out of the document gets itself. A document that is gone, or
  * ends meanwhile, starts no drag, so it is left out.
  */
 const watchDragStart = Effect.fnUntraced(
@@ -150,8 +150,8 @@ const watchDragStart = Effect.fnUntraced(
         "function(){const w=globalThis.__striderDrag??={event:undefined,ended:false};w.event=undefined;" +
           "w.ended=false;if(w.listen!==undefined){removeEventListener('dragstart',w.listen,true);" +
           "removeEventListener('dragend',w.end,true)}" +
-          "w.end=(e)=>{if(e.isTrusted)w.ended=true};w.listen=(e)=>{if(e.isTrusted){w.event=e;w.ended=false;" +
-          "e.target.addEventListener('dragend',w.end,{capture:true,once:true})}};" +
+          "w.end=(e)=>{if(e.isTrusted)w.ended=true};w.listen=(e)=>{if(e.isTrusted){const s=e.composedPath()[0];" +
+          "w.event=e;w.source=s;w.ended=false;s.addEventListener('dragend',w.end,{capture:true,once:true})}};" +
           "addEventListener('dragstart',w.listen,true);addEventListener('dragend',w.end,true)}"
       )
     )
@@ -162,7 +162,7 @@ const watchDragStart = Effect.fnUntraced(
 
 /**
  * Whether a watched document fired a `dragstart` since it was last asked, one its listeners didn't cancel and
- * Chromium didn't abandon.
+ * Chromium didn't abandon: no `dragend` reached its source, and the source is still connected.
  */
 const dragStarted = Effect.fnUntraced(
   function*(state: State, document: DocumentEntry) {
@@ -171,7 +171,8 @@ const dragStarted = Effect.fnUntraced(
       state,
       id,
       dragCall(
-        "function(){const w=globalThis.__striderDrag;const e=w?.event;const ended=w?.ended===true;" +
+        "function(){const w=globalThis.__striderDrag;const e=w?.event;" +
+          "const ended=w?.ended===true||w?.source?.isConnected!==true;" +
           "if(w!==undefined){w.event=undefined;w.ended=false}" +
           "return e!==undefined&&!e.defaultPrevented&&!ended}"
       )
