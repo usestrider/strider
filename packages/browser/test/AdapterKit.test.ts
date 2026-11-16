@@ -358,9 +358,16 @@ describe("AdapterKit", () => {
       const refused = new Protocol.ProtocolError({
         reason: new Protocol.Unsupported({ method: "Runtime.callFunctionOn" })
       })
-      assert.strictEqual(Kit.realmFailure(realm, () => false)(ended).reason._tag, "Gone")
-      assert.strictEqual(Kit.realmFailure(realm, () => true)(refused).reason._tag, "Gone")
-      assert.strictEqual(Kit.realmFailure(realm, () => false)(refused).reason._tag, "Unsupported")
+      const live = { id: realm, ended: false, pending: false, held: [] }
+      const closed = new Target.PageClosed({ by: "command" })
+      const endedWithPage = { id: realm, ended: true, endedWith: closed, pending: false, held: [] }
+      assert.strictEqual(Kit.realmFailure(live)(ended).reason._tag, "Gone")
+      assert.strictEqual(Kit.realmFailure(endedWithPage)(refused).reason._tag, "Gone")
+      assert.strictEqual(Kit.realmFailure(live)(refused).reason._tag, "Unsupported")
+      const gone = Kit.realmFailure(endedWithPage)(ended).reason
+      assert.deepStrictEqual(gone._tag === "Gone" ? gone.reason : undefined, closed)
+      const destroyed = Kit.realmFailure(live)(ended).reason
+      assert.strictEqual(destroyed._tag === "Gone" ? destroyed.reason._tag : undefined, "RealmDestroyed")
     })
   })
 })
