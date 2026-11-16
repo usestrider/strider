@@ -451,6 +451,19 @@ export const declarations = (
           }))
         }), timeout)
 
+      it.effect("routes an exact origin written without its trailing slash", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const route = yield* page.route(origin, () =>
+              Route.fulfill(HttpServerResponse.html("<title>routed</title>")))
+            yield* page.goto(`${origin}/`)
+            assert.strictEqual(yield* page.title, "routed")
+            assert.strictEqual(yield* route.hits, 1)
+          }))
+        }), timeout)
+
       it.effect("matches a URLPattern route, pausing only the URLs under its fixed prefix", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -907,6 +920,25 @@ export const declarations = (
           }))
         }), timeout)
 
+      it.effect("runs each of the init scripts declared at once exactly once in a new document", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const expected: Array<string> = []
+            for (let i = 0; i < 10; i++) {
+              expected.push(`a${i}`, `b${i}`)
+              yield* Effect.all([
+                page.addInitScript({ source: `(window.ran ??= []).push('a${i}')` }),
+                page.addInitScript({ source: `(window.ran ??= []).push('b${i}')` })
+              ], { concurrency: "unbounded", discard: true })
+            }
+            const ran = (yield* run(page, origin, "return window.ran")) as Array<string>
+            assert.sameMembers(ran, expected)
+            assert.strictEqual(ran.length, expected.length)
+          }))
+        }), timeout)
+
       it.effect("runs a script in the isolated world, apart from the page's, where the backend can", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -1248,6 +1280,25 @@ export const declarations = (
             yield* page.getByText("Session expired").pipe(Expect.toBeVisible)
             // The timeline carries over to the next document
             assert.strictEqual(yield* run(page, origin, "return new Date().toISOString()"), "2026-01-01T09:05:00.000Z")
+          }))
+        }), timeout)
+
+      it.effect("applies overlapping adjustments and settings of a controlled clock, each one", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.clock.install({ mode: "controlled", at: "2026-01-01T00:00:00Z" })
+            yield* page.setContent("<p>clock</p>")
+            for (let i = 0; i < 20; i++) {
+              yield* Effect.all([
+                page.clock.adjust("16 millis"),
+                page.clock.setTime(Date.UTC(2026, 0, 1, 0, 0, i + 1))
+              ], { concurrency: "unbounded", discard: true })
+            }
+            // A new document starts at the timeline's last setting, which no earlier one overrides
+            yield* page.clock.setTime(Date.UTC(2026, 0, 2))
+            assert.strictEqual(yield* run(page, origin, "return new Date().toISOString()"), "2026-01-02T00:00:00.000Z")
           }))
         }), timeout)
 

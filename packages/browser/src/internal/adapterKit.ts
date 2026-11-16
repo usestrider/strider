@@ -76,8 +76,19 @@ export const foreign = (id: string): Adapter.AdapterError =>
 export const unsupported = (capability: string, hint: string): Adapter.AdapterError =>
   new Adapter.AdapterError({ reason: { _tag: "Unsupported", capability, hint } })
 
-/** Why targets end when the connection does. */
-export const closed = (): Target.CloseReason => (new Target.ConnectionLost({}))
+/** What a connection's state knows of its browser's end: the reason, once the browser is closing. */
+export interface Ending {
+  browserEnd?: Target.CloseReason | undefined
+}
+
+/** Why targets end when the connection does: the browser's reason once it is closing, else `ConnectionLost`. */
+export const closed = (ending: Ending): Target.CloseReason => ending.browserEnd ?? new Target.ConnectionLost({})
+
+/** Marks the browser closing, for `reason`: what ends from then on, as it shuts down, ends with it. */
+export const closing = (ending: Ending) => (reason: Target.CloseReason): Effect.Effect<void> =>
+  Effect.sync(() => {
+    ending.browserEnd ??= reason
+  })
 
 /** A protocol failure as an adapter error (`Adapter.protocolError`). */
 export const protocolError = Adapter.protocolError
@@ -92,15 +103,26 @@ export const undecodable = (method: string, issue: string): Adapter.AdapterError
   protocolError(new Protocol.ProtocolError({ reason: new Protocol.Decode({ method, issue }) }))
 
 /**
+ * A realm's end as `Gone`: the reason it ended with, as its page's when it ended with its page; else what `closing`
+ * says its page is closing for, where the command fails before the realm is seen to end; else `RealmDestroyed`.
+ */
+export const realmGone = (
+  realm: RealmNode,
+  closing?: () => Target.CloseReason | undefined
+): Adapter.AdapterError =>
+  gone({ _tag: "Realm", id: realm.id }, realm.endedWith ?? closing?.() ?? new Target.RealmDestroyed({}))
+
+/**
  * A command in a realm that failed: `Gone` where the realm ended or its session did, as when its page closed
  * while the command was in flight, or where the browser no longer holds the object the command named (its
  * context was discarded before the event that retires the realm arrived); the protocol's error otherwise.
  */
 export const realmFailure =
-  (realm: Target.RealmId, ended: () => boolean) => (error: Protocol.ProtocolError): Adapter.AdapterError =>
-    ended() || error.reason._tag === "SessionEnded" ||
+  (realm: RealmNode, closing?: () => Target.CloseReason | undefined) =>
+  (error: Protocol.ProtocolError): Adapter.AdapterError =>
+    realm.ended || error.reason._tag === "SessionEnded" ||
       (error.reason._tag === "Rejected" && error.reason.reason === "NoSuchObject")
-      ? gone({ _tag: "Realm", id: realm }, new Target.RealmDestroyed({}))
+      ? realmGone(realm, closing)
       : protocolError(error)
 
 // ── Ids ───────────────────────────────────────────────────────────────────────────────────────────────────
@@ -286,6 +308,8 @@ export const makeFactBuffer = (sink: Adapter.Sink): Effect.Effect<FactBuffer, ne
 export interface RealmNode extends Pending {
   readonly id: Target.RealmId
   ended: boolean
+  /** Why it ended, once it has: its page's reason where it ended with its page. */
+  endedWith?: Target.CloseReason | undefined
 }
 
 /** A navigation in the kit's tree: what the kit reads, which an adapter's entry extends. */
@@ -315,6 +339,7 @@ export const removeRealm = <R extends RealmNode>(
 ): void => {
   if (realm.ended) return
   realm.ended = true
+  realm.endedWith = reason
   remove(realm)
   if (realm.pending) {
     realm.held.length = 0

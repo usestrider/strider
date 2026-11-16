@@ -47,6 +47,17 @@ describe("A URLPattern route's intercept", () => {
   })
 })
 
+describe("An exact route's intercept", () => {
+  it("covers the URL as the browser writes it", () => {
+    for (
+      const [pattern, url] of [
+        ["http://h", "http://h/"],
+        ["HTTP://H:80/a", "http://h/a"]
+      ] as const
+    ) assert.strictEqual(Routes.covering(pattern), url, pattern)
+  })
+})
+
 const request = (method: NetworkRequest.NetworkRequest["method"], url: string, headers: Record<string, string> = {}) =>
   new NetworkRequest.NetworkRequest({
     hop: "Q1.0" as NetworkRequest.HopId,

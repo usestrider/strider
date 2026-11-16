@@ -519,6 +519,13 @@ didn't pay for two protocols.
 **`Browser.layerTest` emulates no DOM.** A fake browser with a DOM would be a second engine to keep honest, and real
 browsers are cheap to launch.
 
+**The scheduled integration run guards Strider's own rules.** Each case tests a rule of Strider's code, or a bug that
+escaped once, as Strider's own test on every backend, within the run's time goals, and only that run decides a
+release. Ports of Playwright's and Puppeteer's suites measure parity and find bugs: they run apart, on request, and
+what they find comes in as a native test of the rule it broke. Rejected: running the ports each night, which would turn
+the run into a parity scoreboard whose flakes and runtime block releases on behavior Strider doesn't claim; and copying
+ported cases in, which brings upstream code, and the assumptions of another implementation, into Strider's tests.
+
 
 ## Document observation and delayed attribution
 
@@ -594,6 +601,14 @@ page or absent compositor frame cannot hold cleanup indefinitely: at the deadlin
 reply wait are released, a warning records the incomplete restoration, and scope cleanup continues. Session end
 also closes the wait and is quiet. The original dimensions remain recorded after incomplete restoration so a
 later override does not mistake stale dimensions for the native viewport.
+
+A context the library created and removes as its scope closes skips releasing the overrides it holds for its life,
+its emulation and its focus emulation, as it skips its file chooser, challenge, credential and download
+declarations: the removal follows, so nothing can observe the restore, and the wait is the one cleanup that can
+last its whole budget, on a renderer blocked by a script or whose size never matches its recorded baseline. If the
+browser refuses the removal, those overrides are released after all. A context handed off and left open, and an
+`emulate` registration released with its own scope, still restore and wait. Rejected: restoring on close with a
+shorter bound, which still spends it on every close that cannot be confirmed and warns for a page about to go.
 
 Rejected: `dontSetVisibleSize: true`. It passed restoration and viewport/full-page capture checks, but Chromium
 screencast frames remained at the native 780x493 instead of an overridden 640x480. Keeping native resizing preserves
@@ -1200,7 +1215,7 @@ session cookie, while closing that startup page first exposed the same loss. Iso
 session cookies. This is an observed boundary while the browser remains alive, not a traced Chromium cause or
 a claim about other session-only state. It affects default contexts with temporary as well as supplied profile
 directories, so preserving the window only for `userDataDir` would leave part of the behavior change in place.
-It is distinct from shutdown of a connected Chromium layer, which now attempts graceful close before signals.
+It is distinct from shutdown of a connected Chromium layer, which attempts graceful close before signals.
 
 Without a startup window, initial `strider tabs` and the `tabs` tool return empty listings. Existing callers
 would have to create a page explicitly. Retain the current initial-page behavior and the session-cookie guard;
@@ -1211,16 +1226,18 @@ silently changing session-cookie lifetime and initial tab listings; enabling it 
 which still changes temporary default contexts; and treating the saving as evidence that the startup page has
 no behavioral role. Caller opt-in keeps that trade explicit.
 
-## Owned Chromium attempts graceful close before termination
+## Owned Chromium and Firefox attempt graceful close before termination
 
-A successfully connected, owned Chromium launch sends Browser.close while the protocol client is alive and waits
-for actual process exit for up to five seconds on the browser clock, independently of the caller's deadline.
-The existing signal termination and five-second force-kill fallback follow, so a hung process can take roughly
-ten seconds plus process-group cleanup. This best effort helps preserve recent supplied-profile storage without
-promising durability on crashes or forced termination. Signal-only teardown was rejected because the reproduced
-normal shutdown lost a recent write; an unbounded wait could hang scope closure, and a caller-configurable budget
-would add public configuration for a bounded internal cleanup policy. Attached browsers and failed connections
-retain their existing release behavior.
+A successfully connected, owned Chromium or Firefox launch sends its protocol's close command (CDP's Browser.close,
+BiDi's browser.close, before session.end, which it ends itself) while the protocol client is alive and waits for
+actual process exit for up to five seconds on the browser clock, independently of the caller's deadline. Both
+adapters share the one finalizer. The wait is on the exit, not the reply: Firefox 158.0 answers browser.close
+before it writes the profile's cookies and localStorage. The existing signal termination and five-second force-kill
+fallback follow, so a hung process can take roughly ten seconds plus process-group cleanup. This best effort helps
+preserve recent supplied-profile storage without promising durability on crashes or forced termination. Signal-only
+teardown was rejected because the reproduced normal shutdown lost a recent write on both browsers; an unbounded
+wait could hang scope closure, and a caller-configurable budget would add public configuration for a bounded
+internal cleanup policy. Attached browsers and failed connections retain their existing release behavior.
 
 ## Chromium screencast ownership belongs to the session
 
