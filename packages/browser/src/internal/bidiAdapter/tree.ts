@@ -14,10 +14,22 @@ import type { ContextEntry, DocumentEntry, NavigableEntry, NavigationEntry, Real
 
 // ── Ending things ─────────────────────────────────────────────────────────────────────────────────────────
 
-/** Releases only the reservation owned by the pending restoration. */
+/**
+ * Cancels the pending restoration: releases only the reservation it owns, and marks the navigable ambiguous, since
+ * the cancelled traversal may still produce a realm that a later traversal could not tell from its own.
+ */
 export const cancelRestoration = (navigable: NavigableEntry) => {
   if (navigable.restoring === undefined) return
   navigable.restorationAmbiguous = true
+  finishRestoration(navigable)
+}
+
+/**
+ * Releases the pending restoration's reservation without marking the navigable ambiguous: for a restoration whose
+ * own navigation ended, which has nothing left to produce.
+ */
+const finishRestoration = (navigable: NavigableEntry) => {
+  if (navigable.restoring === undefined) return
   Kit.unexpect(navigable.expected, navigable.restoring.navigation)
   navigable.restoring = undefined
 }
@@ -43,7 +55,7 @@ export const endNavigation = (
   evidence: string
 ) =>
   Kit.endNavigation(state.buffer, navigation, outcome, evidence, (navigation) => {
-    if (navigation.navigable.restoring?.navigation === navigation.id) cancelRestoration(navigation.navigable)
+    if (navigation.navigable.restoring?.navigation === navigation.id) finishRestoration(navigation.navigable)
     if (outcome._tag === "Failed" && Option.isNone(outcome.errorDocument)) {
       navigation.navigable.failedNavigation = {
         id: navigation.id,
