@@ -905,6 +905,51 @@ describe("Chromium adapter, CDP only", () => {
         `<script>window.log=''</script><div id="source" draggable="true" ondragstart="log+='1'" style="position:absolute;left:10px;top:10px;width:60px;height:60px;background:red">Source</div><div id="target" ondragenter="log+='2'" ondragover="event.preventDefault();log+='3'" ondrop="event.preventDefault();log+='4'" style="position:absolute;left:300px;top:10px;width:60px;height:60px;background:gray">Target</div>`
 
       it.effect(
+        "returns the drag deadline while its source object cleanup reply is outstanding",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            let sourceObject: string | undefined
+            let releaseId: number | undefined
+            const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
+              const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
+              return yield* CdpAdapter.connect({
+                ...transport,
+                send: Effect.fnUntraced(function*(message: string) {
+                  const wire = JSON.parse(message)
+                  if (wire.method === "DOM.describeNode" && wire.params.pierce === true) {
+                    sourceObject = wire.params.objectId
+                  }
+                  if (
+                    wire.method === "Runtime.releaseObject" && sourceObject !== undefined &&
+                    wire.params.objectId === sourceObject
+                  ) releaseId = wire.id
+                  yield* transport.send(message)
+                }),
+                messages: transport.messages.pipe(Stream.filter((message) => {
+                  const wire = JSON.parse(message)
+                  return releaseId === undefined || wire.id !== releaseId
+                }))
+              }, { sink, ownership: "launched" })
+            }))
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(dragFixture)}`)
+              const started = Date.now()
+              const result = yield* page.locator("#source").dragTo(page.locator("#target")).pipe(
+                Deadline.within("1 second"),
+                Protocol.withCommandTimeout("3 seconds"),
+                Effect.result
+              )
+              const elapsed = Date.now() - started
+              assert.isBelow(elapsed, 2000, "the drag deadline must not wait for the source object release timeout")
+              if (result._tag === "Failure") assert.isTrue(Deadline.isTimeout(result.failure))
+            }).pipe(Effect.provide(backend))
+          }),
+        timeout
+      )
+
+      it.effect(
         "drops an HTML drag made by hovering, pressing, hovering the target and releasing",
         () =>
           Effect.gen(function*() {
