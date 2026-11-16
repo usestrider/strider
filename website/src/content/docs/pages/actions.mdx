@@ -164,15 +164,15 @@ set `rendered: false` on a pointer action when your application can tolerate rou
 
 An action needs its element reachable; visible means a person can see it. Actions accept an element with `opacity: 0` on itself or any ancestor. For that element, `isVisible` returns false, `Expect.toBeVisible` waits, and `filter({ visible: true })` excludes that element; `filter({ visible: false })` includes it. Opacity alone does not make an action wait for a fade-in.
 
-An action's `visible` check requires CSS visibility, content visibility, and a nonempty box. Pointer actions require their action point to receive the pointer, so a covering element blocks them, unless it is inside the same button or link as the target, which receives the click either way. Non-pointer actions accept transparency without a pointer hit test: `fill` and `clear` require enabled, editable, and not inert; `focus`, `press`, and `pressSequentially` require not inert; `selectOption` requires enabled, the chosen options included; `selectText` requires only visibility; `scrollIntoView` requires stability. `setInputFiles` runs no readiness checks.
+An action's `visible` check requires CSS visibility, content visibility, and a nonempty box. Pointer actions require their action point to receive the pointer. The element that must receive it is the target's nearest enclosing `button`, `[role=button]`, `a`, or `[role=link]`, found through shadow roots and slots, or else the target itself; an `input`, `textarea`, `select`, or editable target must receive it itself. A covering element blocks the action unless it is inside that element, which receives the click either way. Non-pointer actions accept transparency without a pointer hit test: `fill` and `clear` require enabled, editable, and not inert; `focus`, `press`, and `pressSequentially` require not inert; `selectOption` requires enabled, the chosen options included; `selectText` requires only visibility; `scrollIntoView` requires stability. `setInputFiles` runs no readiness checks.
 
 With the viewport check enabled, actions also scroll targets wholly clipped by a scrollable container. This includes containers around a frame in its parent page. An overlay or clipping by a container that cannot scroll does not trigger scrolling. Turning off the pointer check keeps this scrolling; turning off the viewport check disables it.
 
-- "Stable": stopped moving. "In the viewport": scrolled there. "Receives the pointer": nothing outside the target, or outside the button or link it is in, covers the point.
+- "Stable": stopped moving. "In the viewport": scrolled there. "Receives the pointer": nothing outside the element that must receive the pointer covers the point.
   "Not inert": not under an `inert` attribute, nor outside the topmost open modal dialog, the one last in the
   document. That dialog and its content aren't inert even when an ancestor has `inert`.
-- After the checks pass, it checks once more and sends. If something covers a click's target in between, the page
-  never sees the click, and the action checks again.
+- After the checks pass, it checks once more and sends. With `receivesPointer` on, if something outside the element
+  that must receive the pointer covers the point in between, the page never sees the click, and the action checks again.
 - A timeout's hint names the last failed check:
   `Another element covers the element's action point: div.toast "Saved"`.
 
@@ -181,6 +181,8 @@ With the viewport check enabled, actions also scroll targets wholly clipped by a
 An element that never passes a check, such as a button that pulses forever, times out. Turn single checks off with
 `checks`, by key: `visible`, `stable`, `enabled`, `editable`, `notInert`, `inViewport`, and `receivesPointer`.
 There's no blanket `force`: turning off one check rather than all keeps the rest guarding the action.
+Turning off `receivesPointer` also turns off the guard that stops a click when something covers the point after
+the checks pass, so the click lands on whatever is at the point.
 On Chromium, a pointer action into a cross-site frame goes to that frame without the browser hit-testing the page
 around it, so with `receivesPointer` off, a click reaches the frame's element even where the parent page covers it. `trial: true`
 does the reverse, running the checks and sending nothing, to learn whether an action would go through without

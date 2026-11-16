@@ -1250,8 +1250,10 @@ export interface Locator extends ReadonlyLocator {
    *
    * - The click is a move to the action point, then a press and a release, carrying the keys and buttons the page
    *   holds.
-   * - The gesture is guarded: the first of its pointer, mouse, touch, and click events must land in the element. If
-   *   the page covered it between the checks and the input, the gesture is stopped before the page's handlers see
+   * - The gesture is guarded: the first of its pointer, mouse, touch, and click events must land in the element that
+   *   receives the pointer for it: its nearest enclosing `button`, `[role=button]`, `a`, or `[role=link]`, found
+   *   through shadow roots and slots, or else the element itself, which an `input`, `textarea`, `select`, or
+   *   editable element always is. If the page covered it between the checks and the input, the gesture is stopped before the page's handlers see
    *   it, and the action checks again. With `receivesPointer` disabled the gesture isn't guarded, and lands on
    *   whatever covers the element.
    * - `modifiers` are pressed before the gesture and released after it. On a backend without
