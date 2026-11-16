@@ -162,6 +162,17 @@ A command to a page that can't be reached is dropped; the page's end, which foll
 decorator that qualifies decoded messages, which would still rewrite messages by method name, away from the tables
 that need the ids, and can't see which command a reply answers.
 
+**A command returns after the events the browser sent before its reply.** The reader settles a reply when it
+arrives, but the caller resumes only once the worker has handled every message received before it, on any session,
+within the command's own budget. So an operation that logs, requests, or opens a dialog finds it in the history when
+it returns, as far as the history's retention keeps it, as the order on the wire says, and a test that acts and then
+reads a history doesn't race the worker. The barrier is the connection's: a held session's events count as handled
+once they are held, though they are folded only when its sync completes, so a sync's own reply never waits on the
+sync; and the fold never waits on a command, so the barrier never waits on itself. Rejected: documenting histories
+as eventually consistent with operations, which leaves every read after an action racing; a per-session drain before
+each reply, which deadlocks a sync whose reply arrives while its session is held; and a barrier outside the
+command's timeout, which leaves a command outside an operation unbounded.
+
 ## The browser model (L1)
 
 **A plain click's commands go out as one step, and only their replies overlap.** The move's reply waits a rendering
@@ -329,7 +340,7 @@ world and document. Removing a script affects future documents only, and nothing
 
 **Every frame is resolved by its own document's engine, same-origin frames too.** Reaching into a same-origin iframe
 from the parent's engine works only for same-origin frames, and a cross-site frame needs the per-document route
-anyway. One path for both keeps locating independent of what a page's script can reach. Parent-frame clipping follows the same boundary: L1 reads visible iframe content bounds in each parent document and passes their intersection in child viewport coordinates to the target engine. Viewport scrolling uses geometric fragment presence and native intersection comparisons with ordinary and expanded scrollport margins for targets wholly clipped by ancestor scrollers, independently of coverage. Expansion affects scroll containers only, so non-scrollable clipping inside an unrelated scroller does not request scrolling. The same gate applies to routed iframes in their parent documents, across origins. Exposed fragment centres are recognized synchronously through the browser’s paint stack, including beneath overlays; this avoids an observation window for already-reachable targets without changing pointer point selection. When observation is necessary, the target is resolved again afterwards and all readiness conditions run in one synchronous pass; replacements must start a new check. Observation is bounded by the round budget and a missing response never authorizes readiness. Ordinary scrollable targets must be reachable without a manual scroll, matching Playwright for the 1.0 parity goal: clipping is a scrolling condition, whereas overlay coverage is a pointer condition. Native intersection preserves positioned descendants that escape overflow ancestors without reconstructing CSS layout. An asynchronous observation crosses a rendering update and expires old stability evidence; the synchronous exposed-fragment path preserves safe same-frame reuse. The inViewport check alone controls scrolling, even when receivesPointer is disabled. Rejected: scrolling every Covered target, which moves the page for overlays, and requiring manual scrollIntoView for ordinary nested scrollers. With pointer checks enabled, the browser hit-tests fragment centres in order, and L1 selects the first reaching the target or a descendant and its iframe in every parent document. If none reaches it locally, the first geometric candidate preserves local Covered; if all locally reachable candidates are blocked by parents, the first parent Covered is retained. Candidates are fresh on each round and under the input permit. This permits a later uncovered line when an earlier line is covered. Disabled pointer checks use the first geometric candidate without probing coverage; explicit offsets are never substituted. Parent candidate probes use each document’s engine across origins and processes. Rejected: restarting at the first child candidate after a parent rejects it, which never reaches an available later line, and carrying candidate coordinates across attempts or permit acquisition, which could reuse stale geometry. Rejected: inferring ancestor clipping from computed overflow and containing-block styles, which duplicates an incomplete layout model and misclassifies inline boxes, SVG, and top-layer elements. Rejected: inspecting `window.parent` for same-origin frames, which would give cross-origin frames different pointer behavior, and selecting the first fragment before translating it, which can aim outside the page's visible viewport.
+anyway. One path for both keeps locating independent of what a page's script can reach. Parent-frame clipping follows the same boundary: L1 reads visible iframe content bounds in each parent document and passes their intersection in child viewport coordinates to the target engine. Viewport scrolling uses geometric fragment presence and native intersection comparisons with ordinary and expanded scrollport margins for targets wholly clipped by ancestor scrollers, independently of coverage. Expansion affects scroll containers only, so non-scrollable clipping inside an unrelated scroller does not request scrolling. The same gate applies to routed iframes in their parent documents, across origins. Exposed fragment centres are recognized synchronously through the browser’s paint stack, including beneath overlays; this avoids an observation window for already-reachable targets without changing pointer point selection. When observation is necessary, the target is resolved again afterwards and all readiness conditions run in one synchronous pass; replacements must start a new check. Observation is bounded by the round budget and a missing response never authorizes readiness. Ordinary scrollable targets must be reachable without a manual scroll, matching Playwright for the 1.0 parity goal: clipping is a scrolling condition, whereas overlay coverage is a pointer condition. Native intersection preserves positioned descendants that escape overflow ancestors without reconstructing CSS layout. An asynchronous observation crosses a rendering update and expires old stability evidence; the synchronous exposed-fragment path preserves safe same-frame reuse. The inViewport check alone controls scrolling, even when receivesPointer is disabled. Rejected: scrolling every Covered target, which moves the page for overlays, and requiring manual scrollIntoView for ordinary nested scrollers. With pointer checks enabled, the browser hit-tests fragment centres in order, and L1 selects the first reaching the target or a descendant and its iframe in every parent document. For a target other than a form field or editable element, the element that must be hit is its nearest enclosing `button`, `[role=button]`, `a`, or `[role=link]`, itself included, found in the flat tree through shadow roots and slots: the browser hands a click on a `pointer-events: none` descendant to that ancestor, as it does for a person. Playwright follows the same rule but searches only the light DOM, stopping at a shadow root; Strider departs from it there, since the browser hit-tests the flat tree and delivers a click on a slotted or shadow-root target to that button or link. Rejected: requiring the target itself, which refuses such a click until the deadline though the button receives it, and Playwright's light-DOM search, which refuses the same click across a shadow root or slot. If none reaches it locally, the first geometric candidate preserves local Covered; if all locally reachable candidates are blocked by parents, the first parent Covered is retained. Candidates are fresh on each round and under the input permit. This permits a later uncovered line when an earlier line is covered. Disabled pointer checks use the first geometric candidate without probing coverage; explicit offsets are never substituted. Parent candidate probes use each document’s engine across origins and processes. Rejected: restarting at the first child candidate after a parent rejects it, which never reaches an available later line, and carrying candidate coordinates across attempts or permit acquisition, which could reuse stale geometry. Rejected: inferring ancestor clipping from computed overflow and containing-block styles, which duplicates an incomplete layout model and misclassifies inline boxes, SVG, and top-layer elements. Rejected: inspecting `window.parent` for same-origin frames, which would give cross-origin frames different pointer behavior, and selecting the first fragment before translating it, which can aim outside the page's visible viewport.
 
 Bounding-box reads use the browser's axis-aligned rect in top-level viewport CSS pixels, composed through
 frames, rather than reconstructing layout or original corners. Native frame conversion is used where
@@ -512,6 +523,15 @@ press two ways; chords in the library too, which parses strings where the type a
 `ControlOrMeta` or aliases such as `Ctrl` and `Cmd`, which would need a platform-dependent default the library
 doesn't have, or a second name for a modifier. They are refused as `InvalidInput`, naming the four.
 
+**The agent tools' navigations wait for the parsed document; `Page.goto` returns at commit.** `newPage` and `goto`
+in the toolkit, which the CLI and `strider mcp` share, wait for `domContentLoaded` unless their `waitUntil` says
+otherwise, and `find` reads the page on every call. Agents run commands back to back and read an empty result as
+"not on the page", not "not yet"; parsed HTML is the first point at which the document's own content is in the tree,
+so a snapshot straight after sees it, while what a script adds later stays `expect`'s to wait for. The exported test
+writes the same `waitUntil`, so a replay waits as the session did. Rejected: `commit`, the library's default, which
+returns before the content is parsed, so the first snapshot can come back empty; and `load`, which also waits on
+images, fonts, and slow third-party resources that a snapshot doesn't need. `Page.goto` keeps `commit`, since a program states what it waits for.
+
 **The `strider` client loads Effect, and talks to its session's daemon through one `effect/rpc` group.** Each caller,
 the command, `strider mcp`, `strider sessions`, and `start --fork`, uses the same RPC client over the session's Unix
 socket, so what crosses it is a Schema: a command's output and exit code, a tool call's parameters and result, the
@@ -585,6 +605,24 @@ that effective override when the command runs, including when registrations are 
 The viewport is applied, measured and cleared on top-level page targets only. Chromium refuses the commands on an
 out-of-process iframe's target, whose size comes from its frame in the parent page, and an iframe waiting for the debugger
 resumes only after its setup, so a measurement there waits for a reply the paused renderer can't send.
+
+A page with an opener never takes its own first measurement as its original dimensions. Chromium starts a tab's
+renderer at its opener's layout, which is the override's while the opener emulates a viewport, and lays it out at
+its window's size only once the override is cleared, so a popup's gate can measure a size it never returns to, and
+its restore would wait for it. Only a page of its window says what that size is. A window that `window.open` opens
+as a popup holds no tabs, so a popup that shares its window, read with `Browser.getWindowForTarget` while it waits
+for the debugger and kept for each page, with another page of its context that has recorded dimensions is a tab,
+and takes them, since tabs in one window have one size. Any other popup's dimensions are unknown: one alone in its
+window, beside no page with recorded dimensions, or whose window can't be read. Its release clears the override and
+warns that the restore could not be verified, without waiting. The cost is that a `window.open` popup window, such
+as a sign-in flow's, open when a viewport is released is no longer confirmed, though it measures its own size.
+Rejected: taking the size after the clear as the baseline, which would confirm without the renderer having taken
+the original size; keeping a popup's first measurement when it's alone in its window, which a tab opened alone in a
+new window breaks; comparing that measurement with the configured viewport to detect an inherited size, which mobile
+emulation breaks by laying the page out at another size; telling a popup window from a tab by window bounds, whose
+platform chrome differs; reading the window's type from `Page.windowOpen`'s features, which aren't tied to the
+target they open; and skipping a removed context's restore, which would leave a released `context.emulate` waiting
+on the same popup.
 
 Measure in the named `__strider_viewport` isolated world for the target's main frame,
 passing the returned execution context id explicitly to `Runtime.evaluate`. Create or retrieve that world for each
@@ -1652,6 +1690,47 @@ report both kinds as requests, and Firefox reports `data:` but not `blob:`. Repo
 rejected: the same page would report different requests on each backend, and a `data:` navigation would carry a
 response with no network behind it. `file:` URLs stay requests.
 
+## A timer that throws fails the page clock's operation
+
+When a timer that `adjust` or `setTime` fires on a controlled page clock throws, the error is still reported to
+the page, as a real browser reports an uncaught one, the remaining due timers still run, and the clock still reaches
+its time; then the operation fails with `PageClockError` whose reason is `EvaluationThrown`, carrying the first
+error and the document it threw in. Playwright's clock rethrows the first error once time has reached the target
+too. Succeeding and leaving the error to the page alone was rejected: a test that moves time past a broken timer
+would pass without seeing it. Stopping at the first error was rejected: the timeline would stop short of the time
+the caller asked for, with other documents already past it.
+
+## The page clock waits for the page's messages between timers
+
+After each timer a controlled page clock fires, it lets the page's queued tasks run, and decides how long from
+evidence: it counts the messages the page posts, to a `MessagePort` or to its own window, and passes a message
+through a channel of its own again while the page has posted any since the last one, then waits for one real timer.
+So a chain of the document's own messages, as schedulers built on `MessageChannel` hand work on, completes
+before the next timer whatever its length. It doesn't wait for work in other documents, workers, or the network: a
+document sees only the messages it posts, and a counter of its own can't show that another's work has finished.
+Counting same-origin frames' messages too was rejected: it would hold for some frames and not others. The operation's deadline bounds the wait: past it, the remaining due timers run without
+waiting, the clock reaches its time, and the operation fails with `Timeout`, so a page that posts messages without
+end leaves its clock usable. Playwright's clock waits for one real `setTimeout(0)`, a fixed window that a
+browser's timer clamping makes 4 ms after nested timers and that a longer chain outlasts; that was rejected as a
+settling window. Waiting for nothing between timers was rejected because a timer a task sets would miss the
+adjustment (#343). The cost is real time per timer, so a long adjustment over a frequent interval can outlast the
+default deadline.
+
+## Text is inserted with the page's editing command where a protocol has none
+
+`Keyboard.insertText` and `fill` insert text with no key events on every backend (`fill("")` deletes by pressing Delete). CDP has `Input.insertText`;
+WebDriver BiDi has no such command, and stock WebKit's Automation inserts only by key (`InsertByKey`), so on Firefox
+and stock WebKit the engine inserts with the page's editing command, `execCommand("insertText")`, taken from
+`Document.prototype` at install, in the focused document. Firefox's command fires no `beforeinput`, so there the
+engine dispatches a cancelable one first, untrusted, and inserts nothing when the page cancels it: every other
+backend gives a page that event before the text, and editors that apply text in their `beforeinput` handler need
+it. Strider dispatches an untrusted event only to fill a gap a protocol leaves in an event order every other backend
+gives, never as a substitute for input it could send; `input.insertText` is `partial` on Firefox to say so. Rejected:
+the editing command alone, which would leave a Firefox page's `beforeinput` handler never run, so a rich-text
+editor would get nothing from `fill`; typing each character as a key, which sends key events `insertText` promises
+not to, loses the text when a page cancels a `keydown`, and runs a `beforeinput` handler once per character; and
+refusing `insertText` on those backends, which breaks callers for a gap Strider can fill.
+
 ## A headless launch states a fine pointer with hover
 
 A headless launch of Chromium or Firefox tells its pages they have a fine pointer that can hover: Chromium with
@@ -1665,3 +1744,15 @@ does. A caller's own `--blink-settings`, or a profile's own pointer preferences,
 emulation still overrides them. On Firefox they're user values, as a launch profile's are, so in a profile directory
 the caller keeps, Firefox saves them into `prefs.js` and a later launch there, headed too, keeps them. Writing them
 as default values with `pref()`, which Firefox doesn't save, was rejected: Firefox 158 ignores them there.
+
+## A route's cache setting on Chromium is confirmed except during a navigation
+
+While a request or response route is in force, the CDP adapter turns a target's HTTP cache off with
+`Network.setCacheDisabled`, which the renderer answers. Chromium can hold that reply until a cross-process navigation
+under way commits, so a route declared while the navigation waits on a server that waits on the caller would never
+return. The declaration waits for the reply unless a navigation is pending in the target; then the command is written
+before the declaration returns and reaches the new document at its commit. A declaration that wants the value a
+command still unanswered sent waits for that reply by the same rule, rather than returning at once. The reply is awaited apart from the
+declaration, under the connection's own command deadline, and one that fails or never comes leaves the setting
+unknown, so the next change sends it again. Rejected: always awaiting the reply, which deadlocks with a held
+navigation, and never awaiting it, which leaves the setting unconfirmed when nothing stops the browser answering.

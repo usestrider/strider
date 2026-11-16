@@ -58,7 +58,12 @@ strider -s shop -p main snapshot
 (main · 16 ms)
 ```
 
-`find` gives a ref without the whole tree; then act on it, check the result, and go on:
+`page new` and `goto` return once the new document's HTML is parsed, so a `snapshot` or `find` straight after sees
+its content. `--wait-until commit` returns as soon as the document exists, which may be before it has any content,
+and `--wait-until load` also waits for its images and other resources.
+
+`find` gives a ref without the whole tree, reading the page afresh each time; then act on it, check the result, and
+go on:
 
 ```sh
 strider -s shop -p main find "Add to cart" --role button
@@ -172,12 +177,16 @@ describe("shop", () => {
       Effect.scoped(Effect.gen(function*() {
         const context = yield* Browser.newContext({ focus: "emulated" })
         const main = yield* context.newPage
-        yield* main.goto("https://shop.example.com")
+        yield* main.goto("https://shop.example.com", { waitUntil: "domContentLoaded" })
         yield* main.getByRole("button", { name: "Add to cart", exact: true }).click()
         yield* main.getByRole("status").pipe(Expect.toBeVisible)
-        yield* main.goto("https://shop.example.com/cart")
+        yield* main.goto("https://shop.example.com/cart", {
+          waitUntil: "domContentLoaded"
+        })
         yield* main.getByLabel("Email").fill("ada@example.com")
-        yield* main.goto("https://shop.example.com/orders")
+        yield* main.goto("https://shop.example.com/orders", {
+          waitUntil: "domContentLoaded"
+        })
         const w1 = yield* Download.next(main).pipe(Deadline.within("2 minutes"))
         yield* main.getByRole("button", { name: "Export CSV", exact: true }).click()
         yield* w1

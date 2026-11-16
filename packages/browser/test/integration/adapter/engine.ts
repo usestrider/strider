@@ -1455,6 +1455,8 @@ export const engine = (backend: Backend) =>
                 })
               }`
             )
+            // Ordinary snapshots read assigned slots too, for the flat tree: field ancestry is what a masking one adds
+            let ordinaryReads: number | undefined
             for (const provenance of [false, true, false, true]) {
               yield* call(`() => { globalThis.fieldReads = 0; globalThis.editabilityReads = 0 }`, [])
               const response = yield* send(
@@ -1469,8 +1471,11 @@ export const engine = (backend: Backend) =>
               const reads = yield* call(`() => String(globalThis.fieldReads)`, [])
               assert(reads._tag === "Value" && reads.value.type === "string")
               if (provenance) {
-                assert.isAbove(Number(reads.value.value), 0)
-              } else assert.strictEqual(Number(reads.value.value), 0)
+                assert.isAbove(Number(reads.value.value), ordinaryReads!)
+              } else {
+                ordinaryReads ??= Number(reads.value.value)
+                assert.strictEqual(Number(reads.value.value), ordinaryReads)
+              }
               const classifications = yield* call(`() => String(globalThis.editabilityReads)`, [])
               assert(classifications._tag === "Value" && classifications.value.type === "string")
               if (provenance) {
@@ -2537,6 +2542,89 @@ export const engine = (backend: Backend) =>
               count(yield* send({ op: "count", steps: [role("button", text("Add to cart", true), true)] })),
               3
             )
+          }), timeout)
+
+        it.effect(
+          "finds a display: contents element by role, unless aria-hidden, its visibility or a display: none ancestor hides it",
+          () =>
+            Effect.gen(function*() {
+              const { send } = yield* open(
+                backend,
+                `<button id="shown" style="display:contents">Buy</button>
+<div aria-hidden="true"><button style="display:contents">Buy</button></div>
+<button style="display:contents;visibility:hidden">Buy</button>
+<div style="display:none"><button style="display:contents">Buy</button></div>`
+              )
+              assert.strictEqual(count(yield* send({ op: "count", steps: [role("button", text("Buy", true))] })), 1)
+              assert.strictEqual(
+                count(yield* send({ op: "count", steps: [role("button", text("Buy", true), true)] })),
+                4
+              )
+            }),
+          timeout
+        )
+
+        it.effect("names an element through a slot's assigned nodes and fallback content", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<div id="button"><span>foo</span></div><div id="assigned"><span>Email</span></div><div id="fallback"></div>`,
+              `() => {
+                document.getElementById('button').attachShadow({mode:'open'}).innerHTML = '<button><slot></slot></button>'
+                document.getElementById('assigned').attachShadow({mode:'open'}).innerHTML = '<label><slot></slot><input></label>'
+                document.getElementById('fallback').attachShadow({mode:'open'}).innerHTML = '<label><slot>Phone</slot><input></label>'
+              }`
+            )
+            assert.strictEqual(count(yield* send({ op: "count", steps: [role("button", text("foo", true))] })), 1)
+            assert.strictEqual(count(yield* send({ op: "count", steps: [role("textbox", text("Email", true))] })), 1)
+            assert.strictEqual(count(yield* send({ op: "count", steps: [role("textbox", text("Phone", true))] })), 1)
+          }), timeout)
+
+        it.effect(
+          "counts a display: contents element's text as visible, unless its visibility or opacity hides it",
+          () =>
+            Effect.gen(function*() {
+              const { send } = yield* open(
+                backend,
+                `<span id="shown" style="display:contents">hello</span>
+<span id="hidden" style="display:contents;visibility:hidden">hello</span>
+<span id="transparent" style="display:contents;opacity:0">hello</span>`
+              )
+              const shown = yield* send({ op: "visible", steps: [{ _tag: "Css", selector: "#shown" }] })
+              assert.deepStrictEqual(shown, { _tag: "Visible", count: 1, visible: true })
+              const hidden = yield* send({ op: "visible", steps: [{ _tag: "Css", selector: "#hidden" }] })
+              assert.deepStrictEqual(hidden, { _tag: "Visible", count: 1, visible: false })
+              const transparent = yield* send({ op: "visible", steps: [{ _tag: "Css", selector: "#transparent" }] })
+              assert.deepStrictEqual(transparent, { _tag: "Visible", count: 1, visible: false })
+            }),
+          timeout
+        )
+
+        it.effect("does not count a hidden slot's text as visible display: contents", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<div id="host">secret</div>`,
+              `() => {
+                document.getElementById('host').attachShadow({mode:'open'}).innerHTML =
+                  '<span id="contents" style="display:contents"><slot style="visibility:hidden"></slot></span>'
+              }`
+            )
+            const response = yield* send({ op: "visible", steps: [{ _tag: "Css", selector: "#contents" }] })
+            assert.deepStrictEqual(response, { _tag: "Visible", count: 1, visible: false })
+          }), timeout)
+
+        it.effect("leaves the text of a visibility: hidden display: contents element out of snapshots", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<p>public</p><span style="display:contents;visibility:hidden">secret</span>`
+            )
+            const snapshot = yield* send({ op: "snapshot", steps: null, interactivity: false, depth: null })
+            assert(snapshot._tag === "Snapshot")
+            const serialized = JSON.stringify(snapshot.root)
+            assert.include(serialized, "public")
+            assert.notInclude(serialized, "secret")
           }), timeout)
 
         // HTML takes inert nodes out of the accessibility tree: `inert` on the element or a flat-tree ancestor, and,

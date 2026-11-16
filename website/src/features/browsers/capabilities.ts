@@ -60,6 +60,8 @@ export const groups: ReadonlyArray<{ readonly label: string; readonly names: Rea
       "input.keyboardLayout": "Keyboard layouts",
       "input.pointerModifiers": "Modifiers on pointer actions",
       "input.fractionalPointer": "Pointer events at fractional positions",
+      "hitTest.shadowHostBoxes":
+        "Seeing a shadow host's own boxes, such as a `::before`, over its content when checking that an action point receives the pointer",
       "input.dragAndDrop": "Native HTML drag and drop",
       "input.touch": "Touch input, `tap`",
       "capability.virtualAuthenticator": "Native virtual passkeys on one page, `Capability.VirtualAuthenticator`",

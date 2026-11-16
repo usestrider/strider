@@ -283,10 +283,7 @@ export const applyKind = (
         ...where
       }))
     case "CacheDisabled":
-      return state.send(Network.setCacheBehavior({
-        cacheBehavior: override?._tag === "CacheDisabled" && override.disabled ? "bypass" : "default",
-        ...(where.contexts === undefined ? {} : { contexts: where.contexts })
-      }))
+      return applyCache(state)
     case "FocusEmulation":
       return override === undefined
         ? Effect.void
@@ -297,6 +294,50 @@ export const applyKind = (
       return Effect.void
   }
 }
+
+/**
+ * Whether a placement's requests bypass the cache: where a `CacheDisabled` override says so, or a request- or
+ * response-phase intercept is in force. Firefox looks in its HTTP cache after the request pause, so a request an
+ * intercept continues would be answered from the cache, never reaching the server.
+ */
+const bypass = (state: State, at: Declarations.Placement) => {
+  const override = state.registry.overrides(at).get("CacheDisabled")
+  const intercepts = state.registry.intercepts(at)
+  return (override?._tag === "CacheDisabled" && override.disabled) || intercepts.request.length > 0 ||
+    intercepts.response.length > 0
+}
+
+/**
+ * Sets the cache behavior the declarations in force say. WebDriver BiDi sets it for the session or for top-level
+ * browsing contexts, not for a user context: where a context or the browser wants the cache bypassed, the session
+ * bypasses it, so the context's later pages do from their first request, and each page that wants otherwise is set
+ * on its own, as the adapter first sees it and again whenever a declaration changes what it wants.
+ */
+export const applyCache = (state: State): Effect.Effect<void, Protocol.ProtocolError> =>
+  state.cache.lock.withPermits(1)(Effect.gen(function*() {
+    const session = [...state.contexts.values()].some((context) =>
+      !context.removing && bypass(state, { context: context.id })
+    )
+    if (session !== state.cache.bypass) {
+      state.cache.pages.clear()
+      yield* state.send(Network.setCacheBehavior({ cacheBehavior: session ? "bypass" : "default" }))
+      state.cache.bypass = session
+    }
+    for (const [key, navigable] of state.navigables) {
+      if (navigable.parent !== undefined || navigable.removed || navigable.context.removing) {
+        state.cache.pages.delete(key)
+        continue
+      }
+      const wanted = bypass(state, placement(navigable))
+      if (wanted === (state.cache.pages.get(key) ?? session)) continue
+      yield* state.send(Network.setCacheBehavior({
+        cacheBehavior: wanted ? "bypass" : "default",
+        contexts: [navigable.bidi]
+      }))
+      if (wanted === session) state.cache.pages.delete(key)
+      else state.cache.pages.set(key, wanted)
+    }
+  }))
 
 const addIntercept = Effect.fnUntraced(function*(
   state: State,
@@ -390,6 +431,7 @@ const releaseDeclaration = (
           : applyKind(state, declaration.override._tag, scope).pipe(Effect.ignore)
       case "Intercept":
       case "Challenges": {
+        const cache = declaration._tag === "Intercept" ? applyCache(state).pipe(Effect.ignore) : Effect.void
         const intercept = state.intercepts.get(id)
         state.intercepts.delete(id)
         const collector = state.requestCollectors.get(id)
@@ -400,7 +442,8 @@ const releaseDeclaration = (
             : state.send(Network.removeIntercept({ intercept: intercept.bidi })).pipe(Effect.ignore),
           collector === undefined
             ? Effect.void
-            : state.send(Network.removeDataCollector({ collector })).pipe(Effect.ignore)
+            : state.send(Network.removeDataCollector({ collector })).pipe(Effect.ignore),
+          cache
         ], { discard: true })
       }
       case "BodyCollection": {
@@ -464,6 +507,7 @@ export const declare = Effect.fnUntraced(
           state.requestCollectors.set(id, collector)
         }
         yield* Kit.protocol(addIntercept(state, id, scope, declaration))
+        yield* Kit.protocol(applyCache(state))
         break
       case "Challenges":
         // An intercept at the challenge alone, for every URL, which pauses nothing else. WebDriver BiDi can't

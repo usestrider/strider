@@ -748,8 +748,31 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               // A dialog decided by a declared handler, and a route that answers a fetch
               const handler = yield* call(tools, "dialog", { page: "shop", decision: "dismiss" })
               assert.strictEqual(handler.value.outcome.registration, "r1")
-              yield* call(tools, "click", { page: "shop", target: `text="Ask"` })
-              yield* call(tools, "expect", { page: "shop", target: "css=#asked", state: "visible", text: "false" })
+              const asked = yield* call(tools, "click", { page: "shop", target: `text="Ask"` })
+              const answered = yield* call(tools, "expect", {
+                page: "shop",
+                target: "css=#asked",
+                state: "visible",
+                text: "false"
+              })
+              // One decision line, naming the registration; an earlier result may have brought the dialog's open
+              // line first, and a later one its decision
+              const dialogLines: Array<string> = [...asked.value.sinceLast, ...answered.value.sinceLast]
+                .filter((line: string) => line.startsWith("dialog"))
+              for (let turn = 0; turn < 50 && !dialogLines.some((line) => line.includes(" by ")); turn++) {
+                yield* Effect.sleep("20 millis")
+                const read = yield* call(tools, "pages", {})
+                dialogLines.push(...read.value.sinceLast.filter((line: string) => line.startsWith("dialog")))
+              }
+              const decided = dialogLines.filter((line) => line.includes(" by "))
+              assert.lengthOf(decided, 1, dialogLines.join("\n"))
+              assert.match(decided[0]!, /^dialog \w+( "Sure\?")? on shop dismissed by r1$/)
+              const openLines = dialogLines.filter((line) => !line.includes(" by "))
+              assert.isAtMost(openLines.length, 1, dialogLines.join("\n"))
+              if (openLines.length === 1) {
+                assert.match(openLines[0]!, /^dialog \w+( "Sure\?")? on shop, open$/)
+                assert.isBelow(dialogLines.indexOf(openLines[0]!), dialogLines.indexOf(decided[0]!))
+              }
               yield* call(tools, "route", {
                 page: "shop",
                 pattern: "**/api/status",
@@ -963,7 +986,7 @@ for (const mode of ["open", "closed"]) {
   window[mode + "Field"] = root.querySelector("input")
 }
 </script>`
-              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`, { waitUntil: "load" })
               yield* page.evaluateInMainWorld(async () => {
                 const frame = document.querySelector("iframe")!
                 if (frame.contentDocument?.querySelector("input") === null) {
@@ -1177,7 +1200,7 @@ for (const mode of ["open", "closed"]) {
                 window.keys.push(event.key + ":" + event.metaKey + ":" + (event.target.id || event.target.localName))
               })
             </script>`
-            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`, { waitUntil: "load" })
             const tools = yield* BrowserToolkit.make({
               context: page.context,
               secrets: {},
@@ -1353,7 +1376,7 @@ for (const mode of ["open", "closed"]) {
           const url = `${served.origin}/fixture?html=${encodeURIComponent(app)}`
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             yield* page.getByRole("button", { name: "Sign in" }).click()
             const strict = yield* BrowserToolkit.make({
               context: page.context,

@@ -297,6 +297,21 @@ describe("strider export test", () => {
     return { _tag: "Tool", ...call, target: undefined, result }
   }
 
+  it("writes the waitUntil a navigation was given, and none for commit, which Page.goto does by default", () => {
+    const { text } = ExportTest.render({
+      name: "waits",
+      browser: { _tag: "Attach", backend: "chromium", endpoint: "http://127.0.0.1:9222" },
+      secrets: {},
+      state: undefined,
+      steps: [
+        { _tag: "NewPage", page: "main", url: "https://shop.example.com", waitUntil: "commit" },
+        tool("goto", { page: "main", url: "https://shop.example.com/cart", waitUntil: "load" })
+      ]
+    })
+    assert.include(text, `yield* main.goto("https://shop.example.com")\n`)
+    assert.include(text, `yield* main.goto("https://shop.example.com/cart", { waitUntil: "load" })\n`)
+  })
+
   it("marks a tab the session took with control, until its release, which a test takes itself", () => {
     const { placeholders, text } = ExportTest.render({
       name: "attached",
@@ -317,7 +332,7 @@ describe("strider export test", () => {
       text,
       "// TODO strider control N7: a tab of the browser's own; take it with page.control in the test, as mail\n"
     )
-    assert.include(text, `yield* mail.goto("https://mail.example.com/inbox")\n`)
+    assert.include(text, `yield* mail.goto("https://mail.example.com/inbox", { waitUntil: "domContentLoaded" })\n`)
     assert.include(text, "// TODO strider release -p mail: the session gave the tab back here")
   })
 
@@ -337,9 +352,9 @@ describe("strider export test", () => {
       text,
       [
         `        const shop = yield* context.newPage`,
-        `        yield* shop.goto("https://shop.example.com")`,
+        `        yield* shop.goto("https://shop.example.com", { waitUntil: "domContentLoaded" })`,
         `        const p2 = yield* context.newPage`,
-        `        yield* p2.goto("https://shop.example.com/cart")`,
+        `        yield* p2.goto("https://shop.example.com/cart", { waitUntil: "domContentLoaded" })`,
         ``
       ].join("\n")
     )
@@ -499,8 +514,8 @@ describe("strider export test", () => {
     assert.include(text, `const p2 = yield* w1\n        const consentForm = p2\n`)
     assert.include(text, `yield* consentForm.getByRole("button", { name: "Accept", exact: true }).click()`)
     assert.include(text, `const shop = main\n        const main_2 = yield* context.newPage\n`)
-    assert.include(text, `yield* main_2.goto("https://shop.example.com/help")\n`)
-    assert.include(text, `yield* shop.goto("https://shop.example.com/cart")\n`)
+    assert.include(text, `yield* main_2.goto("https://shop.example.com/help", { waitUntil: "domContentLoaded" })\n`)
+    assert.include(text, `yield* shop.goto("https://shop.example.com/cart", { waitUntil: "domContentLoaded" })\n`)
   })
 
   it("builds a secret into a fill's value or a URL wherever the session put it in", () => {
@@ -538,9 +553,18 @@ describe("strider export test", () => {
     )
     assert.include(text, `yield* main.getByLabel("Note").fill(Redacted.make(\`${token}\\\`\\\${x}\\\`\\\\\`))\n`)
     assert.include(text, `yield* main.getByLabel("Name").fill("100% Ada")\n`)
-    assert.include(text, `yield* main.goto(\`https://shop.example.com/login?token=${token}&next=/cart\`)\n`)
-    assert.include(text, `yield* main.goto(Redacted.value(yield* Config.Redacted("API_TOKEN")))\n`)
-    assert.include(text, `yield* admin.goto(\`https://${token}@admin.example.com\`)\n`)
+    assert.include(
+      text,
+      `yield* main.goto(\`https://shop.example.com/login?token=${token}&next=/cart\`, { waitUntil: "domContentLoaded" })\n`
+    )
+    assert.include(
+      text,
+      `yield* main.goto(Redacted.value(yield* Config.Redacted("API_TOKEN")), { waitUntil: "domContentLoaded" })\n`
+    )
+    assert.include(
+      text,
+      `yield* admin.goto(\`https://${token}@admin.example.com\`, { waitUntil: "domContentLoaded" })\n`
+    )
   })
 
   it("builds a secret into the URL page new opened a page at, as into goto's", () => {
@@ -558,9 +582,9 @@ describe("strider export test", () => {
       text,
       [
         `        const account = yield* context.newPage`,
-        `        yield* account.goto(\`https://shop.example.com/account?token=\${Redacted.value(yield* Config.Redacted("API_TOKEN"))}\`)`,
+        `        yield* account.goto(\`https://shop.example.com/account?token=\${Redacted.value(yield* Config.Redacted("API_TOKEN"))}\`, { waitUntil: "domContentLoaded" })`,
         `        const help = yield* context.newPage`,
-        `        yield* help.goto("https://shop.example.com/help")`,
+        `        yield* help.goto("https://shop.example.com/help", { waitUntil: "domContentLoaded" })`,
         ``
       ].join("\n")
     )
@@ -594,10 +618,10 @@ describe("strider export test", () => {
         }
       ]
     })
-    assert.include(text, `yield* main.goto("https://shop.example.com/caf%C3%A9")\n`)
+    assert.include(text, `yield* main.goto("https://shop.example.com/caf%C3%A9", { waitUntil: "domContentLoaded" })\n`)
     assert.include(
       text,
-      `yield* main.goto(\`https://shop.example.com/caf%C3%A9?token=\${Redacted.value(yield* Config.Redacted("API_TOKEN"))}\`)\n`
+      `yield* main.goto(\`https://shop.example.com/caf%C3%A9?token=\${Redacted.value(yield* Config.Redacted("API_TOKEN"))}\`, { waitUntil: "domContentLoaded" })\n`
     )
     assert.include(text, `yield* main.getByLabel("Token").fill("%tokn%")\n`)
     assert.include(text, "// %tokn% names no secret")
@@ -734,7 +758,7 @@ describe("strider export test", () => {
       [
         `        const shop = yield* context.newPage`,
         `        const shopPopups = yield* Popup.next(shop)`,
-        `        yield* shop.goto("https://shop.example.com")`,
+        `        yield* shop.goto("https://shop.example.com", { waitUntil: "domContentLoaded" })`,
         `        const p1 = yield* shopPopups`,
         `        const shopPopups_2 = yield* Popup.next(shop)`,
         `        yield* shop.getByRole("button", { name: "Open", exact: true }).click()`,
@@ -742,9 +766,9 @@ describe("strider export test", () => {
         // Popup.next gives an opener's first popup alone
         `        // TODO page p3: one of several popups the command above opened, which Popup.next can't single out; declare it here, as p3`,
         `        const help = p2`,
-        `        yield* help.goto("https://shop.example.com/help/faq")`,
-        `        yield* p1.goto("https://shop.example.com/offers")`,
-        `        yield* p3.goto("https://shop.example.com/chat")`,
+        `        yield* help.goto("https://shop.example.com/help/faq", { waitUntil: "domContentLoaded" })`,
+        `        yield* p1.goto("https://shop.example.com/offers", { waitUntil: "domContentLoaded" })`,
+        `        yield* p3.goto("https://shop.example.com/chat", { waitUntil: "domContentLoaded" })`,
         ``
       ].join("\n")
     )
@@ -778,10 +802,10 @@ describe("strider export test", () => {
       [
         `        yield* main.getByRole("button", { name: "Open", exact: true }).click()`,
         `        const p1 = yield* w1`,
-        `        yield* p1.goto("https://shop.example.com/help")`,
+        `        yield* p1.goto("https://shop.example.com/help", { waitUntil: "domContentLoaded" })`,
         `        yield* w1`,
         `        const p2 = (yield* context.pages.waitFor((pages) => pages.length >= 3))[2]!`,
-        `        yield* p2.goto("https://shop.example.com/chat")`,
+        `        yield* p2.goto("https://shop.example.com/chat", { waitUntil: "domContentLoaded" })`,
         ``
       ].join("\n")
     )
@@ -807,10 +831,10 @@ describe("strider export test", () => {
       text,
       [
         `        // TODO strider run pay.ts: a segment runs only in a session; put its steps here, declaring receipt`,
-        `        yield* receipt.goto("https://shop.example.com/receipt")`,
+        `        yield* receipt.goto("https://shop.example.com/receipt", { waitUntil: "domContentLoaded" })`,
         `        // TODO page lost: the session had it, but no command the test repeats opened it; declare it here, as lost`,
-        `        yield* lost.goto("https://shop.example.com/lost")`,
-        `        yield* lost.goto("https://shop.example.com/found")`,
+        `        yield* lost.goto("https://shop.example.com/lost", { waitUntil: "domContentLoaded" })`,
+        `        yield* lost.goto("https://shop.example.com/found", { waitUntil: "domContentLoaded" })`,
         ``
       ].join("\n")
     )
