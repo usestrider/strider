@@ -820,7 +820,16 @@ export const conformance = (backend: Backend) =>
             )
             const none = { alt: false, control: false, meta: false, shift: false }
             const move = (x: number, y: number) =>
-              ({ _tag: "Mouse", type: "move", x, y, button: "none", clickCount: 0, modifiers: none, buttons: 0 }) as const
+              ({
+                _tag: "Mouse",
+                type: "move",
+                x,
+                y,
+                button: "none",
+                clickCount: 0,
+                modifiers: none,
+                buttons: 0
+              }) as const
             const into = (frame: Target.NavigableId, left: number) => {
               const origin = { x: left, y: 0 }
               return { frame, origin, path: [{ frame, origin }] }
@@ -877,7 +886,9 @@ export const conformance = (backend: Backend) =>
               yield* crossing.input
               const seen: Array<string> = []
               const settled = (current: Effect.Success<typeof state>) =>
-                crossing.events.every((event) => seen.includes(event)) &&
+                crossing.events.every((event) =>
+                  seen.includes(event)
+                ) &&
                 JSON.stringify(current.hover) === JSON.stringify(crossing.hover) && current.a === crossing.a &&
                 current.b === crossing.b
               let last = yield* state
@@ -1076,15 +1087,19 @@ export const conformance = (backend: Backend) =>
             const failed = yield* evaluate(world, page, "() => fetch('/json').then(() => 'ok', () => 'failed')").pipe(
               Effect.forkChild
             )
-            const second = yield* world.facts.when("ObligationOpened", (fact) =>
-              fact.subject._tag === "PausedRequest" && fact.obligation !== first.obligation)
+            const second = yield* world.facts.when(
+              "ObligationOpened",
+              (fact) => fact.subject._tag === "PausedRequest" && fact.obligation !== first.obligation
+            )
             yield* world.adapter.resolve(second.obligation, { _tag: "Fail", error: "failed" })
             assert.strictEqual(yield* Fiber.join(failed), "failed")
             const continued = yield* evaluate(world, page, "() => fetch('/headers').then((r) => r.json())").pipe(
               Effect.forkChild
             )
-            const third = yield* world.facts.when("ObligationOpened", (fact) =>
-              fact.subject._tag === "PausedRequest" && fact.subject.request.url.endsWith("/headers"))
+            const third = yield* world.facts.when(
+              "ObligationOpened",
+              (fact) => fact.subject._tag === "PausedRequest" && fact.subject.request.url.endsWith("/headers")
+            )
             // Headers replace the request's own, on every backend: keep them, and add one
             assert(third.subject._tag === "PausedRequest")
             yield* world.adapter.resolve(third.obligation, {
@@ -1116,8 +1131,11 @@ export const conformance = (backend: Backend) =>
                 page,
                 "() => fetch('/echo', { method: 'POST', body: 'hello' }).then((r) => r.json()).then((j) => j.body)"
               ).pipe(Effect.forkChild)
-              const opened = yield* world.facts.when("ObligationOpened", (fact) =>
-                fact.subject._tag === "PausedRequest" && fact.subject.request.url.endsWith("/echo"))
+              const opened = yield* world.facts.when(
+                "ObligationOpened",
+                (fact) =>
+                  fact.subject._tag === "PausedRequest" && fact.subject.request.url.endsWith("/echo")
+              )
               const body = yield* world.adapter.pausedRequestBody(opened.obligation)
               assert.strictEqual(Option.getOrUndefined(Option.map(body, decode)), "hello")
               yield* world.adapter.resolve(opened.obligation, {
@@ -1136,8 +1154,10 @@ export const conformance = (backend: Backend) =>
               const fetched = yield* evaluate(world, page, "() => fetch('/json').then((r) => r.text())").pipe(
                 Effect.forkChild
               )
-              const opened = yield* world.facts.when("ObligationOpened", (fact) =>
-                fact.subject._tag === "PausedRequest" && fact.subject.phase === "response")
+              const opened = yield* world.facts.when(
+                "ObligationOpened",
+                (fact) => fact.subject._tag === "PausedRequest" && fact.subject.phase === "response"
+              )
               const body = yield* Effect.exit(world.adapter.pausedResponseBody(opened.obligation))
               if (capabilities.has("interception.responseBody")) {
                 assert(Exit.isSuccess(body), String(body))
@@ -1166,8 +1186,10 @@ export const conformance = (backend: Backend) =>
                 .pipe(
                   Effect.forkChild
                 )
-              const opened = yield* world.facts.when("ObligationOpened", (fact) =>
-                fact.subject._tag === "PausedRequest" && fact.subject.phase === "auth")
+              const opened = yield* world.facts.when(
+                "ObligationOpened",
+                (fact) => fact.subject._tag === "PausedRequest" && fact.subject.phase === "auth"
+              )
               assert(opened.subject._tag === "PausedRequest")
               assert.strictEqual(Option.getOrThrow(opened.subject.challenge).realm, "strider")
               yield* world.adapter.resolve(opened.obligation, {
@@ -1176,8 +1198,7 @@ export const conformance = (backend: Backend) =>
                 password: "secret"
               })
               const navigation = yield* Fiber.join(navigating)
-              const ended = yield* world.facts.when("NavigationEnded", (fact) =>
-                fact.navigation === navigation)
+              const ended = yield* world.facts.when("NavigationEnded", (fact) => fact.navigation === navigation)
               assert.strictEqual(ended.outcome._tag, "Committed")
               assert.strictEqual(yield* evaluate(world, page, "() => document.body.innerText"), "signed in")
             }))
@@ -1200,8 +1221,11 @@ export const conformance = (backend: Backend) =>
                 .pipe(
                   Effect.forkChild
                 )
-              const opened = yield* world.facts.when("ObligationOpened", (fact) =>
-                fact.subject._tag === "PausedRequest" && fact.subject.request.url.endsWith("/blocked"))
+              const opened = yield* world.facts.when(
+                "ObligationOpened",
+                (fact) =>
+                  fact.subject._tag === "PausedRequest" && fact.subject.request.url.endsWith("/blocked")
+              )
               const reason = capabilities.has("interception.abortReason") ? "aborted" : "failed"
               yield* world.adapter.resolve(opened.obligation, { _tag: "Fail", error: reason })
               const navigation = yield* Fiber.join(navigating)
@@ -1227,9 +1251,7 @@ export const conformance = (backend: Backend) =>
               const declared = yield* Effect.exit(Effect.scoped(
                 world.adapter.declare({ _tag: "UserContext", context }, { _tag: "Override", override })
               ))
-              const entry = capabilities.entries.find((each) =>
-                each.name === capability
-              )
+              const entry = capabilities.entries.find((each) => each.name === capability)
               assert.isDefined(entry, capability)
               if (entry.status === "unsupported") {
                 assert(Exit.isFailure(declared), capability)
@@ -1263,8 +1285,11 @@ export const conformance = (backend: Backend) =>
             yield* script("window.order.push('after broken')", [broken])
             yield* goto(world, page, `${world.site.origin}/hello`)
             assert.deepStrictEqual(yield* evaluate(world, page, "() => window.order"), ["helper", "after helper"])
-            const thrown = yield* world.facts.when("UncaughtException", (fact) =>
-              fact.exception.message === "init threw")
+            const thrown = yield* world.facts.when(
+              "UncaughtException",
+              (fact) =>
+                fact.exception.message === "init threw"
+            )
             assert.strictEqual(thrown.exception.name, "Error")
           }), timeout)
 
@@ -1364,16 +1389,14 @@ export const conformance = (backend: Backend) =>
             assert.deepStrictEqual(hello.message.origin, { _tag: "Page", page })
             // 1-based, as stack traces print it: the page is one line
             assert.strictEqual(Option.getOrThrow(hello.message.location).line, 1)
-            const bad = yield* world.facts.when("ConsoleMessage", (fact) =>
-              fact.message.text === "bad")
+            const bad = yield* world.facts.when("ConsoleMessage", (fact) => fact.message.text === "bad")
             assert.strictEqual(bad.message.level, "error")
             const thrown = yield* world.facts.when("UncaughtException")
             assert.strictEqual(thrown.exception.name, "TypeError")
             assert.strictEqual(thrown.exception.message, "thrown here")
             // A thrown value that isn't an Error reads as an Error whose message is the value
             yield* evaluate(world, page, "() => { setTimeout(() => { throw 'a string' }) }")
-            const raw = yield* world.facts.when("UncaughtException", (fact) =>
-              fact.exception.message === "a string")
+            const raw = yield* world.facts.when("UncaughtException", (fact) => fact.exception.message === "a string")
             assert.strictEqual(raw.exception.name, "Error")
           }), timeout)
 
@@ -1464,11 +1487,7 @@ export const conformance = (backend: Backend) =>
                 const frames = yield* world.adapter.screencast(page)
                 yield* frames.pipe(
                   Stream.take(6),
-                  Stream.runForEach((frame) =>
-                    Effect.sync(() =>
-                      seen[key]!.push([frame.width, frame.height])
-                    )
-                  ),
+                  Stream.runForEach((frame) => Effect.sync(() => seen[key]!.push([frame.width, frame.height]))),
                   Effect.timeout("3 seconds"),
                   Effect.ignore
                 )
@@ -1703,8 +1722,7 @@ export const conformance = (backend: Backend) =>
             assert.strictEqual(outcome._tag, "Download")
             const started = yield* world.facts.when("DownloadStarted")
             assert.strictEqual(started.suggestedFilename, "hello.txt")
-            const ended = yield* world.facts.when("DownloadEnded", (fact) =>
-              fact.download === started.download)
+            const ended = yield* world.facts.when("DownloadEnded", (fact) => fact.download === started.download)
             assert(ended.outcome._tag === "Completed")
             const path = Option.getOrThrow(ended.outcome.path)
             const fs = yield* Effect.promise(() => import("node:fs/promises"))
@@ -1831,8 +1849,7 @@ export const conformance = (backend: Backend) =>
               fact.subject._tag === "Prompt")
             assert.deepInclude(opened.subject, { kind: "beforeunload" })
             yield* world.adapter.resolve(opened.obligation, { _tag: "Accept", promptText: Option.none() })
-            const removed = yield* world.facts.when("NavigableRemoved", (fact) =>
-              fact.navigable === page)
+            const removed = yield* world.facts.when("NavigableRemoved", (fact) => fact.navigable === page)
             assert.deepStrictEqual(removed.reason, new Target.PageClosed({ by: "command" }))
           }), timeout)
 
