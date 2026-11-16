@@ -40,6 +40,8 @@ import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as fs from "node:fs"
+import * as http from "node:http"
+import type * as net from "node:net"
 import * as os from "node:os"
 import * as path from "node:path"
 import * as Handles from "../../../src/internal/handles.ts"
@@ -86,6 +88,56 @@ const refused = Effect.fnUntraced(function*(
     assert.deepInclude(error.reason, { _tag: "Unsupported", capability })
   }))
   return true
+})
+
+/**
+ * A site of its own whose `/file` is a download: the whole body at once (`hold: false`), or its headers and a first
+ * part, holding the rest open until the site closes (`hold: true`).
+ */
+const downloadSite = (hold: boolean) =>
+  Effect.acquireRelease(
+    Effect.callback<{ server: http.Server; origin: string }>((resume) => {
+      const server = http.createServer((request, response) => {
+        if (!request.url?.startsWith("/file")) return html(response)
+        if (!hold) {
+          response.writeHead(200, {
+            "content-type": "application/octet-stream",
+            "content-disposition": "attachment; filename=hello.txt"
+          })
+          return response.end("hello, download")
+        }
+        const part = Buffer.alloc(64 * 1024, 97)
+        response.writeHead(200, {
+          "content-type": "application/octet-stream",
+          "content-disposition": "attachment; filename=held.bin",
+          "content-length": String(part.length * 16)
+        })
+        response.write(part)
+      })
+      const html = (response: http.ServerResponse) => {
+        response.writeHead(200, { "content-type": "text/html; charset=utf-8" })
+        response.end(`<a href="/file" download>Export</a>`)
+      }
+      server.listen(0, "127.0.0.1", () => {
+        const { port } = server.address() as net.AddressInfo
+        resume(Effect.succeed({ server, origin: `http://127.0.0.1:${port}` }))
+      })
+    }),
+    ({ server }) =>
+      Effect.callback<void>((resume) => {
+        server.closeAllConnections()
+        server.close(() => resume(Effect.void))
+      })
+  )
+
+/** That closing `scope` succeeded; if it failed on the downloads directory, what that directory still held. */
+const closesCleanly = Effect.fnUntraced(function*(scope: Scope.Closeable) {
+  const exit = yield* Effect.exit(Scope.close(scope, Exit.void))
+  if (Exit.isSuccess(exit)) return
+  const pretty = Cause.pretty(exit.cause)
+  const directory = /(\/[^\s()]*strider-downloads-[^\s()/]+)/.exec(pretty)?.[1]
+  const left = directory !== undefined && fs.existsSync(directory) ? fs.readdirSync(directory) : []
+  assert.fail(`The context's release failed, leaving ${JSON.stringify(left)} in ${directory}:\n${pretty}`)
 })
 
 export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.Layer<Browser.Browser, unknown>) =>
@@ -174,6 +226,49 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
           }),
         timeout
       )
+
+      // Chromium answers a context's disposal before the downloads in it end, and finishes or cancels them after:
+      // the closer to its completion a download is as its context closes, the likelier its file lands in the
+      // directory while it is being removed, so the case closes several in turn
+      it.effect("closes a context whose download has received its whole body", () =>
+        Effect.gen(function*() {
+          if (yield* refused("downloads", (page) => Download.next(page))) return
+          const { origin } = yield* downloadSite(false)
+          yield* Effect.forEach(Array.from({ length: name === "Chromium" ? 20 : 1 }), () =>
+            Effect.gen(function*() {
+              const scope = yield* Scope.make()
+              yield* Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                yield* page.goto(`${origin}/`)
+                const download = yield* Download.next(page)
+                yield* Effect.forkScoped(Effect.ignore(page.getByText("Export").click()))
+                const file = yield* download
+                // Where the backend reports progress, until the last byte; it may complete first
+                yield* Effect.ignore(
+                  file.status.waitFor((status) => status._tag === "InProgress" && status.received === 15)
+                )
+              }).pipe(Scope.provide(scope))
+              yield* closesCleanly(scope)
+            }), { discard: true })
+        }), timeout)
+
+      it.effect("closes a context while a download's body is still arriving", () =>
+        Effect.gen(function*() {
+          if (yield* refused("downloads", (page) => Download.next(page))) return
+          const { origin } = yield* downloadSite(true)
+          const scope = yield* Scope.make()
+          yield* Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(`${origin}/`)
+            const download = yield* Download.next(page)
+            yield* page.getByText("Export").click()
+            const file = yield* download
+            if (name === "Chromium") {
+              yield* file.status.waitFor((status) => status._tag === "InProgress" && status.received > 0)
+            }
+          }).pipe(Scope.provide(scope))
+          yield* closesCleanly(scope)
+        }), timeout)
 
       // ── FileChooser ──
 
