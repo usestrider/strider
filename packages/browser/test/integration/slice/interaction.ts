@@ -2551,6 +2551,100 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
+      // The browser hands a pointer at a pointer-events none element to whatever is under it: inside a button or
+      // link, that is the button or link, which runs its handler as it does for a person.
+      it.effect(
+        "clicks a pointer-events none label inside a button through the button",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<button onclick="out.textContent='clicked'"><label style="pointer-events:none">Click target</label></button><output id="out"></output>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.getByText("Click target").click().pipe(Deadline.within("1 second"))
+            assert.strictEqual(yield* page.locator("#out").readText, "clicked")
+          })),
+        timeout
+      )
+
+      it.effect(
+        "clicks a pointer-events none element inside a role=link through the link",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div role="link" onclick="out.textContent='clicked'"><div id="inner" style="pointer-events:none">Inner</div></div><output id="out"></output>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.locator("#inner").click().pipe(Deadline.within("1 second"))
+            assert.strictEqual(yield* page.locator("#out").readText, "clicked")
+          })),
+        timeout
+      )
+
+      it.effect(
+        "hovers a pointer-events none label inside a button through the button",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<button onmouseover="out.textContent='hovered'"><label style="pointer-events:none">Click target</label></button><output id="out"></output>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.getByText("Click target").hover().pipe(Deadline.within("1 second"))
+            assert.strictEqual(yield* page.locator("#out").readText, "hovered")
+          })),
+        timeout
+      )
+
+      it.effect(
+        "refuses a pointer-events none element outside any button or link",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div onclick="out.textContent='clicked'"><span id="go" style="pointer-events:none">Go</span></div><output id="out"></output>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            const error = yield* page.locator("#go").click().pipe(Deadline.within("1 second"), Effect.flip)
+            assert(Deadline.isTimeout(error), String(error))
+            assert.include(error.message, "span#go \"Go\" doesn't receive pointer events: its pointer-events is none")
+            assert.strictEqual(yield* page.locator("#out").readText, "")
+          })),
+        timeout
+      )
+
+      it.effect(
+        "clicks a pointer-events none target across a shadow root through its button",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<button onclick="out.textContent='clicked'"><span id="host" style="pointer-events:none"></span></button><output id="out"></output><script>host.attachShadow({mode:'open'}).innerHTML='<span id="inner" style="pointer-events:none">Click target</span>'</script>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.locator("#inner").click().pipe(Deadline.within("1 second"))
+            assert.strictEqual(yield* page.locator("#out").readText, "clicked")
+          })),
+        timeout
+      )
+
+      it.effect(
+        "clicks a pointer-events none slotted target through its enclosing link",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<span id="host"><span id="inner" style="pointer-events:none">Click target</span></span><output id="out"></output><script>host.attachShadow({mode:'open'}).innerHTML='<a href="#"><slot></slot></a>';host.shadowRoot.querySelector('a').onclick=()=>out.textContent='clicked'</script>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.locator("#inner").click().pipe(Deadline.within("1 second"))
+            assert.strictEqual(yield* page.locator("#out").readText, "clicked")
+          })),
+        timeout
+      )
+
       it.effect(
         "rechecks a modal created by a fill focus callback before writing",
         () =>

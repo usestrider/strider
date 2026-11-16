@@ -27,7 +27,9 @@
  * - **Actions** take an initial stability sample immediately, then check at each animation frame until the
  *   checks pass or the round's cap runs out. The checks (CONCEPTS.md §8) are visible, enabled, notInert,
  *   inViewport (scrolling into view once), stable across `frames` rendering updates, and receivesPointer at
- *   the action point. The rendered check independently gates the first check on a rendering update.
+ *   the action point, which the target's nearest enclosing button or link in the flat tree, or else the target,
+ *   must receive; an `input`, `textarea`, `select`, or editable target must receive it itself. The rendered check
+ *   independently gates the first check on a rendering update.
  */
 
 import * as Schema from "effect/Schema"
@@ -675,7 +677,8 @@ export function engine(render: (root: SnapNode) => string) {
 
   /**
    * The parent in the flat tree: an assigned node's slot, otherwise its composed parent. Rendering, hit testing and
-   * event dispatch follow this tree, where slotted content sits under its slot rather than its host.
+   * event dispatch follow this tree, where slotted content sits under its slot rather than its host. Hit testing and
+   * pointer containment, inertness, and a `display: contents` element's visibility all walk it.
    */
   const flatParent = (element: Element): Element | null => dom.assignedSlot(element) ?? composedParent(element)
 
@@ -2078,6 +2081,22 @@ export function engine(render: (root: SnapNode) => string) {
       ? element.value
       : null
 
+  /**
+   * The element that must receive the pointer for an action on `element`: its nearest enclosing button or link in
+   * the flat tree, through shadow roots and slots, itself included, since the browser hands a click on a
+   * pointer-events: none descendant to it. A form field or an editable element must receive the pointer itself.
+   */
+  const pointerRecipient = (element: Element): Element => {
+    if (
+      dom.matches(element, "input, textarea, select") ||
+      (element instanceof HTMLElement && dom.isContentEditable(element))
+    ) return element
+    for (let current: Element | null = element; current !== null; current = flatParent(current)) {
+      if (dom.matches(current, "button, [role=button], a, [role=link]")) return current
+    }
+    return element
+  }
+
   const missed = (element: Element, hit: Element | null): NotReady =>
     getComputedStyle(element).pointerEvents === "none"
       ? { _tag: "NoPointerEvents", element: describe(element) }
@@ -2227,7 +2246,7 @@ export function engine(render: (root: SnapNode) => string) {
         first ??= point
         if (!receivesPointer) return [point]
         const hit = hitTarget(point.x, point.y)
-        if (hit !== null && flatContains(element, hit)) {
+        if (hit !== null && flatContains(pointerRecipient(element), hit)) {
           if (clip === undefined) return [point]
           points.push(point)
         }
@@ -2338,7 +2357,7 @@ export function engine(render: (root: SnapNode) => string) {
     return blocked
   }
 
-  /** Arms a guard on `element`: the gesture's first trusted event must land in it, or the gesture is stopped. */
+  /** Arms a guard on `element`, the pointer's recipient: the gesture's first trusted event must land in it, or the gesture is stopped. */
   const arm = (element: Element) => {
     disarm()
     let decided = false
@@ -2681,7 +2700,7 @@ export function engine(render: (root: SnapNode) => string) {
         if (point === null) reason = { _tag: "OutsideViewport" }
         else if (checks.receivesPointer) {
           const hit = hitTarget(point.x, point.y)
-          if (hit === null || !flatContains(element, hit)) reason = missed(element, hit)
+          if (hit === null || !flatContains(pointerRecipient(element), hit)) reason = missed(element, hit)
         }
       }
       if (reason === null && element !== undefined && action._tag === "Select") {
@@ -2823,7 +2842,7 @@ export function engine(render: (root: SnapNode) => string) {
         for (let current: Element | null = element; current !== null; current = composedParent(current)) {
           if (dom.getAttribute(current, "draggable") === "true") draggable = true
         }
-        if (apply && action.guard) arm(element)
+        if (apply && action.guard) arm(pointerRecipient(element))
         return { ...answer, point, draggable }
       }
       case "Checked":
