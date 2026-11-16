@@ -330,7 +330,12 @@ describe("Stock WebKit, launched in automation mode", () => {
             get() { return origin + (reads++ % 2); }
           });
         </script>`
-          yield* page.goto(fixtureUrl(served.origin, `<iframe srcdoc="${child.replaceAll("\"", "&quot;")}"></iframe>`))
+          yield* page.goto(
+            fixtureUrl(served.origin, `<iframe srcdoc="${child.replaceAll("\"", "&quot;")}"></iframe>`),
+            {
+              waitUntil: "load"
+            }
+          )
           const snapshot = yield* page.snapshot()
           assert.include(snapshot.text, "child heading")
         })),

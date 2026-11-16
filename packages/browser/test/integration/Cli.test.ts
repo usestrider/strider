@@ -2436,15 +2436,17 @@ describe("strider", () => {
         const served = yield* site
         const env = environment()
         const run = (...args: ReadonlyArray<string>) => strider(env, "-s", "remote", ...args)
+        // Each tab asks the site for `/signed-in?<name>` once its cookie and storage are written
         const signingIn = (name: string) =>
           `/fixture?html=${
             encodeURIComponent(
-              `<title>${name}</title><script>document.cookie = "${name}=abc; path=/"; localStorage.setItem("${name}", "v")</script>`
+              `<title>${name}</title><script>document.cookie = "${name}=abc; path=/"; localStorage.setItem("${name}", "v"); fetch("/signed-in?${name}")</script>`
             )
           }`
         const app = `${served.origin}${signingIn("app")}`
         const elsewhere = `${served.crossSite}${signingIn("elsewhere")}`
         const { endpoint } = yield* chromiumAttachable(Chromium.layerConnect).start(app, elsewhere)
+        yield* Effect.all([served.requested("/signed-in?app"), served.requested("/signed-in?elsewhere")])
         const state = path.join(env.XDG_RUNTIME_DIR, "held.state")
         const saved = () => fs.readFileSync(state, "utf8")
         try {

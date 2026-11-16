@@ -679,7 +679,7 @@ describe("Chromium adapter, CDP only", () => {
               const page = yield* Browser.newPage()
               const html =
                 `<button id="go">Go</button><script>window.log=[];for(const type of ['mousemove','mousedown','mouseup','click'])document.getElementById('go').addEventListener(type,e=>log.push([e.type,e.isTrusted,e.buttons]));</script>`
-              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`, { waitUntil: "load" })
               const click = yield* page.locator("#go").click().pipe(Deadline.within("5 seconds"), Effect.forkChild)
               yield* Deferred.await(entered)
               assert.deepStrictEqual(sent, [])
@@ -952,7 +952,7 @@ describe("Chromium adapter, CDP only", () => {
                   encodeURIComponent(child)
                 }`
                 const parent = `<body style="margin:0"><iframe style="border:0" src="${childUrl}"></iframe>`
-                yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(parent)}`)
+                yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(parent)}`, { waitUntil: "load" })
                 const frame = page.frame(page.locator("iframe"))
                 yield* frame.getByRole("button").pipe(Expect.toHaveText("0"))
                 const snapshot = yield* page.snapshot()
@@ -1113,7 +1113,7 @@ describe("Chromium adapter, CDP only", () => {
                 const page = yield* Browser.newPage()
                 const html =
                   `<button id="go">Go</button><script>window.inputLog=[];for(const type of ["mousedown","mouseup"])document.addEventListener(type,e=>inputLog.push(e.type))</script>`
-                yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+                yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`, { waitUntil: "load" })
                 const target = page.locator("#go")
                 assert(target instanceof LocatorImpl)
                 const error = yield* target.click().pipe(

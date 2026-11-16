@@ -231,7 +231,7 @@ describe("Stock WebKit, attached through its remote inspector", () => {
             yield* tab.addInitScript(() => {
               ;(window as { fromInit?: number }).fromInit = 1
             })
-            yield* tab.goto(`${origin}/init`)
+            yield* tab.goto(`${origin}/init`, { waitUntil: "load" })
             assert.strictEqual(
               yield* tab.evaluateInMainWorld(() => (window as { seenByAuthor?: string }).seenByAuthor),
               "number"
