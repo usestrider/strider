@@ -964,7 +964,7 @@ export const conformance = (backend: Backend) =>
         }
 
         it.effect(
-          "sends a release that names no frame outside a cross-site frame in a shadow root to the frame that got the press",
+          "keeps a frameless release with the pressed cross-site frame in a shadow root but routes wheels by their point",
           () =>
             Effect.gen(function*() {
               const world = yield* setup(backend)
@@ -972,13 +972,13 @@ export const conformance = (backend: Backend) =>
               const fixture = (origin: string, html: string) =>
                 `${origin}/fixture?html=${encodeURIComponent(html)}`
               const child =
-                `<body style="margin:0;height:100vh"><script>addEventListener('mousedown', () => parent.postMessage('down', '*')); addEventListener('mouseup', () => parent.postMessage('up', '*')); parent.postMessage('loaded', '*')</script></body>`
+                `<body style="margin:0;height:100vh"><script>addEventListener('mousedown', () => parent.postMessage('down', '*')); addEventListener('mouseup', () => parent.postMessage('up', '*')); addEventListener('wheel', (e) => { e.preventDefault(); parent.postMessage('child wheel', '*') }, { passive: false }); parent.postMessage('loaded', '*')</script></body>`
               yield* goto(
                 world,
                 page,
                 fixture(
                   world.site.origin,
-                  `<body style="margin:0"><div id="host"></div><script>window.got = []; addEventListener('message', (e) => got.push(e.data)); addEventListener('mouseup', () => got.push('parent up')); document.querySelector('#host').attachShadow({ mode: 'open' }).innerHTML = ${
+                  `<body style="margin:0"><div id="host"></div><script>window.got = []; addEventListener('message', (e) => got.push(e.data)); addEventListener('mouseup', () => got.push('parent up')); addEventListener('wheel', (e) => { e.preventDefault(); got.push('parent wheel') }, { passive: false }); document.querySelector('#host').attachShadow({ mode: 'open' }).innerHTML = ${
                     JSON.stringify(
                       `<iframe src="${
                         fixture(world.site.crossSite, child)
@@ -998,7 +998,8 @@ export const conformance = (backend: Backend) =>
               })
               assert(loaded._tag === "Value" && json(loaded.value) === true)
               const none = { alt: false, control: false, meta: false, shift: false }
-              const send = (event: Adapter.InputEvent) => world.adapter.dispatchInput(page, [event])
+              const send = (event: Adapter.InputEvent) =>
+                world.adapter.dispatchInput(page, [event])
               yield* send({
                 _tag: "Mouse",
                 type: "move",
@@ -1019,6 +1020,8 @@ export const conformance = (backend: Backend) =>
                 modifiers: none,
                 buttons: 1
               })
+              // Wheels follow their point without changing where the held button is released.
+              yield* send({ _tag: "Wheel", x: 150, y: 80, deltaX: 0, deltaY: 10, modifiers: none })
               yield* send({
                 _tag: "Mouse",
                 type: "move",
@@ -1029,6 +1032,7 @@ export const conformance = (backend: Backend) =>
                 modifiers: none,
                 buttons: 1
               })
+              yield* send({ _tag: "Wheel", x: 20, y: 20, deltaX: 0, deltaY: 10, modifiers: none })
               yield* send({
                 _tag: "Mouse",
                 type: "up",
@@ -1041,17 +1045,18 @@ export const conformance = (backend: Backend) =>
               })
               const got = Effect.flatMap(
                 world.adapter.evaluate(realm, {
-                  functionDeclaration: "() => window.got.join(',')",
+                  functionDeclaration:
+                    "() => got.filter(x => !x.endsWith('wheel')).join(',') + '|' + got.filter(x => x.endsWith('wheel')).sort().join(',')",
                   arguments: [],
                   awaitPromise: false,
                   result: "value",
                   userActivation: false
                 }),
                 (result) =>
-                  result._tag === "Value" && json(result.value) === "loaded,down,up"
+                  result._tag === "Value" && json(result.value) === "loaded,down,up|child wheel,parent wheel"
                     ? Effect.void
                     : Effect.fail(
-                      `the frame got no release: ${
+                      `unexpected release or wheel recipients: ${
                         result._tag === "Value" ? JSON.stringify(json(result.value)) : result.text
                       }`
                     )
