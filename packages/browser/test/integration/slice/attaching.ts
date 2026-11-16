@@ -6,7 +6,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser, Dialog, Expect, Locator, Page, Popup, Route, Target, UserContext } from "@usestrider/browser"
+import { Browser, Dialog, Expect, Har, Locator, Page, Popup, Route, Target, UserContext } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import * as Equal from "effect/Equal"
 import * as Exit from "effect/Exit"
@@ -231,6 +231,31 @@ export const attaching = (
         const launchPersistent = persistent.value
         const adopted = `data:text/html,${encodeURIComponent("<h1>Adopted</h1>")}`
 
+        it.effect("records a persistent profile's first navigation in a context HAR", () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            const fs = yield* FileSystem.FileSystem
+            const dir = yield* fs.makeTempDirectoryScoped({ prefix: "strider-profile-" })
+            const url = fixtureUrl(origin, "<h1>Recorded</h1>")
+            const out = `${dir}/first.har`
+            yield* Effect.scoped(Effect.gen(function*() {
+              const browser = yield* Browser.Browser
+              const context = yield* browser.defaultContext.control
+              const tab = (yield* context.pages)[0]!
+              const har = yield* Har.record(context, { content: "embed", url, inFlightAtStop: "wait" })
+              yield* tab.goto(url)
+              yield* har.entries.waitFor((count) =>
+                count === 1
+              )
+              yield* har.exportHar(out)
+              const entries = JSON.parse(yield* fs.readFileString(out)).log.entries
+              assert.strictEqual(entries.length, 1)
+              assert.strictEqual(entries[0].request.url, url)
+              assert.strictEqual(entries[0].response.status, 200)
+              assert.strictEqual(entries[0].response.content.text, "<h1>Recorded</h1>")
+            })).pipe(Effect.provide(launchPersistent(dir)))
+          }), timeout)
+
         it.effect("navigates a persistent profile's first tab as soon as it's listed", () =>
           Effect.gen(function*() {
             const fs = yield* FileSystem.FileSystem
@@ -253,12 +278,12 @@ export const attaching = (
               const browser = yield* Browser.Browser
               const context = yield* browser.defaultContext.control
               const tab = (yield* context.pages)[0]!
-              const routed = yield* tab.route(`${origin}/**`, () =>
+              const url = fixtureUrl(origin, "<h1>Routed</h1>")
+              const routed = yield* tab.route(url, () =>
                 Route.continue)
-              yield* tab.goto(fixtureUrl(origin, "<h1>Routed</h1>"))
+              yield* tab.goto(url)
               assert.strictEqual(yield* tab.getByRole("heading").readText, "Routed")
-              // Firefox routes the favicon request too
-              assert.isAtLeast(yield* routed.hits, 1)
+              assert.strictEqual(yield* routed.hits, 1)
             })).pipe(Effect.provide(launchPersistent(dir)))
           }), timeout)
       }
@@ -267,6 +292,36 @@ export const attaching = (
 
       if (Option.isSome(attachable)) {
         const start = attachable.value.start
+
+        it.effect("handles beforeunload when closing a tab immediately after attaching", () =>
+          Effect.gen(function*() {
+            if (!(yield* supports("close.runBeforeUnload"))) {
+              return
+            }
+            const { origin } = yield* site
+            const { layer: attached } = yield* start(tabUrl(origin, "First"), tabUrl(origin, "Second"))
+            yield* Effect.scoped(Effect.gen(function*() {
+              const browser = yield* Browser.Browser
+              const tab = yield* (yield* browser.pages)[0]!.control
+              yield* tab.goto(
+                fixtureUrl(
+                  origin,
+                  `<button>Edit</button><script>window.addEventListener("beforeunload", (e) => { e.preventDefault(); e.returnValue = "" })</script>`
+                )
+              )
+              yield* tab.activate
+              yield* tab.getByRole("button", { name: "Edit" }).click()
+            })).pipe(Effect.provide(attached))
+            yield* Effect.scoped(Effect.gen(function*() {
+              const browser = yield* Browser.Browser
+              const pages = yield* browser.pages
+              for (const observed of pages) {
+                const tab = yield* observed.control
+                yield* Dialog.handle(tab, Dialog.acceptAll)
+                yield* tab.close({ runBeforeUnload: true })
+              }
+            })).pipe(Effect.provide(attached))
+          }), timeout)
 
         it.effect("navigates an attached browser's open tab as soon as it's controlled", () =>
           Effect.gen(function*() {
