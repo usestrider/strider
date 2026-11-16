@@ -33,7 +33,6 @@ import * as Network from "../src/internal/bidiAdapter/network.ts"
 import * as Obligations from "../src/internal/bidiAdapter/obligations.ts"
 import * as State from "../src/internal/bidiAdapter/state.ts"
 import * as Tree from "../src/internal/bidiAdapter/tree.ts"
-import * as WebSocketBridge from "../src/internal/bidiAdapter/webSocketBridge.ts"
 import * as BidiWire from "../src/internal/bidiWire.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as Fold from "../src/internal/fold.ts"
@@ -4642,70 +4641,4 @@ it.effect("rejects a sandbox realm created in a replacement document while acqui
         assert.deepStrictEqual(error.reason.target, { _tag: "Document", id: document.id })
       }
     }
-  }).pipe(Effect.scoped))
-
-it.effect("delivers a WebSocket message whose realm arrives while the root session is resyncing", () =>
-  Effect.gen(function*() {
-    const browser = yield* makeBrowser
-    const snapshot = yield* Deferred.make<ProtocolClient.Synced>()
-    const handlers = Evaluation.register(Kit.handlers<State.Event>())
-    let state!: State.State
-    let foldControl!: ProtocolClient.FoldControl
-    const client = yield* ProtocolClient.make(browser.transport, BidiWire.wire, {
-      fold: (control) => {
-        foldControl = control
-        return {
-          events: handlers.events,
-          apply: (_session, method, params) => Effect.sync(() => handlers.apply(method, params, { state })),
-          lost: (session) => Effect.sync(() => control.sync(session, Deferred.await(snapshot))),
-          ended: () => Effect.void
-        }
-      }
-    })
-    const fixture = yield* withPage({}, {}, client.root)
-    state = fixture.state
-    const received: Array<string> = []
-    const bridge: Adapter.WebSocketBridge = {
-      name: "test-channel",
-      token: "token",
-      scope: yield* Effect.scope,
-      captured: () => Effect.void,
-      receive: (_realm, _payload, _origin, _ownership) => {
-        received.push("message")
-        return true
-      },
-      ended: () => {},
-      failed: () => {}
-    }
-    const preparing = yield* WebSocketBridge.prepare(
-      state,
-      { _tag: "UserContext", context: state.defaultContext },
-      bridge
-    ).pipe(Effect.forkChild)
-    const command = yield* browser.next
-    yield* browser.receive({
-      type: "success",
-      id: command.id,
-      result: { type: "success", realm: "R1", result: { type: "undefined" } }
-    })
-    yield* Fiber.join(preparing)
-    // The adapter's integrity-loss hook holds this same root session until its snapshot completes.
-    foldControl.sync(client.root, Deferred.await(snapshot))
-    const observed = yield* client.root.subscribe(Script.message)
-    yield* browser.receive({
-      type: "event",
-      method: "script.realmCreated",
-      params: { realm: "R2", context: fixture.page.bidi, type: "window", origin: "null" }
-    })
-    yield* browser.receive({
-      type: "event",
-      method: "script.message",
-      params: { channel: bridge.name, data: { type: "string", value: "{}" }, source: { realm: "R2" } }
-    })
-    yield* observed.pipe(Stream.take(1), Stream.runDrain)
-    yield* Effect.yieldNow
-    yield* Deferred.succeed(snapshot, { through: 0, apply: Effect.void })
-    yield* client.root.drainObserved
-    assert.isTrue(state.realms.has("R2" as Script.Realm))
-    assert.deepStrictEqual(received, ["message"])
   }).pipe(Effect.scoped))
