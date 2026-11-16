@@ -4,6 +4,7 @@
  * to be removed skips the release of its own file chooser, challenge, credential, download and override
  * declarations; if the removal is refused, `restoreContext` reconciles its targets with the declarations that remain.
  */
+import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -474,8 +475,18 @@ const applyToTarget = (state: State, declaration: Adapter.Declaration, target: T
   }
 }
 
+// A page still in its initial sync gets the declaration from the sync, which configures it from the registry, or
+// once the sync is applied: one sent in between could cause events the sync discards. A release doesn't wait, since
+// a sync can hang, and what it sends causes no events the model needs.
 const applyDeclaration = (state: State, declaration: Adapter.Declaration, scope: Adapter.DeclarationScope) =>
-  Effect.forEach(targetsInScope(state, scope), (target) => applyToTarget(state, declaration, target), {
+  Effect.forEach(targetsInScope(state, scope), (target) => {
+    const ready = target.page!.ready
+    return Deferred.isDoneUnsafe(ready)
+      ? applyToTarget(state, declaration, target)
+      : Effect.ignore(Deferred.await(ready)).pipe(
+        Effect.andThen(Effect.suspend(() => target.ended ? Effect.void : applyToTarget(state, declaration, target)))
+      )
+  }, {
     concurrency: "unbounded",
     discard: true
   })

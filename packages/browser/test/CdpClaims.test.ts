@@ -29,7 +29,8 @@ const harness = Effect.fnUntraced(function*(sibling?: "closing" | "empty", dropp
   }
   const ids = Kit.makeIds()
   const id = ids.navigable()
-  const page = { id, targetId: "subject-page", ended: false } as PageEntry
+  const page = { id, targetId: "subject-page", ended: false, ready: Deferred.makeUnsafe() } as PageEntry
+  Deferred.doneUnsafe(page.ready, Effect.void)
   const pages = new Map([[id, page]])
   const published = new Set<string>()
   const waiting = yield* Deferred.make<void>()

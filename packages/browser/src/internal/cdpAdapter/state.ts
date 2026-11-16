@@ -5,8 +5,8 @@
  * Identity: frames are keyed by frame id, documents by loader id, realms by `uniqueId` (context ids repeat after a
  * process swap), navigations by loader id, requests by session and request id.
  */
-import type * as Deferred from "effect/Deferred"
-import type * as Effect from "effect/Effect"
+import * as Deferred from "effect/Deferred"
+import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import type * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
@@ -493,10 +493,29 @@ export const downloadDirectory = (state: State, context: UserContext.Id) => {
 const pageGone = (state: State, id: L1Target.NavigableId) =>
   Kit.gone({ _tag: "Page", id }, state.endedPages.get(id) ?? new L1Target.Vanished({}))
 
-export const pageOf = (state: State, id: L1Target.NavigableId): Effect.Effect<PageEntry, Adapter.AdapterError> =>
+/** A page as the model holds it now, even while its initial sync runs: for what must not wait on that sync. */
+export const pageNow = (state: State, id: L1Target.NavigableId): Effect.Effect<PageEntry, Adapter.AdapterError> =>
   Kit.lookup(state.ids, state.pages, id, () => pageGone(state, id), (page) => !page.ended)
 
+// A page Strider didn't open (a persistent profile's first tab, a tab open when it attached) is listed as it
+// attaches, before its initial sync has applied the frame tree. The sync discards every event received before the
+// tree's reply, since the tree stands for them, so a command sent to the page in that window loses the events it
+// causes: a navigation's commit, its requests, a paused request no one continues (which also keeps Chromium from
+// answering the tree). An operation on a page therefore waits for the sync before it sends anything, as `newPage`
+// does, and whatever the page commits before then is the document it opened with, not a navigation after it.
+// Nothing the sync runs goes through here; a release, such as a close, uses `pageNow`, since a sync can hang.
+const synced = <A>(page: PageEntry, found: Effect.Effect<A, Adapter.AdapterError>) =>
+  Deferred.isDoneUnsafe(page.ready) ? found : Effect.andThen(Effect.ignore(Deferred.await(page.ready)), found)
+
+/** A page, once its initial sync is applied. */
+export const pageOf = (state: State, id: L1Target.NavigableId): Effect.Effect<PageEntry, Adapter.AdapterError> =>
+  Effect.flatMap(pageNow(state, id), (page) => synced(page, pageNow(state, id)))
+
+/** A frame, once its page's initial sync is applied. */
 export const frameById = (state: State, id: L1Target.NavigableId): Effect.Effect<FrameEntry, Adapter.AdapterError> =>
+  Effect.flatMap(frameNow(state, id), (frame) => synced(frame.page, frameNow(state, id)))
+
+const frameNow = (state: State, id: L1Target.NavigableId): Effect.Effect<FrameEntry, Adapter.AdapterError> =>
   Kit.lookup(
     state.ids,
     state.navigables,

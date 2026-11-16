@@ -100,6 +100,8 @@ const withPage = Effect.fnUntraced(function*(protocolSession = session, requestT
     closeRequested: false,
     ended: false
   }
+  // An initialized page: its initial sync has been applied
+  Deferred.doneUnsafe(page.ready, Effect.void)
   state.pages.set(page.id, page)
   const main = Tree.newFrame({ frameId: "T1", id: page.id, page, parent: undefined, owner: target })
   state.frames.set("T1", main)
