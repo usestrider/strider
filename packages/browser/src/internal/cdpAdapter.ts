@@ -162,6 +162,7 @@ export const capabilities = (
       entry("input.insertText", "supported"),
       entry("input.pointerModifiers", "supported"),
       entry("input.fractionalPointer", "supported"),
+      entry("hitTest.shadowHostBoxes", "supported"),
       entry("input.dragAndDrop", "supported", ["Strider catches the drag Chromium starts, and finishes it"]),
       entry("webSocketFrames", "supported"),
       entry("networkConnections", "supported"),

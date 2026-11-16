@@ -163,6 +163,9 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       entry("input.fractionalPointer", "partial", [
         "Strider sends the exact point, but Firefox delivers pointer events at whole pixels, up to half a pixel away"
       ]),
+      entry("hitTest.shadowHostBoxes", "partial", [
+        "inside a shadow root, Firefox's hit test leaves out the host's own boxes, so content under a host's covering pseudo-element counts as ready in a trial or readiness check; a real click is still stopped when its first event lands on the host"
+      ]),
       entry("input.keyboardLayout", "partial", [
         "WebDriver BiDi sends a key as its value: the code is Firefox's for that key on a US keyboard, and there is no AltGr or dead key"
       ]),
