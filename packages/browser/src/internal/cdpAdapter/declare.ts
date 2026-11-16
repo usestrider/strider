@@ -1,8 +1,8 @@
 /**
  * Declarations on CDP: what the registry (`declarations.ts`) says each target gets, applied in its gate before
  * its scripts run and again to every target in scope when a registration comes or goes. A context that is about
- * to be removed skips the release of its own file chooser, challenge and credential declarations; if the removal
- * is refused, `restoreContext` reconciles its targets with the declarations that remain.
+ * to be removed skips the release of its own file chooser, challenge, credential, download and override
+ * declarations; if the removal is refused, `restoreContext` reconciles its targets with the declarations that remain.
  */
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -18,6 +18,7 @@ import * as Fetch from "../../cdp/Fetch.ts"
 import * as Network from "../../cdp/Network.ts"
 import * as Page from "../../cdp/Page.ts"
 import * as Runtime from "../../cdp/Runtime.ts"
+import type * as Target from "../../cdp/Target.ts"
 import type * as Deadline from "../../Deadline.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
 import type * as Adapter from "../adapter.ts"
@@ -269,7 +270,16 @@ const applyOverride = (
   }
 }
 
-const applyScripts = Effect.fnUntraced(function*(state: State, target: TargetEntry, page: PageEntry, setup?: Setup) {
+// Two applications that overlap on a target would both remove the same identifier, which Chromium rejects the
+// second time, and the identifier one of them added would be overwritten, its script left to run in every later
+// document. So the registry is read under the target's permit, held until each identifier is recorded: in a new
+// target's gate, until the gate's scope closes, after the replies.
+const scriptLock = (target: TargetEntry) => target.scriptLock ??= Semaphore.makeUnsafe(1)
+
+const applyScripts = (state: State, target: TargetEntry, page: PageEntry) =>
+  scriptLock(target).withPermits(1)(writeScripts(state, target, page))
+
+const writeScripts = Effect.fnUntraced(function*(state: State, target: TargetEntry, page: PageEntry, setup?: Setup) {
   const on = setup?.send ?? Protocol.on(target.session)
   const bundles = state.registry.bundles(placement(page))
   for (const [key, identifier] of Array.from(target.scripts)) {
@@ -283,6 +293,7 @@ const applyScripts = Effect.fnUntraced(function*(state: State, target: TargetEnt
     const previous = target.scripts.get(key)
     if (previous !== undefined) {
       yield* Page.removeScriptToEvaluateOnNewDocument({ identifier: previous as Page.ScriptIdentifier }).pipe(on)
+      target.scripts.delete(key)
     }
     const command = Page.addScriptToEvaluateOnNewDocument({
       source: bundle.source,
@@ -369,6 +380,54 @@ const kindsFor = (page: PageEntry, overrides: ReadonlyMap<Adapter.Override["_tag
   return kinds
 }
 
+/** The browser window that holds a page target, read once and kept. */
+const windowOf = (state: State, target: TargetEntry) =>
+  target.windowId !== undefined
+    ? Effect.succeed(target.windowId)
+    : BrowserCdp.getWindowForTarget({ targetId: target.targetId as Target.TargetID }).pipe(
+      Protocol.on(state.root()),
+      Effect.map(({ windowId }) => {
+        target.windowId = windowId
+        return windowId
+      })
+    )
+
+type Dimensions = { readonly width: number; readonly height: number }
+
+/**
+ * A popup's original dimensions, decided at its gate, or undefined for a page with no opener, which measures its
+ * own. Chromium starts a tab's renderer at its opener's layout, which is the override's while the opener emulates a
+ * viewport, and lays it out at its window's size only once the override is cleared, so a popup's gate measures a
+ * size it may never return to. Only a page of its window says what that size is: a window that `window.open` opens
+ * as a popup holds no tabs, so a popup that shares its window with another page of its context is a tab, and tabs
+ * in one window have one size. It takes that page's recorded dimensions. A popup alone in its window, beside no page
+ * with recorded dimensions, or whose window can't be read has unknown dimensions (null), so its restore clears the
+ * override without confirming it.
+ */
+const popupBaseline = Effect.fnUntraced(function*(
+  state: State,
+  target: TargetEntry,
+  page: PageEntry
+): Effect.fn.Return<Dimensions | null | undefined> {
+  if (page.openerId === undefined) return undefined
+  const own = yield* windowOf(state, target).pipe(Effect.option)
+  if (Option.isNone(own)) return null
+  const others = [...state.targets.values()].filter((other) =>
+    other !== target && other.kind === "page" && !other.ended && other.page !== undefined &&
+    other.page.context === page.context && other.viewport !== undefined && other.viewport !== null
+  )
+  const windows = yield* Effect.forEach(
+    others,
+    (other) => windowOf(state, other).pipe(Effect.option),
+    { concurrency: "unbounded" }
+  )
+  const mate = others.find((_, index) => {
+    const window = windows[index]!
+    return Option.isSome(window) && window.value === own.value
+  })
+  return mate?.viewport ?? null
+})
+
 /** What a new page or frame gets before its scripts run: the declarations in force for its page. */
 export const configureTarget = Effect.fnUntraced(
   function*(state: State, target: TargetEntry, page: PageEntry, setup?: Setup) {
@@ -413,11 +472,16 @@ export const configureTarget = Effect.fnUntraced(
           if (override?._tag !== "Viewport") {
             return
           }
-          // The initial blank document has no scrollbars. Queue its dimensions before changing them, without
-          // creating an isolated world whose identifier would require a renderer reply before resume.
-          yield* setup.send(Page.getLayoutMetrics(), ({ cssLayoutViewport }) => {
-            target.viewport = { width: cssLayoutViewport.clientWidth, height: cssLayoutViewport.clientHeight }
-          })
+          const baseline = yield* popupBaseline(state, target, page)
+          if (baseline !== undefined) {
+            target.viewport = baseline
+          } else {
+            // The initial blank document has no scrollbars. Queue its dimensions before changing them, without
+            // creating an isolated world whose identifier would require a renderer reply before resume.
+            yield* setup.send(Page.getLayoutMetrics(), ({ cssLayoutViewport }) => {
+              target.viewport = { width: cssLayoutViewport.clientWidth, height: cssLayoutViewport.clientHeight }
+            })
+          }
           yield* setup.send(Emulation.setDeviceMetricsOverride({
             width: override.width,
             height: override.height,
@@ -427,7 +491,11 @@ export const configureTarget = Effect.fnUntraced(
         })
       ], { concurrency: "unbounded", discard: true })
     }
-    yield* applyScripts(state, target, page, setup)
+    if (setup === undefined) yield* applyScripts(state, target, page)
+    else {
+      yield* scriptLock(target).takeScoped(1)
+      yield* writeScripts(state, target, page, setup)
+    }
     yield* applyIntercepts(state, target, page, setup?.send)
     yield* keepBodies(state, target, page, setup?.send)
     if (state.registry.fileChooser(placement(page)) && target.kind === "page") {
@@ -512,26 +580,41 @@ export const applyDownloads = (state: State, context: ContextEntry) =>
     }).pipe(Protocol.on(state.root()))
   }))
 
+/** Notes an override whose release was skipped because its context was to be removed, for `restoreContext`. */
+const retire = (state: State, scope: Adapter.DeclarationScope, declaration: Adapter.Declaration) => {
+  if (declaration._tag !== "Override" || scope._tag !== "UserContext") return
+  const context = state.contexts.get(scope.context)
+  if (context !== undefined) (context.retiredOverrides ??= new Map()).set(declaration.override._tag, declaration)
+}
+
 /**
  * What the declarations in force say, sent again to a context's targets, after a removal the browser refused left
  * in place a context whose declarations' releases were skipped because it was to go. Each target's interception
- * and file chooser are reset on their own: a reset that fails is logged and the others still run.
+ * and file chooser are reset on their own, and each override whose release was skipped is released as it would
+ * have been: a reset that fails is logged and the others still run.
  */
-export const restoreContext = (state: State, context: ContextEntry) =>
-  Effect.forEach(
-    targetsInScope(state, { _tag: "UserContext", context: context.id }),
-    (target) =>
-      // Each reset stands alone: one that fails is logged and leaves the others to run
-      Effect.all([
-        applyIntercepts(state, target, target.page!).pipe(releaseErrors),
-        target.kind === "page"
-          ? Page.setInterceptFileChooserDialog({
-            enabled: state.registry.fileChooser(placement(target.page!))
-          }).pipe(Protocol.on(target.session), releaseErrors)
-          : Effect.void
-      ], { discard: true }),
-    { concurrency: "unbounded", discard: true }
-  )
+export const restoreContext = (state: State, context: ContextEntry) => {
+  const scope: Adapter.DeclarationScope = { _tag: "UserContext", context: context.id }
+  const overrides = [...(context.retiredOverrides?.values() ?? [])]
+  context.retiredOverrides = undefined
+  return Effect.all([
+    Effect.forEach(
+      targetsInScope(state, scope),
+      (target) =>
+        // Each reset stands alone: one that fails is logged and leaves the others to run
+        Effect.all([
+          applyIntercepts(state, target, target.page!).pipe(releaseErrors),
+          target.kind === "page"
+            ? Page.setInterceptFileChooserDialog({
+              enabled: state.registry.fileChooser(placement(target.page!))
+            }).pipe(Protocol.on(target.session), releaseErrors)
+            : Effect.void
+        ], { discard: true }),
+      { concurrency: "unbounded", discard: true }
+    ),
+    Effect.forEach(overrides, (declaration) => releaseDeclaration(state, declaration, scope), { discard: true })
+  ], { concurrency: "unbounded", discard: true })
+}
 
 const releaseErrors = <A>(effect: Effect.Effect<A, Protocol.ProtocolError | Deadline.Timeout>) =>
   effect.pipe(
@@ -586,8 +669,9 @@ export const declare = Effect.fnUntraced(function*(
         }
       }
       const release = retiring
-        // The context is removed right after: undoing the declaration would only add a round trip
-        ? Effect.void
+        // The context is removed right after: undoing the declaration would only add a round trip, or for a
+        // viewport a wait on a renderer that may never report its size again
+        ? Effect.sync(() => retire(state, scope, declaration))
         : declaration._tag === "Downloads"
         ? Effect.forEach(
           scope._tag === "UserContext"

@@ -15,7 +15,8 @@ import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as Operation from "../operation.ts"
 import * as Urls from "../urls.ts"
-import { documentOf, type Event, navigableOf, type RealmEntry, realmOf, type State } from "./state.ts"
+import { confirmFrameRemoval } from "./contexts.ts"
+import { closingOf, documentOf, type Event, navigableOf, type RealmEntry, realmOf, type State } from "./state.ts"
 import { addWindowRealm, removeRealm } from "./tree.ts"
 
 // ── Remote values ─────────────────────────────────────────────────────────────────────────────────────────
@@ -215,8 +216,17 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     })
     .on(Script.realmDestroyed, (params, { state }) => {
       const realm = state.realms.get(params.realm)
-      // One created and destroyed before its document committed never reached the model
-      if (realm !== undefined) removeRealm(state, realm, new L1Target.RealmDestroyed({}))
+      // One created and destroyed before its document committed never reached the model. Firefox destroys a closing
+      // page's realms before its context, and they end with the page
+      if (realm !== undefined) {
+        const closing = closingOf(state, realm)()
+        removeRealm(state, realm, closing ?? new L1Target.RealmDestroyed({}))
+        // A child frame's window ends when it navigates or is removed; Firefox can lose the removal's event
+        if (
+          closing === undefined && realm.world._tag === "Main" && !realm.pending &&
+          realm.navigable?.parent !== undefined
+        ) state.buffer.later(confirmFrameRemoval(state, realm.navigable))
+      }
     })
     .on(Log.entryAdded, (params, { state }) => {
       const realm = state.realms.get(params.source.realm)
@@ -238,7 +248,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         if (realm === undefined) return
         state.buffer.emitFrom(realm, {
           _tag: "ConsoleMessage",
-          realm: realm.id,
+          realm: Option.some(realm.id),
           message: new ConsoleMessage.ConsoleMessage({
             // The console method says what the page wrote; BiDi's level is coarser (`console.log` is `info`)
             level: Kit.consoleLevel("method" in params ? params.method : "log"),
@@ -349,17 +359,20 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
     userActivation: call.userActivation
   })).pipe(
     Effect.catch((error) => {
-      // callFunction targets this exact realm. Firefox can reject it before sending realmDestroyed.
+      // callFunction targets this exact realm. Firefox can reject it before sending realmDestroyed, and the realm
+      // ends then, with its page's or the browser's reason while either closes
       const missing = error.reason._tag === "Rejected" && error.reason.reason === "NoSuchFrame"
       return (missing
-        ? state.buffer.run(() => removeRealm(state, realm, new L1Target.RealmDestroyed({})))
+        ? state.buffer.run(() =>
+          removeRealm(state, realm, closingOf(state, realm)() ?? new L1Target.RealmDestroyed({}))
+        )
         : Effect.void).pipe(
-          Effect.andThen(Effect.suspend(() => Effect.fail(Kit.realmFailure(id, () => realm.ended)(error))))
+          Effect.andThen(Effect.suspend(() => Effect.fail(Kit.realmFailure(realm, closingOf(state, realm))(error))))
         )
     }),
     Effect.raceFirst(
       state.buffer.waitFor(() => realm.ended ? true : undefined).pipe(
-        Effect.flatMap(() => Effect.fail(Kit.gone({ _tag: "Realm", id }, new L1Target.RealmDestroyed({}))))
+        Effect.flatMap(() => Effect.fail(Kit.realmGone(realm, closingOf(state, realm))))
       )
     )
   )

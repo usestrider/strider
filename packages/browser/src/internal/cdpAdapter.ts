@@ -13,9 +13,7 @@
  *   the first same-origin document, children of a replaced document end without a CDP event, and navigation
  *   outcomes are reported only on affirmative evidence.
  */
-import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
-import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import type * as Scope from "effect/Scope"
 import * as SubscriptionRef from "effect/SubscriptionRef"
@@ -27,7 +25,6 @@ import type * as Transport from "../protocol/Transport.ts"
 import * as VideoWriter from "../VideoWriter.ts"
 import type * as Adapter from "./adapter.ts"
 import * as Kit from "./adapterKit.ts"
-import * as BrowserClock from "./browserClock.ts"
 import * as Capture from "./cdpAdapter/capture.ts"
 import * as Claims from "./cdpAdapter/claims.ts"
 import * as Contexts from "./cdpAdapter/contexts.ts"
@@ -46,7 +43,6 @@ import * as WebAuthn from "./cdpAdapter/webauthn.ts"
 import * as CdpWire from "./cdpWire.ts"
 import * as Declarations from "./declarations.ts"
 import * as Launch from "./launch.ts"
-import * as Operation from "./operation.ts"
 import * as ProtocolClient from "./protocolClient.ts"
 
 // ── Capabilities ──────────────────────────────────────────────────────────────────────────────────────────
@@ -166,6 +162,7 @@ export const capabilities = (
       entry("input.insertText", "supported"),
       entry("input.pointerModifiers", "supported"),
       entry("input.fractionalPointer", "supported"),
+      entry("hitTest.shadowHostBoxes", "supported"),
       entry("input.dragAndDrop", "supported", ["Strider catches the drag Chromium starts, and finishes it"]),
       entry("webSocketFrames", "supported"),
       entry("networkConnections", "supported"),
@@ -302,20 +299,7 @@ export const connect: (
       const exited = options.exited
       yield* Effect.addFinalizer(() =>
         connected
-          ? Effect.gen(function*() {
-            const close = yield* BrowserCdp.close().pipe(
-              Protocol.on(client.root),
-              Effect.ignore,
-              Effect.interruptible,
-              Effect.forkChild
-            )
-            yield* Effect.exit(exited).pipe(Effect.ensuring(Fiber.interrupt(close)))
-          }).pipe(
-            Effect.interruptible,
-            BrowserClock.timeoutOption(5000),
-            Operation.apart("Chromium.close", Duration.seconds(5)),
-            Effect.ignore
-          )
+          ? Launch.closeGracefully("Chromium.close", BrowserCdp.close().pipe(Protocol.on(client.root)), exited)
           : Effect.void
       )
     }
@@ -376,6 +360,7 @@ export const connect: (
       info,
       capabilities: capabilitySet,
       pauseScope: options.ownership === "launched" ? "browser" : "related",
+      closing: Kit.closing(state),
       // `Page.documentOpened`
       reportsDocumentOpen: true,
       defaultContext: state.defaultContext,
@@ -393,6 +378,7 @@ export const connect: (
       realm: (document, world) => Evaluation.realm(state, document, world),
       evaluate: (realm, call) => Evaluation.evaluate(state, realm, call),
       releaseHandles: (list) => Evaluation.releaseHandles(state, list),
+      textInsertion: "native",
       dispatchInput: (page, events, frame, lands) => Input.dispatchInput(state, page, events, frame, lands),
       contentFrame: (node) => Input.contentFrame(state, node),
       releaseNodes: () => Effect.void,

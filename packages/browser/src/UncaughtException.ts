@@ -3,6 +3,12 @@
  *
  * An exception is reported to its page and its context, as console messages are.
  *
+ * On Firefox, a message the browser writes to the console itself, such as a Content Security Policy violation or a
+ * request blocked by CORS, arrives here too, with no stack, as Firefox sends it as a script error. On stock WebKit,
+ * "Fetch API cannot load … due to access control checks" arrives here too: WebKit sends it on its `javascript`
+ * channel at level `error`, which is how Strider reads an uncaught exception on WebKit. Each backend's `console`
+ * capability says so.
+ *
  * @stability unstable
  * @since 0.1.0
  */
