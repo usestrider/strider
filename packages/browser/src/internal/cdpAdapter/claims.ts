@@ -64,7 +64,8 @@ export const make = (
   return {
     browser,
     dismiss: Effect.fnUntraced(function*(id, prompt) {
-      // A prompt can hold up the page's initial sync, so answering one doesn't wait for it
+      // Answering a prompt already known causes no event the model needs, and that prompt can be what holds up the
+      // page's initial sync, so it doesn't wait for it
       const page = yield* pageNow(state, id)
       const pending = Array.from(state.obligations.values()).find((entry) =>
         entry._tag === "Prompt" && entry.prompt === prompt && entry.target.page === page

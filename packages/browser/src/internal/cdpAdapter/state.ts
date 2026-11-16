@@ -508,7 +508,9 @@ export const pageNow = (state: State, id: L1Target.NavigableId): Effect.Effect<P
 // causes: a navigation's commit, its requests, a paused request no one continues (which also keeps Chromium from
 // answering the tree). An operation on a page therefore waits for the sync before it sends anything, as `newPage`
 // does, and whatever the page commits before then is the document it opened with, not a navigation after it.
-// Nothing the sync runs goes through here; a release, such as a close, uses `pageNow`, since a sync can hang.
+// Nothing the sync runs goes through here. An operation that can cause events waits; a release, such as a forced
+// close, or a decision on something already known, such as answering an open prompt, uses `pageNow`, since a sync
+// can hang.
 const synced = <A>(page: PageEntry, found: Effect.Effect<A, Adapter.AdapterError>) =>
   Deferred.isDoneUnsafe(page.ready) ? found : Effect.andThen(Effect.ignore(Deferred.await(page.ready)), found)
 
