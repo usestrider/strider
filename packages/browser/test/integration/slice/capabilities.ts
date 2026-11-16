@@ -46,6 +46,16 @@ export const cachesFetches: Readonly<Record<"Chromium" | "Firefox" | "WebKit", b
 }
 
 /**
+ * Whether a dedicated worker's requests bypass the HTTP cache while a route is in force: Firefox answers a worker's
+ * second fetch of a cacheable URL from its cache even while the session's cache behavior is `bypass`.
+ */
+export const workerFetchesBypassCache: Readonly<Record<"Chromium" | "Firefox" | "WebKit", boolean>> = {
+  Chromium: true,
+  Firefox: false,
+  WebKit: true
+}
+
+/**
  * How a backend that reports `input.fractionalPointer` as partial places a fractional pointer position: Firefox
  * rounds to the nearest whole pixel, and launched WebKit truncates the fraction.
  */

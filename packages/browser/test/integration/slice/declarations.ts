@@ -33,7 +33,7 @@ import type * as net from "node:net"
 import * as os from "node:os"
 import * as path from "node:path"
 import { site, tlsSite } from "../adapter/harness.ts"
-import { cachesFetches, responseRouteInFlight, status, supports } from "./capabilities.ts"
+import { cachesFetches, responseRouteInFlight, status, supports, workerFetchesBypassCache } from "./capabilities.ts"
 
 const timeout = 60_000
 
@@ -552,14 +552,14 @@ export const declarations = (
                 origin,
                 `return new Promise((resolve, reject) => { const worker = new Worker(URL.createObjectURL(new Blob([${
                   JSON.stringify(script)
-                }], { type: 'text/javascript' }))); worker.onmessage = ({ data }) => { worker.terminate(); resolve(data) }; worker.onerror = reject; worker.postMessage(location.origin + '/cached.js?worker') })`
+                }], { type: 'text/javascript' }))); worker.onmessage = ({ data }) => { worker.terminate(); resolve(data) }; worker.onerror = reject; worker.postMessage(location.origin + '/cached.js?worker-${scope}') })`
               )
               assert.deepStrictEqual(result, [200, 200])
               assert.strictEqual(
                 served.filter((request) =>
-                  request.path === "/cached.js?worker"
+                  request.path === `/cached.js?worker-${scope}`
                 ).length,
-                2
+                workerFetchesBypassCache[name] ? 2 : 1
               )
             }),
           timeout
