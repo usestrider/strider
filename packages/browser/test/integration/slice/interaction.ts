@@ -3259,6 +3259,32 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         }), timeout)
 
       it.effect(
+        "keeps a design-mode fill in its child when beforeinput focuses the parent",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { origin } = yield* site
+            const child = fixtureUrl(
+              origin,
+              `<p id="target">old</p><script>
+            document.designMode = "on";
+            document.addEventListener("beforeinput", () => {
+              parent.document.body.dataset.beforeInput = "seen";
+              parent.document.getElementById("other").focus();
+            }, { once: true });
+          </script>`
+            )
+            const page = yield* newPage
+            yield* page.goto(fixtureUrl(origin, `<input id="other" value="safe"><iframe src="${child}"></iframe>`))
+            const target = page.frame(page.locator("iframe")).locator("#target")
+            const exit = yield* target.fill("new").pipe(Deadline.within("2 seconds"), Effect.exit)
+            assert.strictEqual(yield* page.evaluateInMainWorld(() => document.body.dataset.beforeInput), "seen")
+            assert.strictEqual(yield* page.locator("#other").readValue, "safe")
+            if (Exit.isSuccess(exit)) assert.strictEqual(yield* target.readText, "new")
+          })),
+        timeout
+      )
+
+      it.effect(
         "guards design-mode insertion when focus moves into an ancestor document",
         () =>
           Effect.gen(function*() {

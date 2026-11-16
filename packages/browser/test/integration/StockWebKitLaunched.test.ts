@@ -20,7 +20,9 @@ import type * as CommandLine from "effect/process/CommandLine"
 import * as Random from "effect/Random"
 import * as Redacted from "effect/Redacted"
 import { createServer, type Server, type Socket } from "node:net"
+import * as BrowserImpl from "../../src/internal/browser.ts"
 import * as Launch from "../../src/internal/launch.ts"
+import * as WebKitAdapter from "../../src/internal/webkitAdapter.ts"
 import * as WebKitAutomation from "../../src/internal/webkitAutomation.ts"
 import { site } from "./adapter/harness.ts"
 import { webkitgtk } from "./browsers.ts"
@@ -142,6 +144,65 @@ const silentListenerCases = [
 
 describe("Stock WebKit, launched in automation mode", () => {
   layer(NodeServices.layer, { excludeTestServices: true, timeout })((it) => {
+    it.effect(
+      "keeps an upload on its bound input when another element is removed during node resolution",
+      () =>
+        Effect.scoped(Effect.gen(function*() {
+          yield* useXvfb()
+          let beforeResolve: Effect.Effect<void> = Effect.void
+          let changed = false
+          const backend = BrowserImpl.layer((sink) =>
+            Effect.gen(function*() {
+              const group = yield* WebKitAutomation.start({
+                executablePath: webkitgtk.executable,
+                wrapAutomation: (transport) => ({
+                  ...transport,
+                  send: Effect.fnUntraced(function*(message: string) {
+                    const command = JSON.parse(message)
+                    if (
+                      !changed && command.method === "Automation.evaluateJavaScriptFunction" &&
+                      command.params.function.startsWith("function(path)")
+                    ) {
+                      changed = true
+                      yield* beforeResolve
+                    }
+                    yield* transport.send(message)
+                  })
+                })
+              })
+              return yield* WebKitAdapter.connect(group.transport, { sink, ownership: "launched", automation: group })
+            })
+          )
+          yield* Effect.gen(function*() {
+            const { origin } = yield* site
+            const fs = yield* FileSystem.FileSystem
+            const dir = yield* fs.makeTempDirectoryScoped({ prefix: "strider-node-path-" })
+            yield* fs.writeFileString(`${dir}/note.txt`, "abc")
+            const page = yield* Browser.newPage()
+            yield* page.goto(
+              fixtureUrl(
+                origin,
+                "<div id=\"remove\"></div> text <!-- comment --><input type=\"file\" id=\"target\"><input type=\"file\" id=\"other\">"
+              )
+            )
+            beforeResolve = page.evaluateInMainWorld(() => document.getElementById("remove")!.remove()).pipe(
+              Effect.orDie
+            )
+            const exit = yield* page.locator("#target").setInputFiles(FileInput.local(`${dir}/note.txt`)).pipe(
+              Effect.exit
+            )
+            assert(changed, "the DOM change must happen between path capture and resolution")
+            const files = yield* page.evaluateInMainWorld(() => ({
+              target: (document.getElementById("target") as HTMLInputElement).files!.length,
+              other: (document.getElementById("other") as HTMLInputElement).files!.length
+            }))
+            assert.strictEqual(files.other, 0, "a changed path must never redirect the upload to another input")
+            if (Exit.isSuccess(exit)) assert.strictEqual(files.target, 1)
+          }).pipe(Effect.provide(backend.pipe(Layer.provide(socketConnector))))
+        })),
+      timeout
+    )
+
     it.effect(
       "keeps keyboard input usable after refusing a key before dispatch",
       () =>
