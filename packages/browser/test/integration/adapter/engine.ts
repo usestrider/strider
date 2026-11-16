@@ -2589,6 +2589,62 @@ export const engine = (backend: Backend) =>
             assert.strictEqual(count(yield* filtered(null, resolved)), 0)
           }), timeout)
 
+        it.effect("deduplicates text matches across overlapping element scopes in tree order", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<div class="scope"><div class="scope" id="first">Resolved</div></div><div class="scope" id="second">Resolved</div>`
+            )
+            const steps: ReadonlyArray<Engine.Step> = [
+              { _tag: "Css", selector: ".scope" },
+              { _tag: "Text", matcher: text("Resolved") }
+            ]
+            assert.strictEqual(count(yield* send({ op: "count", steps })), 2)
+            for (const [index, id] of ["first", "second"].entries()) {
+              assert.deepStrictEqual(
+                yield* send({
+                  op: "read",
+                  steps: [...steps, { _tag: "Nth", index }],
+                  read: { _tag: "Attribute", name: "id" }
+                }),
+                { _tag: "Read", value: id }
+              )
+            }
+          }), timeout)
+
+        it.effect("matches text scopes around assigned and fallback slots without matching slots", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<div id="assigned">Checkout</div><div id="fallback"></div>
+<script>
+document.getElementById("assigned").attachShadow({ mode: "open" }).innerHTML =
+  '<button id="checkout"><slot></slot></button>'
+document.getElementById("fallback").attachShadow({ mode: "open" }).innerHTML =
+  '<button id="default"><slot>Default</slot></button>'
+</script>`
+            )
+            for (const [id, said] of [["checkout", "Checkout"], ["default", "Default"]] as const) {
+              assert.deepStrictEqual(
+                yield* send({
+                  op: "read",
+                  steps: [{ _tag: "Css", selector: `#${id}` }, { _tag: "Text", matcher: text(said) }],
+                  read: { _tag: "Attribute", name: "id" }
+                }),
+                { _tag: "Read", value: id }
+              )
+              assert.strictEqual(
+                count(
+                  yield* send({
+                    op: "count",
+                    steps: [{ _tag: "Css", selector: "slot" }, { _tag: "Text", matcher: text(said) }]
+                  })
+                ),
+                0
+              )
+            }
+          }), timeout)
+
         it.effect("never matches a role's scope element itself", () =>
           Effect.gen(function*() {
             const { send } = yield* open(backend, `<button>Go</button>`)
