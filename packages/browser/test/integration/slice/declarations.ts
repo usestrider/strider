@@ -1345,6 +1345,78 @@ export const declarations = (
           )
         })), timeout)
 
+      it.effect("runs a timer scheduled at the end of a long chain of messages", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const page = yield* Browser.newPage()
+          yield* page.clock.install({ mode: "controlled", at: 1000 })
+          yield* page.evaluateInMainWorld(() => {
+            // Window messages and port messages, handed on one after another
+            const channel = new MessageChannel()
+            let messages = 0
+            const next = () => {
+              if (++messages === 200) {
+                setTimeout(() =>
+                  Reflect.set(window, "__done", true), 100)
+              } else if (messages % 2 === 0) {
+                channel.port2.postMessage(null)
+              } else window.postMessage("clock-chain", "*")
+            }
+            channel.port1.onmessage = next
+            addEventListener("message", (event) => {
+              if (event.data === "clock-chain") {
+                next()
+              }
+            })
+            setTimeout(next, 100)
+          })
+          yield* page.clock.adjust(1000)
+          assert.strictEqual(
+            yield* page.evaluateInMainWorld(() =>
+              Reflect.get(window, "__done") === true
+            ),
+            true
+          )
+        })), timeout)
+
+      it.effect("times out over a page that posts messages without end, after running its timers", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const page = yield* Browser.newPage()
+          const { origin } = yield* site
+          yield* page.clock.install({ mode: "controlled", at: 1000 })
+          yield* page.goto(fixtureUrl(origin, `<p id="later">pending</p>`))
+          yield* page.evaluateInMainWorld(() => {
+            const channel = new MessageChannel()
+            channel.port1.onmessage = () => {
+              if (Reflect.get(window, "__stop") !== true) {
+                channel.port2.postMessage(null)
+              }
+            }
+            setTimeout(() =>
+              channel.port2.postMessage(null), 100)
+            setTimeout(() => {
+              document.getElementById("later")!.textContent = "fired"
+            }, 500)
+          })
+          const error = yield* failure(
+            page.clock.adjust(1000).pipe(Deadline.within("1 second")),
+            "adjust over endless messages"
+          )
+          assert(Deadline.isTimeout(error), String(error))
+          // Past the deadline, the page stops waiting for its messages and runs the remaining timers
+          yield* Expect.that(
+            page.locator("#later").readText,
+            Condition.make("fired", (text: string) =>
+              text === "fired")
+          )
+          assert.strictEqual(
+            yield* page.evaluateInMainWorld(() => {
+              Reflect.set(window, "__stop", true)
+              return Date.now()
+            }),
+            2000
+          )
+        })), timeout)
+
       it.effect("starts controlled performance time when replacing a fixed clock", () =>
         Effect.scoped(Effect.gen(function*() {
           const page = yield* Browser.newPage()
