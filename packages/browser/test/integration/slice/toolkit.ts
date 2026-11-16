@@ -752,7 +752,8 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                 state: "visible",
                 text: "false"
               })
-              // One line for the dialog, naming the registration, which a later result brings if these didn't
+              // One decision line, naming the registration; an earlier result may have brought the dialog's open
+              // line first, and a later one its decision
               const dialogLines: Array<string> = [...asked.value.sinceLast, ...answered.value.sinceLast]
                 .filter((line: string) => line.startsWith("dialog"))
               for (let turn = 0; turn < 50 && !dialogLines.some((line) => line.includes(" by ")); turn++) {
@@ -760,8 +761,15 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                 const read = yield* call(tools, "pages", {})
                 dialogLines.push(...read.value.sinceLast.filter((line: string) => line.startsWith("dialog")))
               }
-              assert.lengthOf(dialogLines, 1, dialogLines.join("\n"))
-              assert.match(dialogLines[0]!, /^dialog \w+( "Sure\?")? on shop dismissed by r1$/)
+              const decided = dialogLines.filter((line) => line.includes(" by "))
+              assert.lengthOf(decided, 1, dialogLines.join("\n"))
+              assert.match(decided[0]!, /^dialog \w+( "Sure\?")? on shop dismissed by r1$/)
+              const opened = dialogLines.filter((line) => !line.includes(" by "))
+              assert.isAtMost(opened.length, 1, dialogLines.join("\n"))
+              if (opened.length === 1) {
+                assert.match(opened[0]!, /^dialog \w+( "Sure\?")? on shop, open$/)
+                assert.isBelow(dialogLines.indexOf(opened[0]!), dialogLines.indexOf(decided[0]!))
+              }
               yield* call(tools, "route", {
                 page: "shop",
                 pattern: "**/api/status",
