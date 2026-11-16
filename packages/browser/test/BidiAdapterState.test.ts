@@ -4650,17 +4650,14 @@ it.effect("delivers a WebSocket message whose realm arrives while the root sessi
     const snapshot = yield* Deferred.make<ProtocolClient.Synced>()
     const handlers = Evaluation.register(Kit.handlers<State.Event>())
     let state!: State.State
-    const resyncing = yield* Deferred.make<void>()
+    let foldControl!: ProtocolClient.FoldControl
     const client = yield* ProtocolClient.make(browser.transport, BidiWire.wire, {
       fold: (control) => {
+        foldControl = control
         return {
           events: handlers.events,
           apply: (_session, method, params) => Effect.sync(() => handlers.apply(method, params, { state })),
-          lost: (session) =>
-            Effect.sync(() => {
-              control.sync(session, Deferred.await(snapshot))
-              Deferred.doneUnsafe(resyncing, Effect.void)
-            }),
+          lost: (session) => Effect.sync(() => control.sync(session, Deferred.await(snapshot))),
           ended: () => Effect.void
         }
       }
@@ -4693,8 +4690,7 @@ it.effect("delivers a WebSocket message whose realm arrives while the root sessi
     })
     yield* Fiber.join(preparing)
     // The adapter's integrity-loss hook holds this same root session until its snapshot completes.
-    yield* browser.receive({ type: "event", method: "script.realmCreated", params: { realm: 42 } })
-    yield* Deferred.await(resyncing)
+    foldControl.sync(client.root, Deferred.await(snapshot))
     const observed = yield* client.root.subscribe(Script.message)
     yield* browser.receive({
       type: "event",
