@@ -87,8 +87,11 @@ export interface TargetEntry {
   scriptLoaded?: Deferred.Deferred<void> | undefined
   /** The intercept patterns last applied, so a change is applied once. */
   intercepts: string
-  /** Whether the HTTP cache was last set off, so a change is sent once; Chromium's default is on. */
-  cacheDisabled?: boolean | undefined
+  /**
+   * Whether the HTTP cache was last set off, so a change is sent once; Chromium's default is on, and `"unknown"`
+   * after a reply that failed or never came.
+   */
+  cacheDisabled?: boolean | "unknown" | undefined
   readonly scripts: Map<string, string>
   ended: boolean
   /** Original renderer dimensions, retained until restoration completes; null means the original is unknown. */

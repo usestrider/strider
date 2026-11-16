@@ -288,40 +288,70 @@ const cacheDisabled = (
 
 const sendCache = (target: TargetEntry, disabled: boolean, on: Send) =>
   Effect.suspend(() => {
-    if (disabled === (target.cacheDisabled ?? false)) return Effect.void
+    if (target.cacheDisabled !== "unknown" && disabled === (target.cacheDisabled ?? false)) return Effect.void
     target.cacheDisabled = disabled
     return Network.setCacheDisabled({ cacheDisabled: disabled }).pipe(on)
   })
 
+/** Whether a cross-document navigation is under way in a frame the target owns, or about to be. */
+const navigationPending = (state: State, target: TargetEntry) =>
+  [...state.frames.values()].some((frame) =>
+    frame.owner === target &&
+    (frame.expected.list.length > 0 || [...frame.navigations.values()].some((navigation) => !navigation.sameDocument))
+  )
+
 /**
- * The cache setting a declaration or its release changes, written to a live target without waiting for its reply.
- * The renderer answers it, and Chromium holds it while a cross-process navigation is under way, until the new
- * document commits: a route declared while the navigation waits on its server, which may wait on the caller,
- * would never return. The command is written before the declaration returns and applies in order with what
- * follows it on the session; a failed reply is logged.
+ * The cache setting a declaration or its release changes, sent to a live target and confirmed, except while a
+ * navigation is under way in it. The renderer answers the command, and Chromium holds the reply while a
+ * cross-process navigation is under way, until the new document commits: a route declared while the navigation
+ * waits on its server, which may wait on the caller, would never return. So the wait for the reply ends once a
+ * navigation is pending in the target; the command, written before, reaches the new document at its commit. The
+ * reply is awaited apart from the declaration, under the connection's own deadline for a command: one that fails
+ * or never comes leaves the setting unknown, so the next change sends it again.
  */
 const applyCache = (state: State, target: TargetEntry) =>
   withOverrides(
     target,
-    Effect.suspend(() =>
-      sendCache(
+    Effect.suspend(() => {
+      let confirmation: Effect.Effect<void, Protocol.ProtocolError> = Effect.void
+      return sendCache(
         target,
         cacheDisabled(state, target, state.registry.overrides(placement(target.page!))),
         (command) =>
           Effect.gen(function*() {
             // A connection already tearing down sets nothing more
             if (state.cleanupScope.state._tag === "Closed") return
-            const reply = yield* target.session.start(command, state.cleanupScope)
-            yield* reply.pipe(
-              Effect.catchIf(
-                (error) => error._tag === "ProtocolError" && error.reason._tag === "SessionEnded",
-                () => Effect.void
+            const reply = yield* target.session.start(command, state.cleanupScope).pipe(
+              Operation.detached,
+              Effect.provideService(ProtocolClient.CommandDeadline, Option.none())
+            )
+            const confirmed = yield* reply.pipe(
+              Effect.tapError((error) =>
+                Effect.sync(() => {
+                  target.cacheDisabled = "unknown"
+                }).pipe(
+                  Effect.andThen(
+                    error.reason._tag === "SessionEnded"
+                      ? Effect.void
+                      : Effect.logWarning("Failed to confirm the CDP cache setting", error)
+                  )
+                )
               ),
-              Effect.catch((error) => Effect.logWarning("Failed to set the CDP cache setting", error)),
+              Effect.asVoid,
               Effect.forkIn(state.cleanupScope)
             )
+            confirmation = Effect.raceFirst(
+              Fiber.join(confirmed),
+              state.buffer.waitFor(() => navigationPending(state, target) || undefined)
+            )
           })
-      )
+      ).pipe(Effect.map(() => confirmation))
+    })
+  ).pipe(
+    Effect.flatten,
+    Effect.catchIf(
+      (error) => error._tag === "ProtocolError" && error.reason._tag === "SessionEnded",
+      () => Effect.void
     )
   )
 
@@ -435,6 +465,17 @@ const kindsFor = (
 }
 
 /** What a new page or frame gets before its scripts run: the declarations in force for its page. */
+/**
+ * The cache setting a dedicated worker starts with, written before it resumes, with the replies of its other
+ * domains: by the rule a page's follows.
+ */
+export const workerCache = (state: State, target: TargetEntry, on: Send) =>
+  Effect.suspend(() =>
+    target.page === undefined
+      ? Effect.void
+      : sendCache(target, cacheDisabled(state, target, state.registry.overrides(placement(target.page))), on)
+  )
+
 export const configureTarget = Effect.fnUntraced(
   function*(state: State, target: TargetEntry, page: PageEntry, setup?: Setup) {
     if (setup === undefined) {
@@ -504,12 +545,20 @@ export const configureTarget = Effect.fnUntraced(
 
 const targetsInScope = (state: State, scope: Adapter.DeclarationScope) =>
   [...state.targets.values()].filter((target) =>
-    target.page !== undefined && !target.ended && (target.kind === "page" || target.kind === "iframe") &&
+    target.page !== undefined && !target.ended &&
+    (target.kind === "page" || target.kind === "iframe" || target.kind === "worker") &&
     Declarations.covers(scope, placement(target.page))
   )
 
 const applyToTarget = (state: State, declaration: Adapter.Declaration, target: TargetEntry) => {
   const page = target.page!
+  // A dedicated worker keeps a cache setting of its own, and takes no other declaration through here
+  if (target.kind === "worker") {
+    return declaration._tag === "Intercept" ||
+        (declaration._tag === "Override" && declaration.override._tag === "CacheDisabled")
+      ? applyCache(state, target)
+      : Effect.void
+  }
   switch (declaration._tag) {
     case "InitScript":
       return applyScripts(state, target, page)
@@ -590,7 +639,7 @@ export const restoreContext = (state: State, context: ContextEntry) =>
     (target) =>
       // Each reset stands alone: one that fails is logged and leaves the others to run
       Effect.all([
-        applyIntercepts(state, target, target.page!).pipe(releaseErrors),
+        target.kind === "worker" ? Effect.void : applyIntercepts(state, target, target.page!).pipe(releaseErrors),
         applyCache(state, target).pipe(releaseErrors),
         target.kind === "page"
           ? Page.setInterceptFileChooserDialog({
