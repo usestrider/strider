@@ -982,6 +982,11 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
+      // Inside a shadow root, Firefox's elementFromPoint and elementsFromPoint leave out the host's own boxes, so its
+      // hit test answers with the button under the host's ::before, which native input never reaches. Which boxes a
+      // shadow root's hit test reports is unspecified (w3c/webcomponents#735, #736), and the answers match a label
+      // slotted into the button, so Strider can't tell the cover apart without singling out pseudo-elements. A
+      // backend with the capability in part asserts what it does today, so the case fails when that changes.
       it.effect(
         "refuses a trial click through a shadow host's covering pseudo-element",
         () =>
@@ -1009,8 +1014,17 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               Deadline.within("3 seconds"),
               Effect.exit
             )
-            assert(Exit.isFailure(trial), "A trial click must refuse the button covered by its host")
-            assert.include(Cause.pretty(trial.cause), "covers")
+            if (yield* fullySupports("hitTest.shadowHostBoxes")) {
+              assert(Exit.isFailure(trial), "A trial click must refuse the button covered by its host")
+              assert.include(Cause.pretty(trial.cause), "covers")
+            } else {
+              assert(Exit.isSuccess(trial), "The hit test misses the host's own boxes, so the trial passes")
+              // A trial dispatches nothing; the real click above still reached only the host
+              assert.strictEqual(
+                yield* page.evaluateInMainWorld(() => (globalThis as unknown as { clickCount: number }).clickCount),
+                100
+              )
+            }
           })),
         timeout
       )
