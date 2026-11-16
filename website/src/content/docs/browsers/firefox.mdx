@@ -50,6 +50,8 @@ const AdasFirefox = Firefox.layer({
   after them, replaced at each launch. Firefox saves the preferences a launch writes, the headless pointer
   preferences included, into the directory's `prefs.js`, so a later launch in that directory keeps them, a launch
   with a window too.
+- Closing the layer's scope asks Firefox to quit and waits up to five seconds for it to exit, since Firefox writes
+  cookies and localStorage to the profile as it quits. A Firefox still running after that is stopped with signals.
 
 ## Pages as windows
 

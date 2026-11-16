@@ -2409,6 +2409,8 @@ export const contents = (
               scope: { domain: new URL(crossSite).hostname, path: "/" },
               sameSite: "strict"
             })
+            // The loopback origin is a secure context over http, so a request to it sends a Secure cookie
+            yield* jar.set({ name: "safe", value: "3", scope: { url: origin }, secure: true })
             const all = yield* jar.list
             const token = all.find((cookie) =>
               cookie.name === "token"
@@ -2423,13 +2425,14 @@ export const contents = (
             assert.deepStrictEqual(plain.sameSite, name === "WebKit" ? Option.some("lax") : Option.none())
             assert.strictEqual(Option.isSome(plain.priority), name === "Chromium")
             const names = (cookies: ReadonlyArray<CookieJar.Cookie>) => cookies.map((cookie) => cookie.name).sort()
-            assert.deepStrictEqual(names(yield* jar.listFor(`${origin}/app/x`)), ["plain", "token"])
-            assert.deepStrictEqual(names(yield* jar.listFor(`${origin}/other`)), ["plain"])
+            assert.deepStrictEqual(names(yield* jar.listFor(`${origin}/app/x`)), ["plain", "safe", "token"])
+            assert.deepStrictEqual(names(yield* jar.listFor(`${origin}/other`)), ["plain", "safe"])
             assert.deepStrictEqual(names(yield* jar.listFor(crossSite)), ["other"])
             yield* page.reload()
             assert.include(yield* page.evaluateInMainWorld(() => document.cookie), "plain=1")
+            assert.include(yield* page.evaluateInMainWorld(() => document.cookie), "safe=3")
             yield* jar.remove({ name: "token" })
-            assert.deepStrictEqual(names(yield* jar.list), ["other", "plain"])
+            assert.deepStrictEqual(names(yield* jar.list), ["other", "plain", "safe"])
             const partitioned = yield* Effect.exit(jar.set({
               name: "chip",
               value: "1",

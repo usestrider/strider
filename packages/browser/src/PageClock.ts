@@ -13,6 +13,9 @@
  * `performance.now`, and in controlled mode the timers and animation frames. Its controls are on a symbol, which a
  * page that lists the window's symbols can find.
  *
+ * Calls on one clock that run at the same time take turns, in the order they start: each applies to the time the
+ * one before it left.
+ *
  * **Gotchas**
  *
  * - Workers keep real time unless the clock is installed with `workers: true`, which Firefox can't do. CSS
