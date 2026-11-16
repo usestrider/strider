@@ -302,24 +302,26 @@ export const attaching = (
             const { layer: attached } = yield* start(tabUrl(origin, "First"), tabUrl(origin, "Second"))
             yield* Effect.scoped(Effect.gen(function*() {
               const browser = yield* Browser.Browser
-              const tab = yield* (yield* browser.pages)[0]!.control
-              yield* tab.goto(
-                fixtureUrl(
-                  origin,
-                  `<button>Edit</button><script>window.addEventListener("beforeunload", (e) => { e.preventDefault(); e.returnValue = "" })</script>`
+              for (const observed of yield* browser.pages) {
+                const tab = yield* observed.control
+                yield* tab.goto(
+                  fixtureUrl(
+                    origin,
+                    `<button>Edit</button><script>window.addEventListener("beforeunload", (e) => { e.preventDefault(); e.returnValue = "" })</script>`
+                  )
                 )
-              )
-              yield* tab.activate
-              yield* tab.getByRole("button", { name: "Edit" }).click()
+                yield* tab.activate
+                yield* tab.getByRole("button", { name: "Edit" }).click()
+              }
             })).pipe(Effect.provide(attached))
             yield* Effect.scoped(Effect.gen(function*() {
               const browser = yield* Browser.Browser
-              const pages = yield* browser.pages
-              for (const observed of pages) {
-                const tab = yield* observed.control
-                yield* Dialog.handle(tab, Dialog.acceptAll)
-                yield* tab.close({ runBeforeUnload: true })
-              }
+              const tab = yield* (yield* browser.pages)[0]!.control
+              const handler = yield* Dialog.handle(tab, Dialog.acceptAll)
+              yield* tab.close({ runBeforeUnload: true })
+              yield* handler.handled.waitFor((count) =>
+                count === 1
+              )
             })).pipe(Effect.provide(attached))
           }), timeout)
 
