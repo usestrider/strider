@@ -12,10 +12,8 @@
  */
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
-import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
-import * as Stream from "effect/Stream"
 import * as Debugger from "../../cdp/Debugger.ts"
 import * as Fetch from "../../cdp/Fetch.ts"
 import * as Inspector from "../../cdp/Inspector.ts"
@@ -29,8 +27,7 @@ import * as L1Target from "../../Target.ts"
 import * as Kit from "../adapterKit.ts"
 import type * as ProtocolClient from "../protocolClient.ts"
 import * as Urls from "../urls.ts"
-import { configureTarget, type Setup } from "./declare.ts"
-import * as Evaluation from "./evaluation.ts"
+import { configureTarget, type Setup, workerCache } from "./declare.ts"
 import { frameUrl, targetKind } from "./mapping.ts"
 import {
   closingReason,
@@ -99,6 +96,7 @@ const attached = (state: State, parent: TargetEntry | undefined, params: Target.
         target,
         openerId: info.openerId,
         ready: Deferred.makeUnsafe(),
+        treeRead: Deferred.makeUnsafe(),
         closing: undefined,
         closeRequested: false,
         ended: false
@@ -310,6 +308,9 @@ const snapshot = Effect.fnUntraced(function*(
   release = Effect.void
 ): Effect.fn.Return<ProtocolClient.Synced, Protocol.ProtocolError, Scope.Scope> {
   const on = Protocol.on(target.session)
+  const read = Effect.sync(() => {
+    if (page !== undefined && target.kind === "page") Deferred.doneUnsafe(page.treeRead, Effect.void)
+  })
   const autoAttach = Target.setAutoAttach({
     autoAttach: true,
     waitForDebuggerOnStart: true,
@@ -344,7 +345,7 @@ const snapshot = Effect.fnUntraced(function*(
       const writeFailure = yield* written.pipe(Effect.flip, Effect.option)
       yield* release
       const [snapshot, , declarationFailure] = yield* Effect.all([
-        tree,
+        tree.pipe(Effect.tap(read)),
         Effect.all(replies, { concurrency: "unbounded", discard: true }),
         Effect.all(declarations.map((reply) => reply.pipe(Effect.flip, Effect.option)), { concurrency: "unbounded" })
           .pipe(
@@ -360,6 +361,7 @@ const snapshot = Effect.fnUntraced(function*(
         Network.enable({}).pipe(on)
       ], { concurrency: "unbounded", discard: true })
       const tree = yield* target.session.sendSequenced(Page.getFrameTree())
+      yield* read
       yield* Effect.all([Runtime.enable().pipe(on), Log.enable().pipe(on)], { concurrency: "unbounded", discard: true })
       yield* autoAttach.pipe(on)
       const failure = yield* (configure && page !== undefined ? configureTarget(state, target, page) : Effect.void)
@@ -443,6 +445,7 @@ const workerGate = Effect.fnUntraced(function*(state: State, target: TargetEntry
     Runtime.enable().pipe(on),
     Log.enable().pipe(on),
     Network.enable({}).pipe(on),
+    workerCache(state, target, (command) => command.pipe(on, Effect.asVoid)),
     resume(target.session, waiting)
   ], {
     concurrency: "unbounded",
@@ -455,67 +458,20 @@ const workerGate = Effect.fnUntraced(function*(state: State, target: TargetEntry
 ContextEntry.prototype.gate = gate
 ContextEntry.prototype.workerGate = workerGate
 
+// A context with a script WebSocket route gates its pages as any other context does: the bridge's bindings and
+// capture script are part of the staged setup, so a page that opens with no URL, such as a popup, gets them with its
+// routes, headers and overrides before its one resume. Its first navigation is then intercepted like any other.
+// Bridge calls that arrived before their realm was known are delivered once the snapshot is installed.
 export const webSocketGate: import("./state.ts").ContextGate = Effect.fnUntraced(
   function*(state, target, page, waiting, adopted) {
-    if (target.kind !== "page" || target.url !== "" || page === undefined) {
-      return yield* gate(state, target, page, waiting, adopted)
+    const synced = yield* gate(state, target, page, waiting, adopted)
+    return {
+      through: synced.through,
+      apply: synced.apply.pipe(Effect.andThen(Effect.suspend(() => {
+        WebSocketBridge.flush(state, target)
+        return state.buffer.flush
+      })))
     }
-    const bundles = state.registry.bundles(placement(page))
-    const bridges = bundles.get("")?.webSockets
-    if (bridges === undefined) return yield* gate(state, target, page, waiting, adopted)
-    const scope = yield* Scope.fork(state.cleanupScope)
-    const contexts: Array<Runtime.ExecutionContextCreatedParams> = []
-    const main = yield* Deferred.make<void>()
-    const events = yield* target.session.subscribe(Runtime.executionContextCreated).pipe(Scope.provide(scope))
-    yield* events.pipe(
-      Stream.runForEach((event) =>
-        Effect.sync(() => {
-          contexts.push(event)
-          if ((event.context.auxData as { isDefault?: boolean } | undefined)?.isDefault) {
-            Deferred.doneUnsafe(main, Effect.void)
-          }
-        })
-      ),
-      Effect.forkIn(scope)
-    )
-    return yield* Effect.gen(function*() {
-      const on = Protocol.on(target.session)
-      const bindings = yield* WebSocketBridge.prepare(state, target, bridges, false)
-      yield* Effect.all([
-        Page.enable().pipe(on),
-        Runtime.enable().pipe(on),
-        Log.enable().pipe(on),
-        ...bindings.map((binding) => binding.pipe(on)),
-        ...[...bundles].map(([key, bundle]) =>
-          Page.addScriptToEvaluateOnNewDocument({
-            source: bundle.source,
-            ...(bundle.world._tag === "Isolated" ? { worldName: bundle.world.name } : {})
-          }).pipe(on, Effect.tap(({ identifier }) => Effect.sync(() => target.scripts.set(key, identifier))))
-        ),
-        Runtime.runIfWaitingForDebugger().pipe(on)
-      ], { concurrency: "unbounded", discard: true })
-      yield* Deferred.await(main)
-      const synced = yield* gate(state, target, page, waiting, adopted)
-      const live: Array<Runtime.ExecutionContextCreatedParams> = []
-      for (const event of contexts) {
-        if (
-          Exit.isSuccess(
-            yield* Runtime.evaluate({ expression: "0", uniqueContextId: event.context.uniqueId }).pipe(on, Effect.exit)
-          )
-        ) live.push(event)
-      }
-      return {
-        through: synced.through,
-        apply: synced.apply.pipe(Effect.andThen(Effect.suspend(() => {
-          for (const event of live) {
-            if (event.context.uniqueId === undefined || !state.realmsByUnique.has(event.context.uniqueId)) {
-              Evaluation.contextCreated(event, { state, target })
-            }
-          }
-          return state.buffer.flush
-        })))
-      }
-    }).pipe(Effect.ensuring(Scope.close(scope, Exit.void)))
   }
 )
 

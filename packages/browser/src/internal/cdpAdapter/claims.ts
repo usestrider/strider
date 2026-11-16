@@ -10,7 +10,7 @@ import type * as CdpConnection from "../../protocol/CdpConnection.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
-import { contextOf, pageOf, type State } from "./state.ts"
+import { contextOf, pageNow, pageOf, type State } from "./state.ts"
 import { contextFor } from "./tree.ts"
 
 const dialogKind = (value: string): import("../../Page.ts").Prompt["kind"] =>
@@ -64,7 +64,9 @@ export const make = (
   return {
     browser,
     dismiss: Effect.fnUntraced(function*(id, prompt) {
-      const page = yield* pageOf(state, id)
+      // Answering a prompt already known causes no event the model needs, and that prompt can be what holds up the
+      // page's initial sync, so it doesn't wait for it
+      const page = yield* pageNow(state, id)
       const pending = Array.from(state.obligations.values()).find((entry) =>
         entry._tag === "Prompt" && entry.prompt === prompt && entry.target.page === page
       )
