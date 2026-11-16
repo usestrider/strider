@@ -1357,6 +1357,55 @@ describe("BidiAdapter state", () => {
       )
     }))
 
+  it.effect("does not give a failed traversal's pending error realm to the next traversal", () =>
+    Effect.gen(function*() {
+      // Synthetic ordering: failure can precede an error document's realm and commit. A second command
+      // does not establish that a pending realm belongs to it rather than that failed navigation.
+      const url = "http://failed.example/"
+      const errorUrl = "about:neterror?e=dnsNotFound&u=http%3A//failed.example/"
+      let calls = 0
+      const { facts, page, state } = yield* withPage({
+        "browsingContext.traverseHistory": Effect.sync(() => {
+          if (calls++ === 0) {
+            handlers.apply("browsingContext.navigationStarted", {
+              context: page.bidi,
+              navigation: "failed",
+              url,
+              timestamp: 1
+            }, { state })
+            handlers.apply("browsingContext.navigationFailed", {
+              context: page.bidi,
+              navigation: "failed",
+              url,
+              timestamp: 2
+            }, { state })
+          } else {
+            handlers.apply("script.realmCreated", {
+              realm: "error-realm",
+              context: page.bidi,
+              type: "window",
+              origin: "null"
+            }, { state })
+          }
+          return {}
+        }),
+        "script.evaluate": { type: "success", realm: "error-realm", result: { type: "string", value: errorUrl } }
+      })
+      const handlers = Evaluation.register(Navigation.register(Kit.handlers<State.Event>()))
+      const first = yield* Navigation.traverse(state, page.id, -1)
+      const second = yield* Navigation.traverse(state, page.id, -1)
+      assert(Option.isSome(first) && Option.isSome(second))
+      yield* state.buffer.flush
+      const failed = facts.filter((fact) => fact._tag === "NavigationEnded" && fact.navigation === first.value)
+      assert.lengthOf(failed, 1)
+      assert(failed[0]!._tag === "NavigationEnded" && failed[0]!.outcome._tag === "Failed")
+      assert.lengthOf(
+        facts.filter((fact) => fact._tag === "NavigationEnded" && fact.navigation === second.value),
+        0,
+        "a failed navigation's error realm cannot prove the next traversal committed"
+      )
+    }))
+
   it.effect("releases a traversal interrupted during its location lookup", () =>
     Effect.gen(function*() {
       const entered = yield* Deferred.make<void>()
