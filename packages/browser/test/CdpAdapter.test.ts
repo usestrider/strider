@@ -3353,6 +3353,7 @@ const initScriptPage = Effect.fnUntraced(function*() {
   const live = new Map<string, string>()
   const holding = new Set<string>()
   const held = yield* Queue.unbounded<Effect.Effect<void>>()
+  const rejected: Array<string> = []
   let nextIdentifier = 0
   const answer = (command: Sent): object => {
     if (command.method === "Page.addScriptToEvaluateOnNewDocument") {
@@ -3361,9 +3362,10 @@ const initScriptPage = Effect.fnUntraced(function*() {
       return { result: { identifier } }
     }
     if (command.method === "Page.removeScriptToEvaluateOnNewDocument") {
-      return live.delete(command.params?.identifier as string)
-        ? { result: {} }
-        : { error: { code: -32000, message: "Script not found" } }
+      const identifier = command.params?.identifier as string
+      if (live.delete(identifier)) return { result: {} }
+      rejected.push(identifier)
+      return { error: { code: -32000, message: "Script not found" } }
     }
     return {
       result: command.method === "Browser.getVersion"
@@ -3425,6 +3427,8 @@ const initScriptPage = Effect.fnUntraced(function*() {
   return {
     page,
     live,
+    /** The identifiers whose removal was rejected because Chromium no longer had them. */
+    rejected,
     /** Holds the reply to the next command of this method; the returned effect waits for it and returns the reply. */
     hold: (method: string) => Effect.sync(() => holding.add(method)).pipe(Effect.as(Queue.take(held)))
   }
@@ -3447,6 +3451,7 @@ describe("Chromium init-script writes cut short by a deadline", () => {
       yield* TestClock.adjust("0 millis")
       const next = yield* Effect.exit(h.page.addInitScript({ source: "self.third = true" }))
       assert(Exit.isSuccess(next), `the next declaration failed: ${Exit.isFailure(next) ? String(next.cause) : ""}`)
+      assert.deepStrictEqual(h.rejected, [], "a script was removed twice")
     }).pipe(onTestClock))
 
   it.effect("removes on release the script an add whose reply came after the deadline installed", () =>
@@ -3473,5 +3478,6 @@ describe("Chromium init-script writes cut short by a deadline", () => {
       yield* TestClock.adjust("0 millis")
       const installed = [...h.live].filter(([, source]) => source.includes("self.cutShort"))
       assert.deepStrictEqual(installed, [], "the script the timed-out add installed is still in Chromium")
+      assert.deepStrictEqual(h.rejected, [], "a script was removed twice")
     }).pipe(onTestClock))
 })
