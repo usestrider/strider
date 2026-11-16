@@ -189,6 +189,93 @@ describe("CDP paused page initialization", () => {
   }
 })
 
+describe("CDP paused page viewport baseline", () => {
+  for (const url of ["about:blank", "https://target.test/"]) {
+    it.effect(`${url === "about:blank" ? "measures" : "doesn't measure"} a paused page attached at ${url} before its viewport is written`, () =>
+      Effect.gen(function*() {
+        const browser = yield* makeBrowser
+        const ready = yield* Deferred.make<void>()
+        const commands: Array<Sent> = []
+        yield* Effect.gen(function*() {
+          while (true) {
+            const command = yield* browser.next
+            commands.push(command)
+            yield* browser.receive({
+              id: command.id,
+              sessionId: command.sessionId,
+              result: command.method === "Browser.getVersion"
+                ? {
+                  protocolVersion: "1.3",
+                  product: "Chrome/155.0.8059.79",
+                  revision: "test",
+                  userAgent: "HeadlessChrome",
+                  jsVersion: "test"
+                }
+                : command.method === "Target.getBrowserContexts" ?
+                { browserContextIds: [] }
+                : command.method === "Page.getFrameTree" ?
+                {
+                  frameTree: {
+                    frame: {
+                      id: "T1",
+                      loaderId: "initial",
+                      url: "about:blank",
+                      securityOrigin: "://",
+                      mimeType: "text/html"
+                    }
+                  }
+                }
+                : command.method === "Page.createIsolatedWorld" ?
+                { executionContextId: 7 }
+                : command.method === "Runtime.evaluate" ?
+                { result: { type: "object", value: [800, 600] } }
+                : {}
+            })
+          }
+        }).pipe(Effect.forkScoped)
+        const adapter = yield* CdpAdapter.connect(browser.transport, {
+          ownership: "launched",
+          sink: Effect.fnUntraced(function*(fact) {
+            if (fact._tag === "PageReady" || fact._tag === "PageInitializationFailed") {
+              yield* Deferred.succeed(ready, undefined)
+            }
+          })
+        })
+        yield* adapter.declare({ _tag: "UserContext", context: adapter.defaultContext }, {
+          _tag: "Override",
+          override: { _tag: "Viewport", width: 400, height: 300, deviceScaleFactor: 1, mobile: false }
+        })
+        yield* browser.receive({
+          method: "Target.attachedToTarget",
+          params: {
+            sessionId: "S1",
+            targetInfo: { targetId: "T1", type: "page", title: "", url, attached: true },
+            waitingForDebugger: true
+          }
+        })
+        yield* Deferred.await(ready)
+        const sent = commands.filter((command) => command.sessionId === "S1")
+        const methods = sent.map((command) => command.method)
+        const override = methods.indexOf("Emulation.setDeviceMetricsOverride")
+        assert.isAbove(override, -1)
+        assert.isBelow(override, methods.indexOf("Runtime.runIfWaitingForDebugger"))
+        assert.notInclude(methods, "Page.getLayoutMetrics")
+        const measured = sent.findIndex((command) =>
+          command.method === "Runtime.evaluate" && command.params?.expression === "[innerWidth, innerHeight]" &&
+          command.params?.contextId === 7
+        )
+        if (url === "about:blank") {
+          assert.isAbove(measured, -1)
+          assert.isBelow(measured, override)
+        } else {
+          assert.strictEqual(measured, -1)
+          assert.notInclude(methods, "Page.createIsolatedWorld")
+        }
+        yield* browser.lose("test complete")
+      }).pipe(Effect.scoped))
+  }
+})
+
 describe("CDP combined locale and user-agent declarations", () => {
   for (const order of ["Locale first", "UserAgent first"] as const) {
     for (const timing of ["existing target", "new targets"] as const) {
