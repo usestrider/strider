@@ -674,6 +674,20 @@ export function engine(render: (root: SnapNode) => string) {
     return false
   }
 
+  /**
+   * The parent in the flat tree: an assigned node's slot, otherwise its composed parent. Rendering, hit testing and
+   * event dispatch follow this tree, where slotted content sits under its slot rather than its host.
+   */
+  const flatParent = (element: Element): Element | null => dom.assignedSlot(element) ?? composedParent(element)
+
+  /** Whether `ancestor` contains `node` in the flat tree, which reaches every composed ancestor too. */
+  const flatContains = (ancestor: Element, node: Element): boolean => {
+    for (let current: Element | null = node; current !== null; current = flatParent(current)) {
+      if (current === ancestor) return true
+    }
+    return false
+  }
+
   /** A node's children in the flat tree: a host's shadow tree, a slot's assigned nodes. */
   const flatChildNodes = (node: Node): Array<Node> => {
     if (node instanceof HTMLSlotElement) {
@@ -1157,9 +1171,6 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   // Inertness
-  /** The parent in the flat tree, where inertness applies: the slot an element is assigned to, or its composed parent. */
-  const flatParent = (element: Element): Element | null => dom.assignedSlot(element) ?? composedParent(element)
-
   /** What the document holds that makes anything inert, read once per call, so a page without it walks nothing. */
   let inertness: { readonly attribute: boolean; readonly modal: HTMLDialogElement | null } | undefined
   const inertnessOf = (): { readonly attribute: boolean; readonly modal: HTMLDialogElement | null } => {
@@ -1999,11 +2010,7 @@ export function engine(render: (root: SnapNode) => string) {
       dom.matches(element, "input, textarea, select") ||
       (element instanceof HTMLElement && dom.isContentEditable(element))
     ) return element
-    for (
-      let current: Element | null = element;
-      current !== null;
-      current = dom.assignedSlot(current) ?? composedParent(current)
-    ) {
+    for (let current: Element | null = element; current !== null; current = flatParent(current)) {
       if (dom.matches(current, "button, [role=button], a, [role=link]")) return current
     }
     return element
@@ -2158,7 +2165,7 @@ export function engine(render: (root: SnapNode) => string) {
         first ??= point
         if (!receivesPointer) return [point]
         const hit = hitTarget(point.x, point.y)
-        if (hit !== null && composedContains(pointerRecipient(element), hit)) {
+        if (hit !== null && flatContains(pointerRecipient(element), hit)) {
           if (clip === undefined) return [point]
           points.push(point)
         }
@@ -2270,7 +2277,7 @@ export function engine(render: (root: SnapNode) => string) {
       if (!decided) {
         decided = true
         const target = event.composedPath()[0]
-        if (!(target instanceof Element) || !composedContains(element, target)) {
+        if (!(target instanceof Element) || !flatContains(element, target)) {
           current.blocked = target instanceof Element ? describe(target) : "nothing at that point"
         }
       }
@@ -2550,7 +2557,7 @@ export function engine(render: (root: SnapNode) => string) {
         if (point === null) reason = { _tag: "OutsideViewport" }
         else if (checks.receivesPointer) {
           const hit = hitTarget(point.x, point.y)
-          if (hit === null || !composedContains(pointerRecipient(element), hit)) reason = missed(element, hit)
+          if (hit === null || !flatContains(pointerRecipient(element), hit)) reason = missed(element, hit)
         }
       }
       if (reason === null && element !== undefined && action._tag === "Select") {
