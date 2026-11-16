@@ -1539,6 +1539,39 @@ describe("CDP restoration cleanup", () => {
     }))
 })
 
+describe("CDP cache confirmation", () => {
+  it.effect("shares an outstanding cache confirmation with another declaration of the same value", () =>
+    Effect.gen(function*() {
+      const written = yield* Deferred.make<void>()
+      const reply = yield* Deferred.make<void>()
+      const mock = {
+        ...session,
+        start: Effect.fnUntraced(function*(command: { readonly params: { readonly cacheDisabled: boolean } }) {
+          yield* Deferred.succeed(written, undefined)
+          return command.params.cacheDisabled ? Deferred.await(reply) : Effect.void
+        })
+      } as unknown as ProtocolClient.Session
+      const { state, page, target } = yield* withPage(mock)
+      state.targets.set(mock, { ...target, page })
+      const registration = Declare.declare(state, { _tag: "Page", page: page.id }, {
+        _tag: "Intercept",
+        patterns: ["*"],
+        phases: ["request"]
+      })
+      yield* Effect.gen(function*() {
+        const first = yield* registration.pipe(Effect.forkChild)
+        yield* Deferred.await(written)
+        const second = yield* registration.pipe(Effect.forkChild)
+        yield* TestClock.adjust("0 millis")
+        assert.isUndefined(first.pollUnsafe())
+        assert.isUndefined(second.pollUnsafe())
+        yield* Deferred.succeed(reply, undefined)
+        yield* Fiber.join(first)
+        yield* Fiber.join(second)
+      }).pipe(Effect.ensuring(Deferred.succeed(reply, undefined)))
+    }))
+})
+
 describe("CDP viewport override and its baseline", () => {
   const override = {
     _tag: "Override",
