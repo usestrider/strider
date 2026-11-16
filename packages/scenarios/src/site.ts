@@ -84,6 +84,18 @@ const routes: Record<
       `<div style="height:200px;overflow:auto"><button onclick="document.querySelector('#count').textContent = String(Number(document.querySelector('#count').textContent) + 1)">Increment</button><div style="height:1200px"></div></div><p id="count">0</p>`
     )
   }),
+  // A button at a fixed point, with a cross-site frame beside it when `frame` is set: the frame's origin is
+  // localhost, the page's 127.0.0.1
+  "/benchmark-mouse": (url) => ({
+    body: page(
+      "Mouse benchmark",
+      `<button style="position:fixed;left:10px;top:10px;width:100px;height:30px" onclick="document.querySelector('#count').textContent = String(Number(document.querySelector('#count').textContent) + 1)">Increment</button><p id="count" style="position:fixed;left:10px;top:60px">0</p>${
+        url.searchParams.has("frame")
+          ? `<iframe id="frame" style="position:fixed;left:200px;top:10px;width:400px;height:200px;border:0"></iframe><script>document.querySelector('#frame').src = 'http://localhost:' + location.port + '/benchmark'</script>`
+          : ""
+      }`
+    )
+  }),
   "/benchmark-viewport": () => ({
     body: page(
       "Viewport benchmark",

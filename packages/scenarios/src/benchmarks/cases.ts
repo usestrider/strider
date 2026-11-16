@@ -362,6 +362,22 @@ export const cases: ReadonlyArray<Case> = [
     },
     verify: equals("1")
   },
+  ...[false, true].map((frame): Case => ({
+    name: frame ? "mouse-click-cross-site-frame" : "mouse-click",
+    description: frame
+      ? "Click a button by its coordinates on a page with a cross-site frame, then read its counter"
+      : "Click a button by its coordinates, then read its counter",
+    fixture: frame ? "/benchmark-mouse?frame" : "/benchmark-mouse",
+    strider: Effect.fnUntraced(function*(page) {
+      yield* page.mouse.click({ x: 60, y: 25 })
+      return yield* page.locator("#count").readText
+    }),
+    playwright: async (page) => {
+      await page.mouse.click(60, 25)
+      return page.locator("#count").textContent()
+    },
+    verify: equals("1")
+  })),
   {
     name: "fill",
     description: "Fill a labeled input with default actionability, then read its value",
