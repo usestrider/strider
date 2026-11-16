@@ -760,6 +760,27 @@ describe("Session's digest, dialogs", () => {
       assert.deepStrictEqual(yield* dialogLines(session), ["dialog confirm on main dismissed by policy"])
     }).pipe(Effect.scoped, Effect.provide(Browser.layerTest("-dialog(confirm)"))))
 
+  it.effect("says a handler decided a dialog when no registration of the session did", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const page = yield* context.newPage
+      const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+      yield* session.name(page, "main")
+      yield* Dialog.handle(page, Dialog.acceptAll)
+      assert.deepStrictEqual(yield* dialogLines(session), ["dialog confirm on main accepted by a handler"])
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest("-dialog(confirm)"))))
+
+  it.effect("reports a dialog still open when a result takes it, and its decision as a line of its own", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const page = yield* context.newPage
+      const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+      yield* session.name(page, "main")
+      yield* Dialog.handle(page, (pending) => Effect.andThen(Effect.sleep("100 millis"), Dialog.dismissAll(pending)))
+      assert.deepStrictEqual(yield* dialogLines(session), ["dialog confirm on main, open"])
+      yield* TestClock.adjust("100 millis")
+      assert.deepStrictEqual(yield* dialogLines(session), ["dialog confirm on main dismissed by a handler"])
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest("-dialog(confirm)"))))
 })
 
 describe("Session.open", () => {

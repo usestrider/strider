@@ -745,8 +745,23 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               // A dialog decided by a declared handler, and a route that answers a fetch
               const handler = yield* call(tools, "dialog", { page: "shop", decision: "dismiss" })
               assert.strictEqual(handler.value.outcome.registration, "r1")
-              yield* call(tools, "click", { page: "shop", target: `text="Ask"` })
-              yield* call(tools, "expect", { page: "shop", target: "css=#asked", state: "visible", text: "false" })
+              const asked = yield* call(tools, "click", { page: "shop", target: `text="Ask"` })
+              const answered = yield* call(tools, "expect", {
+                page: "shop",
+                target: "css=#asked",
+                state: "visible",
+                text: "false"
+              })
+              // One line for the dialog, naming the registration, which a later result brings if these didn't
+              const dialogLines: Array<string> = [...asked.value.sinceLast, ...answered.value.sinceLast]
+                .filter((line: string) => line.startsWith("dialog"))
+              for (let turn = 0; turn < 50 && !dialogLines.some((line) => line.includes(" by ")); turn++) {
+                yield* Effect.sleep("20 millis")
+                const read = yield* call(tools, "pages", {})
+                dialogLines.push(...read.value.sinceLast.filter((line: string) => line.startsWith("dialog")))
+              }
+              assert.lengthOf(dialogLines, 1, dialogLines.join("\n"))
+              assert.match(dialogLines[0]!, /^dialog \w+( "Sure\?")? on shop dismissed by r1$/)
               yield* call(tools, "route", {
                 page: "shop",
                 pattern: "**/api/status",
