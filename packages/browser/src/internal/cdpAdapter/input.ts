@@ -9,6 +9,7 @@ import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as DOM from "../../cdp/DOM.ts"
 import * as Input from "../../cdp/Input.ts"
+import * as Runtime from "../../cdp/Runtime.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
 import type * as L1Target from "../../Target.ts"
 import * as Adapter from "../adapter.ts"
@@ -19,6 +20,7 @@ import * as ProtocolClient from "../protocolClient.ts"
 import * as Evaluation from "./evaluation.ts"
 import { heldButton, keyCode, keyLocation, modifierBits } from "./mapping.ts"
 import {
+  closingOf,
   type DocumentEntry,
   documentOf,
   type DragEntry,
@@ -133,7 +135,7 @@ const dragCall = (functionDeclaration: string): Adapter.EvaluationCall => ({
 
 /**
  * Watches a document for the trusted `dragstart` a held move fires, and its source, the event's first target before
- * any shadow tree retargets it. Chromium abandons a drag whose `dragstart` removes or hides its source, or replaces
+ * an open shadow tree retargets it; a closed one shows the page only its host. Chromium abandons a drag whose `dragstart` removes or hides its source, or replaces
  * its document, and fires `dragend` on the source, which a source out of the document gets itself. A document that is gone, or
  * ends meanwhile, starts no drag, so it is left out.
  */
@@ -162,25 +164,39 @@ const watchDragStart = Effect.fnUntraced(
 
 /**
  * Whether a watched document fired a `dragstart` since it was last asked whose drag is owed an interception: its
- * listeners didn't cancel it, the source the page sees is the draggable element itself, and Chromium didn't abandon
- * it, meaning no `dragend` reached the source and the source is still connected. A source the page can't see, such
- * as one inside a closed shadow root, whose `dragstart` shows only its host, or a text selection, can't be checked,
- * so the move doesn't wait for its drag.
+ * listeners didn't cancel it, no `dragend` reached its source, the source is still connected, and Chromium reports
+ * that the source hosts no closed shadow root. A source inside a closed shadow root shows the page only its host,
+ * so whether Chromium kept its drag can't be checked, and the move doesn't wait for it.
  */
 const dragStarted = Effect.fnUntraced(
   function*(state: State, document: DocumentEntry) {
     const id = yield* Evaluation.realm(state, document.id, dragWorld)
-    const result = yield* Evaluation.evaluate(
-      state,
-      id,
-      dragCall(
-        "function(){const w=globalThis.__striderDrag;const e=w?.event;" +
-          "const ended=w?.ended===true||w?.source?.isConnected!==true||w?.source?.draggable!==true;" +
-          "if(w!==undefined){w.event=undefined;w.ended=false}" +
-          "return e!==undefined&&!e.defaultPrevented&&!ended}"
+    const realm = yield* realmOf(state, id)
+    const on = Protocol.on(realm.target.session)
+    // A context destroyed meanwhile is a realm that is gone, as an evaluation in it would report
+    const failed = Effect.mapError(Kit.realmFailure(realm, closingOf(state, realm)))
+    const { result } = yield* failed(
+      Runtime.evaluate({
+        expression: "(()=>{const w=globalThis.__striderDrag;const e=w?.event;const s=w?.source;" +
+          "const ended=w?.ended===true||s?.isConnected!==true;if(w!==undefined){w.event=undefined;w.ended=false}" +
+          "return e!==undefined&&!e.defaultPrevented&&!ended?s:null})()",
+        contextId: realm.contextId as Runtime.ExecutionContextId,
+        returnByValue: false
+      }).pipe(on)
+    )
+    const objectId = result.objectId
+    if (objectId === undefined) return false
+    const described = yield* failed(DOM.describeNode({ objectId, pierce: true, depth: 1 }).pipe(on)).pipe(
+      Effect.ensuring(
+        Runtime.releaseObject({ objectId }).pipe(
+          on,
+          Effect.ignore,
+          Effect.provideService(ProtocolClient.CommandDeadline, Option.none()),
+          Operation.detached
+        )
       )
     )
-    return result._tag === "Value" && result.value.type === "boolean" && result.value.value === true
+    return !(described.node.shadowRoots ?? []).some((root) => root.shadowRootType === "closed")
   },
   Effect.catchIf((error) => error.reason._tag === "Gone", () => Effect.succeed(false))
 )
