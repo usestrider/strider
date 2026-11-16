@@ -223,7 +223,7 @@ const applyOverride = (
         // A tab in a context that emulates focus for its life renders only with it
         return Emulation.setFocusEmulationEnabled({ enabled: target.page?.context.focusEmulated === true }).pipe(on)
       case "CacheDisabled":
-        return Network.setCacheDisabled({ cacheDisabled: false }).pipe(on)
+        return sendCache(target, cacheDisabled(state, target, effective), on)
     }
   }
   switch (override._tag) {
@@ -267,8 +267,113 @@ const applyOverride = (
         enabled: override.enabled || target.page?.context.focusEmulated === true
       }).pipe(on)
     case "CacheDisabled":
-      return Network.setCacheDisabled({ cacheDisabled: override.disabled }).pipe(on)
+      return sendCache(target, cacheDisabled(state, target, effective), on)
   }
+}
+
+/**
+ * Whether a target's HTTP cache is off: where the `CacheDisabled` override says so, or a request- or
+ * response-phase intercept is in force for its page. Chromium looks in its HTTP cache after the request-stage
+ * pause, so a request an intercept continues would be answered from the cache, never reaching the server.
+ */
+const cacheDisabled = (
+  state: State,
+  target: TargetEntry,
+  effective: ReadonlyMap<Adapter.Override["_tag"], Adapter.Override>
+) => {
+  const override = effective.get("CacheDisabled")
+  if (override?._tag === "CacheDisabled" && override.disabled) return true
+  if (target.page === undefined) return false
+  const intercepts = state.registry.intercepts(placement(target.page))
+  return intercepts.request.length > 0 || intercepts.response.length > 0
+}
+
+const sendCache = (target: TargetEntry, disabled: boolean, on: Send) =>
+  Effect.suspend(() => {
+    if (target.cacheDisabled !== "unknown" && disabled === (target.cacheDisabled ?? false)) return Effect.void
+    target.cacheDisabled = disabled
+    return Network.setCacheDisabled({ cacheDisabled: disabled }).pipe(on)
+  })
+
+/** Whether a cross-document navigation is under way in a frame the target owns, or about to be. */
+const navigationPending = (state: State, target: TargetEntry) =>
+  [...state.frames.values()].some((frame) =>
+    frame.owner === target &&
+    (frame.expected.list.length > 0 || [...frame.navigations.values()].some((navigation) => !navigation.sameDocument))
+  )
+
+/**
+ * The cache setting a declaration or its release changes, sent to a live target and confirmed, except while a
+ * navigation is under way in it. The renderer answers the command, and Chromium holds the reply while a
+ * cross-process navigation is under way, until the new document commits: a route declared while the navigation
+ * waits on its server, which may wait on the caller, would never return. So the wait for the reply ends once a
+ * navigation is pending in the target; the command, written before, reaches the new document at its commit. The
+ * reply is awaited apart from the declaration, under the connection's own deadline for a command: one that fails
+ * or never comes leaves the setting unknown, so the next change sends it again. A declaration that wants the value
+ * a command still unanswered sent waits for that reply, by the same rule, rather than sending it again.
+ */
+const applyCache = (state: State, target: TargetEntry) => {
+  // Until the navigation is pending in the target, or the reply comes
+  const until = (confirmed: Fiber.Fiber<void, Protocol.ProtocolError>) =>
+    Effect.raceFirst(
+      Fiber.join(confirmed),
+      state.buffer.waitFor(() => navigationPending(state, target) || undefined)
+    )
+  return withOverrides(
+    target,
+    Effect.suspend(() => {
+      const wanted = cacheDisabled(state, target, state.registry.overrides(placement(target.page!)))
+      // A declaration that wants the value an unconfirmed command sent waits for that command's reply too
+      const outstanding = target.cacheConfirmation
+      if (outstanding !== undefined && outstanding.disabled === wanted && target.cacheDisabled === wanted) {
+        return Effect.succeed(until(outstanding.fiber))
+      }
+      let confirmation: Effect.Effect<void, Protocol.ProtocolError> = Effect.void
+      return sendCache(
+        target,
+        wanted,
+        (command) =>
+          Effect.gen(function*() {
+            // A connection already tearing down sets nothing more
+            if (state.cleanupScope.state._tag === "Closed") return
+            const reply = yield* target.session.start(command, state.cleanupScope).pipe(
+              Operation.detached,
+              Effect.provideService(ProtocolClient.CommandDeadline, Option.none())
+            )
+            const entry: { readonly disabled: boolean; fiber: Fiber.Fiber<void, Protocol.ProtocolError> } = {
+              disabled: wanted,
+              fiber: undefined!
+            }
+            entry.fiber = yield* reply.pipe(
+              Effect.tapError((error) =>
+                Effect.sync(() => {
+                  target.cacheDisabled = "unknown"
+                }).pipe(
+                  Effect.andThen(
+                    error.reason._tag === "SessionEnded"
+                      ? Effect.void
+                      : Effect.logWarning("Failed to confirm the CDP cache setting", error)
+                  )
+                )
+              ),
+              Effect.asVoid,
+              Effect.ensuring(Effect.sync(() => {
+                if (target.cacheConfirmation === entry) target.cacheConfirmation = undefined
+              })),
+              Effect.forkIn(state.cleanupScope)
+            )
+            if (entry.fiber.pollUnsafe() === undefined) target.cacheConfirmation = entry
+            confirmation = until(entry.fiber)
+          })
+      ).pipe(Effect.map(() => confirmation))
+    })
+  ).pipe(
+    Effect.flatten,
+    Effect.catchIf(
+      (error) => error._tag === "ProtocolError" && error.reason._tag === "SessionEnded",
+      () => Effect.void
+    )
+  )
 }
 
 // Two applications that overlap on a target would both remove the same identifier, which Chromium rejects the
@@ -377,12 +482,21 @@ const withOverrides = <A, E, R>(target: TargetEntry, effect: Effect.Effect<A, E,
 }
 
 /**
- * The kinds a new target is configured with: those declared for its page, and focus emulation where its context
- * holds it for its life, even when no declaration of it remains.
+ * The kinds a new target is configured with: those declared for its page, focus emulation where its context
+ * holds it for its life, even when no declaration of it remains, and the cache setting where an intercept turns
+ * the cache off.
  */
-const kindsFor = (page: PageEntry, overrides: ReadonlyMap<Adapter.Override["_tag"], Adapter.Override>) => {
+const kindsFor = (
+  state: State,
+  page: PageEntry,
+  overrides: ReadonlyMap<Adapter.Override["_tag"], Adapter.Override>
+) => {
   const kinds = [...overrides.keys()]
   if (page.context.focusEmulated === true && !overrides.has("FocusEmulation")) kinds.push("FocusEmulation")
+  if (!overrides.has("CacheDisabled")) {
+    const intercepts = state.registry.intercepts(placement(page))
+    if (intercepts.request.length > 0 || intercepts.response.length > 0) kinds.push("CacheDisabled")
+  }
   return kinds
 }
 
@@ -435,6 +549,17 @@ const popupBaseline = Effect.fnUntraced(function*(
 })
 
 /** What a new page or frame gets before its scripts run: the declarations in force for its page. */
+/**
+ * The cache setting a dedicated worker starts with, written before it resumes, with the replies of its other
+ * domains: by the rule a page's follows.
+ */
+export const workerCache = (state: State, target: TargetEntry, on: Send) =>
+  Effect.suspend(() =>
+    target.page === undefined
+      ? Effect.void
+      : sendCache(target, cacheDisabled(state, target, state.registry.overrides(placement(target.page))), on)
+  )
+
 export const configureTarget = Effect.fnUntraced(
   function*(state: State, target: TargetEntry, page: PageEntry, setup?: Setup) {
     if (setup === undefined) {
@@ -444,7 +569,7 @@ export const configureTarget = Effect.fnUntraced(
           Effect.suspend(() => {
             const overrides = state.registry.overrides(placement(page))
             return Effect.forEach(
-              kindsFor(page, overrides),
+              kindsFor(state, page, overrides),
               (kind) => kind === "Viewport" ? Effect.void : applyOverride(state, target, kind, overrides),
               {
                 discard: true
@@ -465,7 +590,7 @@ export const configureTarget = Effect.fnUntraced(
           yield* (target.overrideLock ??= Semaphore.makeUnsafe(1)).takeScoped(1)
           const overrides = state.registry.overrides(placement(page))
           yield* Effect.forEach(
-            kindsFor(page, overrides),
+            kindsFor(state, page, overrides),
             (kind) => kind === "Viewport" ? Effect.void : applyOverride(state, target, kind, overrides, setup.send),
             {
               discard: true
@@ -513,22 +638,32 @@ export const configureTarget = Effect.fnUntraced(
 
 const targetsInScope = (state: State, scope: Adapter.DeclarationScope) =>
   [...state.targets.values()].filter((target) =>
-    target.page !== undefined && !target.ended && (target.kind === "page" || target.kind === "iframe") &&
+    target.page !== undefined && !target.ended &&
+    (target.kind === "page" || target.kind === "iframe" || target.kind === "worker") &&
     Declarations.covers(scope, placement(target.page))
   )
 
 const applyToTarget = (state: State, declaration: Adapter.Declaration, target: TargetEntry) => {
   const page = target.page!
+  // A dedicated worker keeps a cache setting of its own, and takes no other declaration through here
+  if (target.kind === "worker") {
+    return declaration._tag === "Intercept" ||
+        (declaration._tag === "Override" && declaration.override._tag === "CacheDisabled")
+      ? applyCache(state, target)
+      : Effect.void
+  }
   switch (declaration._tag) {
     case "InitScript":
       return applyScripts(state, target, page)
     case "Intercept":
+      return applyIntercepts(state, target, page).pipe(Effect.andThen(applyCache(state, target)))
     case "Challenges":
       return applyIntercepts(state, target, page)
     case "Override":
       if (declaration.override._tag === "Viewport") {
         return viewport(state, target, state.registry.overrides(placement(page)))
       }
+      if (declaration.override._tag === "CacheDisabled") return applyCache(state, target)
       return withOverrides(
         target,
         Effect.suspend(() =>
@@ -606,9 +741,9 @@ const retire = (state: State, scope: Adapter.DeclarationScope, declaration: Adap
 
 /**
  * What the declarations in force say, sent again to a context's targets, after a removal the browser refused left
- * in place a context whose declarations' releases were skipped because it was to go. Each target's interception
- * and file chooser are reset on their own, and each override whose release was skipped is released as it would
- * have been: a reset that fails is logged and the others still run.
+ * in place a context whose declarations' releases were skipped because it was to go. Each target's interception,
+ * cache setting and file chooser are reset on their own, and each override whose release was skipped is released
+ * as it would have been: a reset that fails is logged and the others still run.
  */
 export const restoreContext = (state: State, context: ContextEntry) => {
   const scope: Adapter.DeclarationScope = { _tag: "UserContext", context: context.id }
@@ -620,7 +755,8 @@ export const restoreContext = (state: State, context: ContextEntry) => {
       (target) =>
         // Each reset stands alone: one that fails is logged and leaves the others to run
         Effect.all([
-          applyIntercepts(state, target, target.page!).pipe(releaseErrors),
+          target.kind === "worker" ? Effect.void : applyIntercepts(state, target, target.page!).pipe(releaseErrors),
+          applyCache(state, target).pipe(releaseErrors),
           target.kind === "page"
             ? Page.setInterceptFileChooserDialog({
               enabled: state.registry.fileChooser(placement(target.page!))

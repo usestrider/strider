@@ -1737,3 +1737,15 @@ does. A caller's own `--blink-settings`, or a profile's own pointer preferences,
 emulation still overrides them. On Firefox they're user values, as a launch profile's are, so in a profile directory
 the caller keeps, Firefox saves them into `prefs.js` and a later launch there, headed too, keeps them. Writing them
 as default values with `pref()`, which Firefox doesn't save, was rejected: Firefox 158 ignores them there.
+
+## A route's cache setting on Chromium is confirmed except during a navigation
+
+While a request or response route is in force, the CDP adapter turns a target's HTTP cache off with
+`Network.setCacheDisabled`, which the renderer answers. Chromium can hold that reply until a cross-process navigation
+under way commits, so a route declared while the navigation waits on a server that waits on the caller would never
+return. The declaration waits for the reply unless a navigation is pending in the target; then the command is written
+before the declaration returns and reaches the new document at its commit. A declaration that wants the value a
+command still unanswered sent waits for that reply by the same rule, rather than returning at once. The reply is awaited apart from the
+declaration, under the connection's own command deadline, and one that fails or never comes leaves the setting
+unknown, so the next change sends it again. Rejected: always awaiting the reply, which deadlocks with a held
+navigation, and never awaiting it, which leaves the setting unconfirmed when nothing stops the browser answering.

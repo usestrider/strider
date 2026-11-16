@@ -27,7 +27,7 @@ import * as L1Target from "../../Target.ts"
 import * as Kit from "../adapterKit.ts"
 import type * as ProtocolClient from "../protocolClient.ts"
 import * as Urls from "../urls.ts"
-import { configureTarget, type Setup } from "./declare.ts"
+import { configureTarget, type Setup, workerCache } from "./declare.ts"
 import { frameUrl, targetKind } from "./mapping.ts"
 import {
   closingReason,
@@ -445,6 +445,7 @@ const workerGate = Effect.fnUntraced(function*(state: State, target: TargetEntry
     Runtime.enable().pipe(on),
     Log.enable().pipe(on),
     Network.enable({}).pipe(on),
+    workerCache(state, target, (command) => command.pipe(on, Effect.asVoid)),
     resume(target.session, waiting)
   ], {
     concurrency: "unbounded",

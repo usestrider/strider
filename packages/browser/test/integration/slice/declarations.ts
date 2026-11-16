@@ -37,7 +37,7 @@ import type * as net from "node:net"
 import * as os from "node:os"
 import * as path from "node:path"
 import { site, tlsSite } from "../adapter/harness.ts"
-import { responseRouteInFlight, status, supports } from "./capabilities.ts"
+import { cachesFetches, responseRouteInFlight, status, supports, workerFetchesBypassCache } from "./capabilities.ts"
 import * as SharedContext from "./sharedContext.ts"
 
 const timeout = 60_000
@@ -755,6 +755,212 @@ export const declarations = (
           }))
         }), timeout)
 
+      // A request a route continues goes to the server, a cacheable one too: the browser looks in its cache only
+      // after the pause, so a cache hit would answer it there, and the server would never see it
+      it.effect("sends each fetch of a cacheable URL a page's route continues to the server", () =>
+        Effect.gen(function*() {
+          const { origin, served } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const route = yield* page.route(`${origin}/cached.js*`, () =>
+              Route.continue)
+            const result = yield* run(
+              page,
+              origin,
+              `const read = () => fetch('/cached.js?page').then((r) => r.status); return [await read(), await read()]`
+            )
+            assert.deepStrictEqual(result, [200, 200])
+            const requested = served.filter((request) =>
+              request.path === "/cached.js?page"
+            )
+            assert.deepStrictEqual({ routed: yield* route.hits, served: requested.length }, { routed: 2, served: 2 })
+          }))
+        }), timeout)
+
+      it.effect(
+        "sends each fetch of a cacheable URL a context's route continues to the server, on a page opened after it",
+        () =>
+          Effect.gen(function*() {
+            const { origin, served } = yield* site
+            yield* Effect.scoped(Effect.gen(function*() {
+              const context = yield* Browser.newContext()
+              const route = yield* context.route(`${origin}/cached.js*`, () =>
+                Route.continue)
+              const page = yield* context.newPage
+              const result = yield* run(
+                page,
+                origin,
+                `const read = () => fetch('/cached.js?context').then((r) => r.status); return [await read(), await read()]`
+              )
+              assert.deepStrictEqual(result, [200, 200])
+              const requested = served.filter((request) =>
+                request.path === "/cached.js?context"
+              )
+              assert.deepStrictEqual({ routed: yield* route.hits, served: requested.length }, { routed: 2, served: 2 })
+            }))
+          }),
+        timeout
+      )
+
+      it.effect("sends each fetch of a cacheable URL from a new cross-site frame to the server", () =>
+        Effect.gen(function*() {
+          const { crossSite, origin, served } = yield* site
+          const page = yield* Browser.newPage()
+          const route = yield* page.route(`${crossSite}/cached.js*`, () =>
+            Route.continue)
+          const child = fixtureUrl(
+            crossSite,
+            `<script>(async () => { const read = () => fetch('/cached.js?frame').then((r) => r.status); parent.postMessage([await read(), await read()], '*') })()</script>`
+          )
+          const result = yield* run(
+            page,
+            origin,
+            `return new Promise((resolve) => { addEventListener('message', (event) => resolve(event.data), { once: true }); const frame = document.createElement('iframe'); frame.src = ${
+              JSON.stringify(child)
+            }; document.body.append(frame) })`
+          )
+          assert.deepStrictEqual(result, [200, 200])
+          assert.deepStrictEqual({
+            routed: yield* route.hits,
+            served: served.filter((request) =>
+              request.path === "/cached.js?frame"
+            ).length
+          }, { routed: 2, served: 2 })
+        }), timeout)
+
+      for (const scope of ["page", "context"] as const) {
+        it.effect(
+          `sends each fetch of a cacheable URL from a dedicated worker to the server while a ${scope} route is active`,
+          () =>
+            Effect.gen(function*() {
+              const { origin, served } = yield* site
+              const page = yield* Browser.newPage()
+              yield* (scope === "page" ? page : page.context).route(`${origin}/cached.js*`, () =>
+                Route.continue)
+              const script =
+                `onmessage = async ({ data }) => { const read = () => fetch(data).then((r) => r.status); postMessage([await read(), await read()]) }`
+              const result = yield* run(
+                page,
+                origin,
+                `return new Promise((resolve, reject) => { const worker = new Worker(URL.createObjectURL(new Blob([${
+                  JSON.stringify(script)
+                }], { type: 'text/javascript' }))); worker.onmessage = ({ data }) => { worker.terminate(); resolve(data) }; worker.onerror = reject; worker.postMessage(location.origin + '/cached.js?worker-${scope}') })`
+              )
+              assert.deepStrictEqual(result, [200, 200])
+              assert.strictEqual(
+                served.filter((request) =>
+                  request.path === `/cached.js?worker-${scope}`
+                ).length,
+                workerFetchesBypassCache[name] ? 2 : 1
+              )
+            }),
+          timeout
+        )
+      }
+
+      it.effect("answers a cacheable URL from the cache again once its page's last route is removed", () =>
+        Effect.gen(function*() {
+          const { origin, served } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const fetched = () =>
+              served.filter((request) =>
+                request.path === "/cached.js?released"
+              ).length
+            const read = `return fetch('/cached.js?released').then((r) => r.status)`
+            yield* Effect.scoped(Effect.gen(function*() {
+              yield* page.route(`${origin}/cached.js*`, () =>
+                Route.continue)
+              assert.strictEqual(yield* run(page, origin, read), 200)
+            }))
+            assert.strictEqual(yield* run(page, origin, read), 200)
+            const before = fetched()
+            assert.strictEqual(yield* run(page, origin, read), 200)
+            assert.strictEqual(fetched(), cachesFetches[name] ? before : before + 1)
+          }))
+        }), timeout)
+
+      it.effect(
+        "sends each fetch of a cacheable URL to the server from a document whose navigation was held as its route was declared",
+        () =>
+          Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            let arrived!: () => void
+            const arrival = new Promise<void>((resolve) => {
+              arrived = resolve
+            })
+            let release!: () => void
+            let served = 0
+            const server = yield* Effect.acquireRelease(
+              Effect.promise(() =>
+                new Promise<http.Server>((resolve, reject) => {
+                  const server = http.createServer((request, response) => {
+                    if (request.url === "/cached.js") {
+                      served++
+                      response.writeHead(200, { "content-type": "text/javascript", "cache-control": "max-age=3600" })
+                      response.end("// cached")
+                      return
+                    }
+                    release = () => {
+                      response.writeHead(200, { "content-type": "text/html", "cache-control": "no-store" })
+                      response.end(
+                        `<pre id="out">pending</pre><script>(async () => { const read = () => fetch('/cached.js').then((r) => r.status); return [await read(), await read()] })().then((value) => { document.getElementById('out').textContent = JSON.stringify(value) })</script>`
+                      )
+                    }
+                    arrived()
+                  })
+                  server.once("error", reject)
+                  server.listen(0, "127.0.0.1", () =>
+                    resolve(server))
+                })
+              ),
+              (server) =>
+                Effect.promise(() =>
+                  new Promise<void>((resolve) => {
+                    server.close(() =>
+                      resolve()
+                    )
+                    server.closeAllConnections()
+                  })
+                )
+            )
+            const origin = `http://127.0.0.1:${(server.address() as net.AddressInfo).port}`
+            const navigation = yield* page.goto(`${origin}/held`).pipe(Effect.forkChild)
+            yield* Effect.promise(() => arrival).pipe(Effect.timeout("10 seconds"))
+            const route = yield* page.route(`${origin}/cached.js`, () => Route.continue)
+            release()
+            yield* Fiber.join(navigation)
+            const out = page.locator("#out")
+            yield* Expect.that(out.readText, Condition.make("finished", (text: string) => text !== "pending"))
+            assert.deepStrictEqual(JSON.parse(yield* out.readText), [200, 200])
+            assert.deepStrictEqual({ routed: yield* route.hits, served }, { routed: 2, served: 2 })
+          }),
+        timeout
+      )
+
+      it.effect(
+        "answers a cacheable URL from the cache in a context without routes while another context's route is in force",
+        () =>
+          Effect.gen(function*() {
+            const { origin, served } = yield* site
+            yield* Effect.scoped(Effect.gen(function*() {
+              const routed = yield* Browser.newContext()
+              yield* routed.route(`${origin}/cached.js*`, () => Route.continue)
+              const other = yield* Browser.newContext()
+              const page = yield* other.newPage
+              const result = yield* run(
+                page,
+                origin,
+                `const read = () => fetch('/cached.js?other').then((r) => r.status); return [await read(), await read()]`
+              )
+              assert.deepStrictEqual(result, [200, 200])
+              const requested = served.filter((request) => request.path === "/cached.js?other")
+              assert.strictEqual(requested.length, cachesFetches[name] ? 1 : 2)
+            }))
+          }),
+        timeout
+      )
+
       it.effect("rejects an invalid HTTP credential origin without exposing credentials", () =>
         Effect.gen(function*() {
           const error = yield* Browser.newContext({
@@ -797,10 +1003,8 @@ export const declarations = (
                 password: Redacted.make("secret")
               }
             })
-            yield* canceled.context.route("**", () =>
-              Route.fallthrough, { phase: "auth" })
-            const cancel = yield* canceled.route("**", () =>
-              Route.continue, { phase: "auth" })
+            yield* canceled.context.route("**", () => Route.fallthrough, { phase: "auth" })
+            const cancel = yield* canceled.route("**", () => Route.continue, { phase: "auth" })
             yield* canceled.goto(`${origin}/auth`)
             yield* canceled.getByText("who are you?").pipe(Expect.toBeVisible)
             yield* cancel.remove
@@ -905,16 +1109,13 @@ export const declarations = (
                   }
                 })
                 server.once("error", reject)
-                server.listen(0, "127.0.0.1", () =>
-                  resolve(server))
+                server.listen(0, "127.0.0.1", () => resolve(server))
               })
             ),
             (server) =>
               Effect.promise(() =>
                 new Promise<void>((resolve) => {
-                  server.close(() =>
-                    resolve()
-                  )
+                  server.close(() => resolve())
                   server.closeAllConnections()
                 })
               )
@@ -936,8 +1137,7 @@ export const declarations = (
             const page = yield* Browser.newPage()
             const registered = page.route(
               `${origin}/auth`,
-              () =>
-                Route.provideCredentials({ username: "strider", password: Redacted.make("secret") }),
+              () => Route.provideCredentials({ username: "strider", password: Redacted.make("secret") }),
               {
                 phase: "auth"
               }
@@ -961,8 +1161,7 @@ export const declarations = (
           }
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
-            yield* page.route(`${origin}/auth`, () =>
-              Route.continue, { phase: "auth" })
+            yield* page.route(`${origin}/auth`, () => Route.continue, { phase: "auth" })
             yield* page.goto(`${origin}/auth`)
             yield* page.getByText("who are you?").pipe(Expect.toBeVisible)
           }))

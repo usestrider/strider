@@ -9,6 +9,7 @@
 import * as Deferred from "effect/Deferred"
 import type * as Effect from "effect/Effect"
 import type * as Scope from "effect/Scope"
+import * as Semaphore from "effect/Semaphore"
 import type * as BrowserBidi from "../../bidi-protocol/Browser.ts"
 import type * as BrowsingContext from "../../bidi-protocol/BrowsingContext.ts"
 import type * as Network from "../../bidi-protocol/Network.ts"
@@ -262,6 +263,12 @@ export interface State extends Kit.Ending {
   >
   /** Contexts reported now existed before the connection: they are adopted. */
   adopting: boolean
+  /**
+   * The cache behavior last set: the session's, and each page's where it differs from it, by browsing context.
+   * Setting the session's clears every page's. Its lock keeps one change at a time, each reading the registry
+   * once the one before it has been sent.
+   */
+  readonly cache: { bypass: boolean; readonly pages: Map<string, boolean>; readonly lock: Semaphore.Semaphore }
 }
 
 /** A connection's empty state, with its default context mapped to BiDi's `"default"`. */
@@ -319,7 +326,8 @@ export const make = (options: {
     requestCollectors: new Map(),
     granted: new Map(),
     preloads: [],
-    adopting: true
+    adopting: true,
+    cache: { bypass: false, pages: new Map(), lock: Semaphore.makeUnsafe(1) }
   }
   return state
 }

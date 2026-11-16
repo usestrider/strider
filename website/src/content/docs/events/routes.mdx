@@ -14,7 +14,7 @@ A declaration is a setting held for a scope: a route, an [init script](/docs/eve
 [emulated setting or a granted permission](/docs/pages/contexts#settings-for-a-while), a
 [dialog or file chooser handler](/docs/events/kinds#dialogs-and-file-choosers).
 
-- The browser confirms it before the call returns. A route is in force for requests that start after its declaration returns.
+- The browser confirms it before the call returns, except a route's [cache setting](#routes-and-the-cache) during a navigation. A route is in force for requests that start after its declaration returns.
 - It's removed when its scope closes, or earlier with its handle's `remove`.
 
 ## Handlers and decisions
@@ -95,6 +95,18 @@ const retryAfterOutage = Effect.fn("retryAfterOutage")(function*(page: Page.Page
   yield* page.getByText("Order placed").pipe(Expect.toBeVisible)
 })
 ```
+
+## Routes and the cache
+
+While a request or response route is in force for a page, the page's requests bypass the browser's HTTP cache, so a
+request a route lets through reaches the server. Once the last such route is removed, the cache answers again. An
+authentication route leaves the cache alone.
+
+- On Chromium, the setting is confirmed before the route's declaration returns, unless a navigation is under way in
+  the page. Then it is sent before the declaration returns, and the new document has it from its commit.
+- On Firefox, a dedicated worker's requests still use the cache.
+- On Firefox, while a context's route is in force, a popup that another context opens may send its first requests
+  past the cache, before it gets its own context's setting.
 
 ## The response phase
 
