@@ -4787,8 +4787,7 @@ describe("BiDi frame removal without contextDestroyed", () => {
       handlers.apply("script.realmDestroyed", { realm: "FS" }, { state: setup.state })
       yield* setup.state.buffer.flush
     })
-    const removed = () =>
-      setup.facts.filter((fact) => fact._tag === "NavigableRemoved" && fact.navigable === frame.id)
+    const removed = () => setup.facts.filter((fact) => fact._tag === "NavigableRemoved" && fact.navigable === frame.id)
     return { ...setup, frame, handlers, destroyRealms, removed }
   })
 
