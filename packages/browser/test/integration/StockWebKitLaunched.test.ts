@@ -8,6 +8,7 @@ import { assert, describe, layer } from "@effect/vitest"
 import { Browser, Dialog, Expect, FileInput, Route } from "@usestrider/browser"
 import { WebKit } from "@usestrider/browser/webkit"
 import * as Cause from "effect/Cause"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
@@ -198,6 +199,101 @@ describe("Stock WebKit, launched in automation mode", () => {
             }))
             assert.strictEqual(files.other, 0, "a changed path must never redirect the upload to another input")
             if (Exit.isSuccess(exit)) assert.strictEqual(files.target, 1)
+          }).pipe(Effect.provide(backend.pipe(Layer.provide(socketConnector))))
+        })),
+      timeout
+    )
+
+    it.effect(
+      "removes temporary node identity marks after success, mismatch, interruption and document replacement",
+      () =>
+        Effect.scoped(Effect.gen(function*() {
+          yield* useXvfb()
+          let beforeResolve: Effect.Effect<void> = Effect.void
+          let armed = false
+          const backend = BrowserImpl.layer((sink) =>
+            Effect.gen(function*() {
+              const group = yield* WebKitAutomation.start({
+                executablePath: webkitgtk.executable,
+                wrapAutomation: (transport) => ({
+                  ...transport,
+                  send: Effect.fnUntraced(function*(message: string) {
+                    const command = JSON.parse(message)
+                    if (
+                      armed && command.method === "Automation.evaluateJavaScriptFunction" &&
+                      command.params.function.startsWith("function(path)")
+                    ) {
+                      armed = false
+                      yield* beforeResolve
+                    }
+                    yield* transport.send(message)
+                  })
+                })
+              })
+              return yield* WebKitAdapter.connect(group.transport, { sink, ownership: "launched", automation: group })
+            })
+          )
+          yield* Effect.gen(function*() {
+            const { origin } = yield* site
+            const fs = yield* FileSystem.FileSystem
+            const dir = yield* fs.makeTempDirectoryScoped({ prefix: "strider-node-path-" })
+            yield* fs.writeFileString(`${dir}/note.txt`, "abc")
+            for (const phase of ["success", "mismatch", "interruption", "document replacement"] as const) {
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* Browser.newPage()
+                yield* page.goto(
+                  fixtureUrl(
+                    origin,
+                    "<div id=\"remove\"></div><input type=\"file\" id=\"target\"><input type=\"file\" id=\"other\">"
+                  )
+                )
+                yield* page.evaluateInMainWorld(() => {
+                  ;(window as any).retained = document.getElementById("target")
+                })
+                const arrived = yield* Deferred.make<void>()
+                beforeResolve = Effect.gen(function*() {
+                  const visible = yield* page.evaluateInMainWorld(() => {
+                    const node = (window as any).retained
+                    return {
+                      names: Object.getOwnPropertyNames(node).filter((name) => name.startsWith("__strider_node_")),
+                      keys: Object.keys(node).filter((name) => name.startsWith("__strider_node_")),
+                      json: JSON.stringify(node),
+                      html: node.outerHTML
+                    }
+                  })
+                  assert.strictEqual(visible.names.length, 1, "the resolution must have installed its mark")
+                  assert.deepStrictEqual(visible.keys, [])
+                  assert(!visible.json.includes("__strider_node_"))
+                  assert(!visible.html.includes("__strider_node_"))
+                  assert(!(yield* page.snapshot()).text.includes("__strider_node_"))
+                  if (phase === "mismatch") {
+                    yield* page.evaluateInMainWorld(() => document.getElementById("remove")!.remove())
+                  } else if (phase === "document replacement") {
+                    yield* page.evaluateInMainWorld(() => {
+                      document.open()
+                      document.write("<p>replacement</p>")
+                      document.close()
+                    })
+                  }
+                  yield* Deferred.succeed(arrived, undefined)
+                  if (phase === "interruption") return yield* Effect.never
+                }).pipe(Effect.orDie)
+                armed = true
+                const upload = yield* page.locator("#target").setInputFiles(FileInput.local(`${dir}/note.txt`))
+                  .pipe(Effect.forkScoped)
+                yield* Deferred.await(arrived).pipe(Effect.timeout("2 seconds"))
+                if (phase === "interruption") yield* Fiber.interrupt(upload).pipe(Effect.timeout("2 seconds"))
+                else yield* Fiber.await(upload)
+                assert.deepStrictEqual(
+                  yield* page.evaluateInMainWorld(() =>
+                    Object.getOwnPropertyNames((window as any).retained)
+                      .filter((name) => name.startsWith("__strider_node_"))
+                  ),
+                  [],
+                  phase
+                )
+              }))
+            }
           }).pipe(Effect.provide(backend.pipe(Layer.provide(socketConnector))))
         })),
       timeout
