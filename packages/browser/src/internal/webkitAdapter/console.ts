@@ -1,7 +1,8 @@
 /**
- * The console on stock WebKit: what a page or a worker logged, and what it threw that nothing caught, which WebKit
- * reports as a console error. A message is attributed to the realm of an object it logged, else its worker's, else
- * the page's main frame's.
+ * The console on stock WebKit: what a page or a worker logged, what the browser wrote to its console itself (a CSP
+ * violation, a blocked or failed load), and what it threw that nothing caught, which WebKit reports as a console
+ * error. A message is attributed to the realm of an object it logged, else its worker's, else the page's main
+ * frame's.
  */
 import * as Option from "effect/Option"
 import * as ConsoleMessage from "../../ConsoleMessage.ts"
@@ -42,14 +43,13 @@ const consoleMessage = (
     uncaught(state, message, target, worker)
     return
   }
-  if (message.source !== "console-api") return
   const realm = worker?.realm ??
     realmOfObject(state, target, message.parameters?.find((parameter) => parameter.objectId !== undefined)?.objectId) ??
     mainRealmOf(target)
   if (realm === undefined) return
   state.buffer.emit({
     _tag: "ConsoleMessage",
-    realm: realm.id,
+    realm: Option.some(realm.id),
     message: new ConsoleMessage.ConsoleMessage({
       level: Kit.consoleLevel(message.level),
       text: message.parameters !== undefined && message.parameters.length > 0

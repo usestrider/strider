@@ -33,10 +33,12 @@ const LikeAUser = Chromium.layer({
 }).pipe(Layer.provide(NodeServices.layer))
 ```
 
-- Arguments, in order: the launch profile's switches, `--headless` (unless
-  [`headless: false`](/docs/installation#backends)), your `args`,
+- Arguments, in order: the launch profile's switches, `--headless` and a `--blink-settings` for a fine pointer with
+  hover (unless [`headless: false`](/docs/installation#backends)), your `args`,
   `--remote-debugging-pipe`, `--user-data-dir` with a temporary profile, `about:blank`. Strider talks over the pipe,
   with no message size limit and no debugging port, which [the raw protocol](#the-raw-protocol) needs.
+- Headless Chromium has no pointing device, so the `--blink-settings` makes a page match `(hover: hover)` and
+  `(pointer: fine)`, as it does with a mouse. A `--blink-settings` in your `args` replaces it.
 - Don't put a URL in `args`: headless Chromium opens one page only.
 - `LaunchProfile.automation`, the default, turns off first-run pages, sync, updates, and background networking,
   and enables `CDPScreenshotNewSurface` to request repaint on a new surface for captures. Capture can drive

@@ -1630,6 +1630,25 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
+      // With receivesPointer off, the click is sent to the first geometric centre and lands on whatever is there
+      it.effect("clicks through to a cover when receivesPointer is disabled", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<!doctype html><style>body{margin:0}#go{position:absolute;left:20px;top:20px;width:100px;height:40px}#cover{position:absolute;left:0;top:0;width:300px;height:200px}</style><button id="go">Go</button><div id="cover"></div><script>window.clicks=[];go.addEventListener('click',()=>clicks.push('go'));cover.addEventListener('click',()=>clicks.push('cover'))</script>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.locator("#go").click({ checks: { receivesPointer: false } }).pipe(Deadline.within("1 second"))
+            assert.deepStrictEqual(
+              yield* page.evaluateInMainWorld(() => (window as unknown as { clicks: Array<string> }).clicks),
+              [
+                "cover"
+              ]
+            )
+          }))
+        }), timeout)
+
       it.effect("clicks a wrapped link whose first line a scrolling ancestor clips", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
@@ -5148,6 +5167,96 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 assert.strictEqual(yield* page.locator("#box").isChecked, false)
                 assert.strictEqual(yield* page.locator("#other").isChecked, false)
               }
+            }))
+          }), timeout)
+      }
+
+      // A button's disabled state covers what it contains, as the browser's delivery does.
+      it.effect("reads a span inside a disabled button as disabled", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<button disabled><span id="own">Own</span></button><fieldset disabled><button><span id="fieldset">Fieldset</span></button></fieldset><button><span id="enabled">Enabled</span></button>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(url)
+            assert.isTrue(yield* page.locator("#enabled").isEnabled)
+            yield* page.locator("#enabled").pipe(Expect.toBeEnabled)
+            assert.isFalse(yield* page.locator("#own").isEnabled)
+            yield* page.locator("#own").pipe(Expect.toBeDisabled, Deadline.within("2 seconds"))
+            assert.isFalse(yield* page.locator("#fieldset").isEnabled)
+            const error = yield* page.locator("#fieldset").pipe(
+              Expect.toBeEnabled,
+              Deadline.within("200 millis"),
+              Effect.flip
+            )
+            assert(Deadline.isTimeout(error) || Expect.isExpectationFailed(error), String(error))
+          }))
+        }), timeout)
+
+      it.effect(
+        "click on a span inside a disabled button waits for Disabled, then lands",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<button id="b" disabled onclick="${say("'clicked'")}"><span id="go">Go</span></button>${out}`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              const go = page.locator("#go")
+              // A trial that skips Enabled prepares the engine and geometry without sending input.
+              yield* go.click({ trial: true, checks: { enabled: false } })
+              const observation = yield* checkedReadiness(go)
+              const running = yield* go.click().pipe(Effect.forkScoped)
+              yield* awaitDisabled(running, observation)
+              assert.strictEqual(yield* page.locator("#out").readText, "nothing yet")
+              yield* page.evaluateInMainWorld(() => {
+                ;(document.getElementById("b") as HTMLButtonElement).disabled = false
+              })
+              yield* Fiber.join(running)
+              assert.strictEqual(yield* page.locator("#out").readText, "clicked")
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "reads a disabled option without borrowing an enclosing button's enabled state",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div role="button" id="outer"><select><option id="go" disabled>Unavailable</option></select></div>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              assert.isTrue(yield* page.locator("#outer").isEnabled)
+              assert.isFalse(yield* page.locator("#go").isEnabled)
+              yield* page.locator("#go").pipe(Expect.toBeDisabled, Deadline.within("2 seconds"))
+            }))
+          }),
+        timeout
+      )
+
+      for (const boundary of ["shadow root", "assigned slot"] as const) {
+        it.effect(`reads the disabled enclosing button through ${boundary}`, () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              boundary === "shadow root"
+                ? `<button id="b" disabled><span id="host"></span></button><script>
+                    document.getElementById("host").attachShadow({mode: "open"}).innerHTML = '<span id="go">Go</span>'
+                  </script>`
+                : `<div id="host"><span id="go">Go</span></div><script>
+                    document.getElementById("host").attachShadow({mode: "open"}).innerHTML = '<button id="b" disabled><slot></slot></button>'
+                  </script>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              assert.isFalse(yield* page.locator("#b").isEnabled)
+              assert.isFalse(yield* page.locator("#go").isEnabled)
+              yield* page.locator("#go").pipe(Expect.toBeDisabled, Deadline.within("2 seconds"))
             }))
           }), timeout)
       }

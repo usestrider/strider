@@ -1,5 +1,11 @@
 # @usestrider/vitest
 
+## 0.2.5
+
+### Patch Changes
+
+- Uses `@usestrider/browser` 0.11.0.
+
 ## 0.2.4
 
 ### Patch Changes

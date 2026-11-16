@@ -78,7 +78,8 @@ export const Url = Schema.String.pipe(
 export type Url = typeof Url.Type
 
 /**
- * Schema for a URL pattern: a glob such as `https://*.example.com/api/**`, or a `URLPattern` string.
+ * Schema for a URL pattern: a glob such as `https://*.example.com/api/**`, a `URLPattern` string, or an exact URL,
+ * compared as the browser writes a URL.
  *
  * @stability unstable
  * @category schemas
@@ -95,7 +96,9 @@ export const Pattern = Schema.String.pipe(Schema.brand("~@usestrider/browser/Url
  *
  * - With `*`, it's a glob over the whole URL: `**` matches anything, and `*` anything but `/`.
  * - Starting with a scheme and containing `:name` groups, it's a `URLPattern`.
- * - Anything else matches that exact URL.
+ * - Anything else matches that exact URL, compared as the browser writes a URL: `"ws://localhost:8080"` matches
+ *   `ws://localhost:8080/`, and `"HTTP://Example.com:80"` matches `http://example.com/`. A string that isn't an
+ *   absolute URL is compared as it is.
  *
  * An invalid pattern fails with `InvalidInput` at once.
  *

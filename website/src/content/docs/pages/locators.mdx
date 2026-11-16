@@ -124,6 +124,9 @@ const openOrders = Effect.fn("openOrders")(function*(page: Page.Page) {
 })
 ```
 
+`getByText` searches the previous matches themselves too, so `page.locator(".badge").getByText("Resolved")` finds the
+badge that says it.
+
 `filter` keeps matches by `hasText`, `hasNotText`, `visible`, or what they contain, `has` and `hasNot`.
 
 Use `has` and `hasNot` to test for an element rather than for text. They take a `Locator.relative` locator, which

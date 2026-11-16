@@ -1612,7 +1612,7 @@ export const conformance = (backend: Backend) =>
             const owner = realm.kind.worker._tag === "Dedicated"
               ? Option.getOrUndefined(realm.kind.worker.owner)
               : undefined
-            assert.include([realm.realm, owner], message.realm)
+            assert.include([realm.realm, owner], Option.getOrUndefined(message.realm))
           }), timeout)
 
         it.effect("reports a WebSocket's frames", () =>
