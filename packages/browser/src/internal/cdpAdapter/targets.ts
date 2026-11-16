@@ -512,7 +512,6 @@ export const webSocketGate: import("./state.ts").ContextGate = Effect.fnUntraced
               Evaluation.contextCreated(event, { state, target })
             }
           }
-          WebSocketBridge.flush(state, target)
           return state.buffer.flush
         })))
       }

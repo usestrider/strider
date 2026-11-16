@@ -370,8 +370,9 @@ export interface ProtocolSession {
    */
   readonly key: SessionKey | undefined
   /**
-   * Sends a command and waits for its reply, for at most `CommandTimeout`, or until the deadline of the operation of
-   * `@usestrider/browser` it is sent in. Interrupting the caller, or running
+   * Sends a command and waits for its reply, and for the events received before the reply to be handled, for at most
+   * `CommandTimeout`, or until the deadline of the operation of `@usestrider/browser` it is sent in. Interrupting the
+   * caller, or running
    * out of time, abandons the reply; it never cancels the command, which no protocol can do. A late reply to
    * a command that creates a resource goes to `CurrentLateReplyHandler`.
    *
@@ -529,7 +530,8 @@ export const on: {
 )
 
 /**
- * Reference to how long a command waits for its reply before failing with `NoReply`; 30 seconds unless set.
+ * Reference to how long a command waits for its reply, and for the events received before it to be handled, before
+ * failing with `NoReply`; 30 seconds unless set.
  *
  * **Details**
  *
@@ -857,7 +859,8 @@ export class SessionEnded extends Schema.Error<SessionEnded>("@usestrider/browse
  * **Details**
  *
  * The command may still run: no protocol can cancel one. A late reply is dropped, or, for a command that
- * creates a resource, handed to `CurrentLateReplyHandler`.
+ * creates a resource, handed to `CurrentLateReplyHandler`. A reply counts as late too when it arrived in time but
+ * the events the browser sent before it were still being handled when the time ran out.
  *
  * @stability experimental
  * @category reasons

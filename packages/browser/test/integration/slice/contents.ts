@@ -492,6 +492,32 @@ export const contents = (
           )
         }), timeout)
 
+      it.effect("an evaluation's console messages are in the history once it returns", () =>
+        Effect.gen(function*() {
+          const page = yield* SharedContext.newPage
+          yield* page.evaluateInMainWorld(() => console.log("first"))
+          yield* page.evaluateInMainWorld(() => console.log("second"))
+          yield* page.evaluateInMainWorld(() => console.log("third"))
+          assert.deepStrictEqual((yield* ConsoleMessage.history(page)).entries.map((entry) => entry.text), [
+            "first",
+            "second",
+            "third"
+          ])
+          yield* page.evaluateInMainWorld(() => {
+            for (let i = 0; i <= 300; i++) console.log(`message${i}`)
+          })
+          const history = yield* ConsoleMessage.history(page)
+          assert.deepStrictEqual(
+            history.entries.map((entry) => entry.text),
+            Array.from({ length: 301 }, (_, i) => `message${i}`).slice(-100)
+          )
+          const { origin } = yield* site
+          yield* page.goto(fixtureUrl(origin, "<title>Console</title>"))
+          yield* page.reload({ waitUntil: "load" })
+          yield* page.evaluateInMainWorld(() => console.log("after reload"))
+          assert.strictEqual((yield* ConsoleMessage.history(page)).entries.at(-1)?.text, "after reload")
+        }), timeout)
+
       it.effect("setContent settles when the page silences console.debug", () =>
         Effect.gen(function*() {
           const { origin } = yield* site

@@ -29,6 +29,7 @@ import * as ProtocolClient from "../protocolClient.ts"
 import * as Urls from "../urls.ts"
 import { closingOf, contextKey, documentOf, type Event, frameOf, realmEnd, realmOf, type State } from "./state.ts"
 import { addRealm, removeRealm } from "./tree.ts"
+import * as WebSocketBridge from "./webSocketBridge.ts"
 
 // ── Remote values ─────────────────────────────────────────────────────────────────────────────────────────
 
@@ -210,6 +211,7 @@ export const contextCreated = (params: Runtime.ExecutionContextCreatedParams, { 
         context: Option.fromUndefinedOr((target.page?.context ?? state.workerContexts.get(target))?.id)
       }
     })
+    WebSocketBridge.flush(state, target)
     return
   }
   const frame = frameOf(state, auxData.frameId)
@@ -233,6 +235,7 @@ export const contextCreated = (params: Runtime.ExecutionContextCreatedParams, { 
     origin: context.origin,
     kind: { _tag: "Window", navigable: frame.id, document: document.id, world: realm.world }
   })
+  WebSocketBridge.flush(state, target)
 }
 
 export const register = (handlers: Kit.Handlers<Event>) =>
