@@ -4874,6 +4874,26 @@ describe("BiDi frame removal without contextDestroyed", () => {
       assert.isEmpty(removed())
     }))
 
+  for (const phase of ["parent reply", "tree reply"] as const) {
+    it.effect(`keeps the frame when its page starts closing before the ${phase}`, () =>
+      Effect.gen(function*() {
+        const reply = yield* Deferred.make<unknown>()
+        const { commands, destroyRealms, frame, page, removed } = yield* withFrame({
+          "script.evaluate": phase === "parent reply" ? Deferred.await(reply) : evaluated,
+          "browsingContext.getTree": phase === "tree reply" ? Deferred.await(reply) : tree([])
+        })
+        yield* destroyRealms()
+        yield* settle
+        assert.strictEqual(commands.length, phase === "parent reply" ? 1 : 2)
+        page.closeRequested = true
+        yield* Deferred.succeed(reply, phase === "parent reply" ? evaluated : tree([]))
+        yield* settle
+        assert.isFalse(frame.removed, "the page's teardown must supply the frame's close reason")
+        assert.isEmpty(removed())
+        assert.strictEqual(commands.length, phase === "parent reply" ? 1 : 2)
+      }))
+  }
+
   for (const order of ["before the probe", "after the probe"] as const) {
     it.effect(`ends the frame once when contextDestroyed also comes ${order}`, () =>
       Effect.gen(function*() {
