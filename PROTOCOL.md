@@ -101,10 +101,21 @@ interface ErrorMatcher {
   while the data doesn't include it yet. So the CDP adapter sends mouse, wheel and touch events whose points all land
   in frames of one out-of-process session (a locator action names the frame its element is in and any other its
   points land in, such as a drag's destination) on that session, in the coordinates of the session's outermost
-  frame, from the viewport origins L1 passes with the frame. Any other pointer input, such as a drag between the page
-  and a frame, goes on the page's session, in its coordinates. Keys and text go on the page's session, which sends
-  them to the focused element. Nothing hit-tests the parent documents for input on the frame's session: the
-  locator's pointer check does, before anything is sent. Each adapter marks `unsent` the failures its
+  frame, from the viewport origins L1 passes with the frame. Pointer input that names no frame (`page.mouse`, the
+  touchscreen and the wheel) follows the same rule: on a page with an out-of-process frame, the adapter hit-tests
+  each event's point with `DOM.getNodeForLocation` in each session from the page's down, `DOM.describeNode` tells
+  whether the element hit owns a frame of another session, and `DOM.getBoxModel` gives that element's content box,
+  the frame's origin; the event goes on the deepest such session, in its coordinates. That is no call on a page
+  without an out-of-process frame, two at a point outside them, and three for each level of out-of-process frame
+  the point is in. From a press until every button is up, or from a touch's start until its end, input that names
+  no frame goes on the session the press or the start went on, a release outside the frame included. Firefox
+  doesn't deliver page coordinates into a cross-site frame, so the BiDi adapter does the same with one
+  `script.callFunction` a level, in a sandbox, on a context with child frames, and sends to the frame's context;
+  BiDi refuses a point outside that context's viewport, so a move outside the frame while a button is held there is
+  left out, and the release is sent at the pointer's last point in the frame. Any other pointer input, such as a
+  locator's drag between the page and a frame, goes on the page's session, in its coordinates. Keys and text go on
+  the page's session, which sends them to the focused element. Nothing hit-tests the parent documents for input a
+  locator sends on the frame's session: the locator's pointer check does, before anything is sent. Each adapter marks `unsent` the failures its
   `dispatchInput` meets before writing any input: its lookups and its refusals, such as a key stock WebKit's
   Automation can't type. Locator actions and the page's devices record such a failure as nothing sent and leave
   nothing of it to release; any other failure, or an interruption, still counts as input that may have been sent.

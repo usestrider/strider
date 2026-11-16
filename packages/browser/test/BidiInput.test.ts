@@ -15,7 +15,9 @@ const recording = () => {
   const state = {
     ids: {},
     endedPages: new Set(),
-    navigablesById: new Map([[id, { removed: false, page: { bidi: "context-1" } }]]),
+    navigablesById: new Map([[id, { removed: false, page: { id, bidi: "context-1", children: new Set() } }]]),
+    mouseCapture: new Map(),
+    touchCapture: new Map(),
     send: (command: { readonly params: unknown }) => Effect.sync(() => void sent.push(command.params))
   } as unknown as State
   return { id, sent, state }

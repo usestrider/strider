@@ -100,6 +100,13 @@ export interface TargetEntry {
   viewportLock?: Semaphore.Semaphore | undefined
 }
 
+/** A session pointer input goes on, and the origin of its viewport in the page's coordinates. */
+export interface PointerTarget {
+  readonly target: TargetEntry
+  readonly x: number
+  readonly y: number
+}
+
 export interface PageEntry {
   readonly id: L1Target.NavigableId
   readonly targetId: string
@@ -366,6 +373,13 @@ export interface State extends Kit.Ending {
   readonly interceptingDrags: Set<L1Target.NavigableId>
   /** The buttons each page's last mouse event left held, until the page ends. */
   readonly heldButtons: Map<L1Target.NavigableId, number>
+  /**
+   * The session, and its origin in the page's coordinates, that a page's pointer input naming no frame went on when
+   * a button was pressed, until every button is up; the mouse and wheel input between goes there too.
+   */
+  readonly mouseCapture: Map<L1Target.NavigableId, PointerTarget>
+  /** The same for a touch, from its start until it ends or is canceled. */
+  readonly touchCapture: Map<L1Target.NavigableId, PointerTarget>
   /** A worker no page owns belongs to the context its target names. */
   readonly workerContexts: Map<TargetEntry, ContextEntry>
   /** Targets attached now existed before the connection: they are adopted. */
@@ -435,6 +449,8 @@ export const make = (options: {
     drags: new Map(),
     interceptingDrags: new Set(),
     heldButtons: new Map(),
+    mouseCapture: new Map(),
+    touchCapture: new Map(),
     workerContexts: new Map(),
     attachedAtConnect: true,
     defaultUserAgent: ""
