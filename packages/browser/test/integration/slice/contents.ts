@@ -1127,7 +1127,9 @@ export const contents = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(origin, `<script>window.secret = 42</script><p id="x">hello</p>`))
+            yield* page.goto(fixtureUrl(origin, `<script>window.secret = 42</script><p id="x">hello</p>`), {
+              waitUntil: "load"
+            })
             if (
               yield* isolatedRefused(page.evaluate(() =>
                 1
@@ -2371,7 +2373,9 @@ export const contents = (
           const { crossSite, origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
-            yield* page.goto(fixtureUrl(origin, `<script>document.cookie = "plain=1; path=/"</script><p>hi</p>`))
+            yield* page.goto(fixtureUrl(origin, `<script>document.cookie = "plain=1; path=/"</script><p>hi</p>`), {
+              waitUntil: "load"
+            })
             const jar = page.context.cookies
             if (!(yield* fullySupports("cookies"))) {
               // Where a context's list is the cookies its pages are sent (QUIRKS.md, Q225), one shows once a page is
@@ -2473,7 +2477,8 @@ export const contents = (
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             yield* page.goto(
-              fixtureUrl(origin, `<script>localStorage.setItem("a", "1"); sessionStorage.setItem("s", "x")</script>`)
+              fixtureUrl(origin, `<script>localStorage.setItem("a", "1"); sessionStorage.setItem("s", "x")</script>`),
+              { waitUntil: "load" }
             )
             assert.deepStrictEqual(yield* page.localStorage.get("a"), Option.some("1"))
             assert.deepStrictEqual(yield* page.localStorage.get("missing"), Option.none())
