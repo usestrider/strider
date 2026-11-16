@@ -3,7 +3,7 @@
  * and the digest calls a page by the name it has as each line is noted.
  */
 import { assert, describe, it } from "@effect/vitest"
-import { Browser, Dialog, Snapshot, Target } from "@usestrider/browser"
+import { Browser, Declaration, Dialog, Snapshot, Target } from "@usestrider/browser"
 import { CapturePolicy } from "@usestrider/browser/ai"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -749,6 +749,26 @@ describe("Session's digest, dialogs", () => {
         Effect.flatMap(Stream.runDrain)
       )
       assert.deepStrictEqual(yield* dialogLines(session), ["dialog confirm on main accepted by r1"])
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest("-dialog(confirm)"))))
+
+  it.effect("keeps the registration name when it is removed after choosing a decision", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const page = yield* context.newPage
+      const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+      yield* session.name(page, "main")
+      yield* session.toolkit.handle("dialog", { page: "main", decision: "accept" }).pipe(
+        Effect.flatMap(Stream.runDrain)
+      )
+      const registration = Handles.page(page).entry.state.getUnsafe().promptHandlers.at(-1)!
+        .registration as Declaration.HandlerRegistration
+      const removed = yield* registration.handled.waitFor((count) => count === 1).pipe(
+        Effect.andThen(session.remove("r1")),
+        Effect.forkChild
+      )
+      const lines = yield* dialogLines(session)
+      yield* Fiber.join(removed)
+      assert.deepStrictEqual(lines, ["dialog confirm on main accepted by r1"])
     }).pipe(Effect.scoped, Effect.provide(Browser.layerTest("-dialog(confirm)"))))
 
   it.effect("reports a dialog the policy decided in one line", () =>
