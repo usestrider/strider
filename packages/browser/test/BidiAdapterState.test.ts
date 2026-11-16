@@ -4732,3 +4732,303 @@ it.effect("passes a closing page's reason to the WebSocket bridge after the real
     assert.isFalse(state.realms.has(fixture.realm.bidi))
     assert.deepStrictEqual(reason, new Target.PageClosed({ by: "command" }))
   }))
+
+it.effect("does not retain a preload removed before its reply timed out", () =>
+  Effect.gen(function*() {
+    const clock = yield* Clock.Clock
+    const browser = yield* makeBrowser
+    const client = yield* ProtocolClient.make(browser.transport, BidiWire.wire, { replyClock: clock })
+    const { state } = yield* withPage({}, {}, client.root)
+    const native = new Set<string>()
+    const removed = yield* Deferred.make<void>()
+    let serial = 0
+    let hold = false
+    yield* Effect.gen(function*() {
+      while (true) {
+        const command = yield* browser.next
+        if (command.method === "script.addPreloadScript") {
+          const script = `P${++serial}`
+          native.add(script)
+          yield* browser.receive({ type: "success", id: command.id, result: { script } })
+        } else if (command.method === "script.removePreloadScript") {
+          const existed = native.delete(command.params?.script as string)
+          if (hold) {
+            hold = false
+            yield* Deferred.succeed(removed, undefined)
+            continue
+          }
+          yield* browser.receive(
+            existed
+              ? { type: "success", id: command.id, result: {} }
+              : { type: "error", id: command.id, error: "no such script", message: "Script not found" }
+          )
+        }
+      }
+    }).pipe(Effect.forkScoped)
+    yield* Declare.declare(state, { _tag: "Browser" }, preload("first"))
+    hold = true
+    const replacing = yield* Declare.declare(state, { _tag: "Browser" }, preload("second")).pipe(Effect.forkChild)
+    yield* Deferred.await(removed)
+    yield* TestClock.adjust("5 seconds")
+    yield* Fiber.join(replacing)
+    assert.deepStrictEqual(state.preloads.map(({ script }) => script).sort(), [...native].sort())
+    // The next reconciliation asks again, and Firefox's "no such script" settles the removal.
+    yield* Declare.declare(state, { _tag: "Browser" }, preload("third"))
+    assert.deepStrictEqual(state.preloads.map(({ script }) => script).sort(), [...native].sort())
+    assert.deepStrictEqual(state.unconfirmedPreloads, [])
+  }).pipe(Effect.provideServiceEffect(BrowserClock.CurrentClock, Effect.map(Clock.Clock, BrowserClock.fromClock))))
+
+describe("BiDi frame removal without contextDestroyed", () => {
+  const evaluated = { type: "success", realm: "PR", result: { type: "number", value: 0 } }
+  const tree = (children: ReadonlyArray<string>) => ({
+    contexts: [{
+      context: "C1",
+      url: "http://127.0.0.1/",
+      userContext: "default",
+      originalOpener: null,
+      clientWindow: "W1",
+      parent: null,
+      children: children.map((context) => ({
+        context,
+        url: "http://localhost/child",
+        userContext: "default",
+        originalOpener: null,
+        clientWindow: "W1",
+        children: null
+      }))
+    }]
+  })
+  // Lets the probe the fold started run to its end
+  const settle = Effect.forEach(Array.from({ length: 20 }), () => Effect.yieldNow, { discard: true })
+
+  // The recorded failure: a cross-site iframe is removed, its window and sandbox realms end, and Firefox's
+  // `browsingContext.contextDestroyed` for it never comes
+  const withFrame = Effect.fnUntraced(function*(
+    replies: Readonly<Record<string, unknown>>,
+    failures: Readonly<Record<string, () => Protocol.ProtocolError>> = {}
+  ) {
+    const setup = yield* withPage(replies, failures)
+    const frame = Tree.addNavigable(setup.state, {
+      context: "F1" as BrowsingContext.BrowsingContext,
+      parent: "C1" as BrowsingContext.BrowsingContext,
+      userContext: "default",
+      originalOpener: null,
+      url: "about:blank"
+    }, false)!
+    const handlers = Contexts.register(Evaluation.register(Kit.handlers<State.Event>()))
+    const created = (realm: string, sandbox?: string) =>
+      handlers.apply("script.realmCreated", {
+        realm,
+        context: frame.bidi,
+        type: "window",
+        origin: "http://localhost",
+        sandbox
+      }, { state: setup.state })
+    created("FR")
+    created("FS", "__strider_utility__")
+    yield* setup.state.buffer.flush
+    const destroyRealms = Effect.fnUntraced(function*() {
+      handlers.apply("script.realmDestroyed", { realm: "FR" }, { state: setup.state })
+      handlers.apply("script.realmDestroyed", { realm: "FS" }, { state: setup.state })
+      yield* setup.state.buffer.flush
+    })
+    const removed = () => setup.facts.filter((fact) => fact._tag === "NavigableRemoved" && fact.navigable === frame.id)
+    return { ...setup, frame, handlers, destroyRealms, removed }
+  })
+
+  it.effect("ends the frame when the tree after its parent's reply no longer lists it", () =>
+    Effect.gen(function*() {
+      const { commands, destroyRealms, frame, removed, state } = yield* withFrame({
+        "script.evaluate": evaluated,
+        "browsingContext.getTree": tree([])
+      })
+      yield* destroyRealms()
+      yield* settle
+      assert.deepStrictEqual(commands.map((command) => command.method), [
+        "script.evaluate",
+        "browsingContext.getTree"
+      ])
+      assert.deepStrictEqual(commands[0]!.params, {
+        expression: "0",
+        target: { context: "C1", sandbox: "__strider_utility__" },
+        awaitPromise: false,
+        resultOwnership: "none"
+      })
+      assert.deepStrictEqual(commands[1]!.params, { root: "C1", maxDepth: 1 })
+      assert.isTrue(frame.removed)
+      assert.isFalse(state.navigables.has(frame.bidi))
+      const ends = removed()
+      assert.strictEqual(ends.length, 1)
+      assert.instanceOf((ends[0] as Extract<Adapter.Fact, { _tag: "NavigableRemoved" }>).reason, Target.FrameDetached)
+    }))
+
+  it.effect("keeps the frame, asking once, while the tree still lists it", () =>
+    Effect.gen(function*() {
+      const { commands, destroyRealms, frame, removed } = yield* withFrame({
+        "script.evaluate": evaluated,
+        "browsingContext.getTree": tree(["F1"])
+      })
+      yield* destroyRealms()
+      yield* settle
+      assert.deepStrictEqual(commands.map((command) => command.method), [
+        "script.evaluate",
+        "browsingContext.getTree"
+      ])
+      assert.isFalse(frame.removed)
+      assert.isEmpty(removed())
+    }))
+
+  it.effect("asks nothing for a frame whose next window realm has already arrived", () =>
+    Effect.gen(function*() {
+      const { commands, frame, handlers, state } = yield* withFrame({
+        "script.evaluate": evaluated,
+        "browsingContext.getTree": tree([])
+      })
+      handlers.apply("script.realmCreated", {
+        realm: "FR2",
+        context: frame.bidi,
+        type: "window",
+        origin: "http://localhost"
+      }, { state })
+      handlers.apply("script.realmDestroyed", { realm: "FR" }, { state })
+      yield* state.buffer.flush
+      yield* settle
+      assert.isEmpty(commands)
+      assert.isFalse(frame.removed)
+    }))
+
+  it.effect("asks for no tree when its parent can't answer", () =>
+    Effect.gen(function*() {
+      const { commands, destroyRealms, frame, removed } = yield* withFrame({
+        "browsingContext.getTree": tree([])
+      }, {
+        "script.evaluate": () =>
+          new Protocol.ProtocolError({
+            reason: new Protocol.Rejected({
+              method: "script.evaluate",
+              reason: "NoSuchFrame",
+              code: "no such frame",
+              description: "Browsing context with id C1 not found"
+            })
+          })
+      })
+      yield* destroyRealms()
+      yield* settle
+      assert.deepStrictEqual(commands.map((command) => command.method), ["script.evaluate"])
+      assert.isFalse(frame.removed)
+      assert.isEmpty(removed())
+    }))
+
+  it.effect("waits for the parent reply and observed events before reading the tree", () =>
+    Effect.gen(function*() {
+      const reply = yield* Deferred.make<unknown>()
+      const drained = yield* Deferred.make<void>()
+      let draining = false
+      const { commands, destroyRealms, frame, state } = yield* withFrame({
+        "script.evaluate": Deferred.await(reply),
+        "browsingContext.getTree": tree([])
+      })
+      Object.assign(state.root(), {
+        drainObserved: Effect.sync(() => {
+          draining = true
+        }).pipe(Effect.andThen(Deferred.await(drained)))
+      })
+      yield* destroyRealms()
+      yield* settle
+      assert.strictEqual(commands.length, 1)
+      assert.isFalse(draining)
+      yield* Deferred.succeed(reply, evaluated)
+      yield* settle
+      assert.isTrue(draining)
+      assert.strictEqual(commands.length, 1)
+      assert.isFalse(frame.removed)
+      yield* Deferred.succeed(drained, undefined)
+      yield* settle
+      assert.strictEqual(commands.length, 2)
+      assert.isTrue(frame.removed)
+    }))
+
+  for (const method of ["script.evaluate", "browsingContext.getTree"] as const) {
+    it.effect(`keeps the frame without logging when ${method} fails`, () => {
+      const messages: Array<unknown> = []
+      return Effect.gen(function*() {
+        const { commands, destroyRealms, frame, removed } = yield* withFrame({
+          "script.evaluate": evaluated,
+          "browsingContext.getTree": tree([])
+        }, {
+          [method]: () =>
+            new Protocol.ProtocolError({
+              reason: new Protocol.Rejected({
+                method,
+                reason: "Unrecognized",
+                code: "unknown error",
+                description: "The browser could not complete the command"
+              })
+            })
+        })
+        yield* destroyRealms()
+        yield* settle
+        assert.strictEqual(commands.length, method === "script.evaluate" ? 1 : 2)
+        assert.isFalse(frame.removed)
+        assert.isEmpty(removed())
+        assert.isEmpty(messages)
+      }).pipe(Effect.provideService(
+        Logger.CurrentLoggers,
+        new Set([Logger.make((entry) => messages.push(entry.message))])
+      ))
+    })
+  }
+
+  for (const phase of ["parent reply", "tree reply"] as const) {
+    it.effect(`keeps the frame when its page starts closing before the ${phase}`, () =>
+      Effect.gen(function*() {
+        const reply = yield* Deferred.make<unknown>()
+        const { commands, destroyRealms, frame, page, removed } = yield* withFrame({
+          "script.evaluate": phase === "parent reply" ? Deferred.await(reply) : evaluated,
+          "browsingContext.getTree": phase === "tree reply" ? Deferred.await(reply) : tree([])
+        })
+        yield* destroyRealms()
+        yield* settle
+        assert.strictEqual(commands.length, phase === "parent reply" ? 1 : 2)
+        page.closeRequested = true
+        yield* Deferred.succeed(reply, phase === "parent reply" ? evaluated : tree([]))
+        yield* settle
+        assert.isFalse(frame.removed, "the page's teardown must supply the frame's close reason")
+        assert.isEmpty(removed())
+        assert.strictEqual(commands.length, phase === "parent reply" ? 1 : 2)
+      }))
+  }
+
+  for (const order of ["before the probe", "after the probe"] as const) {
+    it.effect(`ends the frame once when contextDestroyed also comes ${order}`, () =>
+      Effect.gen(function*() {
+        const { destroyRealms, frame, handlers, removed, state } = yield* withFrame({
+          "script.evaluate": evaluated,
+          "browsingContext.getTree": tree([])
+        })
+        const destroyed = () =>
+          handlers.apply("browsingContext.contextDestroyed", {
+            context: "F1",
+            url: "http://localhost/child",
+            userContext: "default",
+            originalOpener: null,
+            clientWindow: "W1",
+            parent: "C1",
+            children: null
+          }, { state })
+        if (order === "before the probe") {
+          handlers.apply("script.realmDestroyed", { realm: "FR" }, { state })
+          destroyed()
+          yield* state.buffer.flush
+          yield* settle
+        } else {
+          yield* destroyRealms()
+          yield* settle
+          destroyed()
+          yield* state.buffer.flush
+        }
+        assert.isTrue(frame.removed)
+        assert.strictEqual(removed().length, 1)
+      }))
+  }
+})

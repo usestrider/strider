@@ -21,6 +21,7 @@ import * as Scope from "effect/Scope"
 import type * as Semaphore from "effect/Semaphore"
 import type * as BrowserWorker from "../BrowserWorker.ts"
 import type * as ConsoleMessage from "../ConsoleMessage.ts"
+import type * as Declaration from "../Declaration.ts"
 import type * as Download from "../Download.ts"
 import type * as Keyboard from "../Keyboard.ts"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
@@ -98,8 +99,19 @@ export type AutoResolutionEvent =
     readonly at: MonotonicInstant.MonotonicInstant
   }
 
+/** A dialog a handler decided, once the browser applied its decision. */
+export interface HandledPromptEvent {
+  readonly prompt: PromptEvent
+  readonly decision: Adapter.Decision
+  /** The registration whose handler decided it. */
+  readonly registration: Declaration.Registration
+  readonly at: MonotonicInstant.MonotonicInstant
+}
+
 /** A registered handler, as the model asks it: `Dialog.handle` or `FileChooser.handle`. */
 export interface Handler<A> {
+  /** The registration `handle` returned for it. */
+  readonly registration: Declaration.Registration
   /**
    * Asks the handler, in its own scope, with its own budget: `None` when it failed, was interrupted or ran
    * out of time, so the policy decides.
@@ -230,6 +242,8 @@ export interface ConnectionEntry {
 export interface PageEvents {
   readonly popup: Events.Channel<PopupEvent>
   readonly dialog: Events.Channel<PromptEvent>
+  /** Dialogs a handler decided; the policy's decisions are `autoResolution`'s. */
+  readonly handledDialog: Events.Channel<HandledPromptEvent>
   readonly fileChooser: Events.Channel<FileChooserEvent>
   readonly autoResolution: Events.Channel<AutoResolutionEvent>
   readonly navigation: Events.Channel<NavigationEvent>

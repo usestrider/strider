@@ -32,7 +32,9 @@ export const storageReplacement = (name: string, backend: Layer.Layer<Browser.Br
             const widget = `${crossSite}/fixture?html=${
               encodeURIComponent("<pre>seeded</pre><script>localStorage.setItem(\"old-frame\", \"1\")</script>")
             }`
-            yield* page.goto(`${origin}/fixture?html=${encodeURIComponent(`<iframe src="${widget}"></iframe>`)}`)
+            yield* page.goto(`${origin}/fixture?html=${encodeURIComponent(`<iframe src="${widget}"></iframe>`)}`, {
+              waitUntil: "load"
+            })
             yield* page.evaluateInMainWorld(async () => {
               document.cookie = "old=1; path=/"
               localStorage.setItem("old", "1")

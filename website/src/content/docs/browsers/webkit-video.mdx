@@ -46,8 +46,8 @@ miss animations, brief errors, and other states between captures. There is no au
 intervals can add more page work.
 
 The writer fits viewport changes into the initial output size, centring the image and padding with black. Navigation
-continues the recording. Closing its scope, page, or context ends input; a started writer has up to five seconds
-on the browser clock to finish. Capture and writer failures fail `video.file`.
+continues the recording. Closing its scope, page, or context ends input; a started writer has up to the [default budget](/docs/deadlines)
+(30 seconds unless set) on the browser clock to finish. Capture and writer failures fail `video.file`.
 
 Files remain in the caller's output directory after the context closes. This enables neither downloads nor
 `Capability.Screencast`. A trace's [`screencast: "native"`](/docs/tools/recordings) selects the enabled video path.

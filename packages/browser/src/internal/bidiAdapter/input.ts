@@ -253,13 +253,8 @@ export const dispatchInput = Effect.fnUntraced(
           })
           break
         case "InsertText":
-          for (const character of event.text) {
-            key().push(
-              { type: "keyDown", value: Redacted.make(character) },
-              { type: "keyUp", value: Redacted.make(character) }
-            )
-          }
-          break
+          // WebDriver BiDi has no command to insert text: L1 inserts it through the engine (`textInsertion`)
+          return yield* Effect.die(new Error("WebDriver BiDi inserts text through the engine, never as input"))
         case "Touch": {
           const first = event.points[0]
           sent = first === undefined

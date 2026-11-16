@@ -272,6 +272,14 @@ export const selectors = {
 export const output = {
   json: Flag.Boolean("json").pipe(Flag.withDescription("Print the result as JSON"), Flag.withDefault(false))
 }
+/** How far page new and goto wait: the document committed, its HTML parsed (the default), or its resources loaded. */
+const waitUntilFlag = Flag.Literals("wait-until", ["commit", "domContentLoaded", "load"]).pipe(
+  Flag.withDescription(
+    "Return when the document commits, when its HTML is parsed, or when it has loaded; domContentLoaded by default"
+  ),
+  Flag.optional
+)
+
 const root = Command.make("strider").pipe(Command.withSharedFlags({ ...selectors, ...output }))
 
 /** The commands of a session, bound to it. */
@@ -425,10 +433,10 @@ export const commands = (getDaemon: () => Daemon) => {
   )
   const goto = Command.make(
     "goto",
-    { url: Argument.String("url") },
-    ({ url }) =>
+    { url: Argument.String("url"), waitUntil: waitUntilFlag },
+    ({ url, waitUntil }) =>
       Effect.flatMap(
-        onPage((page) => ({ page, url })),
+        onPage((page) => ({ page, url, ...(Option.isSome(waitUntil) ? { waitUntil: waitUntil.value } : {}) })),
         (params) =>
           tool("goto", params, (outcome) =>
             Effect.succeed({ text: `at ${outcome.url}${outcome.status === undefined ? "" : ` (${outcome.status})`}` }))
@@ -610,8 +618,12 @@ export const commands = (getDaemon: () => Daemon) => {
         })).pipe(Command.withDescription("Set the selected page's viewport in CSS pixels")),
       Command.make(
         "new",
-        { name: Flag.String("name").pipe(Flag.optional), url: Argument.String("url").pipe(Argument.optional) },
-        ({ name, url }) =>
+        {
+          name: Flag.String("name").pipe(Flag.optional),
+          url: Argument.String("url").pipe(Argument.optional),
+          waitUntil: waitUntilFlag
+        },
+        ({ name, url, waitUntil }) =>
           recording(getDaemon(), "action", (running) =>
             Effect.gen(function*() {
               // The name is checked before the page opens, and a page whose navigation fails is closed, so a
@@ -619,7 +631,8 @@ export const commands = (getDaemon: () => Daemon) => {
               // secret's %name% in the URL is its value, as goto puts it in, and a failure names it again
               const { name: named, page: opened } = yield* getDaemon().session.open({
                 name: Option.getOrUndefined(name),
-                url: Option.getOrUndefined(url)
+                url: Option.getOrUndefined(url),
+                waitUntil: Option.getOrUndefined(waitUntil)
               }).pipe(Effect.mapError((failure) =>
                 new CommandFailed(
                   {
@@ -634,7 +647,12 @@ export const commands = (getDaemon: () => Daemon) => {
                   }
                 )
               ))
-              getDaemon().recorder.record({ _tag: "NewPage", page: named, url: Option.getOrUndefined(url) }, running)
+              getDaemon().recorder.record({
+                _tag: "NewPage",
+                page: named,
+                url: Option.getOrUndefined(url),
+                waitUntil: Option.getOrUndefined(waitUntil)
+              }, running)
               getDaemon().recorder.declared(opened.id)
               yield* Console.log(`${named}${Option.isSome(url) ? ` at ${url.value}` : ""}`)
               for (
