@@ -1,10 +1,10 @@
 /**
  * Locators: how to find elements on a page, and the actions and reads that use them.
  *
- * A locator describes how to find elements and is resolved again on every attempt, so it never goes stale. A query
- * on a locator searches inside its matches. Reads happen once and never retry; the expectations that retry are
- * `Expect`. A ref from a snapshot is the exception: it's pinned to one node, and fails with `StaleRef` rather than
- * finding another.
+ * A locator describes how to find elements and is resolved again on every attempt, so it never goes stale. A query on a
+ * locator searches inside its matches, and `getByText` the matches themselves too. Reads happen once and never retry;
+ * the expectations that retry are `Expect`. A ref from a snapshot is the exception: it's pinned to one node, and fails
+ * with `StaleRef` rather than finding another.
  *
  * Before acting, a locator checks that its element is ready: visible, stable, enabled, and the rest of the action's
  * checks, tested in the page together on each attempt. The checks are named, can be turned off per call with
@@ -306,6 +306,11 @@ export interface Queries<L> {
    * isn't `innerText`, which depends on layout and differs between browsers. A string matches as a case-insensitive
    * substring, or with `exact` as the whole text, case-sensitively; a `RegExp` is tested as given. The document's
    * `head` isn't searched.
+   *
+   * Chained from a locator, it searches the locator's own element as well as the elements inside it, so
+   * `page.locator(".badge").getByText("Resolved")` finds the badge that says "Resolved". The other `getBy*` queries
+   * search only inside the locator's element. The same holds for `getByText` in a filter's `has` and `hasNot`:
+   * the element being tested counts.
    *
    * **Example** (Reading an order number)
    *

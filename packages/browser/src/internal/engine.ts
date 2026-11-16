@@ -1621,8 +1621,9 @@ export function engine(render: (root: SnapNode) => string) {
       }
       case "Text": {
         // A slot is transparent here as in the flat tree: what it renders, its assigned nodes or its fallback
-        // content, is its parent's text, so the slot itself is never the smallest element that says it.
-        const candidates = under.filter((element) =>
+        // content, is its parent's text, so the slot itself is never the smallest element that says it. An
+        // element scope is a candidate itself, ahead of its descendants: the text it says may be its own.
+        const candidates = (scope instanceof Element ? [scope, ...under] : under).filter((element) =>
           !(element instanceof HTMLSlotElement) && !inHead(element) && !SKIPPED.has(dom.localName(element))
         )
         const says = (element: Element) => matches(step.matcher, textOf(element))
