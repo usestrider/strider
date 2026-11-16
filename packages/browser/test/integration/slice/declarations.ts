@@ -32,7 +32,7 @@ import * as http from "node:http"
 import type * as net from "node:net"
 import * as os from "node:os"
 import * as path from "node:path"
-import { site, tlsSite } from "../adapter/harness.ts"
+import { type Site, site, tlsSite } from "../adapter/harness.ts"
 import { responseRouteInFlight, status, supports } from "./capabilities.ts"
 
 const timeout = 60_000
@@ -80,17 +80,21 @@ const tagged = (tag: string) =>
  * declarations first, then the context's.
  */
 const crossSiteFrame = Effect.fnUntraced(function*(
-  declare: (target: Page.Page | UserContext.UserContext) => Effect.Effect<unknown, unknown, Scope.Scope>,
+  declare: (
+    target: Page.Page | UserContext.UserContext,
+    served: Site
+  ) => Effect.Effect<unknown, unknown, Scope.Scope>,
   expected: Condition.Condition<string>,
   frameSource = fixtureUrl
 ) {
-  const { crossSite, origin } = yield* site
+  const served = yield* site
+  const { crossSite, origin } = served
   yield* Effect.scoped(Effect.gen(function*() {
     const context = yield* Browser.newContext()
-    yield* declare(context)
+    yield* declare(context, served)
     const page = yield* context.newPage
     yield* Effect.scoped(Effect.gen(function*() {
-      yield* declare(page)
+      yield* declare(page, served)
       yield* page.goto(fixtureUrl(
         origin,
         `<title>parent</title><pre id="out">pending</pre><script>addEventListener('message', (e) => { document.getElementById('out').textContent = e.data })</script><iframe style="width:300px;height:200px;border:0" src="${
@@ -825,6 +829,16 @@ export const declarations = (
             framed
           )
         }), timeout)
+
+      it.effect("routes a page with a cross-site iframe and releases the routes", () =>
+        crossSiteFrame(
+          (target, { crossSite }) =>
+            target.route(`${crossSite}/routed-frame*`, () =>
+              Route.fulfill(HttpServerResponse.html(`<script>window.__tag = 'routed'</script>${frameBody}`))),
+          tagged("routed"),
+          (crossSite: string) =>
+            `${crossSite}/routed-frame`
+        ), timeout)
 
       it.effect("runs init scripts in a page with a cross-site iframe and releases them", () =>
         crossSiteFrame(
