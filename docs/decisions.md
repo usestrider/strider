@@ -583,13 +583,15 @@ restoration contract. Each target attempts to record its original width and heig
 and replacement registrations retain those dimensions until the last override has been cleared and restored.
 A page with no opener that attaches at `about:blank` under a viewport records them the way the restore measures,
 `innerWidth` and `innerHeight` in the measurement world, and the measurement finishes before the override is sent
-and before the page resumes from waiting for the debugger. Such a page, which is every page Strider opens, has its
-renderer while it waits, so it answers. One measure on both sides matters because at a fractional device scale the
+and before the page resumes from waiting for the debugger. Such a page, which is every page Strider opens in Chromium,
+has its renderer while it waits, so it answers. One measure on both sides matters because at a fractional device scale the
 layout viewport's client size and `innerWidth`/`innerHeight` round 1 px apart, so a page back at its size would
 never match. Any other page with no opener, one that attaches at a URL, such as a tab another client opens in the
 context, may get its renderer only once its first request is routed, after it resumes, so a measurement awaited
 before resume would never be answered. Its dimensions are unknown, and its restore clears the override and warns
-without waiting. The cost is that such a page's restore is no longer confirmed. Rejected: queuing
+without waiting. The cost is that such a page's restore is no longer confirmed. The headless shell attaches every
+new page with an empty URL, whether it starts blank or at a routed URL, so the URL can't tell its pages apart, and
+all of them record unknown dimensions: their restore is never confirmed there. Rejected: queuing
 `Page.getLayoutMetrics` before the override without awaiting it, which measures the other way and which the
 headless shell answers after the override applies, recording the override's size; its only saving, the
 measurement's round trips before the page resumes, costs about 1–2 ms a page.

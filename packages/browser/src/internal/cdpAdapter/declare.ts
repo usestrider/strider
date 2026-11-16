@@ -485,7 +485,8 @@ export const configureTarget = Effect.fnUntraced(
             )
           } else {
             // A page that attaches at a URL may get its renderer only once its first request is routed, after it
-            // resumes, so a measurement awaited here would never be answered. Its dimensions are unknown.
+            // resumes, so a measurement awaited here would never be answered. Its dimensions are unknown. The headless
+            // shell attaches every new page with an empty URL, routed or not, so all of its pages are unknown.
             target.viewport = null
           }
           yield* setup.send(Emulation.setDeviceMetricsOverride({
