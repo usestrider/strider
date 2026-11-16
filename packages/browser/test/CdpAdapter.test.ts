@@ -43,7 +43,6 @@ describe("CDP paused page initialization", () => {
           const browser = yield* makeBrowser
           const ready = yield* Deferred.make<void>()
           const paused = yield* Deferred.make<void>()
-          const resumeSeen = yield* Deferred.make<void>()
           const facts: Array<Adapter.Fact> = []
           const commands: Array<Sent> = []
           const held: Array<Sent> = []
@@ -125,9 +124,6 @@ describe("CDP paused page initialization", () => {
                     }
                   }
                 })
-                // A declaration that overlaps the gate's, made before its script identifiers arrive, waits for them
-                yield* Deferred.succeed(resumeSeen, undefined)
-                yield* Effect.yieldNow
                 // The browser cannot create the renderer to answer these commands until its route can run.
                 yield* Deferred.await(paused)
                 resumed = true
@@ -149,20 +145,6 @@ describe("CDP paused page initialization", () => {
           const context = { _tag: "UserContext", context: adapter.defaultContext } as const
           const scripts = yield* Scope.make()
           yield* Effect.addFinalizer(() => Scope.close(scripts, Exit.void))
-          const overlapping = yield* Deferred.await(resumeSeen).pipe(
-            Effect.andThen(adapter.declare(context, {
-              _tag: "InitScript",
-              source: "self.overlapping = true",
-              world: { _tag: "Main" },
-              phase: "user",
-              workers: false,
-              timing: "beforeAuthorScript",
-              after: []
-            })),
-            Scope.provide(scripts),
-            Effect.exit,
-            Effect.forkScoped
-          )
           for (const world of [{ _tag: "Main" }, { _tag: "Isolated", name: "isolated" }] as const) {
             yield* adapter.declare(context, {
               _tag: "InitScript",
@@ -220,12 +202,9 @@ describe("CDP paused page initialization", () => {
             }
           })
           yield* Deferred.await(ready)
-          yield* Fiber.join(overlapping)
-          const onPage = commands.filter((command) => command.sessionId === "S1")
-          const sent = onPage.map((command) => command.method)
+          const sent = commands.filter((command) => command.sessionId === "S1").map((command) => command.method)
+          assert.strictEqual(sent.at(-1), "Runtime.runIfWaitingForDebugger")
           assert.strictEqual(sent.filter((method) => method === "Runtime.runIfWaitingForDebugger").length, 1)
-          const resumedAt = sent.indexOf("Runtime.runIfWaitingForDebugger")
-          // The page's whole configuration goes out before its one resume
           for (
             const method of [
               "Log.enable",
@@ -237,20 +216,8 @@ describe("CDP paused page initialization", () => {
               ...(bridged ? ["Runtime.addBinding"] : [])
             ]
           ) {
-            assert.include(sent.slice(0, resumedAt), method)
+            assert.include(sent, method)
           }
-          // The gate holds the target's script permit until its identifiers arrive, so the overlapping declaration
-          // writes only after the resume, and replaces the main world's script the gate installed rather than
-          // leaving it in place
-          const gateScript = onPage.find((command) =>
-            command.method === "Page.addScriptToEvaluateOnNewDocument" && command.params?.worldName === undefined
-          )!
-          assert.isBelow(onPage.indexOf(gateScript), resumedAt)
-          const replaced = onPage.findIndex((command) =>
-            command.method === "Page.removeScriptToEvaluateOnNewDocument" &&
-            command.params?.identifier === `script-${gateScript.id}`
-          )
-          assert.isAbove(replaced, resumedAt)
           assert.isBelow(sent.indexOf("Page.getFrameTree"), sent.indexOf("Runtime.enable"))
           // The capture script calls the bridge's binding, so the binding exists before any script is installed.
           if (bridged) {
@@ -269,6 +236,153 @@ describe("CDP paused page initialization", () => {
         }).pipe(Effect.scoped)
     )
   }
+
+  it.effect("holds a paused page's script permit until the gate's identifiers arrive", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const ready = yield* Deferred.make<void>()
+      const resumeSeen = yield* Deferred.make<void>()
+      const commands: Array<Sent> = []
+      const held: Array<Sent> = []
+      let resumed = false
+      const reply = (command: Sent) =>
+        browser.receive({
+          id: command.id,
+          sessionId: command.sessionId,
+          result: command.method === "Browser.getVersion"
+            ? {
+              protocolVersion: "1.3",
+              product: "Chrome/155.0.8059.79",
+              revision: "test",
+              userAgent: "HeadlessChrome",
+              jsVersion: "test"
+            }
+            : command.method === "Target.getBrowserContexts"
+            ? { browserContextIds: [] }
+            : command.method === "Page.getFrameTree"
+            ? {
+              frameTree: {
+                frame: {
+                  id: "T1",
+                  loaderId: "initial",
+                  url: "about:blank",
+                  securityOrigin: "://",
+                  mimeType: "text/html"
+                }
+              }
+            }
+            : command.method === "Page.addScriptToEvaluateOnNewDocument"
+            ? { identifier: `script-${command.id}` }
+            : {}
+        })
+      yield* Effect.gen(function*() {
+        while (true) {
+          const command = yield* browser.next
+          commands.push(command)
+          if (!resumed && command.sessionId === "S1" && command.method !== "Runtime.runIfWaitingForDebugger") {
+            held.push(command)
+            continue
+          }
+          if (command.method === "Runtime.runIfWaitingForDebugger") {
+            // An overlapping declaration starts while the gate's replies, and so its script identifiers, are held
+            yield* Deferred.succeed(resumeSeen, undefined)
+            yield* Effect.yieldNow
+            resumed = true
+            for (const pending of held.splice(0)) yield* reply(pending)
+          }
+          yield* reply(command)
+        }
+      }).pipe(Effect.forkScoped)
+      const adapter = yield* CdpAdapter.connect(browser.transport, {
+        ownership: "launched",
+        sink: (fact) =>
+          fact._tag === "PageReady" || fact._tag === "PageInitializationFailed"
+            ? Deferred.succeed(ready, undefined).pipe(Effect.asVoid)
+            : Effect.void
+      })
+      const context = { _tag: "UserContext", context: adapter.defaultContext } as const
+      const scripts = yield* Scope.make()
+      yield* Effect.addFinalizer(() => Scope.close(scripts, Exit.void))
+      const initScript = (source: string, world: Adapter.World) =>
+        adapter.declare(context, {
+          _tag: "InitScript",
+          source,
+          world,
+          phase: "user",
+          workers: false,
+          timing: "beforeAuthorScript",
+          after: []
+        }).pipe(Scope.provide(scripts))
+      yield* initScript("self.initialized = true", { _tag: "Main" })
+      yield* initScript("self.isolated = true", { _tag: "Isolated", name: "isolated" })
+      // The bridge's binding and capture script are queued under the same permit
+      yield* adapter.declare(context, {
+        _tag: "InitScript",
+        webSocket: {
+          name: "__striderWebSocket",
+          token: "token",
+          scope: scripts,
+          captured: () => Effect.void,
+          receive: () => false,
+          ended: () => {},
+          failed: () => {}
+        },
+        source: "self.bridged = true",
+        world: { _tag: "Main" },
+        phase: "environment",
+        workers: false,
+        timing: "beforeAuthorScript",
+        after: []
+      }).pipe(Scope.provide(scripts))
+      const overlapping = yield* Deferred.await(resumeSeen).pipe(
+        Effect.andThen(initScript("self.overlapping = true", { _tag: "Main" })),
+        Effect.forkScoped
+      )
+      yield* browser.receive({
+        method: "Target.attachedToTarget",
+        params: {
+          sessionId: "S1",
+          targetInfo: { targetId: "T1", type: "page", title: "", url: "", attached: true },
+          waitingForDebugger: true
+        }
+      })
+      yield* Deferred.await(ready)
+      yield* Fiber.join(overlapping)
+      const onPage = commands.filter((command) => command.sessionId === "S1")
+      // The overlapping declaration writes only once it holds the permit, and its first write replaces a script
+      // the gate installed. Everything before that is the gate's initial setup, which ends with the one resume.
+      const replacing = onPage.findIndex((command) => command.method === "Page.removeScriptToEvaluateOnNewDocument")
+      assert.isAbove(replacing, 0)
+      const initial = onPage.slice(0, replacing).map((command) => command.method)
+      assert.strictEqual(initial.at(-1), "Runtime.runIfWaitingForDebugger")
+      assert.strictEqual(
+        onPage.filter((command) => command.method === "Runtime.runIfWaitingForDebugger").length,
+        1
+      )
+      const installed = (from: number, to: number) =>
+        onPage.slice(from, to).filter((command) => command.method === "Page.addScriptToEvaluateOnNewDocument")
+      const gateScripts = installed(0, replacing)
+      assert.deepStrictEqual(gateScripts.map((command) => command.params?.worldName), [undefined, "isolated"])
+      assert.include(initial, "Runtime.addBinding")
+      // The overlapping write removes the identifiers the gate recorded, rather than leaving its scripts installed
+      const removed = (from: number) =>
+        onPage.slice(from).filter((command) => command.method === "Page.removeScriptToEvaluateOnNewDocument")
+          .map((command) => command.params?.identifier)
+      assert.includeMembers(removed(replacing), gateScripts.map((command) => `script-${command.id}`))
+      // Closing the scripts' scope removes the identifiers installed last, by commands sent after the close
+      const latest = new Map(
+        installed(replacing, onPage.length).map((command) => [command.params?.worldName, command] as const)
+      )
+      assert.strictEqual(latest.size, 2)
+      const closedAt = onPage.length
+      yield* Scope.close(scripts, Exit.void).pipe(Effect.provideService(Cleanup.Confirm, true))
+      const afterClose = commands.filter((command) => command.sessionId === "S1").slice(closedAt)
+      const removedAfterClose = afterClose.filter((command) =>
+        command.method === "Page.removeScriptToEvaluateOnNewDocument"
+      ).map((command) => command.params?.identifier)
+      assert.includeMembers(removedAfterClose, [...latest.values()].map((command) => `script-${command.id}`))
+      yield* browser.lose("test complete")
+    }).pipe(Effect.scoped))
 })
 
 describe("CDP combined locale and user-agent declarations", () => {
