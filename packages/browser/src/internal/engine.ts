@@ -673,9 +673,15 @@ export function engine(render: (root: SnapNode) => string) {
     return root instanceof ShadowRoot ? root.host : null
   }
 
-  /** Whether `ancestor` contains `node` in the composed tree. */
-  const composedContains = (ancestor: Element, node: Element): boolean => {
-    for (let current: Element | null = node; current !== null; current = composedParent(current)) {
+  /**
+   * The parent in the flat tree: an assigned node's slot, otherwise its composed parent. Rendering, hit testing and
+   * event dispatch follow this tree, where slotted content sits under its slot rather than its host.
+   */
+  const flatParent = (element: Element): Element | null => dom.assignedSlot(element) ?? composedParent(element)
+
+  /** Whether `ancestor` contains `node` in the flat tree, which reaches every composed ancestor too. */
+  const flatContains = (ancestor: Element, node: Element): boolean => {
+    for (let current: Element | null = node; current !== null; current = flatParent(current)) {
       if (current === ancestor) return true
     }
     return false
@@ -1184,12 +1190,12 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   /**
-   * Excluded from the accessibility tree: `aria-hidden` on it or an ancestor, inert, `display: none` on it or an
+   * Excluded from the accessibility tree: `aria-hidden` on it or a flat-tree ancestor, inert, `display: none` on it or an
    * ancestor, its own `visibility: hidden`, or content an ancestor skips. A `display: contents` element keeps its
    * semantics, so what it holds doesn't decide it.
    */
   const hiddenFromAccessibility = (element: Element): boolean => {
-    for (let current: Element | null = element; current !== null; current = composedParent(current)) {
+    for (let current: Element | null = element; current !== null; current = flatParent(current)) {
       if (dom.getAttribute(current, "aria-hidden") === "true") return true
     }
     if (inert(element)) return true
@@ -1198,12 +1204,6 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   // Inertness
-  /**
-   * The parent in the flat tree, where inertness and a `display: contents` element's visibility apply: the slot an
-   * element is assigned to, or its composed parent.
-   */
-  const flatParent = (element: Element): Element | null => dom.assignedSlot(element) ?? composedParent(element)
-
   /** What the document holds that makes anything inert, read once per call, so a page without it walks nothing. */
   let inertness: { readonly attribute: boolean; readonly modal: HTMLDialogElement | null } | undefined
   const inertnessOf = (): { readonly attribute: boolean; readonly modal: HTMLDialogElement | null } => {
@@ -1794,8 +1794,9 @@ export function engine(render: (root: SnapNode) => string) {
     return out
   }
 
+  /** `aria-disabled` on the element or a flat-tree ancestor, so a slotted element inherits its slot's. */
   const ariaDisabled = (element: Element): boolean => {
-    for (let current: Element | null = element; current !== null; current = composedParent(current)) {
+    for (let current: Element | null = element; current !== null; current = flatParent(current)) {
       if (dom.getAttribute(current, "aria-disabled") === "true") return true
     }
     return false
@@ -2054,7 +2055,7 @@ export function engine(render: (root: SnapNode) => string) {
     for (
       let ancestor: Element | null = element;
       ancestor !== null && ancestor !== label;
-      ancestor = dom.assignedSlot(ancestor) ?? composedParent(ancestor)
+      ancestor = flatParent(ancestor)
     ) {
       if (interactiveLabelDescendant(ancestor)) return null
     }
@@ -2091,7 +2092,7 @@ export function engine(render: (root: SnapNode) => string) {
       const dialog = modal ??
         documentElements().find((d) =>
           dom.matches(d, "[role=dialog][aria-modal=true],[role=alertdialog][aria-modal=true]") &&
-          !composedContains(d, element) && inertAncestor(d) === null && visible(d)
+          !flatContains(d, element) && inertAncestor(d) === null && visible(d)
         )
       return { _tag: "Inert", by: describe(by), dialog: dialog && describe(dialog) }
     }
@@ -2135,7 +2136,7 @@ export function engine(render: (root: SnapNode) => string) {
         if (seen.has(root)) continue
         seen.add(root)
         for (const hit of root instanceof Document ? dom.elementsFromPoint(root, x, y) : root.elementsFromPoint(x, y)) {
-          if (composedContains(element, hit)) return true
+          if (flatContains(element, hit)) return true
           const shadow = dom.shadowRoot(hit)
           if (shadow !== null) roots.push(shadow)
         }
@@ -2153,7 +2154,7 @@ export function engine(render: (root: SnapNode) => string) {
     onCancel?: (cancel: () => void) => void
   ): Promise<boolean | null> | null => {
     let margin = 0
-    for (let ancestor = composedParent(element); ancestor !== null; ancestor = composedParent(ancestor)) {
+    for (let ancestor = flatParent(element); ancestor !== null; ancestor = flatParent(ancestor)) {
       const style = getComputedStyle(ancestor)
       if (
         (/^(auto|scroll|hidden)$/.test(style.overflowX) && dom.scrollWidth(ancestor) > dom.clientWidth(ancestor)) ||
@@ -2226,7 +2227,7 @@ export function engine(render: (root: SnapNode) => string) {
         first ??= point
         if (!receivesPointer) return [point]
         const hit = hitTarget(point.x, point.y)
-        if (hit !== null && composedContains(element, hit)) {
+        if (hit !== null && flatContains(element, hit)) {
           if (clip === undefined) return [point]
           points.push(point)
         }
@@ -2241,13 +2242,21 @@ export function engine(render: (root: SnapNode) => string) {
     }]
   }
 
-  /** What the pointer would hit at a point, through open shadow roots. */
+  /**
+   * What the pointer would hit at a point, through open shadow roots. Each root's answer counts only when it belongs
+   * to that root. A root can answer with its own host or an enclosing one, for slotted text, whose DOM parent is a
+   * host (Chromium does), or for the host's own box or pseudo-element covering its contents. The topmost element of
+   * the root's paint stack then decides: the hit descends to it when it belongs to the root, and otherwise stops at
+   * the host, which covers. Each step descends into a deeper root, so the walk ends.
+   */
   const hitTarget = (x: number, y: number): Element | null => {
     let hit = dom.elementFromPoint(document, x, y)
     let shadow: ShadowRoot | null
     while (hit !== null && (shadow = dom.shadowRoot(hit)) !== null) {
-      const inner = shadow.elementFromPoint(x, y)
-      if (inner === null || inner === hit) break
+      const root = shadow
+      const answer = root.elementFromPoint(x, y)
+      const inner = answer !== null && dom.getRootNode(answer) === root ? answer : root.elementsFromPoint(x, y)[0]
+      if (inner === undefined || dom.getRootNode(inner) !== root) break
       hit = inner
     }
     return hit
@@ -2338,7 +2347,7 @@ export function engine(render: (root: SnapNode) => string) {
       if (!decided) {
         decided = true
         const target = event.composedPath()[0]
-        if (!(target instanceof Element) || !composedContains(element, target)) {
+        if (!(target instanceof Element) || !flatContains(element, target)) {
           current.blocked = target instanceof Element ? describe(target) : "nothing at that point"
         }
       }
@@ -2439,7 +2448,7 @@ export function engine(render: (root: SnapNode) => string) {
       const elsewhere = ancestor ?
         (recipient instanceof Element ? describe(recipient) : "another document")
         : recipient instanceof Element && element !== null &&
-            !composedContains(recipient, element) && !composedContains(element, recipient)
+            !flatContains(recipient, element) && !flatContains(element, recipient)
         ? describe(recipient) :
         null
       const blocked = current.blocked ?? elsewhere ?? blocker()
@@ -2672,7 +2681,7 @@ export function engine(render: (root: SnapNode) => string) {
         if (point === null) reason = { _tag: "OutsideViewport" }
         else if (checks.receivesPointer) {
           const hit = hitTarget(point.x, point.y)
-          if (hit === null || !composedContains(element, hit)) reason = missed(element, hit)
+          if (hit === null || !flatContains(element, hit)) reason = missed(element, hit)
         }
       }
       if (reason === null && element !== undefined && action._tag === "Select") {
@@ -3354,10 +3363,11 @@ export function engine(render: (root: SnapNode) => string) {
     const evidence: Array<string> = []
     if (element instanceof HTMLInputElement && element.type === "password") evidence.push("password")
     const parent = composedParent(element)
-    // `cursor` is inherited: only the element that sets it counts
+    // `cursor` is inherited, in the flat tree: only the element that sets it counts
+    const inheritsFrom = flatParent(element)
     if (
       getComputedStyle(element).cursor === "pointer" &&
-      (parent === null || getComputedStyle(parent).cursor !== "pointer")
+      (inheritsFrom === null || getComputedStyle(inheritsFrom).cursor !== "pointer")
     ) evidence.push("cursorPointer")
     if (dom.hasAttribute(element, "tabindex") && element instanceof HTMLElement && dom.tabIndex(element) >= 0) {
       evidence.push("tabindex")
@@ -3383,7 +3393,7 @@ export function engine(render: (root: SnapNode) => string) {
     return field
   }
 
-  // Naming follows assigned slots and shadow hosts without changing action/selector ancestry.
+  // The flat-tree parent of any node, text included, as `flatParent` is an element's: field ancestry follows it.
   const fieldParent = (node: Node): Node | null => {
     const slot = node instanceof Element ? dom.assignedSlot(node) : node instanceof Text ? node.assignedSlot : null
     if (slot !== null) return slot

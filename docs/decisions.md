@@ -505,6 +505,15 @@ press two ways; chords in the library too, which parses strings where the type a
 `ControlOrMeta` or aliases such as `Ctrl` and `Cmd`, which would need a platform-dependent default the library
 doesn't have, or a second name for a modifier. They are refused as `InvalidInput`, naming the four.
 
+**The agent tools' navigations wait for the parsed document; `Page.goto` returns at commit.** `newPage` and `goto`
+in the toolkit, which the CLI and `strider mcp` share, wait for `domContentLoaded` unless their `waitUntil` says
+otherwise, and `find` reads the page on every call. Agents run commands back to back and read an empty result as
+"not on the page", not "not yet"; parsed HTML is the first point at which the document's own content is in the tree,
+so a snapshot straight after sees it, while what a script adds later stays `expect`'s to wait for. The exported test
+writes the same `waitUntil`, so a replay waits as the session did. Rejected: `commit`, the library's default, which
+returns before the content is parsed, so the first snapshot can come back empty; and `load`, which also waits on
+images, fonts, and slow third-party resources that a snapshot doesn't need. `Page.goto` keeps `commit`, since a program states what it waits for.
+
 **The `strider` client loads Effect, and talks to its session's daemon through one `effect/rpc` group.** Each caller,
 the command, `strider mcp`, `strider sessions`, and `start --fork`, uses the same RPC client over the session's Unix
 socket, so what crosses it is a Schema: a command's output and exit code, a tool call's parameters and result, the
