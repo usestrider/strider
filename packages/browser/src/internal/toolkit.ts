@@ -601,14 +601,15 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
   const registrations = new Map<string, Declaration.Registration>()
   let waitCount = 0
   let registrationCount = 0
-  const registrationName = (registration: Declaration.Registration): Option.Option<string> => {
-    for (const [id, each] of registrations) if (each === registration) return Option.some(id)
-    return Option.none()
-  }
+  // Each registration's handle, kept after `remove` so a decision its handler made before then still names it
+  const registrationNames = new WeakMap<Declaration.Registration, string>()
+  const registrationName = (registration: Declaration.Registration): Option.Option<string> =>
+    Option.fromUndefinedOr(registrationNames.get(registration))
   const register = (registration: Declaration.Registration) =>
     Effect.sync(() => {
       const id = `r${++registrationCount}`
       registrations.set(id, registration)
+      registrationNames.set(registration, id)
       return { registration: id }
     })
   const within = (input: string | undefined): Effect.Effect<Option.Option<Duration.Duration>, Tools.ToolFailure> =>
