@@ -226,7 +226,8 @@ export interface RoleOptions {
    */
   readonly exact?: boolean | undefined
   /**
-   * Match elements hidden from the accessibility tree too.
+   * Match elements hidden from the accessibility tree too, inert ones and those outside an open modal dialog
+   * included.
    *
    * @default false
    */
@@ -269,8 +270,12 @@ export interface Queries<L> {
    *
    * An element's role is the first token of its `role` attribute that Strider knows, or else its implicit
    * role under HTML-AAM, and its name is computed under accname 1.2. Elements outside the accessibility tree
-   * (`aria-hidden`, `display: none`, `visibility: hidden`, the `hidden` attribute) aren't matched unless
-   * `includeHidden` is set.
+   * (`aria-hidden`, `display: none`, `visibility: hidden`, the `hidden` attribute, and inert elements) aren't
+   * matched unless `includeHidden` is set. An element is inert when it or an ancestor has the `inert` attribute,
+   * or, while a modal dialog opened with `showModal()` is open, when it is outside the topmost one. The topmost
+   * modal dialog isn't inert because of its ancestors, so it and its content stay matched inside an inert subtree.
+   * The topmost is the open modal dialog that comes last in document order, open shadow roots included, which isn't
+   * always the one opened last.
    *
    * Roles that prohibit naming, such as generic, paragraph, and code, have an empty name even with an author
    * label. Their descendants and referenced labels can still contribute to another element's name; an explicit
