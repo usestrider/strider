@@ -122,8 +122,12 @@ export const dispatchInput = Effect.fnUntraced(
     state: State,
     id: L1Target.NavigableId,
     events: ReadonlyArray<Adapter.InputEvent>,
-    frame?: { readonly frame: L1Target.NavigableId; readonly origin: { readonly x: number; readonly y: number } }
+    frame?: { readonly frame: L1Target.NavigableId; readonly origin: { readonly x: number; readonly y: number } },
+    lands?: ReadonlyArray<L1Target.NavigableId>
   ) {
+    // Input that names neither a frame nor where its points land, as the page's devices send it; a locator names
+    // both, having checked what its points hit
+    const frameless = frame === undefined && lands === undefined
     // Whatever fails before the actions are written sent nothing
     const navigable = yield* navigableById(state, id).pipe(Effect.mapError(Adapter.unsent))
     // Firefox doesn't deliver page coordinates into a frame of another origin, so input aimed inside a frame goes to
@@ -142,7 +146,7 @@ export const dispatchInput = Effect.fnUntraced(
     // at one point; from a press until every button is up, or from a touch's start until its end, it goes where the
     // press or the start went
     const aim = Effect.fnUntraced(function*(x: number, y: number, capture: Map<L1Target.NavigableId, PointerTarget>) {
-      if (frame !== undefined) return named
+      if (!frameless) return named
       const held = capture.get(navigable.page.id)
       if (held !== undefined) return held
       if (aimed === undefined || aimed.x !== x || aimed.y !== y) {
@@ -195,7 +199,7 @@ export const dispatchInput = Effect.fnUntraced(
       switch (event._tag) {
         case "Mouse": {
           sent = yield* aim(event.x, event.y, state.mouseCapture)
-          if (frame === undefined) {
+          if (frameless) {
             if (event.buttons === 0) state.mouseCapture.delete(navigable.page.id)
             else state.mouseCapture.set(navigable.page.id, sent)
           }
@@ -238,7 +242,7 @@ export const dispatchInput = Effect.fnUntraced(
           sent = first === undefined
             ? state.touchCapture.get(navigable.page.id) ?? named
             : yield* aim(first.x, first.y, state.touchCapture)
-          if (frame === undefined) {
+          if (frameless) {
             if (event.type === "end" || event.type === "cancel") state.touchCapture.delete(navigable.page.id)
             else state.touchCapture.set(navigable.page.id, sent)
           }

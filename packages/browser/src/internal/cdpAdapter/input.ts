@@ -98,9 +98,10 @@ const framelessSession = Effect.fnUntraced(function*(state: State, page: PageEnt
     const found = yield* Kit.protocol(
       Effect.gen(function*() {
         // A point the session's document doesn't cover hits no node
+        // It takes whole CSS pixels: the pixel the point is in
         const hit = yield* DOM.getNodeForLocation({
-          x: x - sent.x,
-          y: y - sent.y,
+          x: Math.floor(x - sent.x),
+          y: Math.floor(y - sent.y),
           includeUserAgentShadowDOM: true,
           ignorePointerEventsNone: false
         }).pipe(on, Effect.catchIf((error) => error.reason._tag === "Rejected", () => Effect.succeed(undefined)))
@@ -142,6 +143,9 @@ export const dispatchInput = Effect.fnUntraced(
       (each) => frameById(state, each).pipe(Effect.mapError(Adapter.unsent))
     )
     let sent = yield* pointerSession(page, frame, landed)
+    // Input that names neither a frame nor where its points land, as the page's devices send it; a locator names
+    // both, having checked what its points hit
+    const frameless = frame === undefined && lands === undefined
     let aimed: { readonly x: number; readonly y: number; readonly sent: PointerTarget } | undefined
     // The session under a point for input that names no frame, once for consecutive events at one point
     const aim = (x: number, y: number) =>
@@ -208,7 +212,7 @@ export const dispatchInput = Effect.fnUntraced(
       written ||= event !== events[0]
       switch (event._tag) {
         case "Mouse": {
-          if (frame === undefined) {
+          if (frameless) {
             sent = state.mouseCapture.get(page.id) ?? (yield* aim(event.x, event.y))
             if (event.buttons === 0) state.mouseCapture.delete(page.id)
             else state.mouseCapture.set(page.id, sent)
@@ -266,7 +270,7 @@ export const dispatchInput = Effect.fnUntraced(
           break
         }
         case "Wheel":
-          if (frame === undefined) sent = state.mouseCapture.get(page.id) ?? (yield* aim(event.x, event.y))
+          if (frameless) sent = state.mouseCapture.get(page.id) ?? (yield* aim(event.x, event.y))
           yield* Kit.protocol(
             Input.dispatchMouseEvent({
               type: "mouseWheel",
@@ -299,7 +303,7 @@ export const dispatchInput = Effect.fnUntraced(
           yield* Kit.protocol(Input.insertText({ text: Redacted.make(event.text) }).pipe(onPageSession))
           break
         case "Touch":
-          if (frame === undefined) {
+          if (frameless) {
             const first = event.points[0]
             sent = state.touchCapture.get(page.id) ??
               (first === undefined ? { target: page.target, x: 0, y: 0 } : yield* aim(first.x, first.y))
