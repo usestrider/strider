@@ -1463,6 +1463,43 @@ describe("CDP restoration cleanup", () => {
       assert.strictEqual(state.downloads.get("late")?.context, context, "retirement still needs download attribution")
     })))
 
+  it.effect("attributes a retired frame's download in a context created after browser-wide Allow", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const applied: Array<string | undefined> = []
+      const mock = {
+        ...session,
+        send: (command: {
+          readonly method: string
+          readonly params: { readonly behavior?: string; readonly browserContextId?: string }
+        }) =>
+          Effect.sync(() => {
+            if (command.method === "Target.createBrowserContext") return { browserContextId: "later" }
+            if (command.params.behavior === "allowAndName") applied.push(command.params.browserContextId)
+            return {}
+          })
+      } as unknown as ProtocolClient.Session
+      const { state, page, target } = yield* withPage(mock)
+      yield* Declare.declare(state, { _tag: "Browser" }, {
+        _tag: "Downloads",
+        behavior: { _tag: "Allow", directory: "/tmp/downloads" }
+      })
+      const id = yield* Contexts.createUserContext(state, { proxy: Option.none(), acceptInsecureCerts: false })
+      const context = state.contexts.get(id)!
+      assert.include(applied, "later", "the new context inherits the browser's download directory")
+      ;(page as { context: State.ContextEntry }).context = context
+      const child = Tree.addFrame(state, "child", state.frames.get("T1")!, target)
+      Tree.removeFrame(state, child, new Target.FrameDetached({}), "frame detached in the later context")
+      const handlers = Contexts.register(Kit.handlers<State.Event>())
+      handlers.apply("Browser.downloadWillBegin", {
+        frameId: "child",
+        guid: "later-download",
+        url: "https://example.test/file",
+        suggestedFilename: "file"
+      }, { state, target })
+      yield* state.buffer.flush
+      assert.strictEqual(state.downloads.get("later-download")?.context, context)
+    })))
+
   it.effect("does not retain detached frames of an externally discovered context", () =>
     Effect.scoped(Effect.gen(function*() {
       const { state, page, target } = yield* withPage()
