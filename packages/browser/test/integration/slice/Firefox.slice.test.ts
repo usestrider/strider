@@ -48,7 +48,16 @@ tooling("Firefox", backend)
 recordings("Firefox", backend)
 toolkit("Firefox", backend)
 deadlines("Firefox", backend)
-attaching("Firefox", backend, Option.some(firefoxAttachable((endpoint) => Firefox.layerConnect(endpoint))))
+attaching(
+  "Firefox",
+  backend,
+  Option.some(firefoxAttachable((endpoint) => Firefox.layerConnect(endpoint))),
+  Option.some((userDataDir) =>
+    Firefox.layer({ executablePath: firefox.executable, userDataDir }).pipe(
+      Layer.provide(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor))
+    )
+  )
+)
 
 webauthn("Firefox", backend)
 

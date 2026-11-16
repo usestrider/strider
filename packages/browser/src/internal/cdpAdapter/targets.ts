@@ -96,6 +96,7 @@ const attached = (state: State, parent: TargetEntry | undefined, params: Target.
         target,
         openerId: info.openerId,
         ready: Deferred.makeUnsafe(),
+        treeRead: Deferred.makeUnsafe(),
         closing: undefined,
         closeRequested: false,
         ended: false
@@ -307,6 +308,9 @@ const snapshot = Effect.fnUntraced(function*(
   release = Effect.void
 ): Effect.fn.Return<ProtocolClient.Synced, Protocol.ProtocolError, Scope.Scope> {
   const on = Protocol.on(target.session)
+  const read = Effect.sync(() => {
+    if (page !== undefined && target.kind === "page") Deferred.doneUnsafe(page.treeRead, Effect.void)
+  })
   const autoAttach = Target.setAutoAttach({
     autoAttach: true,
     waitForDebuggerOnStart: true,
@@ -341,7 +345,7 @@ const snapshot = Effect.fnUntraced(function*(
       const writeFailure = yield* written.pipe(Effect.flip, Effect.option)
       yield* release
       const [snapshot, , declarationFailure] = yield* Effect.all([
-        tree,
+        tree.pipe(Effect.tap(read)),
         Effect.all(replies, { concurrency: "unbounded", discard: true }),
         Effect.all(declarations.map((reply) => reply.pipe(Effect.flip, Effect.option)), { concurrency: "unbounded" })
           .pipe(
@@ -357,6 +361,7 @@ const snapshot = Effect.fnUntraced(function*(
         Network.enable({}).pipe(on)
       ], { concurrency: "unbounded", discard: true })
       const tree = yield* target.session.sendSequenced(Page.getFrameTree())
+      yield* read
       yield* Effect.all([Runtime.enable().pipe(on), Log.enable().pipe(on)], { concurrency: "unbounded", discard: true })
       yield* autoAttach.pipe(on)
       const failure = yield* (configure && page !== undefined ? configureTarget(state, target, page) : Effect.void)

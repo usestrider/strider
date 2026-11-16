@@ -883,6 +883,74 @@ describe("CDP locale declaration release", () => {
         )
       })
     ))
+
+  it.effect("writes a declaration to a page in its initial sync only once the frame tree has replied", () =>
+    withProtocolScheduler((drain) =>
+      Effect.gen(function*() {
+        const browser = yield* makeBrowser
+        const heldTree = yield* Deferred.make<Sent>()
+        const ready = yield* Deferred.make<void>()
+        const commands: Array<Sent> = []
+        const reply = (command: Sent, result: object = {}) =>
+          browser.receive({ id: command.id, sessionId: command.sessionId, result })
+        const tree = {
+          frameTree: {
+            frame: { id: "T1", loaderId: "initial", url: "about:blank", securityOrigin: "://", mimeType: "text/html" }
+          }
+        }
+        yield* Effect.gen(function*() {
+          while (true) {
+            const command = yield* browser.next
+            commands.push(command)
+            if (command.method === "Page.getFrameTree" && command.sessionId === "S1") {
+              yield* Deferred.succeed(heldTree, command)
+              continue
+            }
+            const result = command.method === "Browser.getVersion"
+              ? {
+                protocolVersion: "1.3",
+                product: "Chrome/155.0.8059.79",
+                revision: "test",
+                userAgent: "HeadlessChrome",
+                jsVersion: "test"
+              }
+              : command.method === "Target.getBrowserContexts"
+              ? { browserContextIds: [] }
+              : {}
+            yield* reply(command, result)
+          }
+        }).pipe(Effect.forkScoped)
+        const adapter = yield* CdpAdapter.connect(browser.transport, {
+          ownership: "attached",
+          sink: (fact) =>
+            fact._tag === "PageReady" ? Deferred.succeed(ready, undefined).pipe(Effect.asVoid) : Effect.void
+        })
+        yield* browser.receive({
+          method: "Target.attachedToTarget",
+          params: {
+            sessionId: "S1",
+            targetInfo: { targetId: "T1", type: "page", title: "", url: "about:blank", attached: true },
+            waitingForDebugger: false
+          }
+        })
+        const held = yield* Deferred.await(heldTree)
+        const installing = yield* adapter.declare({ _tag: "UserContext", context: adapter.defaultContext }, {
+          _tag: "Override",
+          override: { _tag: "Locale", locale: "fr-FR" }
+        }).pipe(Effect.forkScoped)
+        yield* drain
+        // Events received before the tree's reply are discarded, so nothing may cause one yet
+        assert.isFalse(commands.some((command) => command.method === "Emulation.setLocaleOverride"))
+        yield* reply(held, tree)
+        yield* Fiber.join(installing)
+        yield* Deferred.await(ready)
+        assert.isTrue(
+          commands.some((command) =>
+            command.method === "Emulation.setLocaleOverride" && command.params?.locale === "fr-FR"
+          )
+        )
+      })
+    ))
 })
 
 describe("CDP viewport restoration", () => {
