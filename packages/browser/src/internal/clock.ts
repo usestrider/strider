@@ -16,7 +16,7 @@
  * - **The timeline's rules** are Playwright's clock's: controlled time moves by whole milliseconds, and
  *   `performance.now()` counts it from 0 where the clock reaches a document, or where a document's clock becomes
  *   controlled. An operation runs one due timer at a time, then lets the page's queued tasks run, so the evaluation
- *   that drives it awaits a promise: it waits on its own port while the page keeps posting messages, counted by
+ *   that drives it awaits a promise: it waits on its own port while the document keeps posting messages, not for other documents' work, counted by
  *   wrapping `postMessage`, until the host's deadline, then for one real timer. A timer set during that turn with
  *   no delay waits 1 ms. After `resume`, animation frames carry times on the timeline `performance.now()` reads. A timer that throws is reported to the page and the rest still run;
  *   the operation then fails with the first error. A document runs its controls one after another, since a host
@@ -345,8 +345,9 @@ const shim = (key: string, initial: State, version: number): string => {
     origin = wall
   }
   /**
-   * What the host can read of a thrown value without running the page's code: a property read, a conversion and
-   * even `instanceof` can run a getter or a proxy's trap, which can throw again.
+   * What the host can read of a thrown value, whatever it is: a property read, a conversion and even `instanceof`
+   * can run the page's getters or a proxy's traps, so each runs guarded, and what throws or isn't a string is left
+   * out.
    */
   const describe = (error: unknown) => {
     const attempt = <A>(read: () => A): A | undefined => {
@@ -529,6 +530,18 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
   const adapter = owner.runtime.model.adapter
   // One operation at a time reads the timeline and replaces its init script, so each closes the one it replaced
   const permit = Semaphore.makeUnsafe(1)
+  /**
+   * Runs an operation's body holding the permit. Waiting for it is bounded by the operation's deadline, on the
+   * browser's clock, and fails with the operation's `Timeout`; the body, once it holds the permit, keeps it to its end.
+   */
+  const exclusive = <A, E, R>(self: Effect.Effect<A, E, R>) =>
+    Effect.flatMap(Operation.record, (record) =>
+      Effect.uninterruptibleMask((restore) =>
+        Effect.andThen(
+          restore(record.bound(permit.take(1), () => Option.some("another operation of this clock was still running"))),
+          restore(self).pipe(Effect.ensuring(permit.release(1)))
+        )
+      ))
 
   /**
    * Evaluates in the main world of every current document of the timeline's pages, and with `workers` in their
@@ -644,7 +657,7 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
     modes: ReadonlyArray<State["mode"]>,
     step: (installed: Installed) => { readonly next: State; readonly run: (budget: number) => string }
   ) =>
-    permit.withPermits(1)(Effect.gen(function*() {
+    exclusive(Effect.gen(function*() {
       const installed = yield* require(operation, modes)
       const { next, run } = step(installed)
       yield* Effect.annotateCurrentSpan("browser.clock.mode", next.mode)
@@ -693,7 +706,7 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
 
   return {
     install: (mode, options) =>
-      permit.withPermits(1)(Effect.gen(function*() {
+      exclusive(Effect.gen(function*() {
         const operation = `${owner.name}.install`
         const { id } = yield* Operation.record
         const fail = (reason: Declaration.DeclarationErrorReason) =>

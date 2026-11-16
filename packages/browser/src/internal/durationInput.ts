@@ -8,6 +8,18 @@ import * as Option from "effect/Option"
 
 const finite = (value: unknown): boolean => typeof value === "number" && Number.isFinite(value)
 
+/** The fields of a duration object that `Duration.fromInput` adds up. */
+const fields = [
+  "weeks",
+  "days",
+  "hours",
+  "minutes",
+  "seconds",
+  "milliseconds",
+  "microseconds",
+  "nanoseconds"
+] as const
+
 /** Whether every number the input is made of is finite, before any conversion. */
 const finiteParts = (input: Duration.Input): boolean => {
   if (typeof input === "number") return Number.isFinite(input)
@@ -16,7 +28,9 @@ const finiteParts = (input: Duration.Input): boolean => {
   if (Duration.isDuration(input)) return Duration.isFinite(input)
   if (Array.isArray(input)) return input.length === 2 && input.every(finite)
   if (typeof input === "object" && input !== null) {
-    return Object.values(input).every((value) => value === undefined || finite(value))
+    // The fields the conversion reads, by property access as it does, inherited ones included; others are ignored
+    const parts = input as Record<string, unknown>
+    return fields.every((field) => parts[field] === undefined || finite(parts[field]))
   }
   return false
 }

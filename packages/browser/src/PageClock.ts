@@ -149,8 +149,8 @@ export interface PageClock {
    * **Details**
    *
    * A fractional duration is rounded up to a whole millisecond. After each timer, the page's queued tasks run:
-   * the clock waits for the messages the page posted, to a port or to its window, for as long as it keeps posting
-   * them, then for one real timer. A timer those tasks set fires within the same call if it falls due. A timer set
+   * the clock waits for the messages the document posted, to a port or to its window, for as long as it keeps
+   * posting them, then for one real timer. A timer those tasks set fires within the same call if it falls due. A timer set
    * by a timer, or by those tasks, with no delay waits 1 ms, so it fires in this call only if that 1 ms is within
    * it. A duration that is negative or isn't finite, or has a part that isn't, fails with `InvalidInput`.
    *
@@ -162,6 +162,9 @@ export interface PageClock {
    * - Each timer costs real time, for the page's tasks after it: a long adjustment over a frequent interval, such
    *   as a day over a 16 ms animation loop, can outlast the operation's deadline. `setTime` fires each due timer
    *   once instead.
+   * - The clock waits while the document keeps posting messages, not for work in other documents, workers, or the
+   *   network: a timer set from a frame's reply, a worker's message, or a response can miss the call it falls due
+   *   in, and fire in a later one.
    * - A page that keeps posting messages keeps the clock waiting until the operation's deadline. Then the
    *   remaining due timers run without waiting, the clock reaches its time, and `adjust` fails with `Timeout`.
    *
