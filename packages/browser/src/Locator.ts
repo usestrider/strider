@@ -221,7 +221,8 @@ export interface RoleOptions {
    */
   readonly name?: string | RegExp | undefined
   /**
-   * Match `name` exactly and case-sensitively.
+   * Match `name` exactly and case-sensitively. Whitespace is still collapsed on both sides, so a non-breaking space in
+   * a name matches a space.
    *
    * @default false
    */
