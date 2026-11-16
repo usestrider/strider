@@ -1449,3 +1449,76 @@ it.effect("evaluateAll does not move an empty snapshot to a document committed a
       )
     }).pipe(Effect.scoped, Effect.provide(layer))
   }))
+
+/** An engine call the browser never answers: the action's Timeout says so, whichever round it was in. */
+describe("an action whose engine call is unanswered at the deadline", () => {
+  for (const held of ["first", "underPermit"] as const) {
+    it.effect(
+      held === "first"
+        ? "keeps the adapter's hint when the first round's call is unanswered"
+        : "keeps the adapter's hint when the round under the input permit is unanswered",
+      () =>
+        Effect.gen(function*() {
+          const clock = BrowserClock.fromClock(yield* Effect.service(Clock.Clock))
+          const sent = yield* Deferred.make<void>()
+          let rounds = 0
+          const layer = BrowserImpl.layer((sink) =>
+            Fake.connect([], {
+              info: new Browser.Info(Fake.info),
+              capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+            })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
+              ...adapter,
+              realm: () => Effect.succeed("held-realm" as Target.RealmId),
+              evaluate: Effect.fnUntraced(function*(_realm, call) {
+                if (call.functionDeclaration === Engine.install) {
+                  return { _tag: "Value", value: { type: "string", value: "installed" } } as const
+                }
+                rounds++
+                if (held === "first" || rounds === 2) {
+                  yield* Deferred.succeed(sent, undefined)
+                  // The reply comes after the deadline, if at all
+                  return yield* Effect.never
+                }
+                return {
+                  _tag: "Value",
+                  value: {
+                    type: "string",
+                    value: JSON.stringify({
+                      _tag: "Ready",
+                      element: "<input>",
+                      scrolled: false,
+                      point: { x: 1, y: 1 },
+                      draggable: false,
+                      checked: null,
+                      fill: null
+                    })
+                  }
+                } as const
+              })
+            })))
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            // Hover's rounds check without applying, so no input is sent before the held call
+            const target = page.locator("#target")
+            const pending = yield* (held === "first" ? target.focus() : target.hover()).pipe(
+              Deadline.within("300 millis"),
+              Effect.flip,
+              Effect.forkChild
+            )
+            yield* Deferred.await(sent)
+            yield* TestClock.adjust("300 millis")
+            const error = yield* Fiber.join(pending)
+            assert(Deadline.isTimeout(error), String(error))
+            assert.strictEqual(error.operation, held === "first" ? "Locator.focus" : "Locator.hover")
+            assert.deepStrictEqual(error.diagnostics.dispatch, { _tag: "NotSent" })
+            assert.strictEqual(rounds, held === "first" ? 1 : 2)
+            assert.deepStrictEqual(
+              error.hint,
+              Option.some("The browser didn't answer the call into the page before the deadline")
+            )
+          })).pipe(Effect.provide(layer), Effect.provideService(BrowserClock.CurrentClock, clock))
+        }).pipe(Effect.scoped)
+    )
+  }
+})

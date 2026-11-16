@@ -46,6 +46,12 @@ const help = (...args: ReadonlyArray<string>) => {
 }
 
 describe("strider help", () => {
+  it("does not describe find as reusing a snapshot until explicitly refreshed", () => {
+    const text = help("find").replace(/\s+/g, " ")
+    assert.notInclude(text, "taking one if there is none")
+    assert.notInclude(Tools.find.description!, "taking one if there is none")
+  })
+
   it("shows root help without a session selector", () => {
     const text = help()
     assert.match(text, /^\s+select\b/m)

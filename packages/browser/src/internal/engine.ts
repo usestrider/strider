@@ -6,6 +6,13 @@
  * source crosses into the page as text (`source`), where it is installed once per realm, out of the page's
  * reach. L1 sends it requests as JSON and reads JSON back (`Request`, `Response`).
  *
+ * It reads the DOM members of anything that can be any element, or the document, through the prototypes' own
+ * getters and methods, taken once as it loads (`dom`, and each labelable element's `labels`), never through the
+ * object: a form's named controls are properties of the form that win over its members (`<input name="localName">`
+ * makes `form.localName` the input), and where the engine shares the page's world, as on stock WebKit, a document's
+ * named images, forms, embeds, objects and iframes do the same. Members of a value already known not to be a form,
+ * such as an input's `value` or a shadow root's `activeElement`, are read directly.
+ *
  * - **The tree** is the document's elements and those of every open shadow root, in tree order, a shadow
  *   root's elements right after its host. Closed shadow roots are invisible to scripts, so to the engine too;
  *   iframes are entered only through `frame()`, whose steps L1 resolves with the engine of each document
@@ -316,6 +323,11 @@ export type Request =
   | { readonly op: "disarm" }
   | { readonly op: "fillGuard"; readonly steps: ReadonlyArray<Step>; readonly ancestor: boolean }
   | { readonly op: "fillDisarm" }
+  /**
+   * Inserts text with the editing command in this document's focused element, after a cancelable `beforeinput`
+   * when `beforeInput` is set; answers `InFrame` when the focus is in a frame's document instead.
+   */
+  | { readonly op: "insert"; readonly text: string; readonly beforeInput: boolean }
   | { readonly op: "read"; readonly steps: ReadonlyArray<Step>; readonly read: Read }
   | {
     readonly op: "expect"
@@ -408,6 +420,9 @@ export const Response = Schema.Union([
   }),
   Schema.TaggedStruct("Final", { final: Final }),
   Schema.TaggedStruct("Guarded", { blocked: Schema.NullOr(Schema.String) }),
+  Schema.TaggedStruct("Inserted", { inserted: Schema.Boolean }),
+  /** The focused element is the `index`th of the document's frames, in the order a `"iframe, frame"` query finds them. */
+  Schema.TaggedStruct("InFrame", { index: Schema.Number }),
   Schema.TaggedStruct("FillGuard", {
     blocked: Schema.NullOr(Schema.String),
     unsafe: Schema.Boolean,
@@ -516,6 +531,109 @@ export function engine(render: (root: SnapNode) => string) {
   const cancelFrame = realTimers?.cancelAnimationFrame ?? globalThis.cancelAnimationFrame.bind(globalThis)
   const now = realTimers?.now ?? performance.now.bind(performance)
 
+  // The DOM
+  // Each DOM member the engine reads from an element or a document, taken from its prototype as the engine loads
+  // and called on the object, never read through it. A form exposes each named control as a property that wins
+  // over the form's own members, so in a form holding `<input name="localName">`, `form.localName` is the input;
+  // a document does the same for its named images, forms, embeds, objects and iframes where the engine shares the
+  // page's world (`document.activeElement` is `<img name="activeElement">`).
+  const call = Reflect.apply
+  const getter = <P extends object, K extends keyof P & string>(prototype: P, name: K): (receiver: P) => P[K] => {
+    const get = Object.getOwnPropertyDescriptor(prototype, name)!.get!
+    return (receiver) => call(get, receiver, [])
+  }
+  const method = <P extends object, K extends keyof P & string>(prototype: P, name: K) => {
+    const member = prototype[name] as (...args: Array<any>) => any
+    return (
+      receiver: P,
+      ...args: P[K] extends (...args: infer A) => any ? A : never
+    ): P[K] extends (...args: Array<any>) => infer R ? R : never => call(member, receiver, args)
+  }
+  const dom = {
+    nodeType: getter(Node.prototype, "nodeType"),
+    nodeName: getter(Node.prototype, "nodeName"),
+    nodeValue: getter(Node.prototype, "nodeValue"),
+    parentNode: getter(Node.prototype, "parentNode"),
+    parentElement: getter(Node.prototype, "parentElement"),
+    childNodes: getter(Node.prototype, "childNodes"),
+    textContent: getter(Node.prototype, "textContent"),
+    isConnected: getter(Node.prototype, "isConnected"),
+    getRootNode: method(Node.prototype, "getRootNode"),
+    contains: method(Node.prototype, "contains"),
+    localName: getter(Element.prototype, "localName"),
+    namespaceURI: getter(Element.prototype, "namespaceURI"),
+    id: getter(Element.prototype, "id"),
+    classList: getter(Element.prototype, "classList"),
+    outerHTML: getter(Element.prototype, "outerHTML"),
+    children: getter(Element.prototype, "children"),
+    firstElementChild: getter(Element.prototype, "firstElementChild"),
+    nextElementSibling: getter(Element.prototype, "nextElementSibling"),
+    previousElementSibling: getter(Element.prototype, "previousElementSibling"),
+    scrollWidth: getter(Element.prototype, "scrollWidth"),
+    scrollHeight: getter(Element.prototype, "scrollHeight"),
+    clientWidth: getter(Element.prototype, "clientWidth"),
+    clientHeight: getter(Element.prototype, "clientHeight"),
+    shadowRoot: getter(Element.prototype, "shadowRoot"),
+    assignedSlot: getter(Element.prototype, "assignedSlot"),
+    getAttribute: method(Element.prototype, "getAttribute"),
+    hasAttribute: method(Element.prototype, "hasAttribute"),
+    hasAttributeNS: method(Element.prototype, "hasAttributeNS"),
+    getAttributeNames: method(Element.prototype, "getAttributeNames"),
+    matches: method(Element.prototype, "matches"),
+    closest: method(Element.prototype, "closest"),
+    querySelector: method(Element.prototype, "querySelector"),
+    querySelectorAll: method(Element.prototype, "querySelectorAll"),
+    getBoundingClientRect: method(Element.prototype, "getBoundingClientRect"),
+    getClientRects: method(Element.prototype, "getClientRects"),
+    checkVisibility: method(Element.prototype, "checkVisibility"),
+    scrollIntoView: method(Element.prototype, "scrollIntoView"),
+    dispatchEvent: method(EventTarget.prototype, "dispatchEvent"),
+    addEventListener: method(EventTarget.prototype, "addEventListener"),
+    removeEventListener: method(EventTarget.prototype, "removeEventListener"),
+    isContentEditable: getter(HTMLElement.prototype, "isContentEditable"),
+    tabIndex: getter(HTMLElement.prototype, "tabIndex"),
+    activeElement: getter(Document.prototype, "activeElement"),
+    documentElement: getter(Document.prototype, "documentElement"),
+    doctype: getter(Document.prototype, "doctype"),
+    title: getter(Document.prototype, "title"),
+    designMode: getter(Document.prototype, "designMode"),
+    execCommand: method(Document.prototype, "execCommand"),
+    createRange: method(Document.prototype, "createRange"),
+    getElementById: method(Document.prototype, "getElementById"),
+    elementFromPoint: method(Document.prototype, "elementFromPoint"),
+    elementsFromPoint: method(Document.prototype, "elementsFromPoint"),
+    documentFirstElementChild: getter(Document.prototype, "firstElementChild"),
+    documentQuerySelectorAll: method(Document.prototype, "querySelectorAll")
+  }
+  // The labelable elements, each with its own `labels` getter
+  const nativeLabels = [
+    HTMLButtonElement,
+    HTMLInputElement,
+    HTMLMeterElement,
+    HTMLOutputElement,
+    HTMLProgressElement,
+    HTMLSelectElement,
+    HTMLTextAreaElement
+  ].map((type) => [type, Object.getOwnPropertyDescriptor(type.prototype, "labels")!.get!] as const)
+  const htmlFocus = HTMLElement.prototype.focus
+  const svgFocus = SVGElement.prototype.focus
+  const htmlBlur = HTMLElement.prototype.blur
+  const svgBlur = SVGElement.prototype.blur
+  /** Focuses an HTML or SVG element. */
+  const focus = (element: HTMLElement | SVGElement): void =>
+    call(element instanceof SVGElement ? svgFocus : htmlFocus, element, [])
+  /** An element's own `blur`, or `undefined` for one that has none. */
+  const blurOf = (element: Element): (() => void) | undefined => {
+    const blur = element instanceof HTMLElement
+      ? htmlBlur
+      : element instanceof SVGElement
+      ? svgBlur
+      : "blur" in element && typeof element.blur === "function"
+      ? element.blur
+      : undefined
+    return blur === undefined ? undefined : () => call(blur, element, [])
+  }
+
   // The tree
   const SKIPPED = new Set(["script", "style", "noscript", "template"])
 
@@ -526,27 +644,44 @@ export function engine(render: (root: SnapNode) => string) {
   const elementsUnder = (root: Document | Element | ShadowRoot): Array<Element> => {
     const out: Array<Element> = []
     const visit = (node: Document | Element | ShadowRoot) => {
-      for (let child = node.firstElementChild; child !== null; child = child.nextElementSibling) {
+      for (
+        let child = node instanceof Element
+          ? dom.firstElementChild(node)
+          : node instanceof Document
+          ? dom.documentFirstElementChild(node)
+          : node.firstElementChild;
+        child !== null;
+        child = dom.nextElementSibling(child)
+      ) {
         out.push(child)
-        if (child.shadowRoot !== null) visit(child.shadowRoot)
+        const shadow = dom.shadowRoot(child)
+        if (shadow !== null) visit(shadow)
         visit(child)
       }
     }
-    if (root instanceof Element && root.shadowRoot !== null) visit(root.shadowRoot)
+    const shadow = root instanceof Element ? dom.shadowRoot(root) : null
+    if (shadow !== null) visit(shadow)
     visit(root)
     return out
   }
 
   /** The parent in the composed tree: the parent element, or a shadow root's host. */
   const composedParent = (element: Element): Element | null => {
-    if (element.parentElement !== null) return element.parentElement
-    const root = element.parentNode
+    const parent = dom.parentElement(element)
+    if (parent !== null) return parent
+    const root = dom.parentNode(element)
     return root instanceof ShadowRoot ? root.host : null
   }
 
-  /** Whether `ancestor` contains `node` in the composed tree. */
-  const composedContains = (ancestor: Element, node: Element): boolean => {
-    for (let current: Element | null = node; current !== null; current = composedParent(current)) {
+  /**
+   * The parent in the flat tree: an assigned node's slot, otherwise its composed parent. Rendering, hit testing and
+   * event dispatch follow this tree, where slotted content sits under its slot rather than its host.
+   */
+  const flatParent = (element: Element): Element | null => dom.assignedSlot(element) ?? composedParent(element)
+
+  /** Whether `ancestor` contains `node` in the flat tree, which reaches every composed ancestor too. */
+  const flatContains = (ancestor: Element, node: Element): boolean => {
+    for (let current: Element | null = node; current !== null; current = flatParent(current)) {
       if (current === ancestor) return true
     }
     return false
@@ -556,10 +691,11 @@ export function engine(render: (root: SnapNode) => string) {
   const flatChildNodes = (node: Node): Array<Node> => {
     if (node instanceof HTMLSlotElement) {
       const assigned = node.assignedNodes({ flatten: true })
-      return assigned.length > 0 ? assigned : Array.from(node.childNodes)
+      return assigned.length > 0 ? assigned : Array.from(dom.childNodes(node))
     }
-    if (node instanceof Element && node.shadowRoot !== null) return Array.from(node.shadowRoot.childNodes)
-    return Array.from(node.childNodes)
+    const shadow = node instanceof Element ? dom.shadowRoot(node) : null
+    if (shadow !== null) return Array.from(shadow.childNodes)
+    return Array.from(dom.childNodes(node))
   }
 
   const flatChildElements = (element: Element): Array<Element> => {
@@ -574,7 +710,7 @@ export function engine(render: (root: SnapNode) => string) {
 
   const inHead = (element: Element): boolean => {
     for (let current: Element | null = element; current !== null; current = composedParent(current)) {
-      if (current.localName === "head") return true
+      if (dom.localName(current) === "head") return true
     }
     return false
   }
@@ -587,12 +723,12 @@ export function engine(render: (root: SnapNode) => string) {
 
   const rawText = new Map<Node, string>()
   const textOfNode = (node: Node): string => {
-    if (node.nodeType === Node.TEXT_NODE) return node.nodeValue ?? ""
+    if (dom.nodeType(node) === Node.TEXT_NODE) return dom.nodeValue(node) ?? ""
     if (!(node instanceof Element)) return ""
     const cached = rawText.get(node)
     if (cached !== undefined) return cached
     let text = ""
-    if (SKIPPED.has(node.localName)) text = ""
+    if (SKIPPED.has(dom.localName(node))) text = ""
     else if (buttonLikeInput(node)) text = node.value
     else for (const child of flatChildNodes(node)) text += textOfNode(child)
     rawText.set(node, text)
@@ -738,8 +874,8 @@ export function engine(render: (root: SnapNode) => string) {
   ])
 
   const hasAccessibleNameAttribute = (element: Element): boolean =>
-    (element.getAttribute("aria-label") ?? "").trim() !== "" || element.hasAttribute("aria-labelledby") ||
-    (element.getAttribute("title") ?? "").trim() !== ""
+    (dom.getAttribute(element, "aria-label") ?? "").trim() !== "" || dom.hasAttribute(element, "aria-labelledby") ||
+    (dom.getAttribute(element, "title") ?? "").trim() !== ""
 
   // HTML integer parsing only needs to succeed here: ASCII whitespace, optional sign, then a digit.
   // Trailing text is ignored; Number/trim accept different inputs (notably non-ASCII whitespace).
@@ -747,16 +883,16 @@ export function engine(render: (root: SnapNode) => string) {
   const DISABLABLE_TAGS = new Set(["button", "fieldset", "input", "optgroup", "option", "select", "textarea"])
   const NATIVE_FOCUSABLE_TAGS = new Set(["button", "details", "select", "textarea"])
   const focusable = (element: Element): boolean => {
-    const tag = element.localName
+    const tag = dom.localName(element)
     // Custom-element definitions live in the main world. A hyphen conservatively includes form-associated hosts.
     // Keep the native selector for these and built-in controls: it includes disabled fieldsets and legend exceptions.
-    if ((DISABLABLE_TAGS.has(tag) || tag.includes("-")) && element.matches(":disabled")) return false
-    const tabindex = element.getAttribute("tabindex")
+    if ((DISABLABLE_TAGS.has(tag) || tag.includes("-")) && dom.matches(element, ":disabled")) return false
+    const tabindex = dom.getAttribute(element, "tabindex")
     return (tabindex !== null && HTML_INTEGER_PREFIX.test(tabindex)) ||
-      ((tag === "a" || tag === "area") && element.hasAttribute("href")) ||
+      ((tag === "a" || tag === "area") && dom.hasAttribute(element, "href")) ||
       NATIVE_FOCUSABLE_TAGS.has(tag) ||
       (element instanceof HTMLInputElement && element.type !== "hidden") ||
-      (element instanceof HTMLElement && element.isContentEditable)
+      (element instanceof HTMLElement && dom.isContentEditable(element))
   }
 
   // ARIA 1.2 global properties; deprecated globals follow the pinned role-query contract.
@@ -793,7 +929,7 @@ export function engine(render: (root: SnapNode) => string) {
   const presentationConflict = (element: Element, implicit: string | null): boolean => {
     if (focusable(element)) return true
     // One attribute snapshot avoids probing every possible global property on every presentation candidate.
-    for (const attribute of element.getAttributeNames()) {
+    for (const attribute of dom.getAttributeNames(element)) {
       if (GLOBAL_ARIA.has(attribute)) return true
       if (
         (attribute === "aria-label" || attribute === "aria-labelledby") &&
@@ -821,7 +957,7 @@ export function engine(render: (root: SnapNode) => string) {
   ])
 
   const inputRole = (input: HTMLInputElement): string | null => {
-    const list = input.hasAttribute("list")
+    const list = dom.hasAttribute(input, "list")
     switch (input.type) {
       case "button":
       case "image":
@@ -850,17 +986,17 @@ export function engine(render: (root: SnapNode) => string) {
 
   const sectioningAncestor = (element: Element): boolean => {
     for (let current = composedParent(element); current !== null; current = composedParent(current)) {
-      if (["article", "aside", "main", "nav", "section"].includes(current.localName)) return true
+      if (["article", "aside", "main", "nav", "section"].includes(dom.localName(current))) return true
     }
     return false
   }
 
   /** The implicit role under HTML-AAM, for the elements the engine knows; `null` for none. */
   const implicitRole = (element: Element): string | null => {
-    switch (element.localName) {
+    switch (dom.localName(element)) {
       case "a":
       case "area":
-        return element.hasAttribute("href") ? "link" : element.localName === "a" ? "generic" : null
+        return dom.hasAttribute(element, "href") ? "link" : dom.localName(element) === "a" ? "generic" : null
       case "address":
       case "details":
       case "fieldset":
@@ -912,7 +1048,7 @@ export function engine(render: (root: SnapNode) => string) {
       case "html":
         return "document"
       case "img":
-        return element.getAttribute("alt") === "" && !hasAccessibleNameAttribute(element) ? "presentation" : "img"
+        return dom.getAttribute(element, "alt") === "" && !hasAccessibleNameAttribute(element) ? "presentation" : "img"
       case "input":
         return inputRole(element as HTMLInputElement)
       case "ins":
@@ -962,14 +1098,14 @@ export function engine(render: (root: SnapNode) => string) {
       case "thead":
         return "rowgroup"
       case "td": {
-        const table = element.closest("table")
-        const role = table?.getAttribute("role")
+        const table = dom.closest(element, "table")
+        const role = table === null ? undefined : dom.getAttribute(table, "role")
         return role === "grid" || role === "treegrid" ? "gridcell" : "cell"
       }
       case "textarea":
         return "textbox"
       case "th":
-        return element.getAttribute("scope") === "row" ? "rowheader" : "columnheader"
+        return dom.getAttribute(element, "scope") === "row" ? "rowheader" : "columnheader"
       case "time":
         return "time"
       case "tr":
@@ -997,7 +1133,7 @@ export function engine(render: (root: SnapNode) => string) {
   const roleOf = (element: Element): string | null => {
     if (roleCache.has(element)) return roleCache.get(element)!
     let explicit: string | null = null
-    for (const token of (element.getAttribute("role") ?? "").split(/\s+/)) {
+    for (const token of (dom.getAttribute(element, "role") ?? "").split(/\s+/)) {
       if (!KNOWN_ROLES.has(token)) continue
       explicit = token
       break
@@ -1010,9 +1146,9 @@ export function engine(render: (root: SnapNode) => string) {
         // A conflict cancels the first recognized presentation token, not advances to a fallback token.
         if (presentationConflict(element, implicit)) role = implicit
       } else if (implicit !== null) {
-        const parents = PRESENTATION_PARENTS.get(element.localName)
+        const parents = PRESENTATION_PARENTS.get(dom.localName(element))
         const parent = parents === undefined ? null : composedParent(element)
-        if (parent !== null && parents!.includes(parent.localName)) {
+        if (parent !== null && parents!.includes(dom.localName(parent))) {
           const inherited = roleOf(parent)
           if ((inherited === "none" || inherited === "presentation") && !presentationConflict(element, implicit)) {
             role = inherited
@@ -1025,23 +1161,161 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   // Hidden, visible
-  /** Excluded from the accessibility tree: `aria-hidden`, `display: none`, `visibility: hidden`. */
-  const hiddenFromAccessibility = (element: Element): boolean => {
-    for (let current: Element | null = element; current !== null; current = composedParent(current)) {
-      if (current.getAttribute("aria-hidden") === "true") return true
+  /**
+   * Whether a `display: contents` element shows what it holds. It has no box of its own, so it's judged by its
+   * computed `visibility` and by its nearest flat-tree ancestor with a box: that one must not be `display: none`,
+   * inside one, or skipping its content (`content-visibility: hidden`, or `auto` off screen with
+   * `contentVisibilityAuto`). With `opacityProperty`, opacity 0 hides it too: its own, a `display: contents`
+   * ancestor's on the way up, or that boxed ancestor's or one above it.
+   */
+  const contentsShown = (
+    element: Element,
+    options?: { readonly contentVisibilityAuto?: boolean; readonly opacityProperty?: boolean }
+  ): boolean => {
+    const opacityProperty = options?.opacityProperty ?? false
+    const own = getComputedStyle(element)
+    if (own.visibility !== "visible" || (opacityProperty && own.opacity === "0")) return false
+    for (let current = flatParent(element); current !== null; current = flatParent(current)) {
+      const style = getComputedStyle(current)
+      if (style.display === "contents") {
+        if (opacityProperty && style.opacity === "0") return false
+        continue
+      }
+      return style.contentVisibility !== "hidden" && dom.checkVisibility(current, {
+        contentVisibilityAuto: options?.contentVisibilityAuto ?? false,
+        opacityProperty
+      })
     }
-    return !element.checkVisibility({ visibilityProperty: true })
+    return true
   }
 
-  /** CONCEPTS.md §8: observations include opacity; action readiness ignores it. */
+  /**
+   * Excluded from the accessibility tree: `aria-hidden` on it or a flat-tree ancestor, inert, `display: none` on it or an
+   * ancestor, its own `visibility: hidden`, or content an ancestor skips. A `display: contents` element keeps its
+   * semantics, so what it holds doesn't decide it.
+   */
+  const hiddenFromAccessibility = (element: Element): boolean => {
+    for (let current: Element | null = element; current !== null; current = flatParent(current)) {
+      if (dom.getAttribute(current, "aria-hidden") === "true") return true
+    }
+    if (inert(element)) return true
+    if (getComputedStyle(element).display === "contents") return !contentsShown(element)
+    return !dom.checkVisibility(element, { visibilityProperty: true })
+  }
+
+  // Inertness
+  /** What the document holds that makes anything inert, read once per call, so a page without it walks nothing. */
+  let inertness: { readonly attribute: boolean; readonly modal: HTMLDialogElement | null } | undefined
+  const inertnessOf = (): { readonly attribute: boolean; readonly modal: HTMLDialogElement | null } => {
+    if (inertness !== undefined) return inertness
+    let attribute = false
+    let modal: HTMLDialogElement | null = null
+    for (const element of documentElements()) {
+      if (!attribute && dom.hasAttribute(element, "inert")) attribute = true
+      if (element instanceof HTMLDialogElement && dom.matches(element, ":modal")) modal = element
+    }
+    return inertness = { attribute, modal }
+  }
+
+  /**
+   * The topmost open modal dialog. The DOM exposes no top-layer order, so it is the last open modal dialog in tree
+   * order, open shadow roots included: a dialog opened later but earlier in the document is taken for one beneath.
+   */
+  const topmostModal = (): HTMLDialogElement | null => inertnessOf().modal
+
+  /**
+   * The element whose `inert` attribute makes `element` inert, on the flat tree, through slots. The topmost modal
+   * dialog doesn't inherit its ancestors' inertness.
+   */
+  const inertAncestor = (element: Element): Element | null => {
+    const { attribute, modal } = inertnessOf()
+    if (!attribute) return null
+    // Every element on the way shares the answer, so each ancestor is walked once per call
+    const path: Array<Element> = []
+    let found: Element | null = null
+    for (let current: Element | null = element; current !== null; current = flatParent(current)) {
+      const known = inertAncestors.get(current)
+      if (known !== undefined) {
+        found = known
+        break
+      }
+      path.push(current)
+      if (dom.hasAttribute(current, "inert")) {
+        found = current
+        break
+      }
+      if (current === modal) break
+    }
+    for (const each of path) inertAncestors.set(each, found)
+    return found
+  }
+  const inertAncestors = new Map<Element, Element | null>()
+
+  /** The topmost modal dialog when `element` is outside it, which makes `element` inert. */
+  const blockingModal = (element: Element): HTMLDialogElement | null => {
+    const modal = topmostModal()
+    if (modal === null) return null
+    const path: Array<Element> = []
+    let inside = false
+    for (let current: Element | null = element; current !== null; current = flatParent(current)) {
+      const known = insideModal.get(current)
+      if (known !== undefined) {
+        inside = known
+        break
+      }
+      path.push(current)
+      if (current === modal) {
+        inside = true
+        break
+      }
+    }
+    for (const each of path) insideModal.set(each, inside)
+    return inside ? null : modal
+  }
+  const insideModal = new Map<Element, boolean>()
+
+  /** The topmost modal dialog's flat-tree ancestors, which it escapes the inertness of. */
+  const modalAncestors = (): ReadonlySet<Element> => {
+    if (escaped !== undefined) return escaped
+    escaped = new Set()
+    const modal = topmostModal()
+    for (let current = modal && flatParent(modal); current !== null; current = flatParent(current)) {
+      escaped.add(current)
+    }
+    return escaped
+  }
+  let escaped: Set<Element> | undefined
+
+  /** HTML's inertness: `inert` on the element or a flat-tree ancestor, or outside the topmost open modal dialog. */
+  const inert = (element: Element): boolean => inertAncestor(element) !== null || blockingModal(element) !== null
+
+  /** Text that takes up space on the page: non-blank, with a non-empty rect. */
+  const renderedText = (node: Text): boolean => {
+    if ((dom.nodeValue(node) ?? "").trim() === "") return false
+    const range = dom.createRange(document)
+    range.selectNodeContents(node)
+    return Array.from(range.getClientRects()).some((rect) => rect.width > 0 && rect.height > 0)
+  }
+
+  /**
+   * CONCEPTS.md §8: observations include opacity; action readiness ignores it. A `display: contents` element is
+   * rendered when one of its flat-tree children is: an element, or text it shows. A slot among them is judged as an
+   * element of its own, so the text it holds is shown or hidden by the slot's style, which that text inherits.
+   */
   const rendered = (element: Element, opacityProperty: boolean): boolean => {
     if (getComputedStyle(element).display === "contents") {
-      return flatChildElements(element).some((child) => rendered(child, opacityProperty))
+      let text = false
+      for (const child of flatChildNodes(element)) {
+        if (child instanceof Element) {
+          if (rendered(child, opacityProperty)) return true
+        } else if (child instanceof Text) text ||= renderedText(child)
+      }
+      return text && contentsShown(element, { contentVisibilityAuto: true, opacityProperty })
     }
-    if (!element.checkVisibility({ contentVisibilityAuto: true, opacityProperty, visibilityProperty: true })) {
+    if (!dom.checkVisibility(element, { contentVisibilityAuto: true, opacityProperty, visibilityProperty: true })) {
       return false
     }
-    const rect = element.getBoundingClientRect()
+    const rect = dom.getBoundingClientRect(element)
     return rect.width > 0 && rect.height > 0
   }
 
@@ -1059,8 +1333,10 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   const byId = (element: Element, id: string): Element | null => {
-    const root = element.getRootNode()
-    return root instanceof Document || root instanceof ShadowRoot ? root.getElementById(id) : null
+    const root = dom.getRootNode(element)
+    return root instanceof Document || root instanceof ShadowRoot
+      ? (root instanceof Document ? dom.getElementById(root, id) : root.getElementById(id))
+      : null
   }
 
   const embeddedControlRole = (role: string | null): boolean =>
@@ -1071,20 +1347,22 @@ export function engine(render: (root: SnapNode) => string) {
     if (element instanceof HTMLInputElement && element.type === "password") return ""
     if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
       if (role === "slider" || role === "spinbutton") {
-        return element.getAttribute("aria-valuetext") ?? element.getAttribute("aria-valuenow") ?? element.value
+        return dom.getAttribute(element, "aria-valuetext") ?? dom.getAttribute(element, "aria-valuenow") ??
+          element.value
       }
       return element.value
     }
     if (element instanceof HTMLSelectElement) {
       return Array.from(element.selectedOptions).map((option) => textOf(option)).join(" ")
     }
-    return element.getAttribute("aria-valuetext") ?? element.getAttribute("aria-valuenow") ?? textOf(element)
+    return dom.getAttribute(element, "aria-valuetext") ?? dom.getAttribute(element, "aria-valuenow") ?? textOf(element)
   }
 
-  const labelsOf = (element: Element): Array<HTMLLabelElement> =>
-    "labels" in element && element.labels instanceof NodeList
-      ? Array.from(element.labels as NodeListOf<HTMLLabelElement>)
-      : []
+  const labelsOf = (element: Element): Array<HTMLLabelElement> => {
+    const labels = nativeLabels.find(([type]) => element instanceof type)
+    const list = labels === undefined ? null : call(labels[1], element, []) as NodeListOf<HTMLLabelElement> | null
+    return list === null ? [] : Array.from(list)
+  }
 
   const pseudoContent = (element: Element, pseudo: "::before" | "::after"): string => {
     const content = getComputedStyle(element, pseudo).content
@@ -1093,8 +1371,8 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   const nameOfNode = (node: Node, context: NameContext): string => {
-    if (node.nodeType === Node.TEXT_NODE) {
-      const value = node.nodeValue ?? ""
+    if (dom.nodeType(node) === Node.TEXT_NODE) {
+      const value = dom.nodeValue(node) ?? ""
       if (value !== "" && inField(node)) context.contribution.fieldContent = true
       return value
     }
@@ -1121,7 +1399,7 @@ export function engine(render: (root: SnapNode) => string) {
     }
     // 2B: aria-labelledby, not followed twice
     if (!context.labelledBy) {
-      const ids = (element.getAttribute("aria-labelledby") ?? "").split(/\s+/).filter((id) => id !== "")
+      const ids = (dom.getAttribute(element, "aria-labelledby") ?? "").split(/\s+/).filter((id) => id !== "")
       const parts = ids.flatMap((id) => {
         const target = byId(element, id)
         return target === null ? [] : [nameOfElement(target, { ...context, labelledBy: true, traversal: true })]
@@ -1137,7 +1415,7 @@ export function engine(render: (root: SnapNode) => string) {
       return value
     }
     // 2C: aria-label
-    const label = element.getAttribute("aria-label") ?? ""
+    const label = dom.getAttribute(element, "aria-label") ?? ""
     if (label.trim() !== "") return label
     // 2D: the host language's label
     if (role !== "none" && role !== "presentation") {
@@ -1148,7 +1426,7 @@ export function engine(render: (root: SnapNode) => string) {
     if (context.traversal || (role !== null && NAME_FROM_CONTENT.has(role))) {
       let content = pseudoContent(element, "::before")
       for (const child of flatChildNodes(element)) {
-        if (child instanceof Element && SKIPPED.has(child.localName)) continue
+        if (child instanceof Element && SKIPPED.has(dom.localName(child))) continue
         const name = nameOfNode(child, { ...context, traversal: true })
         const inline = !(child instanceof Element) || getComputedStyle(child).display.startsWith("inline")
         content += inline ? name : ` ${name} `
@@ -1161,9 +1439,9 @@ export function engine(render: (root: SnapNode) => string) {
       }
     }
     // 2I: the tooltip, then a placeholder (HTML-AAM)
-    const title = element.getAttribute("title") ?? ""
+    const title = dom.getAttribute(element, "title") ?? ""
     if (title.trim() !== "") return title
-    const placeholder = element.getAttribute("placeholder") ?? ""
+    const placeholder = dom.getAttribute(element, "placeholder") ?? ""
     if ((element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) && placeholder.trim() !== "") {
       return placeholder
     }
@@ -1194,11 +1472,11 @@ export function engine(render: (root: SnapNode) => string) {
       return labels.map((label) => nameOfElement(label, { ...context, traversal: true })).join(" ")
     }
     if (element instanceof HTMLImageElement || element instanceof HTMLAreaElement) {
-      const alt = element.getAttribute("alt") ?? ""
+      const alt = dom.getAttribute(element, "alt") ?? ""
       if (alt.trim() !== "" && inField(element)) context.contribution.fieldContent = true
       return alt
     }
-    const first = (selector: string) => Array.from(element.children).find((child) => child.matches(selector))
+    const first = (selector: string) => Array.from(dom.children(element)).find((child) => dom.matches(child, selector))
     if (element instanceof HTMLFieldSetElement) {
       const legend = first("legend")
       return legend === undefined ? "" : nameOfElement(legend, { ...context, traversal: true })
@@ -1207,7 +1485,7 @@ export function engine(render: (root: SnapNode) => string) {
       const caption = first("caption")
       return caption === undefined ? "" : nameOfElement(caption, { ...context, traversal: true })
     }
-    if (element.localName === "figure") {
+    if (dom.localName(element) === "figure") {
       const caption = first("figcaption")
       return caption === undefined ? "" : nameOfElement(caption, { ...context, traversal: true })
     }
@@ -1215,7 +1493,7 @@ export function engine(render: (root: SnapNode) => string) {
       const title = first("title")
       if (title === undefined) return ""
       if (textContainsField(title)) context.contribution.fieldContent = true
-      return title.textContent ?? ""
+      return dom.textContent(title) ?? ""
     }
     return ""
   }
@@ -1282,7 +1560,7 @@ export function engine(render: (root: SnapNode) => string) {
     const held = nodesByRef.get(step.ref)
     if (held === undefined) return stale("OtherSnapshot")
     const element = held.deref()
-    if (element === undefined || !element.isConnected) return stale("Detached")
+    if (element === undefined || !dom.isConnected(element)) return stale("Detached")
     return element
   }
 
@@ -1294,18 +1572,18 @@ export function engine(render: (root: SnapNode) => string) {
 
   const labelTexts = (element: Element): Array<string> => {
     const texts: Array<string> = []
-    for (const id of (element.getAttribute("aria-labelledby") ?? "").split(/\s+/).filter((id) => id !== "")) {
+    for (const id of (dom.getAttribute(element, "aria-labelledby") ?? "").split(/\s+/).filter((id) => id !== "")) {
       const target = byId(element, id)
       if (target !== null) texts.push(textOf(target))
     }
-    const label = element.getAttribute("aria-label")
+    const label = dom.getAttribute(element, "aria-label")
     if (label !== null) texts.push(collapse(label))
     for (const each of labelsOf(element)) texts.push(textOf(each))
     return texts
   }
 
   const attributeMatches = (element: Element, attribute: string, matcher: TextMatcher): boolean => {
-    const value = element.getAttribute(attribute)
+    const value = dom.getAttribute(element, attribute)
     return value !== null && matches(matcher, collapse(value))
   }
 
@@ -1325,12 +1603,21 @@ export function engine(render: (root: SnapNode) => string) {
     switch (step._tag) {
       case "Css": {
         const roots: Array<Document | Element | ShadowRoot> = [scope]
-        if (scope instanceof Element && scope.shadowRoot !== null) roots.push(scope.shadowRoot)
-        for (const element of under) if (element.shadowRoot !== null) roots.push(element.shadowRoot)
+        const shadow = scope instanceof Element ? dom.shadowRoot(scope) : null
+        if (shadow !== null) roots.push(shadow)
+        for (const element of under) {
+          const shadow = dom.shadowRoot(element)
+          if (shadow !== null) roots.push(shadow)
+        }
         const found = new Set<Element>()
         for (const root of roots) {
           try {
-            for (const element of Array.from(root.querySelectorAll(step.selector))) found.add(element)
+            const all = root instanceof Document
+              ? dom.documentQuerySelectorAll(root, step.selector)
+              : root instanceof Element
+              ? dom.querySelectorAll(root, step.selector)
+              : root.querySelectorAll(step.selector)
+            for (const element of Array.from(all)) found.add(element)
           } catch (error) {
             throw {
               invalidSelector: true,
@@ -1342,7 +1629,12 @@ export function engine(render: (root: SnapNode) => string) {
         return under.filter((element) => found.has(element))
       }
       case "Text": {
-        const candidates = under.filter((element) => !inHead(element) && !SKIPPED.has(element.localName))
+        // A slot is transparent here as in the flat tree: what it renders, its assigned nodes or its fallback
+        // content, is its parent's text, so the slot itself is never the smallest element that says it. An
+        // element scope is a candidate itself, ahead of its descendants: the text it says may be its own.
+        const candidates = (scope instanceof Element ? [scope, ...under] : under).filter((element) =>
+          !(element instanceof HTMLSlotElement) && !inHead(element) && !SKIPPED.has(dom.localName(element))
+        )
         const says = (element: Element) => matches(step.matcher, textOf(element))
         return candidates.filter((element) => says(element) && !flatChildElements(element).some(says))
       }
@@ -1359,7 +1651,8 @@ export function engine(render: (root: SnapNode) => string) {
         )
       case "Label":
         return under.filter((element) =>
-          (labelable(element) || element.hasAttribute("aria-label") || element.hasAttribute("aria-labelledby")) &&
+          (labelable(element) || dom.hasAttribute(element, "aria-label") ||
+            dom.hasAttribute(element, "aria-labelledby")) &&
           labelTexts(element).some((text) => matches(step.matcher, text))
         )
       case "Placeholder":
@@ -1376,7 +1669,7 @@ export function engine(render: (root: SnapNode) => string) {
       case "Title":
         return under.filter((element) => attributeMatches(element, "title", step.matcher))
       case "TestId":
-        return under.filter((element) => element.getAttribute("data-testid") === step.id)
+        return under.filter((element) => dom.getAttribute(element, "data-testid") === step.id)
       default:
         return []
     }
@@ -1479,9 +1772,9 @@ export function engine(render: (root: SnapNode) => string) {
   // Actionability
   /** An element's text for a description: as `textOf`, but with no field's content, which may be private. */
   const describedText = (node: Node): string =>
-    node.nodeType === Node.TEXT_NODE
-      ? node.nodeValue ?? ""
-      : !(node instanceof Element) || SKIPPED.has(node.localName) || fieldOf(node)
+    dom.nodeType(node) === Node.TEXT_NODE
+      ? dom.nodeValue(node) ?? ""
+      : !(node instanceof Element) || SKIPPED.has(dom.localName(node)) || fieldOf(node)
       ? ""
       : buttonLikeInput(node)
       ? node.value
@@ -1493,23 +1786,24 @@ export function engine(render: (root: SnapNode) => string) {
    * an element inside one, is described with no text.
    */
   const describe = (element: Element): string => {
-    let out = element.localName
-    if (element.id !== "") out += `#${element.id}`
-    for (const name of Array.from(element.classList).slice(0, 2)) out += `.${name}`
+    let out = dom.localName(element)
+    if (dom.id(element) !== "") out += `#${dom.id(element)}`
+    for (const name of Array.from(dom.classList(element)).slice(0, 2)) out += `.${name}`
     const text = withinField(element) ? "" : collapse(describedText(element))
     if (text !== "") out += ` "${text.length > 40 ? `${text.slice(0, 40)}…` : text}"`
     return out
   }
 
+  /** `aria-disabled` on the element or a flat-tree ancestor, so a slotted element inherits its slot's. */
   const ariaDisabled = (element: Element): boolean => {
-    for (let current: Element | null = element; current !== null; current = composedParent(current)) {
-      if (current.getAttribute("aria-disabled") === "true") return true
+    for (let current: Element | null = element; current !== null; current = flatParent(current)) {
+      if (dom.getAttribute(current, "aria-disabled") === "true") return true
     }
     return false
   }
 
   const enabled = (element: Element): boolean => {
-    if (element.matches(":disabled")) return false
+    if (dom.matches(element, ":disabled")) return false
     return !ariaDisabled(element)
   }
 
@@ -1520,13 +1814,13 @@ export function engine(render: (root: SnapNode) => string) {
       element instanceof HTMLOptionElement || element instanceof HTMLOptGroupElement ||
       element instanceof HTMLFieldSetElement
     if (!native) return false
-    if (element.hasAttribute("disabled")) return true
-    if (element instanceof HTMLOptionElement && element.closest("optgroup[disabled]") !== null) return true
+    if (dom.hasAttribute(element, "disabled")) return true
+    if (element instanceof HTMLOptionElement && dom.closest(element, "optgroup[disabled]") !== null) return true
     // Role filters use explicit native rules: :disabled differs between browsers for options and optgroups.
-    const fieldset = element.closest("fieldset[disabled]")
+    const fieldset = dom.closest(element, "fieldset[disabled]")
     if (fieldset === null) return false
-    const legend = Array.from(fieldset.children).find((child) => child instanceof HTMLLegendElement)
-    return legend === undefined || !legend.contains(element)
+    const legend = Array.from(dom.children(fieldset)).find((child) => child instanceof HTMLLegendElement)
+    return legend === undefined || !dom.contains(legend, element)
   }
 
   /** Text inputs whose value is typed; the other input types have it set. */
@@ -1562,7 +1856,7 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   const contentEditable = (element: Element): element is HTMLElement =>
-    element instanceof HTMLElement && element.isContentEditable
+    element instanceof HTMLElement && dom.isContentEditable(element)
 
   /** Whether an element's kind takes input at all, whatever its state. */
   const editableKind = (element: Element): boolean => typed(element) || settable(element) || contentEditable(element)
@@ -1570,7 +1864,7 @@ export function engine(render: (root: SnapNode) => string) {
   /** The Editable predicate: enabled, not read-only, and an editable kind (CONCEPTS.md §8). */
   const readOnly = (element: Element): boolean =>
     ((element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) && element.readOnly) ||
-    element.getAttribute("aria-readonly") === "true"
+    dom.getAttribute(element, "aria-readonly") === "true"
 
   const CHECKABLE_ROLES = new Set([
     "checkbox",
@@ -1592,7 +1886,7 @@ export function engine(render: (root: SnapNode) => string) {
     }
     const role = roleOf(element)
     if (role === null || !CHECKABLE_ROLES.has(role)) return { state: null, checked: null }
-    const token = element.getAttribute("aria-checked")?.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+    const token = dom.getAttribute(element, "aria-checked")?.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
     if (token === "true") return { state: true, checked: true }
     if (token === "false") return { state: false, checked: false }
     if (token === "mixed") {
@@ -1631,29 +1925,29 @@ export function engine(render: (root: SnapNode) => string) {
   ])
 
   const levelOf = (element: Element): number => {
-    if (/^h[1-6]$/.test(element.localName)) return Number(element.localName.slice(1))
+    if (/^h[1-6]$/.test(dom.localName(element))) return Number(dom.localName(element).slice(1))
     if (!LEVEL_ROLES.has(roleOf(element) ?? "")) return 0
-    const value = Number(element.getAttribute("aria-level"))
+    const value = Number(dom.getAttribute(element, "aria-level"))
     return Number.isInteger(value) && value >= 1 ? value : 0
   }
 
   const pressedOf = (element: Element): boolean | "mixed" => {
     if (!PRESSED_ROLES.has(roleOf(element) ?? "")) return false
-    const value = element.getAttribute("aria-pressed")?.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+    const value = dom.getAttribute(element, "aria-pressed")?.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
     return value === "mixed" ? "mixed" : value === "true"
   }
 
   const expandedOf = (element: Element): boolean | undefined => {
     if (element instanceof HTMLDetailsElement) return element.open
     if (!EXPANDED_ROLES.has(roleOf(element) ?? "")) return undefined
-    const value = element.getAttribute("aria-expanded")?.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+    const value = dom.getAttribute(element, "aria-expanded")?.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
     return value === undefined ? undefined : value === "true"
   }
 
   const selectedOf = (element: Element): boolean => {
     if (element instanceof HTMLOptionElement) return element.selected
     return SELECTED_ROLES.has(roleOf(element) ?? "") &&
-      element.getAttribute("aria-selected")?.replace(/[A-Z]/g, (letter) => letter.toLowerCase()) === "true"
+      dom.getAttribute(element, "aria-selected")?.replace(/[A-Z]/g, (letter) => letter.toLowerCase()) === "true"
   }
 
   const LABEL_WIDGET_ROLES = new Set([
@@ -1688,27 +1982,54 @@ export function engine(render: (root: SnapNode) => string) {
 
   const interactiveLabelDescendant = (element: Element): boolean => {
     const role = roleOf(element)
-    return element.matches(
+    return dom.matches(
+      element,
       "button, input, select, textarea, details, summary, iframe, frame, embed, object, a[href], area[href], img[usemap], audio[controls], video[controls]"
     ) || (
-      element.namespaceURI === "http://www.w3.org/2000/svg" && element.localName === "a" &&
-      element.hasAttributeNS("http://www.w3.org/1999/xlink", "href")
+      dom.namespaceURI(element) === "http://www.w3.org/2000/svg" && dom.localName(element) === "a" &&
+      dom.hasAttributeNS(element, "http://www.w3.org/1999/xlink", "href")
     ) || contentEditable(element) || (role !== null && LABEL_WIDGET_ROLES.has(role))
   }
 
   const enclosingLabel = (element: Element): HTMLLabelElement | null => {
     let label: Element | null = element
-    while (label !== null && !(label instanceof HTMLLabelElement)) label = label.parentElement
+    while (label !== null && !(label instanceof HTMLLabelElement)) label = dom.parentElement(label)
     return label
   }
 
-  const textSelectionTarget = (element: Element): Element => {
-    let target = element
-    if (!target.matches("input, textarea, select") && !contentEditable(target)) {
-      target = target.closest("button, [role=button], [role=checkbox], [role=radio]") ?? target
+  const CONTROL = "button, [role=button], [role=checkbox], [role=radio]"
+
+  const standsForItself = (element: Element): boolean =>
+    dom.matches(element, "input, textarea, select") || contentEditable(element)
+
+  // Selection takes the text of the control an element is in, found among its DOM ancestors. Fields and editable
+  // content stand for themselves.
+  const enclosingControl = (element: Element): Element =>
+    standsForItself(element) ? element : dom.closest(element, CONTROL) ?? element
+
+  // The browser delivers no click to a disabled button's subtree on the flat tree, so Enabled climbs it: through
+  // assigned slots and out of shadow roots. Fields and editable content stand for themselves.
+  const flatEnclosingControl = (element: Element): Element => {
+    if (standsForItself(element)) return element
+    for (
+      let current: Element | null = element;
+      current !== null;
+      current = dom.assignedSlot(current) ?? composedParent(current)
+    ) {
+      if (dom.matches(current, CONTROL)) return current
     }
+    return element
+  }
+
+  // Enabled as a user sees it: an element is enabled only when it and its enclosing control both are, so a span inside
+  // a disabled button is disabled, and a disabled option stays disabled whatever encloses its select
+  const enabledControl = (element: Element): boolean => enabled(element) && enabled(flatEnclosingControl(element))
+
+  const textSelectionTarget = (element: Element): Element => {
+    let target = enclosingControl(element)
     if (
-      !target.matches(
+      !dom.matches(
+        target,
         "a, input, textarea, button, select, [role=link], [role=button], [role=checkbox], [role=radio]"
       ) &&
       !contentEditable(target)
@@ -1727,14 +2048,14 @@ export function engine(render: (root: SnapNode) => string) {
     for (
       let ancestor: Element | null = element;
       ancestor !== null && ancestor !== label;
-      ancestor = ancestor.parentElement
+      ancestor = dom.parentElement(ancestor)
     ) {
       if (interactiveLabelDescendant(ancestor)) return null
     }
     for (
       let ancestor: Element | null = element;
       ancestor !== null && ancestor !== label;
-      ancestor = ancestor.assignedSlot ?? composedParent(ancestor)
+      ancestor = flatParent(ancestor)
     ) {
       if (interactiveLabelDescendant(ancestor)) return null
     }
@@ -1743,9 +2064,10 @@ export function engine(render: (root: SnapNode) => string) {
 
   /** The element with focus, through open shadow roots. */
   const deepActive = (): Element | null => {
-    let active: Element | null = document.activeElement
-    while (active !== null && active.shadowRoot !== null && active.shadowRoot.activeElement !== null) {
-      active = active.shadowRoot.activeElement
+    let active: Element | null = dom.activeElement(document)
+    for (let shadow = active === null ? null : dom.shadowRoot(active); shadow?.activeElement;) {
+      active = shadow.activeElement
+      shadow = dom.shadowRoot(active)
     }
     return active
   }
@@ -1761,38 +2083,20 @@ export function engine(render: (root: SnapNode) => string) {
       ? { _tag: "NoPointerEvents", element: describe(element) }
       : { _tag: "Covered", by: hit === null ? "nothing at that point" : describe(hit) }
 
-  /** The element whose `inert` attribute makes `element` inert: inertness applies on the flat tree, through slots. */
-  const inertAncestor = (element: Element): Element | null => {
-    for (
-      let current: Element | null = element;
-      current !== null;
-      current = current.assignedSlot ?? composedParent(current)
-    ) {
-      if (current.hasAttribute("inert")) return current
-    }
-    return null
-  }
-
   const inertReason = (element: Element): NotReady | null => {
-    const inert = inertAncestor(element)
-    // Dialogs outside the target, in shadow roots too
-    const dialogs = documentElements().filter((d) =>
-      (d instanceof HTMLDialogElement || d.hasAttribute("aria-modal")) && !composedContains(d, element)
-    )
-    if (inert !== null) {
-      // An open modal: a native one, or a rendered `aria-modal` dialog that isn't inert itself
-      const modal = dialogs.find((d) =>
-        d instanceof HTMLDialogElement
-          ? d.matches(":modal")
-          : d.matches("[role=dialog][aria-modal=true],[role=alertdialog][aria-modal=true]") &&
-            inertAncestor(d) === null && visible(d)
-      )
-      return { _tag: "Inert", by: describe(inert), dialog: modal && describe(modal) }
+    const by = inertAncestor(element)
+    const modal = blockingModal(element)
+    if (by !== null) {
+      // The dialog to name: the topmost modal one, or a rendered `aria-modal` dialog outside the target that isn't
+      // inert itself, in shadow roots too
+      const dialog = modal ??
+        documentElements().find((d) =>
+          dom.matches(d, "[role=dialog][aria-modal=true],[role=alertdialog][aria-modal=true]") &&
+          !flatContains(d, element) && inertAncestor(d) === null && visible(d)
+        )
+      return { _tag: "Inert", by: describe(by), dialog: dialog && describe(dialog) }
     }
-    const modal = dialogs.find((dialog) => dialog instanceof HTMLDialogElement && dialog.matches(":modal"))
-    return modal !== undefined
-      ? { _tag: "BlockedByModal", dialog: describe(modal) }
-      : null
+    return modal !== null ? { _tag: "BlockedByModal", dialog: describe(modal) } : null
   }
 
   /** Geometric bounds only; the browser's hit test determines whether ancestors or overlays block a centre. */
@@ -1806,7 +2110,7 @@ export function engine(render: (root: SnapNode) => string) {
   const fragments = (element: Element, inherited?: Clip): Array<Clip> => {
     const bounds = viewportBounds(inherited)
     const result: Array<Clip> = []
-    for (const rect of element.getClientRects()) {
+    for (const rect of dom.getClientRects(element)) {
       const left = Math.max(bounds.left, rect.left)
       const top = Math.max(bounds.top, rect.top)
       const right = Math.min(bounds.right, rect.right)
@@ -1831,9 +2135,10 @@ export function engine(render: (root: SnapNode) => string) {
         const root = roots.pop()!
         if (seen.has(root)) continue
         seen.add(root)
-        for (const hit of root.elementsFromPoint(x, y)) {
-          if (composedContains(element, hit)) return true
-          if (hit.shadowRoot !== null) roots.push(hit.shadowRoot)
+        for (const hit of root instanceof Document ? dom.elementsFromPoint(root, x, y) : root.elementsFromPoint(x, y)) {
+          if (flatContains(element, hit)) return true
+          const shadow = dom.shadowRoot(hit)
+          if (shadow !== null) roots.push(shadow)
         }
       }
     }
@@ -1849,14 +2154,14 @@ export function engine(render: (root: SnapNode) => string) {
     onCancel?: (cancel: () => void) => void
   ): Promise<boolean | null> | null => {
     let margin = 0
-    for (let ancestor = composedParent(element); ancestor !== null; ancestor = composedParent(ancestor)) {
+    for (let ancestor = flatParent(element); ancestor !== null; ancestor = flatParent(ancestor)) {
       const style = getComputedStyle(ancestor)
       if (
-        (/^(auto|scroll|hidden)$/.test(style.overflowX) && ancestor.scrollWidth > ancestor.clientWidth) ||
-        (/^(auto|scroll|hidden)$/.test(style.overflowY) && ancestor.scrollHeight > ancestor.clientHeight)
+        (/^(auto|scroll|hidden)$/.test(style.overflowX) && dom.scrollWidth(ancestor) > dom.clientWidth(ancestor)) ||
+        (/^(auto|scroll|hidden)$/.test(style.overflowY) && dom.scrollHeight(ancestor) > dom.clientHeight(ancestor))
       ) {
-        const rect = ancestor.getBoundingClientRect()
-        margin += ancestor.scrollWidth + ancestor.scrollHeight + Math.abs(rect.left) + Math.abs(rect.top) +
+        const rect = dom.getBoundingClientRect(ancestor)
+        margin += dom.scrollWidth(ancestor) + dom.scrollHeight(ancestor) + Math.abs(rect.left) + Math.abs(rect.top) +
           rect.width + rect.height
       }
     }
@@ -1887,9 +2192,9 @@ export function engine(render: (root: SnapNode) => string) {
 
   /** Oversized unions can have their centre in a gap between fragments; align an edge in that case. */
   const scrollToFragments = (element: Element, inherited?: Clip) => {
-    const rect = element.getBoundingClientRect()
+    const rect = dom.getBoundingClientRect(element)
     const bounds = viewportBounds(inherited)
-    element.scrollIntoView({
+    dom.scrollIntoView(element, {
       block: rect.height > bounds.bottom - bounds.top ? "start" : "center",
       inline: rect.width > bounds.right - bounds.left ? "start" : "center",
       behavior: "instant"
@@ -1922,14 +2227,14 @@ export function engine(render: (root: SnapNode) => string) {
         first ??= point
         if (!receivesPointer) return [point]
         const hit = hitTarget(point.x, point.y)
-        if (hit !== null && composedContains(element, hit)) {
+        if (hit !== null && flatContains(element, hit)) {
           if (clip === undefined) return [point]
           points.push(point)
         }
       }
       return points.length > 0 ? points : first === null ? [] : [first]
     }
-    const rect = element.getBoundingClientRect()
+    const rect = dom.getBoundingClientRect(element)
     const style = getComputedStyle(element)
     return [{
       x: rect.left + parseFloat(style.borderLeftWidth) + position.x,
@@ -1937,12 +2242,21 @@ export function engine(render: (root: SnapNode) => string) {
     }]
   }
 
-  /** What the pointer would hit at a point, through open shadow roots. */
+  /**
+   * What the pointer would hit at a point, through open shadow roots. Each root's answer counts only when it belongs
+   * to that root. A root can answer with its own host or an enclosing one, for slotted text, whose DOM parent is a
+   * host (Chromium does), or for the host's own box or pseudo-element covering its contents. The topmost element of
+   * the root's paint stack then decides: the hit descends to it when it belongs to the root, and otherwise stops at
+   * the host, which covers. Each step descends into a deeper root, so the walk ends.
+   */
   const hitTarget = (x: number, y: number): Element | null => {
-    let hit = document.elementFromPoint(x, y)
-    while (hit !== null && hit.shadowRoot !== null) {
-      const inner = hit.shadowRoot.elementFromPoint(x, y)
-      if (inner === null || inner === hit) break
+    let hit = dom.elementFromPoint(document, x, y)
+    let shadow: ShadowRoot | null
+    while (hit !== null && (shadow = dom.shadowRoot(hit)) !== null) {
+      const root = shadow
+      const answer = root.elementFromPoint(x, y)
+      const inner = answer !== null && dom.getRootNode(answer) === root ? answer : root.elementsFromPoint(x, y)[0]
+      if (inner === undefined || dom.getRootNode(inner) !== root) break
       hit = inner
     }
     return hit
@@ -1961,7 +2275,7 @@ export function engine(render: (root: SnapNode) => string) {
     })
 
   const fire = (element: Element, type: "input" | "change") =>
-    element.dispatchEvent(new Event(type, { bubbles: true, composed: type === "input" }))
+    dom.dispatchEvent(element, new Event(type, { bubbles: true, composed: type === "input" }))
 
   /** Focuses an element and selects its contents, so text inserted next replaces them. */
   const selectContents = (element: HTMLElement) => {
@@ -1970,16 +2284,20 @@ export function engine(render: (root: SnapNode) => string) {
       element.select()
       return
     }
-    if (document.designMode === "on") {
+    if (dom.designMode(document) === "on") {
       window.focus()
     } else {
       let host = element
-      while (host.parentElement?.isContentEditable) host = host.parentElement
-      host.focus()
+      for (
+        let parent = dom.parentElement(host);
+        parent instanceof HTMLElement && dom.isContentEditable(parent);
+        parent = dom.parentElement(host)
+      ) host = parent
+      focus(host)
     }
     const selection = getSelection()
     if (selection === null) return
-    const range = document.createRange()
+    const range = dom.createRange(document)
     range.selectNodeContents(element)
     selection.removeAllRanges()
     selection.addRange(range)
@@ -1987,7 +2305,7 @@ export function engine(render: (root: SnapNode) => string) {
 
   const optionMatches = (option: HTMLOptionElement, index: number, choice: Choice) =>
     choice.value !== undefined ? option.value === choice.value : choice.label !== undefined
-      ? option.label === choice.label || collapse(option.textContent ?? "") === choice.label
+      ? option.label === choice.label || collapse(dom.textContent(option) ?? "") === choice.label
       : index === choice.index
 
   const describeChoice = (choice: Choice) =>
@@ -2029,7 +2347,7 @@ export function engine(render: (root: SnapNode) => string) {
       if (!decided) {
         decided = true
         const target = event.composedPath()[0]
-        if (!(target instanceof Element) || !composedContains(element, target)) {
+        if (!(target instanceof Element) || !flatContains(element, target)) {
           current.blocked = target instanceof Element ? describe(target) : "nothing at that point"
         }
       }
@@ -2049,8 +2367,16 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   // Native insertion is a separate protocol command. In a design-mode document a timer can refocus a
-  // form control after selection, so validate at the cancellable native event, before its default mutation.
-  let fillGuard: { remove: () => void; blocked: string | null; unsafe: boolean; accepted: boolean } | null = null
+  // form control after selection, so validate at the cancellable native event, before its default mutation, or,
+  // where the engine inserts the text itself, at the insertion, before it dispatches anything (`insert`).
+  let fillGuard: {
+    remove: () => void
+    blocked: string | null
+    unsafe: boolean
+    accepted: boolean
+    inserting: boolean
+    check: () => string | null
+  } | null = null
   const fillDisarm = () => {
     const current = fillGuard
     fillGuard = null
@@ -2074,7 +2400,14 @@ export function engine(render: (root: SnapNode) => string) {
       blocked: null as string | null,
       unsafe: false,
       accepted: false,
-      inserting: false
+      inserting: false,
+      // At an insertion the engine makes itself: an ancestor's focus must still be on the guarded frame, as the
+      // trusted events a native insertion sends would show it
+      check: (): string | null => {
+        if (!ancestor) return blocker()
+        const active = deepActive()
+        return active === element ? null : active === null ? "another document" : describe(active)
+      }
     }
     const blocker = (): string | null => {
       // Ancestors should receive no insertion event: correct input reaches the target document instead.
@@ -2082,24 +2415,27 @@ export function engine(render: (root: SnapNode) => string) {
       const active = deepActive()
       if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return describe(active)
       const selection = getSelection()
-      if (element === null || !element.isConnected || selection?.rangeCount !== 1) {
+      if (element === null || !dom.isConnected(element) || selection?.rangeCount !== 1) {
         return "the selection left the target"
       }
       const selected = selection.getRangeAt(0)
-      if (current.inserting && element.contains(selected.startContainer) && element.contains(selected.endContainer)) {
+      if (
+        current.inserting && dom.contains(element, selected.startContainer) &&
+        dom.contains(element, selected.endContainer)
+      ) {
         return null
       }
       // WebKit canonicalizes element-edge ranges to text-node edges. Ascend equivalent edges rather
       // than treating those native representations as different selections.
       const atEdge = (node: Node, offset: number, end: boolean): boolean => {
         while (node !== element) {
-          const length = node instanceof CharacterData ? node.length : node.childNodes.length
-          if (offset !== (end ? length : 0) || node.parentNode === null) return false
-          const parent = node.parentNode
-          offset = Array.prototype.indexOf.call(parent.childNodes, node) + (end ? 1 : 0)
+          const length = node instanceof CharacterData ? node.length : dom.childNodes(node).length
+          const parent = dom.parentNode(node)
+          if (offset !== (end ? length : 0) || parent === null) return false
+          offset = Array.prototype.indexOf.call(dom.childNodes(parent), node) + (end ? 1 : 0)
           node = parent
         }
-        return offset === (end ? element.childNodes.length : 0)
+        return offset === (end ? dom.childNodes(element).length : 0)
       }
       return atEdge(selected.startContainer, selected.startOffset, false) &&
           atEdge(selected.endContainer, selected.endOffset, true)
@@ -2112,7 +2448,7 @@ export function engine(render: (root: SnapNode) => string) {
       const elsewhere = ancestor ?
         (recipient instanceof Element ? describe(recipient) : "another document")
         : recipient instanceof Element && element !== null &&
-            !composedContains(recipient, element) && !composedContains(element, recipient)
+            !flatContains(recipient, element) && !flatContains(element, recipient)
         ? describe(recipient) :
         null
       const blocked = current.blocked ?? elsewhere ?? blocker()
@@ -2134,7 +2470,7 @@ export function engine(render: (root: SnapNode) => string) {
         const active = deepActive()
         if (active !== element) {
           current.blocked = active === null ? "another document" : describe(active)
-          element.focus()
+          focus(element)
         }
       }
     }
@@ -2144,6 +2480,45 @@ export function engine(render: (root: SnapNode) => string) {
     if (current.blocked === null) { for (const type of types) addEventListener(type, handler, true) }
     fillGuard = current
     return { _tag: "FillGuard" as const, blocked: current.blocked, unsafe: false, accepted: false }
+  }
+
+  /**
+   * Inserts text where the focus is, with the document's editing command, which sends no key events: the
+   * engine's own `execCommand`, taken from `Document.prototype` at install, so a page's replacement isn't called.
+   * Where the browser's command dispatches no `beforeinput` (Firefox), `beforeInput` dispatches it first, as the
+   * other browsers do, and a page that cancels it gets nothing inserted. An armed fill guard checks the target here,
+   * before anything is dispatched.
+   */
+  const insert = (text: string, beforeInput: boolean): Response => {
+    const active = deepActive()
+    const guard = fillGuard
+    // An armed guard, in an ancestor document too, decides before anything goes further or is dispatched
+    const blocked = (): boolean => {
+      if (guard === null) return false
+      guard.blocked ??= guard.check()
+      return guard.blocked !== null
+    }
+    if (blocked()) return { _tag: "Inserted", inserted: false }
+    if (active instanceof HTMLIFrameElement || active instanceof HTMLFrameElement) {
+      return { _tag: "InFrame", index: resolve([{ _tag: "Css", selector: "iframe, frame" }]).indexOf(active) }
+    }
+    if (beforeInput && active !== null) {
+      const event = new InputEvent("beforeinput", {
+        inputType: "insertText",
+        data: text,
+        bubbles: true,
+        cancelable: true,
+        composed: true
+      })
+      if (!dom.dispatchEvent(active, event)) return { _tag: "Inserted", inserted: false }
+      // Its handlers may have moved the focus or the selection
+      if (blocked()) return { _tag: "Inserted", inserted: false }
+    }
+    if (guard !== null) {
+      guard.accepted = true
+      guard.inserting = true
+    }
+    return { _tag: "Inserted", inserted: dom.execCommand(document, "insertText", false, text) }
   }
 
   // Actions
@@ -2272,8 +2647,8 @@ export function engine(render: (root: SnapNode) => string) {
       else if (checks.visible && !rendered(element, false)) reason = { _tag: "NotVisible" }
       else if (
         checks.enabled && (
-          !enabled(element) || (action._tag === "Point" && action.checked === true &&
-            !enabled(checkableForAction(element) ?? element))
+          !enabledControl(element) || (action._tag === "Point" && action.checked === true &&
+            !enabledControl(checkableForAction(element) ?? element))
         )
       ) reason = { _tag: "Disabled" }
       else if (checks.editable && readOnly(element)) reason = { _tag: "ReadOnly" }
@@ -2285,7 +2660,7 @@ export function engine(render: (root: SnapNode) => string) {
           state.scrolled = true
         }
       } else if (checks.stable > 0) {
-        const rect = element.getBoundingClientRect()
+        const rect = dom.getBoundingClientRect(element)
         state.rects.push(rect)
         if (state.rects.length > checks.stable + 1) state.rects.shift()
         const unchanged = evidence !== null && evidence.element === element && evidence.frames === checks.stable &&
@@ -2306,7 +2681,7 @@ export function engine(render: (root: SnapNode) => string) {
         if (point === null) reason = { _tag: "OutsideViewport" }
         else if (checks.receivesPointer) {
           const hit = hitTarget(point.x, point.y)
-          if (hit === null || !composedContains(element, hit)) reason = missed(element, hit)
+          if (hit === null || !flatContains(element, hit)) reason = missed(element, hit)
         }
       }
       if (reason === null && element !== undefined && action._tag === "Select") {
@@ -2319,7 +2694,8 @@ export function engine(render: (root: SnapNode) => string) {
           // The native rule, as the role filters use it: :disabled differs between browsers for options.
           const off = action.choices.find((choice) =>
             options.some((option, index) =>
-              optionMatches(option, index, choice) && (option.disabled || option.closest("optgroup[disabled]") !== null)
+              optionMatches(option, index, choice) &&
+              (option.disabled || dom.closest(option, "optgroup[disabled]") !== null)
             )
           )
           if (off !== undefined) reason = { _tag: "DisabledOption", option: describeChoice(off) }
@@ -2327,7 +2703,7 @@ export function engine(render: (root: SnapNode) => string) {
       }
       if (reason === null && element !== undefined) {
         if (
-          request.apply && action._tag === "Fill" && document.designMode === "on" &&
+          request.apply && action._tag === "Fill" && dom.designMode(document) === "on" &&
           !(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)
         ) {
           const active = deepActive()
@@ -2445,7 +2821,7 @@ export function engine(render: (root: SnapNode) => string) {
       case "Point": {
         let draggable = false
         for (let current: Element | null = element; current !== null; current = composedParent(current)) {
-          if (current.getAttribute("draggable") === "true") draggable = true
+          if (dom.getAttribute(current, "draggable") === "true") draggable = true
         }
         if (apply && action.guard) arm(element)
         return { ...answer, point, draggable }
@@ -2453,13 +2829,14 @@ export function engine(render: (root: SnapNode) => string) {
       case "Checked":
         return { ...answer, checked: checkedOf(element) }
       case "Blur":
-        if (!("blur" in element) || typeof element.blur !== "function") {
+        const blur = blurOf(element)
+        if (blur === undefined) {
           return {
             _tag: "Final",
             final: { _tag: "WrongElement", expected: "an element with a blur method", element: describe(element) }
           }
         }
-        if (apply) element.blur()
+        if (apply) blur()
         return answer
       default:
         break
@@ -2472,8 +2849,8 @@ export function engine(render: (root: SnapNode) => string) {
           target.select()
           target.focus()
         } else {
-          if (target instanceof HTMLElement || target instanceof SVGElement) target.focus()
-          const range = document.createRange()
+          if (target instanceof HTMLElement || target instanceof SVGElement) focus(target)
+          const range = dom.createRange(document)
           range.selectNodeContents(target)
           const selection = getSelection()
           if (selection !== null) {
@@ -2484,10 +2861,10 @@ export function engine(render: (root: SnapNode) => string) {
         return answer
       }
       case "Focus":
-        if (element instanceof HTMLElement || element instanceof SVGElement) element.focus()
+        if (element instanceof HTMLElement || element instanceof SVGElement) focus(element)
         return answer
       case "Scroll":
-        element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" })
+        dom.scrollIntoView(element, { block: "center", inline: "center", behavior: "instant" })
         return answer
       case "Fill": {
         if (invalidNumberFill(element, action.value)) {
@@ -2534,7 +2911,7 @@ export function engine(render: (root: SnapNode) => string) {
         }
         return recheckFill() ?? {
           ...answer,
-          fill: document.designMode === "on" &&
+          fill: dom.designMode(document) === "on" &&
               !(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) ?
             "guarded" :
             "type"
@@ -2573,13 +2950,13 @@ export function engine(render: (root: SnapNode) => string) {
         return value === null ? wrong("an input, a textarea, or a select") : { _tag: "Read", value }
       }
       case "Html":
-        return { _tag: "Read", value: element.outerHTML }
+        return { _tag: "Read", value: dom.outerHTML(element) }
       case "Attribute":
-        return { _tag: "Read", value: element.getAttribute(request.read.name) }
+        return { _tag: "Read", value: dom.getAttribute(element, request.read.name) }
       case "Editable":
         return { _tag: "Read", value: editableKind(element) && enabled(element) && !readOnly(element) }
       case "Enabled":
-        return { _tag: "Read", value: enabled(element) }
+        return { _tag: "Read", value: enabledControl(element) }
       case "Checked": {
         const control = request.read.followLabel ? checkableForAction(element) : element
         const checked = control === null ? null : checkedOf(control)
@@ -2612,7 +2989,7 @@ export function engine(render: (root: SnapNode) => string) {
   const evaluate = (steps: ReadonlyArray<Step>, expectation: Expectation): { passed: boolean; observed: unknown } => {
     clearTreeCaches()
     if (expectation._tag === "Title") {
-      const title = collapse(document.title)
+      const title = collapse(dom.title(document))
       return { passed: expected(expectation.expected, title), observed: title }
     }
     const found = resolve(steps)
@@ -2647,7 +3024,7 @@ export function engine(render: (root: SnapNode) => string) {
         return { passed: expected(expectation.expected[0]!, texts[0]!), observed: texts[0] }
       }
       case "Class": {
-        const texts = found.map((element) => element.classList.toString())
+        const texts = found.map((element) => dom.classList(element).toString())
         if (expectation.list) {
           return {
             passed: texts.length === expectation.expected.length &&
@@ -2665,9 +3042,9 @@ export function engine(render: (root: SnapNode) => string) {
     const element = found[0]!
     switch (expectation._tag) {
       case "Enabled":
-        return { passed: enabled(element), observed: enabled(element) ? "enabled" : "disabled" }
+        return { passed: enabledControl(element), observed: enabledControl(element) ? "enabled" : "disabled" }
       case "Disabled":
-        return { passed: !enabled(element), observed: enabled(element) ? "enabled" : "disabled" }
+        return { passed: !enabledControl(element), observed: enabledControl(element) ? "enabled" : "disabled" }
       case "Checked": {
         const checked = checkedOf(element)
         return {
@@ -2680,9 +3057,9 @@ export function engine(render: (root: SnapNode) => string) {
         return { passed: active === element, observed: active === null ? "nothing focused" : describe(active) }
       }
       case "Empty": {
-        const empty = element.nodeName === "INPUT" || element.nodeName === "TEXTAREA"
+        const empty = dom.nodeName(element) === "INPUT" || dom.nodeName(element) === "TEXTAREA"
           ? !(element as HTMLInputElement | HTMLTextAreaElement).value
-          : !element.textContent?.trim()
+          : !dom.textContent(element)?.trim()
         return { passed: empty, observed: empty ? "empty" : "not empty" }
       }
       case "Editable": {
@@ -2755,7 +3132,7 @@ export function engine(render: (root: SnapNode) => string) {
         return { passed: matchPattern(expectation.pattern, root), observed: render(root) }
       }
       case "Attribute": {
-        const value = element.getAttribute(expectation.name)
+        const value = dom.getAttribute(element, expectation.name)
         const matcher = expectation.expected
         return {
           passed: value !== null &&
@@ -2806,7 +3183,7 @@ export function engine(render: (root: SnapNode) => string) {
       } else {
         publish({ passed: false, observed: { matches: 1 } }, true)
         const element = found[0]!
-        const rendered = requireUnchangedRendering ? element.getClientRects().length > 0 : undefined
+        const rendered = requireUnchangedRendering ? dom.getClientRects(element).length > 0 : undefined
         observer = new IntersectionObserver((entries) => {
           if (!active) return
           clearTreeCaches()
@@ -2815,7 +3192,7 @@ export function engine(render: (root: SnapNode) => string) {
             // A new box needs a host check; moving an existing box needs no stability gate.
             if (
               current.length === 1 && current[0] === element &&
-              (rendered === undefined || rendered === (element.getClientRects().length > 0))
+              (rendered === undefined || rendered === (dom.getClientRects(element).length > 0))
             ) {
               const ratio = entries[0]!.intersectionRatio
               const intersects = ratio > 0 && ratio > expectation.ratio - 1e-9
@@ -2964,7 +3341,7 @@ export function engine(render: (root: SnapNode) => string) {
     if (checkedOf(element) === true) states.push("checked")
     if (expandedOf(element) === true) states.push("expanded")
     if (selectedOf(element) === true) states.push("selected")
-    if ((INTERACTIVE.has(role ?? "") || element.matches(":disabled")) && !enabled(element)) states.push("disabled")
+    if ((INTERACTIVE.has(role ?? "") || dom.matches(element, ":disabled")) && !enabled(element)) states.push("disabled")
     if (deepActive() === element) states.push("focused")
     if (pressedOf(element) === true) states.push("pressed")
     if (validationMessageOf(element) !== null) states.push("invalid")
@@ -2986,17 +3363,20 @@ export function engine(render: (root: SnapNode) => string) {
     const evidence: Array<string> = []
     if (element instanceof HTMLInputElement && element.type === "password") evidence.push("password")
     const parent = composedParent(element)
-    // `cursor` is inherited: only the element that sets it counts
+    // `cursor` is inherited, in the flat tree: only the element that sets it counts
+    const inheritsFrom = flatParent(element)
     if (
       getComputedStyle(element).cursor === "pointer" &&
-      (parent === null || getComputedStyle(parent).cursor !== "pointer")
+      (inheritsFrom === null || getComputedStyle(inheritsFrom).cursor !== "pointer")
     ) evidence.push("cursorPointer")
-    if (element.hasAttribute("tabindex") && (element as HTMLElement).tabIndex >= 0) evidence.push("tabindex")
+    if (dom.hasAttribute(element, "tabindex") && element instanceof HTMLElement && dom.tabIndex(element) >= 0) {
+      evidence.push("tabindex")
+    }
     if (
-      element instanceof HTMLElement && element.isContentEditable &&
-      !(parent instanceof HTMLElement && parent.isContentEditable)
+      element instanceof HTMLElement && dom.isContentEditable(element) &&
+      !(parent instanceof HTMLElement && dom.isContentEditable(parent))
     ) evidence.push("contentEditable")
-    if (element.hasAttribute("onclick")) evidence.push("onclickAttribute")
+    if (dom.hasAttribute(element, "onclick")) evidence.push("onclickAttribute")
     return evidence
   }
 
@@ -3013,10 +3393,12 @@ export function engine(render: (root: SnapNode) => string) {
     return field
   }
 
-  // Naming follows assigned slots and shadow hosts without changing action/selector ancestry.
+  // The flat-tree parent of any node, text included, as `flatParent` is an element's: field ancestry follows it.
   const fieldParent = (node: Node): Node | null => {
-    if ((node instanceof Element || node instanceof Text) && node.assignedSlot !== null) return node.assignedSlot
-    return node.parentNode instanceof ShadowRoot ? node.parentNode.host : node.parentNode
+    const slot = node instanceof Element ? dom.assignedSlot(node) : node instanceof Text ? node.assignedSlot : null
+    if (slot !== null) return slot
+    const parent = dom.parentNode(node)
+    return parent instanceof ShadowRoot ? parent.host : parent
   }
 
   const fieldAncestry = new Map<Node, boolean>()
@@ -3055,7 +3437,7 @@ export function engine(render: (root: SnapNode) => string) {
       flatChildNodes(element).some((child) =>
         child instanceof Element
           ? textContainsField(child)
-          : child.nodeType === Node.TEXT_NODE && (child.nodeValue ?? "").trim() !== "" && inField(child)
+          : dom.nodeType(child) === Node.TEXT_NODE && (dom.nodeValue(child) ?? "").trim() !== "" && inField(child)
       ))
     fieldText.set(element, field)
     return field
@@ -3065,6 +3447,10 @@ export function engine(render: (root: SnapNode) => string) {
     rawText.clear()
     roleCache.clear()
     nameCache.clear()
+    inertness = undefined
+    inertAncestors.clear()
+    insideModal.clear()
+    escaped = undefined
     namesFromContent.clear()
     namesFromFields.clear()
     provenance = false
@@ -3092,15 +3478,15 @@ export function engine(render: (root: SnapNode) => string) {
         ...(textContainsField(element) ? { fieldContent: true } : {})
       }
     }
-    const title = collapse(element.getAttribute("title") ?? "")
+    const title = collapse(dom.getAttribute(element, "title") ?? "")
     if (title !== "") return { _tag: "Inferred", value: title, from: "title" }
     const placeholder = collapse(
-      element.getAttribute("placeholder") ?? element.getAttribute("aria-placeholder") ??
-        element.getAttribute("data-placeholder") ?? ""
+      dom.getAttribute(element, "placeholder") ?? dom.getAttribute(element, "aria-placeholder") ??
+        dom.getAttribute(element, "data-placeholder") ?? ""
     )
     if (placeholder !== "") return { _tag: "Inferred", value: placeholder, from: "placeholder" }
-    const image = element.querySelector("img[alt]")
-    const alt = collapse(image?.getAttribute("alt") ?? "")
+    const image = dom.querySelector(element, "img[alt]")
+    const alt = collapse((image === null ? null : dom.getAttribute(image, "alt")) ?? "")
     if (alt !== "") {
       return {
         _tag: "Inferred",
@@ -3109,7 +3495,7 @@ export function engine(render: (root: SnapNode) => string) {
         ...(image !== null && inField(image) ? { fieldContent: true } : {})
       }
     }
-    const previous = element.previousElementSibling
+    const previous = dom.previousElementSibling(element)
     const nearby = previous === null ? "" : textOf(previous)
     if (nearby !== "" && nearby.length <= 40) {
       return {
@@ -3142,16 +3528,25 @@ export function engine(render: (root: SnapNode) => string) {
       if (text !== "") out.push(textNode(text))
     }
     const visit = (node: Node, textShown: boolean) => {
-      if (node.nodeType === 3) {
-        if (textShown) pending += node.textContent ?? ""
+      if (dom.nodeType(node) === 3) {
+        if (textShown) pending += dom.textContent(node) ?? ""
         return
       }
-      if (!(node instanceof Element) || SKIPPED.has(node.localName)) return
-      if (node.getAttribute("aria-hidden") === "true") return
+      if (!(node instanceof Element) || SKIPPED.has(dom.localName(node))) return
+      if (dom.getAttribute(node, "aria-hidden") === "true") return
+      if (inert(node)) {
+        // An inert ancestor of the topmost modal dialog adds nothing of its own, but the dialog escapes it
+        if (modalAncestors().has(node)) {
+          for (const child of flatChildNodes(node)) visit(child, false)
+        }
+        return
+      }
       const display = getComputedStyle(node).display
       if (display === "none") return
-      if (display !== "contents" && !node.checkVisibility()) return
-      const shown = display === "contents" || node.checkVisibility({ visibilityProperty: true })
+      if (display !== "contents" && !dom.checkVisibility(node)) return
+      const shown = display === "contents"
+        ? contentsShown(node)
+        : dom.checkVisibility(node, { visibilityProperty: true })
       const made = shown ? elementNode(node, level, walk) : null
       if (made === null) {
         for (const child of flatChildNodes(node)) visit(child, shown)
@@ -3232,16 +3627,15 @@ export function engine(render: (root: SnapNode) => string) {
 
   /** The document's root. */
   const documentNode = (walk: Walk): SnapNode => {
-    const title = collapse(document.title)
+    const title = collapse(dom.title(document))
+    const root = dom.documentElement(document)
     return {
       ref: null,
       role: { _tag: "Aria", role: "document" },
       name: title === "" ? { _tag: "None" } : { _tag: "Accessible", value: title },
       states: [],
       validationMessage: null,
-      children: document.documentElement === null || (walk.depth !== null && walk.depth < 1)
-        ? []
-        : childrenOf(document.documentElement, 1, walk),
+      children: root === null || (walk.depth !== null && walk.depth < 1) ? [] : childrenOf(root, 1, walk),
       frame: false
     }
   }
@@ -3340,7 +3734,7 @@ export function engine(render: (root: SnapNode) => string) {
     const found = resolve(steps)
     if (found.length > 1) return strict(found)
     if (found.length === 0) return { _tag: "NoMatch" }
-    const box = found[0]!.getBoundingClientRect()
+    const box = dom.getBoundingClientRect(found[0]!)
     return {
       _tag: "Rect",
       rect: { x: box.x, y: box.y, width: box.width, height: box.height },
@@ -3349,8 +3743,10 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   const html = (): Response => {
-    const doctype = document.doctype === null ? "" : new XMLSerializer().serializeToString(document.doctype)
-    return { _tag: "Read", value: doctype + (document.documentElement?.outerHTML ?? "") }
+    const type = dom.doctype(document)
+    const doctype = type === null ? "" : new XMLSerializer().serializeToString(type)
+    const root = dom.documentElement(document)
+    return { _tag: "Read", value: doctype + (root === null ? "" : dom.outerHTML(root)) }
   }
 
   const strict = (found: ReadonlyArray<Element>): Response => ({
@@ -3406,7 +3802,7 @@ export function engine(render: (root: SnapNode) => string) {
       )
     }
     if (request.scroll === true && !inViewport(one)) {
-      one.scrollIntoView({ block: "center", inline: "center", behavior: "instant" })
+      dom.scrollIntoView(one, { block: "center", inline: "center", behavior: "instant" })
     }
     return one
   }
@@ -3435,7 +3831,7 @@ export function engine(render: (root: SnapNode) => string) {
         scrolled = true
       }
     }
-    const rect = iframe.getBoundingClientRect()
+    const rect = dom.getBoundingClientRect(iframe)
     const style = getComputedStyle(iframe)
     const origin = {
       x: rect.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft),
@@ -3466,7 +3862,8 @@ export function engine(render: (root: SnapNode) => string) {
     validationObservers.get(token)?.()
     const roots: Array<Document | ShadowRoot> = [document]
     for (const element of elementsUnder(document)) {
-      if (element.shadowRoot !== null) roots.push(element.shadowRoot)
+      const shadow = dom.shadowRoot(element)
+      if (shadow !== null) roots.push(shadow)
     }
     const found = new Map<Element, string>()
     const listener = (event: Event) => {
@@ -3477,6 +3874,10 @@ export function engine(render: (root: SnapNode) => string) {
       rawText.clear()
       roleCache.clear()
       nameCache.clear()
+      inertness = undefined
+      inertAncestors.clear()
+      insideModal.clear()
+      escaped = undefined
       const name = full ? accessibleName(element, true) : ""
       found.set(
         element,
@@ -3485,9 +3886,9 @@ export function engine(render: (root: SnapNode) => string) {
         }`
       )
     }
-    for (const root of roots) root.addEventListener("invalid", listener, true)
+    for (const root of roots) dom.addEventListener(root, "invalid", listener, true)
     validationObservers.set(token, () => {
-      for (const root of roots) root.removeEventListener("invalid", listener, true)
+      for (const root of roots) dom.removeEventListener(root, "invalid", listener, true)
       validationObservers.delete(token)
       return Array.from(found.values())
     })
@@ -3527,6 +3928,8 @@ export function engine(render: (root: SnapNode) => string) {
           return JSON.stringify(armFill(request.steps, request.ancestor) satisfies Response)
         case "fillDisarm":
           return JSON.stringify(fillDisarm() satisfies Response)
+        case "insert":
+          return JSON.stringify(insert(request.text, request.beforeInput) satisfies Response)
         case "disarm":
           return JSON.stringify({ _tag: "Guarded", blocked: disarm() } satisfies Response)
         case "read":
@@ -3537,7 +3940,7 @@ export function engine(render: (root: SnapNode) => string) {
         case "expect":
           return JSON.stringify(await expect(request))
         case "title":
-          return JSON.stringify({ _tag: "Title", title: document.title } satisfies Response)
+          return JSON.stringify({ _tag: "Title", title: dom.title(document) } satisfies Response)
         case "frame":
           return JSON.stringify(await frame(request))
         case "snapshot":

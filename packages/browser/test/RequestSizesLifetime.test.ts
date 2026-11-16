@@ -114,7 +114,7 @@ describe("request sizes lifecycle", () => {
       }
       const owner = Option.getOrThrow(Option.getOrThrow(a.fold.hop(a.request.hop)).context)
       yield* a.fold.sink({ _tag: "HopSizes", hop: a.request.hop, sizes: empty() })
-      yield* a.fold.loseConnection
+      yield* a.fold.loseConnection(new Target.ConnectionLost({}))
       assert.strictEqual(owner.sizes?.size, 0)
       const error = yield* NetworkRequest.sizes(a.page, a.request).pipe(Effect.flip)
       assert.deepInclude(error.reason, { _tag: "RequestUnavailable", why: "ownerLost" })

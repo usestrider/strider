@@ -49,11 +49,12 @@ export interface Owner {
 
 /**
  * The L0 intercept that covers a pattern. A glob is passed as it is, since L0's `*` matches more than ours (`/`
- * included); a URL as itself; a `URLPattern`, which L0 can't read, as its fixed prefix (Q106).
+ * included); a URL as the browser writes it, which is what L0 compares it with; a `URLPattern`, which L0 can't read,
+ * as its fixed prefix (Q106).
  */
 export const covering = (pattern: string): string =>
   pattern.includes("*") || !/:[a-zA-Z_]/.test(pattern.replace(/^[a-z][a-z0-9+.-]*:/i, ""))
-    ? pattern
+    ? UrlPattern.normalize(pattern)
     : `${fixedPrefix(pattern)}*`
 
 /**

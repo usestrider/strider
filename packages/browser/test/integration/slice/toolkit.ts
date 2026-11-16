@@ -23,11 +23,14 @@ import { supports } from "./capabilities.ts"
 
 const timeout = 60_000
 
-// A sign-in form, a console error, a missing resource, a popup, a dialog and a fetch a route can answer
+// A sign-in form, a console error, a missing resource, a popup, a dialog and a fetch a route can answer. The
+// fields are in a form and name their autocomplete, or Chromium writes hints about them to the console.
 const app = `<title>shop</title>
-<label>Email <input id="email"></label>
-<label>Password <input id="password" type="password"></label>
-<button id="go">Sign in</button>
+<form>
+<label>Email <input id="email" autocomplete="username"></label>
+<label>Password <input id="password" type="password" autocomplete="current-password"></label>
+<button id="go" type="button">Sign in</button>
+</form>
 <p id="out">signed out</p>
 <button onclick="window.open('/child')">Open</button>
 <button onclick="document.getElementById('asked').textContent = String(confirm('Sure?'))">Ask</button>
@@ -668,7 +671,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                 capture: CapturePolicy.local
               })
               yield* call(tools, "newPage", { name: "shop", url })
-              const clicked = yield* call(tools, "click", { page: "shop", target: `role=button[name="Pay"]` }).pipe(
+              const clicked = yield* call(tools, "click", { page: "shop", target: "css=#app button" }).pipe(
                 Deadline.within("1 second")
               )
               assert.isTrue(clicked.failed, JSON.stringify(clicked.value))
@@ -745,8 +748,31 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               // A dialog decided by a declared handler, and a route that answers a fetch
               const handler = yield* call(tools, "dialog", { page: "shop", decision: "dismiss" })
               assert.strictEqual(handler.value.outcome.registration, "r1")
-              yield* call(tools, "click", { page: "shop", target: `text="Ask"` })
-              yield* call(tools, "expect", { page: "shop", target: "css=#asked", state: "visible", text: "false" })
+              const asked = yield* call(tools, "click", { page: "shop", target: `text="Ask"` })
+              const answered = yield* call(tools, "expect", {
+                page: "shop",
+                target: "css=#asked",
+                state: "visible",
+                text: "false"
+              })
+              // One decision line, naming the registration; an earlier result may have brought the dialog's open
+              // line first, and a later one its decision
+              const dialogLines: Array<string> = [...asked.value.sinceLast, ...answered.value.sinceLast]
+                .filter((line: string) => line.startsWith("dialog"))
+              for (let turn = 0; turn < 50 && !dialogLines.some((line) => line.includes(" by ")); turn++) {
+                yield* Effect.sleep("20 millis")
+                const read = yield* call(tools, "pages", {})
+                dialogLines.push(...read.value.sinceLast.filter((line: string) => line.startsWith("dialog")))
+              }
+              const decided = dialogLines.filter((line) => line.includes(" by "))
+              assert.lengthOf(decided, 1, dialogLines.join("\n"))
+              assert.match(decided[0]!, /^dialog \w+( "Sure\?")? on shop dismissed by r1$/)
+              const openLines = dialogLines.filter((line) => !line.includes(" by "))
+              assert.isAtMost(openLines.length, 1, dialogLines.join("\n"))
+              if (openLines.length === 1) {
+                assert.match(openLines[0]!, /^dialog \w+( "Sure\?")? on shop, open$/)
+                assert.isBelow(dialogLines.indexOf(openLines[0]!), dialogLines.indexOf(decided[0]!))
+              }
               yield* call(tools, "route", {
                 page: "shop",
                 pattern: "**/api/status",
@@ -810,15 +836,28 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                 state: "visible",
                 text: "wrong password"
               })
+              // Chromium and stock WebKit write the failed load to the console too; Firefox doesn't
+              const expected = [
+                "console error on shop: signed in, with a warning",
+                ...(name === "Firefox"
+                  ? []
+                  : [
+                    "console error on shop: Failed to load resource: the server responded with a status of 404 (Not Found)"
+                  ])
+              ]
               let errors: ReadonlyArray<string> = []
               let failed: ReadonlyArray<string> = []
-              for (let attempt = 0; attempt < 50 && (errors.length === 0 || failed.length === 0); attempt++) {
+              for (
+                let attempt = 0;
+                attempt < 50 && (errors.length < expected.length || failed.length === 0);
+                attempt++
+              ) {
                 errors =
                   (yield* call(tools, "history", { page: "shop", kind: "console", level: "error" })).value.outcome
                 failed = (yield* call(tools, "history", { page: "shop", kind: "network", failed: true })).value.outcome
-                if (errors.length === 0 || failed.length === 0) yield* Effect.sleep("100 millis")
+                if (errors.length < expected.length || failed.length === 0) yield* Effect.sleep("100 millis")
               }
-              assert.deepStrictEqual(errors, ["console error on shop: signed in, with a warning"])
+              assert.deepStrictEqual(errors, expected)
               assert.isTrue(failed.some((line: string) => /^404 .*\/missing$/.test(line)), failed.join(", "))
               const warnings = yield* call(tools, "history", { page: "shop", kind: "console", level: "warning" })
               assert.deepStrictEqual(warnings.value.outcome, [])
@@ -1347,8 +1386,17 @@ for (const mode of ["open", "closed"]) {
             const screenshot = yield* call(strict, "screenshot", { page: "p1" })
             assert.isTrue(screenshot.failed)
             assert.strictEqual(screenshot.value.error, "NotPermitted")
-            const history = yield* call(strict, "history", { page: "p1", kind: "console" })
-            assert.deepStrictEqual(history.value.outcome, ["console error (text not sent)"])
+            // The script's error, and on Chromium and stock WebKit the browser's for the missing resource, each
+            // without its text
+            const expected = name === "Firefox"
+              ? ["console error (text not sent)"]
+              : ["console error (text not sent)", "console error (text not sent)"]
+            let history: ReadonlyArray<string> = []
+            for (let attempt = 0; attempt < 50 && history.length < expected.length; attempt++) {
+              history = (yield* call(strict, "history", { page: "p1", kind: "console" })).value.outcome
+              if (history.length < expected.length) yield* Effect.sleep("100 millis")
+            }
+            assert.deepStrictEqual(history, expected)
             const local = yield* BrowserToolkit.make({
               context: page.context,
               secrets: {},

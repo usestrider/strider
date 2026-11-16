@@ -10,8 +10,9 @@
  *
  * An action checks in rounds in the page, at each frame, until its checks pass; then it takes the page's input
  * permit, checks once more and does its part in the page (focus, select, scroll), and sends its input, built from
- * the page's input state (`input.ts`). A pointer gesture is guarded: if its first trusted event lands outside the
- * element, the page never sees it, and the action checks again.
+ * the page's input state (`input.ts`). A pointer gesture is guarded while its receivesPointer check is on: if its first
+ * trusted event lands outside the element, the page never sees it, and the action checks again. With the check off,
+ * nothing is armed, and the input lands on whatever is at the point.
  */
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -1418,8 +1419,9 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
   }
 
   /**
-   * A pointer action: the checks, then under the permit the point, a guard armed on the element, the gesture,
-   * and the guard asked whether it stopped the gesture, in which case the action checks again.
+   * A pointer action: the checks, then under the permit the point, a guard armed on the element when the
+   * receivesPointer check is on, the gesture, and the guard asked whether it stopped the gesture, in which case the
+   * action checks again.
    */
   private pointer(
     operation: string,
@@ -1445,7 +1447,10 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     } = {}
   ) {
     const owner = this.owner
-    const guard = extra.guard ?? true
+    // The guard is the receivesPointer check applied to the first trusted event: an action that turned the check
+    // off means its input to land on whatever covers the element, so nothing is armed to stop it
+    const guard = (extra.guard ?? true) &&
+      (options?.checks?.receivesPointer ?? pointerChecks.receivesPointer)
     const at = extra.position ?? options?.position
     const position = at === undefined ? null : { x: at.x, y: at.y }
     return this.act(
@@ -1870,6 +1875,16 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
               ))
             }
             record.markSent()
+            const inserted = Runtime.insertsInPage(owner.runtime, events)
+            if (Option.isSome(inserted)) {
+              return Runtime.insertText(
+                owner.runtime,
+                owner.page,
+                inserted.value.text,
+                inserted.value.beforeInput,
+                id
+              ).pipe(Effect.mapError((failure) => this.sendFailure(operation, failure, record)))
+            }
             return owner.runtime.model.adapter.dispatchInput(
               owner.page.id,
               events,
