@@ -3538,3 +3538,111 @@ describe("CDP owned Chromium shutdown", () => {
       ))
   }
 })
+
+describe("CDP WebSocket bridge", () => {
+  it.effect("delivers a binding call that arrived while its target's session was held, once the sync folds its realm", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const received = yield* Deferred.make<string>()
+      const bridgeScope = yield* Scope.make()
+      yield* Effect.addFinalizer(() => Scope.close(bridgeScope, Exit.void))
+      const bridge: Adapter.WebSocketBridge = {
+        name: "__striderWebSocketTest",
+        token: "token",
+        scope: bridgeScope,
+        captured: () => Effect.void,
+        receive: (realm) => {
+          Deferred.doneUnsafe(received, Effect.succeed(realm))
+          return true
+        },
+        ended: () => {},
+        failed: () => {}
+      }
+      const ready = yield* Deferred.make<void>()
+      yield* Effect.gen(function*() {
+        while (true) {
+          const command = yield* browser.next
+          if (command.sessionId === "S1" && command.method === "Runtime.addBinding") {
+            // The realm and a call through the binding arrive while the session's sync is still running, and
+            // nothing arrives for the session after it
+            yield* browser.receive({
+              sessionId: "S1",
+              method: "Runtime.executionContextCreated",
+              params: {
+                context: {
+                  id: 1,
+                  uniqueId: "context-1",
+                  origin: "https://target.test",
+                  name: "",
+                  auxData: { frameId: "T1", isDefault: true, type: "default" }
+                }
+              }
+            })
+            yield* browser.receive({
+              sessionId: "S1",
+              method: "Runtime.bindingCalled",
+              params: { name: bridge.name, payload: "{}", executionContextId: 1 }
+            })
+          }
+          yield* browser.receive({
+            id: command.id,
+            sessionId: command.sessionId,
+            result: command.method === "Browser.getVersion"
+              ? {
+                protocolVersion: "1.3",
+                product: "Chrome/155.0.8059.79",
+                revision: "test",
+                userAgent: "HeadlessChrome",
+                jsVersion: "test"
+              }
+              : command.method === "Target.getBrowserContexts"
+              ? { browserContextIds: [] }
+              : command.method === "Page.getFrameTree"
+              ? {
+                frameTree: {
+                  frame: {
+                    id: "T1",
+                    loaderId: "initial",
+                    url: "https://target.test/",
+                    securityOrigin: "https://target.test",
+                    mimeType: "text/html"
+                  }
+                }
+              }
+              : command.method === "Page.addScriptToEvaluateOnNewDocument"
+              ? { identifier: `script-${command.id}` }
+              : {}
+          })
+        }
+      }).pipe(Effect.forkScoped)
+      const adapter = yield* CdpAdapter.connect(browser.transport, {
+        ownership: "launched",
+        sink: (fact) =>
+          fact._tag === "PageReady" || fact._tag === "PageInitializationFailed"
+            ? Deferred.succeed(ready, undefined).pipe(Effect.asVoid)
+            : Effect.void
+      })
+      yield* adapter.declare({ _tag: "UserContext", context: adapter.defaultContext }, {
+        _tag: "InitScript",
+        webSocket: bridge,
+        source: "",
+        world: { _tag: "Main" },
+        phase: "user",
+        workers: false,
+        timing: "beforeAuthorScript",
+        after: []
+      })
+      yield* browser.receive({
+        method: "Target.attachedToTarget",
+        params: {
+          sessionId: "S1",
+          targetInfo: { targetId: "T1", type: "page", title: "", url: "https://target.test/", attached: true },
+          waitingForDebugger: false
+        }
+      })
+      yield* Deferred.await(ready)
+      const realm = yield* Deferred.await(received).pipe(Effect.timeoutOption("1 second"), TestClock.withLive)
+      assert.isTrue(Option.isSome(realm), "the parked binding call must reach the bridge")
+      yield* browser.lose("test complete")
+    }).pipe(Effect.scoped))
+})

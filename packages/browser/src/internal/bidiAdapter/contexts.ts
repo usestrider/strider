@@ -10,6 +10,7 @@ import * as Redacted from "effect/Redacted"
 import * as BrowserBidi from "../../bidi-protocol/Browser.ts"
 import * as BrowsingContext from "../../bidi-protocol/BrowsingContext.ts"
 import * as Network from "../../bidi-protocol/Network.ts"
+import * as Script from "../../bidi-protocol/Script.ts"
 import type * as Download from "../../Download.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
 import * as L1Target from "../../Target.ts"
@@ -26,6 +27,7 @@ import {
   type DownloadEntry,
   type Event,
   navigableById,
+  type NavigableEntry,
   navigableOf,
   type State
 } from "./state.ts"
@@ -89,6 +91,45 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         state.buffer.emit({ _tag: "DownloadEnded", download: download.id, outcome: { _tag: "Canceled" } })
       }
     })
+
+/**
+ * Ends a child frame whose window realm ended with no new one, if Firefox no longer lists it. This stands in for
+ * the `browsingContext.contextDestroyed` that Firefox 158 loses when a removed cross-site iframe's process is gone
+ * before its discard handler reads the process's type; it comes out once the pinned Firefox has Mozilla's fix.
+ *
+ * The realm's end and the frame's discard reach the browser's process from two processes, so a tree read on the
+ * realm's end alone can still list the frame. The parent frame's process sends the discard right after the message
+ * that ends the frame's window, on its one channel: its reply to a command sent once the realm ended comes after
+ * the discard, which takes the frame out of the tree at once. A frame the tree still lists is kept.
+ */
+export const confirmFrameRemoval = (state: State, navigable: NavigableEntry) => {
+  const parent = navigable.parent
+  // A page that starts closing meanwhile ends the frame with its own reason
+  const awaitsRealm = () =>
+    !navigable.removed && closingReason(state, navigable.page) === undefined &&
+    !Array.from(navigable.document?.realms ?? []).some((realm) => realm.world._tag === "Main" && !realm.ended) &&
+    !navigable.pendingRealms.some((realm) => realm.world._tag === "Main" && !realm.ended)
+  if (parent === undefined || !awaitsRealm()) return Effect.void
+  return Effect.gen(function*() {
+    // A failure, such as a parent frame that is gone and whose end covers this one, keeps the frame
+    yield* state.send(Script.evaluate({
+      expression: "0",
+      target: { context: parent.bidi, sandbox: "__strider_utility__" },
+      awaitPromise: false,
+      resultOwnership: "none"
+    }))
+    yield* state.root().drainObserved
+    if (!awaitsRealm()) return
+    const tree = yield* state.send(BrowsingContext.getTree({ root: parent.bidi, maxDepth: 1 }))
+    const listed = tree.contexts.some((info) => (info.children ?? []).some((child) => child.context === navigable.bidi))
+    if (listed) return
+    yield* state.buffer.run(() => {
+      if (awaitsRealm()) {
+        removeNavigable(state, navigable, new L1Target.FrameDetached({}), "bidi:browsingContext.getTree")
+      }
+    })
+  })
+}
 
 // ── Operations ────────────────────────────────────────────────────────────────────────────────────────────
 

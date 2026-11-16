@@ -94,6 +94,7 @@ const attached = (state: State, parent: TargetEntry | undefined, params: Target.
         targetId: info.targetId,
         context,
         target,
+        openerId: info.openerId,
         ready: Deferred.makeUnsafe(),
         closing: undefined,
         closeRequested: false,
