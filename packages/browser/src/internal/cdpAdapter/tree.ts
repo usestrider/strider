@@ -123,6 +123,7 @@ export const endPage = (state: State, page: PageEntry, reason: L1Target.CloseRea
     }
   }
   Deferred.doneUnsafe(page.ready, Effect.fail(Kit.gone({ _tag: "Page", id: page.id }, reason)))
+  Deferred.doneUnsafe(page.treeRead, Effect.void)
 }
 
 // ── Documents and navigations ─────────────────────────────────────────────────────────────────────────────

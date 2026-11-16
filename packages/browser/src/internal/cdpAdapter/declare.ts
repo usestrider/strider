@@ -475,15 +475,16 @@ const applyToTarget = (state: State, declaration: Adapter.Declaration, target: T
   }
 }
 
-// A page still in its initial sync gets the declaration from the sync, which configures it from the registry, or
-// once the sync is applied: one sent in between could cause events the sync discards. A release doesn't wait, since
-// a sync can hang, and what it sends causes no events the model needs.
+// A page in its initial sync discards the events received before the frame tree's reply, so a declaration writes
+// to it only once that reply is in: one sent before could pause a request that no one continues, which also keeps
+// Chromium from answering the tree. It doesn't wait for the rest of the sync, which can be held up by a dialog or
+// the renderer. A release doesn't wait at all, since what it sends causes no events the model needs.
 const applyDeclaration = (state: State, declaration: Adapter.Declaration, scope: Adapter.DeclarationScope) =>
   Effect.forEach(targetsInScope(state, scope), (target) => {
-    const ready = target.page!.ready
-    return Deferred.isDoneUnsafe(ready)
+    const read = target.page!.treeRead
+    return Deferred.isDoneUnsafe(read)
       ? applyToTarget(state, declaration, target)
-      : Effect.ignore(Deferred.await(ready)).pipe(
+      : Deferred.await(read).pipe(
         Effect.andThen(Effect.suspend(() => target.ended ? Effect.void : applyToTarget(state, declaration, target)))
       )
   }, {

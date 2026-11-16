@@ -585,19 +585,30 @@ describe("CDP locale declaration release", () => {
         ))
     }
   }
-  it.effect("leaves a declaration made while a page syncs to the sync, and to after it", () =>
+  it.effect("reads current declarations when queued target configuration acquires the permit", () =>
     withProtocolScheduler((drain) =>
       Effect.gen(function*() {
         const browser = yield* makeBrowser
+        const heldLocale = yield* Deferred.make<Sent>()
         const heldGate = yield* Deferred.make<Sent>()
         const ready = yield* Deferred.make<void>()
         const commands: Array<Sent> = []
+        let holdingLocale = true
         const reply = (command: Sent, result: object = {}) =>
           browser.receive({ id: command.id, sessionId: command.sessionId, result })
         yield* Effect.gen(function*() {
           while (true) {
             const command = yield* browser.next
             commands.push(command)
+            // Hold installation's first locale reply; any stale configuration command must
+            // still receive its reply so the regression reports an assertion, not a deadlock.
+            if (
+              command.method === "Emulation.setLocaleOverride" && command.params?.locale === "fr-FR" && holdingLocale
+            ) {
+              holdingLocale = false
+              yield* Deferred.succeed(heldLocale, command)
+              continue
+            }
             if (command.method === "Target.setAutoAttach" && command.sessionId === "S1") {
               yield* Deferred.succeed(heldGate, command)
               continue
@@ -641,22 +652,107 @@ describe("CDP locale declaration release", () => {
             waitingForDebugger: false
           }
         })
-        // Attachment has registered the target, but its sync has not reached configureTarget yet.
+        // Attachment has registered the target, but its gate has not reached configureTarget yet.
         const gate = yield* Deferred.await(heldGate)
+        const scope = yield* Scope.make()
+        yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))
         const installing = yield* adapter.declare({ _tag: "UserContext", context: adapter.defaultContext }, {
           _tag: "Override",
           override: { _tag: "Locale", locale: "fr-FR" }
-        }).pipe(Effect.scoped, Effect.forkChild)
-        yield* drain
-        // Nothing is written to the page mid-sync: the sync's configuration reads the declaration
-        assert.isFalse(commands.some((command) => command.method === "Emulation.setLocaleOverride"))
+        }).pipe(Scope.provide(scope), Effect.forkChild)
+        const locale = yield* Deferred.await(heldLocale)
+        // Installation holds the override permit. Configuration now queues behind it.
         yield* reply(gate)
-        yield* Deferred.await(ready)
+        yield* drain
+        // Remove the declaration before configuration can acquire the permit.
+        const closing = yield* Scope.close(scope, Exit.void).pipe(
+          Effect.provideService(Cleanup.Confirm, true),
+          Effect.forkChild
+        )
+        yield* drain
+        yield* reply(locale)
         yield* Fiber.join(installing)
-        const locales = commands.filter((command) => command.method === "Emulation.setLocaleOverride")
-        assert.strictEqual(locales.filter((command) => command.params?.locale === "fr-FR").length >= 1, true)
-        // Its release, once the sync is applied, leaves the page without it
-        assert.notStrictEqual(locales.at(-1)?.params?.locale, "fr-FR")
+        yield* Fiber.join(closing)
+        yield* Deferred.await(ready)
+        // Only installation may write fr-FR; a pre-permit snapshot makes configuration write it again.
+        assert.strictEqual(
+          commands.filter((command) =>
+            command.method === "Emulation.setLocaleOverride" && command.params?.locale === "fr-FR"
+          ).length,
+          1
+        )
+        assert.deepStrictEqual(
+          commands.filter((command) => command.method === "Emulation.setUserAgentOverride").at(-1)?.params,
+          { userAgent: "HeadlessChrome" }
+        )
+      })
+    ))
+
+  it.effect("writes a declaration to a page in its initial sync only once the frame tree has replied", () =>
+    withProtocolScheduler((drain) =>
+      Effect.gen(function*() {
+        const browser = yield* makeBrowser
+        const heldTree = yield* Deferred.make<Sent>()
+        const ready = yield* Deferred.make<void>()
+        const commands: Array<Sent> = []
+        const reply = (command: Sent, result: object = {}) =>
+          browser.receive({ id: command.id, sessionId: command.sessionId, result })
+        const tree = {
+          frameTree: {
+            frame: { id: "T1", loaderId: "initial", url: "about:blank", securityOrigin: "://", mimeType: "text/html" }
+          }
+        }
+        yield* Effect.gen(function*() {
+          while (true) {
+            const command = yield* browser.next
+            commands.push(command)
+            if (command.method === "Page.getFrameTree" && command.sessionId === "S1") {
+              yield* Deferred.succeed(heldTree, command)
+              continue
+            }
+            const result = command.method === "Browser.getVersion"
+              ? {
+                protocolVersion: "1.3",
+                product: "Chrome/155.0.8059.79",
+                revision: "test",
+                userAgent: "HeadlessChrome",
+                jsVersion: "test"
+              }
+              : command.method === "Target.getBrowserContexts"
+              ? { browserContextIds: [] }
+              : {}
+            yield* reply(command, result)
+          }
+        }).pipe(Effect.forkScoped)
+        const adapter = yield* CdpAdapter.connect(browser.transport, {
+          ownership: "attached",
+          sink: (fact) =>
+            fact._tag === "PageReady" ? Deferred.succeed(ready, undefined).pipe(Effect.asVoid) : Effect.void
+        })
+        yield* browser.receive({
+          method: "Target.attachedToTarget",
+          params: {
+            sessionId: "S1",
+            targetInfo: { targetId: "T1", type: "page", title: "", url: "about:blank", attached: true },
+            waitingForDebugger: false
+          }
+        })
+        const held = yield* Deferred.await(heldTree)
+        const installing = yield* adapter.declare({ _tag: "UserContext", context: adapter.defaultContext }, {
+          _tag: "Override",
+          override: { _tag: "Locale", locale: "fr-FR" }
+        }).pipe(Effect.forkScoped)
+        yield* drain
+        // Events received before the tree's reply are discarded, so nothing may cause one yet
+        assert.isFalse(commands.some((command) => command.method === "Emulation.setLocaleOverride"))
+        yield* reply(held, tree)
+        yield* Fiber.join(installing)
+        yield* Deferred.await(ready)
+        assert.isTrue(
+          commands.some((command) =>
+            command.method === "Emulation.setLocaleOverride" && command.params?.locale === "fr-FR"
+          )
+        )
       })
     ))
 })
@@ -741,7 +837,7 @@ describe("CDP viewport restoration", () => {
         assert.isTrue(sentWhileRestoring)
       })
     ))
-  it.effect("applies a declaration made while a page's configuration measures the viewport once the page is synced", () =>
+  it.effect("leaves other overrides free to apply while target configuration waits for viewport measurement", () =>
     withProtocolScheduler((drain) =>
       Effect.gen(function*() {
         const browser = yield* makeBrowser
@@ -813,13 +909,11 @@ describe("CDP viewport restoration", () => {
           override: { _tag: "Locale", locale: "fr-FR" }
         }).pipe(Effect.forkScoped)
         yield* drain
-        // The page is still syncing, so the declaration waits for the sync rather than writing to it
         const sentWhileConfiguring = commands.some((command) => command.method === "Emulation.setLocaleOverride")
         yield* browser.receive({ id: held.id, sessionId: held.sessionId, result: { executionContextId: 7 } })
         yield* Deferred.await(ready)
         yield* Fiber.join(locale)
-        assert.isFalse(sentWhileConfiguring)
-        assert.isTrue(commands.some((command) => command.method === "Emulation.setLocaleOverride"))
+        assert.isTrue(sentWhileConfiguring)
       })
     ))
 })

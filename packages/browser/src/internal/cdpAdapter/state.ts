@@ -106,6 +106,11 @@ export interface PageEntry {
   readonly context: ContextEntry
   readonly target: TargetEntry
   readonly ready: Deferred.Deferred<void, Adapter.AdapterError>
+  /**
+   * Done once the page's initial sync has the frame tree's reply: events received after it are folded, not
+   * discarded, so a declaration may write to the page from then on. The page's end also completes it.
+   */
+  readonly treeRead: Deferred.Deferred<void>
   closing: L1Target.CloseReason | undefined
   /**
    * A close that runs `beforeunload` was sent and its prompt, if any, hasn't refused it: the page's end is the
