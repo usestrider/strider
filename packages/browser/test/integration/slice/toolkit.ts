@@ -764,11 +764,11 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               const decided = dialogLines.filter((line) => line.includes(" by "))
               assert.lengthOf(decided, 1, dialogLines.join("\n"))
               assert.match(decided[0]!, /^dialog \w+( "Sure\?")? on shop dismissed by r1$/)
-              const opened = dialogLines.filter((line) => !line.includes(" by "))
-              assert.isAtMost(opened.length, 1, dialogLines.join("\n"))
-              if (opened.length === 1) {
-                assert.match(opened[0]!, /^dialog \w+( "Sure\?")? on shop, open$/)
-                assert.isBelow(dialogLines.indexOf(opened[0]!), dialogLines.indexOf(decided[0]!))
+              const openLines = dialogLines.filter((line) => !line.includes(" by "))
+              assert.isAtMost(openLines.length, 1, dialogLines.join("\n"))
+              if (openLines.length === 1) {
+                assert.match(openLines[0]!, /^dialog \w+( "Sure\?")? on shop, open$/)
+                assert.isBelow(dialogLines.indexOf(openLines[0]!), dialogLines.indexOf(decided[0]!))
               }
               yield* call(tools, "route", {
                 page: "shop",
