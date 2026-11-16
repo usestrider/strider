@@ -183,7 +183,7 @@ export const createPage = Effect.fnUntraced(function*(state: State, id: UserCont
   // A declaration that can be released or overridden later doesn't last as long as the tab, so it doesn't decide.
   const { targetId } = yield* Kit.protocol(
     Target.createTarget({
-      url: "about:blank",
+      url: (globalThis as any).__probeUrl ?? "about:blank",
       // Otherwise a window of its own, so a page opened after it doesn't put it in the background, where headless
       // Chromium renders nothing
       ...(context.focusEmulated ? {} : { newWindow: true }),

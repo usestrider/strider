@@ -91,6 +91,7 @@ const attached = (state: State, parent: TargetEntry | undefined, params: Target.
     case "page": {
       const context = contextFor(state, info.browserContextId)
       const opener = info.openerId === undefined ? undefined : state.targetsById.get(info.openerId)?.page
+      console.log("PROBE attach", JSON.stringify({ url: info.url, openerId: info.openerId, waiting: params.waitingForDebugger }))
       const target = newTarget(state, kind, info, session, undefined, undefined)
       const page: PageEntry = {
         id: state.ids.navigable(),
