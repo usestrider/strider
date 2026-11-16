@@ -62,6 +62,41 @@ describe("PageClock broadcast", () => {
       assert.strictEqual(interrupted, false)
       assert.strictEqual(finished, true)
     })))
+
+  it.effect("fails with an unreadable timer error when the page's description of it doesn't decode", () =>
+    Effect.scoped(Effect.gen(function*() {
+      // A page that replaced `JSON.stringify` can make the shim resolve to anything after "threw "
+      const adapter = {
+        declare: () => Effect.void,
+        realm: (id: string) => Effect.succeed(id),
+        evaluate: (_realm: string, options: { readonly awaitPromise: boolean }) =>
+          Effect.succeed({
+            _tag: "Value",
+            value: { type: "string", value: options.awaitPromise ? "threw not json" : "installed" }
+          })
+      }
+      const runtime = { model: { adapter }, timelines: Clock.makeTimelines() } as unknown as Runtime.Runtime
+      const pages = [{
+        state: {
+          get: Effect.succeed({
+            status: { _tag: "Open", document: { id: "page" }, url: "page" },
+            frames: [],
+            workers: []
+          })
+        }
+      }] as unknown as Array<Model.PageEntry>
+      const clock = Clock.make({
+        runtime,
+        scope: { _tag: "Browser" },
+        pages: () => pages,
+        name: "clock",
+        conflicting: Option.none
+      }, {})
+      yield* clock.install({ mode: "controlled", at: 1000 })
+      const error = yield* Effect.flip(clock.adjust(100))
+      assert(error._tag === "PageClockError" && error.reason._tag === "EvaluationThrown", String(error))
+      assert.strictEqual(error.reason.exception.message, "a value that can't be read")
+    })))
 })
 
 describe("PageClock duration input", () => {

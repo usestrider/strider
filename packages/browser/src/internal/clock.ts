@@ -29,6 +29,7 @@ import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
 import * as Deadline from "../Deadline.ts"
@@ -460,8 +461,25 @@ const operationSource = (
 /** A timer's error in one document, from the JSON the shim resolved to. */
 interface Thrown {
   readonly url: string
-  readonly exception: { readonly name: string; readonly message: string; readonly stack: string | null }
+  readonly exception: typeof ThrownException.Type
 }
+
+/** What the shim reads of a thrown value. */
+const ThrownException = Schema.Struct({
+  name: Schema.String,
+  message: Schema.String,
+  stack: Schema.NullOr(Schema.String)
+})
+
+/**
+ * The thrown value the shim described. The page's world runs the shim, so a page that replaced `JSON.stringify`
+ * can send anything; what doesn't decode is still a timer's error, one that can't be read.
+ */
+const decodeThrown = (text: string): typeof ThrownException.Type =>
+  Option.getOrElse(
+    Schema.decodeUnknownOption(Schema.fromJsonString(ThrownException))(text),
+    () => ({ name: "Error", message: "a value that can't be read", stack: null })
+  )
 
 /** A timeline, kept by its owner while a clock is installed. */
 interface Installed {
@@ -584,7 +602,7 @@ export const make = (owner: Owner, key: object): PageClock.PageClock => {
                 const value = result.value
                 return Effect.succeed(
                   value.type === "string" && value.value.startsWith("threw ")
-                    ? [{ url: where.url, exception: JSON.parse(value.value.slice("threw ".length)) }]
+                    ? [{ url: where.url, exception: decodeThrown(value.value.slice("threw ".length)) }]
                     : []
                 )
               }),
