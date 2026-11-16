@@ -24,11 +24,14 @@ import * as Adapter from "../src/internal/adapter.ts"
 import * as BidiWire from "../src/internal/bidiWire.ts"
 import * as BoundedAdapter from "../src/internal/boundedAdapter.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
+import { dispatchInput as dispatchCdpInput } from "../src/internal/cdpAdapter/input.ts"
+import type { State as CdpState } from "../src/internal/cdpAdapter/state.ts"
 import * as CdpWire from "../src/internal/cdpWire.ts"
 import * as Ingestion from "../src/internal/ingestion.ts"
 import * as Operation from "../src/internal/operation.ts"
 import * as ProtocolClient from "../src/internal/protocolClient.ts"
 import * as WebKitWire from "../src/internal/webkitWire.ts"
+import type * as L1Target from "../src/Target.ts"
 import { type FakeBrowser, makeBrowser } from "./utils/FakeBrowser.ts"
 
 interface Recorder {
@@ -662,6 +665,115 @@ describe("ProtocolClient", () => {
       yield* Deferred.succeed(gate, undefined)
       yield* Fiber.join(drained)
       assert.deepStrictEqual(recorder.folded, ["1"])
+    }))
+
+  it.effect("routes frameless input after a nested attachment already received on the parent session is folded", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const gate = yield* Deferred.make<void>()
+      const entered = yield* Deferred.make<void>()
+      const original = makeFold().fold
+      let addNested = () => {}
+      const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire, {
+        fold: (control) => {
+          const fold = original(control)
+          return {
+            ...fold,
+            apply: (session, method, params, received) => {
+              const apply = fold.apply(session, method, params, received)
+              if (
+                method !== Target.attachedToTarget.method ||
+                (params as Target.AttachedToTargetParams).sessionId !== "S3"
+              ) return apply
+              return Effect.gen(function*() {
+                yield* Deferred.succeed(entered, undefined)
+                yield* Deferred.await(gate)
+                addNested()
+                yield* apply
+              })
+            }
+          }
+        }
+      })
+      const pageSession = yield* attach(browser, client, "S1")
+      const parentSession = yield* attach(browser, client, "S2")
+      yield* client.root.drainObserved
+      const id = "page-1" as L1Target.NavigableId
+      const pageTarget = { targetId: "T-S1", session: pageSession }
+      const parentTarget = { targetId: "T-S2", session: parentSession }
+      const page = { id, target: pageTarget, ended: false }
+      const rootFrame = { page, owner: pageTarget, parent: undefined }
+      const parentFrame = { page, owner: parentTarget, parent: rootFrame }
+      const frames = new Map<string, unknown>([["T-S1", rootFrame], ["T-S2", parentFrame]])
+      const state = { ids: {}, pages: new Map([[id, page]]), frames } as unknown as CdpState
+      addNested = () =>
+        frames.set("T-S3", {
+          page,
+          parent: parentFrame,
+          owner: { targetId: "T-S3", session: client.session("S3" as Protocol.SessionKey)! }
+        })
+      // A nested attachment is received on the parent OOPIF, not on the page session.
+      yield* browser.receive({
+        method: "Target.attachedToTarget",
+        sessionId: "S2",
+        params: {
+          sessionId: "S3",
+          targetInfo: { targetId: "T-S3", type: "iframe", title: "", url: "http://nested.test", attached: true },
+          waitingForDebugger: false
+        }
+      })
+      yield* Deferred.await(entered)
+      const input = yield* dispatchCdpInput(state, id, [{
+        _tag: "Wheel",
+        x: 150,
+        y: 100,
+        deltaX: 0,
+        deltaY: 10,
+        modifiers: { alt: false, control: false, meta: false, shift: false }
+      }]).pipe(Effect.forkChild)
+      const reply = (command: Awaited<Effect.Success<typeof browser.next>>) => {
+        const child = command.sessionId === "S1" ? "T-S2" : "T-S3"
+        const result = command.method === "DOM.getNodeForLocation" ?
+          { backendNodeId: 1, frameId: command.sessionId === "S1" ? "T-S1" : "T-S2" }
+          : command.method === "DOM.describeNode" ?
+          {
+            node: {
+              nodeId: 1,
+              backendNodeId: 1,
+              nodeType: 1,
+              nodeName: "IFRAME",
+              localName: "iframe",
+              nodeValue: "",
+              frameId: child
+            }
+          }
+          : command.method === "DOM.getBoxModel"
+          ? {
+            model: {
+              content: [10, 10, 210, 10, 210, 210, 10, 210],
+              padding: [],
+              border: [],
+              margin: [],
+              width: 200,
+              height: 200
+            }
+          }
+          : {}
+        return browser.receive({ id: command.id, sessionId: command.sessionId, result })
+      }
+      // The page's hit test can finish while the parent session's fold is still pending.
+      for (let i = 0; i < 3; i++) yield* reply(yield* browser.next)
+      const next = yield* browser.next.pipe(Effect.forkChild)
+      for (let i = 0; i < 10; i++) yield* Effect.yieldNow
+      yield* Deferred.succeed(gate, undefined)
+      let command = yield* Fiber.join(next)
+      while (command.method !== "Input.dispatchMouseEvent") {
+        yield* reply(command)
+        command = yield* browser.next
+      }
+      yield* reply(command)
+      yield* Fiber.join(input)
+      assert.strictEqual(command.sessionId, "S3", "the wheel must reach the nested frame, not its parent")
     }))
 
   it.effect("returns the receive sequence of a reply from sendSequenced", () =>
