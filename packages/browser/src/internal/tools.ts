@@ -80,6 +80,7 @@ export const pages = tool(
 
 /** How far a navigation goes before the tool returns: the document committed, parsed, or loaded. */
 export const WaitUntil = Schema.Literals(["commit", "domContentLoaded", "load"]).annotate({
+  default: "domContentLoaded",
   description:
     "When the navigation returns: commit, when the new document exists but may have no content yet; domContentLoaded (the default), once its HTML is parsed; or load, once its images and other resources have loaded too"
 })
@@ -266,7 +267,7 @@ export const history = tool(
 
 export const find = tool(
   "find",
-  "Searches the page's latest snapshot, taking one if there is none, for elements whose name, text, or inferred password designation contains the query (case-insensitive), or equals it with exact (case-sensitive); narrows by role. Inferred password controls use role editable; explicit ARIA roles are preserved. Returns their refs, which are targets, each with its role, name, and the named elements it is in.",
+  "Takes a fresh snapshot of the page, which becomes its latest, and searches it for elements whose name, text, or inferred password designation contains the query (case-insensitive), or equals it with exact (case-sensitive); narrows by role. Inferred password controls use role editable; explicit ARIA roles are preserved. Returns their refs, which are targets, each with its role, name, and the named elements it is in. It doesn't wait: content a script adds later needs expect.",
   {
     page: PageName,
     query: Schema.String,
