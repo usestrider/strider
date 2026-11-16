@@ -1,5 +1,13 @@
 /**
- * The messages that a page or its workers write to the console.
+ * The messages on a page's console: what the page or its workers write to it, and what the browser writes there
+ * itself, such as a Content Security Policy violation, a request blocked by CORS, or a resource that failed to load.
+ *
+ * The browser's own messages are reported as its developer tools console shows them, one message for each entry, so
+ * one failure can be one message on one browser and several on another. On Firefox they arrive as uncaught
+ * exceptions instead, as Firefox sends them as script errors. Stock WebKit's "Fetch API cannot load … due to access
+ * control checks" arrives as an uncaught exception too: WebKit sends it on its `javascript` channel at level `error`,
+ * which is how Strider reads an uncaught exception on WebKit. Each backend's `console` capability says what it
+ * reports.
  *
  * A message is reported to its page and its context: a dedicated worker's messages reach its page, and a shared or
  * service worker's only its context. Each backend's `console` capability says what it reports from workers.
