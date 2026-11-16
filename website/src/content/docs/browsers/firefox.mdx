@@ -139,6 +139,12 @@ by a subscription with [`body`](/docs/events/network#decoding-bodies) or by
 input, but Firefox delivers it at the nearest whole pixel, so a click at a fractional point, such as an explicit `position` in a box at a
 half-pixel offset, lands up to half a pixel away. The capability `input.fractionalPointer` is `partial` here.
 
+**A shadow host's own boxes don't cover its shadow content in the pointer check.** Inside a shadow root, Firefox's
+hit test leaves out the host's own boxes, such as a `::before` drawn above the host's shadow content. A
+[trial](/docs/pages/actions#turning-checks-off) click, or another check of readiness alone, on content under such a cover
+counts it as ready. A real click is still stopped, since its first event lands on the host. The capability
+`hitTest.shadowHostBoxes` is `partial` here.
+
 **An unhandled rejection is reported as a throw,** so [`UncaughtException`](/docs/events/events#history)'s `kind` is `"unknown"`.
 
 **[`servedBy`](/docs/events/network#response-sources) is `"cacheOrServiceWorker"`** for both: Firefox can't tell them apart. A script reused from the memory

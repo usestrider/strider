@@ -960,6 +960,144 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         )
       }
 
+      it.effect(
+        "clicks a link whose slotted text is forwarded through nested shadow roots",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div id="outer">Sign up</div><script>
+            window.clickCount=0;
+            outer.attachShadow({mode:'open'}).innerHTML='<div id="inner"><slot></slot></div>';
+            outer.shadowRoot.querySelector('#inner').attachShadow({mode:'open'}).innerHTML='<a id="inner-link" href="#" onclick="clickCount++"><slot></slot></a>';
+            </script>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.locator("#inner-link").click().pipe(Deadline.within("3 seconds"))
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() => (globalThis as unknown as { clickCount: number }).clickCount),
+              1
+            )
+          })),
+        timeout
+      )
+
+      // Inside a shadow root, Firefox's elementFromPoint and elementsFromPoint leave out the host's own boxes, so its
+      // hit test answers with the button under the host's ::before, which native input never reaches. Which boxes a
+      // shadow root's hit test reports is unspecified (w3c/webcomponents#735, #736), and the answers match a label
+      // slotted into the button, so Strider can't tell the cover apart without singling out pseudo-elements. A
+      // backend with the capability in part asserts what it does today, so the case fails when that changes.
+      it.effect(
+        "refuses a trial click through a shadow host's covering pseudo-element",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div id="outer" onclick="clickCount+=100"></div><script>
+            window.clickCount=0;
+            outer.attachShadow({mode:'open'}).innerHTML='<style>:host{position:relative;display:block;width:120px;height:40px}:host::before{content:"";position:absolute;inset:0;z-index:2;background:red}</style><button id="target" onclick="clickCount++" style="position:absolute;inset:0">Target</button>';
+            </script>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            const point = yield* page.evaluateInMainWorld(() => {
+              const rect = document.querySelector("#outer")!.shadowRoot!.querySelector("#target")!
+                .getBoundingClientRect()
+              return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
+            })
+            // Native input reaches only the host; a hit on the button would also increment its own counter.
+            yield* page.mouse.click(point)
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() => (globalThis as unknown as { clickCount: number }).clickCount),
+              100
+            )
+            const trial = yield* page.locator("#target").click({ trial: true }).pipe(
+              Deadline.within("1 second"),
+              Effect.exit
+            )
+            if (yield* fullySupports("hitTest.shadowHostBoxes")) {
+              assert(Exit.isFailure(trial), "A trial click must refuse the button covered by its host")
+              assert.include(Cause.pretty(trial.cause), "covers")
+            } else {
+              assert(Exit.isSuccess(trial), "The hit test misses the host's own boxes, so the trial passes")
+              // A trial dispatches nothing; the real click above still reached only the host
+              assert.strictEqual(
+                yield* page.evaluateInMainWorld(() => (globalThis as unknown as { clickCount: number }).clickCount),
+                100
+              )
+            }
+          })),
+        timeout
+      )
+
+      /** A custom element whose shadow root wraps its slotted children in a link that counts its clicks. */
+      const shadowLink = (content: string) =>
+        `<!doctype html><script>window.clickCount=0;customElements.define("my-link",class extends HTMLElement{constructor(){super();this.attachShadow({mode:"open"}).innerHTML='<a href="#" id="inner-link" onclick="clickCount++"><slot></slot></a>'}})</script><my-link>${content}</my-link>`
+
+      for (
+        const [label, content] of [["slotted text", "Sign up"], ["a slotted element", "<span>Sign up</span>"]] as const
+      ) {
+        it.effect(`clicks a link in a shadow root whose label is ${label}`, () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() => shadowLink(content))
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.locator("#inner-link").click().pipe(Deadline.within("3 seconds"))
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() => (globalThis as unknown as { clickCount: number }).clickCount),
+              1
+            )
+          })), timeout)
+
+        it.effect(`names a link in a shadow root by its label, ${label}`, () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() => shadowLink(content))
+            const page = yield* newPage
+            yield* page.goto(url)
+            assert.strictEqual(yield* page.getByRole("link", { name: "Sign up" }).count, 1)
+          })), timeout)
+      }
+
+      it.effect(
+        "hides a slotted element under an aria-hidden shadow element from role queries",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<!doctype html><script>customElements.define("hidden-slot",class extends HTMLElement{constructor(){super();this.attachShadow({mode:"open"}).innerHTML='<div aria-hidden="true"><slot></slot></div>'}})</script><hidden-slot><button>Hidden</button></hidden-slot><button>Shown</button>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            assert.strictEqual(yield* page.getByRole("button").count, 1)
+            assert.strictEqual(yield* page.getByRole("button", { name: "Shown" }).count, 1)
+          })),
+        timeout
+      )
+
+      it.effect("inherits aria-disabled through a slot's shadow ancestors", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<div id="host"><button>Save</button></div><script>host.attachShadow({mode:'open'}).innerHTML='<div role="group" aria-disabled="true"><slot></slot></div>'</script>`
+          )
+          const page = yield* newPage
+          yield* page.goto(url)
+          assert.strictEqual(yield* page.getByRole("button").count, 1)
+          assert.strictEqual(yield* page.getByRole("button", { disabled: true }).count, 1)
+        })), timeout)
+
+      it.effect(
+        "does not infer a new pointer cursor on content inheriting it from a slot",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div id="host"><span id="label">Save</span></div><script>host.attachShadow({mode:'open'}).innerHTML='<div style="cursor:pointer"><slot></slot></div>'</script>`
+            )
+            const page = yield* newPage
+            yield* page.goto(url)
+            const snapshot = yield* page.locator("#label").snapshot()
+            assert.deepStrictEqual(snapshot.root.role, { _tag: "Aria", role: "generic" })
+          })),
+        timeout
+      )
+
       it.effect("fills a transparent control under a cover, with no pointer to hit-test", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
