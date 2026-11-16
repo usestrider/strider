@@ -475,12 +475,18 @@ export const configureTarget = Effect.fnUntraced(
           const baseline = yield* popupBaseline(state, target, page)
           if (baseline !== undefined) {
             target.viewport = baseline
+          } else if (target.url === "about:blank") {
+            // Measured as the restore measures, since at a fractional device scale the layout viewport rounds 1 px
+            // away from `innerWidth`/`innerHeight`. It finishes before the override is sent, because a queued read
+            // can be answered after the override applies. A page that attaches at the blank document has its
+            // renderer while it waits for the debugger, so it answers before it resumes.
+            target.viewport = yield* dimensions(target).pipe(
+              Effect.match({ onFailure: () => null, onSuccess: (value) => value })
+            )
           } else {
-            // The initial blank document has no scrollbars. Queue its dimensions before changing them, without
-            // creating an isolated world whose identifier would require a renderer reply before resume.
-            yield* setup.send(Page.getLayoutMetrics(), ({ cssLayoutViewport }) => {
-              target.viewport = { width: cssLayoutViewport.clientWidth, height: cssLayoutViewport.clientHeight }
-            })
+            // A page that attaches at a URL may get its renderer only once its first request is routed, after it
+            // resumes, so a measurement awaited here would never be answered. Its dimensions are unknown.
+            target.viewport = null
           }
           yield* setup.send(Emulation.setDeviceMetricsOverride({
             width: override.width,
