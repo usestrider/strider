@@ -161,8 +161,11 @@ const watchDragStart = Effect.fnUntraced(
 )
 
 /**
- * Whether a watched document fired a `dragstart` since it was last asked, one its listeners didn't cancel and
- * Chromium didn't abandon: no `dragend` reached its source, and the source is still connected.
+ * Whether a watched document fired a `dragstart` since it was last asked whose drag is owed an interception: its
+ * listeners didn't cancel it, the source the page sees is the draggable element itself, and Chromium didn't abandon
+ * it, meaning no `dragend` reached the source and the source is still connected. A source the page can't see, such
+ * as one inside a closed shadow root, whose `dragstart` shows only its host, or a text selection, can't be checked,
+ * so the move doesn't wait for its drag.
  */
 const dragStarted = Effect.fnUntraced(
   function*(state: State, document: DocumentEntry) {
@@ -172,7 +175,7 @@ const dragStarted = Effect.fnUntraced(
       id,
       dragCall(
         "function(){const w=globalThis.__striderDrag;const e=w?.event;" +
-          "const ended=w?.ended===true||w?.source?.isConnected!==true;" +
+          "const ended=w?.ended===true||w?.source?.isConnected!==true||w?.source?.draggable!==true;" +
           "if(w!==undefined){w.event=undefined;w.ended=false}" +
           "return e!==undefined&&!e.defaultPrevented&&!ended}"
       )
@@ -296,7 +299,9 @@ export const dispatchInput = Effect.fnUntraced(
             )
           }
           if (event.type === "down") {
-            state.pressedIn.set(page.id, landed)
+            const pressedFrame = frame === undefined ? undefined : landed.find((each) => each.id === frame.frame)
+            // The frame the press itself went to, not the gesture's destination
+            state.pressedIn.set(page.id, pressedFrame === undefined ? landed : [pressedFrame])
             // A real mouse is captured by the frame its press went to, until every button is released; Chromium
             // routes input sent on the page's session by its point alone, so a held move or a release out of an
             // out-of-process frame that got the press goes on that frame's session, in its coordinates

@@ -97,9 +97,13 @@ export const removeFrame = (state: State, frame: FrameEntry, reason: L1Target.Cl
     // A held mouse kept by a frame that is gone goes back to the page, and the frame starts no drag
     const pressed = state.pressedIn.get(frame.page.id)
     if (pressed?.includes(frame)) {
-      state.pressedIn.set(frame.page.id, pressed.filter((each) => each !== frame))
-      // Only the frame the press went to keeps the mouse, not another that shares its session
-      if (state.pressedOn.get(frame.page.id)?.target === frame.owner && frame.owner !== frame.page.target) {
+      const left = pressed.filter((each) => each !== frame)
+      state.pressedIn.set(frame.page.id, left)
+      // The session keeps the mouse while a frame the press went to is still on it
+      if (
+        state.pressedOn.get(frame.page.id)?.target === frame.owner && frame.owner !== frame.page.target &&
+        !left.some((each) => each.owner === frame.owner)
+      ) {
         state.pressedOn.delete(frame.page.id)
       }
     }
