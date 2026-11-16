@@ -307,16 +307,29 @@ const navigationPending = (state: State, target: TargetEntry) =>
  * waits on its server, which may wait on the caller, would never return. So the wait for the reply ends once a
  * navigation is pending in the target; the command, written before, reaches the new document at its commit. The
  * reply is awaited apart from the declaration, under the connection's own deadline for a command: one that fails
- * or never comes leaves the setting unknown, so the next change sends it again.
+ * or never comes leaves the setting unknown, so the next change sends it again. A declaration that wants the value
+ * a command still unanswered sent waits for that reply, by the same rule, rather than sending it again.
  */
-const applyCache = (state: State, target: TargetEntry) =>
-  withOverrides(
+const applyCache = (state: State, target: TargetEntry) => {
+  // Until the navigation is pending in the target, or the reply comes
+  const until = (confirmed: Fiber.Fiber<void, Protocol.ProtocolError>) =>
+    Effect.raceFirst(
+      Fiber.join(confirmed),
+      state.buffer.waitFor(() => navigationPending(state, target) || undefined)
+    )
+  return withOverrides(
     target,
     Effect.suspend(() => {
+      const wanted = cacheDisabled(state, target, state.registry.overrides(placement(target.page!)))
+      // A declaration that wants the value an unconfirmed command sent waits for that command's reply too
+      const outstanding = target.cacheConfirmation
+      if (outstanding !== undefined && outstanding.disabled === wanted && target.cacheDisabled === wanted) {
+        return Effect.succeed(until(outstanding.fiber))
+      }
       let confirmation: Effect.Effect<void, Protocol.ProtocolError> = Effect.void
       return sendCache(
         target,
-        cacheDisabled(state, target, state.registry.overrides(placement(target.page!))),
+        wanted,
         (command) =>
           Effect.gen(function*() {
             // A connection already tearing down sets nothing more
@@ -325,7 +338,11 @@ const applyCache = (state: State, target: TargetEntry) =>
               Operation.detached,
               Effect.provideService(ProtocolClient.CommandDeadline, Option.none())
             )
-            const confirmed = yield* reply.pipe(
+            const entry: { readonly disabled: boolean; fiber: Fiber.Fiber<void, Protocol.ProtocolError> } = {
+              disabled: wanted,
+              fiber: undefined!
+            }
+            entry.fiber = yield* reply.pipe(
               Effect.tapError((error) =>
                 Effect.sync(() => {
                   target.cacheDisabled = "unknown"
@@ -338,12 +355,13 @@ const applyCache = (state: State, target: TargetEntry) =>
                 )
               ),
               Effect.asVoid,
+              Effect.ensuring(Effect.sync(() => {
+                if (target.cacheConfirmation === entry) target.cacheConfirmation = undefined
+              })),
               Effect.forkIn(state.cleanupScope)
             )
-            confirmation = Effect.raceFirst(
-              Fiber.join(confirmed),
-              state.buffer.waitFor(() => navigationPending(state, target) || undefined)
-            )
+            if (entry.fiber.pollUnsafe() === undefined) target.cacheConfirmation = entry
+            confirmation = until(entry.fiber)
           })
       ).pipe(Effect.map(() => confirmation))
     })
@@ -354,6 +372,7 @@ const applyCache = (state: State, target: TargetEntry) =>
       () => Effect.void
     )
   )
+}
 
 const applyScripts = Effect.fnUntraced(function*(state: State, target: TargetEntry, page: PageEntry, setup?: Setup) {
   const on = setup?.send ?? Protocol.on(target.session)

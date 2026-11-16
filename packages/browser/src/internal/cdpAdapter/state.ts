@@ -7,6 +7,7 @@
  */
 import type * as Deferred from "effect/Deferred"
 import type * as Effect from "effect/Effect"
+import type * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import type * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
@@ -92,6 +93,13 @@ export interface TargetEntry {
    * after a reply that failed or never came.
    */
   cacheDisabled?: boolean | "unknown" | undefined
+  /** The cache command still unanswered, with the value it sets, which a declaration wanting that value awaits. */
+  cacheConfirmation?:
+    | {
+      readonly disabled: boolean
+      readonly fiber: Fiber.Fiber<void, import("../../protocol/Protocol.ts").ProtocolError>
+    }
+    | undefined
   readonly scripts: Map<string, string>
   ended: boolean
   /** Original renderer dimensions, retained until restoration completes; null means the original is unknown. */
