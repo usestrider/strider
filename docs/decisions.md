@@ -1672,6 +1672,32 @@ report both kinds as requests, and Firefox reports `data:` but not `blob:`. Repo
 rejected: the same page would report different requests on each backend, and a `data:` navigation would carry a
 response with no network behind it. `file:` URLs stay requests.
 
+## A timer that throws fails the page clock's operation
+
+When a timer that `adjust` or `setTime` fires on a controlled page clock throws, the error is still reported to
+the page, as a real browser reports an uncaught one, the remaining due timers still run, and the clock still reaches
+its time; then the operation fails with `PageClockError` whose reason is `EvaluationThrown`, carrying the first
+error and the document it threw in. Playwright's clock rethrows the first error once time has reached the target
+too. Succeeding and leaving the error to the page alone was rejected: a test that moves time past a broken timer
+would pass without seeing it. Stopping at the first error was rejected: the timeline would stop short of the time
+the caller asked for, with other documents already past it.
+
+## The page clock waits for the page's messages between timers
+
+After each timer a controlled page clock fires, it lets the page's queued tasks run, and decides how long from
+evidence: it counts the messages the page posts, to a `MessagePort` or to its own window, and passes a message
+through a channel of its own again while the page has posted any since the last one, then waits for one real timer.
+So a chain of the document's own messages, as schedulers built on `MessageChannel` hand work on, completes
+before the next timer whatever its length. It doesn't wait for work in other documents, workers, or the network: a
+document sees only the messages it posts, and a counter of its own can't show that another's work has finished.
+Counting same-origin frames' messages too was rejected: it would hold for some frames and not others. The operation's deadline bounds the wait: past it, the remaining due timers run without
+waiting, the clock reaches its time, and the operation fails with `Timeout`, so a page that posts messages without
+end leaves its clock usable. Playwright's clock waits for one real `setTimeout(0)`, a fixed window that a
+browser's timer clamping makes 4 ms after nested timers and that a longer chain outlasts; that was rejected as a
+settling window. Waiting for nothing between timers was rejected because a timer a task sets would miss the
+adjustment (#343). The cost is real time per timer, so a long adjustment over a frequent interval can outlast the
+default deadline.
+
 ## Text is inserted with the page's editing command where a protocol has none
 
 `Keyboard.insertText` and `fill` insert text with no key events on every backend (`fill("")` deletes by pressing Delete). CDP has `Input.insertText`;
