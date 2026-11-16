@@ -2257,13 +2257,13 @@ describe("Chromium video writer lifetime", () => {
         yield* TestClock.adjust("1 second")
         yield* drain
         const closedPromptly = closing.pollUnsafe() !== undefined
-        yield* TestClock.adjust("5 seconds")
+        yield* TestClock.adjust("30 seconds")
         yield* Fiber.join(closing)
-        assert(closedPromptly, "closing a frameless recording must not wait out the five-second finish budget")
+        assert(closedPromptly, "closing a frameless recording must not wait out the writer's finish budget")
         assert.strictEqual(writes, 0)
         const error = yield* Effect.flip(video.file)
         assert(Capability.isCapabilityError(error))
-        assert.notMatch(error.message, /did not finish within 5 seconds/)
+        assert.notMatch(error.message, /did not finish within/)
       })
     ).pipe(onTestClock))
 
@@ -2330,7 +2330,7 @@ describe("Chromium video writer lifetime", () => {
           }
           yield* drain
           if (mode === "blocked") {
-            yield* TestClock.adjust("5 seconds")
+            yield* TestClock.adjust("30 seconds")
             yield* drain
           }
           const settled = file.pollUnsafe() !== undefined
@@ -2341,7 +2341,7 @@ describe("Chromium video writer lifetime", () => {
           const releasedAtFile = released
           const closing = yield* Effect.forkScoped(Scope.close(recordingScope, Exit.void))
           yield* drain
-          yield* TestClock.adjust("5 seconds")
+          yield* TestClock.adjust("30 seconds")
           yield* Fiber.join(closing)
           assert.isTrue(settled, "source termination must settle file without closing the caller scope")
           const outcome = yield* Fiber.join(file)
@@ -2369,7 +2369,7 @@ describe("Chromium video writer lifetime", () => {
       ).pipe(onTestClock))
   }
 
-  it.effect("bounds an unresponsive writer finish by five seconds on the browser clock", () =>
+  it.effect("bounds an unresponsive writer finish by the default budget read when video is acquired", () =>
     withProtocolScheduler((drain) =>
       Effect.gen(function*() {
         const started = yield* Deferred.make<void>()
@@ -2382,16 +2382,20 @@ describe("Chromium video writer lifetime", () => {
         })
         const page = yield* h.page.control
         const scope = yield* Scope.make()
-        const video = yield* page.capability(Capability.Video).pipe(Scope.provide(scope))
+        const video = yield* page.capability(Capability.Video).pipe(
+          Scope.provide(scope),
+          Deadline.withDefaultBudget("2 seconds")
+        )
         yield* frame(h, 53)
         yield* Deferred.await(started)
         const closing = yield* Effect.forkScoped(Scope.close(scope, Exit.void))
         yield* drain
-        yield* TestClock.adjust("5 seconds")
+        yield* TestClock.adjust("2 seconds")
         yield* Fiber.join(closing)
         const error = yield* Effect.flip(video.file)
         assert(Capability.isCapabilityError(error))
         assert.strictEqual(error.reason._tag, "BackendFailure")
+        assert.match(error.message, /did not finish within 2s/)
       })
     ).pipe(onTestClock))
 })
