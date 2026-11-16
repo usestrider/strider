@@ -36,6 +36,7 @@ import * as os from "node:os"
 import * as path from "node:path"
 import { site, tlsSite } from "../adapter/harness.ts"
 import { responseRouteInFlight, status, supports } from "./capabilities.ts"
+import * as SharedContext from "./sharedContext.ts"
 
 const timeout = 60_000
 
@@ -1385,57 +1386,41 @@ export const declarations = (
           }))
         }), timeout)
 
-      it.effect("drains messages exchanged with a frame before advancing the clock", () =>
+      it.effect("waits for every document when a timer throws a value without a string conversion", () =>
         Effect.scoped(Effect.gen(function*() {
-          const page = yield* Browser.newPage()
-          yield* page.evaluateInMainWorld(async () => {
-            const frame = document.createElement("iframe")
-            frame.srcdoc = `<script>onmessage = event => {
-              const port = event.ports[0];
-              port.onmessage = event => port.postMessage(event.data);
-              port.postMessage("ready");
-            }</script>`
-            const loaded = new Promise((resolve) =>
-              frame.onload = resolve
-            )
-            document.body.append(frame)
-            await loaded
-            const channel = new MessageChannel()
-            const ready = new Promise((resolve) =>
-              channel.port1.onmessage = resolve
-            )
-            frame.contentWindow!.postMessage("connect", "*", [channel.port2])
-            await ready
-            Reflect.set(window, "__port", channel.port1)
+          const first = yield* Browser.newPage()
+          yield* first.context.clock.install({ mode: "controlled", at: 1000 })
+          const second = yield* first.context.newPage
+          const { origin } = yield* site
+          yield* second.goto(fixtureUrl(origin, "<p>second</p>"))
+          yield* first.evaluateInMainWorld(() => {
+            setTimeout(() => {
+              throw Object.create(null)
+            }, 1)
           })
-          yield* page.clock.install({ mode: "controlled", at: 1000 })
-          yield* page.evaluateInMainWorld(() => {
-            const port = Reflect.get(window, "__port") as MessagePort
+          yield* second.evaluateInMainWorld(() => {
             let count = 0
-            port.onmessage = () => {
-              if (++count < 200) {
-                port.postMessage(null)
-              } else {
-                setTimeout(() =>
-                  Reflect.set(window, "__done", true), 100)
-                port.close()
-              }
-            }
-            setTimeout(() =>
-              port.postMessage(null), 100)
+            setInterval(() =>
+              Reflect.set(window, "__count", ++count), 1)
           })
-          yield* page.clock.adjust(1000)
-          assert.strictEqual(
-            yield* page.evaluateInMainWorld(() =>
-              Reflect.get(window, "__done") === true
-            ),
-            true
+          const error = yield* failure(first.context.clock.adjust(1000), "adjust over a throwing value")
+          assert.deepStrictEqual(
+            yield* second.evaluateInMainWorld(() => [Date.now(), Reflect.get(window, "__count")]),
+            [2000, 1000]
           )
+          assert(PageClock.isPageClockError(error) && error.reason._tag === "EvaluationThrown", String(error))
         })), timeout)
+
+      // Playwright's controlled clock is the reference for the timeline's rules in these cases
+    })
+
+    // Cases that keep nothing in their context share one
+    layer(SharedContext.layer(backend), { excludeTestServices: true, timeout })((suite) => {
+      const it = SharedContext.guard(suite)
 
       it.effect("runs a timer scheduled at the end of a long chain of messages", () =>
         Effect.scoped(Effect.gen(function*() {
-          const page = yield* Browser.newPage()
+          const page = yield* SharedContext.newPage
           yield* page.clock.install({ mode: "controlled", at: 1000 })
           yield* page.evaluateInMainWorld(() => {
             // Window messages and port messages, handed on one after another
@@ -1470,7 +1455,7 @@ export const declarations = (
         "times out over a page that posts messages without end, after running its timers",
         () =>
           Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const { origin } = yield* site
             yield* page.clock.install({ mode: "controlled", at: 1000 })
             yield* page.goto(fixtureUrl(origin, `<p id="later">pending</p>`))
@@ -1511,7 +1496,7 @@ export const declarations = (
 
       it.effect("starts controlled performance time when replacing a fixed clock", () =>
         Effect.scoped(Effect.gen(function*() {
-          const page = yield* Browser.newPage()
+          const page = yield* SharedContext.newPage
           const fixed = yield* page.clock.install({ mode: "fixed", at: 500 })
           yield* fixed.remove
           yield* page.clock.install({ mode: "controlled", at: 1000 })
@@ -1524,7 +1509,7 @@ export const declarations = (
 
       it.effect("keeps resumed animation frame timestamps on the performance timeline", () =>
         Effect.scoped(Effect.gen(function*() {
-          const page = yield* Browser.newPage()
+          const page = yield* SharedContext.newPage
           const { origin } = yield* site
           yield* page.goto(fixtureUrl(origin, "<p>frame</p>"))
           yield* page.clock.install({ mode: "controlled", at: 1000 })
@@ -1559,38 +1544,11 @@ export const declarations = (
           }
         })), timeout)
 
-      it.effect("waits for every document when a timer throws a value without a string conversion", () =>
-        Effect.scoped(Effect.gen(function*() {
-          const first = yield* Browser.newPage()
-          yield* first.context.clock.install({ mode: "controlled", at: 1000 })
-          const second = yield* first.context.newPage
-          const { origin } = yield* site
-          yield* second.goto(fixtureUrl(origin, "<p>second</p>"))
-          yield* first.evaluateInMainWorld(() => {
-            setTimeout(() => {
-              throw Object.create(null)
-            }, 1)
-          })
-          yield* second.evaluateInMainWorld(() => {
-            let count = 0
-            setInterval(() =>
-              Reflect.set(window, "__count", ++count), 1)
-          })
-          const error = yield* failure(first.context.clock.adjust(1000), "adjust over a throwing value")
-          assert.deepStrictEqual(
-            yield* second.evaluateInMainWorld(() => [Date.now(), Reflect.get(window, "__count")]),
-            [2000, 1000]
-          )
-          assert(PageClock.isPageClockError(error) && error.reason._tag === "EvaluationThrown", String(error))
-        })), timeout)
-
-      // Playwright's controlled clock is the reference for the timeline's rules in these cases
-
       it.effect("runs the page's tasks between the timers an adjustment fires", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.clock.install({ mode: "controlled", at: "2026-01-01T00:00:00Z" })
             yield* page.goto(fixtureUrl(origin, "<p>clock</p>"))
             // A timer hands off through a real task, which sets a timer due within the same adjustment
@@ -1616,7 +1574,7 @@ export const declarations = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.clock.install({ mode: "controlled", at: "2026-01-01T00:00:00Z" })
             yield* page.goto(fixtureUrl(origin, "<p>clock</p>"))
             yield* page.evaluateInMainWorld(() => {
@@ -1640,7 +1598,7 @@ export const declarations = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.clock.install({ mode: "controlled", at: "2026-01-01T00:00:00Z" })
             // The page's own script: Chromium hides from the page the errors of functions an evaluation made
             yield* page.goto(fixtureUrl(
@@ -1671,7 +1629,7 @@ export const declarations = (
       it.effect("rejects durations that aren't finite, and negative adjustments", () =>
         Effect.gen(function*() {
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             for (const by of [Number.NaN, Number.POSITIVE_INFINITY]) {
               const error = yield* failure(
                 page.clock.install({ mode: "offset", by }),
@@ -1693,7 +1651,7 @@ export const declarations = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const controlled = yield* page.clock.install({ mode: "controlled", at: 1000 })
             yield* page.goto(fixtureUrl(origin, "<p>clock</p>"))
             yield* page.clock.adjust(0.5)
@@ -1718,7 +1676,7 @@ export const declarations = (
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.clock.install({ mode: "controlled", at: 1000 })
             yield* page.goto(fixtureUrl(origin, "<p>clock</p>"))
             const read = page.evaluateInMainWorld(() => [performance.now(), performance.timeOrigin])
