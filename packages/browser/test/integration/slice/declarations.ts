@@ -915,9 +915,7 @@ export const declarations = (
             )
             const origin = `http://127.0.0.1:${(server.address() as net.AddressInfo).port}`
             const navigation = yield* page.goto(`${origin}/held`).pipe(Effect.forkChild)
-            yield* Effect.promise(() =>
-              arrival
-            ).pipe(Effect.timeout("10 seconds"))
+            yield* Effect.promise(() => arrival).pipe(Effect.timeout("10 seconds"))
             const route = yield* page.route(`${origin}/cached.js`, () => Route.continue)
             release()
             yield* Fiber.join(navigation)
