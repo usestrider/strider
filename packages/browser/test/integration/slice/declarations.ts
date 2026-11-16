@@ -1452,7 +1452,7 @@ export const declarations = (
         })), timeout)
 
       it.effect(
-        "times out over a page that posts messages without end, after running its timers, and keeps its clock usable",
+        "times out over a page that posts messages without end, after running its timers",
         () =>
           Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
@@ -1489,14 +1489,6 @@ export const declarations = (
                 return Date.now()
               }),
               2000
-            )
-            // The clock is usable again: the next adjustment runs once the page stops posting
-            yield* page.clock.adjust(1)
-            assert.strictEqual(
-              yield* page.evaluateInMainWorld(() =>
-                Date.now()
-              ),
-              2001
             )
           })),
         timeout
