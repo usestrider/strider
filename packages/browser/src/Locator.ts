@@ -932,7 +932,8 @@ export interface ReadonlyLocator
  * `filter({ visible: true })` excludes it, and `filter({ visible: false })` includes it. Opacity alone does
  * not make an action wait for a fade-in.
  *
- * The action's `visible` check requires CSS visibility, content visibility, and a nonempty box. Pointer actions
+ * The action's `visible` check requires CSS visibility, content visibility, and a nonempty box. An element with
+ * `display: contents` has no box, so it needs a visible child element or visible text instead. Pointer actions
  * also check that the point receives input. Non-pointer actions do not hit-test: `fill` and `clear` check enabled,
  * editable, and not inert; `focus`, `press`, and `pressSequentially` check not inert; `blur` has no checks by default; `selectOption` checks enabled;
  * `selectText` checks only visibility; `scrollIntoView` checks stability. `setInputFiles` runs no readiness checks.
