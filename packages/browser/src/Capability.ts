@@ -196,8 +196,10 @@ export const Screencast: Capability<ScreencastControl> = make("Screencast")
  * Its initial PNG is immediate; subsequent captures wait the configured interval after completion. PNG polling
  * can miss short states and adds work to the page. Video does not enable WebKit downloads or native screencasts.
  * Chromium and opted-in WebKit keep each source frame's time, showing it until the next frame or recording end.
- * Viewport changes are scaled and padded to the initial size. Closing its scope or ending its page/session closes input and waits up to five seconds on the
- * browser clock for a started writer. A recording that receives no image fails promptly with `BackendFailure`.
+ * Viewport changes are scaled and padded to the initial size. Closing its scope or ending its page/session closes input and waits for a started
+ * writer to finish, for up to `Deadline.DefaultBudget` (30 seconds unless set) on the browser clock, as read when
+ * the capability is acquired: wrap the acquisition in `Deadline.withDefaultBudget` to give a slow encoder longer.
+ * A recording that receives no image fails promptly with `BackendFailure`.
  *
  * **Gotchas**
  *

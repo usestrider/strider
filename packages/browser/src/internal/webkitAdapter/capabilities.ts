@@ -78,7 +78,11 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
       entry("interception.abortReason", "unsupported", ["WebKit reports every reason as \"Blocked by Web Inspector\""]),
       entry("interception.redirects", "partial", ["only a redirect's first hop pauses"]),
       entry("bodies", "supported"),
-      entry("console", "supported", ["a message with only primitive arguments is attributed to the main frame"]),
+      entry("console", "supported", [
+        "a message with only primitive arguments is attributed to the main frame",
+        "the browser's \"Fetch API cannot load … due to access control checks\" arrives as an uncaught exception: " +
+        "WebKit sends it on its `javascript` channel at level `error`, which Strider reads as an uncaught exception"
+      ]),
       entry("prompts", "unsupported", [
         "stock WebKit's inspector has no Dialog domain: a dialog blocks the page unreported"
       ]),
@@ -252,7 +256,9 @@ export const launchedCapabilities = (info: Browser.Info, video = false) => {
     ]],
     "input.topLevelDesignMode": ["supported", []],
     "input.native": ["supported", ["Automation's simulated input, which the page trusts"]],
-    "input.insertText": ["supported", []],
+    "input.insertText": ["supported", [
+      "Automation inserts text only by key, so Strider inserts it with the page's editing command, which fires a trusted beforeinput and input and no key events"
+    ]],
     "input.keyboardLayout": ["unsupported", [
       "Automation types characters and named keys, not a layout's physical keys"
     ]],

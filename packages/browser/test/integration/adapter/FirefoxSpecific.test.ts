@@ -1,11 +1,14 @@
 /**
  * What only the BiDi adapter does, against the pinned Firefox: what names a page, realm or handle of its own that
- * ended.
+ * ended, and what a profile directory keeps when the layer closes.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
+import { Browser } from "@usestrider/browser"
+import { Firefox } from "@usestrider/browser/firefox"
 import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import { afterAll } from "vitest"
@@ -70,6 +73,40 @@ describe("Firefox adapter, BiDi only", () => {
             assert.strictEqual(replaced.reason._tag, "Gone")
             const gone = yield* call("() => 1").pipe(Effect.flip)
             assert.strictEqual(gone.reason._tag, "Gone")
+          }),
+        timeout
+      )
+      it.effect(
+        "persists a cookie and a localStorage item in a supplied profile when the browser layer closes before the page scope",
+        () =>
+          Effect.gen(function*() {
+            const fs = yield* FileSystem.FileSystem
+            const served = yield* site
+            const directory = yield* fs.makeTempDirectoryScoped({ prefix: "strider-profile-storage-test-" })
+            // Keep the page alive until the browser layer shuts down; closing it first can flush storage.
+            for (const round of [0, 1]) {
+              yield* Effect.scoped(
+                Effect.gen(function*() {
+                  const browser = yield* Browser.Browser
+                  assertPinned("Firefox", browser.info.version, firefox.version)
+                  const context = yield* browser.defaultContext.control
+                  const page = yield* context.newPage
+                  yield* page.goto(`${served.origin}/hello`)
+                  if (round === 0) {
+                    yield* page.evaluateInMainWorld(() => {
+                      document.cookie = "scope-shutdown=kept; expires=Fri, 31 Dec 9999 23:59:59 GMT; path=/"
+                      localStorage.setItem("scope-shutdown", "kept")
+                    })
+                  } else {
+                    assert.deepStrictEqual(
+                      yield* page.evaluateInMainWorld(() => [document.cookie, localStorage.getItem("scope-shutdown")]),
+                      ["scope-shutdown=kept", "kept"]
+                    )
+                  }
+                }).pipe(Effect.provide(Firefox.layer({ executablePath: executable, userDataDir: directory })))
+              )
+              assert.isTrue(yield* fs.exists(directory))
+            }
           }),
         timeout
       )

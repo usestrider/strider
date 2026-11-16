@@ -18,6 +18,7 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Stream from "effect/Stream"
+import * as Tracer from "effect/Tracer"
 import * as BidiAdapter from "../../src/internal/bidiAdapter.ts"
 import * as BidiWire from "../../src/internal/bidiWire.ts"
 import * as BrowserImpl from "../../src/internal/browser.ts"
@@ -100,6 +101,24 @@ describe("Firefox over WebDriver BiDi", () => {
           }),
         timeout
       )
+
+      it.effect("records the headless pointer preferences on the launch span", () =>
+        Effect.gen(function*() {
+          const spans: Array<Tracer.NativeSpan> = []
+          const tracer = Tracer.make({
+            span(options) {
+              const span = new Tracer.NativeSpan(options)
+              spans.push(span)
+              return span
+            }
+          })
+          yield* Effect.scoped(FirefoxLauncher.launch({ executablePath: executable })).pipe(Effect.withTracer(tracer))
+          const launch = spans.find((span) => span.name === "Firefox.launch")
+          assert(launch !== undefined)
+          const attributes = JSON.stringify(Object.fromEntries(launch.attributes))
+          assert.include(attributes, "ui.primaryPointerCapabilities")
+          assert.include(attributes, "ui.allPointerCapabilities")
+        }), timeout)
 
       it.effect("keeps the preferences a profile directory of the caller's sets", () =>
         Effect.gen(function*() {

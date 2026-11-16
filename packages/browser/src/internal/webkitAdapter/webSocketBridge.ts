@@ -97,7 +97,7 @@ export const prepare: (
         }).pipe(
           Protocol.on(session),
           Effect.map((result) => typeof result.result.value === "string" ? result.result.value : ""),
-          Effect.mapError(Kit.realmFailure(realm.id, () => realm.ended))
+          Effect.mapError(Kit.realmFailure(realm))
         ),
         worker === undefined
           ? { _tag: "Frame", page: realm.document!.frame.page.id, frame: realm.document!.frame.id }
@@ -119,7 +119,7 @@ export const prepare: (
                   fact.reason._tag === "ConnectionLost" || fact.reason._tag === "ModelUnavailable" ||
                   fact.reason._tag === "AccessReleased"
                 ) bridge.failed(fact.realm)
-                else bridge.ended(fact.realm)
+                else bridge.ended(fact.realm, fact.reason)
               }
             }
             base.buffer.emit(fact)

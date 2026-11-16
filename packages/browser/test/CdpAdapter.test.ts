@@ -1,7 +1,6 @@
 /** Deterministic CDP event ordering regressions, without launching a browser. */
 import { assert, describe, it } from "@effect/vitest"
 import { Browser, Capability, Deadline, NetworkRequest, Reason, VideoWriter } from "@usestrider/browser"
-import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -11,7 +10,6 @@ import * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
-import * as Scheduler from "effect/Scheduler"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
@@ -30,31 +28,7 @@ import * as Readable from "../src/internal/readable.ts"
 import * as Protocol from "../src/protocol/Protocol.ts"
 import captured from "./fixtures/redirect-extra-info.ts"
 import { makeBrowser, type Sent } from "./utils/FakeBrowser.ts"
-
-// Share one dispatcher across the protocol fibers so a checkpoint drains all runnable work,
-// stopping only at an actual protocol reply or permit wait, without counting scheduler turns.
-const withProtocolScheduler = Effect.fnUntraced(function*<A, E, R>(
-  run: (drain: Effect.Effect<void>) => Effect.Effect<A, E, R>
-) {
-  const parent = yield* Scheduler.Scheduler
-  const dispatcher = parent.makeDispatcher()
-  const checkpoint = parent.makeDispatcher()
-  const drain = Effect.callback<void>((resume) => {
-    checkpoint.scheduleTask(() => {
-      dispatcher.flush()
-      resume(Effect.void)
-    }, 0)
-  })
-  return yield* run(drain).pipe(
-    Effect.forkChild,
-    Effect.flatMap(Fiber.join),
-    Effect.provideService(Scheduler.Scheduler, {
-      executionMode: parent.executionMode,
-      shouldYield: (fiber) => parent.shouldYield(fiber),
-      makeDispatcher: () => dispatcher
-    })
-  )
-})
+import { onTestClock, withProtocolScheduler } from "./utils/ProtocolScheduler.ts"
 
 describe("CDP paused page initialization", () => {
   for (const rejected of [false, true]) {
@@ -1284,19 +1258,6 @@ const sentHeaders = Effect.fnUntraced(
   }
 )
 
-/** Advance deadlines without delays, retaining the live epoch used by the real protocol client's command deadline. */
-const onTestClock = <A, E, R>(self: Effect.Effect<A, E, R>) =>
-  Clock.clockWith((clock) =>
-    Effect.suspend(() => {
-      const test = BrowserClock.fromClock(clock)
-      const origin = BrowserClock.live.now() - test.now()
-      return Effect.provideService(self, BrowserClock.CurrentClock, {
-        now: () => (origin + test.now()) as ReturnType<typeof test.now>,
-        sleep: test.sleep
-      })
-    })
-  )
-
 describe("Chromium public sent-header waiting", () => {
   it.effect("returns the snapshot for a new lookup after eviction while releasing an existing waiter", () =>
     Effect.gen(function*() {
@@ -2296,13 +2257,13 @@ describe("Chromium video writer lifetime", () => {
         yield* TestClock.adjust("1 second")
         yield* drain
         const closedPromptly = closing.pollUnsafe() !== undefined
-        yield* TestClock.adjust("5 seconds")
+        yield* TestClock.adjust("30 seconds")
         yield* Fiber.join(closing)
-        assert(closedPromptly, "closing a frameless recording must not wait out the five-second finish budget")
+        assert(closedPromptly, "closing a frameless recording must not wait out the writer's finish budget")
         assert.strictEqual(writes, 0)
         const error = yield* Effect.flip(video.file)
         assert(Capability.isCapabilityError(error))
-        assert.notMatch(error.message, /did not finish within 5 seconds/)
+        assert.notMatch(error.message, /did not finish within/)
       })
     ).pipe(onTestClock))
 
@@ -2369,7 +2330,7 @@ describe("Chromium video writer lifetime", () => {
           }
           yield* drain
           if (mode === "blocked") {
-            yield* TestClock.adjust("5 seconds")
+            yield* TestClock.adjust("30 seconds")
             yield* drain
           }
           const settled = file.pollUnsafe() !== undefined
@@ -2380,7 +2341,7 @@ describe("Chromium video writer lifetime", () => {
           const releasedAtFile = released
           const closing = yield* Effect.forkScoped(Scope.close(recordingScope, Exit.void))
           yield* drain
-          yield* TestClock.adjust("5 seconds")
+          yield* TestClock.adjust("30 seconds")
           yield* Fiber.join(closing)
           assert.isTrue(settled, "source termination must settle file without closing the caller scope")
           const outcome = yield* Fiber.join(file)
@@ -2408,7 +2369,7 @@ describe("Chromium video writer lifetime", () => {
       ).pipe(onTestClock))
   }
 
-  it.effect("bounds an unresponsive writer finish by five seconds on the browser clock", () =>
+  it.effect("bounds an unresponsive writer finish by the default budget read when video is acquired", () =>
     withProtocolScheduler((drain) =>
       Effect.gen(function*() {
         const started = yield* Deferred.make<void>()
@@ -2421,16 +2382,20 @@ describe("Chromium video writer lifetime", () => {
         })
         const page = yield* h.page.control
         const scope = yield* Scope.make()
-        const video = yield* page.capability(Capability.Video).pipe(Scope.provide(scope))
+        const video = yield* page.capability(Capability.Video).pipe(
+          Scope.provide(scope),
+          Deadline.withDefaultBudget("2 seconds")
+        )
         yield* frame(h, 53)
         yield* Deferred.await(started)
         const closing = yield* Effect.forkScoped(Scope.close(scope, Exit.void))
         yield* drain
-        yield* TestClock.adjust("5 seconds")
+        yield* TestClock.adjust("2 seconds")
         yield* Fiber.join(closing)
         const error = yield* Effect.flip(video.file)
         assert(Capability.isCapabilityError(error))
         assert.strictEqual(error.reason._tag, "BackendFailure")
+        assert.match(error.message, /did not finish within 2s/)
       })
     ).pipe(onTestClock))
 })
