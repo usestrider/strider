@@ -1010,7 +1010,7 @@ describe("strider", () => {
         assert.strictEqual(started.code, 0, started.err)
         try {
           assert.strictEqual((yield* run("-s", "inert", "page", "new", "--name", "p", url)).code, 0)
-          const clicked = yield* run("-s", "inert", "-p", "p", "click", `role=button[name="Pay"]`)
+          const clicked = yield* run("-s", "inert", "-p", "p", "click", "css=#app button")
           assert.strictEqual(clicked.code, 12, clicked.err)
           assert.include(clicked.err, "inert")
           assert.include(clicked.err, "div#app")

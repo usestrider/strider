@@ -1,5 +1,27 @@
 # @usestrider/browser
 
+## 0.11.0
+
+### Breaking changes
+
+- **A context or page still held when its browser closes ends with `BrowserClosed`** (#349). Its `closed` resolves instead of waiting forever, and pages and contexts the browser reports gone as it shuts down end with `BrowserClosed` rather than `PageClosed` or `ConnectionLost`. An evaluation pending when its page closes fails with `TargetGone` whose reason is the page's, such as `PageClosed` with `by: "command"`, instead of `RealmDestroyed`; a realm whose document went still ends with `RealmDestroyed`. Code that matched `PageClosed` or `ConnectionLost` to notice its browser closing should match `BrowserClosed`, and code that matched `RealmDestroyed` for a call cut short by its page closing should match `PageClosed` as well.
+- **`data:` and `blob:` URLs are no requests** (#333). A navigation to one, and a reload of it, commits with `response` `None` on every backend, as documented, instead of a status 200 response. They're no longer reported as requests, and routes no longer see them: such a load can't be intercepted or fulfilled, so check the page's content instead.
+- **Pointer input into a cross-site frame goes to that frame on Chromium** (#336). A click, hover, wheel, or tap aimed into an out-of-process frame is sent on the frame's own session, which reaches the frame even before it has been drawn, so a click just after the frame loads no longer lands on the parent's `iframe` element, and an action into a frame that paints nothing no longer times out. With `checks: { receivesPointer: false }`, a click into a cross-site frame now reaches its element even where an element of the parent covers it; keep the default checks to have that refused.
+- **Stock WebKit refuses `javaScript: "disabled"`** (#337), with `Unsupported` under the new capability `emulation.javaScript.disabled`: with scripts off, stock WebKit gives a page no script context, so Strider can't read or act on it. Until now the setting was never sent to a page, so its scripts ran anyway. `javaScript: "enabled"` is still accepted, under `emulation.javaScript`, and is now applied to each page as it is set up, including after a process swap. Check `emulation.javaScript.disabled` before disabling scripts.
+- **HAR exports follow HAR 1.2 in more of their fields, and `BodyLimit` counts only the body** (#334). `creator.version` is the version that wrote the log, where it was always `0.1.0`. A response's `bodySize` is its body as transferred and `_transferSize` the whole response, each -1 where the browser doesn't count it (Chromium has no body count), and responses from a cache, a service worker, or a route have no counts of their own. A request with no body has a `bodySize` of 0, a `mimeType` keeps its parameters, a body that isn't valid UTF-8 is written as base64, `Max-Age` gives a cookie's `expires`, and a nameless cookie is listed, and redacted. `BodyLimit` no longer counts a response's headers: on Chromium it compares the body as read, decoded, so a compressed response whose decoded body is over the limit now fails with `BodyUnavailable`. Compare a HAR's `mimeType` by the part before its `;`, and read a response's whole transfer from `_transferSize`.
+
+### Fixed
+
+- **Exact URL patterns match the URL as the browser writes it** (#348), in routes, WebSocket routes, event filters, and HAR replay: `page.route("http://example.com")` and `routeWebSocket("ws://localhost:8080")` never matched, since the browser reports them with a trailing `/`, and neither did an uppercase host, a default port, or an unescaped character.
+- **Methods evaluate** (#332): a method shorthand, async method, generator, getter, or setter passed to any call that runs a function in the page, where its source failed with `SyntaxError`. A thrown value that isn't an object, such as `throw "qwerty"` or `Promise.reject(7)`, gives `EvaluationThrown` an `Error` whose message is the value.
+- **Chromium sends a context's `httpCredentials` to a challenge that comes before the request's network events** (#335), as it can for a page's or a dedicated worker's fetch, which got the server's 401.
+- **`page.setContent` settles in a Chromium context with JavaScript disabled** (#337), waiting on what the browser reports of the replaced document instead of a listener in the page.
+- **Forms whose controls are named for DOM members** (#338), such as `<input name="localName">` or `<input name="getAttribute">`, keep their role, and no longer make every role query on the page fail with a `TypeError`. On stock WebKit, a document's named elements no longer stand in for its own members.
+- **`getByText` no longer matches a `<slot>`** (#347): slotted text, or a slot's fallback text, matches the element around the slot alone, where a strict locator failed with two matches.
+- **Keyboard events carry a real keyboard's fields** (#331): on Chromium, a modifier's `location` and `repeat` for a key already held; on every backend, `press("Meta")`'s keydown reports `metaKey: true`, and releasing one of two holds of a modifier keeps its flag.
+- **`page.close({ runBeforeUnload: true })` ends with `PageClosed` whose `by` is `"command"`** (#329) on Chromium and Firefox, where it reported `"script"`.
+- **`CookieJar.listFor` includes `Secure` cookies for local hosts over plain http** (#346): `localhost`, hosts under it, 127.0.0.0/8, and `[::1]`, which browsers send them to.
+
 ## 0.10.0
 
 ### Breaking changes

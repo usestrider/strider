@@ -5,6 +5,7 @@
  */
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import * as Semaphore from "effect/Semaphore"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as Protocol from "../../protocol/Protocol.ts"
 import * as Network from "../../webkit-stock-protocol/Network.ts"
@@ -117,7 +118,12 @@ const applyTargetOverride = (
   }
 }
 
-const applyBootstrap = Effect.fnUntraced(function*(state: State, target: TargetEntry) {
+// One application at a time per target reads the registry and sends its bundle, so an older bundle never lands
+// after a newer one
+const applyBootstrap = (state: State, target: TargetEntry) =>
+  (target.bootstrapLock ??= Semaphore.makeUnsafe(1)).withPermits(1)(writeBootstrap(state, target))
+
+const writeBootstrap = Effect.fnUntraced(function*(state: State, target: TargetEntry) {
   const bundles = state.registry.bundles(placement(target.page))
   const main = bundles.get(Declarations.worldKey({ _tag: "Main" }))
   if (main?.webSockets !== undefined) {
