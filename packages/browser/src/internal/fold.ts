@@ -869,8 +869,10 @@ export const make = Effect.fnUntraced(function*(options: {
           return
         }
         case "ConsoleMessage": {
-          const owner = realmOwners.get(fact.realm) ??
-            (fact.message.origin._tag === "Page" ? ownerOfPage(pageOf(fact.message.origin.page)) : nobody)
+          const origin = fact.message.origin
+          const owner = Option.flatMap(fact.realm, (realm) => Option.fromNullishOr(realmOwners.get(realm))).pipe(
+            Option.getOrElse(() => origin._tag === "Page" ? ownerOfPage(pageOf(origin.page)) : nobody)
+          )
           publish(owner, fact.message, (events) => events.console, (events) => events.console)
           return
         }

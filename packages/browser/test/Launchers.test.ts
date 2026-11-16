@@ -408,6 +408,21 @@ describe("Chromium launcher", () => {
         )
       }))
 
+    it.effect("states a fine pointer with hover when headless, before the caller's arguments, and not when headed", () =>
+      Effect.sync(() => {
+        const [pointer] = ChromiumLauncher.headlessPointerArgs
+        for (const profile of ["automation", "concurrent", "stock"] as const) {
+          const args = ChromiumLauncher.argsFor(
+            { profile, args: ["--blink-settings=primaryHoverType=1"] },
+            "/p",
+            "pipe"
+          )
+          assert.strictEqual(args[args.indexOf("--headless") + 1], pointer, profile)
+          assert.isBelow(args.indexOf(pointer!), args.indexOf("--blink-settings=primaryHoverType=1"), profile)
+        }
+        assert.notInclude(ChromiumLauncher.argsFor({ headless: false }, "/p", "pipe"), pointer)
+      }))
+
     it.effect("hides infobars in the automation and concurrent profiles, not the stock one", () =>
       Effect.sync(() => {
         for (const profile of ["automation", "concurrent"] as const) {
@@ -827,6 +842,22 @@ describe("Firefox launcher", () => {
           )
           assert.strictEqual(FirefoxLauncher.userJs(FirefoxLauncher.profilePrefs.stock), "")
           assert.include(FirefoxLauncher.argsFor({}, "/p"), "--headless")
+        }))
+
+      it.effect("states a fine pointer with hover when headless, unless the profile sets it, and not when headed", () =>
+        Effect.sync(() => {
+          for (const profile of ["automation", "concurrent", "stock"] as const) {
+            const prefs = FirefoxLauncher.prefsFor({ profile })
+            assert.strictEqual(prefs["ui.primaryPointerCapabilities"], 6, profile)
+            assert.strictEqual(prefs["ui.allPointerCapabilities"], 6, profile)
+          }
+          assert.deepStrictEqual(
+            FirefoxLauncher.prefsFor({ headless: false }),
+            FirefoxLauncher.profilePrefs.automation
+          )
+          const own = FirefoxLauncher.prefsFor({ profilePrefs: { "ui.primaryPointerCapabilities": 2 } })
+          assert.strictEqual(own["ui.primaryPointerCapabilities"], 2)
+          assert.strictEqual(own["ui.allPointerCapabilities"], 6)
         }))
 
       it.effect("keeps the preferences a profile of the caller's already sets, and replaces its own", () =>

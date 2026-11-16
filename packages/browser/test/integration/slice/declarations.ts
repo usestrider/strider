@@ -13,6 +13,7 @@ import {
   Expect,
   Page,
   PageClock,
+  Popup,
   Route,
   UncaughtException,
   UserContext
@@ -24,6 +25,7 @@ import * as Headers from "effect/http/Headers"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import type * as Layer from "effect/Layer"
+import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import type * as Scope from "effect/Scope"
@@ -103,6 +105,41 @@ const crossSiteFrame = Effect.fnUntraced(function*(
 })
 
 const json = (value: unknown) => HttpServerResponse.jsonUnsafe(value)
+
+/**
+ * Runs an effect with a logger that also keeps the messages of its warnings and errors, so a case can check that
+ * a release logged none.
+ */
+const withWarnings = Effect.fnUntraced(function*<A, E, R>(effect: Effect.Effect<A, E, R>) {
+  const warnings: Array<string> = []
+  const loggers = yield* Logger.CurrentLoggers
+  const logger = Logger.make((entry) => {
+    if (entry.logLevel === "Warn" || entry.logLevel === "Error") {
+      warnings.push(
+        (Array.isArray(entry.message) ? entry.message : [entry.message]).map((part) =>
+          typeof part === "string" ? part : String(part)
+        ).join(" ")
+      )
+    }
+    for (const existing of loggers) existing.log(entry)
+  })
+  const value = yield* effect.pipe(Effect.provideService(Logger.CurrentLoggers, new Set([logger])))
+  return { value, warnings }
+})
+
+/** Opens a popup from a `target=_blank` link on the page, and returns it once it opens. */
+const openPopup = Effect.fnUntraced(function*(page: Page.Page, origin: string) {
+  yield* page.goto(
+    fixtureUrl(origin, `<a target="_blank" href="${fixtureUrl(origin, "<h1>Popup</h1>")}">Open popup</a>`)
+  )
+  const opened = yield* Popup.next(page)
+  yield* page.getByRole("link", { name: "Open popup" }).click()
+  const popup = yield* opened
+  yield* popup.getByRole("heading").pipe(Expect.toHaveText("Popup"))
+  return popup
+})
+
+const size = (page: Page.Page) => page.evaluateInMainWorld(() => [innerWidth, innerHeight] as const)
 
 export const declarations = (
   name: "Chromium" | "Firefox" | "WebKit",
@@ -189,6 +226,237 @@ export const declarations = (
           const gone = yield* read.viewportSize.pipe(Effect.flip)
           assert.strictEqual(gone._tag, "TargetGone")
         })), timeout)
+
+      // ── Viewport releases with a popup open ──
+
+      it.effect("releases a page's own context's viewport promptly after it opened a popup", () =>
+        Effect.gen(function*() {
+          if (!(yield* supports("emulation.viewport")) || !(yield* supports("popups.opener"))) {
+            return
+          }
+          const { origin } = yield* site
+          const { warnings } = yield* withWarnings(Effect.gen(function*() {
+            const released = yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage({ emulation: { viewport: { width: 1280, height: 720 } } })
+              const popup = yield* openPopup(page, origin)
+              assert.deepStrictEqual(yield* size(popup), [1280, 720])
+              return Date.now()
+            }))
+            const elapsed = Date.now() - released
+            assert.isBelow(elapsed, 5_000, `the scope's release took ${elapsed} ms`)
+          }))
+          assert.deepStrictEqual(
+            warnings.filter((warning) =>
+              warning.includes("Failed to release")
+            ),
+            []
+          )
+        }), timeout)
+
+      it.effect("releases a context's viewport while a popup is open, giving the popup its own size back", () =>
+        Effect.gen(function*() {
+          if (!(yield* supports("emulation.viewport")) || !(yield* supports("popups.opener"))) {
+            return
+          }
+          const { origin } = yield* site
+          const { warnings } = yield* withWarnings(Effect.scoped(Effect.gen(function*() {
+            const context = yield* Browser.newContext()
+            const page = yield* context.newPage
+            const natural = yield* size(page)
+            const declared = yield* context.emulate({ viewport: { width: 640, height: 480 } })
+            const popup = yield* openPopup(page, origin)
+            assert.deepStrictEqual(yield* size(popup), [640, 480])
+            const started = Date.now()
+            yield* declared.remove
+            const elapsed = Date.now() - started
+            assert.isBelow(elapsed, 5_000, `the viewport's release took ${elapsed} ms`)
+            assert.deepStrictEqual(yield* popup.viewportSize, Option.none())
+            assert.deepStrictEqual(yield* size(popup), natural)
+            assert.deepStrictEqual(yield* size(page), natural)
+          })))
+          assert.deepStrictEqual(
+            warnings.filter((warning) =>
+              warning.includes("Failed to release")
+            ),
+            []
+          )
+        }), timeout)
+
+      it.effect("releases a context's viewport while a popup in a window of its own is open", () =>
+        Effect.gen(function*() {
+          if (!(yield* supports("emulation.viewport")) || !(yield* supports("popups.opener"))) {
+            return
+          }
+          const { origin } = yield* site
+          const { warnings } = yield* withWarnings(Effect.scoped(Effect.gen(function*() {
+            const context = yield* Browser.newContext()
+            const page = yield* context.newPage
+            const declared = yield* context.emulate({ viewport: { width: 640, height: 480 } })
+            const target = fixtureUrl(origin, "<h1>Popup</h1>")
+            yield* page.goto(fixtureUrl(
+              origin,
+              `<button onclick="window.open('${target}', '_blank', 'width=400,height=300')">Open popup</button>`
+            ))
+            const opened = yield* Popup.next(page)
+            yield* page.getByRole("button", { name: "Open popup" }).click()
+            const popup = yield* opened
+            yield* popup.getByRole("heading").pipe(Expect.toHaveText("Popup"))
+            assert.deepStrictEqual(yield* size(popup), [640, 480])
+            const started = Date.now()
+            yield* declared.remove
+            const elapsed = Date.now() - started
+            assert.isBelow(elapsed, 5_000, `the viewport's release took ${elapsed} ms`)
+            assert.deepStrictEqual(yield* popup.viewportSize, Option.none())
+          })))
+          assert.deepStrictEqual(
+            warnings.filter((warning) =>
+              warning.includes("Failed to release")
+            ),
+            []
+          )
+          if (name === "Chromium") {
+            // Nothing in the popup's window records its size, so its restore isn't confirmed
+            assert.isTrue(warnings.some((warning) =>
+              warning.includes("could not be verified")
+            ))
+          }
+        }), timeout)
+
+      it.effect("releases a context's viewport after a popup in its own window opens a tab", () =>
+        Effect.gen(function*() {
+          if (!(yield* supports("emulation.viewport")) || !(yield* supports("popups.opener"))) {
+            return
+          }
+          const { origin } = yield* site
+          const { warnings } = yield* withWarnings(Effect.scoped(Effect.gen(function*() {
+            const context = yield* Browser.newContext()
+            const page = yield* context.newPage
+            const declared = yield* context.emulate({ viewport: { width: 640, height: 480 } })
+            const target = fixtureUrl(origin, "<h1>Popup</h1>")
+            yield* page.goto(fixtureUrl(
+              origin,
+              `<button onclick="window.open('${target}', '_blank', 'width=400,height=300')">Open popup</button>`
+            ))
+            const opened = yield* Popup.next(page)
+            yield* page.getByRole("button", { name: "Open popup" }).click()
+            const popup = yield* opened
+            yield* popup.getByRole("heading").pipe(Expect.toHaveText("Popup"))
+            assert.deepStrictEqual(yield* size(popup), [640, 480])
+            const nested = yield* openPopup(popup, origin)
+            assert.deepStrictEqual(yield* size(nested), [640, 480])
+            const started = Date.now()
+            yield* declared.remove
+            const elapsed = Date.now() - started
+            assert.isBelow(elapsed, 5_000, `the viewport's release took ${elapsed} ms`)
+            assert.deepStrictEqual(yield* popup.viewportSize, Option.none())
+            assert.deepStrictEqual(yield* nested.viewportSize, Option.none())
+            assert.notDeepEqual(yield* size(nested), [640, 480])
+          })))
+          assert.deepStrictEqual(
+            warnings.filter((warning) =>
+              warning.includes("Failed to release")
+            ),
+            []
+          )
+          // The popup window's restore isn't confirmed; the tab takes the original page's size and confirms it
+          assert.strictEqual(
+            warnings.filter((warning) =>
+              warning.includes("could not be verified")
+            ).length,
+            name === "Chromium" ? 1 : 0
+          )
+        }), timeout)
+
+      it.effect("releases a context's viewport after a popup window opens a tab once the original page closed", () =>
+        Effect.gen(function*() {
+          if (!(yield* supports("emulation.viewport")) || !(yield* supports("popups.opener"))) {
+            return
+          }
+          const { origin } = yield* site
+          const { warnings } = yield* withWarnings(Effect.scoped(Effect.gen(function*() {
+            const context = yield* Browser.newContext()
+            const page = yield* context.newPage
+            const declared = yield* context.emulate({ viewport: { width: 640, height: 480 } })
+            const target = fixtureUrl(origin, "<h1>Popup</h1>")
+            yield* page.goto(fixtureUrl(
+              origin,
+              `<button onclick="window.open('${target}', '_blank', 'width=400,height=300')">Open popup</button>`
+            ))
+            const opened = yield* Popup.next(page)
+            yield* page.getByRole("button", { name: "Open popup" }).click()
+            const popup = yield* opened
+            yield* popup.getByRole("heading").pipe(Expect.toHaveText("Popup"))
+            yield* page.close()
+            yield* popup.activate
+            // The tab can't join the popup's window, so it opens alone in a new one
+            const tab = yield* openPopup(popup, origin)
+            assert.deepStrictEqual(yield* size(tab), [640, 480])
+            const started = Date.now()
+            yield* declared.remove
+            const elapsed = Date.now() - started
+            assert.isBelow(elapsed, 5_000, `the viewport's release took ${elapsed} ms`)
+            assert.deepStrictEqual(yield* tab.viewportSize, Option.none())
+          })))
+          assert.deepStrictEqual(
+            warnings.filter((warning) =>
+              warning.includes("Failed to release")
+            ),
+            []
+          )
+          if (name === "Chromium") {
+            // The tab measured the size it inherited before its window laid it out, so its own size is unknown
+            assert.isTrue(warnings.some((warning) =>
+              warning.includes("could not be verified")
+            ))
+          }
+        }), timeout)
+
+      it.effect(
+        "releases a context's viewport after a popup window opens a tab with mobile emulation once the original page closed",
+        () =>
+          Effect.gen(function*() {
+            if (!(yield* supports("emulation.viewport.mobile")) || !(yield* supports("popups.opener"))) {
+              return
+            }
+            const { origin } = yield* site
+            const { warnings } = yield* withWarnings(Effect.scoped(Effect.gen(function*() {
+              const context = yield* Browser.newContext()
+              const page = yield* context.newPage
+              const declared = yield* context.emulate({ viewport: { width: 640, height: 480, mobile: true } })
+              const target = fixtureUrl(origin, "<h1>Popup</h1>")
+              yield* page.goto(fixtureUrl(
+                origin,
+                `<button onclick="window.open('${target}', '_blank', 'width=400,height=300')">Open popup</button>`
+              ))
+              const opened = yield* Popup.next(page)
+              yield* page.getByRole("button", { name: "Open popup" }).click()
+              const popup = yield* opened
+              yield* popup.getByRole("heading").pipe(Expect.toHaveText("Popup"))
+              yield* page.close()
+              yield* popup.activate
+              // The tab can't join the popup's window, so it opens alone in a new one
+              const tab = yield* openPopup(popup, origin)
+              const started = Date.now()
+              yield* declared.remove
+              const elapsed = Date.now() - started
+              assert.isBelow(elapsed, 5_000, `the viewport's release took ${elapsed} ms`)
+              assert.deepStrictEqual(yield* tab.viewportSize, Option.none())
+            })))
+            assert.deepStrictEqual(
+              warnings.filter((warning) =>
+                warning.includes("Failed to release")
+              ),
+              []
+            )
+            if (name === "Chromium") {
+              // The tab measured the size it inherited before its window laid it out, so its own size is unknown
+              assert.isTrue(warnings.some((warning) =>
+                warning.includes("could not be verified")
+              ))
+            }
+          }),
+        timeout
+      )
 
       // ── Routes ──
 
@@ -920,6 +1188,25 @@ export const declarations = (
           }))
         }), timeout)
 
+      it.effect("runs each of the init scripts declared at once exactly once in a new document", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const expected: Array<string> = []
+            for (let i = 0; i < 10; i++) {
+              expected.push(`a${i}`, `b${i}`)
+              yield* Effect.all([
+                page.addInitScript({ source: `(window.ran ??= []).push('a${i}')` }),
+                page.addInitScript({ source: `(window.ran ??= []).push('b${i}')` })
+              ], { concurrency: "unbounded", discard: true })
+            }
+            const ran = (yield* run(page, origin, "return window.ran")) as Array<string>
+            assert.sameMembers(ran, expected)
+            assert.strictEqual(ran.length, expected.length)
+          }))
+        }), timeout)
+
       it.effect("runs a script in the isolated world, apart from the page's, where the backend can", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -1041,6 +1328,28 @@ export const declarations = (
             assert.deepStrictEqual(
               yield* run(page, origin, "return [navigator.language, Intl.DateTimeFormat().resolvedOptions().timeZone]"),
               ["de-DE", "Asia/Tokyo"]
+            )
+          }))
+        }), timeout)
+
+      it.effect("reports a fine pointer with hover to a page of a default context", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            // Strider drives the page with a mouse, so a desktop page sees one, headless or not
+            assert.deepStrictEqual(
+              yield* run(
+                page,
+                origin,
+                "return ['(hover: hover)', '(any-hover: hover)', '(pointer: fine)', '(any-pointer: fine)'].map((query) => [query, matchMedia(query).matches])"
+              ),
+              [
+                ["(hover: hover)", true],
+                ["(any-hover: hover)", true],
+                ["(pointer: fine)", true],
+                ["(any-pointer: fine)", true]
+              ]
             )
           }))
         }), timeout)
@@ -1261,6 +1570,25 @@ export const declarations = (
             yield* page.getByText("Session expired").pipe(Expect.toBeVisible)
             // The timeline carries over to the next document
             assert.strictEqual(yield* run(page, origin, "return new Date().toISOString()"), "2026-01-01T09:05:00.000Z")
+          }))
+        }), timeout)
+
+      it.effect("applies overlapping adjustments and settings of a controlled clock, each one", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.clock.install({ mode: "controlled", at: "2026-01-01T00:00:00Z" })
+            yield* page.setContent("<p>clock</p>")
+            for (let i = 0; i < 20; i++) {
+              yield* Effect.all([
+                page.clock.adjust("16 millis"),
+                page.clock.setTime(Date.UTC(2026, 0, 1, 0, 0, i + 1))
+              ], { concurrency: "unbounded", discard: true })
+            }
+            // A new document starts at the timeline's last setting, which no earlier one overrides
+            yield* page.clock.setTime(Date.UTC(2026, 0, 2))
+            assert.strictEqual(yield* run(page, origin, "return new Date().toISOString()"), "2026-01-02T00:00:00.000Z")
           }))
         }), timeout)
 

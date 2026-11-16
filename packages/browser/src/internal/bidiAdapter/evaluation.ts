@@ -241,7 +241,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         if (realm === undefined) return
         state.buffer.emitFrom(realm, {
           _tag: "ConsoleMessage",
-          realm: realm.id,
+          realm: Option.some(realm.id),
           message: new ConsoleMessage.ConsoleMessage({
             // The console method says what the page wrote; BiDi's level is coarser (`console.log` is `info`)
             level: Kit.consoleLevel("method" in params ? params.method : "log"),

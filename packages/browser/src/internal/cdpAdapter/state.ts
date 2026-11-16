@@ -92,12 +92,16 @@ export interface TargetEntry {
   scriptLoaded?: Deferred.Deferred<void> | undefined
   /** The intercept patterns last applied, so a change is applied once. */
   intercepts: string
+  /** Each init script bundle's identifier in Chromium, by its key, written under `scriptLock`. */
   readonly scripts: Map<string, string>
   ended: boolean
   /** Original renderer dimensions, retained until restoration completes; null means the original is unknown. */
   viewport?: { readonly width: number; readonly height: number } | null | undefined
+  /** For a page: the browser window that holds it, once read. */
+  windowId?: number | undefined
   overrideLock?: Semaphore.Semaphore | undefined
   viewportLock?: Semaphore.Semaphore | undefined
+  scriptLock?: Semaphore.Semaphore | undefined
 }
 
 export interface PageEntry {
@@ -105,6 +109,8 @@ export interface PageEntry {
   readonly targetId: string
   readonly context: ContextEntry
   readonly target: TargetEntry
+  /** For a popup: the target id of the page that opened it, which may not be tracked. */
+  readonly openerId?: string | undefined
   readonly ready: Deferred.Deferred<void, Adapter.AdapterError>
   closing: L1Target.CloseReason | undefined
   /**

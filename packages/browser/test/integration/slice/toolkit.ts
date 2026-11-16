@@ -23,11 +23,14 @@ import { supports } from "./capabilities.ts"
 
 const timeout = 60_000
 
-// A sign-in form, a console error, a missing resource, a popup, a dialog and a fetch a route can answer
+// A sign-in form, a console error, a missing resource, a popup, a dialog and a fetch a route can answer. The
+// fields are in a form and name their autocomplete, or Chromium writes hints about them to the console.
 const app = `<title>shop</title>
-<label>Email <input id="email"></label>
-<label>Password <input id="password" type="password"></label>
-<button id="go">Sign in</button>
+<form>
+<label>Email <input id="email" autocomplete="username"></label>
+<label>Password <input id="password" type="password" autocomplete="current-password"></label>
+<button id="go" type="button">Sign in</button>
+</form>
 <p id="out">signed out</p>
 <button onclick="window.open('/child')">Open</button>
 <button onclick="document.getElementById('asked').textContent = String(confirm('Sure?'))">Ask</button>
@@ -833,15 +836,28 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                 state: "visible",
                 text: "wrong password"
               })
+              // Chromium and stock WebKit write the failed load to the console too; Firefox doesn't
+              const expected = [
+                "console error on shop: signed in, with a warning",
+                ...(name === "Firefox"
+                  ? []
+                  : [
+                    "console error on shop: Failed to load resource: the server responded with a status of 404 (Not Found)"
+                  ])
+              ]
               let errors: ReadonlyArray<string> = []
               let failed: ReadonlyArray<string> = []
-              for (let attempt = 0; attempt < 50 && (errors.length === 0 || failed.length === 0); attempt++) {
+              for (
+                let attempt = 0;
+                attempt < 50 && (errors.length < expected.length || failed.length === 0);
+                attempt++
+              ) {
                 errors =
                   (yield* call(tools, "history", { page: "shop", kind: "console", level: "error" })).value.outcome
                 failed = (yield* call(tools, "history", { page: "shop", kind: "network", failed: true })).value.outcome
-                if (errors.length === 0 || failed.length === 0) yield* Effect.sleep("100 millis")
+                if (errors.length < expected.length || failed.length === 0) yield* Effect.sleep("100 millis")
               }
-              assert.deepStrictEqual(errors, ["console error on shop: signed in, with a warning"])
+              assert.deepStrictEqual(errors, expected)
               assert.isTrue(failed.some((line: string) => /^404 .*\/missing$/.test(line)), failed.join(", "))
               const warnings = yield* call(tools, "history", { page: "shop", kind: "console", level: "warning" })
               assert.deepStrictEqual(warnings.value.outcome, [])
@@ -1370,8 +1386,17 @@ for (const mode of ["open", "closed"]) {
             const screenshot = yield* call(strict, "screenshot", { page: "p1" })
             assert.isTrue(screenshot.failed)
             assert.strictEqual(screenshot.value.error, "NotPermitted")
-            const history = yield* call(strict, "history", { page: "p1", kind: "console" })
-            assert.deepStrictEqual(history.value.outcome, ["console error (text not sent)"])
+            // The script's error, and on Chromium and stock WebKit the browser's for the missing resource, each
+            // without its text
+            const expected = name === "Firefox"
+              ? ["console error (text not sent)"]
+              : ["console error (text not sent)", "console error (text not sent)"]
+            let history: ReadonlyArray<string> = []
+            for (let attempt = 0; attempt < 50 && history.length < expected.length; attempt++) {
+              history = (yield* call(strict, "history", { page: "p1", kind: "console" })).value.outcome
+              if (history.length < expected.length) yield* Effect.sleep("100 millis")
+            }
+            assert.deepStrictEqual(history, expected)
             const local = yield* BrowserToolkit.make({
               context: page.context,
               secrets: {},
