@@ -476,6 +476,41 @@ describe("BidiAdapter state", () => {
       }))
   }
 
+  for (const event of ["historyUpdated", "fragmentNavigated"] as const) {
+    it.effect(`correlates two consecutive same-document traversals through ${event}`, () =>
+      Effect.gen(function*() {
+        const urls = ["about:blank#first", "about:blank#second"]
+        let step = 0
+        const { facts, page, state } = yield* withPage({
+          // Each traversal's own event arrives before its reply, as Firefox sends them.
+          "browsingContext.traverseHistory": Effect.sync(() => {
+            handlers.apply(
+              `browsingContext.${event}`,
+              { context: page.bidi, url: urls[step++]!, timestamp: step },
+              { state }
+            )
+            return {}
+          })
+        })
+        const handlers = Navigation.register(Kit.handlers<State.Event>())
+        const first = yield* Navigation.traverse(state, page.id, -1)
+        const second = yield* Navigation.traverse(state, page.id, -1)
+        yield* state.buffer.flush
+        assert(Option.isSome(first) && Option.isSome(second))
+        for (const [index, traversal] of [first.value, second.value].entries()) {
+          const ends = facts.filter((fact) => fact._tag === "NavigationEnded" && fact.navigation === traversal)
+          assert.lengthOf(ends, 1, `traversal ${index + 1} ended under its own id`)
+          assert.deepStrictEqual(ends[0]!._tag === "NavigationEnded" && ends[0]!.outcome, {
+            _tag: "SameDocument",
+            document: page.document!.id,
+            via: event === "fragmentNavigated" ? "fragment" : "historyApi"
+          })
+        }
+        assert.strictEqual(page.document!.url, urls[1])
+        assert.isEmpty(page.expected.list)
+      }))
+  }
+
   it.effect("claims a same-document event received before the traversal's reply but folded after it", () =>
     Effect.gen(function*() {
       // The protocol client resolves a reply in its reader, but folds the events received before it in a
