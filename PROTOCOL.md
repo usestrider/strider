@@ -110,7 +110,9 @@ interface ErrorMatcher {
   the point is in. From a press until every button is up, or from a touch's start until its end, input that names
   no frame goes on the session the press or the start went on, a release outside the frame included. Firefox
   doesn't deliver page coordinates into a cross-site frame, so the BiDi adapter does the same with one
-  `script.callFunction` a level, in a sandbox, on a context with child frames, and sends to the frame's context;
+  `script.callFunction` a level, in a sandbox and through open shadow roots, on a context holding a frame of
+  another origin than its parent's (it delivers page coordinates into one of the page's origin), and sends to the
+  frame's context;
   BiDi refuses a point outside that context's viewport, so a move outside the frame while a button is held there is
   left out, and the release is sent at the pointer's last point in the frame. Any other pointer input, such as a
   locator's drag between the page and a frame, goes on the page's session, in its coordinates. Keys and text go on
