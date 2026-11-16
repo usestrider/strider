@@ -89,7 +89,7 @@ const routes: Record<
   "/benchmark-mouse": (url) => ({
     body: page(
       "Mouse benchmark",
-      `<button style="position:fixed;left:10px;top:10px;width:100px;height:30px" onclick="document.querySelector('#count').textContent = String(Number(document.querySelector('#count').textContent) + 1)">Increment</button><p id="count" style="position:fixed;left:10px;top:60px">0</p>${
+      `<button style="position:fixed;left:10px;top:10px;width:100px;height:30px" onclick="document.querySelector('#count').textContent = String(Number(document.querySelector('#count').textContent) + 1)">Increment</button><p id="count" style="position:fixed;left:10px;top:60px">0</p><p id="hit" style="position:fixed;left:10px;top:90px"></p><script>addEventListener('mousedown', () => { document.querySelector('#hit').textContent = 'hit' })</script>${
         url.searchParams.has("frame")
           ? `<iframe id="frame" style="position:fixed;left:200px;top:10px;width:400px;height:200px;border:0"></iframe><script>document.querySelector('#frame').src = 'http://localhost:' + location.port + '/benchmark-mouse'</script>`
           : ""
