@@ -5,8 +5,8 @@
  * on failure and interruption, as a held key is.
  *
  * Input goes to the element under its point, in the page or in a frame, a cross-site frame included, even one that
- * has just loaded and not drawn yet. While a button is held, input goes to the frame that got the press, so a
- * release outside it still reaches it.
+ * has just loaded and not drawn yet. While a button is held, mouse input goes to the frame that got the press, so a
+ * release outside it still reaches it, until that frame goes away; the wheel goes by its point.
  *
  * @stability unstable
  * @since 0.1.0

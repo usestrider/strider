@@ -107,8 +107,9 @@ interface ErrorMatcher {
   whether the element hit owns a frame of another session, and `DOM.getBoxModel` gives that element's content box,
   the frame's origin; the event goes on the deepest such session, in its coordinates. That is no call on a page
   without an out-of-process frame, two at a point outside them, and three for each level of out-of-process frame
-  the point is in. From a press until every button is up, or from a touch's start until its end, input that names
-  no frame goes on the session the press or the start went on, a release outside the frame included. Firefox
+  the point is in. From a press until every button is up, or from a touch's start until its end, mouse and touch input
+  that names no frame goes on the session the press or the start went on, a release outside the frame included,
+  until that session or context ends; a wheel goes by its point. Firefox
   doesn't deliver page coordinates into a cross-site frame, so the BiDi adapter does the same with one
   `script.callFunction` a level, in a sandbox and through open shadow roots, on a context holding a frame of
   another origin than its parent's (it delivers page coordinates into one of the page's origin), and sends to the
