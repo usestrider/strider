@@ -8,7 +8,9 @@
  * - **The digest.** The context's and each page's event channels are recorded from the start, and each result
  *   takes what they recorded since the previous call: navigations, popups, dialogs and who decided them,
  *   downloads, uncaught exceptions, console errors, failed requests and validation observed during clicks.
- *   No tool waits for later page events after it acts.
+ *   No tool waits for later page events after it acts. A dialog is one line, naming its decider: a registration
+ *   by its handle (`accepted by r1`), `a handler` the session didn't register, or `policy`; one still undecided
+ *   when a result takes it says `open`, and its decision comes in a later result as a line of its own.
  * - **Secrets.** A `%name%` in a parameter, for a name among the secrets, is the secret's value at dispatch, and
  *   every result and digest line has the values put back as `%name%`. Other text between `%` signs, such as a
  *   URL's `%C3%`, is sent as written.
