@@ -2581,10 +2581,14 @@ export const engine = (backend: Backend) =>
 
         it.effect("names with hidden elements included keep the hidden descendants", () =>
           Effect.gen(function*() {
-            const { send } = yield* open(backend, `<button><span style="display:none">Save</span></button>`)
+            // Hidden by its style, and inert: both count with hidden elements included
+            const { send } = yield* open(
+              backend,
+              `<button><span style="display:none">Save</span></button><button><span inert>Save</span></button>`
+            )
             assert.strictEqual(
               count(yield* send({ op: "count", steps: [role("button", text("Save", true), true)] })),
-              1
+              2
             )
           }), timeout)
 
