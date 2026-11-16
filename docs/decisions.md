@@ -579,6 +579,24 @@ The viewport is applied, measured and cleared on top-level page targets only. Ch
 out-of-process iframe's target, whose size comes from its frame in the parent page, and an iframe waiting for the debugger
 resumes only after its setup, so a measurement there waits for a reply the paused renderer can't send.
 
+A page with an opener never takes its own first measurement as its original dimensions. Chromium starts a tab's
+renderer at its opener's layout, which is the override's while the opener emulates a viewport, and lays it out at
+its window's size only once the override is cleared, so a popup's gate can measure a size it never returns to, and
+its restore would wait for it. Only a page of its window says what that size is. A window that `window.open` opens
+as a popup holds no tabs, so a popup that shares its window, read with `Browser.getWindowForTarget` while it waits
+for the debugger and kept for each page, with another page of its context that has recorded dimensions is a tab,
+and takes them, since tabs in one window have one size. Any other popup's dimensions are unknown: one alone in its
+window, beside no page with recorded dimensions, or whose window can't be read. Its release clears the override and
+warns that the restore could not be verified, without waiting. The cost is that a `window.open` popup window, such
+as a sign-in flow's, open when a viewport is released is no longer confirmed, though it measures its own size.
+Rejected: taking the size after the clear as the baseline, which would confirm without the renderer having taken
+the original size; keeping a popup's first measurement when it's alone in its window, which a tab opened alone in a
+new window breaks; comparing that measurement with the configured viewport to detect an inherited size, which mobile
+emulation breaks by laying the page out at another size; telling a popup window from a tab by window bounds, whose
+platform chrome differs; reading the window's type from `Page.windowOpen`'s features, which aren't tied to the
+target they open; and skipping a removed context's restore, which would leave a released `context.emulate` waiting
+on the same popup.
+
 Measure in the named `__strider_viewport` isolated world for the target's main frame,
 passing the returned execution context id explicitly to `Runtime.evaluate`. Create or retrieve that world for each
 measurement rather than caching an execution context across navigation. Main-world lexical bindings and numeric
@@ -1310,8 +1328,11 @@ scaled to fit, centred, and padded black. The writer owns pixel fitting because 
 that policy, timestamps, acknowledgements, and lifetimes. `layerFfmpeg`'s quality is fixed rather than an option: constrained-quality VP8 (CRF 8, quantizer 0 to 50, a 4 Mbit/s average target that bursts allow exceeding) in real-time mode with `-cpu-used 8` keeps small text legible at desktop size, where libvpx's 256 kbit/s default does not; Chromium's screencast asks for JPEG quality 90, which also enlarges native trace frames. An option is rejected for now because a caller with another trade-off can provide a `VideoWriter`, and adding one later is additive. Reusable writer conformance checks decode changing and odd-sized
 inputs to verify output dimensions and padding. Its file lives in the context's downloads directory on Chromium,
 or the explicitly named output directory on WebKit. Scope closure
-or normal source termination ends input and allows five seconds on the browser clock to finish a started writer,
-even while the caller scope stays open. An empty recording fails promptly without starting a writer; source failures
+or normal source termination ends input and allows `Deadline.DefaultBudget`, as read when the capability is
+acquired, on the browser clock to finish a started writer, even while the caller scope stays open. The finish stays
+bounded because scope close waits for the writer; a fixed five seconds is rejected because what is left to encode
+at the end depends on the machine's load, not on Strider, and a limit only while input is read is rejected because
+the writer's progress after input ends is not visible. An empty recording fails promptly without starting a writer; source failures
 retain their errors. A failed or unfinished writer fails
 `file` with `BackendFailure`. Native traces select video when available. Rejected: adding the writer to the
 capability's requirement channel, which would require Firefox callers to provide an unused service; naming the
