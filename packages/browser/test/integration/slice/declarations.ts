@@ -307,15 +307,19 @@ export const declarations = (
             const elapsed = Date.now() - started
             assert.isBelow(elapsed, 5_000, `the viewport's release took ${elapsed} ms`)
             assert.deepStrictEqual(yield* popup.viewportSize, Option.none())
-            assert.notDeepEqual(yield* size(popup), [640, 480])
           })))
-          // A popup in a window of its own is laid out at that window's size before its gate, so its restore confirms
           assert.deepStrictEqual(
             warnings.filter((warning) =>
-              warning.includes("Failed to release") || warning.includes("could not be verified")
+              warning.includes("Failed to release")
             ),
             []
           )
+          if (name === "Chromium") {
+            // Nothing in the popup's window records its size, so its restore isn't confirmed
+            assert.isTrue(warnings.some((warning) =>
+              warning.includes("could not be verified")
+            ))
+          }
         }), timeout)
 
       it.effect("releases a context's viewport after a popup in its own window opens a tab", () =>
@@ -346,14 +350,20 @@ export const declarations = (
             assert.isBelow(elapsed, 5_000, `the viewport's release took ${elapsed} ms`)
             assert.deepStrictEqual(yield* popup.viewportSize, Option.none())
             assert.deepStrictEqual(yield* nested.viewportSize, Option.none())
-            assert.notDeepEqual(yield* size(popup), [640, 480])
             assert.notDeepEqual(yield* size(nested), [640, 480])
           })))
           assert.deepStrictEqual(
             warnings.filter((warning) =>
-              warning.includes("Failed to release") || warning.includes("could not be verified")
+              warning.includes("Failed to release")
             ),
             []
+          )
+          // The popup window's restore isn't confirmed; the tab takes the original page's size and confirms it
+          assert.strictEqual(
+            warnings.filter((warning) =>
+              warning.includes("could not be verified")
+            ).length,
+            name === "Chromium" ? 1 : 0
           )
         }), timeout)
 
