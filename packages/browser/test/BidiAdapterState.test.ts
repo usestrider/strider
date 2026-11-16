@@ -4733,6 +4733,51 @@ it.effect("passes a closing page's reason to the WebSocket bridge after the real
     assert.deepStrictEqual(reason, new Target.PageClosed({ by: "command" }))
   }))
 
+it.effect("does not retain a preload removed before its reply timed out", () =>
+  Effect.gen(function*() {
+    const clock = yield* Clock.Clock
+    const browser = yield* makeBrowser
+    const client = yield* ProtocolClient.make(browser.transport, BidiWire.wire, { replyClock: clock })
+    const { state } = yield* withPage({}, {}, client.root)
+    const native = new Set<string>()
+    const removed = yield* Deferred.make<void>()
+    let serial = 0
+    let hold = false
+    yield* Effect.gen(function*() {
+      while (true) {
+        const command = yield* browser.next
+        if (command.method === "script.addPreloadScript") {
+          const script = `P${++serial}`
+          native.add(script)
+          yield* browser.receive({ type: "success", id: command.id, result: { script } })
+        } else if (command.method === "script.removePreloadScript") {
+          const existed = native.delete(command.params?.script as string)
+          if (hold) {
+            hold = false
+            yield* Deferred.succeed(removed, undefined)
+            continue
+          }
+          yield* browser.receive(
+            existed
+              ? { type: "success", id: command.id, result: {} }
+              : { type: "error", id: command.id, error: "no such script", message: "Script not found" }
+          )
+        }
+      }
+    }).pipe(Effect.forkScoped)
+    yield* Declare.declare(state, { _tag: "Browser" }, preload("first"))
+    hold = true
+    const replacing = yield* Declare.declare(state, { _tag: "Browser" }, preload("second")).pipe(Effect.forkChild)
+    yield* Deferred.await(removed)
+    yield* TestClock.adjust("5 seconds")
+    yield* Fiber.join(replacing)
+    assert.deepStrictEqual(state.preloads.map(({ script }) => script).sort(), [...native].sort())
+    // The next reconciliation asks again, and Firefox's "no such script" settles the removal.
+    yield* Declare.declare(state, { _tag: "Browser" }, preload("third"))
+    assert.deepStrictEqual(state.preloads.map(({ script }) => script).sort(), [...native].sort())
+    assert.deepStrictEqual(state.unconfirmedPreloads, [])
+  }).pipe(Effect.provideServiceEffect(BrowserClock.CurrentClock, Effect.map(Clock.Clock, BrowserClock.fromClock))))
+
 describe("BiDi frame removal without contextDestroyed", () => {
   const evaluated = { type: "success", realm: "PR", result: { type: "number", value: 0 } }
   const tree = (children: ReadonlyArray<string>) => ({

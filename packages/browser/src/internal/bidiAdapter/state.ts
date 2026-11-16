@@ -253,6 +253,11 @@ export interface State extends Kit.Ending {
   readonly requestCollectors: Map<Adapter.RegistrationId, Network.Collector>
   /** Permissions granted, by context, as `[origin, name]` JSON: BiDi has no reset, so they are set back. */
   readonly granted: Map<UserContext.Id, Set<string>>
+  /**
+   * The preload scripts whose removal Firefox never answered, so may still be registered: each reconciliation sends
+   * their removal again.
+   */
+  unconfirmedPreloads: ReadonlyArray<Script.PreloadScript>
   /** The preload scripts registered, in order. */
   preloads: ReadonlyArray<
     {
@@ -326,6 +331,7 @@ export const make = (options: {
     requestCollectors: new Map(),
     granted: new Map(),
     preloads: [],
+    unconfirmedPreloads: [],
     adopting: true,
     cache: { bypass: false, pages: new Map(), lock: Semaphore.makeUnsafe(1) }
   }

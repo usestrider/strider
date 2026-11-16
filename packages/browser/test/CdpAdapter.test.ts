@@ -3607,6 +3607,170 @@ describe("CDP owned Chromium shutdown", () => {
   }
 })
 
+/**
+ * A page whose init scripts the fake keeps as Chromium does: it carries out each command as it arrives, and holds
+ * only the reply to the methods the test names, as when a reply comes after the deadline.
+ */
+const initScriptPage = Effect.fnUntraced(function*() {
+  const browser = yield* makeBrowser
+  const ready = yield* Deferred.make<void>()
+  const live = new Map<string, string>()
+  const holding = new Set<string>()
+  const held = yield* Queue.unbounded<Effect.Effect<void>>()
+  const rejected: Array<string> = []
+  let nextIdentifier = 0
+  const answer = (command: Sent): object => {
+    if (command.method === "Page.addScriptToEvaluateOnNewDocument") {
+      const identifier = `script-${++nextIdentifier}`
+      live.set(identifier, command.params?.source as string)
+      return { result: { identifier } }
+    }
+    if (command.method === "Page.removeScriptToEvaluateOnNewDocument") {
+      const identifier = command.params?.identifier as string
+      if (live.delete(identifier)) return { result: {} }
+      rejected.push(identifier)
+      return { error: { code: -32000, message: "Script not found" } }
+    }
+    return {
+      result: command.method === "Browser.getVersion"
+        ? {
+          protocolVersion: "1.3",
+          product: "Chrome/155.0.8059.79",
+          revision: "test",
+          userAgent: "HeadlessChrome",
+          jsVersion: "test"
+        }
+        : command.method === "Target.getBrowserContexts"
+        ? { browserContextIds: [] }
+        : command.method === "Page.getFrameTree"
+        ? {
+          frameTree: {
+            frame: { id: "T1", loaderId: "initial", url: "about:blank", securityOrigin: "://", mimeType: "text/html" }
+          }
+        }
+        : command.method === "Page.getLayoutMetrics"
+        ? metrics
+        : command.method === "Runtime.evaluate"
+        ? { result: { type: "undefined" } }
+        : {}
+    }
+  }
+  yield* Effect.gen(function*() {
+    while (true) {
+      const command = yield* browser.next
+      const reply = browser.receive({ id: command.id, sessionId: command.sessionId, ...answer(command) })
+      if (holding.has(command.method)) {
+        holding.delete(command.method)
+        yield* Queue.offer(held, reply)
+        continue
+      }
+      yield* reply
+    }
+  }).pipe(Effect.forkScoped)
+  const services = yield* Layer.build(BrowserImpl.layer((sink) =>
+    CdpAdapter.connect(browser.transport, {
+      ownership: "attached",
+      sink: Effect.fnUntraced(function*(fact) {
+        yield* sink(fact)
+        if (fact._tag === "PageReady") yield* Deferred.succeed(ready, undefined)
+      })
+    })
+  ))
+  yield* browser.receive({
+    method: "Target.attachedToTarget",
+    params: {
+      sessionId: "S1",
+      targetInfo: { targetId: "T1", type: "page", title: "", url: "about:blank", attached: true },
+      waitingForDebugger: false
+    }
+  })
+  yield* Deferred.await(ready)
+  const service = Context.get(services, Browser.Browser)
+  const observed = (yield* service.pages.waitFor((pages) => pages.length > 0))[0]!
+  const page = yield* observed.control
+  return {
+    page,
+    live,
+    /** The identifiers whose removal was rejected because Chromium no longer had them. */
+    rejected,
+    /** Holds the reply to the next command of this method; the returned effect waits for it and returns the reply. */
+    hold: (method: string) => Effect.sync(() => holding.add(method)).pipe(Effect.as(Queue.take(held)))
+  }
+})
+
+describe("Chromium init-script writes cut short by a deadline", () => {
+  it.effect("keeps the next declaration working after a remove whose reply came after the deadline", () =>
+    Effect.gen(function*() {
+      const h = yield* initScriptPage()
+      yield* h.page.addInitScript({ source: "self.first = true" })
+      const remove = yield* h.hold("Page.removeScriptToEvaluateOnNewDocument")
+      const replacing = yield* Effect.forkScoped(
+        h.page.addInitScript({ source: "self.second = true" }).pipe(Deadline.within("1 second"), Effect.flip)
+      )
+      const reply = yield* remove
+      yield* TestClock.adjust("1 second")
+      assert(Deadline.isTimeout(yield* Fiber.join(replacing)))
+      // Chromium has carried out the remove; only its reply comes after the deadline.
+      yield* reply
+      yield* TestClock.adjust("0 millis")
+      const next = yield* Effect.exit(h.page.addInitScript({ source: "self.third = true" }))
+      assert(Exit.isSuccess(next), `the next declaration failed: ${Exit.isFailure(next) ? String(next.cause) : ""}`)
+      assert.deepStrictEqual(h.rejected, [], "a script was removed twice")
+    }).pipe(onTestClock))
+
+  it.effect("keeps the next declaration working after a remove whose reply also misses CommandTimeout", () =>
+    Effect.gen(function*() {
+      const h = yield* initScriptPage()
+      yield* h.page.addInitScript({ source: "self.first = true" })
+      const remove = yield* h.hold("Page.removeScriptToEvaluateOnNewDocument")
+      const replacing = yield* Effect.forkScoped(
+        h.page.addInitScript({ source: "self.second = true" }).pipe(
+          Protocol.withCommandTimeout("10 millis"),
+          Effect.exit
+        )
+      )
+      const reply = yield* remove
+      // Wait for the independent write's real command timer, not the operation's test clock.
+      assert(Exit.isFailure(yield* Fiber.join(replacing)))
+      // Chromium removed the script; its reply comes after the command wait ended.
+      yield* reply
+      yield* TestClock.adjust("0 millis")
+      const next = yield* Effect.exit(h.page.addInitScript({ source: "self.third = true" }))
+      assert(Exit.isSuccess(next), `the next declaration failed: ${Exit.isFailure(next) ? String(next.cause) : ""}`)
+      // Nothing told Strider the removal took effect, so the next write asked again, and Chromium's answer settled it.
+      assert.deepStrictEqual(h.rejected, ["script-1"], "the unanswered removal was not asked again exactly once")
+      yield* h.page.addInitScript({ source: "self.fourth = true" })
+      assert.deepStrictEqual(h.rejected, ["script-1"], "a settled removal was sent again")
+    }).pipe(onTestClock))
+
+  it.effect("removes on release the script an add whose reply came after the deadline installed", () =>
+    Effect.gen(function*() {
+      const h = yield* initScriptPage()
+      const scope = yield* Scope.make()
+      const add = yield* h.hold("Page.addScriptToEvaluateOnNewDocument")
+      const adding = yield* Effect.forkScoped(
+        h.page.addInitScript({ source: "self.cutShort = true" }).pipe(
+          Deadline.within("1 second"),
+          Scope.provide(scope),
+          Effect.flip
+        )
+      )
+      const reply = yield* add
+      yield* TestClock.adjust("1 second")
+      assert(Deadline.isTimeout(yield* Fiber.join(adding)))
+      // Chromium has installed the script; only its reply comes after the deadline.
+      yield* reply
+      yield* TestClock.adjust("0 millis")
+      yield* Scope.close(scope, Exit.void)
+      // A later write on the target waits for any earlier one, so once it returns the record has settled.
+      yield* h.page.addInitScript({ source: "self.later = true" })
+      yield* TestClock.adjust("0 millis")
+      const installed = [...h.live].filter(([, source]) => source.includes("self.cutShort"))
+      assert.deepStrictEqual(installed, [], "the script the timed-out add installed is still in Chromium")
+      assert.deepStrictEqual(h.rejected, [], "a script was removed twice")
+    }).pipe(onTestClock))
+})
+
 describe("CDP WebSocket bridge", () => {
   it.effect("delivers a binding call that arrived while its target's session was held, once the sync folds its realm", () =>
     Effect.gen(function*() {
