@@ -16,6 +16,7 @@ import {
   contextKey,
   type DocumentEntry,
   type FrameEntry,
+  keepEndedFramesIfDeclared,
   type NavigationEntry,
   pageCredentialsScope,
   type PageEntry,
@@ -263,6 +264,7 @@ export const contextFor = (state: State, browserContextId: string | undefined): 
   const entry = new ContextEntry(state.ids.userContext(), browserContextId, false)
   state.contexts.set(entry.id, entry)
   state.contextsByCdp.set(browserContextId, entry)
+  keepEndedFramesIfDeclared(state, entry)
   state.buffer.emit({ _tag: "UserContextAdded", context: entry.id, isDefault: false })
   return entry
 }

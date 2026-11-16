@@ -28,6 +28,7 @@ import {
   type Event,
   forgetRetiredFrames,
   frameOf,
+  keepEndedFramesIfDeclared,
   pageOf,
   type State
 } from "./state.ts"
@@ -120,6 +121,7 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
   entry.proxy = Option.getOrUndefined(options.proxy)
   state.contexts.set(entry.id, entry)
   state.contextsByCdp.set(browserContextId, entry)
+  keepEndedFramesIfDeclared(state, entry)
   yield* state.buffer.run(() =>
     state.buffer.emit({
       _tag: "UserContextAdded",

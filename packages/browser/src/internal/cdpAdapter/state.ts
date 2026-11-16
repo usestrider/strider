@@ -55,8 +55,9 @@ export class ContextEntry {
   declare lifecycleLock?: Semaphore.Semaphore | undefined
   /**
    * A declaration gave its downloads a directory, and the context still answers for it: set as the declaration is
-   * registered, kept while the context retires, and cleared when the declaration is released with the context left
-   * open or when the context is removed.
+   * registered, or as the context is made while a browser-wide one is in force (`keepEndedFramesIfDeclared`), kept
+   * while the context retires, and cleared when the declaration is released with the context left open or when the
+   * context is removed.
    */
   declare keepsEndedFrames?: boolean | undefined
   /** The ids of its frames that have ended, which `State.retiredFrames` holds (`retireFrame`). */
@@ -478,9 +479,18 @@ export const downloadDirectory = (state: State, context: UserContext.Id) => {
 }
 
 /**
+ * Starts keeping a new context's ended frames when a browser-wide declaration in force gives its downloads a
+ * directory, as one registered later does for the contexts it finds.
+ */
+export const keepEndedFramesIfDeclared = (state: State, context: ContextEntry) => {
+  if (!context.isDefault && Option.isSome(downloadDirectory(state, context.id))) context.keepsEndedFrames = true
+}
+
+/**
  * Keeps which context a frame that ended belonged to, while a declaration has given the context's downloads a
- * directory, through the context's retirement: a download Chromium announces after the frame has gone is that
- * context's. Nothing is kept for the default context, which is never removed, or for one already disposed.
+ * directory (`ContextEntry.keepsEndedFrames`), whether registered for it or browser-wide, through the context's
+ * retirement: a download Chromium announces after the frame has gone is that context's. Nothing is kept for the
+ * default context, which is never removed, or for one already disposed.
  */
 export const retireFrame = (state: State, context: ContextEntry, frameId: string) => {
   if (context.isDefault || context.disposed || context.keepsEndedFrames !== true) return
