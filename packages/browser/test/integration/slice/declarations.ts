@@ -1343,28 +1343,6 @@ export const declarations = (
           }))
         }), timeout)
 
-      it.effect("reports a fine pointer with hover to a page of a default context", () =>
-        Effect.gen(function*() {
-          const { origin } = yield* site
-          yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
-            // Strider drives the page with a mouse, so a desktop page sees one, headless or not
-            assert.deepStrictEqual(
-              yield* run(
-                page,
-                origin,
-                "return ['(hover: hover)', '(any-hover: hover)', '(pointer: fine)', '(any-pointer: fine)'].map((query) => [query, matchMedia(query).matches])"
-              ),
-              [
-                ["(hover: hover)", true],
-                ["(any-hover: hover)", true],
-                ["(pointer: fine)", true],
-                ["(any-pointer: fine)", true]
-              ]
-            )
-          }))
-        }), timeout)
-
       it.effect("emulates each field, or fails naming what the backend can't", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -1654,11 +1632,40 @@ export const declarations = (
           }))
         }), timeout)
 
+      // Playwright's controlled clock is the reference for the timeline's rules in these cases
+    })
+
+    // Cases that keep nothing in their context share one
+    layer(SharedContext.layer(backend), { excludeTestServices: true, timeout })((suite) => {
+      const it = SharedContext.guard(suite)
+
+      it.effect("reports a fine pointer with hover to a page of a default context", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            // Strider drives the page with a mouse, so a desktop page sees one, headless or not
+            assert.deepStrictEqual(
+              yield* run(
+                page,
+                origin,
+                "return ['(hover: hover)', '(any-hover: hover)', '(pointer: fine)', '(any-pointer: fine)'].map((query) => [query, matchMedia(query).matches])"
+              ),
+              [
+                ["(hover: hover)", true],
+                ["(any-hover: hover)", true],
+                ["(pointer: fine)", true],
+                ["(any-pointer: fine)", true]
+              ]
+            )
+          }))
+        }), timeout)
+
       it.effect("waits for every document when a timer throws a value without a string conversion", () =>
         Effect.scoped(Effect.gen(function*() {
-          const first = yield* Browser.newPage()
+          const first = yield* SharedContext.newPage
           yield* first.context.clock.install({ mode: "controlled", at: 1000 })
-          const second = yield* first.context.newPage
+          const second = yield* SharedContext.newPage
           const { origin } = yield* site
           yield* second.goto(fixtureUrl(origin, "<p>second</p>"))
           yield* first.evaluateInMainWorld(() => {
@@ -1678,13 +1685,6 @@ export const declarations = (
           )
           assert(PageClock.isPageClockError(error) && error.reason._tag === "EvaluationThrown", String(error))
         })), timeout)
-
-      // Playwright's controlled clock is the reference for the timeline's rules in these cases
-    })
-
-    // Cases that keep nothing in their context share one
-    layer(SharedContext.layer(backend), { excludeTestServices: true, timeout })((suite) => {
-      const it = SharedContext.guard(suite)
 
       it.effect("runs a timer scheduled at the end of a long chain of messages", () =>
         Effect.scoped(Effect.gen(function*() {
