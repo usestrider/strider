@@ -572,22 +572,23 @@ The viewport is applied, measured and cleared on top-level page targets only. Ch
 out-of-process iframe's target, whose size comes from its frame in the parent page, and an iframe waiting for the debugger
 resumes only after its setup, so a measurement there waits for a reply the paused renderer can't send.
 
-A page with an opener takes its original dimensions from the window it opens in, read with
-`Browser.getWindowForTarget` while it waits for the debugger, a reply from the browser process alone, and kept for
-each page. Chromium starts a tab's renderer at its opener's size, which is the override while the opener emulates a
-viewport, and lays it out at its window's size only once the override is cleared, so a tab's gate measures the size
-it inherited, and its restore would wait for a size it never returns to. A window that `window.open` opens as a
-popup holds no tabs and is laid out at its own size before its gate. So a page that shares its window with another
-page of its context is a tab, and takes that page's recorded dimensions, or none if no page there has any. A page
-alone in its window keeps its gate's measurement unless it equals the size it would have inherited: its opener's
-viewport override when the opener is tracked, or else its own. A tab that opened alone in a new window, as one a
-popup window's `target=_blank` link opens once its opener's window has closed, measures that, so its dimensions are
-unknown, as they are when its window can't be read. Rejected: taking the size after the clear as the baseline, which
-would confirm without the renderer having taken the original size; treating every popup's dimensions as unknown
-unless another page shares its window, which would leave a `window.open` popup window, such as a sign-in flow's,
-unverified though it measures its own size; reading the window's type from `Page.windowOpen`'s features, which
-aren't tied to the target they open; and skipping a removed context's restore, which would leave a released
-`context.emulate` waiting on the same popup.
+A page with an opener never takes its own first measurement as its original dimensions. Chromium starts a tab's
+renderer at its opener's layout, which is the override's while the opener emulates a viewport, and lays it out at
+its window's size only once the override is cleared, so a popup's gate can measure a size it never returns to, and
+its restore would wait for it. Only a page of its window says what that size is. A window that `window.open` opens
+as a popup holds no tabs, so a popup that shares its window, read with `Browser.getWindowForTarget` while it waits
+for the debugger and kept for each page, with another page of its context that has recorded dimensions is a tab,
+and takes them, since tabs in one window have one size. Any other popup's dimensions are unknown: one alone in its
+window, beside no page with recorded dimensions, or whose window can't be read. Its release clears the override and
+warns that the restore could not be verified, without waiting. The cost is that a `window.open` popup window, such
+as a sign-in flow's, open when a viewport is released is no longer confirmed, though it measures its own size.
+Rejected: taking the size after the clear as the baseline, which would confirm without the renderer having taken
+the original size; keeping a popup's first measurement when it's alone in its window, which a tab opened alone in a
+new window breaks; comparing that measurement with the configured viewport to detect an inherited size, which mobile
+emulation breaks by laying the page out at another size; telling a popup window from a tab by window bounds, whose
+platform chrome differs; reading the window's type from `Page.windowOpen`'s features, which aren't tied to the
+target they open; and skipping a removed context's restore, which would leave a released `context.emulate` waiting
+on the same popup.
 
 Measure in the named `__strider_viewport` isolated world for the target's main frame,
 passing the returned execution context id explicitly to `Runtime.evaluate`. Create or retrieve that world for each

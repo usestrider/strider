@@ -385,57 +385,37 @@ const windowOf = (state: State, target: TargetEntry) =>
 type Dimensions = { readonly width: number; readonly height: number }
 
 /**
- * Where a popup's original dimensions come from, decided at its gate. Chromium starts a tab's renderer at its
- * opener's size, which is the opener's override while the opener emulates a viewport, and lays it out at its
- * window's size only once the override is cleared, so a tab's gate measures the size it inherited. A window that
- * `window.open` opens as a popup is laid out at its own size before its gate, and holds no other page.
- *
- * - A popup that shares its window with another page of its context is a tab, so it takes that page's recorded
- *   dimensions, or none (null) if no page there has any.
- * - A popup alone in its window keeps its gate's measurement, unless it equals the size it would have inherited:
- *   its opener's viewport override when the opener is tracked, or else its own. A tab that opened alone in a new
- *   window measures that, so its dimensions are unknown (null), as they are when its window can't be read.
- * - A page with no opener keeps its gate's measurement.
+ * A popup's original dimensions, decided at its gate, or undefined for a page with no opener, which measures its
+ * own. Chromium starts a tab's renderer at its opener's layout, which is the override's while the opener emulates a
+ * viewport, and lays it out at its window's size only once the override is cleared, so a popup's gate measures a
+ * size it may never return to. Only a page of its window says what that size is: a window that `window.open` opens
+ * as a popup holds no tabs, so a popup that shares its window with another page of its context is a tab, and tabs
+ * in one window have one size. It takes that page's recorded dimensions. A popup alone in its window, beside no page
+ * with recorded dimensions, or whose window can't be read has unknown dimensions (null), so its restore clears the
+ * override without confirming it.
  */
 const popupBaseline = Effect.fnUntraced(function*(
   state: State,
   target: TargetEntry,
-  page: PageEntry,
-  override: Dimensions
-): Effect.fn.Return<
-  { readonly _tag: "Recorded"; readonly viewport: Dimensions | null } | {
-    readonly _tag: "Measured"
-    readonly inherited: Dimensions | undefined
-  }
-> {
-  if (page.openerId === undefined) return { _tag: "Measured", inherited: undefined }
+  page: PageEntry
+): Effect.fn.Return<Dimensions | null | undefined> {
+  if (page.openerId === undefined) return undefined
   const own = yield* windowOf(state, target).pipe(Effect.option)
-  if (Option.isNone(own)) return { _tag: "Recorded", viewport: null }
+  if (Option.isNone(own)) return null
   const others = [...state.targets.values()].filter((other) =>
     other !== target && other.kind === "page" && !other.ended && other.page !== undefined &&
-    other.page.context === page.context
+    other.page.context === page.context && other.viewport !== undefined && other.viewport !== null
   )
-  // A page whose window can't be read, as one that has just closed, is left out
   const windows = yield* Effect.forEach(
     others,
     (other) => windowOf(state, other).pipe(Effect.option),
     { concurrency: "unbounded" }
   )
-  const mates = others.filter((_, index) => {
+  const mate = others.find((_, index) => {
     const window = windows[index]!
     return Option.isSome(window) && window.value === own.value
   })
-  if (mates.length > 0) {
-    const recorded = mates.find((mate) => mate.viewport !== undefined && mate.viewport !== null)?.viewport
-    return { _tag: "Recorded", viewport: recorded ?? null }
-  }
-  const opener = state.targetsById.get(page.openerId)?.page
-  if (opener === undefined) return { _tag: "Measured", inherited: override }
-  const inherited = state.registry.overrides(placement(opener)).get("Viewport")
-  return {
-    _tag: "Measured",
-    inherited: inherited?._tag === "Viewport" ? { width: inherited.width, height: inherited.height } : undefined
-  }
+  return mate?.viewport ?? null
 })
 
 /** What a new page or frame gets before its scripts run: the declarations in force for its page. */
@@ -482,19 +462,14 @@ export const configureTarget = Effect.fnUntraced(
           if (override?._tag !== "Viewport") {
             return
           }
-          const baseline = yield* popupBaseline(state, target, page, override)
-          if (baseline._tag === "Recorded") {
-            target.viewport = baseline.viewport
+          const baseline = yield* popupBaseline(state, target, page)
+          if (baseline !== undefined) {
+            target.viewport = baseline
           } else {
-            const inherited = baseline.inherited
             // The initial blank document has no scrollbars. Queue its dimensions before changing them, without
             // creating an isolated world whose identifier would require a renderer reply before resume.
             yield* setup.send(Page.getLayoutMetrics(), ({ cssLayoutViewport }) => {
-              const width = cssLayoutViewport.clientWidth
-              const height = cssLayoutViewport.clientHeight
-              target.viewport = inherited !== undefined && inherited.width === width && inherited.height === height
-                ? null
-                : { width, height }
+              target.viewport = { width: cssLayoutViewport.clientWidth, height: cssLayoutViewport.clientHeight }
             })
           }
           yield* setup.send(Emulation.setDeviceMetricsOverride({
