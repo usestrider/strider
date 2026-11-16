@@ -2624,6 +2624,16 @@ export const engine = (backend: Backend) =>
             ])
           }), timeout)
 
+        it.effect("selected options preserve the surrounding reference traversal", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<label for="colour">Colour <span role="listbox"><span role="option" aria-selected="true"><span role="alert">Blue</span></span></span></label><input data-t id="colour">
+<button data-t aria-labelledby="choice"></button><span id="choice" role="listbox" aria-owns="selected"></span><span id="selected" role="option" aria-selected="true"><span role="alert">Green</span></span>`
+            )
+            assert.deepStrictEqual(namesOf(yield* send(marked)), ["Colour Blue", "Green"])
+          }), timeout)
+
         it.effect("a native select in a label contributes its chosen option's label, or its first option's", () =>
           Effect.gen(function*() {
             const { send } = yield* open(
