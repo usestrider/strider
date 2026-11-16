@@ -66,7 +66,11 @@ export const invalidInput = (
   step: string
 ) => fail(new Reason.InvalidInput(input), step)
 
-/** A launch's span: the executable it named and, where the backend has them, the launch profile it used. */
+/**
+ * A launch's span: the executable it named and, where the backend has them, the launch profile it used. The launch
+ * adds, once it knows them, the arguments it passes (`browser.launch.args`) and, on Firefox, the preferences it
+ * writes to `user.js` (`browser.launch.prefs`, as JSON).
+ */
 export const span = (
   name: string,
   options: { readonly executablePath?: string | undefined; readonly profile?: string | undefined },

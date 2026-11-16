@@ -1986,11 +1986,36 @@ export function engine(render: (root: SnapNode) => string) {
     return label
   }
 
-  const textSelectionTarget = (element: Element): Element => {
-    let target = element
-    if (!dom.matches(target, "input, textarea, select") && !contentEditable(target)) {
-      target = dom.closest(target, "button, [role=button], [role=checkbox], [role=radio]") ?? target
+  const CONTROL = "button, [role=button], [role=checkbox], [role=radio]"
+
+  const standsForItself = (element: Element): boolean =>
+    dom.matches(element, "input, textarea, select") || contentEditable(element)
+
+  // Selection takes the text of the control an element is in, found among its DOM ancestors. Fields and editable
+  // content stand for themselves.
+  const enclosingControl = (element: Element): Element =>
+    standsForItself(element) ? element : dom.closest(element, CONTROL) ?? element
+
+  // The browser delivers no click to a disabled button's subtree on the flat tree, so Enabled climbs it: through
+  // assigned slots and out of shadow roots. Fields and editable content stand for themselves.
+  const flatEnclosingControl = (element: Element): Element => {
+    if (standsForItself(element)) return element
+    for (
+      let current: Element | null = element;
+      current !== null;
+      current = dom.assignedSlot(current) ?? composedParent(current)
+    ) {
+      if (dom.matches(current, CONTROL)) return current
     }
+    return element
+  }
+
+  // Enabled as a user sees it: an element is enabled only when it and its enclosing control both are, so a span inside
+  // a disabled button is disabled, and a disabled option stays disabled whatever encloses its select
+  const enabledControl = (element: Element): boolean => enabled(element) && enabled(flatEnclosingControl(element))
+
+  const textSelectionTarget = (element: Element): Element => {
+    let target = enclosingControl(element)
     if (
       !dom.matches(
         target,
@@ -2549,8 +2574,8 @@ export function engine(render: (root: SnapNode) => string) {
       else if (checks.visible && !rendered(element, false)) reason = { _tag: "NotVisible" }
       else if (
         checks.enabled && (
-          !enabled(element) || (action._tag === "Point" && action.checked === true &&
-            !enabled(checkableForAction(element) ?? element))
+          !enabledControl(element) || (action._tag === "Point" && action.checked === true &&
+            !enabledControl(checkableForAction(element) ?? element))
         )
       ) reason = { _tag: "Disabled" }
       else if (checks.editable && readOnly(element)) reason = { _tag: "ReadOnly" }
@@ -2858,7 +2883,7 @@ export function engine(render: (root: SnapNode) => string) {
       case "Editable":
         return { _tag: "Read", value: editableKind(element) && enabled(element) && !readOnly(element) }
       case "Enabled":
-        return { _tag: "Read", value: enabled(element) }
+        return { _tag: "Read", value: enabledControl(element) }
       case "Checked": {
         const control = request.read.followLabel ? checkableForAction(element) : element
         const checked = control === null ? null : checkedOf(control)
@@ -2944,9 +2969,9 @@ export function engine(render: (root: SnapNode) => string) {
     const element = found[0]!
     switch (expectation._tag) {
       case "Enabled":
-        return { passed: enabled(element), observed: enabled(element) ? "enabled" : "disabled" }
+        return { passed: enabledControl(element), observed: enabledControl(element) ? "enabled" : "disabled" }
       case "Disabled":
-        return { passed: !enabled(element), observed: enabled(element) ? "enabled" : "disabled" }
+        return { passed: !enabledControl(element), observed: enabledControl(element) ? "enabled" : "disabled" }
       case "Checked": {
         const checked = checkedOf(element)
         return {
