@@ -398,6 +398,26 @@ export const cases: ReadonlyArray<Case> = [
     verify: equals("1")
   },
   {
+    name: "mouse-move-cross-site-frame",
+    description:
+      "Move the pointer in 20 steps across a page and through a cross-site frame, then read the page's counter",
+    fixture: "/benchmark-mouse?frame=drawn",
+    // The moves start once the frame has run two animation frames, which it reports itself, with no input
+    prepareStrider: (page) => page.locator("#drawn").pipe(Expect.toHaveText("drawn")),
+    preparePlaywright: (page) => page.locator("#drawn").filter({ hasText: "drawn" }).waitFor(),
+    strider: Effect.fnUntraced(function*(page) {
+      yield* page.mouse.move({ x: 150, y: 100 })
+      yield* page.mouse.move({ x: 700, y: 100 }, { steps: 20 })
+      return yield* page.locator("#count").readText
+    }),
+    playwright: async (page) => {
+      await page.mouse.move(150, 100)
+      await page.mouse.move(700, 100, { steps: 20 })
+      return page.locator("#count").textContent()
+    },
+    verify: equals("0")
+  },
+  {
     name: "fill",
     description: "Fill a labeled input with default actionability, then read its value",
     strider: Effect.fnUntraced(function*(page) {
