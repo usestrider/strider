@@ -495,8 +495,14 @@ export interface Options {
    *
    * Chromium, Firefox, and launched stock WebKit support this when creating a context. On Chromium each of the
    * context's pages, popups included, ignores certificate errors before it loads anything, and a reclaimable
-   * context refuses `true` with `Unsupported`. Attached stock WebKit cannot create contexts. Reclaiming an existing context refuses either explicit value: this setting can only
-   * be chosen at creation. Omitting it preserves the existing context's setting.
+   * context refuses `true` with `Unsupported`. Attached stock WebKit cannot create contexts. Reclaiming an
+   * existing context refuses either explicit value: this setting can only be chosen at creation. Omitting it
+   * preserves the existing context's setting.
+   *
+   * **Gotchas**
+   *
+   * On Chromium the override is sent to the context's pages, not to its service workers, so a service worker's
+   * own requests may still fail on a certificate error.
    *
    * **Example** (A local HTTPS test site)
    *
