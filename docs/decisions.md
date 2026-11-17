@@ -600,22 +600,18 @@ release reproduced a successful clear followed by the overridden width. A clear 
 restoration contract. Each target attempts to record its original width and height before its first viewport override; nested
 and replacement registrations retain those dimensions until the last override has been cleared and restored.
 A page with no opener that is paused for the debugger when it attaches, while a viewport is already in force,
-records them before the override is written: if it attaches at `about:blank`, it measures the way the restore
-does, `innerWidth` and `innerHeight` in the measurement world, and the measurement finishes before the override is
-sent and before the page resumes. Such a page, which is every page Strider opens in Chromium, has its renderer
-while it waits, so it answers. One measure on both sides matters because at a fractional device scale the layout
-viewport's client size and `innerWidth`/`innerHeight` round 1 px apart, so a page back at its size would never
-match. Any other such page, one that attaches paused at a URL, such as a tab another client opens in a context
-Strider created, may get its renderer only once its first request is routed, after it resumes, so a measurement
-awaited before resume would not be answered. Its dimensions are unknown, and its restore clears the override and
-warns without waiting. The cost is that such a page's restore is no longer confirmed. The headless shell attaches
-every new page with an empty URL, whether it starts blank or at a routed URL, so the URL can't tell its pages apart,
-and every page it creates under a viewport records unknown dimensions. This applies only to a page set up paused
-while a viewport is in force: a page given its viewport later, or one attached already running, as on connecting to
-a browser, is measured before its first override as any other target is, and its restore is confirmed. Rejected:
-queuing `Page.getLayoutMetrics` before the override without awaiting it, which measures the other way and which the
-headless shell answers after the override applies, recording the override's size; its only saving is the
-measurement's renderer round trips before the page resumes.
+queues its reading of `innerWidth` and `innerHeight` in its main world before the override, and nothing is awaited
+before it resumes. It reads what the restore compares, because the layout viewport's client size leaves out a
+scrollbar and at a fractional device scale rounds 1 px away, so a page back at its size would never match. The main
+world is read because no page script has run there before the page resumes. A renderer that answers the reading
+only after the override applies, as the headless shell does, reports the override's own size, so a reading equal to
+the override's width and height, or one that fails, leaves the dimensions unknown, and the restore clears the
+override and warns without waiting. The cost is that a page whose own size equals the viewport's is not confirmed.
+A page given its viewport later, or one attached already running, as on connecting to a browser, is measured in the
+measurement world before its first override, as any other target is. Rejected: awaiting the measurement before the
+override and the resume, which costs every page opened under a viewport a renderer round trip before it starts,
+the common path; queuing `Page.getLayoutMetrics`, which measures the layout viewport rather than what the restore
+compares; and comparing the layout viewport at the restore instead, which a scrollbar on the released page breaks.
 While an override remains, release reapplies the current effective override. Per-target serialization recomputes
 that effective override when the command runs, including when registrations are released out of order.
 

@@ -40,6 +40,11 @@ export interface Setup {
     command: Protocol.Command<M, P, A>,
     receive?: (result: A) => void
   ) => Effect.Effect<void, Protocol.ProtocolError>
+  /** Writes a reading whose failed reply leaves it unread, given `undefined`, rather than failing the setup. */
+  readonly read: <M extends string, P, A>(
+    command: Protocol.Command<M, P, A>,
+    receive: (result: A | undefined) => void
+  ) => Effect.Effect<void, Protocol.ProtocolError>
 }
 
 type Send = <M extends string, P, A>(command: Protocol.Command<M, P, A>) => Effect.Effect<void, Protocol.ProtocolError>
@@ -652,20 +657,30 @@ export const configureTarget = Effect.fnUntraced(
           const baseline = yield* popupBaseline(state, target, page)
           if (baseline !== undefined) {
             target.viewport = baseline
-          } else if (target.url === "about:blank") {
-            // Measured as the restore measures, since at a fractional device scale the layout viewport rounds 1 px
-            // away from `innerWidth`/`innerHeight`. It finishes before the override is sent, because a queued read
-            // can be answered after the override applies. A page that attaches at the blank document has its
-            // renderer while it waits for the debugger, so it answers before it resumes.
-            target.viewport = yield* dimensions(target).pipe(
-              Effect.match({ onFailure: () => null, onSuccess: (value) => value })
-            )
           } else {
-            // A paused page that attaches at a URL may get its renderer only once its first request is routed,
-            // after it resumes, so a measurement awaited here might not be answered. Its dimensions are unknown. The
-            // headless shell attaches every new page with an empty URL, routed or not, so each page it creates under a
-            // viewport is unknown. A page given a viewport later, or attached unpaused, is measured in `viewport`.
+            // Queued before the override, with nothing awaited before resume: a page whose first request is routed
+            // gets its renderer only once that request runs, after it resumes. It reads what the restore compares,
+            // `innerWidth` and `innerHeight`: the layout viewport's client size leaves out a scrollbar, and at a
+            // fractional device scale rounds 1 px away. It reads the main world, where no page script has run before
+            // the page resumes. A renderer that answers only after the override applies, as the headless shell does,
+            // reports the override's own size, which can't be told from a page of that size, so that size, and any
+            // reading that isn't one, leaves the dimensions unknown.
             target.viewport = null
+            yield* setup.read(
+              Runtime.evaluate({ expression: "[innerWidth, innerHeight]", returnByValue: true }),
+              (reply) => {
+                const value = reply?.result.value
+                const measured = Array.isArray(value) && typeof value[0] === "number" &&
+                    typeof value[1] === "number" && Number.isFinite(value[0]) && Number.isFinite(value[1]) &&
+                    value[0] > 0 && value[1] > 0
+                  ? { width: value[0], height: value[1] }
+                  : null
+                target.viewport = measured === null ||
+                    (measured.width === override.width && measured.height === override.height)
+                  ? null
+                  : measured
+              }
+            )
           }
           yield* setup.send(Emulation.setDeviceMetricsOverride({
             width: override.width,
