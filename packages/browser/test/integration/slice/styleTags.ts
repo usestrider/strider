@@ -1,6 +1,6 @@
 /** Style injection, `addStyleTag`, into a page's or a frame's document, on every backend. */
 import { assert, describe, layer } from "@effect/vitest"
-import type { Browser } from "@usestrider/browser"
+import { type Browser, Expect } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
 import * as fs from "node:fs/promises"
@@ -64,7 +64,7 @@ export const styleTags = (name: string, backend: Layer.Layer<Browser.Browser, un
           yield* page.goto(`${served.origin}/fixture?html=x`)
           const url = `${served.origin}/missing`
           const error = yield* page.addStyleTag({ url }).pipe(Effect.flip)
-          assert.strictEqual(error._tag, "PageError")
+          assert(error._tag === "PageError")
           assert.strictEqual(error.reason._tag, "ResourceFailed")
           assert.strictEqual(error.reason._tag === "ResourceFailed" && error.reason.url, url)
         }).pipe(Effect.scoped))
@@ -76,10 +76,12 @@ export const styleTags = (name: string, backend: Layer.Layer<Browser.Browser, un
           yield* page.goto(`${served.origin}/style-csp?html=x`)
           const before = yield* page.evaluateInMainWorld(bodyColor)
           const inline = yield* page.addStyleTag({ source: "body { color: rgb(1, 2, 3) }" }).pipe(Effect.flip)
+          assert(inline._tag === "PageError")
           assert.strictEqual(inline.reason._tag, "RefusedByPolicy")
           assert.strictEqual(inline.reason._tag === "RefusedByPolicy" && inline.reason.directive, "style-src-elem")
           const remote = yield* page.addStyleTag({ url: stylesheet(served.crossSite, "body { color: rgb(4, 5, 6) }") })
             .pipe(Effect.flip)
+          assert(remote._tag === "PageError")
           assert.strictEqual(remote.reason._tag, "RefusedByPolicy")
           assert.strictEqual(remote.reason._tag === "RefusedByPolicy" && remote.reason.directive, "style-src-elem")
           assert.strictEqual(yield* page.evaluateInMainWorld(bodyColor), before)
@@ -97,10 +99,7 @@ export const styleTags = (name: string, backend: Layer.Layer<Browser.Browser, un
           const before = yield* page.evaluateInMainWorld(bodyColor)
           const frame = page.frame(page.locator("iframe"))
           yield* frame.addStyleTag({ source: "body { color: rgb(1, 2, 3) }" })
-          assert.strictEqual(
-            yield* frame.locator("body").evaluate((body) => getComputedStyle(body).color),
-            "rgb(1, 2, 3)"
-          )
+          yield* frame.locator("body").pipe(Expect.toHaveCSS("color", "rgb(1, 2, 3)"))
           assert.strictEqual(yield* page.evaluateInMainWorld(bodyColor), before)
         }).pipe(Effect.scoped))
     })

@@ -33,6 +33,7 @@ import type * as JSHandle from "../JSHandle.ts"
 import type * as Keyboard from "../Keyboard.ts"
 import * as Locator from "../Locator.ts"
 import type * as Mouse from "../Mouse.ts"
+import type * as Page from "../Page.ts"
 import * as Protocol from "../protocol/Protocol.ts"
 import * as Reason from "../Reason.ts"
 import type * as Snapshot from "../Snapshot.ts"
@@ -56,6 +57,7 @@ import * as Recorders from "./recorders.ts"
 import * as Runtime from "./runtime.ts"
 import * as Snapshots from "./snapshot.ts"
 import { describeSteps, matcher, queries, type Relative, roleStep } from "./steps.ts"
+import * as StyleTag from "./styleTag.ts"
 
 // ── Locators ──────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -582,6 +584,74 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
           : this.error(operation, failure.reason, id)
       ))
       return value as JSHandle.Serialized<B>
+    }).pipe(Operation.named(operation, {
+      attributes: { "browser.page.id": this.owner.page.id, "browser.locator": this.description }
+    }))
+  }
+
+  /**
+   * `FrameLocator.addStyleTag`, on the locator of a frame's root element: the stylesheet goes into the document that
+   * match is in, resolved now, through one call in its main world.
+   */
+  addStyleTag(tag: Page.StyleTag): Effect.Effect<void, Locator.LocatorError | Target.TargetGone | Deadline.Timeout> {
+    const operation = "FrameLocator.addStyleTag"
+    const owner = this.owner
+    return Effect.gen({ self: this }, function*() {
+      yield* Access.check(owner.grant)
+      const record = yield* Operation.record
+      const id = record.id
+      const budget = record.budget
+      const inserted = yield* StyleTag.resolve(owner.runtime, tag).pipe(
+        Effect.mapError((reason) => this.error(operation, reason, id))
+      )
+      const found = yield* Runtime.element(owner.runtime, owner.page, this.steps, id, budget.at).pipe(
+        Effect.mapError((failure) => this.sendFailure(operation, failure, record))
+      )
+      if (found._tag === "Response") {
+        const response = found.response
+        switch (response._tag) {
+          case "NoMatch":
+            return yield* Effect.fail(this.error(
+              operation,
+              new Locator.NoMatch({ hint: "the iframe isn't on the page, or shows no document yet" }),
+              id
+            ))
+          case "InvalidSelector":
+            return yield* Effect.fail(this.invalidSelector(operation, response, id))
+          default:
+            return yield* this.unmatched(operation, response, id)
+        }
+      }
+      const settled = yield* Effect.gen(function*() {
+        const realm = yield* Evaluation.documentRealm(owner.runtime, found.routed.document, { _tag: "Main" }, id)
+        const values = yield* Evaluation.toLocal([inserted], realm)
+        // The call is on its way: a deadline after it can't say the stylesheet wasn't inserted
+        const result = yield* Evaluation.call(owner.runtime, {
+          dispatch: record,
+          realm,
+          functionDeclaration: FunctionSource.declaration(StyleTag.insert),
+          arguments: values,
+          result: "value",
+          userActivation: false,
+          page: Option.some(owner.page),
+          at: budget.at,
+          id
+        })
+        return yield* Evaluation.fromRemote(result)
+      }).pipe(Effect.mapError((failure) =>
+        failure._tag === "Gone"
+          ? failure.error
+          : failure._tag === "Deadline"
+          ? record.timeout(
+            record.dispatch._tag === "MayHaveBeenSent"
+              ? Option.some("The frame didn't answer before the deadline; the stylesheet may still be loading")
+              : Option.none()
+          )
+          : this.error(operation, failure.reason, id)
+      ))
+      return yield* StyleTag.settle(inserted, settled).pipe(
+        Effect.mapError((reason) => this.error(operation, reason, id))
+      )
     }).pipe(Operation.named(operation, {
       attributes: { "browser.page.id": this.owner.page.id, "browser.locator": this.description }
     }))
@@ -2051,6 +2121,7 @@ export const frameLocator = (owner: Owner, steps: ReadonlyArray<Engine.Step>): L
   return {
     ...queries(inside, make),
     owner: make(steps),
+    addStyleTag: (tag) => make([...inside, { _tag: "Css", selector: ":root" }]).addStyleTag(tag),
     frame: (iframe) => {
       if (!(iframe instanceof LocatorImpl) || iframe.owner.page.id !== owner.page.id) {
         throw new Error("FrameLocator.frame: the iframe's locator belongs to another page")

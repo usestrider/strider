@@ -31,6 +31,7 @@ import type * as Declaration from "./Declaration.ts"
 import * as Diagnostics from "./Diagnostics.ts"
 import * as Dialog from "./Dialog.ts"
 import type * as Emulation from "./Emulation.ts"
+import type * as FilePath from "./FilePath.ts"
 import type * as InitScript from "./InitScript.ts"
 import * as ReasonCause from "./internal/reasonCause.ts"
 import type * as RoutePhaseDiagnostic from "./internal/routePhaseDiagnostic.ts"
@@ -976,6 +977,39 @@ export interface Page extends ReadonlyPage {
     ...args: Args
   ): Effect.Effect<JSHandle.Serialized<A>, PageError | Target.TargetGone | Deadline.Timeout>
   /**
+   * Adds a stylesheet to the page's current document, from CSS source, a URL, or a file, and returns once it applies.
+   *
+   * **Details**
+   *
+   * `{ source }` and `{ path }` add a `<style>`; a file's text gets a `sourceURL` comment naming its path, so
+   * devtools show where the rules came from. `{ url }` adds a `<link rel="stylesheet">` and waits for it to load.
+   * The element goes at the end of the document's head, or of its root element when it has no head. It belongs to
+   * the document: it stays until the page's scripts remove it or the document is replaced, and a navigation
+   * doesn't add it again. Nothing is set up before the call.
+   *
+   * Fails with `RefusedByPolicy` when the page's Content Security Policy refuses the stylesheet, with
+   * `ResourceFailed` when its URL doesn't load, and with `InvalidInput` when a path can't be read or the browser's
+   * layer has no `FileSystem` and `Path` to read it with.
+   *
+   * **Gotchas**
+   *
+   * The element is inserted among the page's own scripts, so they can see it and its order among their own styles
+   * decides which rules win.
+   *
+   * **Example** (Hiding a cookie banner before a screenshot)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const hideBanner = Effect.fn("hideBanner")(function*(page: Page.Page) {
+   *   yield* page.addStyleTag({ source: "#cookie-banner { display: none }" })
+   *   return yield* page.screenshot()
+   * })
+   * ```
+   */
+  addStyleTag(tag: StyleTag): Effect.Effect<void, PageError | Target.TargetGone | Deadline.Timeout>
+  /**
    * Calls `fn` in the isolated world and returns its result as a handle, for values that can't come back by value.
    *
    * **Gotchas**
@@ -1419,8 +1453,40 @@ export const PageErrorReason = Schema.Union([
   Reason.Unsupported,
   Reason.BackendFailure,
   Reason.ViewportMismatch,
-  Reason.PromptBlocking
+  Reason.PromptBlocking,
+  Reason.RefusedByPolicy,
+  Reason.ResourceFailed
 ])
+
+/**
+ * A stylesheet for `addStyleTag`: CSS source, a URL, or a file; which kind is always stated.
+ *
+ * **Details**
+ *
+ * - `{ source }` is CSS text.
+ * - `{ url }` is a stylesheet's address, resolved against the document's.
+ * - `{ path }` is a file on this machine, read when the stylesheet is added.
+ *
+ * **Example** (A file and a URL)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const theme = Effect.fn("theme")(function*(page: Page.Page) {
+ *   yield* page.addStyleTag({ path: "./fixtures/print.css" })
+ *   yield* page.addStyleTag({ url: "https://cdn.example.com/theme.css" })
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export type StyleTag =
+  | { readonly source: string }
+  | { readonly url: string }
+  | { readonly path: FilePath.Local | string }
 
 /**
  * The reasons a page operation can fail.

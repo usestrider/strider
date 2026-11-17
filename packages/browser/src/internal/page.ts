@@ -62,6 +62,7 @@ import * as Routes from "./routes.ts"
 import * as Runtime from "./runtime.ts"
 import * as Snapshots from "./snapshot.ts"
 import * as Storage from "./storage.ts"
+import * as StyleTag from "./styleTag.ts"
 import * as Urls from "./urls.ts"
 import * as Watchable from "./watchable.ts"
 
@@ -260,7 +261,7 @@ export const make = (owner: PageOwner): Page.Page => {
    * Calls a function in a world of the page's current document: the caller's isolated
    * world, or the main world with user activation inside `Page.withUserGesture`.
    */
-  const evaluation = <B, R>(
+  const evaluationStep = <B, R>(
     operation: string,
     world: Adapter.World,
     fn: Function,
@@ -305,7 +306,18 @@ export const make = (owner: PageOwner): Page.Page => {
         ),
         Effect.annotateSpans({ "browser.evaluation.user_gesture": gesture })
       )
-    }).pipe(
+    })
+
+  /** `evaluationStep` as an operation of its own. */
+  const evaluation = <B, R>(
+    operation: string,
+    world: Adapter.World,
+    fn: Function,
+    args: ReadonlyArray<unknown>,
+    result: "value" | "handle",
+    then: (realm: Target.RealmId, value: Adapter.RemoteValue) => Effect.Effect<B, Evaluation.Failure, R>
+  ): Effect.Effect<B, Page.PageError | Target.TargetGone | Deadline.Timeout, R> =>
+    evaluationStep(operation, world, fn, args, result, then).pipe(
       Operation.named(operation, {
         attributes: {
           "browser.page.id": entry.id,
@@ -611,6 +623,25 @@ export const make = (owner: PageOwner): Page.Page => {
         JSHandle.Serialized<A>,
         Page.PageError | Target.TargetGone | Deadline.Timeout
       >,
+    addStyleTag: (tag) =>
+      Effect.gen(function*() {
+        const id = (yield* Operation.record).id
+        const fail = (reason: Page.PageErrorReason) => pageError("Page.addStyleTag", reason, id)
+        const inserted = yield* StyleTag.resolve(runtime, tag).pipe(Effect.mapError(fail))
+        const settled = yield* evaluationStep(
+          "Page.addStyleTag",
+          { _tag: "Main" },
+          StyleTag.insert,
+          [inserted],
+          "value",
+          (_realm, value) => Evaluation.fromRemote(value)
+        )
+        return yield* StyleTag.settle(inserted, settled).pipe(Effect.mapError(fail))
+      }).pipe(
+        Operation.named("Page.addStyleTag", {
+          attributes: { "browser.page.id": entry.id, "browser.style_tag.kind": "url" in tag ? "url" : "inline" }
+        })
+      ),
     evaluateHandle: <Args extends ReadonlyArray<unknown>, A>(fn: (...args: Args) => A | Promise<A>, ...args: Args) =>
       evaluation(
         "Page.evaluateHandle",

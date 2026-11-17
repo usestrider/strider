@@ -31,6 +31,7 @@ import * as Steps from "./internal/steps.ts"
 import type * as JSHandle from "./JSHandle.ts"
 import type * as Keyboard from "./Keyboard.ts"
 import type * as Mouse from "./Mouse.ts"
+import type * as Page from "./Page.ts"
 import * as Reason from "./Reason.ts"
 import type * as Snapshot from "./Snapshot.ts"
 import type * as Target from "./Target.ts"
@@ -1907,6 +1908,27 @@ export interface FrameLocator extends ReadonlyFrameLocator {
   getByTestId(id: string): Locator
   locator(css: string): Locator
   frame(iframe: ReadonlyLocator): FrameLocator
+  /**
+   * Adds a stylesheet to the iframe's current document, as `Page.addStyleTag` does to a page's.
+   *
+   * **Details**
+   *
+   * The iframe is found when the call starts, and the stylesheet goes into the document it shows then. Fails with
+   * `NoMatch` when there's no such iframe, and as `Page.addStyleTag` does otherwise.
+   *
+   * **Example** (Restyling an embedded widget)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const compactChat = Effect.fn("compactChat")(function*(page: Page.Page) {
+   *   const chat = page.frame(page.locator("iframe#chat"))
+   *   yield* chat.addStyleTag({ source: ".message { margin: 0 }" })
+   * })
+   * ```
+   */
+  addStyleTag(tag: Page.StyleTag): Effect.Effect<void, LocatorError | Target.TargetGone | Deadline.Timeout>
 }
 
 /**
@@ -2081,7 +2103,9 @@ export const LocatorErrorReason = Schema.Union([
   Reason.Unsupported,
   Reason.BackendFailure,
   Reason.PromptBlocking,
-  Reason.LocatorHandlerFailed
+  Reason.LocatorHandlerFailed,
+  Reason.RefusedByPolicy,
+  Reason.ResourceFailed
 ])
 
 /**
