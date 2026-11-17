@@ -41,7 +41,8 @@ const fetchThrough = (proxy: number, authority: string) =>
         const secure = tls.connect({ socket, rejectUnauthorized: false, servername: "localhost" }, () =>
           secure.write(`GET / HTTP/1.1\r\nHost: ${authority}\r\nConnection: close\r\n\r\n`))
         let body = ""
-        secure.on("data", (chunk) => body += chunk)
+        secure.on("data", (chunk) =>
+          body += chunk)
         secure.on("error", () => resolve(undefined))
         secure.on("close", () => resolve(body === "" ? undefined : body.split("\r\n\r\n")[1]))
       })
@@ -119,7 +120,11 @@ describe("ClientCertificates", () => {
         const proxy = yield* ClientCertificates.serve(prepared([]), { acceptInsecureCerts: false })
         const tunneled = yield* Effect.promise(() =>
           new Promise<string>((resolve) => {
-            const socket = net.connect(proxy.port, "127.0.0.1", () => socket.write(`CONNECT 127.0.0.1:${port} HTTP/1.1\r\n\r\n`))
+            const socket = net.connect(
+              proxy.port,
+              "127.0.0.1",
+              () => socket.write(`CONNECT 127.0.0.1:${port} HTTP/1.1\r\n\r\n`)
+            )
             let text = ""
             socket.once("data", () => {
               socket.on("data", (chunk) => text += chunk)

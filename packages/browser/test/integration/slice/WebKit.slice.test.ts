@@ -13,6 +13,7 @@ import { webkitgtk } from "../browsers.ts"
 import { socketConnector } from "../sockets.ts"
 import { useXvfb } from "../stockWebKit.ts"
 import { attaching } from "./attaching.ts"
+import { clientCertificates } from "./clientCertificates.ts"
 import { contents } from "./contents.ts"
 import { deadlines } from "./deadlines.ts"
 import { declarations } from "./declarations.ts"
@@ -28,7 +29,6 @@ import { storageReplacement } from "./storageReplacement.ts"
 import { tooling } from "./tooling.ts"
 import { toolkit } from "./toolkit.ts"
 import { webauthn } from "./webauthn.ts"
-import { clientCertificates } from "./clientCertificates.ts"
 
 // The X server comes up before the browser, and goes after it
 const display = Layer.effectDiscard(useXvfb()).pipe(Layer.provide(NodeServices.layer))

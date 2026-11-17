@@ -40,13 +40,12 @@ const site = Effect.acquireRelease(
     })
 ).pipe(Effect.map((server) => (server.address() as net.AddressInfo).port))
 
-const certificateTitle = (context: UserContext.UserContext, url: string) =>
-  Effect.gen(function*() {
-    const page = yield* context.newPage
-    const loaded = yield* page.goto(url).pipe(Effect.exit)
-    if (Exit.isFailure(loaded)) return undefined
-    return yield* page.evaluateInMainWorld(() => document.title)
-  })
+const certificateTitle = Effect.fnUntraced(function*(context: UserContext.UserContext, url: string) {
+  const page = yield* context.newPage
+  const loaded = yield* page.goto(url).pipe(Effect.exit)
+  if (Exit.isFailure(loaded)) return undefined
+  return yield* page.evaluateInMainWorld(() => document.title)
+})
 
 export const clientCertificates = (name: string, backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} client certificates`, () => {

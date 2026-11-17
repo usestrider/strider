@@ -141,7 +141,9 @@ export const proxyCertificate = () => {
   )
   const signature = crypto.sign("sha256", tbs, privateKey)
   const der = tlv(0x30, tbs, algorithm, tlv(0x03, Buffer.from([0]), signature))
-  const cert = `-----BEGIN CERTIFICATE-----\n${der.toString("base64").replace(/.{64}/g, "$&\n")}\n-----END CERTIFICATE-----\n`
+  const cert = `-----BEGIN CERTIFICATE-----\n${
+    der.toString("base64").replace(/.{64}/g, "$&\n")
+  }\n-----END CERTIFICATE-----\n`
   return selfSigned = { key: privateKey.export({ type: "pkcs8", format: "pem" }) as string, cert }
 }
 
@@ -261,7 +263,11 @@ export const serve = (
     ),
     ({ server, sockets }) =>
       Effect.callback<void>((resume) => {
-        for (const socket of sockets) socket.destroy()
-        server.close(() => resume(Effect.void))
+        for (const socket of sockets) {
+          socket.destroy()
+        }
+        server.close(() =>
+          resume(Effect.void)
+        )
       })
   ).pipe(Effect.map(({ port }) => ({ port })))

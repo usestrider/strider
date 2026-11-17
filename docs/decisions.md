@@ -1513,6 +1513,16 @@ never request a feature gain no interception, injected instrumentation, per-acti
 state for it. Additions must include paired default-path benchmarks so review can assess their cost. Reject
 always-on preparation for optional features: unused capabilities must not slow existing automation.
 
+## Client certificates through a per-context proxy
+
+No browser protocol Strider speaks sets a TLS client certificate for one context, so a context with
+`clientCertificates` routes its TLS traffic through a loopback proxy of its own, which ends each tunnel with a
+self-signed certificate only that context accepts, and opens its own connection to the site, presenting the
+matching certificate and checking the site's. Following [Pay for what you use](#pay-for-what-you-use), the proxy
+exists only for that context and closes with it. Rejected: launch-wide certificate stores or browser policies,
+which reach every context; and refusing plain HTTP on Firefox, whose user contexts take no PAC proxy, which would
+break `http://` pages there.
+
 ## Cooperative readiness checks
 
 Opted-in checks use a separate document- and operation-bound execution protocol, sharing the ordinary readiness

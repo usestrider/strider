@@ -562,13 +562,15 @@ export interface Options {
    *
    * @default no client certificates, and no proxy
    */
-  readonly clientCertificates?: ReadonlyArray<{
-    readonly origin: string
-    readonly cert?: Uint8Array | undefined
-    readonly key?: Redacted.Redacted<Uint8Array> | undefined
-    readonly pfx?: Redacted.Redacted<Uint8Array> | undefined
-    readonly passphrase?: Redacted.Redacted<string> | undefined
-  }> | undefined
+  readonly clientCertificates?:
+    | ReadonlyArray<{
+      readonly origin: string
+      readonly cert?: Uint8Array | undefined
+      readonly key?: Redacted.Redacted<Uint8Array> | undefined
+      readonly pfx?: Redacted.Redacted<Uint8Array> | undefined
+      readonly passphrase?: Redacted.Redacted<string> | undefined
+    }>
+    | undefined
 
   /**
    * Answers website authentication challenges with these credentials. User auth routes run first;
