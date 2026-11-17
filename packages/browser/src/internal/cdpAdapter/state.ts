@@ -5,8 +5,9 @@
  * Identity: frames are keyed by frame id, documents by loader id, realms by `uniqueId` (context ids repeat after a
  * process swap), navigations by loader id, requests by session and request id.
  */
-import type * as Deferred from "effect/Deferred"
-import type * as Effect from "effect/Effect"
+import * as Deferred from "effect/Deferred"
+import * as Effect from "effect/Effect"
+import type * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import type * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
@@ -58,6 +59,15 @@ export class ContextEntry {
   declare removing: boolean
   declare disposed?: boolean | undefined
   declare lifecycleLock?: Semaphore.Semaphore | undefined
+  /**
+   * A declaration gave its downloads a directory, and the context still answers for it: set as the declaration is
+   * registered, or as the context is made while a browser-wide one is in force (`keepEndedFramesIfDeclared`), kept
+   * while the context retires, and cleared when the declaration is released with the context left open or when the
+   * context is removed.
+   */
+  declare keepsEndedFrames?: boolean | undefined
+  /** The ids of its frames that have ended, which `State.retiredFrames` holds (`retireFrame`). */
+  declare retiredFrames?: Set<string> | undefined
   declare gate: ContextGate
   declare workerGate: WorkerGate
   constructor(id: UserContext.Id, browserContextId: string | undefined, isDefault: boolean) {
@@ -92,8 +102,25 @@ export interface TargetEntry {
   scriptLoaded?: Deferred.Deferred<void> | undefined
   /** The intercept patterns last applied, so a change is applied once. */
   intercepts: string
+  /**
+   * Whether the HTTP cache was last set off, so a change is sent once; Chromium's default is on, and `"unknown"`
+   * after a reply that failed or never came.
+   */
+  cacheDisabled?: boolean | "unknown" | undefined
+  /** The cache command still unanswered, with the value it sets, which a declaration wanting that value awaits. */
+  cacheConfirmation?:
+    | {
+      readonly disabled: boolean
+      readonly fiber: Fiber.Fiber<void, import("../../protocol/Protocol.ts").ProtocolError>
+    }
+    | undefined
   /** Each init script bundle's identifier in Chromium, by its key, written under `scriptLock`. */
   readonly scripts: Map<string, string>
+  /**
+   * The init script identifiers whose removal Chromium never answered, so may still be installed, written under
+   * `scriptLock`: each write sends their removal again.
+   */
+  unconfirmedScripts?: Set<string> | undefined
   ended: boolean
   /** Original renderer dimensions, retained until restoration completes; null means the original is unknown. */
   viewport?: { readonly width: number; readonly height: number } | null | undefined
@@ -112,6 +139,11 @@ export interface PageEntry {
   /** For a popup: the target id of the page that opened it, which may not be tracked. */
   readonly openerId?: string | undefined
   readonly ready: Deferred.Deferred<void, Adapter.AdapterError>
+  /**
+   * Done once the page's initial sync has the frame tree's reply: events received after it are folded, not
+   * discarded, so a declaration may write to the page from then on. The page's end also completes it.
+   */
+  readonly treeRead: Deferred.Deferred<void>
   closing: L1Target.CloseReason | undefined
   /**
    * A close that runs `beforeunload` was sent and its prompt, if any, hasn't refused it: the page's end is the
@@ -363,6 +395,12 @@ export interface State extends Kit.Ending {
   readonly routeFailed: Set<string>
   readonly obligations: Map<Adapter.ObligationId, ObligationEntry>
   readonly downloads: Map<string, DownloadEntry>
+  /**
+   * The context of each ended frame, by frame id, of a context that keeps them (`ContextEntry.keepsEndedFrames`),
+   * until it stops or is removed: Chromium can announce a download after the frame that started it has gone, and
+   * removing the context waits for it before the directory is removed.
+   */
+  readonly retiredFrames: Map<string, ContextEntry>
   readonly downloadsById: Map<Download.Id, DownloadEntry>
   readonly handles: Map<Adapter.HandleId, HandleEntry>
   readonly groups: Groups.Groups
@@ -434,6 +472,7 @@ export const make = (options: {
     routeFailed: new Set(),
     obligations: new Map(),
     downloads: new Map(),
+    retiredFrames: new Map(),
     downloadsById: new Map(),
     handles: new Map(),
     groups: Groups.make(),
@@ -494,15 +533,66 @@ export const downloadDirectory = (state: State, context: UserContext.Id) => {
     : Option.none<string>()
 }
 
+/**
+ * Starts keeping a new context's ended frames when a browser-wide declaration in force gives its downloads a
+ * directory, as one registered later does for the contexts it finds.
+ */
+export const keepEndedFramesIfDeclared = (state: State, context: ContextEntry) => {
+  if (!context.isDefault && Option.isSome(downloadDirectory(state, context.id))) context.keepsEndedFrames = true
+}
+
+/**
+ * Keeps which context a frame that ended belonged to, while a declaration has given the context's downloads a
+ * directory (`ContextEntry.keepsEndedFrames`), whether registered for it or browser-wide, through the context's
+ * retirement: a download Chromium announces after the frame has gone is that context's. Nothing is kept for the
+ * default context, which is never removed, or for one already disposed.
+ */
+export const retireFrame = (state: State, context: ContextEntry, frameId: string) => {
+  if (context.isDefault || context.disposed || context.keepsEndedFrames !== true) return
+  state.retiredFrames.set(frameId, context)
+  ;(context.retiredFrames ??= new Set()).add(frameId)
+}
+
+/**
+ * Forgets the frames of `context` that ended, and stops keeping them: when the declaration that gave its downloads a
+ * directory is released with the context left open, and when the context is removed.
+ */
+export const forgetRetiredFrames = (state: State, context: ContextEntry) => {
+  context.keepsEndedFrames = false
+  for (const frameId of context.retiredFrames ?? []) state.retiredFrames.delete(frameId)
+  context.retiredFrames = undefined
+}
+
 // ── Lookups: an id this connection minted that ended is Gone, any other Foreign ───────────────────────────
 
 const pageGone = (state: State, id: L1Target.NavigableId) =>
   Kit.gone({ _tag: "Page", id }, state.endedPages.get(id) ?? new L1Target.Vanished({}))
 
-export const pageOf = (state: State, id: L1Target.NavigableId): Effect.Effect<PageEntry, Adapter.AdapterError> =>
+/** A page as the model holds it now, even while its initial sync runs: for what must not wait on that sync. */
+export const pageNow = (state: State, id: L1Target.NavigableId): Effect.Effect<PageEntry, Adapter.AdapterError> =>
   Kit.lookup(state.ids, state.pages, id, () => pageGone(state, id), (page) => !page.ended)
 
+// A page Strider didn't open (a persistent profile's first tab, a tab open when it attached) is listed as it
+// attaches, before its initial sync has applied the frame tree. The sync discards every event received before the
+// tree's reply, since the tree stands for them, so a command sent to the page in that window loses the events it
+// causes: a navigation's commit, its requests, a paused request no one continues (which also keeps Chromium from
+// answering the tree). An operation on a page therefore waits for the sync before it sends anything, as `newPage`
+// does, and whatever the page commits before then is the document it opened with, not a navigation after it.
+// Nothing the sync runs goes through here. An operation that can cause events waits; a release, such as a forced
+// close, or a decision on something already known, such as answering an open prompt, uses `pageNow`, since a sync
+// can hang.
+const synced = <A>(page: PageEntry, found: Effect.Effect<A, Adapter.AdapterError>) =>
+  Deferred.isDoneUnsafe(page.ready) ? found : Effect.andThen(Effect.ignore(Deferred.await(page.ready)), found)
+
+/** A page, once its initial sync is applied. */
+export const pageOf = (state: State, id: L1Target.NavigableId): Effect.Effect<PageEntry, Adapter.AdapterError> =>
+  Effect.flatMap(pageNow(state, id), (page) => synced(page, pageNow(state, id)))
+
+/** A frame, once its page's initial sync is applied. */
 export const frameById = (state: State, id: L1Target.NavigableId): Effect.Effect<FrameEntry, Adapter.AdapterError> =>
+  Effect.flatMap(frameNow(state, id), (frame) => synced(frame.page, frameNow(state, id)))
+
+const frameNow = (state: State, id: L1Target.NavigableId): Effect.Effect<FrameEntry, Adapter.AdapterError> =>
   Kit.lookup(
     state.ids,
     state.navigables,

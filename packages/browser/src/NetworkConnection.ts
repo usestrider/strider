@@ -264,6 +264,13 @@ export const stream = <PE = never, PR = never>(
 /**
  * Reads the connections the target's event log kept (`UserContext.Options.eventLog`); never waits.
  *
+ * **Details**
+ *
+ * An operation returns only after the events the browser sent before answering it have been handled, so what
+ * it caused is here once it returns, as far as the browser reported it by then and the log still keeps it.
+ * The exception is a target whose state is still being read, as when it has just attached or its events
+ * overflowed: its events reach the log once that read completes.
+ *
  * **Example** (Listing the sockets a page has opened)
  *
  * ```ts import.meta.vitest

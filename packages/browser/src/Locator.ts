@@ -214,13 +214,15 @@ export interface RoleOptions {
 
   /**
    * The accessible name. A string matches as a case-insensitive substring unless `exact` is set; a `RegExp`
-   * is used as given.
+   * is used as given. Both sides have their whitespace collapsed first, so a non-breaking space in a name matches
+   * a space.
    *
    * @default any name
    */
   readonly name?: string | RegExp | undefined
   /**
-   * Match `name` exactly and case-sensitively.
+   * Match `name` exactly and case-sensitively. Whitespace is still collapsed on both sides, so a non-breaking space in
+   * a name matches a space.
    *
    * @default false
    */
@@ -271,11 +273,16 @@ export interface Queries<L> {
    * An element's role is the first token of its `role` attribute that Strider knows, or else its implicit
    * role under HTML-AAM, and its name is computed under accname 1.2. Elements outside the accessibility tree
    * (`aria-hidden`, `display: none`, `visibility: hidden`, the `hidden` attribute, and inert elements) aren't
-   * matched unless `includeHidden` is set. An element is inert when it or an ancestor has the `inert` attribute,
-   * or, while a modal dialog opened with `showModal()` is open, when it is outside the topmost one. The topmost
-   * modal dialog isn't inert because of its ancestors, so it and its content stay matched inside an inert subtree.
-   * The topmost is the open modal dialog that comes last in document order, open shadow roots included, which isn't
-   * always the one opened last.
+   * matched unless `includeHidden` is set, which also counts hidden descendants in their names. An element is inert
+   * when it or an ancestor has the `inert` attribute, or, while a modal dialog opened with `showModal()` is open,
+   * when it is outside the topmost one. The topmost modal dialog isn't inert because of its ancestors, so it and its
+   * content stay matched inside an inert subtree. The topmost is the open modal dialog that comes last in document
+   * order, open shadow roots included, which isn't always the one opened last.
+   *
+   * A name from content takes only the descendants whose role gives their text, as Chromium and Firefox do: text,
+   * generic and structural elements such as lists and paragraphs, and roles named from content. A nested tree
+   * item's group, or an `alert` inside a heading, adds nothing. An embedded combobox or listbox adds its selected
+   * options. Soft hyphens and zero-width spaces are dropped from a name, and non-breaking spaces are kept.
    *
    * Roles that prohibit naming, such as generic, paragraph, and code, have an empty name even with an author
    * label. Their descendants and referenced labels can still contribute to another element's name; an explicit
@@ -1051,7 +1058,9 @@ export interface PointerOptions extends ActionOptions {
   /**
    * Where to point, from the top left of the element's padding box.
    * With no position, client rectangles are clipped by the viewport and all parent frames.
-   * With `receivesPointer` enabled, the first centre hitting the target or a descendant and its iframe in every parent is selected,
+   * With `receivesPointer` enabled, the first centre hitting the target or a descendant and its iframe in every parent is selected
+   * (for a target inside a `button`, `a`, or `role=button` or `role=link` element other than a form field or editable element,
+   * the nearest such element, found through shadow roots and slots, counts as the target, so a `pointer-events: none` label inside a button is clicked through the button),
    * allowing a later line when an earlier one is covered. Only centres are probed; if none hits, the check reports `Covered`.
    * Candidates are produced anew under the input permit.
    * Disabling `receivesPointer` uses the first geometric centre without coverage probes.
@@ -1261,8 +1270,10 @@ export interface Locator extends ReadonlyLocator {
    *
    * - The click is a move to the action point, then a press and a release, carrying the keys and buttons the page
    *   holds.
-   * - The gesture is guarded: the first of its pointer, mouse, touch, and click events must land in the element. If
-   *   the page covered it between the checks and the input, the gesture is stopped before the page's handlers see
+   * - The gesture is guarded: the first of its pointer, mouse, touch, and click events must land in the element that
+   *   receives the pointer for it: its nearest enclosing `button`, `[role=button]`, `a`, or `[role=link]`, found
+   *   through shadow roots and slots, or else the element itself, which an `input`, `textarea`, `select`, or
+   *   editable element always is. If the page covered it between the checks and the input, the gesture is stopped before the page's handlers see
    *   it, and the action checks again. With `receivesPointer` disabled the gesture isn't guarded, and lands on
    *   whatever covers the element.
    * - `modifiers` are pressed before the gesture and released after it. On a backend without

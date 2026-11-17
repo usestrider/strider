@@ -38,7 +38,14 @@ tooling("Chromium", backend)
 recordings("Chromium", backend)
 toolkit("Chromium", backend)
 deadlines("Chromium", backend)
-attaching("Chromium", backend, Option.some(chromiumAttachable((endpoint) => Chromium.layerConnect(endpoint))))
+attaching(
+  "Chromium",
+  backend,
+  Option.some(chromiumAttachable((endpoint) => Chromium.layerConnect(endpoint))),
+  Option.some((userDataDir) =>
+    Chromium.layer({ executablePath: chromium.executable, userDataDir }).pipe(Layer.provide(NodeServices.layer))
+  )
+)
 
 webauthn("Chromium", backend)
 

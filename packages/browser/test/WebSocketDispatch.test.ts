@@ -3,12 +3,14 @@ import { assert, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Scope from "effect/Scope"
+import * as Stream from "effect/Stream"
 import * as Runtime from "../src/cdp/Runtime.ts"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as Kit from "../src/internal/adapterKit.ts"
 import * as Evaluation from "../src/internal/cdpAdapter/evaluation.ts"
 import * as CdpState from "../src/internal/cdpAdapter/state.ts"
 import { installWebSocketGates } from "../src/internal/cdpAdapter/targets.ts"
+import * as CdpBridge from "../src/internal/cdpAdapter/webSocketBridge.ts"
 import type * as ProtocolClient from "../src/internal/protocolClient.ts"
 import * as Console from "../src/internal/webkitAdapter/console.ts"
 import * as State from "../src/internal/webkitAdapter/state.ts"
@@ -147,3 +149,57 @@ it("does not probe popup-replay deduplication during ordinary CDP context dispat
   assert.strictEqual(state.realmsByUnique.size, 1)
   assert.strictEqual(facts[0]?._tag, "RealmAdded")
 })
+
+it.effect("preserves a WebSocket target's realm identity when a known execution context is reported again", () =>
+  Effect.gen(function*() {
+    const scope = yield* Effect.scope
+    const ids = Kit.makeIds()
+    const facts: Array<Adapter.Fact> = []
+    const handlers = Evaluation.register(Kit.handlers<CdpState.Event>())
+    const session = {
+      key: "routed",
+      subscribe: () => Effect.succeed(Stream.never),
+      send: () => Effect.succeed({})
+    } as unknown as ProtocolClient.Session
+    const page = { id: ids.navigable(), context: { id: ids.userContext() } } as CdpState.PageEntry
+    const target = { kind: "page", session, page } as CdpState.TargetEntry
+    const frame = {
+      id: page.id,
+      document: { realms: new Set() },
+      navigations: new Map()
+    } as unknown as CdpState.FrameEntry
+    const state = {
+      ids,
+      buffer: { emit: (fact: Adapter.Fact) => facts.push(fact) },
+      frames: new Map([["frame", frame]]),
+      realms: new Map(),
+      realmsByContext: new Map(),
+      realmsByUnique: new Map()
+    } as unknown as CdpState.State
+    target.event = { state, target, handlers }
+    yield* CdpBridge.prepare(state, target, [{
+      name: "binding",
+      token: "token",
+      scope,
+      captured: () => Effect.void,
+      receive: () => false,
+      ended: () => {},
+      failed: () => {}
+    }], false)
+    const event = {
+      context: {
+        id: Runtime.ExecutionContextId.make(1),
+        uniqueId: "same-context",
+        name: "",
+        origin: "https://example.com",
+        auxData: { frameId: "frame", isDefault: true }
+      }
+    }
+    target.event.handlers.apply(Runtime.executionContextCreated.method, event, target.event)
+    const original = state.realmsByUnique.get("same-context")!
+    target.event.handlers.apply(Runtime.executionContextCreated.method, event, target.event)
+    assert.strictEqual(state.realmsByUnique.get("same-context"), original)
+    assert.strictEqual(state.realms.size, 1)
+    assert.strictEqual(frame.document!.realms.size, 1)
+    assert.strictEqual(facts.filter((fact) => fact._tag === "RealmAdded").length, 1)
+  }).pipe(Effect.scoped))
