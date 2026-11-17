@@ -26,7 +26,8 @@ export const cancelRestoration = (navigable: NavigableEntry) => {
 
 /**
  * Releases the pending restoration's reservation without marking the navigable ambiguous: for a restoration whose
- * own navigation ended, which has nothing left to produce.
+ * own navigation ended in the same document, which has no realm left to produce. Every other ending cancels it, since
+ * a failed navigation's error page may still commit.
  */
 const finishRestoration = (navigable: NavigableEntry) => {
   if (navigable.restoring === undefined) return
@@ -55,7 +56,10 @@ export const endNavigation = (
   evidence: string
 ) =>
   Kit.endNavigation(state.buffer, navigation, outcome, evidence, (navigation) => {
-    if (navigation.navigable.restoring?.navigation === navigation.id) finishRestoration(navigation.navigable)
+    if (navigation.navigable.restoring?.navigation === navigation.id) {
+      if (outcome._tag === "SameDocument") finishRestoration(navigation.navigable)
+      else cancelRestoration(navigation.navigable)
+    }
     if (outcome._tag === "Failed" && Option.isNone(outcome.errorDocument)) {
       navigation.navigable.failedNavigation = {
         id: navigation.id,

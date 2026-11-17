@@ -72,8 +72,9 @@ export interface NavigableEntry extends Kit.NavigableNode<NavigableEntry> {
     readonly sameDocumentThrough?: number | undefined
   } | undefined
   /**
-   * Set when a pending restoration is cancelled, since the cancelled traversal may still produce a realm; one whose
-   * own navigation ended leaves it unset. Only an observed commit resets this ambiguity.
+   * Set when a pending restoration is cancelled or its own navigation ends any way but in the same document, since that
+   * traversal may still produce a realm, such as a failed navigation's error page; one that ended in the same document
+   * leaves it unset. Only an observed commit resets this ambiguity.
    */
   restorationAmbiguous: boolean
   /** Traversal commands awaiting replies or their observation drain, including invalidated owners. */
