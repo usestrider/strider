@@ -17,8 +17,10 @@ import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
 import { site, tlsSite } from "./adapter/harness.ts"
-import { proxy } from "./adapter/proxy.ts"
+import { proxy, selfSigned } from "./adapter/proxy.ts"
+import { socks } from "./adapter/socks.ts"
 import { chromium, firefox, webkitgtk } from "./browsers.ts"
+import { supports } from "./slice/capabilities.ts"
 import { socketConnector } from "./sockets.ts"
 import { useXvfb } from "./stockWebKit.ts"
 
@@ -33,6 +35,25 @@ const options = (
     bypass,
     ...(password === undefined ? {} : { credentials: { username, password: Redacted.make(password) } })
   }
+})
+
+/** Whether `predicate` holds within five seconds, polled every 10 ms. */
+const eventually = (predicate: () => boolean) =>
+  Effect.callback<void>((resume) => {
+    const timer = setInterval(() => {
+      if (predicate()) {
+        clearInterval(timer)
+        resume(Effect.void)
+      }
+    }, 10)
+    return Effect.sync(() => clearInterval(timer))
+  }).pipe(Effect.timeoutOption("5 seconds"), Effect.map((done) => done._tag === "Some"))
+
+/** A context's creation refused for `capability`, before anything reaches the proxy. */
+const refused = Effect.fnUntraced(function*(settings: UserContext.Options, capability: string) {
+  const error = yield* Browser.newContext(settings).pipe(Effect.flip)
+  assert(UserContext.isUserContextError(error) && error.reason._tag === "Unsupported", String(error))
+  assert.strictEqual(error.reason.capability, capability)
 })
 
 const archiveText = (file: string) =>
@@ -512,12 +533,106 @@ for (
         )
       }
 
+      it.effect(
+        "routes HTTP, HTTPS and WebSocket destinations through a SOCKS5 proxy, which resolves names",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const secure = yield* tlsSite
+            const local = yield* socks()
+            const page = yield* Browser.newPage(options(`socks5://${local.address}`))
+            yield* page.goto(`${served.origin.replace("127.0.0.1", "proxy.test")}/socket`)
+            assert.isTrue(
+              yield* eventually(() =>
+                local.requests.some((request) =>
+                  request.remoteDns && request.sent === "GET /ws HTTP/1.1" &&
+                  request.received === "HTTP/1.1 101 Switching Protocols"
+                )
+              )
+            )
+            // Certificate verification still applies: the untrusted fixture certificate fails the navigation
+            const error = yield* page.goto(secure.origin.replace("127.0.0.1", "proxy.test")).pipe(
+              Deadline.within("10 seconds"),
+              Effect.flip
+            )
+            assert.notEqual(error._tag, "Timeout")
+            const tlsPort = Number(new URL(secure.origin).port)
+            assert.isTrue(
+              local.requests.some((request) =>
+                request.host === "proxy.test" && request.port === tlsPort && request.sent === "tls"
+              )
+            )
+            yield* refused(
+              options(`socks5://${local.address}`, [], "socks-secret"),
+              "userContexts.proxy.socksCredentials"
+            )
+          }),
+        60_000
+      )
+
+      it.effect("routes through a SOCKS4 proxy that resolves names, or refuses it", () =>
+        Effect.gen(function*() {
+          const served = yield* site
+          const local = yield* socks()
+          if (!(yield* supports("userContexts.proxy.socks4"))) {
+            return yield* refused(options(`socks4://${local.address}`), "userContexts.proxy.socks4")
+          }
+          const page = yield* Browser.newPage(options(`socks4://${local.address}`))
+          yield* page.goto(`${served.origin.replace("127.0.0.1", "proxy.test")}/socks4`)
+          assert.isTrue(served.served.some((request) => request.path === "/socks4"))
+          assert.isTrue(
+            local.requests.some((request) => request.version === "socks4a" && request.host === "proxy.test")
+          )
+        }), 60_000)
+
+      it.effect("bypasses a domain's subdomains for a leading-dot entry, or refuses it", () =>
+        Effect.gen(function*() {
+          const served = yield* site
+          const local = yield* socks()
+          const settings = options(`socks5://${local.address}`, [".proxy.test"])
+          if (!(yield* supports("userContexts.proxy.bypassSuffix"))) {
+            return yield* refused(settings, "userContexts.proxy.bypassSuffix")
+          }
+          const page = yield* Browser.newPage(settings)
+          const port = new URL(served.origin).port
+          yield* page.goto(`http://proxy.test:${port}/apex`)
+          assert.isTrue(served.served.some((request) => request.path === "/apex"))
+          // sub.proxy.test resolves only inside the proxy, so going direct fails to resolve it
+          const error = yield* page.goto(`http://sub.proxy.test:${port}/subdomain`).pipe(
+            Deadline.within("10 seconds"),
+            Effect.flip
+          )
+          assert.notEqual(error._tag, "Timeout")
+          assert.isFalse(local.requests.some((request) => request.host === "sub.proxy.test"))
+        }), 60_000)
+
+      it.effect(
+        "reaches an https:// proxy over TLS and verifies its certificate, or refuses it",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const local = yield* proxy(undefined, { tls: yield* selfSigned })
+            if (!(yield* supports("userContexts.proxy.https"))) {
+              return yield* refused(options(`https://${local.address}`), "userContexts.proxy.https")
+            }
+            const page = yield* Browser.newPage(options(`https://${local.address}`))
+            const error = yield* page.goto(`${served.origin.replace("127.0.0.1", "proxy.test")}/over-tls`).pipe(
+              Deadline.within("10 seconds"),
+              Effect.flip
+            )
+            assert.notEqual(error._tag, "Timeout")
+            assert.isTrue(local.handshakes.count > 0)
+            assert.deepStrictEqual(local.requests, [])
+          }),
+        60_000
+      )
+
       it.effect("rejects invalid proxy settings without reflecting embedded secrets", () =>
         Effect.gen(function*() {
           for (
             const server of [
               "http://user:embedded-secret@localhost:8000",
-              "socks5://localhost:8000",
+              "ftp://localhost:8000",
               "http://localhost:8000/path"
             ]
           ) {

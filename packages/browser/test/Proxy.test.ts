@@ -8,22 +8,28 @@ describe("proxy options", () => {
   it.effect("normalizes endpoints and defaults without unwrapping the password", () =>
     Effect.gen(function*() {
       for (
-        const [server, normalized] of [["EXAMPLE.com:8080", "example.com:8080"], [
-          "http://example.com/",
-          "example.com:80"
-        ], ["http://[2001:db8::1]:8080", "[2001:db8::1]:8080"]] as const
+        const [server, scheme, normalized] of [
+          ["EXAMPLE.com:8080", "http", "example.com:8080"],
+          ["http://example.com/", "http", "example.com:80"],
+          ["http://[2001:db8::1]:8080", "http", "[2001:db8::1]:8080"],
+          ["https://example.com", "https", "example.com:443"],
+          ["socks5://EXAMPLE.com", "socks5", "example.com:1080"],
+          ["socks4://example.com:1081", "socks4", "example.com:1081"],
+          ["socks5://[2001:db8::1]:1080/", "socks5", "[2001:db8::1]:1080"]
+        ] as const
       ) {
         const result = yield* Proxy.normalize({ server }, "test")
-        assert.deepStrictEqual(result, { server: normalized, bypass: [] })
+        assert.deepStrictEqual(result, { scheme, server: normalized, bypass: [] })
+        assert.strictEqual(Proxy.endpoint(result), `${scheme}://${normalized}`)
       }
       const password = Redacted.make("fixture-password")
       const result = yield* Proxy.normalize({
         server: "host:80",
-        bypass: ["EXAMPLE.com", "2001:db8::2"],
+        bypass: ["EXAMPLE.com", "2001:db8::2", ".Sub.Example.com"],
         credentials: { username: "user", password }
       }, "test")
       assert.strictEqual(result.credentials?.password, password)
-      assert.deepStrictEqual(result.bypass, ["example.com", "2001:db8::2"])
+      assert.deepStrictEqual(result.bypass, ["example.com", "2001:db8::2", ".sub.example.com"])
       assert.notInclude(JSON.stringify(result), "fixture-password")
     }))
 
@@ -34,7 +40,10 @@ describe("proxy options", () => {
       "http://user:embedded-password@host",
       "http://host/path",
       "http://host:0",
-      "http://host:65536"
+      "http://host:65536",
+      "socks5://host/path",
+      "socks5://host:0",
+      "socks5://user@host"
     ]
   ) {
     it.effect(`refuses invalid endpoint ${server.replace("embedded-password", "REDACTED")}`, () =>
@@ -56,7 +65,12 @@ describe("proxy options", () => {
       "%65xample.com",
       "foo;bar",
       "foo\\",
-      "[::1]:80"
+      "[::1]:80",
+      ".",
+      "..example.com",
+      "example.com.",
+      ".192.0.2.1",
+      ".[::1]"
     ]
   ) {
     it.effect(`refuses unsupported bypass syntax ${host}`, () =>
@@ -68,9 +82,19 @@ describe("proxy options", () => {
 
   it.effect("refuses unsupported schemes and malformed credentials without reflecting secrets", () =>
     Effect.gen(function*() {
-      for (const server of ["https://host:443", "socks5://host:1080"]) {
+      for (const server of ["ftp://host:21", "socks://host:1080", "socks4a://host:1080", "quic://host:443"]) {
         const error = yield* Proxy.normalize({ server }, "test").pipe(Effect.flip)
-        assert.strictEqual(error._tag, "Unsupported")
+        assert(error._tag === "Unsupported")
+        assert.strictEqual(error.capability, "userContexts.proxy.scheme")
+      }
+      for (const server of ["socks5://host:1080", "socks4://host:1080"]) {
+        const error = yield* Proxy.normalize({
+          server,
+          credentials: { username: "user", password: Redacted.make("socks-secret") }
+        }, "test").pipe(Effect.flip)
+        assert(error._tag === "Unsupported")
+        assert.strictEqual(error.capability, "userContexts.proxy.socksCredentials")
+        assert.notInclude(JSON.stringify(error), "socks-secret")
       }
       const untyped = {
         server: "host:8080",
