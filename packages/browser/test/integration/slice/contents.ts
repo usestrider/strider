@@ -101,6 +101,10 @@ const firstAlpha = (png: Uint8Array): number => {
 }
 
 /** A small page for snapshots: landmarks, controls, an inferred control, hidden content, a list and text. */
+/** AR-126's shape: a heading and a textbox inside a banner inside the body. */
+const todos =
+  `<title>Todos</title><header><h1>todos</h1><input placeholder="What needs to be done?"></header><main><p>List</p></main>`
+
 const shop =
   `<title>Shop</title><h1>Shop</h1><nav aria-label="Main"><a href="#orders">Orders</a></nav><a id="gone" href="#gone">Gone</a>
 <button onclick="log('save')">Save</button>
@@ -2282,6 +2286,76 @@ export const contents = (
           }))
         }), timeout)
 
+      it.effect("matches a page's pattern at its document node", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, todos))
+            yield* page.pipe(Expect.toMatchAria(
+              AriaPattern.node(
+                "document",
+                "Todos",
+                AriaPattern.including(AriaPattern.node("banner", "", AriaPattern.unchecked))
+              )
+            ))
+          }))
+        }), timeout)
+
+      it.effect("matches a pattern anywhere beneath its subject", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, todos))
+            yield* page.pipe(Expect.toMatchAria(AriaPattern.anywhere(AriaPattern.including(
+              AriaPattern.node("heading", "todos", AriaPattern.unchecked),
+              AriaPattern.node("textbox", "What needs to be done?", AriaPattern.unchecked)
+            ))))
+            yield* page.locator("body").pipe(Expect.toMatchAria(AriaPattern.anywhere(AriaPattern.including(
+              AriaPattern.node("heading", "todos", AriaPattern.unchecked)
+            ))))
+          }))
+        }), timeout)
+
+      it.effect("with not, waits until the subject doesn't match", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, todos))
+            yield* page.evaluateInMainWorld(() => {
+              setTimeout(() =>
+                document.querySelector("h1")!.remove(), 300)
+            })
+            yield* page.pipe(Expect.toMatchAria(
+              AriaPattern.anywhere(AriaPattern.including(AriaPattern.node("heading", "todos", AriaPattern.unchecked))),
+              { not: true }
+            ))
+          }))
+        }), timeout)
+
+      it.effect("with not, fails with the tree it saw when the subject keeps matching", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, todos))
+            const failed = reasonOf(
+              yield* Effect.exit(
+                page.getByRole("banner").pipe(
+                  Expect.toMatchAria(AriaPattern.node("banner", "", AriaPattern.unchecked), { not: true }),
+                  Deadline.within("1 second")
+                )
+              )
+            )
+            assert.strictEqual(failed?._tag, "ExpectationFailed")
+            const error = failed as unknown as Expect.ExpectationFailed
+            assert.match(error.message, /not to match node\("banner"/)
+            assert.match(String(Option.getOrThrow(error.last).value), /^- banner \[ref=e\d+\]:\n {2}- heading "todos"/)
+          }))
+        }), timeout)
+
       it.effect("says what is near when nothing matches, and suggests close names", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -2569,9 +2643,7 @@ export const contents = (
             // The loopback origin is a secure context over http, so a request to it sends a Secure cookie
             yield* jar.set({ name: "safe", value: "3", scope: { url: origin }, secure: true })
             const all = yield* jar.list
-            const token = all.find((cookie) =>
-              cookie.name === "token"
-            )!
+            const token = all.find((cookie) => cookie.name === "token")!
             assert.strictEqual(Redacted.value(token.value), "secret")
             assert.strictEqual(token.path, "/app")
             assert.deepStrictEqual(token.sameSite, Option.some("lax"))
