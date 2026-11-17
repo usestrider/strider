@@ -1,0 +1,99 @@
+---
+title: Bindings
+description: A binding is a host function that a page's scripts call as window[name](...).
+order: 9
+---
+
+A binding puts a function in a page's scripts that answers from your program. The page calls `window[name](...)`
+and gets a promise; your handler, an Effect, decides the answer. Schemas decode the arguments the page passed and
+encode the value the handler returns.
+
+## Exposing a function to a page
+
+Give the name, the schemas, and the handler, then load the page:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect, Schema } from "effect"
+
+const exposeTotal = Effect.fn("exposeTotal")(function*(page: Page.Page) {
+  yield* page.exposeBinding(
+    "total",
+    { arguments: Schema.Tuple([Schema.Number, Schema.Number]), result: Schema.Number },
+    ([price, quantity]) => Effect.succeed(price * quantity)
+  )
+  yield* page.goto("https://shop.example.com/cart")
+  return yield* page.evaluateInMainWorld(() => (window as any).total(4.5, 2))
+})
+```
+
+Arguments and the answer cross by value, the way `evaluateInMainWorld`'s arguments do: `NaN`, `-0`, `undefined`,
+dates, maps, and sets keep their types. A value that can't cross, such as a function, rejects the page's promise.
+When the arguments don't match the schema, or the handler fails, the promise rejects with an `Error` that carries the
+message. A defect in the handler rejects it with a fixed message and is logged.
+
+A page binding is in every frame of that page, before each document's own scripts, and stays across navigations.
+It's in the main world only, not in workers.
+
+## Who called
+
+The handler's second argument names the calling page and frame. The frame is the page itself for its top document:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect, Schema } from "effect"
+
+const logCallers = Effect.fn("logCallers")(function*(page: Page.Page) {
+  yield* page.exposeBinding(
+    "report",
+    { arguments: Schema.Tuple([Schema.String]), result: Schema.Undefined },
+    ([message], source) =>
+      Effect.log(source.frame === page.id ? "page" : "frame", message).pipe(
+        Effect.as(undefined)
+      )
+  )
+})
+```
+
+## Every page of a context
+
+On a context, the binding reaches every page, popup, and frame, cross-site frames included, before their own
+scripts. A context that exposes nothing gets nothing installed:
+
+```ts
+import { UserContext } from "@usestrider/browser"
+import { Effect, Schema } from "effect"
+
+const exposeClock = Effect.fn("exposeClock")(
+  function*(context: UserContext.UserContext) {
+    yield* context.exposeBinding(
+      "serverTime",
+      { arguments: Schema.Tuple([]), result: Schema.Number },
+      () => Effect.succeed(1_700_000_000_000)
+    )
+  }
+)
+```
+
+A name can be exposed once in a context: exposing it again, on the context or one of its pages, fails with
+`NameTaken`.
+
+## Removing a binding
+
+A binding lasts as long as its scope. `remove` ends it early: it deletes the function from open documents, and
+calls still waiting for their answer reject. A document can have at most 4096 calls waiting; the next one rejects.
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect, Schema } from "effect"
+
+const onceOnly = Effect.fn("onceOnly")(function*(page: Page.Page) {
+  const binding = yield* page.exposeBinding(
+    "token",
+    { arguments: Schema.Tuple([]), result: Schema.String },
+    () => Effect.succeed("abc123")
+  )
+  yield* page.evaluateInMainWorld(() => (window as any).token())
+  yield* binding.remove
+})
+```

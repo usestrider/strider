@@ -3,13 +3,25 @@
   "upstream": [
     "method:BrowserContext.exposeFunction"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding UserContext operation/event. Its public API provides pages/workers, cookies, clock, storage export, routes, scripts, scoped emulation and grants; it does not implement this contract.",
+  "status": "has",
+  "api": [
+    {
+      "module": "UserContext",
+      "symbol": "UserContext.exposeBinding",
+      "url": "/docs/api/browser/UserContext#UserContext.exposeBinding"
+    },
+    {
+      "module": "Binding",
+      "symbol": "Source",
+      "url": "/docs/api/browser/Binding#Source"
+    }
+  ],
+  "notes": "One member covers both: the handler gets the calling page and frame as its second argument. Arguments and result cross by value through Schemas, and the handler returns an Effect; registration is scoped.",
   "capabilities": [],
   "audit": {
     "sources": [
-      "packages/browser/src/UserContext.ts"
+      "packages/browser/src/UserContext.ts",
+      "packages/browser/src/Binding.ts"
     ],
     "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
   },
