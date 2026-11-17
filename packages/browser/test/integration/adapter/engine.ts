@@ -6,6 +6,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as SubscriptionRef from "effect/SubscriptionRef"
@@ -78,7 +79,7 @@ const open = Effect.fnUntraced(function*(
     // Decoded as the library decodes it, so every answer the tests see is one the schema accepts
     return yield* Engine.decodeResponse(result.value.value).pipe(Effect.orDie)
   })
-  return { send, call, adapter, page, context: userContext, document, realm }
+  return { send, call, adapter, page, context: userContext, document, realm, facts }
 })
 
 const text = (value: string, exact = false): Engine.TextMatcher => ({ _tag: "String", value, exact })
@@ -3268,6 +3269,72 @@ document.getElementById("outer").attachShadow({ mode: "open" }).innerHTML =
             assert(twice._tag === "Strict")
             assert.strictEqual(twice.count, 4)
           }), timeout)
+        for (const source of ["previous document", "cross-origin frame"] as const) {
+          it.effect(`rejects raw-engine storage left by a ${source} and replaces the context`, () =>
+            Effect.gen(function*() {
+              const { origin, crossSite } = yield* site
+              // Keep the server alive across both cases, as a suite-level fixture would be.
+              const leaked = yield* Effect.scoped(Effect.gen(function*() {
+                const child = `${crossSite}/fixture?html=${
+                  encodeURIComponent(
+                    "<script>localStorage.setItem(\"left\", \"1\")</script>"
+                  )
+                }`
+                const opened = yield* open(
+                  backend,
+                  source === "cross-origin frame" ? `<iframe src="${child}"></iframe>` : "<p>first</p>",
+                  source === "previous document" ? "() => localStorage.setItem(\"left\", \"1\")" : undefined,
+                  origin
+                )
+                if (source === "previous document") {
+                  const navigation = yield* opened.adapter.navigate(opened.page, `${crossSite}/fixture`, {
+                    referrer: Option.none()
+                  })
+                  const ended = yield* opened.facts.when("NavigationEnded", (fact) =>
+                    fact.navigation === navigation)
+                  assert(ended.outcome._tag === "Committed")
+                  const document = ended.outcome.document
+                  yield* opened.facts.when("DocumentReadiness", (fact) =>
+                    fact.document === document && fact.readiness === "complete")
+                }
+                return opened.context
+              })).pipe(Effect.exit)
+              // Read and clear the actual leftover before asserting, so this regression cannot poison later cases.
+              const next = yield* Effect.scoped(Effect.gen(function*() {
+                const child = `${crossSite}/fixture?html=${
+                  encodeURIComponent(
+                    "<script>parent.postMessage(localStorage.getItem(\"left\"), \"*\"); localStorage.clear()</script>"
+                  )
+                }`
+                const opened = yield* open(
+                  backend,
+                  source === "previous document" ?
+                    "<p>next</p>" :
+                    `<script>globalThis.stored = new Promise(resolve => addEventListener("message", event => resolve(event.data), { once: true }))</script><iframe src="${child}"></iframe>`,
+                  undefined,
+                  origin
+                )
+                const realm = yield* opened.adapter.realm(opened.document, { _tag: "Main" })
+                const stored = yield* opened.adapter.evaluate(realm, {
+                  functionDeclaration: source === "previous document"
+                    ? "() => { const value = localStorage.getItem(\"left\"); localStorage.clear(); return value }"
+                    : "() => globalThis.stored",
+                  arguments: [],
+                  awaitPromise: true,
+                  result: "value",
+                  userActivation: false
+                })
+                return { context: opened.context, stored }
+              }))
+              assert.isTrue(
+                Exit.isFailure(leaked),
+                `cleanup accepted the leak; the next case read ${JSON.stringify(next.stored)}`
+              )
+              assert.include(String(Exit.isFailure(leaked) ? leaked.cause : ""), "localStorage")
+              assert.deepStrictEqual(next.stored, { _tag: "Value", value: { type: "null" } })
+            }), timeout)
+        }
+
         // About the harness's contexts themselves, so each half opens a context of its own
         it.effect("keeps raw-engine documents, realms and storage private to each scoped context", () =>
           Effect.gen(function*() {
