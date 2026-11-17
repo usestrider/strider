@@ -1151,16 +1151,16 @@ export interface Page extends ReadonlyPage {
   /**
    * Adds a `<script>` element to the page's current document and waits for it to load or run, returning it.
    *
+   * **When to use**
+   *
+   * Use to run a library or helper among the page's own scripts in the document that's already loaded; use
+   * `addInitScript` for code that must run in every new document, before the page's scripts.
+   *
    * **Details**
    *
    * The element is added from the page's main world, so the page's Content Security Policy applies: a script it
    * refuses fails with `RefusedByPolicy`, and a URL that doesn't load with `ResourceFailed`. See `ScriptTag` for
    * what the call waits for. The handle is the element, released with the scope.
-   *
-   * **When to use**
-   *
-   * Use to run a library or helper among the page's own scripts in the document that's already loaded; use
-   * `addInitScript` for code that must run in every new document, before the page's scripts.
    *
    * **Example** (Loading a library from a URL)
    *

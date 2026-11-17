@@ -1,7 +1,18 @@
 {
-  "status": "missing",
-  "api": [],
-  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "FrameLocator.addScriptTag",
+      "url": "/docs/api/browser/Locator#FrameLocator.addScriptTag"
+    },
+    {
+      "module": "ScriptTag",
+      "symbol": "Source",
+      "url": "/docs/api/browser/ScriptTag#Source"
+    }
+  ],
+  "notes": "Read through the layer's FileSystem when called, with a //# sourceURL comment naming the file.",
   "capabilities": [],
   "id": "option-frame-addscripttag-path",
   "upstream": [

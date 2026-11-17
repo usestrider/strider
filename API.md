@@ -422,6 +422,9 @@ interface Page extends ReadonlyPage {
   route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, NoInfer<P> | "request">, options?: Route.Options<P> | undefined): Effect<Route.Registration, Route.RouteError | TargetGone | Timeout, Scope | R>
   addLocatorHandler<E, R>(locator: Locator.Locator, handler: (locator: Locator.Locator) => Effect<void, E, R>, options?: { readonly times?: number; readonly noWaitAfter?: boolean }): Effect<Registration, PageError | TargetGone | Timeout, Scope | R> // page-local, serial, nonrecursive; default unlimited and wait for disappearance
   addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect<InitScript.InitScript, Declaration.DeclarationError | TargetGone | Timeout, Scope>
+  addScriptTag(script: ScriptTag.Source, options?: ScriptTag.Options | undefined): Effect<JSHandle.JSHandle<HTMLScriptElement>, PageError | TargetGone | Timeout, Scope>
+    // once, in the current document, from its main world: a URL's load, or inline JavaScript having run;
+    // the page's CSP applies (RefusedByPolicy), and a URL that doesn't load is ResourceFailed
   emulate(settings: Emulation.Emulation): Effect<Declaration.Registration, Declaration.DeclarationError | TargetGone | Timeout, Scope>
   readonly activate: Effect<void, PageError | TargetGone | Timeout> // bring to front; rendering-based waits need it
   close(): Effect<void, PageError | TargetGone | Timeout>   // owned teardown: no beforeunload
@@ -697,7 +700,8 @@ interface HeldKey { readonly release: Effect<void> }     // idempotent; the scop
 interface ReadonlyFrameLocator extends Queries<ReadonlyLocator> {   // an iframe's document, entered by its element; lazy like any locator
   readonly owner: ReadonlyLocator                        // the iframe element
   frame(iframe: ReadonlyLocator): ReadonlyFrameLocator
-}                                                        // FrameLocator: the same queries returning Locator
+}                                                        // FrameLocator: the same queries returning Locator, and
+                                                         // addScriptTag, as Page's, in the frame's current document
 
 // JSHandle
 interface JSHandle<A = unknown> extends Pipeable, Inspectable {   // a value in one realm, owned by the scope that acquired it
