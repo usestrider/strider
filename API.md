@@ -745,7 +745,7 @@ declare const toHaveRole: DualMatcher<Locator.ReadonlyLocator, [expected: string
 declare const toHaveCSS: DualMatcher<Locator.ReadonlyLocator, [name: string, expected: string | RegExp, options?: { readonly not?: boolean | undefined; readonly pseudo?: "before" | "after" | undefined } | undefined]>
 declare const toHaveAttribute: DualMatcher<Locator.ReadonlyLocator, [name: string, expected?: string | RegExp | undefined]>
 declare const toHaveCount: DualMatcher<Locator.ReadonlyLocator, [count: number]>
-declare const toMatchAria: DualMatcher<Locator.ReadonlyLocator, [pattern: AriaPattern.AriaPattern]>
+declare const toMatchAria: DualMatcher<Locator.ReadonlyLocator | Page.ReadonlyPage, [pattern: AriaPattern.AriaPattern, options?: { readonly not?: boolean | undefined } | undefined]>   // a page is matched from its document node; not waits for no match
 declare const toHaveURL: DualMatcher<Page.ReadonlyPage, [expected: string | RegExp]>
 declare const toHaveTitle: DualMatcher<Page.ReadonlyPage, [expected: string | RegExp]>
 // the general form: a subject and a condition
@@ -766,6 +766,7 @@ declare const node: (role: AriaRole.AriaRole, name: string | RegExp, children: C
 declare const text: (value: string | RegExp) => AriaPattern
 declare const exactly: (...children: ReadonlyArray<AriaPattern>) => Children     // these children, in this order, and no others
 declare const including: (...children: ReadonlyArray<AriaPattern>) => Children   // these children in this order; others may come between
+declare const anywhere: (children: Children) => AriaPattern                      // the node, or any node beneath it, has these children
 declare const unchecked: Children                                                // children are not compared
 ```
 
@@ -1139,7 +1140,7 @@ Snapshots:
   - *inferred names:* visible text, `title`, `placeholder`, `alt`, a nearby label.
 - **Password controls.** Password inputs without an explicit ARIA role appear as `editable [ref=e1] [inferred: password]` when inferred interactivity is enabled. Their accessible names, including labels, titles, and placeholders, are retained; controls with no accessible name stay unnamed, without nearby-label inference. Disabled and read-only inputs retain this designation. Explicit ARIA roles are preserved. Password values do not contribute to snapshot names or find data, including when another element references the input for its name.
 - **Every inference is tagged with its evidence** in both the value and the text, so a model or a reader can tell `button "Save"` from `clickable "Save" [inferred: cursorPointer]`.
-- **`snapshot({ sources: "aria" })` is the pure accessibility tree,** which `Expect.toMatchAria` matches against.
+- **`snapshot({ sources: "aria" })` is the pure accessibility tree,** which `Expect.toMatchAria` matches against: a locator's from its match's node, a page's from its `document` node, named by its title. `AriaPattern.anywhere` matches a fragment at any depth beneath that root.
 - **The tree is the engine's,** the one `getByRole` matches, the same on every backend. An element with no role gives its children to its parent; hidden and inert elements are left out, and while a modal dialog is open, everything outside the topmost one; text is a `text` node unless it only repeats its parent's name, so a list item's text is its child, since a list item's name doesn't come from its content; an iframe is an `iframe` node with its frame's tree inside, whose refs are prefixed (`f1e3`). Click listeners aren't inferred on any backend yet (`snapshot.clickListeners`).
 - **Same node, same ref** while its document lives, so a renamed button keeps its ref. `generation` names the engine's ref table for the document. A ref never rebinds: its node removed is `StaleRef{Detached}`, its document replaced `Replaced`, a ref no snapshot of the document gave `OtherSnapshot`, and a table installed again `BindingLost`.
 - **Diffs are explicit** (`snapshot.diff(previous)`), never an automatic switch between full and delta output.
@@ -1425,6 +1426,8 @@ const carts = yield* NetworkResponse.history(page, { url: "https://app.example.c
 yield* page.getByRole("navigation").pipe(Expect.toMatchAria(
   AriaPattern.node("navigation", "Main", AriaPattern.including(
     AriaPattern.node("link", "Orders", AriaPattern.unchecked)))))
+yield* page.pipe(Expect.toMatchAria(   // a page's tree, matched at any depth
+  AriaPattern.anywhere(AriaPattern.including(AriaPattern.node("heading", "Orders", AriaPattern.unchecked)))))
 
 // 17. An operation of the program's own: one deadline, and a Timeout named for it that says how far it got
 const checkout = Operation.fn("checkout")(function*(page: Page.Page, card: string) {

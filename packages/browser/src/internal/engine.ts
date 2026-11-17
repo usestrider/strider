@@ -199,13 +199,18 @@ export type Expectation =
   | { readonly _tag: "Attribute"; readonly name: string; readonly expected: TextMatcher | null }
   | { readonly _tag: "Count"; readonly count: number }
   | { readonly _tag: "Title"; readonly expected: TextMatcher }
-  /** The one match's accessibility tree matches a pattern. */
-  | { readonly _tag: "Aria"; readonly pattern: Pattern }
+  /**
+   * The one match's accessibility tree, or with `document` the page's from its document node, matches a pattern;
+   * with `not`, it doesn't.
+   */
+  | { readonly _tag: "Aria"; readonly pattern: Pattern; readonly document: boolean; readonly not: boolean }
 
 /** A pattern over the accessibility tree, as `AriaPattern` builds it. */
 export type Pattern =
   | { readonly _tag: "Node"; readonly role: string; readonly name: TextMatcher; readonly children: PatternChildren }
   | { readonly _tag: "Text"; readonly value: TextMatcher }
+  /** A node, at the subject or at any depth beneath it, whose children match. */
+  | { readonly _tag: "Anywhere"; readonly children: PatternChildren }
 
 /** How a pattern's children are matched. */
 export type PatternChildren =
@@ -3222,6 +3227,11 @@ export function engine(render: (root: SnapNode) => string) {
       const title = collapse(dom.title(document))
       return { passed: expected(expectation.expected, title), observed: title }
     }
+    if (expectation._tag === "Aria" && expectation.document) {
+      const root = documentNode({ interactivity: false, depth: null })
+      const matches = matchPattern(expectation.pattern, root)
+      return { passed: expectation.not ? !matches : matches, observed: render(root) }
+    }
     const found = resolve(steps)
     switch (expectation._tag) {
       case "Attached":
@@ -3357,7 +3367,8 @@ export function engine(render: (root: SnapNode) => string) {
       }
       case "Aria": {
         const root = rootNode(element, { interactivity: false, depth: null })
-        return { passed: matchPattern(expectation.pattern, root), observed: render(root) }
+        const matches = matchPattern(expectation.pattern, root)
+        return { passed: expectation.not ? !matches : matches, observed: render(root) }
       }
       case "Attribute": {
         const value = dom.getAttribute(element, expectation.name)
@@ -3899,10 +3910,19 @@ export function engine(render: (root: SnapNode) => string) {
     if (pattern._tag === "Text") {
       return node.role._tag === "Aria" && node.role.role === "text" && nameMatches(pattern.value, node.name)
     }
+    if (pattern._tag === "Anywhere") return matchAnywhere(pattern.children, node)
     if (node.role._tag !== "Aria" || node.role.role !== pattern.role || !nameMatches(pattern.name, node.name)) {
       return false
     }
-    const children = pattern.children
+    return matchChildren(pattern.children, node)
+  }
+
+  /** Whether the node, or any node beneath it, has children that match. */
+  const matchAnywhere = (children: PatternChildren, node: SnapNode): boolean =>
+    matchChildren(children, node) || node.children.some((child) => matchAnywhere(children, child))
+
+  /** Whether a node's children match as a pattern states. */
+  const matchChildren = (children: PatternChildren, node: SnapNode): boolean => {
     switch (children._tag) {
       case "Unchecked":
         return true

@@ -109,6 +109,38 @@ export const text = (value: string | RegExp): AriaPattern =>
   Data.registerPattern({ [TypeId]: TypeId }, { _tag: "Text", value: matcher(value) })
 
 /**
+ * A node, at the subject or at any depth beneath it, whose children match as `children` says. Its own role and name
+ * aren't compared.
+ *
+ * **When to use**
+ *
+ * Use to match part of a tree without spelling out the nodes above it, such as a heading inside a banner from the
+ * page.
+ *
+ * **Example** (Matching a heading and a field anywhere on a page)
+ *
+ * ```ts import.meta.vitest
+ * import { AriaPattern, Expect, Page } from "@usestrider/browser"
+ *
+ * const todoForm = (page: Page.ReadonlyPage) =>
+ *   page.pipe(Expect.toMatchAria(
+ *     AriaPattern.anywhere(
+ *       AriaPattern.including(
+ *         AriaPattern.node("heading", "todos", AriaPattern.unchecked),
+ *         AriaPattern.node("textbox", "What needs to be done?", AriaPattern.unchecked)
+ *       )
+ *     )
+ *   ))
+ * ```
+ *
+ * @stability unstable
+ * @category constructors
+ * @since 0.1.0
+ */
+export const anywhere = (children: Children): AriaPattern =>
+  Data.registerPattern({ [TypeId]: TypeId }, { _tag: "Anywhere", children: Data.childrenOf(children) })
+
+/**
  * These direct children, in this order, and no others.
  *
  * **Example** (Matching a cart with exactly two items)

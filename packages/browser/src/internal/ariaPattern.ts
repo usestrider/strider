@@ -37,9 +37,11 @@ const quote = (matcher: Engine.TextMatcher) =>
 /** How a pattern reads in code, for an expectation's condition. */
 export const describe = (data: Engine.Pattern): string => {
   if (data._tag === "Text") return `text(${quote(data.value)})`
-  const inner = data.children
-  const list = inner._tag === "Unchecked"
+  if (data._tag === "Anywhere") return `anywhere(${describeChildren(data.children)})`
+  return `node(${JSON.stringify(data.role)}, ${quote(data.name)}, ${describeChildren(data.children)})`
+}
+
+const describeChildren = (inner: Engine.PatternChildren): string =>
+  inner._tag === "Unchecked"
     ? "unchecked"
     : `${inner._tag === "Exactly" ? "exactly" : "including"}(${inner.patterns.map(describe).join(", ")})`
-  return `node(${JSON.stringify(data.role)}, ${quote(data.name)}, ${list})`
-}

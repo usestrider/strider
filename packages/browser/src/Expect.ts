@@ -20,7 +20,7 @@ import * as Effect from "effect/Effect"
 import { dual } from "effect/Function"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
-import type * as AriaPattern from "./AriaPattern.ts"
+import * as AriaPattern from "./AriaPattern.ts"
 import type * as Condition from "./Condition.ts"
 import type * as Deadline from "./Deadline.ts"
 import * as Diagnostics from "./Diagnostics.ts"
@@ -658,12 +658,21 @@ export const toHaveCount: DualMatcher<Locator.ReadonlyLocator, [count: number]> 
 )
 
 /**
- * Expects the one match's accessibility tree to match a pattern.
+ * Expects the accessibility tree of a locator's one match, or of a page, to match a pattern.
+ *
+ * **Details**
+ *
+ * A locator's pattern is matched against its match's node; a page's against its `document` node, named by the
+ * page's title, in the main frame. Both are the roots `snapshot({ sources: "aria" })` returns. Use
+ * `AriaPattern.anywhere` to match a node at any depth beneath the subject.
+ *
+ * With `not: true`, it waits until the subject doesn't match. A locator's missing and multiple matches retry until
+ * exactly one matches, with `not` too. A failure's last observed value is the subject's tree as text.
  *
  * **Gotchas**
  *
- * A pattern's children are the node's direct children, so links in a list sit under `list` and `listitem` nodes:
- * match the list, or locate it, rather than the navigation around it.
+ * A node pattern's children are the node's direct children, so links in a list sit under `list` and `listitem`
+ * nodes: match the list, locate it, or use `AriaPattern.anywhere`, rather than the navigation around it.
  *
  * **Example** (Checking the navigation for an Orders link)
  *
@@ -682,13 +691,57 @@ export const toHaveCount: DualMatcher<Locator.ReadonlyLocator, [count: number]> 
  *   ))
  * ```
  *
+ * **Example** (Checking a page for a heading at any depth)
+ *
+ * ```ts import.meta.vitest
+ * import { AriaPattern, Expect, Page } from "@usestrider/browser"
+ *
+ * const hasHeading = (page: Page.ReadonlyPage) =>
+ *   page.pipe(Expect.toMatchAria(
+ *     AriaPattern.anywhere(
+ *       AriaPattern.including(
+ *         AriaPattern.node("heading", "Orders", AriaPattern.unchecked)
+ *       )
+ *     )
+ *   ))
+ * ```
+ *
+ * **Example** (Waiting for a dialog's error to go)
+ *
+ * ```ts import.meta.vitest
+ * import { AriaPattern, Expect, Page } from "@usestrider/browser"
+ *
+ * const errorGone = (page: Page.ReadonlyPage) =>
+ *   page.getByRole("dialog").pipe(Expect.toMatchAria(
+ *     AriaPattern.anywhere(
+ *       AriaPattern.including(
+ *         AriaPattern.node("alert", "", AriaPattern.unchecked)
+ *       )
+ *     ),
+ *     { not: true }
+ *   ))
+ * ```
+ *
  * @stability unstable
  * @category matchers
  * @since 0.1.0
  */
-export const toMatchAria: DualMatcher<Locator.ReadonlyLocator, [pattern: AriaPattern.AriaPattern]> = dual(
-  2,
-  (locator: Locator.ReadonlyLocator, pattern: AriaPattern.AriaPattern) => ExpectImpl.toMatchAria(locator, pattern)
+export const toMatchAria: DualMatcher<
+  Locator.ReadonlyLocator | Page.ReadonlyPage,
+  [
+    pattern: AriaPattern.AriaPattern,
+    options?: {
+      /** Waits until the subject doesn't match instead. @default false */
+      readonly not?: boolean | undefined
+    } | undefined
+  ]
+> = dual(
+  (args) => !AriaPattern.isAriaPattern(args[0]),
+  (
+    subject: Locator.ReadonlyLocator | Page.ReadonlyPage,
+    pattern: AriaPattern.AriaPattern,
+    options?: { readonly not?: boolean | undefined }
+  ) => ExpectImpl.toMatchAria(subject, pattern, options)
 )
 
 /**

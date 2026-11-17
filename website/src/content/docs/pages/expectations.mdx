@@ -45,7 +45,7 @@ Each matcher takes a locator, except `toHaveURL` and `toHaveTitle`, which take t
 | `toHaveRole(expected)`                         | its computed ARIA role equals the string exactly                 |
 | `toHaveCSS(name, expected, options?)`          | its computed CSS property matches an exact string or regular expression |
 | `toHaveCount(n)`                               | exactly `n` elements match                                       |
-| `toMatchAria(pattern)`                         | its accessibility tree matches a pattern                         |
+| `toMatchAria(pattern, options?)`               | its accessibility tree matches a pattern; `not` waits for it not to |
 | `toHaveURL(expected)`, `toHaveTitle(expected)` | the page's URL or title matches                                  |
 
 Roles can be implicit, such as a button's `button` role, or set with `role`. Role assertions compare exact,
@@ -286,6 +286,32 @@ const productTabs = AriaPattern.node(
 const productPage = Effect.fn("productPage")(function*(page: Page.Page) {
   yield* page.getByRole("navigation").pipe(Expect.toMatchAria(mainNav))
   yield* page.getByRole("tablist").pipe(Expect.toMatchAria(productTabs))
+})
+```
+
+A page is a subject too: its tree starts at the `document` node, named by the page's title.
+`AriaPattern.anywhere` matches a node at any depth beneath the subject whose children match, so a pattern needn't
+spell out the nodes above what it checks. With `{ not: true }`, the expectation waits until the subject doesn't
+match:
+
+```ts
+import { AriaPattern, Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const todoForm = AriaPattern.anywhere(
+  AriaPattern.including(
+    AriaPattern.node("heading", "todos", AriaPattern.unchecked),
+    AriaPattern.node("textbox", "What needs to be done?", AriaPattern.unchecked)
+  )
+)
+
+const alert = AriaPattern.anywhere(
+  AriaPattern.including(AriaPattern.node("alert", "", AriaPattern.unchecked))
+)
+
+const todoPage = Effect.fn("todoPage")(function*(page: Page.Page) {
+  yield* page.pipe(Expect.toMatchAria(todoForm))
+  yield* page.getByRole("dialog").pipe(Expect.toMatchAria(alert, { not: true }))
 })
 ```
 
