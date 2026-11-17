@@ -172,11 +172,11 @@ export const declarations = (
           } else {
             const context = yield* Browser.newContext(options)
             const page = yield* context.newPage
-            yield* page.goto(origin)
+            yield* page.goto(origin, { waitUntil: "load" })
             assert.strictEqual(yield* page.title, "secure")
             // Browser.newPage must forward the same creation options.
             const shortcut = yield* Browser.newPage(options)
-            yield* shortcut.goto(origin)
+            yield* shortcut.goto(origin, { waitUntil: "load" })
             assert.strictEqual(yield* shortcut.title, "secure")
           }
           const stillRejected = yield* sibling.goto(`${origin}/after`).pipe(Effect.flip)
@@ -480,11 +480,11 @@ export const declarations = (
             yield* Effect.scoped(Effect.gen(function*() {
               const route = yield* page.route(`${origin}/hello*`, () =>
                 Route.fulfill(HttpServerResponse.html("<title>routed</title>")))
-              yield* page.goto(`${origin}/hello?route=${n}`)
+              yield* page.goto(`${origin}/hello?route=${n}`, { waitUntil: "load" })
               assert.strictEqual(yield* page.title, "routed")
               assert.strictEqual(yield* route.hits, 1)
             }))
-            yield* page.goto(`${origin}/hello?released=${n}`)
+            yield* page.goto(`${origin}/hello?released=${n}`, { waitUntil: "load" })
             assert.notStrictEqual(yield* page.title, "routed")
           }
         }), timeout)
@@ -589,7 +589,7 @@ export const declarations = (
               assert.deepStrictEqual(seen, ["current"])
               assert.strictEqual(yield* current.hits, intercepted ? 2 : 1)
               yield* current.remove
-              yield* page.goto(`${origin}/after`)
+              yield* page.goto(`${origin}/after`, { waitUntil: "load" })
               assert.strictEqual(yield* page.title, "network")
               assert.deepStrictEqual(seen, ["current"])
             }),
@@ -737,7 +737,7 @@ export const declarations = (
             const page = yield* Browser.newPage()
             const route = yield* page.route(origin, () =>
               Route.fulfill(HttpServerResponse.html("<title>routed</title>")))
-            yield* page.goto(`${origin}/`)
+            yield* page.goto(`${origin}/`, { waitUntil: "load" })
             assert.strictEqual(yield* page.title, "routed")
             assert.strictEqual(yield* route.hits, 1)
           }))
@@ -1124,7 +1124,7 @@ export const declarations = (
           const page = yield* Browser.newPage({
             httpCredentials: { username: "strider", password: Redacted.make("secret") }
           })
-          yield* page.goto(`${origin}/first`).pipe(Deadline.within("5 seconds"))
+          yield* page.goto(`${origin}/first`, { waitUntil: "load" }).pipe(Deadline.within("5 seconds"))
           assert.strictEqual(yield* page.title, "denied")
           assert.strictEqual(first, 1)
           assert.strictEqual(second, 0)
@@ -2076,16 +2076,19 @@ export const declarations = (
             const page = yield* SharedContext.newPage
             yield* page.clock.install({ mode: "controlled", at: "2026-01-01T00:00:00Z" })
             // The page's own script: Chromium hides from the page the errors of functions an evaluation made
-            yield* page.goto(fixtureUrl(
-              origin,
-              `<script>
+            yield* page.goto(
+              fixtureUrl(
+                origin,
+                `<script>
                 window.__reported = []
                 addEventListener("error", (event) => window.__reported.push(String(event.error?.message)))
                 setTimeout(() => { throw new Error("first") }, 100)
                 setTimeout(() => { throw new Error("second") }, 200)
                 setTimeout(() => { window.__after = true }, 300)
               </script>`
-            ))
+              ),
+              { waitUntil: "load" }
+            )
             const error = yield* failure(page.clock.adjust("1 second"), "adjust over a throwing timer")
             assert(PageClock.isPageClockError(error), String(error))
             assert(error.reason._tag === "EvaluationThrown", String(error))

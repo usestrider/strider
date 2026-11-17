@@ -845,7 +845,7 @@ describe("Stock WebKit, launched in automation mode", () => {
         yield* Effect.scoped(Effect.gen(function*() {
           const page = yield* Browser.newPage()
           yield* page.goto(fixtureUrl(origin, "<title>one</title>"))
-          yield* page.goto(fixtureUrl(origin, "<title>two</title>"))
+          yield* page.goto(fixtureUrl(origin, "<title>two</title>"), { waitUntil: "load" })
           // A traversal its inspector misreports (Q215)
           const back = reasonOf(yield* Effect.exit(page.back()))
           assert.strictEqual(back?.reason?.capability, "navigation.traverse")
