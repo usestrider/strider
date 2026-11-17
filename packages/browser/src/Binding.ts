@@ -2,7 +2,7 @@
  * Bindings: host functions a page's scripts call as `window[name](...)`.
  *
  * A binding is a declaration: it needs a `Scope`, and removing it, or closing its scope, deletes the function from
- * the documents that have it. Its arguments and result cross as JSON, decoded and encoded by the schemas it is
+ * the documents that have it. Its arguments and result cross by value, as `evaluateInMainWorld`'s do, decoded and encoded by the schemas it is
  * registered with, and its handler is told which page and frame called it.
  *
  * @stability unstable
@@ -39,8 +39,8 @@ export type Source = typeof Source.Type
  *
  * **Details**
  *
- * `arguments` decodes the array of arguments the page passed, after they cross as JSON, so it is usually a
- * `Schema.Tuple`. `result` encodes the handler's value, which crosses back as JSON.
+ * `arguments` decodes the array of arguments the page passed, after they cross by value, so it is usually a
+ * `Schema.Tuple`. `result` encodes the handler's value, which crosses back the same way. A value that can't cross rejects the call.
  *
  * @stability unstable
  * @category models

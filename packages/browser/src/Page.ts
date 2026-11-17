@@ -1122,8 +1122,8 @@ export interface Page extends ReadonlyPage {
    *
    * **Details**
    *
-   * In the page, the function returns a promise. Its arguments cross as JSON and are decoded by `arguments`; the
-   * handler's value is encoded by `result` and resolves the promise. A decoding failure or a failed handler rejects
+   * In the page, the function returns a promise. Its arguments cross by value, as `evaluateInMainWorld`'s do, and are decoded
+   * by `arguments`; the handler's value is encoded by `result` and resolves the promise. A decoding failure or a failed handler rejects
    * it with an `Error` carrying the message; a defect or an interruption rejects it with a fixed message and is
    * logged. The function is in the main world of documents already open and of every document after, before their
    * own scripts, and not in workers. Removing it deletes it from open documents and rejects the calls still
