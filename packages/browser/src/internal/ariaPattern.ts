@@ -38,7 +38,11 @@ const quote = (matcher: Engine.TextMatcher) =>
 export const describe = (data: Engine.Pattern): string => {
   if (data._tag === "Text") return `text(${quote(data.value)})`
   if (data._tag === "Anywhere") return `anywhere(${describeChildren(data.children)})`
-  return `node(${JSON.stringify(data.role)}, ${quote(data.name)}, ${describeChildren(data.children)})`
+  const states = Object.entries(data.states).filter(([, value]) => value !== undefined)
+  const options = states.length === 0
+    ? ""
+    : `, { ${states.map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join(", ")} }`
+  return `node(${JSON.stringify(data.role)}, ${quote(data.name)}, ${describeChildren(data.children)}${options})`
 }
 
 const describeChildren = (inner: Engine.PatternChildren): string =>

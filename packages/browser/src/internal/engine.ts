@@ -207,10 +207,28 @@ export type Expectation =
 
 /** A pattern over the accessibility tree, as `AriaPattern` builds it. */
 export type Pattern =
-  | { readonly _tag: "Node"; readonly role: string; readonly name: TextMatcher; readonly children: PatternChildren }
+  | {
+    readonly _tag: "Node"
+    readonly role: string
+    readonly name: TextMatcher
+    readonly children: PatternChildren
+    readonly states: PatternStates
+  }
   | { readonly _tag: "Text"; readonly value: TextMatcher }
   /** A node, at the subject or at any depth beneath it, whose children match. */
   | { readonly _tag: "Anywhere"; readonly children: PatternChildren }
+
+/** The level and states a node pattern compares; an omitted one isn't compared. */
+export interface PatternStates {
+  readonly level?: number | undefined
+  readonly checked?: boolean | "mixed" | undefined
+  readonly pressed?: boolean | "mixed" | undefined
+  readonly expanded?: boolean | undefined
+  readonly selected?: boolean | undefined
+  readonly disabled?: boolean | undefined
+  readonly invalid?: boolean | undefined
+  readonly focused?: boolean | undefined
+}
 
 /** How a pattern's children are matched. */
 export type PatternChildren =
@@ -247,6 +265,8 @@ export interface SnapNode {
     }
     | { readonly _tag: "None" }
   readonly states: ReadonlyArray<string>
+  /** A heading's, list item's, row's or tree item's level, when it has one. */
+  readonly level?: number | undefined
   readonly editable?: boolean | undefined
   readonly validationMessage: string | null
   readonly children: ReadonlyArray<SnapNode>
@@ -277,6 +297,7 @@ export const SnapNode: Schema.Codec<SnapNode> = Schema.Struct({
     Schema.TaggedStruct("None", {})
   ]),
   states: Schema.Array(Schema.String),
+  level: Schema.optional(Schema.Number),
   editable: Schema.optional(Schema.Boolean),
   validationMessage: Schema.NullOr(Schema.String),
   children: Schema.Array(Schema.suspend((): Schema.Codec<SnapNode> => SnapNode)),
@@ -506,7 +527,15 @@ export function renderText(root: SnapNode): string {
     }
     let out = `${indent}- ${node.role.role}`
     if (node.name._tag !== "None") out += ` ${JSON.stringify(node.name.value)}`
-    for (const state of node.states) out += ` [${state}]`
+    if (node.level !== undefined) out += ` [level=${node.level}]`
+    // A button's mixed state is its pressed state's; any other node's, its checked state's
+    for (const state of node.states) {
+      out += state !== "mixed"
+        ? ` [${state}]`
+        : node.role._tag === "Aria" && node.role.role === "button"
+        ? " [pressed=mixed]"
+        : " [checked=mixed]"
+    }
     if (node.validationMessage != null) out += ` [validationMessage=${JSON.stringify(node.validationMessage)}]`
     if (node.ref !== null) out += ` [ref=${node.ref}]`
     if (node.role._tag === "Inferred") out += ` [inferred: ${node.role.evidence.join(", ")}]`
@@ -3577,12 +3606,16 @@ export function engine(render: (root: SnapNode) => string) {
 
   const statesOf = (element: Element, role: string | null): Array<string> => {
     const states: Array<string> = []
-    if (checkedOf(element) === true) states.push("checked")
+    const checked = checkedState(element).state
+    if (checked === "mixed") states.push("mixed")
+    else if (checked === true) states.push("checked")
     if (expandedOf(element) === true) states.push("expanded")
     if (selectedOf(element) === true) states.push("selected")
     if ((INTERACTIVE.has(role ?? "") || dom.matches(element, ":disabled")) && !enabled(element)) states.push("disabled")
     if (deepActive() === element) states.push("focused")
-    if (pressedOf(element) === true) states.push("pressed")
+    const pressed = pressedOf(element)
+    if (pressed === "mixed") states.push("mixed")
+    else if (pressed === true) states.push("pressed")
     if (validationMessageOf(element) !== null) states.push("invalid")
     return states
   }
@@ -3850,6 +3883,7 @@ export function engine(render: (root: SnapNode) => string) {
         ...(field && namesFromContent.has(element) ? { from: "text" as const } : {}),
         ...(namesFromFields.has(element) ? { fieldContent: true } : {})
       }
+    const level_ = levelOf(element)
     let children = frame || (walk.depth !== null && level >= walk.depth) ? [] : childrenOf(element, level + 1, walk)
     // Text that only repeats the node's name isn't a node of its own
     if (
@@ -3862,6 +3896,7 @@ export function engine(render: (root: SnapNode) => string) {
       role,
       name,
       states: statesOf(element, role._tag === "Aria" ? role.role : null),
+      ...(level_ > 0 ? { level: level_ } : {}),
       ...(field ? { editable: true } : {}),
       validationMessage: validationMessageOf(element),
       children,
@@ -3914,7 +3949,24 @@ export function engine(render: (root: SnapNode) => string) {
     if (node.role._tag !== "Aria" || node.role.role !== pattern.role || !nameMatches(pattern.name, node.name)) {
       return false
     }
-    return matchChildren(pattern.children, node)
+    return statesMatch(pattern.states, node) && matchChildren(pattern.children, node)
+  }
+
+  /** Whether a node has the level and states a pattern states. */
+  const statesMatch = (states: PatternStates, node: SnapNode): boolean => {
+    if (states.level !== undefined && node.level !== states.level) return false
+    const has = (state: string) => node.states.includes(state)
+    // A node's mixed state is a button's pressed state, and any other node's checked state
+    const button = node.role._tag === "Aria" && node.role.role === "button"
+    const checked = has("checked") ? true : !button && has("mixed") ? "mixed" : false
+    const pressed = has("pressed") ? true : button && has("mixed") ? "mixed" : false
+    if (states.checked !== undefined && states.checked !== checked) return false
+    if (states.pressed !== undefined && states.pressed !== pressed) return false
+    for (const state of ["expanded", "selected", "disabled", "invalid", "focused"] as const) {
+      const expected = states[state]
+      if (expected !== undefined && has(state) !== expected) return false
+    }
+    return true
   }
 
   /** Whether the node, or any node beneath it, has children that match. */

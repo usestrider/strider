@@ -164,7 +164,8 @@ interface Node {
     | { readonly _tag: "Accessible"; readonly value: string }
     | { readonly _tag: "Inferred"; readonly value: string; readonly from: "text" | "title" | "placeholder" | "alt" | "nearbyLabel" }
     | { readonly _tag: "None" }
-  readonly states: ReadonlySet<"checked" | "expanded" | "selected" | "disabled" | "focused" | "pressed" | "invalid">
+  readonly states: ReadonlySet<"checked" | "mixed" | "expanded" | "selected" | "disabled" | "focused" | "pressed" | "invalid">   // mixed: [checked=mixed], or [pressed=mixed] on a button
+  readonly level?: number | undefined                    // a heading's, or an aria-level list item's, row's or tree item's: [level=2]
   readonly validationMessage: Option<string>
   readonly children: ReadonlyArray<Node>
 }
@@ -762,7 +763,9 @@ declare const because: { (why: string): <A>(condition: Condition<A>) => Conditio
 // a Condition is Pipeable: condition.pipe(Condition.because("…"))
 
 // AriaPattern: matched against snapshot({ sources: "aria" }); how children match is always stated
-declare const node: (role: AriaRole.AriaRole, name: string | RegExp, children: Children) => AriaPattern   // "" means no accessible name
+declare const node: (role: AriaRole.AriaRole, name: string | RegExp, children: Children, options?: NodeOptions | undefined) => AriaPattern   // "" means no accessible name
+// NodeOptions: { level, checked, pressed, expanded, selected, disabled, invalid, focused }; an omitted one isn't
+// compared, false requires its absence, and checked and pressed also take "mixed"
 declare const text: (value: string | RegExp) => AriaPattern
 declare const exactly: (...children: ReadonlyArray<AriaPattern>) => Children     // these children, in this order, and no others
 declare const including: (...children: ReadonlyArray<AriaPattern>) => Children   // these children in this order; others may come between

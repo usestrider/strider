@@ -196,9 +196,8 @@ const toNode = (node: Engine.SnapNode): Snapshot.Node => ({
       ...(node.name.fieldContent === undefined ? {} : { fieldContent: node.name.fieldContent })
     }
     : node.name,
-  states: new Set(
-    node.states as ReadonlyArray<"checked" | "expanded" | "selected" | "disabled" | "focused" | "pressed" | "invalid">
-  ),
+  states: new Set(node.states as ReadonlyArray<Snapshot.State>),
+  ...(node.level === undefined ? {} : { level: node.level }),
   ...(node.editable === undefined ? {} : { editable: node.editable }),
   validationMessage: Option.fromNullishOr(node.validationMessage),
   children: node.children.map(toNode)
@@ -223,6 +222,7 @@ const toEngine = (node: Snapshot.Node): Engine.SnapNode => ({
   role: node.role,
   name: node.name,
   states: [...node.states],
+  ...(node.level === undefined ? {} : { level: node.level }),
   validationMessage: Option.getOrNull(node.validationMessage),
   ...(node.editable === undefined ? {} : { editable: node.editable }),
   children: node.children.map(toEngine),
@@ -236,16 +236,18 @@ const lineOf = (node: Snapshot.Node): string =>
     role: node.role,
     name: node.name,
     states: [...node.states],
+    ...(node.level === undefined ? {} : { level: node.level }),
     validationMessage: Option.getOrNull(node.validationMessage),
     children: [],
     frame: false
   }).replace(/^- /, "")
 
-/** What a diff compares of a node: its role, name, states and validation message. */
+/** What a diff compares of a node: its role, name, level, states and validation message. */
 const sameNode: Equivalence.Equivalence<Snapshot.Node> = Schema.toEquivalence(Schema.Struct({
   role: Snapshot.Role,
   name: Snapshot.Name,
   states: Schema.ReadonlySet(Snapshot.State),
+  level: Schema.optional(Schema.Number),
   editable: Schema.optional(Schema.Boolean),
   validationMessage: Schema.Option(Schema.String)
 }))

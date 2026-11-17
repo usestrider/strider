@@ -289,6 +289,19 @@ const productPage = Effect.fn("productPage")(function*(page: Page.Page) {
 })
 ```
 
+A node pattern can also state a level and states, read as the snapshot shows them (`[level=2]`, `[checked]`,
+`[checked=mixed]`, `[pressed=mixed]`). One left out isn't compared, and `false` requires its absence:
+
+```ts
+import { AriaPattern } from "@usestrider/browser"
+
+const plans = AriaPattern.node("heading", "Plans", AriaPattern.unchecked, { level: 2 })
+const selectAll = AriaPattern.node("checkbox", "All", AriaPattern.unchecked, {
+  checked: "mixed",
+  disabled: false
+})
+```
+
 A page is a subject too: its tree starts at the `document` node, named by the page's title.
 `AriaPattern.anywhere` matches a node at any depth beneath the subject whose children match, so a pattern needn't
 spell out the nodes above what it checks. With `{ not: true }`, the expectation waits until the subject doesn't

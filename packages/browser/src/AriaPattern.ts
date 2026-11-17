@@ -54,8 +54,53 @@ const matcher = (value: string | RegExp): Engine.TextMatcher =>
 export const isAriaPattern = (u: unknown): u is AriaPattern => Predicate.hasProperty(u, TypeId)
 
 /**
- * A node with a role, an accessible name, and children compared as `children` says. A string name is matched whole
- * after collapsing whitespace, and an empty one means no accessible name.
+ * The level and states a node pattern compares. An omitted one isn't compared; `true` requires the state, and
+ * `false` requires its absence.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export interface NodeOptions {
+  /** The node's level, such as 2 for an `h2`: headings, list items, rows and tree items have one. @default undefined */
+  readonly level?: number | undefined
+  /** Whether it's checked; `"mixed"` for an indeterminate checkbox or `aria-checked="mixed"`. @default undefined */
+  readonly checked?: boolean | "mixed" | undefined
+  /** Whether a toggle button is pressed; `"mixed"` for `aria-pressed="mixed"`. @default undefined */
+  readonly pressed?: boolean | "mixed" | undefined
+  /** Whether it's expanded. @default undefined */
+  readonly expanded?: boolean | undefined
+  /** Whether it's selected. @default undefined */
+  readonly selected?: boolean | undefined
+  /** Whether it's disabled. @default undefined */
+  readonly disabled?: boolean | undefined
+  /** Whether a form control fails its constraint validation. @default undefined */
+  readonly invalid?: boolean | undefined
+  /** Whether it has focus. @default undefined */
+  readonly focused?: boolean | undefined
+}
+
+/**
+ * A node with a role, an accessible name, and children compared as `children` says, and with `options`, the level
+ * and states it must have. A string name is matched whole after collapsing whitespace, and an empty one means no
+ * accessible name.
+ *
+ * **Details**
+ *
+ * States are read as the snapshot reads them, so a pattern's `level`, `checked` or `pressed` matches what
+ * `snapshot({ sources: "aria" })` shows as `[level=2]`, `[checked]`, `[checked=mixed]` or `[pressed=mixed]`.
+ *
+ * **Example** (Matching a second-level heading and a partly checked box)
+ *
+ * ```ts import.meta.vitest
+ * import { AriaPattern } from "@usestrider/browser"
+ *
+ * const plans = AriaPattern.node("heading", "Plans", AriaPattern.unchecked, { level: 2 })
+ * const selectAll = AriaPattern.node("checkbox", "All", AriaPattern.unchecked, {
+ *   checked: "mixed",
+ *   disabled: false
+ * })
+ * ```
  *
  * **Example** (Matching a heading whose name varies)
  *
@@ -78,12 +123,27 @@ export const isAriaPattern = (u: unknown): u is AriaPattern => Predicate.hasProp
  * @category constructors
  * @since 0.1.0
  */
-export const node = (role: AriaRole.AriaRole, name: string | RegExp, children: Children): AriaPattern =>
+export const node = (
+  role: AriaRole.AriaRole,
+  name: string | RegExp,
+  children: Children,
+  options?: NodeOptions | undefined
+): AriaPattern =>
   Data.registerPattern({ [TypeId]: TypeId }, {
     _tag: "Node",
     role,
     name: matcher(name),
-    children: Data.childrenOf(children)
+    children: Data.childrenOf(children),
+    states: {
+      level: options?.level,
+      checked: options?.checked,
+      pressed: options?.pressed,
+      expanded: options?.expanded,
+      selected: options?.selected,
+      disabled: options?.disabled,
+      invalid: options?.invalid,
+      focused: options?.focused
+    }
   })
 
 /**
