@@ -3315,6 +3315,30 @@ document.getElementById("outer").attachShadow({ mode: "open" }).innerHTML =
             assert.deepStrictEqual(next, Exit.succeed({ _tag: "Value", value: { type: "number", value: 0 } }))
           }), timeout)
 
+        it.effect("rejects a raw-engine popup left open after its opener closes", () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            const leaked = yield* Effect.scoped(Effect.gen(function*() {
+              const opened = yield* open(backend, "<p>opener</p>", undefined, origin)
+              const realm = yield* opened.adapter.realm(opened.document, { _tag: "Main" })
+              const result = yield* opened.adapter.evaluate(realm, {
+                functionDeclaration: `() => new Promise(resolve => {
+                  const popup = window.open("/fixture?popup");
+                  if (!popup) return resolve(false);
+                  popup.addEventListener("load", () => resolve(true), { once: true });
+                })`,
+                arguments: [],
+                awaitPromise: true,
+                result: "value",
+                userActivation: true
+              })
+              assert.deepStrictEqual(result, { _tag: "Value", value: { type: "boolean", value: true } })
+            })).pipe(Effect.exit)
+            assert.isTrue(Exit.isFailure(leaked))
+            assert.include(String(Exit.isFailure(leaked) ? leaked.cause : ""), "page(s) open")
+            yield* Effect.scoped(open(backend, "<p>next</p>", undefined, origin))
+          }), timeout)
+
         for (const source of ["previous document", "cross-origin frame"] as const) {
           it.effect(`rejects raw-engine storage left by a ${source} and replaces the context`, () =>
             Effect.gen(function*() {

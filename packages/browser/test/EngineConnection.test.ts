@@ -14,6 +14,7 @@ import * as Browser from "../src/Browser.ts"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as Fake from "../src/internal/fake.ts"
 import * as Target from "../src/Target.ts"
+import * as Url from "../src/Url.ts"
 import type * as UserContext from "../src/UserContext.ts"
 import * as Fixture from "./integration/adapter/engineConnection.ts"
 import type { Backend } from "./integration/adapter/harness.ts"
@@ -103,6 +104,40 @@ describe("Raw engine connection fixture", () => {
         assert.notStrictEqual(next.context, context)
         assert.strictEqual(source.connects(), 1)
       })))
+
+    for (const resource of ["page", "worker with context", "worker with page"] as const) {
+      it.effect(`rejects a leftover ${resource} and replaces the shared context`, () =>
+        Effect.scoped(Effect.gen(function*() {
+          const source = backend()
+          const fixture = yield* Fixture.make(source)
+          yield* fixture.prepare
+          let context: UserContext.Id | undefined
+          const exit = yield* Effect.scoped(Effect.gen(function*() {
+            const opened = yield* fixture.page
+            context = opened.context
+            if (resource === "page") yield* opened.adapter.createPage(opened.context)
+            else {yield* source.sinks[0]!({
+                _tag: "RealmAdded",
+                realm: "leftover-worker" as Target.RealmId,
+                origin: "https://example.com",
+                kind: {
+                  _tag: "Worker",
+                  worker: { _tag: "Shared" },
+                  url: Url.Url.make("https://example.com/worker.js"),
+                  page: resource === "worker with page" ? Option.some(opened.page) : Option.none(),
+                  context: resource === "worker with context" ? Option.some(opened.context) : Option.none()
+                }
+              })}
+          })).pipe(Effect.exit)
+          assert.isTrue(Exit.isFailure(exit))
+          assert.include(
+            String(Exit.isFailure(exit) ? exit.cause : ""),
+            resource === "page" ? "page(s) open" : "a worker at"
+          )
+          const next = yield* Effect.scoped(fixture.page)
+          assert.notStrictEqual(next.context, context)
+        })))
+    }
 
     it.effect("discards uncertain cleanup and preserves the original case failure without retry", () =>
       Effect.scoped(Effect.gen(function*() {
