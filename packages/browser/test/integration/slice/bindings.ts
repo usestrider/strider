@@ -9,6 +9,7 @@ import * as Fiber from "effect/Fiber"
 import type * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import { site } from "../adapter/harness.ts"
+import { supports } from "./capabilities.ts"
 import * as SharedContext from "./sharedContext.ts"
 import { newPage } from "./sharedContext.ts"
 
@@ -169,6 +170,8 @@ export const bindings = (name: string, backend: Layer.Layer<Browser.Browser, unk
           ))
           yield* Expect.toHaveText(page.locator("#out"), "resolved 5")
           yield* Expect.toHaveText(page.frame(page.locator("iframe")).locator("#out"), "resolved 5")
+          // Stock WebKit reports a popup as the browser's page, not its opener's, so there is no popup to read.
+          if (!(yield* supports("popups.opener"))) return
           const opened = yield* Popup.next(page)
           yield* page.getByRole("link", { name: "Open popup" }).click()
           const popup = yield* opened
