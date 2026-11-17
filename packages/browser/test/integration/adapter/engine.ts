@@ -3200,7 +3200,7 @@ document.getElementById("outer").attachShadow({ mode: "open" }).innerHTML =
             assert.strictEqual(yield* inHost({ _tag: "Placeholder", matcher: text("who") }), 1)
             assert.strictEqual(yield* inHost({ _tag: "AltText", matcher: text("logo") }), 1)
             assert.strictEqual(yield* inHost({ _tag: "Title", matcher: text("tip") }), 1)
-            assert.strictEqual(yield* inHost({ _tag: "TestId", id: "go" }), 1)
+            assert.strictEqual(yield* inHost({ _tag: "TestId", id: "go", attribute: "data-testid" }), 1)
             const hasDeep: Engine.Step = {
               _tag: "Filter",
               hasText: null,

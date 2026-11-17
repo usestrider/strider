@@ -1,6 +1,6 @@
 /** Runtime validation for JavaScript callers that bypass Locator's TypeScript contract. */
 import { assert, describe, it } from "@effect/vitest"
-import { Browser, Deadline, Locator, Target } from "@usestrider/browser"
+import { Browser, Deadline, Locator, Target, UserContext } from "@usestrider/browser"
 import * as Cache from "effect/Cache"
 import * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
@@ -1521,4 +1521,49 @@ describe("an action whose engine call is unanswered at the deadline", () => {
         }).pipe(Effect.scoped)
     )
   }
+})
+
+describe("UserContext.Options.testIdAttribute", () => {
+  const testIds = (locator: Locator.ReadonlyLocator): ReadonlyArray<unknown> => {
+    const found: Array<unknown> = []
+    const visit = (steps: ReadonlyArray<Engine.Step>) => {
+      for (const step of steps) {
+        if (step._tag === "TestId") found.push(step)
+        if (step._tag === "Filter") {
+          if (step.has !== null) visit(step.has)
+          if (step.hasNot !== null) visit(step.hasNot)
+        }
+      }
+    }
+    visit((locator as LocatorImpl).steps)
+    return found
+  }
+
+  for (const name of ["", "data qa", "data\"qa", "data'qa", "data>qa", "data/qa", "data=qa", "data\u0007qa"]) {
+    it.effect(`refuses ${JSON.stringify(name)} with InvalidInput before creating a context`, () =>
+      Effect.gen(function*() {
+        const error = yield* Browser.newContext({ testIdAttribute: name }).pipe(Effect.flip)
+        assert(UserContext.isUserContextError(error))
+        assert(error.reason._tag === "InvalidInput")
+        assert.strictEqual(error.reason.input, "testIdAttribute")
+      }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+  }
+
+  it.effect("fixes the context's attribute in every getByTestId step, relative ones where they're placed", () =>
+    Effect.gen(function*() {
+      const configured = yield* (yield* Browser.newContext({ testIdAttribute: "data-qa" })).newPage
+      const sibling = yield* (yield* Browser.newContext()).newPage
+      const qa = { _tag: "TestId", id: "x", attribute: "data-qa" }
+      const standard = { _tag: "TestId", id: "x", attribute: "data-testid" }
+      assert.deepStrictEqual(testIds(configured.getByTestId("x")), [qa])
+      assert.deepStrictEqual(testIds(configured.locator("main").getByTestId("x")), [qa])
+      assert.deepStrictEqual(testIds(configured.frame(configured.locator("iframe")).getByTestId("x")), [qa])
+      assert.deepStrictEqual(testIds(sibling.getByTestId("x")), [standard])
+      const relative = Locator.relative.getByTestId("x")
+      assert.deepStrictEqual(
+        testIds(configured.locator("li").filter({ has: relative, hasNot: relative })),
+        [qa, qa]
+      )
+      assert.deepStrictEqual(testIds(sibling.locator("li").filter({ has: relative })), [standard])
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
 })
