@@ -87,6 +87,57 @@ export const styleTags = (name: string, backend: Layer.Layer<Browser.Browser, un
           assert.strictEqual(yield* page.evaluateInMainWorld(bodyColor), before)
         }).pipe(Effect.scoped))
 
+      it.effect("ignores another stylesheet's policy violation whose URL prefixes its own", () =>
+        Effect.gen(function*() {
+          const served = yield* site
+          const page = yield* newPage
+          yield* page.goto(`${served.origin}/fixture?html=${
+            encodeURIComponent(
+              `<meta http-equiv="Content-Security-Policy" content="style-src ${served.origin}/style"><body>x</body>`
+            )
+          }`)
+          yield* page.evaluateInMainWorld((url: string) => {
+            const observer = new MutationObserver((records) => {
+              if (
+                !records.some((record) => Array.from(record.addedNodes).some((node) => node instanceof HTMLLinkElement))
+              ) return
+              observer.disconnect()
+              const other = document.createElement("link")
+              other.rel = "stylesheet"
+              other.href = url
+              document.head.appendChild(other)
+            })
+            observer.observe(document.head, { childList: true })
+          }, `${served.origin}/`)
+          yield* page.addStyleTag({ url: stylesheet(served.origin, "body { color: rgb(31, 32, 33) }") })
+          assert.strictEqual(yield* page.evaluateInMainWorld(bodyColor), "rgb(31, 32, 33)")
+        }).pipe(Effect.scoped))
+
+      it.effect("applies inline source under a report-only policy", () =>
+        Effect.gen(function*() {
+          const served = yield* site
+          const page = yield* newPage
+          yield* page.goto(`${served.origin}/style-report-only`)
+          yield* page.addStyleTag({ source: "body { color: rgb(41, 42, 43) }" })
+          assert.strictEqual(yield* page.evaluateInMainWorld(bodyColor), "rgb(41, 42, 43)")
+        }).pipe(Effect.scoped))
+
+      for (const kind of ["URL", "inline source"] as const) {
+        it.effect(`refuses the same ${kind} twice in one document`, () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const page = yield* newPage
+            yield* page.goto(`${served.origin}/style-csp?html=x`)
+            const source = "body { color: rgb(21, 22, 23) }"
+            const tag = kind === "URL" ? { url: stylesheet(served.crossSite, source) } : { source }
+            for (let attempt = 1; attempt <= 2; attempt++) {
+              const error = yield* page.addStyleTag(tag).pipe(Effect.flip)
+              assert(error._tag === "PageError", `attempt ${attempt}: ${error._tag}`)
+              assert.strictEqual(error.reason._tag, "RefusedByPolicy", `attempt ${attempt}`)
+            }
+          }).pipe(Effect.scoped))
+      }
+
       it.effect("injects into a cross-site iframe's document through its frame locator", () =>
         Effect.gen(function*() {
           const served = yield* site
