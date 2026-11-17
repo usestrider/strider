@@ -411,6 +411,8 @@ interface Page extends ReadonlyPage {
   evaluateInMainWorld<Args extends ReadonlyArray<unknown>, A>(   // the page's own world; needs control
     fn: (...args: Args) => A | Promise<A>, ...args: Args
   ): Effect<JSHandle.Serialized<A>, PageError>
+  addStyleTag(tag: StyleTag): Effect<void, PageError | TargetGone | Timeout>
+    // { source } | { url } | { path }: a <style> or <link> in the current document, in the main world, once it applies
   evaluateHandle<Args extends ReadonlyArray<unknown>, A>(   // the isolated world, like evaluate
     fn: (...args: Args) => A | Promise<A>, ...args: Args
   ): Effect<JSHandle.JSHandle<Awaited<A>>, PageError, Scope>
@@ -483,6 +485,7 @@ Notes:
 - **Chromium `page.screenshot` calls belong to one main document.** The binding starts before element or layout preparation. A committed cross-document replacement before a terminal native capture reply fails promptly with `PageError{reason: Page.CaptureInvalidated}`, whose `document` and `replacement` identify both documents. A same-URL reload qualifies; hash/history changes and started-but-canceled navigations do not. Native reply receipt wins over a later replacement even if decoding finishes later; a replacement observed first wins over a late reply. An already terminal closure, crash, or deadline keeps its error. This does not cancel Chromium's command, prove temporary capture settings were restored, wait for destination load, retry, or silently return replacement-document pixels. A caller can request another capture explicitly. In the pinned Chromium 155.0.8059.79 regression, an immediate second capture returned replacement-document pixels at the requested 1100×1000 viewport dimensions, without a load wait, delay, or repair; this observation is not a general completion or restoration guarantee. This guard applies to `page.screenshot`; trace screenshot collection is outside this contract. Firefox, stock WebKit, subframe-only replacement, and hangs without a committed main-document replacement keep their existing behavior.
 
 - **Evaluated functions cross into the page.** They must be self-contained, and values travel as arguments. A `ReferenceError` from an evaluated function fails with `Reason.EvaluationThrown`, whose hint says so.
+- **Injected styles belong to the document.** `addStyleTag` makes one main-world call that appends a `<style>` (from `source`, or a `path` read through the layer's `FileSystem` with a `sourceURL` comment naming it) or a `<link rel="stylesheet">` (from `url`) to the head, or the root element without one, and returns on the element's `load`. The page's Content Security Policy applies: a `securitypolicyviolation` the element causes fails it with the shared `RefusedByPolicy{directive}`, which every backend dispatches before the element's `error`, and an `error` without one is `ResourceFailed{url}`. Strider keeps nothing: the element stays until the page removes it or the document is replaced, and no init script or listener exists before the call, so a page that never calls it does no added work (docs/decisions.md, "Pay for what you use"). It returns nothing rather than the element: Strider has no element handles, and a locator finds the element if a caller needs it.
 - **One name per world.** `evaluate` always runs in the isolated world, so a helper that takes a `ReadonlyPage` behaves the same when it is given a `Page`. The main world is `evaluateInMainWorld`, only on `Page`, so it is visible at every call site that uses it. So is running as a user gesture, where the backend supports it: `page.evaluateInMainWorld(openHelp).pipe(Page.withUserGesture)`.
 - **The type says what arrives.** Results cross by value, typed `Serialized<A>`. To validate a result instead of trusting the function's type, decode it: `.pipe(Effect.flatMap(Schema.decodeUnknownEffect(Cart)))`. Handles are opt-in and scoped.
 - **Evaluation goes again only when nothing ran.** A document that ends before the call is followed to the next one; one that ends during it fails the call with `TargetGone`, since the function may have run partly. A handle passed as an argument crosses as itself, into its own realm only; anything else crosses by value, and the first value that can't fails with `NotSerializable{path}`.
@@ -697,7 +700,8 @@ interface HeldKey { readonly release: Effect<void> }     // idempotent; the scop
 interface ReadonlyFrameLocator extends Queries<ReadonlyLocator> {   // an iframe's document, entered by its element; lazy like any locator
   readonly owner: ReadonlyLocator                        // the iframe element
   frame(iframe: ReadonlyLocator): ReadonlyFrameLocator
-}                                                        // FrameLocator: the same queries returning Locator
+}                                                        // FrameLocator: the same queries returning Locator, and
+                                                         // addStyleTag(tag), into the iframe's current document
 
 // JSHandle
 interface JSHandle<A = unknown> extends Pipeable, Inspectable {   // a value in one realm, owned by the scope that acquired it

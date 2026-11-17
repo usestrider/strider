@@ -3,13 +3,20 @@
   "upstream": [
     "method:Frame.addStyleTag"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding retained Frame operation. Page.frames exposes the observed tree and page.frame enters by iframe locator; these do not implement this contract.",
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "FrameLocator.addStyleTag",
+      "url": "/docs/api/browser/Locator#FrameLocator.addStyleTag"
+    }
+  ],
+  "notes": "Adds a <style> or <link> in the main world of the iframe's current document and waits for it to apply; a CSP refusal fails with RefusedByPolicy and a failed load with ResourceFailed. It returns nothing rather than an ElementHandle: Strider has no element handles, and a locator finds the element.",
   "capabilities": [],
   "audit": {
     "sources": [
-      "packages/browser/src/Page.ts"
+      "packages/browser/src/Locator.ts",
+      "packages/browser/src/internal/styleTag.ts"
     ],
     "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
   },

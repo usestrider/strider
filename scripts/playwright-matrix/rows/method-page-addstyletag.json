@@ -3,13 +3,20 @@
   "upstream": [
     "method:Page.addStyleTag"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding Page operation/event. Generic main-world evaluation is available, but does not implement this named contract and its waiting/lifetime guarantees.",
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "Page.addStyleTag",
+      "url": "/docs/api/browser/Page#Page.addStyleTag"
+    }
+  ],
+  "notes": "Adds a <style> or <link> in the main world of the page's current document and waits for it to apply; a CSP refusal fails with RefusedByPolicy and a failed load with ResourceFailed. It returns nothing rather than an ElementHandle: Strider has no element handles, and a locator finds the element.",
   "capabilities": [],
   "audit": {
     "sources": [
-      "packages/browser/src/Page.ts"
+      "packages/browser/src/Page.ts",
+      "packages/browser/src/internal/styleTag.ts"
     ],
     "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
   },

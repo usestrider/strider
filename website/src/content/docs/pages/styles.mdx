@@ -1,0 +1,73 @@
+---
+title: Injected styles
+description: A stylesheet added to the page's document, from CSS, a URL, or a file.
+order: 9
+---
+
+[`page.addStyleTag`](/docs/api/browser/Page#Page.addStyleTag) adds a stylesheet to the page's current document and
+returns once its rules apply. Use it to hide what changes between runs before a screenshot, or to restyle a page
+for a test.
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const stableScreenshot = Effect.fn("stableScreenshot")(function*(page: Page.Page) {
+  yield* page.addStyleTag({ source: ".clock, .ad { visibility: hidden }" })
+  return yield* page.screenshot()
+})
+```
+
+The stylesheet comes from CSS source, a URL, or a file on this machine. A URL becomes a `<link>`, and the call waits
+for it to load; a file is read when the call runs, and its text names the file, so the browser's developer tools
+show where the rules came from. Reading a file needs the `FileSystem` and `Path` services in the browser's layer.
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const theme = Effect.fn("theme")(function*(page: Page.Page) {
+  yield* page.addStyleTag({ url: "https://cdn.example.com/print.css" })
+  yield* page.addStyleTag({ path: "./fixtures/high-contrast.css" })
+})
+```
+
+The element belongs to the document, as one of the page's own would: it stays until the page's scripts remove it
+or the document is replaced, and a navigation doesn't add it again. A frame locator adds a stylesheet to its
+iframe's document:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const compactChat = Effect.fn("compactChat")(function*(page: Page.Page) {
+  const chat = page.frame(page.locator("iframe#chat"))
+  yield* chat.addStyleTag({ source: ".message { margin: 0 }" })
+})
+```
+
+## When it fails
+
+The page's Content Security Policy applies to the stylesheet as it does to the page's own. A stylesheet the policy
+refuses fails with `RefusedByPolicy`, which names the directive, and a URL that doesn't load fails with
+`ResourceFailed`:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const optionalTheme = Effect.fn("optionalTheme")(function*(page: Page.Page) {
+  yield* page.addStyleTag({ url: "https://cdn.example.com/theme.css" }).pipe(
+    Effect.catchReason(
+      "PageError",
+      "RefusedByPolicy",
+      (refused) => Effect.logWarning(refused.directive)
+    ),
+    Effect.catchReason(
+      "PageError",
+      "ResourceFailed",
+      (failed) => Effect.logWarning(failed.url)
+    )
+  )
+})
+```
