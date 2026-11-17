@@ -223,7 +223,14 @@ describe("CDP paused page initialization", () => {
           if (bridged) {
             assert.isBelow(sent.indexOf("Runtime.addBinding"), sent.indexOf("Page.addScriptToEvaluateOnNewDocument"))
           }
-          assert.isBelow(sent.indexOf("Page.getLayoutMetrics"), sent.indexOf("Emulation.setDeviceMetricsOverride"))
+          // A page that doesn't attach at about:blank is not measured before resume: its renderer may exist only
+          // once its first request is routed
+          assert.notInclude(sent, "Page.getLayoutMetrics")
+          assert.notInclude(sent, "Page.createIsolatedWorld")
+          assert.isBelow(
+            sent.indexOf("Emulation.setDeviceMetricsOverride"),
+            sent.indexOf("Runtime.runIfWaitingForDebugger")
+          )
           assert.include(facts.map((fact) => fact._tag), rejected ? "PageInitializationFailed" : "PageReady")
           const firstScript = commands.find((command) => command.method === "Page.addScriptToEvaluateOnNewDocument")!
           yield* Scope.close(scripts, Exit.void).pipe(Effect.provideService(Cleanup.Confirm, true))
@@ -392,41 +399,49 @@ describe("CDP paused page viewport baseline", () => {
         const browser = yield* makeBrowser
         const ready = yield* Deferred.make<void>()
         const commands: Array<Sent> = []
+        // The measurement's evaluation, whose reply is held until the test releases it
+        const measuring = yield* Deferred.make<Sent>()
+        const isMeasurement = (command: Sent) =>
+          command.method === "Runtime.evaluate" && command.params?.expression === "[innerWidth, innerHeight]" &&
+          command.params?.contextId === 7
+        const reply = (command: Sent) =>
+          browser.receive({
+            id: command.id,
+            sessionId: command.sessionId,
+            result: command.method === "Browser.getVersion"
+              ? {
+                protocolVersion: "1.3",
+                product: "Chrome/155.0.8059.79",
+                revision: "test",
+                userAgent: "HeadlessChrome",
+                jsVersion: "test"
+              }
+              : command.method === "Target.getBrowserContexts" ?
+              { browserContextIds: [] }
+              : command.method === "Page.getFrameTree" ?
+              {
+                frameTree: {
+                  frame: {
+                    id: "T1",
+                    loaderId: "initial",
+                    url: "about:blank",
+                    securityOrigin: "://",
+                    mimeType: "text/html"
+                  }
+                }
+              }
+              : command.method === "Page.createIsolatedWorld" ?
+              { executionContextId: 7 }
+              : command.method === "Runtime.evaluate" ?
+              { result: { type: "object", value: [800, 600] } }
+              : {}
+          })
         yield* Effect.gen(function*() {
           while (true) {
             const command = yield* browser.next
             commands.push(command)
-            yield* browser.receive({
-              id: command.id,
-              sessionId: command.sessionId,
-              result: command.method === "Browser.getVersion"
-                ? {
-                  protocolVersion: "1.3",
-                  product: "Chrome/155.0.8059.79",
-                  revision: "test",
-                  userAgent: "HeadlessChrome",
-                  jsVersion: "test"
-                }
-                : command.method === "Target.getBrowserContexts" ?
-                { browserContextIds: [] }
-                : command.method === "Page.getFrameTree" ?
-                {
-                  frameTree: {
-                    frame: {
-                      id: "T1",
-                      loaderId: "initial",
-                      url: "about:blank",
-                      securityOrigin: "://",
-                      mimeType: "text/html"
-                    }
-                  }
-                }
-                : command.method === "Page.createIsolatedWorld" ?
-                { executionContextId: 7 }
-                : command.method === "Runtime.evaluate" ?
-                { result: { type: "object", value: [800, 600] } }
-                : {}
-            })
+            if (isMeasurement(command)) yield* Deferred.succeed(measuring, command)
+            else yield* reply(command)
           }
         }).pipe(Effect.forkScoped)
         const adapter = yield* CdpAdapter.connect(browser.transport, {
@@ -449,6 +464,19 @@ describe("CDP paused page viewport baseline", () => {
             waitingForDebugger: true
           }
         })
+        if (url === "about:blank") {
+          // Neither the override nor the resume is written while the measurement's reply is outstanding
+          const measurement = yield* Effect.raceFirst(
+            Deferred.await(measuring),
+            Deferred.await(ready).pipe(Effect.andThen(Effect.die("the page was ready before it was measured")))
+          )
+          for (let turn = 0; turn < 100; turn++) yield* Effect.yieldNow
+          const before = commands.filter((command) => command.sessionId === "S1").map((command) => command.method)
+          assert.notInclude(before, "Emulation.setDeviceMetricsOverride")
+          assert.notInclude(before, "Runtime.runIfWaitingForDebugger")
+          assert.isFalse(yield* Deferred.isDone(ready))
+          yield* reply(measurement)
+        }
         yield* Deferred.await(ready)
         const sent = commands.filter((command) => command.sessionId === "S1")
         const methods = sent.map((command) => command.method)
@@ -456,10 +484,7 @@ describe("CDP paused page viewport baseline", () => {
         assert.isAbove(override, -1)
         assert.isBelow(override, methods.indexOf("Runtime.runIfWaitingForDebugger"))
         assert.notInclude(methods, "Page.getLayoutMetrics")
-        const measured = sent.findIndex((command) =>
-          command.method === "Runtime.evaluate" && command.params?.expression === "[innerWidth, innerHeight]" &&
-          command.params?.contextId === 7
-        )
+        const measured = sent.findIndex(isMeasurement)
         if (url === "about:blank") {
           assert.isAbove(measured, -1)
           assert.isBelow(measured, override)
