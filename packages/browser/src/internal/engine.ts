@@ -58,7 +58,8 @@ export type Step =
   | { readonly _tag: "Placeholder"; readonly matcher: TextMatcher }
   | { readonly _tag: "AltText"; readonly matcher: TextMatcher }
   | { readonly _tag: "Title"; readonly matcher: TextMatcher }
-  | { readonly _tag: "TestId"; readonly id: string }
+  /** Elements whose `attribute`, the context's test-id attribute when the locator was made, is `id`. */
+  | { readonly _tag: "TestId"; readonly id: string; readonly attribute: string }
   | { readonly _tag: "Css"; readonly selector: string }
   | { readonly _tag: "Nth"; readonly index: number }
   | { readonly _tag: "First" }
@@ -1883,7 +1884,7 @@ export function engine(render: (root: SnapNode) => string) {
       case "Title":
         return under.filter((element) => attributeMatches(element, "title", step.matcher))
       case "TestId":
-        return under.filter((element) => dom.getAttribute(element, "data-testid") === step.id)
+        return under.filter((element) => dom.getAttribute(element, step.attribute) === step.id)
       default:
         return []
     }

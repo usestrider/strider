@@ -769,15 +769,6 @@
       ]
     },
     {
-      "id": "test-id-attribute",
-      "value": "Test-id attribute setting",
-      "disposition": "planned",
-      "note": "Add a context test-id attribute setting; it is not implemented yet.",
-      "rows": [
-        "method-selectors-settestidattribute"
-      ]
-    },
-    {
       "id": "selector-dsl",
       "value": "text=, >> and custom selector engines",
       "disposition": "excluded",

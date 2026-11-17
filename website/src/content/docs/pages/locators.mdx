@@ -39,7 +39,7 @@ that replaces the built-ins it uses can change what queries find.
 | `getByPlaceholder(text)`             | inputs whose placeholder matches                               |
 | `getByAltText(text)`                 | images and areas whose alt text matches                        |
 | `getByTitle(text)`                   | elements whose `title` matches                                 |
-| `getByTestId(id)`                    | elements whose `data-testid` is `id`                           |
+| `getByTestId(id)`                    | elements whose test-id attribute (`data-testid`) is `id`       |
 | `locator(css)`                       | elements matching a CSS selector                               |
 
 Prefer `getByRole`: roles and names are what assistive technology sees, and they survive changes to markup and
@@ -49,6 +49,30 @@ its `aria-label`. They're computed by [HTML-AAM](https://www.w3.org/TR/html-aam-
 
 A malformed CSS selector fails with [`InvalidInput`](/docs/errors#three-kinds-of-failure) when used, without
 waiting.
+
+## Test ids
+
+A test id is an attribute that marks an element for tests, `data-testid` by default. A context's
+`testIdAttribute` option names another, such as `data-qa`, for every page in it; other contexts keep their own. A
+relative locator in `filter({ has })` uses the attribute of the locator it filters:
+
+```ts
+import { Browser, Locator } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const checkout = Effect.fn("checkout")(function*() {
+  const context = yield* Browser.newContext({ testIdAttribute: "data-qa" })
+  const page = yield* context.newPage
+  yield* page.goto("https://shop.example/cart")
+  // Finds <li data-qa="item"> holding a <button data-qa="remove">
+  yield* page.getByTestId("item")
+    .filter({ has: Locator.relative.getByTestId("remove") })
+    .first.click()
+})
+```
+
+A name that isn't an HTML attribute name fails with [`InvalidInput`](/docs/errors#three-kinds-of-failure) before the
+context is created.
 
 ## Matching text
 

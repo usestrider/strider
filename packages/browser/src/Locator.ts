@@ -392,7 +392,13 @@ export interface Queries<L> {
    */
   getByTitle(text: string | RegExp, options?: TextOptions | undefined): L
   /**
-   * Elements whose `data-testid` attribute is `id`.
+   * Elements whose test-id attribute is exactly `id`: `data-testid`, unless the context sets another with
+   * `UserContext.Options.testIdAttribute`.
+   *
+   * **Details**
+   *
+   * The attribute is the context's when the locator is made. A relative locator takes the attribute of the locator
+   * whose `filter` it's placed in.
    *
    * **Example** (Reading the cart badge)
    *

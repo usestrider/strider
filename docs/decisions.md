@@ -1617,6 +1617,16 @@ so rejection cannot create an unbounded challenge loop.
 The alternative of an ordered credential array is left to auth routes, which already express that selection.
 Optional interception follows [Pay for what you use](#pay-for-what-you-use).
 
+## Context test-id attribute
+
+The attribute `getByTestId` matches is a context's setting, fixed when the context is created, so sibling contexts
+never share it. A locator copies its context's attribute into its query when it is made, and a relative locator,
+which has no context, takes the attribute of the locator whose filter it is placed in. The page's engine reads the
+attribute from the query, so a context that keeps the default does no added work, following
+[Pay for what you use](#pay-for-what-you-use). Rejected: a global setting that can change at any time, as
+Playwright's `selectors.setTestIdAttribute` is, which leaks between tests that share a process and makes a locator's
+meaning depend on when it runs.
+
 ## Generated reference outputs and curated comparisons
 
 API indexes and the capability matrix's browser statuses and current evidence hashes are ignored outputs,
