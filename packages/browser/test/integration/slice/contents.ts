@@ -1681,7 +1681,7 @@ export const contents = (
               yield* Effect.exit(page.getByTestId(/^row-/i).readText)
             ) as unknown as Locator.LocatorError
             assert.strictEqual(error.reason._tag, "StrictViolation")
-            assert.strictEqual(error.locator, "getByTestId(/^row-/i)")
+            assert.strictEqual(error.locator, "page.getByTestId(/^row-/i)")
           }))
         }), timeout)
 
