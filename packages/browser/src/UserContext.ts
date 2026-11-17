@@ -24,6 +24,7 @@ import * as Predicate from "effect/Predicate"
 import type * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
+import type * as Binding from "./Binding.ts"
 import type * as BrowserWorker from "./BrowserWorker.ts"
 import type * as CookieJar from "./CookieJar.ts"
 import type * as Deadline from "./Deadline.ts"
@@ -377,6 +378,39 @@ export interface UserContext extends ObservedUserContext {
     WebSocketRoute.WebSocketRouteError | Target.TargetGone | Deadline.Timeout,
     Scope.Scope | R
   >
+  /**
+   * Exposes a host function that every page of this context, its popups and its frames, call as `window[name](...)`, while the registration lives.
+   *
+   * **Details**
+   *
+   * In the page, the function returns a promise. Its arguments cross as JSON and are decoded by `arguments`; the
+   * handler's value is encoded by `result` and resolves the promise. A decoding failure or a failed handler rejects
+   * it with an `Error` carrying the message; a defect or an interruption rejects it with a fixed message and is
+   * logged. The function is in the main world of documents already open and of every document after, before their
+   * own scripts, and not in workers. Removing it deletes it from open documents and rejects the calls still
+   * waiting. A name the page or its context already exposes fails with `NameTaken`.
+   *
+   * **Example** (Reading a value the test holds)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect, Schema } from "effect"
+   *
+   * const exposeAnswer = Effect.fn("exposeAnswer")(function*(page: Page.Page) {
+   *   yield* page.context.exposeBinding(
+   *     "answer",
+   *     { arguments: Schema.Tuple([Schema.String]), result: Schema.Number },
+   *     ([question]) => Effect.succeed(question.length)
+   *   )
+   *   yield* page.evaluateInMainWorld(() => (window as any).answer("why?"))
+   * })
+   * ```
+   */
+  exposeBinding<A extends ReadonlyArray<unknown>, B, E, R>(
+    name: string,
+    schemas: Binding.Schemas<A, B>,
+    handler: Binding.Handler<NoInfer<A>, NoInfer<B>, E, R>
+  ): Effect.Effect<Binding.Registration, Binding.BindingError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
   /**
    * Runs a script in every new document of every page while the registration lives.
    *
