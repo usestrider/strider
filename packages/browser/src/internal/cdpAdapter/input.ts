@@ -186,15 +186,20 @@ const dragStarted = Effect.fnUntraced(
     )
     const objectId = result.objectId
     if (objectId === undefined) return false
-    const described = yield* failed(DOM.describeNode({ objectId, pierce: true, depth: 1 }).pipe(on)).pipe(
-      Effect.ensuring(
-        Runtime.releaseObject({ objectId }).pipe(
-          on,
-          Effect.ignore,
-          Effect.provideService(ProtocolClient.CommandDeadline, Option.none()),
-          Operation.detached
-        )
+    // The release is the connection's cleanup, forked into its scope, so the move never waits for its reply
+    const release = Effect.suspend(() =>
+      state.cleanupScope.state._tag === "Closed" ? Effect.void : Runtime.releaseObject({ objectId }).pipe(
+        on,
+        Effect.ignore,
+        Operation.detached,
+        Effect.provideService(ProtocolClient.CommandDeadline, Option.none()),
+        Effect.interruptible,
+        Effect.forkIn(state.cleanupScope, { startImmediately: true }),
+        Effect.asVoid
       )
+    )
+    const described = yield* failed(DOM.describeNode({ objectId, pierce: true, depth: 1 }).pipe(on)).pipe(
+      Effect.ensuring(release)
     )
     return !(described.node.shadowRoots ?? []).some((root) => root.shadowRootType === "closed")
   },
