@@ -238,6 +238,27 @@ export const contextCreated = (params: Runtime.ExecutionContextCreatedParams, { 
   WebSocketBridge.flush(state, target)
 }
 
+/** The categories of the `Log.entryAdded` sources that name one; the application cache's count as `storage`. */
+const logCategories: Readonly<Record<string, ConsoleMessage.Category>> = {
+  network: "network",
+  security: "security",
+  deprecation: "deprecation",
+  intervention: "intervention",
+  violation: "violation",
+  rendering: "rendering",
+  storage: "storage",
+  appcache: "storage"
+}
+
+/**
+ * What a `Log.entryAdded` entry is about. CORS failures come on the `javascript` source with the `cors` category, and
+ * count as `security`, where WebKit puts its own.
+ */
+const categoryOf = (entry: Log.LogEntry): ConsoleMessage.Category =>
+  entry.category === "cors" ? "security" : Object.hasOwn(logCategories, entry.source)
+    ? logCategories[entry.source]!
+    : "other"
+
 export const register = (handlers: Kit.Handlers<Event>) =>
   handlers
     .on(Runtime.executionContextCreated, contextCreated)
@@ -275,6 +296,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
           origin: realm.frame !== undefined
             ? { _tag: "Page", page: realm.frame.page.id }
             : { _tag: "Worker", realm: realm.id },
+          source: { _tag: "Page" },
           at: Adapter.now()
         })
       })
@@ -321,6 +343,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
           origin: realm !== undefined
             ? { _tag: "Worker", realm: realm.id }
             : { _tag: "Page", page: page!.id },
+          source: { _tag: "Browser", category: categoryOf(entry) },
           at: Adapter.now()
         })
       }
