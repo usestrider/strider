@@ -377,3 +377,48 @@ export class LocatorHandlerFailed extends Schema.Error<LocatorHandlerFailed>(
     return `Locator handler for ${this.trigger} failed (${this.hint})`
   }
 }
+
+/**
+ * Reason for an element a caller added, such as a script tag, whose resource didn't load.
+ *
+ * **Details**
+ *
+ * The browser fired the element's `error` event: the URL was unreachable, answered with an error status, or
+ * wasn't a script it could run. It names no cause, since the page isn't told one.
+ *
+ * @stability unstable
+ * @category reasons
+ * @since 0.1.0
+ */
+export class ResourceFailed extends Schema.Error<ResourceFailed>("@usestrider/browser/Reason/ResourceFailed")({
+  _tag: Schema.tag("ResourceFailed"),
+  url: Schema.String,
+  hint: Schema.String
+}) {
+  override get message(): string {
+    return `${this.url} didn't load (${this.hint})`
+  }
+}
+
+/**
+ * Reason for an element a caller added, such as a script tag, that the page's Content Security Policy refused.
+ *
+ * **Details**
+ *
+ * `directive` is the one the browser reports as refusing it, such as `script-src-elem`, and `blocked` is what it
+ * refused: the URL, or `inline`.
+ *
+ * @stability unstable
+ * @category reasons
+ * @since 0.1.0
+ */
+export class RefusedByPolicy extends Schema.Error<RefusedByPolicy>("@usestrider/browser/Reason/RefusedByPolicy")({
+  _tag: Schema.tag("RefusedByPolicy"),
+  directive: Schema.String,
+  blocked: Schema.String,
+  hint: Schema.String
+}) {
+  override get message(): string {
+    return `The page's Content Security Policy refused ${this.blocked} under ${this.directive} (${this.hint})`
+  }
+}

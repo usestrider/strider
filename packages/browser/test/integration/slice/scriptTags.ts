@@ -1,6 +1,6 @@
 /** Script injection, `addScriptTag`, into a page's or a frame's document, on every backend. */
 import { assert, describe, layer } from "@effect/vitest"
-import type { Browser } from "@usestrider/browser"
+import { type Browser, Locator, Page } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
 import * as fs from "node:fs/promises"
@@ -12,7 +12,13 @@ import { newPage } from "./sharedContext.ts"
 
 const script = (origin: string, js: string) => `${origin}/script?js=${encodeURIComponent(js)}`
 
-const global = (name: string) => () => Reflect.get(window, name) as unknown
+/** The reason of a page or locator error, or the tag of any other failure. */
+const reasonOf = <E extends { readonly _tag: string }>(error: E) =>
+  Page.isPageError(error) || Locator.isLocatorError(error) ? error.reason : undefined
+
+/** A global of the page's main world, by value. */
+const global = (page: Page.Page, key: string) =>
+  page.evaluateInMainWorld((key: string) => Reflect.get(window, key) as unknown, key)
 
 export const scriptTags = (name: string, backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} script tags`, () => {
@@ -25,7 +31,7 @@ export const scriptTags = (name: string, backend: Layer.Layer<Browser.Browser, u
           const page = yield* newPage
           yield* page.goto(`${served.origin}/fixture?html=x`)
           const element = yield* page.addScriptTag({ url: script(served.origin, "window.fromUrl = 'ran'") })
-          assert.strictEqual(yield* page.evaluateInMainWorld(global("fromUrl")), "ran")
+          assert.strictEqual(yield* global(page, "fromUrl"), "ran")
           assert.strictEqual(yield* element.evaluate((tag) => tag.src.includes("/script?")), true)
         }).pipe(Effect.scoped))
 
@@ -35,8 +41,7 @@ export const scriptTags = (name: string, backend: Layer.Layer<Browser.Browser, u
           const page = yield* newPage
           yield* page.goto(`${served.origin}/fixture?html=x`)
           const error = yield* page.addScriptTag({ url: "http://127.0.0.1:9/unreachable.js" }).pipe(Effect.flip)
-          assert.strictEqual(error._tag, "PageError")
-          assert.strictEqual(error.reason._tag, "ResourceFailed")
+          assert.strictEqual(reasonOf(error)?._tag, "ResourceFailed")
         }).pipe(Effect.scoped))
 
       it.effect("runs inline source before returning", () =>
@@ -45,7 +50,7 @@ export const scriptTags = (name: string, backend: Layer.Layer<Browser.Browser, u
           const page = yield* newPage
           yield* page.goto(`${served.origin}/fixture?html=x`)
           yield* page.addScriptTag({ source: "window.inline = document.currentScript.tagName" })
-          assert.strictEqual(yield* page.evaluateInMainWorld(global("inline")), "SCRIPT")
+          assert.strictEqual(yield* global(page, "inline"), "SCRIPT")
         }).pipe(Effect.scoped))
 
       it.effect("waits for inline and URL modules to run", () =>
@@ -56,11 +61,11 @@ export const scriptTags = (name: string, backend: Layer.Layer<Browser.Browser, u
           yield* page.addScriptTag({ source: "await Promise.resolve(); window.inlineModule = typeof import.meta" }, {
             type: "module"
           })
-          assert.strictEqual(yield* page.evaluateInMainWorld(global("inlineModule")), "object")
+          assert.strictEqual(yield* global(page, "inlineModule"), "object")
           yield* page.addScriptTag({ url: script(served.origin, "window.urlModule = typeof import.meta") }, {
             type: "module"
           })
-          assert.strictEqual(yield* page.evaluateInMainWorld(global("urlModule")), "object")
+          assert.strictEqual(yield* global(page, "urlModule"), "object")
         }).pipe(Effect.scoped))
 
       it.effect("reads a path and names it with sourceURL", () =>
@@ -75,7 +80,7 @@ export const scriptTags = (name: string, backend: Layer.Layer<Browser.Browser, u
           yield* Effect.promise(() => fs.writeFile(file, "window.fromPath = 'ran'"))
           yield* page.goto(`${served.origin}/fixture?html=x`)
           const element = yield* page.addScriptTag({ path: file })
-          assert.strictEqual(yield* page.evaluateInMainWorld(global("fromPath")), "ran")
+          assert.strictEqual(yield* global(page, "fromPath"), "ran")
           assert.isTrue((yield* element.evaluate((tag) => tag.text)).endsWith(`\n//# sourceURL=${file}`))
         }).pipe(Effect.scoped))
 
@@ -97,13 +102,14 @@ export const scriptTags = (name: string, backend: Layer.Layer<Browser.Browser, u
           const page = yield* newPage
           yield* page.goto(`${served.origin}/csp?html=x`)
           const inline = yield* page.addScriptTag({ source: "window.refused = true" }).pipe(Effect.flip)
-          assert.strictEqual(inline.reason._tag, "RefusedByPolicy")
-          assert.strictEqual(inline.reason._tag === "RefusedByPolicy" && inline.reason.directive, "script-src-elem")
+          const refused = reasonOf(inline)
+          assert.strictEqual(refused?._tag, "RefusedByPolicy")
+          assert.strictEqual(refused?._tag === "RefusedByPolicy" && refused.directive, "script-src-elem")
           const remote = yield* page.addScriptTag({ url: script(served.crossSite, "window.refused = true") }).pipe(
             Effect.flip
           )
-          assert.strictEqual(remote.reason._tag, "RefusedByPolicy")
-          assert.strictEqual(yield* page.evaluateInMainWorld(global("refused")), undefined)
+          assert.strictEqual(reasonOf(remote)?._tag, "RefusedByPolicy")
+          assert.strictEqual(yield* global(page, "refused"), undefined)
         }).pipe(Effect.scoped))
 
       it.effect("injects into a cross-site iframe's main world through its frame locator", () =>
@@ -118,10 +124,12 @@ export const scriptTags = (name: string, backend: Layer.Layer<Browser.Browser, u
           const frame = page.frame(page.locator("iframe"))
           const element = yield* frame.addScriptTag({ source: "window.inFrame = location.host" })
           assert.strictEqual(
-            yield* element.evaluate((tag) => tag.ownerDocument.defaultView === window && Reflect.get(window, "inFrame")),
+            yield* element.evaluate((tag) =>
+              tag.ownerDocument.defaultView === window && Reflect.get(window, "inFrame")
+            ),
             new URL(served.crossSite).host
           )
-          assert.strictEqual(yield* page.evaluateInMainWorld(global("inFrame")), undefined)
+          assert.strictEqual(yield* global(page, "inFrame"), undefined)
         }).pipe(Effect.scoped))
     })
   })

@@ -24,6 +24,7 @@ import * as Inspectable from "effect/Inspectable"
 import * as Option from "effect/Option"
 import { pipeArguments } from "effect/Pipeable"
 import * as Redacted from "effect/Redacted"
+import type * as Scope from "effect/Scope"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as AriaRole from "../AriaRole.ts"
 import * as Deadline from "../Deadline.ts"
@@ -35,6 +36,7 @@ import * as Locator from "../Locator.ts"
 import type * as Mouse from "../Mouse.ts"
 import * as Protocol from "../protocol/Protocol.ts"
 import * as Reason from "../Reason.ts"
+import type * as ScriptTag from "../ScriptTag.ts"
 import type * as Snapshot from "../Snapshot.ts"
 import * as Target from "../Target.ts"
 import * as Access from "./access.ts"
@@ -56,6 +58,7 @@ import * as Recorders from "./recorders.ts"
 import * as Runtime from "./runtime.ts"
 import * as Snapshots from "./snapshot.ts"
 import { describeSteps, matcher, queries, type Relative, roleStep } from "./steps.ts"
+import * as Tags from "./tags.ts"
 
 // ── Locators ──────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -582,6 +585,48 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
           : this.error(operation, failure.reason, id)
       ))
       return value as JSHandle.Serialized<B>
+    }).pipe(Operation.named(operation, {
+      attributes: { "browser.page.id": this.owner.page.id, "browser.locator": this.description }
+    }))
+  }
+
+  /**
+   * `frameLocator.addScriptTag`, on the locator of its document's root: the element is resolved now, as `evaluate`
+   * resolves one, for the document it is in, and the script is added in that document's main world.
+   */
+  addScriptTagIn(
+    operation: string,
+    script: ScriptTag.Source,
+    options: ScriptTag.Options | undefined
+  ): Effect.Effect<
+    JSHandle.JSHandle<HTMLScriptElement>,
+    Locator.LocatorError | Target.TargetGone | Deadline.Timeout,
+    Scope.Scope
+  > {
+    const owner = this.owner
+    return Effect.gen({ self: this }, function*() {
+      yield* Access.check(owner.grant)
+      const record = yield* Operation.record
+      const id = record.id
+      const spec = yield* Tags.script(owner.runtime, script, options).pipe(
+        Effect.mapError((reason) => this.error(operation, reason, id))
+      )
+      const found = yield* Runtime.element(owner.runtime, owner.page, this.steps, id, record.budget.at).pipe(
+        Effect.mapError((failure) => this.sendFailure(operation, failure, record))
+      )
+      if (found._tag === "Response") {
+        return yield* found.response._tag === "NoMatch"
+          ? Effect.fail(this.error(
+            operation,
+            new Locator.NoMatch({ hint: "addScriptTag finds the iframe's document now and never waits for it" }),
+            id
+          ))
+          : this.unmatched(operation, found.response, id)
+      }
+      return yield* Effect.gen(function*() {
+        const realm = yield* Evaluation.documentRealm(owner.runtime, found.routed.document, { _tag: "Main" }, id)
+        return yield* Tags.insert<HTMLScriptElement>(owner.runtime, realm, owner.page, spec, record)
+      }).pipe(Effect.mapError(Tags.fail(record, (reason) => this.error(operation, reason, id))))
     }).pipe(Operation.named(operation, {
       attributes: { "browser.page.id": this.owner.page.id, "browser.locator": this.description }
     }))
@@ -2065,6 +2110,12 @@ export const frameLocator = (owner: Owner, steps: ReadonlyArray<Engine.Step>): L
       }
       return frameLocator(owner, iframe.steps)
     },
+    addScriptTag: (script, options) =>
+      (queries(inside, make).locator(":root") as LocatorImpl).addScriptTagIn(
+        "FrameLocator.addScriptTag",
+        script,
+        options
+      ),
     toString: () => `FrameLocator(page.frame(page.${describeSteps(steps)}))`
   } as Locator.FrameLocator
 }

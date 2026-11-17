@@ -22,6 +22,7 @@ import type * as Pipeable from "effect/Pipeable"
 import * as Predicate from "effect/Predicate"
 import type * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
+import type * as Scope from "effect/Scope"
 import type * as AriaRole from "./AriaRole.ts"
 import type * as Deadline from "./Deadline.ts"
 import * as Diagnostics from "./Diagnostics.ts"
@@ -32,6 +33,7 @@ import type * as JSHandle from "./JSHandle.ts"
 import type * as Keyboard from "./Keyboard.ts"
 import type * as Mouse from "./Mouse.ts"
 import * as Reason from "./Reason.ts"
+import type * as ScriptTag from "./ScriptTag.ts"
 import type * as Snapshot from "./Snapshot.ts"
 import type * as Target from "./Target.ts"
 
@@ -1907,6 +1909,35 @@ export interface FrameLocator extends ReadonlyFrameLocator {
   getByTestId(id: string): Locator
   locator(css: string): Locator
   frame(iframe: ReadonlyLocator): FrameLocator
+  /**
+   * Adds a `<script>` element to the iframe's current document and waits for it to load or run, returning it.
+   *
+   * **Details**
+   *
+   * As `page.addScriptTag`, in the frame's document and main world: the frame's Content Security Policy applies,
+   * and a cross-site frame works as a same-site one. The iframe must be in the page now; this doesn't wait for it.
+   * See `ScriptTag` for what the call waits for.
+   *
+   * **Example** (A helper inside an embedded editor)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const prepareEditor = Effect.fn("prepareEditor")(function*(page: Page.Page) {
+   *   const editor = page.frame(page.locator("iframe#editor"))
+   *   yield* editor.addScriptTag({ source: "window.editorReady = true" })
+   * })
+   * ```
+   */
+  addScriptTag(
+    script: ScriptTag.Source,
+    options?: ScriptTag.Options | undefined
+  ): Effect.Effect<
+    JSHandle.JSHandle<HTMLScriptElement>,
+    LocatorError | Target.TargetGone | Deadline.Timeout,
+    Scope.Scope
+  >
 }
 
 /**
@@ -2081,7 +2112,9 @@ export const LocatorErrorReason = Schema.Union([
   Reason.Unsupported,
   Reason.BackendFailure,
   Reason.PromptBlocking,
-  Reason.LocatorHandlerFailed
+  Reason.LocatorHandlerFailed,
+  Reason.ResourceFailed,
+  Reason.RefusedByPolicy
 ])
 
 /**
