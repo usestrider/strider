@@ -2,7 +2,9 @@
 import { assert, describe, layer } from "@effect/vitest"
 import { type Browser, Locator, Page } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import type * as Layer from "effect/Layer"
+import { createHash } from "node:crypto"
 import * as fs from "node:fs/promises"
 import * as os from "node:os"
 import * as nodePath from "node:path"
@@ -66,6 +68,59 @@ export const scriptTags = (name: string, backend: Layer.Layer<Browser.Browser, u
             type: "module"
           })
           assert.strictEqual(yield* global(page, "urlModule"), "object")
+        }).pipe(Effect.scoped))
+
+      it.effect("runs source authorized by a CSP hash without changing its text", () =>
+        Effect.gen(function*() {
+          const served = yield* site
+          const page = yield* newPage
+          const source = "window.hashAllowed = true"
+          const hash = createHash("sha256").update(source).digest("base64")
+          const html =
+            `<meta http-equiv="Content-Security-Policy" content="script-src 'sha256-${hash}'"><script>${source}</script>`
+          yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`, { waitUntil: "load" })
+          assert.strictEqual(yield* global(page, "hashAllowed"), true)
+          yield* page.evaluateInMainWorld(() => {
+            Reflect.set(window, "hashAllowed", false)
+          })
+          const element = yield* page.addScriptTag({ source })
+          assert.strictEqual(yield* global(page, "hashAllowed"), true)
+          assert.strictEqual(yield* element.evaluate((tag) => tag.text), source)
+        }).pipe(Effect.scoped))
+
+      it.effect("does not complete a pending module on an unrelated page error", () =>
+        Effect.gen(function*() {
+          const served = yield* site
+          const page = yield* newPage
+          yield* page.goto(`${served.origin}/fixture?html=x`)
+          yield* page.evaluateInMainWorld(() => {
+            Reflect.set(
+              window,
+              "moduleStarted",
+              new Promise<void>((resolve) => {
+                Reflect.set(window, "notifyModuleStarted", resolve)
+              })
+            )
+          })
+          const pending = yield* page.addScriptTag({
+            source:
+              "await new Promise(resolve => { window.releaseModule = resolve; window.notifyModuleStarted() }); window.moduleFinished = true"
+          }, { type: "module" }).pipe(Effect.forkScoped)
+          yield* page.evaluateInMainWorld(() => Reflect.get(window, "moduleStarted") as Promise<void>)
+          yield* page.evaluateInMainWorld(() => {
+            const unrelated = document.createElement("script")
+            unrelated.textContent = "throw new Error('unrelated page script')"
+            document.head.append(unrelated)
+          })
+          // A second round trip lets the injection's protocol reply be consumed before inspecting its fiber.
+          yield* page.evaluateInMainWorld(() => document.readyState)
+          const beforeRelease = pending.pollUnsafe()
+          yield* page.evaluateInMainWorld(() => {
+            Reflect.get(window, "releaseModule")()
+          })
+          yield* Fiber.join(pending)
+          assert.strictEqual(beforeRelease, undefined, "the module must still be pending until its await is released")
+          assert.strictEqual(yield* global(page, "moduleFinished"), true)
         }).pipe(Effect.scoped))
 
       it.effect("reads a path and names it with sourceURL", () =>
