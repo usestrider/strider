@@ -2477,6 +2477,7 @@ describe("CDP proxy and website challenge separation", () => {
             context: {
               ...page.context,
               proxy: {
+                scheme: "http" as const,
                 server: "proxy.test:8080",
                 bypass: [],
                 credentials: { username: "proxy-user", password: Redacted.make("fixture-password") }
@@ -2519,6 +2520,7 @@ for (const terminal of ["Network.loadingFinished", "Network.loadingFailed"]) {
     Effect.gen(function*() {
       const { state, page, target } = yield* withPage()
       page.context.proxy = {
+        scheme: "http",
         server: "proxy.test:8080",
         bypass: [],
         credentials: { username: "proxy-user", password: Redacted.make("fixture-password") }

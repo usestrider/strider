@@ -44,6 +44,14 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
       entry("acceptInsecureCerts", "unsupported", ["an attached process cannot be reconfigured"]),
       entry("userContexts.proxy", "unsupported", ["an attached process cannot be reconfigured"]),
       entry("userContexts.proxy.credentials", "unsupported", ["stock WebKit does not support proxy credentials"]),
+      entry("userContexts.proxy.socks4", "unsupported", ["an attached process cannot be reconfigured"]),
+      entry("userContexts.proxy.https", "unsupported", ["the TLS connection to the proxy can't be verified"]),
+      entry("userContexts.proxy.socksCredentials", "unsupported", [
+        "proxy credentials would enter the process environment"
+      ]),
+      entry("userContexts.proxy.bypassSuffix", "unsupported", [
+        "the proxy resolver matches a domain with its subdomains, never its subdomains alone"
+      ]),
       entry("boundingBox.frameTransforms", "supported"),
       entry("hitTest.shadowHostBoxes", "supported"),
       entry("isolatedWorlds", "unsupported", [
@@ -250,8 +258,9 @@ export const launchedCapabilities = (info: Browser.Info, video = false) => {
     acceptInsecureCerts: ["supported", ["native capability in the context-owned process"]],
     userContexts: ["supported", ["each context is a browser process of its own"]],
     "userContexts.proxy": ["supported", [
-      "isolated process environment; HTTP proxy endpoints only; loopback stays direct"
+      "isolated process environment; http, socks5 and socks4 endpoints; loopback stays direct"
     ]],
+    "userContexts.proxy.socks4": ["supported", ["names are resolved at the proxy (SOCKS4a)"]],
     "pauseOnStart.popups": ["unsupported", [
       "a page a page opens is found when the browser lists it, and isn't paused"
     ]],

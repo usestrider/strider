@@ -3681,6 +3681,7 @@ it.effect("removes a context's proxy auth interceptor and attempts, retaining on
     })
     const id = yield* Contexts.createUserContext(state, {
       proxy: Option.some({
+        scheme: "http",
         server: "proxy.test:8080",
         bypass: [],
         credentials: { username: "user", password: Redacted.make("fixture-password") }
@@ -3699,7 +3700,7 @@ it.effect("removes a context's proxy auth interceptor and attempts, retaining on
         (command.params as { intercept: string }).intercept === "proxy-intercept"
       )
     )
-    assert.isTrue(state.proxyBindings.has("proxy.test:8080"))
+    assert.isTrue(state.proxyBindings.has("http://proxy.test:8080"))
     State.releaseProxy(state)
     assert.strictEqual(state.proxyBindings.size, 0)
   }))
@@ -3722,6 +3723,7 @@ it.effect("releases a Firefox proxy credential binding when its context is never
     const create = (password: string) =>
       Contexts.createUserContext(state, {
         proxy: Option.some({
+          scheme: "http",
           server: "proxy.test:8080",
           bypass: [],
           credentials: { username: "user", password: Redacted.make(password) }
@@ -3752,6 +3754,7 @@ for (const configured of [true, false]) {
       const { state, page, commands, facts } = yield* withPage()
       if (configured) {
         page.context.proxy = {
+          scheme: "http",
           server: "proxy.test:8080",
           bypass: [],
           credentials: { username: "proxy-user", password: Redacted.make("proxy-password") }
@@ -3859,6 +3862,7 @@ for (
     Effect.gen(function*() {
       const { state, page, commands, facts } = yield* withPage()
       page.context.proxy = {
+        scheme: "http",
         server: "proxy.test:8080",
         bypass: [],
         credentials: { username: "proxy-user", password: Redacted.make("proxy-secret") }
@@ -3923,6 +3927,7 @@ for (
 describe("Firefox proxy reservation lifetime", () => {
   const options = (password: string): Adapter.UserContextOptions => ({
     proxy: Option.some({
+      scheme: "http",
       server: "proxy.test:8080",
       bypass: [],
       credentials: { username: "user", password: Redacted.make(password) }
@@ -4075,6 +4080,7 @@ for (const kind of ["InvalidArgument", "Encode", "Decode", "Unrecognized"] as co
       const create = (password: string) =>
         Contexts.createUserContext(state, {
           proxy: Option.some({
+            scheme: "http",
             server: "proxy.test:8080",
             bypass: [],
             credentials: { username: "user", password: Redacted.make(password) }

@@ -14,7 +14,7 @@ export const normalize = (
       new Reason.InvalidInput({
         input: "proxy",
         expected:
-          "an HTTP proxy endpoint without credentials, path, query, or fragment, and bypass hostnames or IP addresses",
+          "an http, https, socks5, or socks4 proxy endpoint without credentials, path, query, or fragment, and bypass hostnames, .domain suffixes, or IP addresses",
         hint: "Supply proxy credentials separately with a Redacted password"
       })
     )
@@ -32,28 +32,45 @@ export const normalize = (
   if (
     url === null || url.username !== "" || url.password !== "" || input.includes("@") || url.hostname === ""
   ) return invalid()
-  if (url.protocol !== "http:") {
+  const scheme = url.protocol.slice(0, -1)
+  if (!isScheme(scheme)) {
     return Effect.fail(
       new Reason.Unsupported({
         capability: "userContexts.proxy.scheme",
         backend,
-        hint: "Only HTTP proxy endpoints are supported, for HTTP and HTTPS destinations"
+        hint: "Proxy endpoints are http://, https://, socks5://, or socks4://"
       })
     )
   }
-  if (url.pathname !== "/" || input.includes("?") || input.includes("#") || url.port === "0") return invalid()
+  if (scheme.startsWith("socks") && options.credentials !== undefined) {
+    return Effect.fail(
+      new Reason.Unsupported({
+        capability: "userContexts.proxy.socksCredentials",
+        backend,
+        hint: "No backend authenticates to a SOCKS proxy; use one that needs no credentials"
+      })
+    )
+  }
+  // A scheme URL doesn't know, such as socks5, keeps an empty path and its host's case
+  if (
+    (url.pathname !== "/" && url.pathname !== "") || input.includes("?") || input.includes("#") || url.port === "0"
+  ) return invalid()
   const bypass = options.bypass ?? []
   for (const host of bypass) {
     if (
       typeof host !== "string" || host === "" || /[\s/\\*,;?#@%]/.test(host) ||
-      host.startsWith(".") || host.endsWith(".") || (host.startsWith("[") && !host.endsWith("]"))
+      host.startsWith("..") || host.endsWith(".") || (host.startsWith("[") && !host.endsWith("]")) ||
+      // A leading dot names a domain's subdomains, which an IP address has none of
+      (host.startsWith(".") && /^[\d.:[\]]*$/.test(host.slice(1)))
     ) return invalid()
-    const parsed = URL.parse(`http://${host.includes(":") && !host.startsWith("[") ? `[${host}]` : host}`)
+    const name = host.startsWith(".") ? host.slice(1) : host
+    const parsed = URL.parse(`http://${name.includes(":") && !name.startsWith("[") ? `[${name}]` : name}`)
     if (parsed === null || parsed.port !== "" || parsed.pathname !== "/" || parsed.username !== "") return invalid()
   }
   return Effect.succeed(
     {
-      server: `${url.hostname}:${url.port || "80"}`,
+      scheme,
+      server: `${url.hostname.toLowerCase()}:${url.port || defaultPorts[scheme]}`,
       bypass: bypass.map((host) => host.toLowerCase()),
       ...(options.credentials === undefined
         ? {}
@@ -61,6 +78,16 @@ export const normalize = (
     } satisfies Adapter.ProxyOptions
   )
 }
+
+/** The proxy endpoint schemes Strider knows; a backend may still refuse one through its capability table. */
+export const schemes = ["http", "https", "socks5", "socks4"] as const
+
+const isScheme = (scheme: string): scheme is Adapter.ProxyScheme => (schemes as ReadonlyArray<string>).includes(scheme)
+
+const defaultPorts: Record<Adapter.ProxyScheme, string> = { http: "80", https: "443", socks5: "1080", socks4: "1080" }
+
+/** The endpoint as a URL without credentials, which identifies it. */
+export const endpoint = (options: Adapter.ProxyOptions) => `${options.scheme}://${options.server}`
 
 /** The loopback exclusions needed by browser control connections and local destinations. */
 export const loopback = ["localhost", "127.0.0.1", "::1"] as const

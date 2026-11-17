@@ -83,8 +83,12 @@ export const capabilities = (
       entry("userContexts", "supported"),
       entry("acceptInsecureCerts", "unsupported", ["CDP ignores certificate errors browser-wide, not per context"]),
       entry("userContexts.proxy", "supported", [
-        "HTTP proxy endpoints for HTTP and HTTPS destinations; loopback stays direct"
+        "http, https and socks5 endpoints for HTTP, HTTPS and WebSocket destinations; .domain bypass matches subdomains only; loopback stays direct"
       ]),
+      entry("userContexts.proxy.socks4", "unsupported", ["Chromium's SOCKS4 resolves names locally, not at the proxy"]),
+      entry("userContexts.proxy.https", "supported", ["the proxy's certificate must be one the browser trusts"]),
+      entry("userContexts.proxy.socksCredentials", "unsupported", ["the browser offers no SOCKS authentication"]),
+      entry("userContexts.proxy.bypassSuffix", "supported"),
       entry("userContexts.proxy.credentials", "supported", [
         "proxy challenges only; one credential submission per request"
       ]),
