@@ -13,6 +13,7 @@ import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import { site } from "../adapter/harness.ts"
+import { endsUnloadablePageNavigation } from "./capabilities.ts"
 import * as SharedContext from "./sharedContext.ts"
 
 const timeout = 60_000
@@ -192,8 +193,12 @@ export const slice = (
               })
               return yield* next
             }).pipe(Deadline.within("1 second"), Effect.flip)
-            assert(failed._tag === "PageError", String(failed))
-            assert.strictEqual(failed.reason._tag, "NavigationFailed")
+            if (endsUnloadablePageNavigation[name as keyof typeof endsUnloadablePageNavigation]) {
+              assert(failed._tag === "PageError", String(failed))
+              assert.strictEqual(failed.reason._tag, "NavigationFailed")
+            } else {
+              assert(Deadline.isTimeout(failed), String(failed))
+            }
           }))
         }), timeout)
 
