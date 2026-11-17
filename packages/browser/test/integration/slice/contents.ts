@@ -100,11 +100,15 @@ const firstAlpha = (png: Uint8Array): number => {
   return raw[4]!
 }
 
-/** A small page for snapshots: landmarks, controls, an inferred control, hidden content, a list and text. */
-/** AR-126's shape: a heading and a textbox inside a banner inside the body. */
+/** A heading and a textbox inside a banner inside the body, for patterns that match at any depth. */
 const todos =
   `<title>Todos</title><header><h1>todos</h1><input placeholder="What needs to be done?"></header><main><p>List</p></main>`
 
+/** A heading with a level, and a checkbox and a toggle button that can be mixed. */
+const controls = `<h2>Plans</h2><input type="checkbox" id="all" aria-label="All">` +
+  `<button aria-pressed="mixed">Bold</button><button>Plain</button>`
+
+/** A small page for snapshots: landmarks, controls, an inferred control, hidden content, a list and text. */
 const shop =
   `<title>Shop</title><h1>Shop</h1><nav aria-label="Main"><a href="#orders">Orders</a></nav><a id="gone" href="#gone">Gone</a>
 <button onclick="log('save')">Save</button>
@@ -2353,6 +2357,64 @@ export const contents = (
             const error = failed as unknown as Expect.ExpectationFailed
             assert.match(error.message, /not to match node\("banner"/)
             assert.match(String(Option.getOrThrow(error.last).value), /^- banner \[ref=e\d+\]:\n {2}- heading "todos"/)
+          }))
+        }), timeout)
+
+      it.effect("compares the level and states a node pattern states, and only those", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, controls))
+            yield* page.evaluateInMainWorld(() => {
+              document.querySelector<HTMLInputElement>("#all")!.indeterminate = true
+            })
+            const anywhere = (pattern: AriaPattern.AriaPattern) =>
+              AriaPattern.anywhere(AriaPattern.including(pattern))
+            yield* page.pipe(Expect.toMatchAria(anywhere(
+              AriaPattern.node("heading", "Plans", AriaPattern.unchecked, { level: 2 })
+            )))
+            yield* page.pipe(Expect.toMatchAria(
+              anywhere(AriaPattern.node("heading", "Plans", AriaPattern.unchecked, { level: 3 })),
+              { not: true }
+            ))
+            yield* page.pipe(Expect.toMatchAria(anywhere(
+              AriaPattern.node("checkbox", "All", AriaPattern.unchecked, { checked: "mixed" })
+            )))
+            yield* page.pipe(Expect.toMatchAria(anywhere(
+              AriaPattern.node("button", "Bold", AriaPattern.unchecked, { pressed: "mixed", disabled: false })
+            )))
+            // false requires the state to be absent
+            yield* page.pipe(Expect.toMatchAria(
+              anywhere(AriaPattern.node("checkbox", "All", AriaPattern.unchecked, { checked: false })),
+              { not: true }
+            ))
+            yield* page.pipe(Expect.toMatchAria(anywhere(
+              AriaPattern.node("button", "Plain", AriaPattern.unchecked, { pressed: false })
+            )))
+          }))
+        }), timeout)
+
+      it.effect("snapshots carry a node's level and mixed state, and render them", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, controls))
+            yield* page.evaluateInMainWorld(() => {
+              document.querySelector<HTMLInputElement>("#all")!.indeterminate = true
+            })
+            const snapshot = yield* page.snapshot({ sources: "aria" })
+            assert.match(snapshot.text, /- heading "Plans" \[level=2\] \[ref=e\d+\]/)
+            assert.match(snapshot.text, /- checkbox "All" \[checked=mixed\] \[ref=e\d+\]/)
+            assert.match(snapshot.text, /- button "Bold" \[pressed=mixed\] \[ref=e\d+\]/)
+            assert.match(snapshot.text, /- button "Plain" \[ref=e\d+\]/)
+            const nodes = [...snapshot.refs.values()]
+            const heading = nodes.find((node) => node.role.role === "heading")!
+            const checkbox = nodes.find((node) => node.role.role === "checkbox")!
+            assert.strictEqual(heading.level, 2)
+            assert.strictEqual(checkbox.level, undefined)
+            assert.deepStrictEqual([...checkbox.states], ["mixed"])
           }))
         }), timeout)
 
