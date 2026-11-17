@@ -78,6 +78,61 @@ export const bindings = (name: string, backend: Layer.Layer<Browser.Browser, unk
           )
         }).pipe(Effect.scoped))
 
+      it.effect("carries NaN, -0, and undefined both ways and rejects a value that can't cross", () =>
+        Effect.gen(function*() {
+          const served = yield* site
+          const page = yield* newPage
+          const values = Schema.Tuple([Schema.Number, Schema.Number, Schema.Undefined])
+          const received: Array<ReadonlyArray<unknown>> = []
+          yield* page.exposeBinding("echo", { arguments: values, result: values }, (args) =>
+            Effect.sync(() => {
+              received.push(args)
+              return [NaN, -0, undefined] as const
+            }))
+          yield* page.goto(fixtureUrl(served.origin, "<p>ready</p>"))
+          const back = yield* page.evaluateInMainWorld(() =>
+            (window as any).echo(NaN, -0, undefined).then((result: ReadonlyArray<unknown>) => [
+              Number.isNaN(result[0]),
+              Object.is(result[1], -0),
+              result.length === 3 && result[2] === undefined
+            ]) as Promise<ReadonlyArray<boolean>>
+          )
+          assert.deepStrictEqual(back, [true, true, true])
+          assert.strictEqual(received.length, 1)
+          assert.isTrue(Number.isNaN(received[0]![0]))
+          assert.isTrue(Object.is(received[0]![1], -0))
+          assert.strictEqual(received[0]!.length, 3)
+          assert.strictEqual(received[0]![2], undefined)
+          const refused = yield* page.evaluateInMainWorld(() =>
+            (window as any).echo(() => 1).then(
+              () => "resolved",
+              (error: Error) => `rejected ${error.message}`
+            ) as Promise<string>
+          )
+          assert.match(refused, /^rejected Not serializable at args\[0\] \(/)
+          assert.strictEqual(received.length, 1)
+        }).pipe(Effect.scoped))
+
+      it.effect("rejects a call past the 4096 a document may have waiting", () =>
+        Effect.gen(function*() {
+          const served = yield* site
+          const page = yield* newPage
+          const gate = yield* Deferred.make<void>()
+          yield* page.exposeBinding("wait", numbers, () => Deferred.await(gate).pipe(Effect.as(0)))
+          yield* page.goto(fixtureUrl(served.origin, "<p>ready</p>"))
+          const next = yield* page.evaluateInMainWorld(() => {
+            for (let i = 0; i < 4096; i++) (window as any).wait(1, 2).catch(() => {})
+            return (window as any).wait(1, 2).then(
+              () => "resolved",
+              (error: Error) => `rejected ${error.message}`
+            ) as Promise<string>
+          })
+          assert.strictEqual(
+            next,
+            "rejected Binding \"wait\" has 4096 calls waiting for their answer; await some first"
+          )
+        }).pipe(Effect.scoped))
+
       it.effect("rejects with a fixed message when the handler dies", () =>
         Effect.gen(function*() {
           const served = yield* site
