@@ -1,18 +1,23 @@
 /**
  * A local HTTP/CONNECT proxy. Only proxy.test is forwarded, to loopback at the requested port; other hosts fail.
  * This makes proxy-side DNS and bypass observable without external sites. Credentials never enter its request log.
+ * With `tls`, the browser reaches the proxy itself over TLS (an `https://` proxy endpoint).
  */
 import * as Effect from "effect/Effect"
 import * as http from "node:http"
+import * as https from "node:https"
 import * as net from "node:net"
 
 export const proxy = (
   credentials?: { readonly username: string; readonly password: string },
-  options?: { readonly websiteChallenge?: boolean | undefined }
+  options?: {
+    readonly websiteChallenge?: boolean | undefined
+    readonly tls?: { readonly key: Buffer; readonly cert: Buffer } | undefined
+  }
 ) =>
   Effect.acquireRelease(
     Effect.callback<{
-      readonly server: http.Server
+      readonly server: http.Server | https.Server
       readonly sockets: Set<net.Socket>
       readonly address: string
       readonly requests: Array<{ readonly method: string; readonly url: string; readonly authenticated: boolean }>
@@ -30,7 +35,7 @@ export const proxy = (
         socket.on("close", () => sockets.delete(socket))
         socket.on("error", () => socket.destroy())
       }
-      const server = http.createServer((request, response) => {
+      const listener: http.RequestListener = (request, response) => {
         if (!authorized(request)) {
           response.writeHead(407, {
             "proxy-authenticate": "Basic realm=\"local-proxy\"",
@@ -59,7 +64,10 @@ export const proxy = (
           response.end()
         })
         request.pipe(upstream)
-      })
+      }
+      const server = options?.tls === undefined
+        ? http.createServer(listener)
+        : https.createServer({ key: options.tls.key, cert: options.tls.cert }, listener)
       server.on("connection", track)
       server.on("connect", (request, socket, head) => {
         if (!authorized(request)) {
