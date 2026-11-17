@@ -1,3 +1,4 @@
+import { bindings } from "./bindings.ts"
 import { locatorHandlers } from "./locatorHandlers.ts"
 /**
  * The slices against Chromium, through the public layer: the pinned Chromium (`browsers.ts`), in the Nix
@@ -57,3 +58,5 @@ storageReplacement("Chromium", backend)
 requestSizes("Chromium", backend)
 
 stalledReadProbes("Chromium", backend)
+
+bindings("Chromium", backend)

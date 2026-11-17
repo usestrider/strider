@@ -1,3 +1,4 @@
+import { bindings } from "./bindings.ts"
 import { locatorHandlers } from "./locatorHandlers.ts"
 /**
  * The slices against stock WebKit, through the public layer: WebKitGTK's MiniBrowser (`browsers.ts`)
@@ -61,3 +62,5 @@ requestTiming("WebKit", backend)
 
 storageReplacement("WebKit", backend)
 requestSizes("WebKit", backend)
+
+bindings("WebKit", backend)
