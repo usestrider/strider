@@ -392,7 +392,12 @@ export interface Queries<L> {
    */
   getByTitle(text: string | RegExp, options?: TextOptions | undefined): L
   /**
-   * Elements whose `data-testid` attribute is `id`.
+   * Elements whose `data-testid` attribute is `id`, or matches it when `id` is a RegExp.
+   *
+   * **Details**
+   *
+   * A string matches the attribute exactly, case and whitespace included. A RegExp is tested against the attribute
+   * as written, with its own flags; its `g` flag is ignored. An element without the attribute never matches.
    *
    * **Example** (Reading the cart badge)
    *
@@ -404,8 +409,19 @@ export interface Queries<L> {
    *   return yield* page.getByTestId("cart-count").readText
    * })
    * ```
+   *
+   * **Example** (Counting the rows of a table)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const rowCount = Effect.fn("rowCount")(function*(page: Page.ReadonlyPage) {
+   *   return yield* page.getByTestId(/^row-/).count
+   * })
+   * ```
    */
-  getByTestId(id: string): L
+  getByTestId(id: string | RegExp): L
   /**
    * Elements matching a CSS selector. A malformed selector fails with `InvalidInput` as soon as the locator is
    * used, without waiting.
@@ -1248,7 +1264,7 @@ export interface Locator extends ReadonlyLocator {
   getByPlaceholder(text: string | RegExp, options?: TextOptions | undefined): Locator
   getByAltText(text: string | RegExp, options?: TextOptions | undefined): Locator
   getByTitle(text: string | RegExp, options?: TextOptions | undefined): Locator
-  getByTestId(id: string): Locator
+  getByTestId(id: string | RegExp): Locator
   locator(css: string): Locator
   frame(iframe: ReadonlyLocator): FrameLocator
   filter(options: FilterOptions): Locator
@@ -1904,7 +1920,7 @@ export interface FrameLocator extends ReadonlyFrameLocator {
   getByPlaceholder(text: string | RegExp, options?: TextOptions | undefined): Locator
   getByAltText(text: string | RegExp, options?: TextOptions | undefined): Locator
   getByTitle(text: string | RegExp, options?: TextOptions | undefined): Locator
-  getByTestId(id: string): Locator
+  getByTestId(id: string | RegExp): Locator
   locator(css: string): Locator
   frame(iframe: ReadonlyLocator): FrameLocator
 }

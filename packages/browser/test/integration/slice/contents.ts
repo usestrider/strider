@@ -1677,7 +1677,9 @@ export const contents = (
             )
             assert.strictEqual(yield* page.getByTestId(/^row-/).count, 2)
             assert.strictEqual(yield* page.getByTestId(/^ROW-1$/i).readText, "a")
-            const error = reasonOf(yield* Effect.exit(page.getByTestId(/^row-/i).readText)) as unknown as Locator.LocatorError
+            const error = reasonOf(
+              yield* Effect.exit(page.getByTestId(/^row-/i).readText)
+            ) as unknown as Locator.LocatorError
             assert.strictEqual(error.reason._tag, "StrictViolation")
             assert.strictEqual(error.locator, "getByTestId(/^row-/i)")
           }))
