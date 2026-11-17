@@ -1667,6 +1667,22 @@ export const contents = (
           )
         }), timeout)
 
+      it.effect("finds test ids by pattern, and names the pattern when it matches several", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(
+              fixtureUrl(origin, `<p data-testid="row-1">a</p><p data-testid="row-2">b</p><p data-testid="total">c</p>`)
+            )
+            assert.strictEqual(yield* page.getByTestId(/^row-/).count, 2)
+            assert.strictEqual(yield* page.getByTestId(/^ROW-1$/i).readText, "a")
+            const error = reasonOf(yield* Effect.exit(page.getByTestId(/^row-/i).readText)) as unknown as Locator.LocatorError
+            assert.strictEqual(error.reason._tag, "StrictViolation")
+            assert.strictEqual(error.locator, "getByTestId(/^row-/i)")
+          }))
+        }), timeout)
+
       it.effect("evaluates with the locator's one match first, in the isolated world", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
