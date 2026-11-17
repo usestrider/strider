@@ -267,6 +267,80 @@ export const engine = (backend: Backend) =>
     ).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor)))
     layer(fixture, { excludeTestServices: true })(
       (it) => {
+        it.effect("accepts an XPath document root result and skips the non-element node", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(backend, "<b>inside</b>")
+            assert.strictEqual(
+              count(
+                yield* send({
+                  op: "count",
+                  steps: [{ _tag: "XPath", expression: "/" }]
+                })
+              ),
+              0
+            )
+          }), timeout)
+
+        it.effect("keeps both branches of a chained XPath union inside its scope", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(backend, "<div id=\"scope\"><a>inside</a></div><b>outside</b>")
+            assert.strictEqual(
+              count(
+                yield* send({
+                  op: "count",
+                  steps: [{ _tag: "Css", selector: "#scope" }, { _tag: "XPath", expression: "//a | //b" }]
+                })
+              ),
+              1
+            )
+          }), timeout)
+
+        it.effect("evaluates XPath within a shadow tree when CSS supplies its context element", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              "<div id=\"host\"></div>",
+              `() => {
+                document.getElementById("host").attachShadow({ mode: "open" }).innerHTML =
+                  '<section id="scope"><b>inside</b></section>'
+              }`
+            )
+            assert.strictEqual(
+              count(
+                yield* send({
+                  op: "count",
+                  steps: [{ _tag: "XPath", expression: "//b" }]
+                })
+              ),
+              0
+            )
+            assert.strictEqual(
+              count(
+                yield* send({
+                  op: "count",
+                  steps: [{ _tag: "Css", selector: "#scope" }, { _tag: "XPath", expression: "//b" }]
+                })
+              ),
+              1
+            )
+          }), timeout)
+
+        it.effect("keeps XPath snapshot evaluation independent of a replaced global after installation", () =>
+          Effect.gen(function*() {
+            const { send, call } = yield* open(backend, "<b>inside</b>")
+            const replaced = yield* call(`() => { globalThis.XPathResult = undefined }`, [])
+            assert.strictEqual(replaced._tag, "Value")
+            assert.strictEqual(
+              count(
+                yield* send({
+                  op: "count",
+                  steps: [{ _tag: "XPath", expression: "//b" }]
+                })
+              ),
+              1
+            )
+          }), timeout)
+
         it.effect("reuses same-frame stability inside a reachable scrolling layout", () =>
           Effect.gen(function*() {
             const { call } = yield* open(
@@ -315,7 +389,11 @@ export const engine = (backend: Backend) =>
                 cap: 200
               })
               assert.strictEqual(response._tag, "NotReady", JSON.stringify(response))
-              if (response._tag === "NotReady") assert(response.history.some((reason) => reason._tag === "Disabled"))
+              if (response._tag === "NotReady") {
+                assert(response.history.some((reason) =>
+                  reason._tag === "Disabled"
+                ))
+              }
             }), timeout)
         }
 
