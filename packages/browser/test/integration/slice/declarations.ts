@@ -117,18 +117,17 @@ const crossSiteFrame = Effect.fnUntraced(function*(
 
 const json = (value: unknown) => HttpServerResponse.jsonUnsafe(value)
 
-/** A page whose inline script reports whether it ran and whether it could `eval`; under the site's `/csp` it runs only where the policy is bypassed. */
+/**
+ * A page that says whether its inline script ran and whether a script its policy allows could `eval`: under the
+ * site's `/csp`, `blocked` and `refused` unless the policy is bypassed.
+ */
 const cspProbe =
-  `<pre id="out">blocked</pre><script>document.getElementById('out').textContent = (() => { try { return 'inline,' + eval("'eval'") } catch { return 'inline,refused' } })()</script>`
+  `<pre id="inline">blocked</pre><pre id="eval">pending</pre><script>document.getElementById('inline').textContent = 'ran'</script><script src="/eval.js"></script>`
 
-/** Whether the page's policy lets it `eval`. */
-const cspEval = () => {
-  try {
-    return (0, eval)("'eval'") as string
-  } catch {
-    return "refused"
-  }
-}
+const cspOutcome = (page: Page.Page) =>
+  Effect.all([page.locator("#inline").readText, page.locator("#eval").readText]).pipe(
+    Effect.map((texts) => texts.join(","))
+  )
 
 /**
  * Runs an effect with a logger that also keeps the messages of its warnings and errors, so a case can check that
@@ -1720,18 +1719,15 @@ export const declarations = (
             yield* Effect.scoped(Effect.gen(function*() {
               const bypassing = yield* Browser.newContext({ bypassCSP: true })
               const page = yield* bypassing.newPage
-              // A cross-site navigation, and a cross-site iframe, each in a renderer of its own on Chromium
               yield* page.goto(`${origin}/csp?html=${encodeURIComponent(cspProbe)}`)
-              assert.strictEqual(yield* page.locator("#out").readText, "inline,eval")
-              assert.strictEqual(yield* page.evaluate(cspEval), "eval")
+              assert.strictEqual(yield* cspOutcome(page), "ran,ran")
+              // A cross-site navigation, and a cross-site iframe, each in a renderer of its own on Chromium
               yield* page.goto(`${crossSite}/csp?html=${encodeURIComponent(cspProbe)}`)
-              assert.strictEqual(yield* page.locator("#out").readText, "inline,eval")
+              assert.strictEqual(yield* cspOutcome(page), "ran,ran")
               yield* page.goto(fixtureUrl(
                 origin,
                 `<pre id="out">pending</pre><script>addEventListener('message', (e) => { document.getElementById('out').textContent = e.data })</script><iframe src="${crossSite}/csp?html=${
-                  encodeURIComponent(
-                    `<script>parent.postMessage((() => { try { return 'inline,' + eval("'eval'") } catch { return 'inline,refused' } })(), '*')</script>`
-                  )
+                  encodeURIComponent(cspProbe)
                 }"></iframe>`
               ))
               yield* Expect.that(
@@ -1739,12 +1735,11 @@ export const declarations = (
                 Condition.make("reported", (text: string) =>
                   text !== "pending")
               )
-              assert.strictEqual(yield* page.locator("#out").readText, "inline,eval")
+              assert.strictEqual(yield* page.locator("#out").readText, "ran,ran")
               // A context in the same browser that doesn't ask keeps the policy
               const other = yield* Browser.newPage()
               yield* other.goto(`${origin}/csp?html=${encodeURIComponent(cspProbe)}`)
-              assert.strictEqual(yield* other.locator("#out").readText, "blocked")
-              assert.strictEqual(yield* other.evaluate(cspEval), "refused")
+              assert.strictEqual(yield* cspOutcome(other), "blocked,refused")
             }))
           }),
         timeout
