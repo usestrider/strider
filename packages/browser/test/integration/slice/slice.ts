@@ -179,6 +179,24 @@ export const slice = (
           }
         }), timeout)
 
+      it.effect("fails at once a navigation the page starts to a URL whose scheme the browser can't load", () =>
+        Effect.gen(function*() {
+          const url = yield* fixture("<p>site</p>")
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(url)
+            const failed = yield* Effect.gen(function*() {
+              const next = yield* PageNavigation.next(page, { url: "nosuchscheme:x" })
+              yield* page.evaluateInMainWorld(() => {
+                location.href = "nosuchscheme:x"
+              })
+              return yield* next
+            }).pipe(Deadline.within("1 second"), Effect.flip)
+            assert(failed._tag === "PageError", String(failed))
+            assert.strictEqual(failed.reason._tag, "NavigationFailed")
+          }))
+        }), timeout)
+
       it.effect("commits a data: or blob: URL, and a reload of it, with no response", () =>
         Effect.gen(function*() {
           const url = yield* fixture("<p>site</p>")
@@ -211,8 +229,12 @@ export const slice = (
             const page = yield* SharedContext.newPage
             const requests = yield* NetworkRequest.stream(page)
             const collected = yield* requests.pipe(
-              Stream.map((request) => request.url),
-              Stream.takeUntil((url) => url === sentinel),
+              Stream.map((request) =>
+                request.url
+              ),
+              Stream.takeUntil((url) =>
+                url === sentinel
+              ),
               Stream.runCollect,
               Effect.forkChild
             )
