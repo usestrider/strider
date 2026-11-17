@@ -58,6 +58,19 @@ const routes: Record<string, Route> = {
     })
     response.end(new URL(request.url ?? "/", "http://site").searchParams.get("html") ?? "")
   },
+  // Any page, as `/fixture`, under a policy that allows only the site's own stylesheets
+  "/style-csp": (request, response) => {
+    response.writeHead(200, {
+      "content-type": "text/html; charset=utf-8",
+      "content-security-policy": "style-src 'self'"
+    })
+    response.end(new URL(request.url ?? "/", "http://site").searchParams.get("html") ?? "")
+  },
+  // Any stylesheet: its source is the `css` parameter
+  "/style": (request, response) => {
+    response.writeHead(200, { "content-type": "text/css; charset=utf-8" })
+    response.end(new URL(request.url ?? "/", "http://site").searchParams.get("css") ?? "")
+  },
   // An error page: a commit with a status of 404
   "/missing": (_request, response) => html(response, `<title>missing</title><p>No such page</p>`, 404),
   "/204": (_request, response) => {

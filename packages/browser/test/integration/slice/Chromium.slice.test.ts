@@ -20,6 +20,7 @@ import { requestBodies } from "./requestBodies.ts"
 import { requestSizes } from "./requestSizes.ts"
 import { requestTiming } from "./requestTiming.ts"
 import { slice } from "./slice.ts"
+import { styleTags } from "./styleTags.ts"
 import { stalledReadProbes } from "./stalledReadProbes.ts"
 import { storageReplacement } from "./storageReplacement.ts"
 import { tooling } from "./tooling.ts"
@@ -57,3 +58,4 @@ storageReplacement("Chromium", backend)
 requestSizes("Chromium", backend)
 
 stalledReadProbes("Chromium", backend)
+styleTags("Chromium", backend)
