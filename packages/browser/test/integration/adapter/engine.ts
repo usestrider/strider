@@ -3269,6 +3269,52 @@ document.getElementById("outer").attachShadow({ mode: "open" }).innerHTML =
             assert(twice._tag === "Strict")
             assert.strictEqual(twice.count, 4)
           }), timeout)
+        it.effect("rejects a raw-engine service worker registration left for the next case", () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            const call = Effect.fnUntraced(
+              function*(opened: Effect.Success<ReturnType<typeof open>>, functionDeclaration: string) {
+                const realm = yield* opened.adapter.realm(opened.document, { _tag: "Main" })
+                return yield* opened.adapter.evaluate(realm, {
+                  functionDeclaration,
+                  arguments: [],
+                  awaitPromise: true,
+                  result: "value",
+                  userActivation: false
+                })
+              }
+            )
+            const leaked = yield* Effect.scoped(Effect.gen(function*() {
+              const opened = yield* open(backend, "<p>register</p>", undefined, origin)
+              const registered = yield* call(
+                opened,
+                `async () => {
+                await navigator.serviceWorker.register("/sw.js");
+                await navigator.serviceWorker.ready;
+                return (await navigator.serviceWorker.getRegistrations()).length;
+              }`
+              )
+              assert.deepStrictEqual(registered, { _tag: "Value", value: { type: "number", value: 1 } })
+            })).pipe(Effect.exit)
+            const next = yield* Effect.scoped(Effect.gen(function*() {
+              const opened = yield* open(backend, "<p>next</p>", undefined, origin)
+              return yield* call(
+                opened,
+                `async () => {
+                const registrations = await navigator.serviceWorker.getRegistrations();
+                await Promise.all(registrations.map(registration => registration.unregister()));
+                return registrations.length;
+              }`
+              )
+            })).pipe(Effect.exit)
+            assert.isTrue(
+              Exit.isFailure(leaked),
+              `cleanup accepted a service worker; next case: ${JSON.stringify(next)}`
+            )
+            assert.include(String(Exit.isFailure(leaked) ? leaked.cause : ""), "worker")
+            assert.deepStrictEqual(next, Exit.succeed({ _tag: "Value", value: { type: "number", value: 0 } }))
+          }), timeout)
+
         for (const source of ["previous document", "cross-origin frame"] as const) {
           it.effect(`rejects raw-engine storage left by a ${source} and replaces the context`, () =>
             Effect.gen(function*() {
