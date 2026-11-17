@@ -493,9 +493,9 @@ export interface Options {
    *
    * **Details**
    *
-   * Firefox and launched stock WebKit support this when creating a context. Chromium refuses `true` with
-   * `Unsupported` because its certificate override affects the whole browser. Attached stock WebKit cannot
-   * create contexts. Reclaiming an existing context refuses either explicit value: this setting can only
+   * Chromium, Firefox, and launched stock WebKit support this when creating a context. On Chromium each of the
+   * context's pages, popups included, ignores certificate errors before it loads anything, and a reclaimable
+   * context refuses `true` with `Unsupported`. Attached stock WebKit cannot create contexts. Reclaiming an existing context refuses either explicit value: this setting can only
    * be chosen at creation. Omitting it preserves the existing context's setting.
    *
    * **Example** (A local HTTPS test site)
@@ -514,6 +514,61 @@ export interface Options {
    * @default false for new contexts
    */
   readonly acceptInsecureCerts?: boolean | undefined
+
+  /**
+   * Presents TLS client certificates to the HTTPS sites whose origins they name, in this context alone.
+   *
+   * **Details**
+   *
+   * Each entry gives a PEM `cert` with its `key`, or a `pfx` archive, with a `passphrase` when the key is
+   * encrypted. `origin` must be an HTTPS origin, and matches scheme, hostname, and effective port, so a
+   * certificate for `https://example.com` is not sent to `https://example.com:8443`. The key, archive and
+   * passphrase are `Redacted`, and never appear in errors or traces. Every entry is loaded when the context is
+   * created, so an unreadable file or a wrong passphrase fails with `InvalidInput` then.
+   *
+   * The context's HTTPS and WebSocket-over-TLS traffic, local sites included, goes through a proxy Strider runs
+   * on 127.0.0.1 for that context, which closes with it. The proxy connects to each site itself, presents the
+   * matching certificate when the site asks for one, and checks the site's certificate against Node's trusted
+   * certificates, unless `acceptInsecureCerts` is true. When the site can't be reached or isn't trusted, the
+   * proxy closes the browser's connection, and the request fails as a connection error. On Firefox the
+   * context's plain HTTP goes through the proxy too, which forwards it unchanged. A context without this option
+   * starts no proxy.
+   *
+   * **Gotchas**
+   *
+   * Chromium and a Firefox Strider launched support this. A Firefox Strider connected to, stock WebKit, a
+   * reclaimable context, and a context that also sets `proxy` refuse it with `Unsupported`. Pages connect to
+   * the site over HTTP/1.1.
+   *
+   * **Example** (A site that requires a client certificate)
+   *
+   * ```ts import.meta.vitest
+   * import { Browser } from "@usestrider/browser"
+   * import { Effect, FileSystem, Redacted } from "effect"
+   *
+   * const open = Effect.fn("open")(function*() {
+   *   const fs = yield* FileSystem.FileSystem
+   *   const context = yield* Browser.newContext({
+   *     clientCertificates: [{
+   *       origin: "https://internal.example.com",
+   *       cert: yield* fs.readFile("client.pem"),
+   *       key: Redacted.make(yield* fs.readFile("client-key.pem"))
+   *     }]
+   *   })
+   *   const page = yield* context.newPage
+   *   yield* page.goto("https://internal.example.com")
+   * })
+   * ```
+   *
+   * @default no client certificates, and no proxy
+   */
+  readonly clientCertificates?: ReadonlyArray<{
+    readonly origin: string
+    readonly cert?: Uint8Array | undefined
+    readonly key?: Redacted.Redacted<Uint8Array> | undefined
+    readonly pfx?: Redacted.Redacted<Uint8Array> | undefined
+    readonly passphrase?: Redacted.Redacted<string> | undefined
+  }> | undefined
 
   /**
    * Answers website authentication challenges with these credentials. User auth routes run first;

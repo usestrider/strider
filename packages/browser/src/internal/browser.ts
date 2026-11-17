@@ -44,6 +44,7 @@ import * as UserContext from "../UserContext.ts"
 import * as WebSocketRoute from "../WebSocketRoute.ts"
 import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
+import * as ClientCertificates from "./clientCertificates.ts"
 import * as BrowserService from "./browserService.ts"
 import * as ClaimHooks from "./claimHooks.ts"
 import * as Clock from "./clock.ts"
@@ -614,6 +615,31 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         }
         credentialOrigin = url.origin
       }
+      const certificates = options?.clientCertificates
+      let preparedCertificates: ClientCertificates.Prepared | undefined
+      if (certificates !== undefined) {
+        const refusal = mode !== undefined
+          ? "Client certificates need a context Strider creates and owns, which a reclaimable context isn't"
+          : options?.proxy !== undefined
+          ? "Client certificates can't be combined with proxy yet"
+          : undefined
+        if (refusal !== undefined) {
+          return yield* Effect.fail(contextError(
+            operation,
+            new Reason.Unsupported({ capability: "clientCertificates", backend: adapter.info.product, hint: refusal }),
+            id
+          ))
+        }
+        const prepared = ClientCertificates.prepare(certificates)
+        if (prepared instanceof ClientCertificates.Invalid) {
+          return yield* Effect.fail(contextError(
+            operation,
+            new Reason.InvalidInput({ input: "clientCertificates", expected: prepared.expected, hint: prepared.hint }),
+            id
+          ))
+        }
+        preparedCertificates = prepared
+      }
       if (mode !== undefined && "context" in mode && options?.storageStateTracking === true) {
         return yield* Effect.fail(
           contextError(
@@ -721,12 +747,31 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         made = downloads.value
         yield* ledger.add({ _tag: "Directory", path: downloads.value })
       }
+      // A context's client certificate proxy outlives the context, which this scope removes first
+      const certificateProxy = preparedCertificates === undefined
+        ? Option.none<number>()
+        : Option.some(
+          (yield* ClientCertificates.serve(preparedCertificates, {
+            acceptInsecureCerts: options?.acceptInsecureCerts ?? false
+          }).pipe(Effect.mapError((error) =>
+            contextError(
+              operation,
+              new Reason.BackendFailure({
+                kind: "Rejected",
+                method: "ClientCertificates.serve",
+                hint: `Couldn't start the context's client certificate proxy: ${error.message}`
+              }),
+              id
+            )
+          ))).port
+        )
       // Removed when the scope closes, waiting for its end under a budget of its own (`Model.remove`)
       const entry = yield* Effect.acquireRelease(
         (mode !== undefined && "context" in mode
           ? Effect.succeed(mode.context)
           : adapter.createUserContext({
             proxy,
+            certificateProxy,
             acceptInsecureCerts: options?.acceptInsecureCerts ?? false,
             reclaimable,
             focusEmulated: options?.focus === "emulated",

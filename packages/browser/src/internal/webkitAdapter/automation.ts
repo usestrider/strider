@@ -245,6 +245,9 @@ export const resizeWindow = (
 
 export const createUserContextLaunched = Effect.fnUntraced(
   function*(state: State, options: Adapter.UserContextOptions) {
+    if (options.certificateProxy !== undefined && Option.isSome(options.certificateProxy)) {
+      return yield* Effect.fail(Kit.unsupported("clientCertificates", "Stock WebKit takes a proxy only at launch"))
+    }
     if (Option.isSome(options.proxy) && options.proxy.value.credentials !== undefined) {
       return yield* Effect.fail(
         Kit.unsupported("userContexts.proxy.credentials", "Stock WebKit does not support proxy credentials")

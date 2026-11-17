@@ -30,7 +30,12 @@ export interface Prepared {
 
 /** Why certificates were refused; never names or echoes a secret. */
 export class Invalid {
-  constructor(readonly expected: string, readonly hint: string) {}
+  readonly expected: string
+  readonly hint: string
+  constructor(expected: string, hint: string) {
+    this.expected = expected
+    this.hint = hint
+  }
 }
 
 const bytes = (value: unknown): Buffer | undefined =>
