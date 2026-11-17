@@ -2085,7 +2085,7 @@ export const contents = (
             assert.deepStrictEqual(snapshot.root.role, { _tag: "Aria", role: "document" })
             const text = snapshot.text
             assert.match(text, /^- document "Shop":/)
-            assert.match(text, /- heading "Shop" \[ref=e\d+\]/)
+            assert.match(text, /- heading "Shop" \[level=1\] \[ref=e\d+\]/)
             assert.match(text, /- navigation "Main" \[ref=e\d+\]:\n {4}- link "Orders" \[ref=e\d+\]/)
             assert.match(text, /- button "Save" \[ref=e\d+\]/)
             assert.match(
@@ -2217,7 +2217,7 @@ export const contents = (
             const snapshot = yield* page.snapshot()
             assert.match(
               snapshot.text,
-              /- iframe "Payment" \[ref=e\d+\]:\n {4}- heading "Inner" \[ref=f1e\d+\]\n {4}- button "Add" \[ref=f1e\d+\]/
+              /- iframe "Payment" \[ref=e\d+\]:\n {4}- heading "Inner" \[level=1\] \[ref=f1e\d+\]\n {4}- button "Add" \[ref=f1e\d+\]/
             )
             const add = [...snapshot.refs].find(([ref, node]) =>
               ref.startsWith("f1") && node.role.role === "button"
