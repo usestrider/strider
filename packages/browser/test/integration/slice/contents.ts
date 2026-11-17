@@ -828,6 +828,93 @@ export const contents = (
           }
         }), timeout)
 
+      it.effect("an XPath locator from the page matches the elements of a union in document order", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* SharedContext.newPage
+          yield* page.goto(fixtureUrl(origin, "<ul><li id=\"three\">Three</li><li> One </li><li>  Two  </li></ul>"))
+          const items = page.locator(Locator.xpath("//li[normalize-space()='Two'] | //li[@id='three']"))
+          assert.strictEqual(yield* items.count, 2)
+          assert.strictEqual(yield* items.first.readText, "Three")
+          assert.strictEqual(yield* items.last.readText, "Two")
+        }), timeout)
+
+      it.effect("a chained XPath locator searches inside its scope, and other axes reach outside it", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* SharedContext.newPage
+          yield* page.goto(fixtureUrl(
+            origin,
+            "<ul id=\"a\"><li>A1</li></ul><ul id=\"b\"><li>B1</li><li>B2</li></ul>"
+          ))
+          assert.strictEqual(yield* page.locator(Locator.xpath("//li")).count, 3)
+          assert.strictEqual(yield* page.locator("#b").locator(Locator.xpath("//li")).count, 2)
+          assert.strictEqual(yield* page.locator("#b").locator(Locator.xpath("/li")).count, 2)
+          const parent = page.getByText("A1").locator(Locator.xpath(".."))
+          assert.deepStrictEqual(yield* parent.readAttribute("id"), Option.some("a"))
+          const next = page.locator("#a").locator(Locator.xpath("following-sibling::ul"))
+          assert.deepStrictEqual(yield* next.readAttribute("id"), Option.some("b"))
+        }), timeout)
+
+      it.effect("filter's has takes a relative XPath locator, evaluated from each candidate", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* SharedContext.newPage
+          yield* page.goto(fixtureUrl(
+            origin,
+            "<table><tr><td>Ann</td><td>Paid</td></tr><tr><td>Bob</td><td>Due</td></tr><tr><td>Paid</td><td>Cy</td></tr></table>"
+          ))
+          const paid = page.locator("tr").filter({ has: Locator.relative.locator(Locator.xpath("./td[2][.='Paid']")) })
+          assert.strictEqual(yield* paid.count, 1)
+          assert.strictEqual(yield* paid.locator("td").first.readText, "Ann")
+        }), timeout)
+
+      it.effect("an XPath locator after a frame boundary starts from the iframe's document", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* SharedContext.newPage
+          const child = fixtureUrl(origin, "<p>inside</p>")
+          yield* page.goto(fixtureUrl(origin, `<p>outside</p><iframe src="${child}"></iframe>`))
+          const inside = page.frame(page.locator("iframe")).locator(Locator.xpath("//p"))
+          assert.strictEqual(yield* inside.readText, "inside")
+          assert.strictEqual(yield* inside.count, 1)
+        }), timeout)
+
+      it.effect("an XPath locator keeps only the elements its expression selects", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* SharedContext.newPage
+          yield* page.goto(fixtureUrl(origin, "<ul><li id=\"one\">One</li><li>Two</li></ul>"))
+          assert.strictEqual(yield* page.locator(Locator.xpath("//li/text() | //li[@id='one']")).count, 1)
+          assert.strictEqual(yield* page.locator(Locator.xpath("//li/@id")).count, 0)
+        }), timeout)
+
+      it.effect("an XPath expression that is malformed or selects no nodes fails at once with InvalidInput", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* SharedContext.newPage
+          yield* page.goto(fixtureUrl(origin, "<ul><li>One</li></ul>"))
+          for (const expression of ["//li[", "count(//li)", "//svg:rect"]) {
+            for (
+              const locator of [
+                page.locator(Locator.xpath(expression)),
+                page.locator("#missing").locator(Locator.xpath(expression))
+              ]
+            ) {
+              const error = yield* locator.readText.pipe(Deadline.within("1 second"), Effect.flip)
+              assert(Locator.isLocatorError(error), String(error))
+              assert.strictEqual(error.reason._tag, "InvalidInput", expression)
+              if (error.reason._tag === "InvalidInput") {
+                assert.strictEqual(error.reason.input, "selector")
+                assert.strictEqual(error.reason.expected, "an XPath expression")
+              }
+            }
+          }
+          const error = yield* page.locator(Locator.xpath("count(//li)")).count.pipe(Effect.flip)
+          assert(Locator.isLocatorError(error), String(error))
+          assert.strictEqual(error.locator, "page.locator(Locator.xpath(\"count(//li)\"))")
+        }), timeout)
+
       it.effect("reads bounding boxes without visibility checks, scrolling or input", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
