@@ -489,7 +489,6 @@ describe("ProtocolClient", () => {
       }, CdpWire.wire)
       const fiber = yield* client.root.sendOrdered(click()).pipe(Effect.forkChild)
       const first = yield* browser.next
-      yield* Deferred.await(entered)
       yield* browser.receive({ id: first.id, error: { code: -32000, message: "rejected" } })
       yield* browser.delivered
       assert.isUndefined(fiber.pollUnsafe())
@@ -668,11 +667,9 @@ describe("ProtocolClient", () => {
       assert.deepStrictEqual(recorder.folded, ["1"])
     }))
 
-  it.effect("routes frameless input after a nested attachment already received on the parent session is folded", () =>
+  it.effect("routes frameless input after a nested attachment received on the parent session before the page's replies", () =>
     Effect.gen(function*() {
       const browser = yield* makeBrowser
-      const gate = yield* Deferred.make<void>()
-      const entered = yield* Deferred.make<void>()
       const original = makeFold().fold
       let addNested = () => {}
       const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire, {
@@ -687,8 +684,8 @@ describe("ProtocolClient", () => {
                 (params as Target.AttachedToTargetParams).sessionId !== "S3"
               ) return apply
               return Effect.gen(function*() {
-                yield* Deferred.succeed(entered, undefined)
-                yield* Deferred.await(gate)
+                // The fold takes some turns of the scheduler; a reply must not reach its caller first
+                for (let i = 0; i < 50; i++) yield* Effect.yieldNow
                 addNested()
                 yield* apply
               })
@@ -702,7 +699,10 @@ describe("ProtocolClient", () => {
       const id = "page-1" as L1Target.NavigableId
       const pageTarget = { targetId: "T-S1", session: pageSession }
       const parentTarget = { targetId: "T-S2", session: parentSession }
-      const page = { id, target: pageTarget, ended: false }
+      // A page whose initial sync is applied, as the input's page lookup waits for that
+      const ready = yield* Deferred.make<void>()
+      yield* Deferred.succeed(ready, undefined)
+      const page = { id, target: pageTarget, ended: false, ready }
       const rootFrame = { page, owner: pageTarget, parent: undefined }
       const parentFrame = { page, owner: parentTarget, parent: rootFrame }
       const frames = new Map<string, unknown>([["T-S1", rootFrame], ["T-S2", parentFrame]])
@@ -723,7 +723,6 @@ describe("ProtocolClient", () => {
           waitingForDebugger: false
         }
       })
-      yield* Deferred.await(entered)
       const input = yield* dispatchCdpInput(state, id, [{
         _tag: "Wheel",
         x: 150,
@@ -762,12 +761,9 @@ describe("ProtocolClient", () => {
           : {}
         return browser.receive({ id: command.id, sessionId: command.sessionId, result })
       }
-      // The page's hit test can finish while the parent session's fold is still pending.
-      for (let i = 0; i < 3; i++) yield* reply(yield* browser.next)
-      const next = yield* browser.next.pipe(Effect.forkChild)
-      for (let i = 0; i < 10; i++) yield* Effect.yieldNow
-      yield* Deferred.succeed(gate, undefined)
-      let command = yield* Fiber.join(next)
+      // The page's replies arrive after the nested attachment, so the input reads the frame tree only once that
+      // attachment is folded, though it was received on another session
+      let command = yield* browser.next
       while (command.method !== "Input.dispatchMouseEvent") {
         yield* reply(command)
         command = yield* browser.next

@@ -89,10 +89,9 @@ const framelessSession = Effect.fnUntraced(function*(state: State, page: PageEnt
   let sent: PointerTarget = { target: page.target, x: 0, y: 0 }
   while (true) {
     const target = sent.target
-    // Whether this session owns an out-of-process frame is read after every event already received on it is
-    // folded: a reply the caller acted on can arrive with, and be delivered before, a frame's attachment that came
-    // ahead of it, and a nested frame's attachment is folded on its parent frame's session
-    yield* target.session.drainObserved
+    // Whether this session owns an out-of-process frame is read from a state that holds every event received
+    // before the last reply, on any session: the protocol client hands over a reply only once those are folded, a
+    // nested frame's attachment on its parent frame's session included
     // Sessions are told apart by target id: a frame's owner and its page's target needn't be one entry
     const ownsRemote = [...state.frames.values()].some((each) =>
       each.page === page && each.owner.targetId !== target.targetId && each.parent?.owner.targetId === target.targetId

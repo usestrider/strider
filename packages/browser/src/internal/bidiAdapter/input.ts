@@ -31,9 +31,8 @@ export interface PointerTarget {
  * search where it is.
  */
 const framelessContext = Effect.fnUntraced(function*(state: State, page: NavigableEntry, x: number, y: number) {
-  // The frame tree is read after every event already received is folded: a reply the caller acted on can arrive
-  // with, and be delivered before, a frame's commit that came ahead of it
-  yield* state.root().drainObserved
+  // The frame tree read here holds every event received before the reply the caller acted on: the protocol client
+  // hands over a reply only once those are folded, a frame's commit included
   let sent: PointerTarget = { navigable: page, x: 0, y: 0, width: Infinity, height: Infinity }
   while (crossesOrigin(sent.navigable)) {
     const reply = yield* Kit.protocol(state.send(Script.callFunction({
