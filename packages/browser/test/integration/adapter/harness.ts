@@ -58,6 +58,11 @@ const routes: Record<string, Route> = {
     })
     response.end(new URL(request.url ?? "/", "http://site").searchParams.get("html") ?? "")
   },
+  // Any script: its source is the `js` parameter
+  "/script": (request, response) => {
+    response.writeHead(200, { "content-type": "text/javascript; charset=utf-8" })
+    response.end(new URL(request.url ?? "/", "http://site").searchParams.get("js") ?? "")
+  },
   // An error page: a commit with a status of 404
   "/missing": (_request, response) => html(response, `<title>missing</title><p>No such page</p>`, 404),
   "/204": (_request, response) => {
