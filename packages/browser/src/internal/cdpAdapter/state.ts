@@ -215,6 +215,8 @@ export interface NavigationEntry extends Kit.NavigationNode {
   readonly traversal: boolean
   documentHop: NetworkRequest.HopId | undefined
   status: number | undefined
+  /** Whether the document request's latest hop has had its response; a redirect starts a hop with none. */
+  responded: boolean
   failed: string | undefined
 }
 

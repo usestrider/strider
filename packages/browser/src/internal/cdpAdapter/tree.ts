@@ -200,6 +200,7 @@ export const startNavigation = (
     traversal: type === "traversal",
     documentHop: undefined,
     status: undefined,
+    responded: false,
     failed: undefined,
     ended: false
   }
