@@ -830,11 +830,17 @@ export const declarations = (
           )
         }), timeout)
 
+      // On Chromium the frame's document pauses on its parent's session, before the frame's own target attaches, and
+      // the frame's fetch on the frame's own session: the tag needs the route to reach both
       it.effect("routes a page with a cross-site iframe and releases the routes", () =>
         crossSiteFrame(
           (target, { crossSite }) =>
-            target.route(`${crossSite}/routed-frame*`, () =>
-              Route.fulfill(HttpServerResponse.html(`<script>window.__tag = 'routed'</script>${frameBody}`))),
+            target.route(`${crossSite}/routed-frame*`, ({ request }) =>
+              request.url.endsWith("/routed-frame-tag")
+                ? Route.fulfill(HttpServerResponse.text("routed"))
+                : Route.fulfill(HttpServerResponse.html(
+                  `${frameBody}<script>fetch('/routed-frame-tag').then((response) => response.text()).then((tag) => { window.__tag = tag; report() })</script>`
+                ))),
           tagged("routed"),
           (crossSite: string) =>
             `${crossSite}/routed-frame`
