@@ -234,6 +234,11 @@ server's `401` page.
 For WebM files, [enable PNG-polled video explicitly](/docs/browsers/webkit-video). It uses a supplied writer and
 a caller-owned directory, independently of downloads.
 
+**One CORS message is an uncaught exception.** WebKit sends "Fetch API cannot load … due to access control
+checks" as a script error, so it arrives as an [`UncaughtException`](/docs/events/events#history), with no
+[`source`](/docs/events/kinds#console-messages). Its other CORS and CSP messages are console messages from the
+browser. The capability `console.source` is `partial` here.
+
 **No downloads, file choosers, PDFs, or screencasts.** [`setInputFiles`](/docs/pages/actions#files) works. Screenshots are PNG.
 
 ## The raw protocol

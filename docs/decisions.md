@@ -1768,3 +1768,13 @@ command still unanswered sent waits for that reply by the same rule, rather than
 declaration, under the connection's own command deadline, and one that fails or never comes leaves the setting
 unknown, so the next change sends it again. Rejected: always awaiting the reply, which deadlocks with a held
 navigation, and never awaiting it, which leaves the setting unconfirmed when nothing stops the browser answering.
+
+## Console messages name their source in one shared set of categories
+
+A `ConsoleMessage` carries a `source`: `Page` for the page's own `console` calls, or `Browser` with a `category` from
+one set every browser shares (`network`, `security`, `deprecation`, `intervention`, `violation`, `rendering`,
+`storage`, `other`). The source follows from the event that delivered the message, not from which domains are enabled.
+Each adapter maps its browser's names onto the set, and what fits none is `other`, so a program can filter for
+`security` the same way on every browser. Rejected: keeping each browser's own name beside the category, which would
+make that name part of the API and tie a program to one browser's wording; and a default `source` on the
+constructor, which would be a hidden default, and wrong for the browser's own messages.

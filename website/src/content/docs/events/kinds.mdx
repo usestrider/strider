@@ -1,12 +1,13 @@
 ---
-title: Navigations, popups, dialogs, and downloads
+title: Navigations, popups, dialogs, downloads, and console messages
 description: The events an action most often causes.
 order: 2
 ---
 
-These four kinds of event have modules that add what each needs to the
+These five kinds of event have modules that add what each needs to the
 [`next`, `stream`, and `history`](/docs/events/events#next-stream-and-history) every event module has: a
-navigation's response, a popup's page, a handler for dialogs and file choosers, and a download's file.
+navigation's response, a popup's page, a handler for dialogs and file choosers, a download's file, and who wrote a
+console message.
 
 ## Navigations
 
@@ -166,3 +167,30 @@ const exportedHeader = Effect.fn("exportedHeader")(function*(page: Page.Page) {
   The default, a temporary directory, is removed with the context; a `{ directory }` of yours never is.
 - `saveAs` copies it out once complete; `stream` gives its bytes; `finished` waits for it to end.
 - WebKit reports no downloads: `Download.next` fails there with `Unsupported`.
+
+## Console messages
+
+A console message's `source` says who wrote it: `Page` for the page's own `console` calls, in the page or its
+workers, or `Browser` for what the browser writes there itself, with a `category` such as `security` for a Content
+Security Policy violation or `network` for a resource that failed to load. A test can check that a page broke no
+policy without matching on the text:
+
+```ts
+import { ConsoleMessage, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const securityMessages = Effect.fn("securityMessages")(
+  function*(page: Page.ObservedPage) {
+    const messages = yield* ConsoleMessage.history(page)
+    return messages.entries.filter((message) =>
+      message.source._tag === "Browser" && message.source.category === "security"
+    )
+  }
+)
+```
+
+The categories are one set for every browser, listed in
+[`ConsoleMessage.Category`](/docs/api/browser/ConsoleMessage#Category); what a browser sends that fits none is
+`other`. Firefox sends the browser's own messages as script errors, so they arrive as
+[uncaught exceptions](/docs/api/browser/UncaughtException) and every console message there is `Page`. WebKit
+does the same with "Fetch API cannot load … due to access control checks".
