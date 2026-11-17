@@ -407,8 +407,15 @@ export interface Queries<L> {
    */
   getByTestId(id: string): L
   /**
-   * Elements matching a CSS selector. A malformed selector fails with `InvalidInput` as soon as the locator is
-   * used, without waiting.
+   * Elements matching a CSS selector, or an XPath expression built with `Locator.xpath`. A malformed selector
+   * fails with `InvalidInput` as soon as the locator is used, without waiting.
+   *
+   * **Details**
+   *
+   * A string is always CSS, which searches open shadow roots too. An XPath expression is evaluated from the
+   * document, from a page or after `frame`, or from each element matched so far when chained. Chained, an
+   * expression that starts with `/` searches inside the element, so `//li` reads as `.//li`, while other axes,
+   * such as `..` or `following-sibling::`, reach wherever they lead. See `Locator.xpath` for the rest of its rules.
    *
    * **Example** (Submitting a form found by CSS)
    *
@@ -420,8 +427,20 @@ export interface Queries<L> {
    *   yield* page.locator("form#checkout button[type=submit]").click()
    * })
    * ```
+   *
+   * **Example** (Reading the row of a list item found by XPath)
+   *
+   * ```ts import.meta.vitest
+   * import { Locator, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const secondItem = Effect.fn("secondItem")(function*(page: Page.ReadonlyPage) {
+   *   const list = page.locator("ul#basket")
+   *   return yield* list.locator(Locator.xpath("//li[normalize-space()='Two']")).readText
+   * })
+   * ```
    */
-  locator(css: string): L
+  locator(selector: string | XPath): L
 }
 
 /**
@@ -1249,7 +1268,7 @@ export interface Locator extends ReadonlyLocator {
   getByAltText(text: string | RegExp, options?: TextOptions | undefined): Locator
   getByTitle(text: string | RegExp, options?: TextOptions | undefined): Locator
   getByTestId(id: string): Locator
-  locator(css: string): Locator
+  locator(selector: string | XPath): Locator
   frame(iframe: ReadonlyLocator): FrameLocator
   filter(options: FilterOptions): Locator
   and(other: ReadonlyLocator): Locator
@@ -1790,6 +1809,65 @@ export interface Locator extends ReadonlyLocator {
  */
 export const isLocator = (u: unknown): u is ReadonlyLocator => Predicate.hasProperty(u, TypeId)
 
+const XPathTypeId = "~@usestrider/browser/Locator/XPath"
+
+/**
+ * An XPath expression for `locator`, built with `Locator.xpath`, so it is never mistaken for CSS.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export interface XPath {
+  readonly [XPathTypeId]: typeof XPathTypeId
+  /** The expression, as given. */
+  readonly expression: string
+}
+
+/**
+ * An XPath expression for `locator`: elements it selects, in document order.
+ *
+ * **Details**
+ *
+ * The expression is evaluated with the browser's `document.evaluate`, and only the element nodes it selects are
+ * kept: text and attribute nodes are skipped. A union (`a | b`) matches the elements of both, in document order.
+ * From a page, or after `frame`, the expression starts from the document; chained after another query, it starts
+ * from each element matched so far, and one that starts with `/` searches inside it. It has no namespace prefixes:
+ * an unprefixed name matches an HTML element.
+ *
+ * An expression that doesn't parse, uses a prefix, or selects something other than nodes, such as `count(//li)`,
+ * fails with `InvalidInput` as soon as the locator is used, without waiting.
+ *
+ * **Gotchas**
+ *
+ * XPath can't see into shadow roots, so unlike CSS it never matches an element inside one.
+ *
+ * **Example** (Finding the items that are named Two or have the id three)
+ *
+ * ```ts import.meta.vitest
+ * import { Locator, Page } from "@usestrider/browser"
+ *
+ * const items = (page: Page.ReadonlyPage) =>
+ *   page.locator(Locator.xpath("//li[normalize-space()='Two'] | //li[@id='three']"))
+ * ```
+ *
+ * **Example** (Keeping the rows whose second cell says Paid)
+ *
+ * ```ts import.meta.vitest
+ * import { Locator, Page } from "@usestrider/browser"
+ *
+ * const paidRows = (page: Page.ReadonlyPage) =>
+ *   page.locator("tr").filter({
+ *     has: Locator.relative.locator(Locator.xpath("./td[2][.='Paid']"))
+ *   })
+ * ```
+ *
+ * @stability unstable
+ * @category constructors
+ * @since 0.1.0
+ */
+export const xpath = (expression: string): XPath => ({ [XPathTypeId]: XPathTypeId, expression })
+
 const RelativeLocatorTypeId = "~@usestrider/browser/Locator/RelativeLocator"
 
 /**
@@ -1905,7 +1983,7 @@ export interface FrameLocator extends ReadonlyFrameLocator {
   getByAltText(text: string | RegExp, options?: TextOptions | undefined): Locator
   getByTitle(text: string | RegExp, options?: TextOptions | undefined): Locator
   getByTestId(id: string): Locator
-  locator(css: string): Locator
+  locator(selector: string | XPath): Locator
   frame(iframe: ReadonlyLocator): FrameLocator
 }
 

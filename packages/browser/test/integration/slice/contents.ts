@@ -1078,9 +1078,17 @@ export const contents = (
             y: Math.min(...red.map((p) =>
               p.y
             )),
-            width: Math.max(...red.map((p) => p.x)) - Math.min(...red.map((p) => p.x)) +
+            width: Math.max(...red.map((p) =>
+              p.x
+            )) - Math.min(...red.map((p) =>
+              p.x
+            )) +
               1,
-            height: Math.max(...red.map((p) => p.y)) - Math.min(...red.map((p) => p.y)) + 1
+            height: Math.max(...red.map((p) =>
+              p.y
+            )) - Math.min(...red.map((p) =>
+              p.y
+            )) + 1
           }
           // Stock WebKit paints iframe contents differently from coincident slotted light-DOM boxes.
           // Native paint is the reference here; rasterized edges may differ by one pixel.
@@ -1192,7 +1200,9 @@ export const contents = (
               if (
                 !["scaling", "nested CSS zoom"].includes(rule.name) &&
                 (yield* frameRectRefused(target.boundingBox))
-              ) continue
+              ) {
+                continue
+              }
               const box = Option.getOrThrow(yield* target.boundingBox)
               for (const key of ["x", "y", "width", "height"] as const) {
                 assert.closeTo(box[key], expected[key], .05, `${rule.name} ${key}, scrolled=${scrolled}`)
@@ -1562,14 +1572,25 @@ export const contents = (
               assert.strictEqual(reason.exception.message, "boom")
             }
             const rejected = reasonOf(
-              yield* Effect.exit(evaluate(() => Promise.reject(new Error("later"))))
+              yield* Effect.exit(evaluate(() =>
+                Promise.reject(new Error("later"))
+              ))
             )
             assert.strictEqual((rejected as unknown as Page.PageError).reason._tag, "EvaluationThrown")
             const argument = reasonOf(
-              yield* Effect.exit(evaluate((value: unknown) => value, { fn: () => 1, nested: [Symbol("s")] }))
+              yield* Effect.exit(evaluate((value: unknown) =>
+                value, {
+                fn: () =>
+                  1,
+                nested: [Symbol("s")]
+              }))
             )
             assert.deepInclude((argument as unknown as Page.PageError).reason, { _tag: "NotSerializable" })
-            const node = reasonOf(yield* Effect.exit(evaluate(() => document.body as unknown)))
+            const node = reasonOf(
+              yield* Effect.exit(evaluate(() =>
+                document.body as unknown
+              ))
+            )
             const nodeReason = (node as unknown as Page.PageError).reason
             assert.strictEqual(nodeReason._tag, "NotSerializable")
           }))
@@ -1602,7 +1623,8 @@ export const contents = (
                 throw "Foo: bar"
               }
             ], (fn) =>
-              Effect.map(thrownBy(fn), (exception) => `${exception?.name}: ${exception?.message}`))
+              Effect.map(thrownBy(fn), (exception) =>
+                `${exception?.name}: ${exception?.message}`))
             assert.deepStrictEqual(thrown, [
               "Error: qwerty",
               "Error: null",
@@ -1683,15 +1705,27 @@ export const contents = (
               yield* isolatedRefused(page.evaluateHandle(() =>
                 document.body
               ))
-            ) return
-            const body = yield* page.evaluateHandle(() => document.body)
+            ) {
+              return
+            }
+            const body = yield* page.evaluateHandle(() =>
+              document.body
+            )
             assert.isTrue(JSHandle.isJSHandle(body))
-            assert.strictEqual(yield* body.evaluate((element) => element.tagName), "BODY")
             assert.strictEqual(
-              yield* body.evaluate((element, id: string) => element.querySelector(`#${id}`)!.textContent, "x"),
+              yield* body.evaluate((element) =>
+                element.tagName
+              ),
+              "BODY"
+            )
+            assert.strictEqual(
+              yield* body.evaluate((element, id: string) =>
+                element.querySelector(`#${id}`)!.textContent, "x"),
               "hello"
             )
-            const paragraph = yield* body.evaluateHandle((element) => element.querySelector("p")!)
+            const paragraph = yield* body.evaluateHandle((element) =>
+              element.querySelector("p")!
+            )
             assert.strictEqual(yield* paragraph.evaluate((element) => element.id), "x")
             const data = yield* page.evaluateHandle(() => ({ a: 1, list: [1, 2] }))
             assert.deepStrictEqual(yield* data.read, { a: 1, list: [1, 2] })
@@ -2656,9 +2690,7 @@ export const contents = (
             // The loopback origin is a secure context over http, so a request to it sends a Secure cookie
             yield* jar.set({ name: "safe", value: "3", scope: { url: origin }, secure: true })
             const all = yield* jar.list
-            const token = all.find((cookie) =>
-              cookie.name === "token"
-            )!
+            const token = all.find((cookie) => cookie.name === "token")!
             assert.strictEqual(Redacted.value(token.value), "secret")
             assert.strictEqual(token.path, "/app")
             assert.deepStrictEqual(token.sameSite, Option.some("lax"))

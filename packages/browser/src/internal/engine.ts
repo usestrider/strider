@@ -60,6 +60,8 @@ export type Step =
   | { readonly _tag: "Title"; readonly matcher: TextMatcher }
   | { readonly _tag: "TestId"; readonly id: string }
   | { readonly _tag: "Css"; readonly selector: string }
+  /** An XPath expression's element nodes, from the document or, chained, from each element so far. */
+  | { readonly _tag: "XPath"; readonly expression: string }
   | { readonly _tag: "Nth"; readonly index: number }
   | { readonly _tag: "First" }
   | { readonly _tag: "Last" }
@@ -448,7 +450,7 @@ export const Response = Schema.Union([
   Schema.TaggedStruct("InvalidSelector", {
     selector: Schema.String,
     message: Schema.String,
-    kind: Schema.optionalKey(Schema.Literal("role"))
+    kind: Schema.optionalKey(Schema.Literals(["role", "xpath"]))
   }),
   Schema.TaggedStruct("Title", { title: Schema.String }),
   Schema.TaggedStruct("Roles", {
@@ -605,7 +607,11 @@ export function engine(render: (root: SnapNode) => string) {
     elementFromPoint: method(Document.prototype, "elementFromPoint"),
     elementsFromPoint: method(Document.prototype, "elementsFromPoint"),
     documentFirstElementChild: getter(Document.prototype, "firstElementChild"),
-    documentQuerySelectorAll: method(Document.prototype, "querySelectorAll")
+    documentQuerySelectorAll: method(Document.prototype, "querySelectorAll"),
+    createElement: method(Document.prototype, "createElement"),
+    evaluate: method(Document.prototype, "evaluate"),
+    snapshotLength: getter(XPathResult.prototype, "snapshotLength"),
+    snapshotItem: method(XPathResult.prototype, "snapshotItem")
   }
   // The labelable elements, each with its own `labels` getter
   const nativeLabels = [
@@ -1731,7 +1737,7 @@ export function engine(render: (root: SnapNode) => string) {
   // Queries
   interface InvalidSelector {
     readonly invalidSelector: true
-    readonly kind?: "role" | undefined
+    readonly kind?: "role" | "xpath" | undefined
     readonly selector: string
     readonly message: string
   }
@@ -1811,8 +1817,41 @@ export function engine(render: (root: SnapNode) => string) {
   const documentElements = (): Array<Element> =>
     treeScope === null ? elementsUnder(document) : (treeScope.elements ??= elementsUnder(document))
 
+  /**
+   * An XPath expression's element nodes from `context`, in document order. Chained, an expression that starts with
+   * `/` is read from the element, as `.//li` for `//li`, so it searches inside as CSS does.
+   */
+  const xpathQuery = (context: Node, expression: string): Array<Element> => {
+    const source = context === document || !expression.startsWith("/") ? expression : `.${expression}`
+    let result: XPathResult
+    try {
+      result = dom.evaluate(document, source, context, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null)
+    } catch (error) {
+      throw {
+        invalidSelector: true,
+        kind: "xpath",
+        selector: expression,
+        message: error instanceof Error ? error.message : String(error)
+      } satisfies InvalidSelector
+    }
+    const found: Array<Element> = []
+    for (let index = 0, length = dom.snapshotLength(result); index < length; index++) {
+      const node = dom.snapshotItem(result, index)
+      if (node !== null && dom.nodeType(node) === Node.ELEMENT_NODE) found.push(node as Element)
+    }
+    return found
+  }
+
+  /**
+   * The XPath expressions this engine has checked, and the detached element it checks them from at no cost (an
+   * element, since Firefox refuses a text node as the context node).
+   */
+  const checkedXPaths = new Set<string>()
+  let xpathProbe: Element | undefined
+
   /** The candidates of one query under `scope`, in tree order. */
   const query = (scope: Document | Element, step: Step): Array<Element> => {
+    if (step._tag === "XPath") return xpathQuery(scope, step.expression)
     const under = scope === document ? documentElements() : elementsUnder(scope)
     switch (step._tag) {
       case "Css": {
@@ -1919,6 +1958,14 @@ export function engine(render: (root: SnapNode) => string) {
           }
           break
         }
+        case "XPath":
+          // Parsed and type-checked once, from a detached node, so an empty scope still fails and no document is
+          // searched to do it
+          if (!checkedXPaths.has(step.expression)) {
+            xpathQuery(xpathProbe ??= dom.createElement(document, "div"), step.expression)
+            checkedXPaths.add(step.expression)
+          }
+          break
         case "Filter":
           if (step.has !== null) validateSteps(step.has)
           if (step.hasNot !== null) validateSteps(step.hasNot)

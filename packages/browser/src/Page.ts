@@ -799,7 +799,7 @@ export interface Page extends ReadonlyPage {
   getByAltText(text: string | RegExp, options?: Locator.TextOptions | undefined): Locator.Locator
   getByTitle(text: string | RegExp, options?: Locator.TextOptions | undefined): Locator.Locator
   getByTestId(id: string): Locator.Locator
-  locator(css: string): Locator.Locator
+  locator(selector: string | Locator.XPath): Locator.Locator
   frame(iframe: Locator.ReadonlyLocator): Locator.FrameLocator
   snapshot(
     options?: Snapshot.Options | undefined

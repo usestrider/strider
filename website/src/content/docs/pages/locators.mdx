@@ -41,6 +41,7 @@ that replaces the built-ins it uses can change what queries find.
 | `getByTitle(text)`                   | elements whose `title` matches                                 |
 | `getByTestId(id)`                    | elements whose `data-testid` is `id`                           |
 | `locator(css)`                       | elements matching a CSS selector                               |
+| `locator(Locator.xpath(expression))` | elements an XPath expression selects                           |
 
 Prefer `getByRole`: roles and names are what assistive technology sees, and they survive changes to markup and
 classes. An accessible name is what a screen reader announces for an element: a button's text, a field's label, or
@@ -49,6 +50,38 @@ its `aria-label`. They're computed by [HTML-AAM](https://www.w3.org/TR/html-aam-
 
 A malformed CSS selector fails with [`InvalidInput`](/docs/errors#three-kinds-of-failure) when used, without
 waiting.
+
+## XPath
+
+`Locator.xpath` wraps an XPath expression so `locator` reads it as XPath rather than CSS. It keeps the elements the
+expression selects, in document order, and skips text and attribute nodes. From a page it starts at the document.
+Chained after another query, it starts at each match, and an expression that starts with `/` searches inside it,
+so `//li` reads as `.//li`. Other axes, such as `..`, reach wherever they lead:
+
+```ts
+import { Locator, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const readOrder = Effect.fn("readOrder")(function*(page: Page.ReadonlyPage) {
+  const items = page.locator(
+    Locator.xpath("//li[normalize-space()='Two'] | //li[@id='three']")
+  )
+  const inBasket = page.locator("ul#basket").locator(Locator.xpath("//li")) // only the basket's items
+  const basket = page.getByText("Two").locator(Locator.xpath("..")) // the item's list
+  const paid = page.locator("tr").filter({
+    has: Locator.relative.locator(Locator.xpath("./td[2][.='Paid']"))
+  })
+  return [
+    yield* items.count,
+    yield* inBasket.count,
+    yield* basket.count,
+    yield* paid.count
+  ]
+})
+```
+
+XPath can't see into shadow roots, and names take no namespace prefix. An expression that doesn't parse, uses a
+prefix, or doesn't select nodes, such as `count(//li)`, fails with `InvalidInput` when used, without waiting.
 
 ## Matching text
 
