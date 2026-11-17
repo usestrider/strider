@@ -8,13 +8,13 @@ import * as Runtime from "../src/cdp/Runtime.ts"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as Kit from "../src/internal/adapterKit.ts"
 import * as Evaluation from "../src/internal/cdpAdapter/evaluation.ts"
+import * as CdpBridge from "../src/internal/cdpAdapter/hostBridge.ts"
 import * as CdpState from "../src/internal/cdpAdapter/state.ts"
-import { installWebSocketGates } from "../src/internal/cdpAdapter/targets.ts"
-import * as CdpBridge from "../src/internal/cdpAdapter/webSocketBridge.ts"
+import { installHostBridgeGates } from "../src/internal/cdpAdapter/targets.ts"
 import type * as ProtocolClient from "../src/internal/protocolClient.ts"
 import * as Console from "../src/internal/webkitAdapter/console.ts"
+import * as Bridge from "../src/internal/webkitAdapter/hostBridge.ts"
 import * as State from "../src/internal/webkitAdapter/state.ts"
-import * as Bridge from "../src/internal/webkitAdapter/webSocketBridge.ts"
 import * as Target from "../src/Target.ts"
 import * as UserContext from "../src/UserContext.ts"
 
@@ -26,7 +26,7 @@ it.effect("installs CDP gate overrides only on the requesting context and restor
     assert.strictEqual(first.gate, gate)
     assert.isFalse(Object.hasOwn(first, "gate"))
     const scope = yield* Scope.make()
-    yield* installWebSocketGates(first, scope, true)
+    yield* installHostBridgeGates(first, scope, true)
     assert.notStrictEqual(first.gate, gate)
     assert.notStrictEqual(first.workerGate, worker)
     assert.strictEqual(sibling.gate, gate)
@@ -44,7 +44,7 @@ it.effect("keeps the WebKit default console table intact and scopes filtering an
     const facts: Array<Adapter.Fact> = []
     const handlers = Console.register(Kit.handlers<State.Event>())
     const scope = yield* Scope.make()
-    let live: ReadonlyArray<Adapter.WebSocketBridge> = []
+    let live: ReadonlyArray<Adapter.HostBridge> = []
     let ended = 0, received = 0
     const session = {} as ProtocolClient.Session
     const state = {
@@ -52,7 +52,7 @@ it.effect("keeps the WebKit default console table intact and scopes filtering an
       buffer: { emit: (fact: Adapter.Fact) => facts.push(fact) },
       workers: new Map(),
       realmsByContext: new Map(),
-      registry: { bundles: () => new Map([["", { webSockets: live }]]) }
+      registry: { bundles: () => new Map([["", { hostBridges: live }]]) }
     } as unknown as State.State
     const make = () => {
       const page = { id: ids.navigable(), context: { id: ids.userContext() }, session } as State.PageEntry
@@ -80,7 +80,7 @@ it.effect("keeps the WebKit default console table intact and scopes filtering an
     const ordinary = { message: { source: "console-api", level: "debug", text: "ordinary" } }
     sibling.target.event.handlers.apply("Console.messageAdded", ordinary, sibling.target.event)
     assert.strictEqual(facts.length, 1)
-    const bridge: Adapter.WebSocketBridge = {
+    const bridge: Adapter.HostBridge = {
       name: "private",
       token: "token",
       scope,

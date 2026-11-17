@@ -171,7 +171,7 @@ export const expose = <A extends ReadonlyArray<unknown>, B, E, R>(
       yield* Handlers.report(`Binding "${name}" handler failed`, exit.cause)
       yield* settle(realm, call.id, false, `Binding "${name}" handler failed`)
     })
-    const bridge: Adapter.WebSocketBridge = {
+    const bridge: Adapter.HostBridge = {
       name: bridgeName,
       token,
       scope: bridgeScope,
@@ -280,7 +280,7 @@ export const expose = <A extends ReadonlyArray<unknown>, B, E, R>(
           workers: false,
           timing: adapter.info.protocol === "webkit" ? "bestEffort" : "beforeAuthorScript",
           after: [],
-          webSocket: bridge
+          hostBridge: bridge
         }
       ).pipe(Scope.provide(bridgeScope))
       // Documents already open get the binding now; the declaration covers the ones that follow.

@@ -10,6 +10,7 @@ import * as L1Target from "../../Target.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as Urls from "../urls.ts"
+import * as HostBridge from "./hostBridge.ts"
 import { releaseDocument } from "./responses.ts"
 import {
   ContextEntry,
@@ -25,7 +26,6 @@ import {
   type State,
   type TargetEntry
 } from "./state.ts"
-import * as WebSocketBridge from "./webSocketBridge.ts"
 
 // ── Ending things ─────────────────────────────────────────────────────────────────────────────────────────
 
@@ -79,7 +79,7 @@ export const adoptPending = (state: State, frame: FrameEntry, document: Document
       origin: realm.origin,
       kind: { _tag: "Window", navigable: frame.id, document: document.id, world: realm.world }
     })
-    WebSocketBridge.flush(state, realm.target)
+    HostBridge.flush(state, realm.target)
   }
 }
 
