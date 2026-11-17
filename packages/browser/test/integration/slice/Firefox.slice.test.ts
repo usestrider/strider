@@ -27,6 +27,7 @@ import { storageReplacement } from "./storageReplacement.ts"
 import { tooling } from "./tooling.ts"
 import { toolkit } from "./toolkit.ts"
 import { webauthn } from "./webauthn.ts"
+import { clientCertificates } from "./clientCertificates.ts"
 
 // Firefox keeps about 10 MB per window opened and closed, so a suite's browser is replaced after 100 pages when the shared context settles with nothing live (recycledBrowser.ts); suites that don't settle keep theirs.
 // STRIDER_FIREFOX_RECYCLE_PAGES=0 turns the replacement off, to measure the growth it prevents.
@@ -69,3 +70,4 @@ storageReplacement("Firefox", backend)
 requestSizes("Firefox", backend)
 
 stalledReadProbes("Firefox", backend)
+clientCertificates("Firefox", backend)

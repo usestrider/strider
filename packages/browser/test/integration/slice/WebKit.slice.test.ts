@@ -28,6 +28,7 @@ import { storageReplacement } from "./storageReplacement.ts"
 import { tooling } from "./tooling.ts"
 import { toolkit } from "./toolkit.ts"
 import { webauthn } from "./webauthn.ts"
+import { clientCertificates } from "./clientCertificates.ts"
 
 // The X server comes up before the browser, and goes after it
 const display = Layer.effectDiscard(useXvfb()).pipe(Layer.provide(NodeServices.layer))
@@ -61,3 +62,4 @@ requestTiming("WebKit", backend)
 
 storageReplacement("WebKit", backend)
 requestSizes("WebKit", backend)
+clientCertificates("WebKit", backend)

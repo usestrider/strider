@@ -25,6 +25,7 @@ import { storageReplacement } from "./storageReplacement.ts"
 import { tooling } from "./tooling.ts"
 import { toolkit } from "./toolkit.ts"
 import { webauthn } from "./webauthn.ts"
+import { clientCertificates } from "./clientCertificates.ts"
 
 const backend = Chromium.layer({ executablePath: chromium.executable }).pipe(Layer.provide(NodeServices.layer))
 
@@ -57,3 +58,4 @@ storageReplacement("Chromium", backend)
 requestSizes("Chromium", backend)
 
 stalledReadProbes("Chromium", backend)
+clientCertificates("Chromium", backend)
