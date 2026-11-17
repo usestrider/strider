@@ -25,6 +25,7 @@ import * as Handlers from "./handlers.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import type * as Runtime from "./runtime.ts"
+import * as Serialization from "./serialization.ts"
 
 /** The page side. This function is serialized; it must not close over host code. */
 export const install = (name: string, bridge: string, token: string, transport: string) => {
@@ -37,18 +38,94 @@ export const install = (name: string, bridge: string, token: string, transport: 
   const debug = global.console.debug.bind(global.console)
   const send = (payload: string) =>
     transport === "console" ? debug({ __striderWebSocket: token, payload }) : global[bridge](payload)
+  const { Array: ArrayType, Date: DateType, Map: MapType, Number: NumberType, Object: ObjectType } = global
+  const { RegExp: RegExpType, Set: SetType, WeakMap: WeakMapType, WeakSet: WeakSetType } = global
+  const NodeType = global.Node
+  const isArray = ArrayType.isArray
+  const keys = ObjectType.keys
+  // The values page.evaluate passes, as the remote values the host decodes them from.
+  class Unserializable {
+    readonly message: string
+    constructor(path: string, hint: string) {
+      this.message = `Not serializable at ${path} (${hint})`
+    }
+  }
+  const encode = (value: any, path: string, seen: Set<object>): unknown => {
+    switch (typeof value) {
+      case "undefined":
+        return { type: "undefined" }
+      case "string":
+      case "boolean":
+        return { type: typeof value, value }
+      case "number":
+        return {
+          type: "number",
+          value: NumberType.isNaN(value)
+            ? "NaN"
+            : ObjectType.is(value, -0)
+            ? "-0"
+            : value === Infinity
+            ? "Infinity"
+            : value === -Infinity
+            ? "-Infinity"
+            : value
+        }
+      case "bigint":
+        return { type: "bigint", value: String(value) }
+      case "function":
+      case "symbol":
+        throw new Unserializable(path, "Functions and symbols don't cross by value")
+    }
+    if (value === null) return { type: "null" }
+    if (typeof NodeType === "function" && value instanceof NodeType) {
+      throw new Unserializable(path, "DOM nodes don't cross by value")
+    }
+    if (value instanceof P || value instanceof WeakMapType || value instanceof WeakSetType) {
+      throw new Unserializable(path, "Promises and weak collections don't cross by value; pass their data instead")
+    }
+    if (seen.has(value)) throw new Unserializable(path, "The value refers to itself, which can't cross by value")
+    seen.add(value)
+    try {
+      if (value instanceof DateType) return { type: "date", value: value.toISOString() }
+      if (value instanceof RegExpType) return { type: "regexp", value: { pattern: value.source, flags: value.flags } }
+      if (isArray(value)) {
+        return { type: "array", value: value.map((item: unknown, i: number) => encode(item, `${path}[${i}]`, seen)) }
+      }
+      if (value instanceof SetType) {
+        return { type: "set", value: [...value].map((item, i) => encode(item, `${path}[${i}]`, seen)) }
+      }
+      if (value instanceof MapType) {
+        return {
+          type: "map",
+          value: [...value].map(([key, item], i) => [
+            typeof key === "string" ? key : encode(key, `${path}[${i}][0]`, seen),
+            encode(item, `${path}[${i}][1]`, seen)
+          ])
+        }
+      }
+      return {
+        type: "object",
+        value: keys(value).map((key: string) => [key, encode(value[key], `${path}.${key}`, seen)])
+      }
+    } finally {
+      seen.delete(value)
+    }
+  }
   const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: unknown) => void }>()
   let next = 0
   let live = true
   const call = (...args: Array<unknown>) =>
     new P((resolve: (value: unknown) => void, reject: (error: unknown) => void) => {
       if (!live) return reject(new E(`Binding "${name}" was removed`))
+      if (pending.size >= 4096) {
+        return reject(new E(`Binding "${name}" has 4096 calls waiting for their answer; await some first`))
+      }
       const id = ++next
       let payload: string
       try {
-        payload = stringify({ id, args })
-      } catch (error) {
-        return reject(error)
+        payload = stringify({ id, args: encode(args, "args", new Set()) })
+      } catch (error: any) {
+        return reject(error instanceof Unserializable ? new E(error.message) : error)
       }
       pending.set(id, { resolve, reject })
       send(payload)
@@ -82,7 +159,7 @@ const keyOf = (token: string) => `globalThis[Symbol.for(${JSON.stringify("stride
 /** The names exposed in a context, by the context or by one of its pages. */
 const exposed = new WeakMap<Model.ContextEntry, { context: Set<string>; pages: Map<Target.NavigableId, Set<string>> }>()
 
-const Call = Schema.fromJsonString(Schema.Struct({ id: Schema.Number, args: Schema.Unknown }))
+const Call = Schema.fromJsonString(Schema.Struct({ id: Schema.Number, args: Schema.Any }))
 
 const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : typeof error === "string" ? error : String(error)
@@ -145,21 +222,49 @@ export const expose = <A extends ReadonlyArray<unknown>, B, E, R>(
       readonly source: Binding.Source
       readonly ownership: { readonly isAlive: () => boolean; readonly release?: Effect.Effect<void> | undefined }
     }
-    // Calls whose answer hasn't been settled: a page that floods a binding is refused past this bound.
+    // Calls whose answer hasn't been settled. Each document bounds its own (`install`), so none is refused here.
     const calls = new Set<Call>()
     const incoming = yield* Queue.unbounded<Call>()
-    const settle = (realm: Target.RealmId, id: number, ok: boolean, value: unknown) =>
-      adapter.evaluate(realm, {
-        functionDeclaration: `() => { ${keyOf(token)}?.settle(${id}, ${ok}, ${JSON.stringify(value) ?? "undefined"}) }`,
-        arguments: [],
+    const settle = (realm: Target.RealmId, id: number, ok: boolean, value: unknown) => {
+      let remote: Adapter.RemoteValue
+      try {
+        remote = Serialization.toRemote(value, "result")
+      } catch (error) {
+        if (!(error instanceof Serialization.Unserializable)) throw error
+        ok = false
+        remote = { type: "string", value: new Reason.NotSerializable({ path: error.path, hint: error.hint }).message }
+      }
+      return adapter.evaluate(realm, {
+        functionDeclaration: `(id, ok, value) => { ${keyOf(token)}?.settle(id, ok, value) }`,
+        arguments: [
+          { _tag: "Value", value: { type: "number", value: id } },
+          { _tag: "Value", value: { type: "boolean", value: ok } },
+          { _tag: "Value", value: remote }
+        ],
         awaitPromise: false,
         result: "value",
         userActivation: false
       }).pipe(Effect.asVoid)
+    }
     const answer = Effect.fnUntraced(function*(realm: Target.RealmId, payload: string, source: Binding.Source) {
       const call = yield* Schema.decodeUnknownEffect(Call)(payload)
-      const args = yield* Schema.decodeUnknownEffect(schemas.arguments)(call.args).pipe(Effect.exit)
-      if (Exit.isFailure(args)) return yield* settle(realm, call.id, false, Cause.pretty(args.cause))
+      let given: unknown
+      try {
+        given = Serialization.fromRemote(call.args, "args")
+      } catch (error) {
+        if (!(error instanceof Serialization.Unserializable)) throw error
+        return yield* settle(
+          realm,
+          call.id,
+          false,
+          new Reason.NotSerializable({ path: error.path, hint: error.hint }).message
+        )
+      }
+      const args = yield* Schema.decodeUnknownEffect(schemas.arguments)(given).pipe(Effect.exit)
+      if (Exit.isFailure(args)) {
+        const issue = Cause.findErrorOption(args.cause)
+        return yield* settle(realm, call.id, false, Option.isSome(issue) ? issue.value.message : "Invalid arguments")
+      }
       const exit = yield* handler(args.value, source).pipe(
         Effect.flatMap(Schema.encodeEffect(schemas.result)),
         Effect.provideContext(services),
@@ -178,7 +283,6 @@ export const expose = <A extends ReadonlyArray<unknown>, B, E, R>(
       captured: (_realm, handle) => adapter.releaseHandles([handle]).pipe(Effect.ignore),
       receive: (realm, payload, origin, ownership) => {
         if (!live || !ownership.isAlive() || origin._tag !== "Frame") return false
-        if (calls.size >= 4096) return false
         const call: Call = { realm, payload, source: { page: origin.page, frame: origin.frame }, ownership }
         calls.add(call)
         Queue.offerUnsafe(incoming, call)
