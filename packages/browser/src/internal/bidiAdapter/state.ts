@@ -61,14 +61,21 @@ export interface NavigableEntry extends Kit.NavigableNode<NavigableEntry> {
    * them, including a same-name sandbox that arrives before the main realm.
    */
   readonly pendingRealms: Array<RealmEntry>
-  /** The traversal eligible to observe a restoration, from command issuance until invalidation. */
+  /**
+   * The traversal eligible to observe a restoration, from command issuance until its own navigation ends or it is
+   * cancelled.
+   */
   restoring: {
     readonly navigation: PageNavigation.Id
     readonly arrived: (realm: RealmEntry) => void
     /** Only events received before this reply may claim the same-document traversal. */
     readonly sameDocumentThrough?: number | undefined
   } | undefined
-  /** An invalidated traversal may still produce a realm; only an observed commit resets this ambiguity. */
+  /**
+   * Set when a pending restoration is cancelled or its own navigation ends any way but in the same document, since that
+   * traversal may still produce a realm, such as a failed navigation's error page; one that ended in the same document
+   * leaves it unset. Only an observed commit resets this ambiguity.
+   */
   restorationAmbiguous: boolean
   /** Traversal commands awaiting replies or their observation drain, including invalidated owners. */
   readonly traversalCommands: Set<PageNavigation.Id>

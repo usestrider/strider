@@ -476,6 +476,41 @@ describe("BidiAdapter state", () => {
       }))
   }
 
+  for (const event of ["historyUpdated", "fragmentNavigated"] as const) {
+    it.effect(`correlates two consecutive same-document traversals through ${event}`, () =>
+      Effect.gen(function*() {
+        const urls = ["about:blank#first", "about:blank#second"]
+        let step = 0
+        const { facts, page, state } = yield* withPage({
+          // Each traversal's own event arrives before its reply, as Firefox sends them.
+          "browsingContext.traverseHistory": Effect.sync(() => {
+            handlers.apply(
+              `browsingContext.${event}`,
+              { context: page.bidi, url: urls[step++]!, timestamp: step },
+              { state }
+            )
+            return {}
+          })
+        })
+        const handlers = Navigation.register(Kit.handlers<State.Event>())
+        const first = yield* Navigation.traverse(state, page.id, -1)
+        const second = yield* Navigation.traverse(state, page.id, -1)
+        yield* state.buffer.flush
+        assert(Option.isSome(first) && Option.isSome(second))
+        for (const [index, traversal] of [first.value, second.value].entries()) {
+          const ends = facts.filter((fact) => fact._tag === "NavigationEnded" && fact.navigation === traversal)
+          assert.lengthOf(ends, 1, `traversal ${index + 1} ended under its own id`)
+          assert.deepStrictEqual(ends[0]!._tag === "NavigationEnded" && ends[0]!.outcome, {
+            _tag: "SameDocument",
+            document: page.document!.id,
+            via: event === "fragmentNavigated" ? "fragment" : "historyApi"
+          })
+        }
+        assert.strictEqual(page.document!.url, urls[1])
+        assert.isEmpty(page.expected.list)
+      }))
+  }
+
   it.effect("claims a same-document event received before the traversal's reply but folded after it", () =>
     Effect.gen(function*() {
       // The protocol client resolves a reply in its reader, but folds the events received before it in a
@@ -1319,6 +1354,55 @@ describe("BidiAdapter state", () => {
         facts.filter((fact) => fact._tag === "NavigationStarted" && fact.navigation === navigation.value),
         0,
         "the second traversal must not claim a realm the announced one may own"
+      )
+    }))
+
+  it.effect("does not give a failed traversal's pending error realm to the next traversal", () =>
+    Effect.gen(function*() {
+      // Synthetic ordering: failure can precede an error document's realm and commit. A second command
+      // does not establish that a pending realm belongs to it rather than that failed navigation.
+      const url = "http://failed.example/"
+      const errorUrl = "about:neterror?e=dnsNotFound&u=http%3A//failed.example/"
+      let calls = 0
+      const { facts, page, state } = yield* withPage({
+        "browsingContext.traverseHistory": Effect.sync(() => {
+          if (calls++ === 0) {
+            handlers.apply("browsingContext.navigationStarted", {
+              context: page.bidi,
+              navigation: "failed",
+              url,
+              timestamp: 1
+            }, { state })
+            handlers.apply("browsingContext.navigationFailed", {
+              context: page.bidi,
+              navigation: "failed",
+              url,
+              timestamp: 2
+            }, { state })
+          } else {
+            handlers.apply("script.realmCreated", {
+              realm: "error-realm",
+              context: page.bidi,
+              type: "window",
+              origin: "null"
+            }, { state })
+          }
+          return {}
+        }),
+        "script.evaluate": { type: "success", realm: "error-realm", result: { type: "string", value: errorUrl } }
+      })
+      const handlers = Evaluation.register(Navigation.register(Kit.handlers<State.Event>()))
+      const first = yield* Navigation.traverse(state, page.id, -1)
+      const second = yield* Navigation.traverse(state, page.id, -1)
+      assert(Option.isSome(first) && Option.isSome(second))
+      yield* state.buffer.flush
+      const failed = facts.filter((fact) => fact._tag === "NavigationEnded" && fact.navigation === first.value)
+      assert.lengthOf(failed, 1)
+      assert(failed[0]!._tag === "NavigationEnded" && failed[0]!.outcome._tag === "Failed")
+      assert.lengthOf(
+        facts.filter((fact) => fact._tag === "NavigationEnded" && fact.navigation === second.value),
+        0,
+        "a failed navigation's error realm cannot prove the next traversal committed"
       )
     }))
 
