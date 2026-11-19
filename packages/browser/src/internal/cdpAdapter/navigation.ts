@@ -177,6 +177,8 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         state.buffer.emit({ _tag: "DocumentReadiness", document: document.id, readiness: "interactive" })
       } else if (params.name === "load") {
         state.buffer.emit({ _tag: "DocumentReadiness", document: document.id, readiness: "complete" })
+      } else if (params.name === "firstPaint") {
+        document.painted = true
       }
     })
 

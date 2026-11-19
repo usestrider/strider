@@ -185,6 +185,11 @@ export interface DocumentEntry {
   loaderId: string | undefined
   url: string
   generation: number
+  /**
+   * Whether the document has been drawn: Chromium reports its `firstPaint` lifecycle event once the frame's first
+   * paint has been presented, and input routed by the browser's hit-test data reaches an out-of-process frame from then.
+   */
+  painted: boolean
   readonly realms: Set<RealmEntry>
 }
 

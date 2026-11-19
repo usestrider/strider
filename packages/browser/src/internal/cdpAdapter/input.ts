@@ -245,10 +245,17 @@ interface Aimed extends PointerTarget {
  * element of a frame another session owns (`DOM.describeNode`), input goes on that session, from the element's
  * content box (`DOM.getBoxModel`). A session that owns no out-of-process frame of the page is read no further, so a
  * page without one costs no call, a point outside its out-of-process frames one call in an operation, and a point
- * inside three more for each level. A point that hits nothing ends the search where it is.
+ * inside three more for each level. A point that hits nothing ends the search where it is. While every
+ * out-of-process frame of the page has been drawn (`painted`), Chromium's own routing reaches each, and input goes on
+ * the page's session with no call.
  */
 const framelessSession = Effect.fnUntraced(function*(state: State, page: PageEntry, x: number, y: number) {
   let sent: Aimed = { target: page.target, x: 0, y: 0 }
+  const drawn = [...state.frames.values()].every((each) =>
+    each.page !== page || each.parent === undefined || each.owner.targetId === each.parent.owner.targetId ||
+    each.document?.painted === true
+  )
+  if (drawn) return sent
   while (true) {
     const target = sent.target
     // Whether this session owns an out-of-process frame is read from a state that holds every event received

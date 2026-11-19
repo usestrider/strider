@@ -170,6 +170,7 @@ export const commit = (
     loaderId: snapshot.loaderId,
     url: snapshot.url,
     generation: 0,
+    painted: false,
     realms: new Set()
   }
   state.documents.set(document.id, document)
