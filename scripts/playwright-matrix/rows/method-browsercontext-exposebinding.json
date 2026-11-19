@@ -16,7 +16,7 @@
       "url": "/docs/api/browser/Binding#Source"
     }
   ],
-  "notes": "The handler gets the calling page and frame (Binding.Source) rather than Playwright's page, frame and context objects. Arguments and result cross by value through Schemas, and the handler returns an Effect; registration is scoped.",
+  "notes": "The handler gets the calling page and frame (Binding.Source) rather than Playwright's page, frame and context objects. Arguments and result cross by value through Schemas, and the handler returns an Effect; registration is scoped. On WebKit, a new popup gets the binding as soon as possible rather than before its first script.",
   "capabilities": [],
   "audit": {
     "sources": [

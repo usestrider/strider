@@ -388,7 +388,8 @@ export interface UserContext extends ObservedUserContext {
    * it with an `Error` carrying the message; a defect or an interruption rejects it with a fixed message and is
    * logged. The function is in the main world of documents already open and of every document after, before their
    * own scripts, and not in workers. Removing it deletes it from open documents and rejects the calls still
-   * waiting. A name the page or its context already exposes fails with `NameTaken`.
+   * waiting. A name the page or its context already exposes fails with `NameTaken`. On WebKit, a new popup may run its first scripts before the binding arrives.
+   * A document holds at most 4096 waiting calls per binding; the next one rejects. The name must be a JavaScript identifier, or the call fails with `InvalidInput`.
    *
    * **Example** (Reading a value the test holds)
    *

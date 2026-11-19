@@ -16,7 +16,7 @@
       "url": "/docs/api/browser/Binding#Source"
     }
   ],
-  "notes": "One member covers both: the handler gets the calling page and frame as its second argument. Arguments and result cross by value through Schemas, and the handler returns an Effect; registration is scoped.",
+  "notes": "One member covers both: the handler gets the calling page and frame as its second argument. Arguments and result cross by value through Schemas, and the handler returns an Effect; registration is scoped. On WebKit, a new popup gets the binding as soon as possible rather than before its first script.",
   "capabilities": [],
   "audit": {
     "sources": [

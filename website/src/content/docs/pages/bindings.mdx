@@ -75,13 +75,16 @@ const exposeClock = Effect.fn("exposeClock")(
 )
 ```
 
-A name can be exposed once in a context: exposing it again, on the context or one of its pages, fails with
-`NameTaken`.
+A name the context exposes can't be exposed again, on the context or any of its pages, and a page can't expose a
+name twice: either fails with `NameTaken`. Two pages of a context may each expose the same name. A name must be a
+JavaScript identifier.
+
+On WebKit, a context binding reaches a new popup as soon as it can, which may be after the popup's first scripts.
 
 ## Removing a binding
 
 A binding lasts as long as its scope. `remove` ends it early: it deletes the function from open documents, and
-calls still waiting for their answer reject. A document can have at most 4096 calls waiting; the next one rejects.
+calls still waiting for their answer reject. A document can have at most 4096 calls waiting on one binding; the next one rejects.
 
 ```ts
 import { Page } from "@usestrider/browser"
