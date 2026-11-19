@@ -161,6 +161,22 @@ const target = (authority: string) => {
 }
 
 /**
+ * Whether a tunnel's first bytes are a TLS ClientHello: a handshake record (22) of TLS's major version 3 with a
+ * plausible length, whose first message is a ClientHello (1). Undefined while the bytes so far could still be one.
+ */
+export const clientHello = (bytes: Uint8Array): boolean | undefined => {
+  if (bytes.length >= 1 && bytes[0] !== 0x16) return false
+  if (bytes.length >= 2 && bytes[1] !== 0x03) return false
+  if (bytes.length >= 3 && bytes[2]! > 0x04) return false
+  if (bytes.length >= 5) {
+    const length = (bytes[3]! << 8) | bytes[4]!
+    if (length === 0 || length > 16384 + 2048) return false
+  }
+  if (bytes.length >= 6) return bytes[5] === 0x01
+  return undefined
+}
+
+/**
  * Starts the context's proxy on 127.0.0.1, closed with the scope. A tunnel whose first bytes are a TLS
  * ClientHello is re-encrypted toward the site; any other tunnel is passed through unchanged, and plain HTTP
  * requests are forwarded. The site is verified against Node's trusted certificates unless `acceptInsecureCerts`.
@@ -206,7 +222,7 @@ export const serve = (
           }
           socket.write("HTTP/1.1 200 Connection Established\r\n\r\n")
           const start = (first: Buffer) => {
-            if (first[0] !== 0x16) {
+            if (!clientHello(first)) {
               const plain = track(net.connect(destination.port, destination.host))
               plain.on("close", () => socket.destroy())
               socket.on("close", () => plain.destroy())
@@ -253,8 +269,62 @@ export const serve = (
               browser.pipe(site).pipe(browser)
             })
           }
-          if (head.length > 0) start(head)
-          else socket.once("data", start)
+          // Read until the bytes show whether this is a ClientHello, however they are fragmented
+          let buffered = head
+          const decide = (ended: boolean) => {
+            if (!ended && clientHello(buffered) === undefined) return
+            socket.off("data", collect)
+            socket.off("end", end)
+            socket.pause()
+            if (ended && buffered.length === 0) return socket.end()
+            start(buffered)
+          }
+          const collect = (chunk: Buffer) => {
+            buffered = Buffer.concat([buffered, chunk])
+            decide(false)
+          }
+          const end = () => decide(true)
+          if (clientHello(buffered) !== undefined) return start(buffered)
+          socket.on("data", collect)
+          socket.on("end", end)
+        })
+        // An upgrade, such as a WebSocket handshake over plain HTTP, is relayed and then piped both ways
+        server.on("upgrade", (request: http.IncomingMessage, socket: net.Socket, head: Buffer) => {
+          const url = URL.parse(request.url ?? "")
+          if (url === null || url.protocol !== "http:") {
+            socket.end("HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n")
+            return
+          }
+          const headers = { ...request.headers }
+          delete headers["proxy-connection"]
+          const upstream = http.request(url, { method: request.method, headers })
+          upstream.on("socket", track)
+          upstream.on("error", () => socket.destroy())
+          const status = (reply: http.IncomingMessage, closing: boolean) => {
+            const lines = [`HTTP/1.1 ${reply.statusCode} ${reply.statusMessage ?? ""}`]
+            for (let index = 0; index < reply.rawHeaders.length; index += 2) {
+              const name = reply.rawHeaders[index]!
+              // A refused upgrade's body is relayed decoded, and ends the connection
+              if (closing && /^(transfer-encoding|connection|content-length)$/i.test(name)) continue
+              lines.push(`${name}: ${reply.rawHeaders[index + 1]}`)
+            }
+            if (closing) lines.push("Connection: close")
+            return `${lines.join("\r\n")}\r\n\r\n`
+          }
+          upstream.on("upgrade", (reply, site, siteHead) => {
+            track(site)
+            site.on("close", () => socket.destroy())
+            socket.on("close", () => site.destroy())
+            socket.write(status(reply, false))
+            if (siteHead.length > 0) socket.write(siteHead)
+            if (head.length > 0) site.write(head)
+            site.pipe(socket).pipe(site)
+          })
+          upstream.on("response", (reply) => {
+            socket.write(status(reply, true))
+            reply.pipe(socket)
+          })
+          upstream.end()
         })
         server.on("error", (error) => resume(Effect.fail(error)))
         server.listen(0, "127.0.0.1", () =>

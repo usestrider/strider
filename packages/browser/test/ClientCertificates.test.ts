@@ -85,6 +85,18 @@ describe("ClientCertificates", () => {
     })
   })
 
+  it("recognizes a ClientHello only from a whole record header and handshake type", () => {
+    const hello = [0x16, 0x03, 0x01, 0x02, 0x00, 0x01]
+    for (let length = 0; length < hello.length; length++) {
+      assert.isUndefined(ClientCertificates.clientHello(new Uint8Array(hello.slice(0, length))))
+    }
+    assert.isTrue(ClientCertificates.clientHello(new Uint8Array(hello)))
+    assert.isFalse(ClientCertificates.clientHello(new Uint8Array([0x16, 0x03, 0x01, 0x02, 0x00, 0x02])))
+    assert.isFalse(ClientCertificates.clientHello(new Uint8Array([0x16, 0x00])))
+    assert.isFalse(ClientCertificates.clientHello(new Uint8Array([0x16, 0x03, 0x01, 0x00, 0x00])))
+    assert.isFalse(ClientCertificates.clientHello(new Uint8Array([0x47])))
+  })
+
   describe("serve", () => {
     it.effect("presents the certificate to its origin alone", () =>
       Effect.gen(function*() {
