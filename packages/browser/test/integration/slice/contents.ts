@@ -3195,18 +3195,22 @@ document.getElementById("form").addEventListener("submit", (event) => {
             assert.notStrictEqual(frame.id, page.id)
             // The handle is on a frame of this page
             assert.strictEqual(frame.page.id, page.id)
-            if (!(yield* supports("navigation.childFrames"))) {
-              const refused = reasonOf(yield* Effect.exit(frame.goto(fixtureUrl(crossSite, "<p>never</p>"))))
-              assert.strictEqual(refused?.reason?._tag, "Unsupported")
-              return
-            }
+            // Where a child frame's readiness isn't reported, a goto that waits for it is refused
+            const readiness = yield* fullySupports("frames.readiness")
+            let last: string = ""
             const targets = [
               ["commit", fixtureUrl(crossSite, "<p>committed</p>")],
               ["domContentLoaded", fixtureUrl(origin, "<p>parsed</p><img src=\"/pending-image\">")],
               ["load", fixtureUrl(crossSite, "<p>loaded</p>")]
             ] as const
             for (const [waitUntil, url] of targets) {
+              if (!readiness && waitUntil !== "commit") {
+                const refused = reasonOf(yield* Effect.exit(frame.goto(url, { waitUntil })))
+                assert.deepInclude(refused?.reason as object, { _tag: "Unsupported", capability: "frames.readiness" })
+                continue
+              }
               const navigation = yield* frame.goto(url, { waitUntil })
+              last = url
               assert.strictEqual(navigation.url, url)
               const status = yield* frame.status
               assert.strictEqual(status._tag, "Attached")
@@ -3225,8 +3229,9 @@ document.getElementById("form").addEventListener("submit", (event) => {
             // The page's own document stays where it was, and its tree shows the frame's new URL
             assert.include(yield* page.url, origin)
             yield* page.frames.waitFor((tree) =>
-              tree.children[0]?.url === targets[2][1]
+              tree.children[0]?.url === last
             )
+            if (!readiness) return
             // Waiting on the status is the frame's load-state wait
             yield* frame.status.waitFor((status) =>
               status._tag === "Attached" && Option.isSome(status.document) &&
@@ -3245,26 +3250,33 @@ document.getElementById("form").addEventListener("submit", (event) => {
             )
             yield* page.frame(page.locator("#child")).locator("p").pipe(Expect.toHaveText("first"))
             const frame = yield* page.frame(page.locator("#child")).resolve
-            if (!(yield* supports("navigation.childFrames"))) {
-              return
+            // The image never finishes, so the frame's document never loads until it goes away; where a child
+            // frame's readiness isn't reported, no goto can wait for it, and only the detach is checked
+            const readiness = yield* fullySupports("frames.readiness")
+            const pending = readiness
+              ? Option.some(
+                yield* frame.goto(
+                  fixtureUrl(origin, "<p>pending</p><img src=\"/pending-image\">"),
+                  { waitUntil: "load" }
+                ).pipe(Effect.forkScoped)
+              )
+              : Option.none()
+            if (readiness) {
+              yield* page.frame(page.locator("#child")).locator("p").pipe(Expect.toHaveText("pending"))
             }
-            // The image never finishes, so the frame's document never loads until it goes away
-            const pending = yield* frame.goto(
-              fixtureUrl(origin, "<p>pending</p><img src=\"/pending-image\">"),
-              { waitUntil: "load" }
-            ).pipe(Effect.forkScoped)
-            yield* page.frame(page.locator("#child")).locator("p").pipe(Expect.toHaveText("pending"))
             yield* page.evaluateInMainWorld(() =>
               document.getElementById("child")!.remove()
             )
-            const failed = reasonOf(yield* Fiber.await(pending))
-            assert.strictEqual(failed?._tag, "TargetGone")
-            assert.strictEqual(failed?.reason?._tag, "FrameDetached")
-            assert.strictEqual((yield* frame.status)._tag, "Detached")
+            if (Option.isSome(pending)) {
+              const failed = reasonOf(yield* Fiber.await(pending.value))
+              assert.strictEqual(failed?._tag, "TargetGone")
+              assert.strictEqual(failed?.reason?._tag, "FrameDetached")
+            }
+            yield* frame.status.waitFor((status) =>
+              status._tag === "Detached"
+            )
             const after = reasonOf(
-              yield* Effect.exit(frame.evaluateInMainWorld(() =>
-                1
-              ))
+              yield* Effect.exit(frame.evaluateInMainWorld(() => 1))
             )
             assert.strictEqual(after?._tag, "TargetGone")
             assert.strictEqual(after?.reason?._tag, "FrameDetached")
@@ -3288,10 +3300,14 @@ document.getElementById("form").addEventListener("submit", (event) => {
             const frame = yield* page.frameById(tree.children[0]!.id)
             assert.strictEqual(frame.id, tree.children[0]!.id)
             assert.strictEqual(frame.page.id, page.id)
-            // A frame handle has no locators of its own yet: its document is read by evaluation
-            yield* frame.status.waitFor((status) =>
-              status._tag === "Attached" && Option.isSome(status.document) &&
-              status.document.value.readiness === "complete"
+            // A frame handle has no locators: its document is read by evaluation, once it has loaded
+            yield* frame.evaluateInMainWorld(() =>
+              new Promise<void>((resolve) => {
+                if (document.readyState === "complete") {
+                  resolve()
+                } else {addEventListener("load", () =>
+                    resolve())}
+              })
             )
             // The main world sees the frame's own globals, not its parent's
             assert.deepStrictEqual(
@@ -3310,14 +3326,18 @@ document.getElementById("form").addEventListener("submit", (event) => {
                 null
               )
               assert.strictEqual(
-                yield* frame.evaluate(() =>
-                  document.querySelector("p")!.textContent
-                ),
+                yield* frame.evaluate(() => document.querySelector("p")!.textContent),
                 "inner"
               )
             }
-            const handle = yield* frame.evaluateHandle(() => ({ where: location.origin }))
-            assert.deepStrictEqual(yield* handle.read, { where: crossSite })
+            // A handle is in the isolated world, as the page's are: refused where there is none
+            if (yield* supports("isolatedWorlds")) {
+              const handle = yield* frame.evaluateHandle(() => ({ where: location.origin }))
+              assert.deepStrictEqual(yield* handle.read, { where: crossSite })
+            } else {
+              const refused = reasonOf(yield* Effect.exit(frame.evaluateHandle(() => location.origin)))
+              assert.deepInclude(refused?.reason as object, { _tag: "Unsupported", capability: "isolatedWorlds" })
+            }
             // The root's id gives the page's own frame
             const root = yield* page.frameById(page.id)
             assert.strictEqual(yield* root.evaluateInMainWorld(() => Reflect.get(window, "outerGlobal")), "outer")
