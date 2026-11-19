@@ -115,7 +115,8 @@ const DocumentStatus = Schema.Struct({
 
 // PageNavigation: the success value of goto, reload, back and forward; also an event module
 // url: where the page went, after redirects, or the URL a same-document navigation set
-// frame (in every variant, left out below): the navigable it happened in, the page's own id or a frame's
+// page and frame (in every variant, left out below): the page it happened in, and the navigable, the page's own id or a frame's
+// next, stream and history take a page or a context, whose subscription takes every page in it, including pages opened later
 const PageNavigation = Schema.Union([
   Schema.TaggedStruct("Committed", {                    // 404/500 is still a commit; response is None for about:blank, data:, blob:
     id: Id, url: Url.Url, document: Target.DocumentId, response: Schema.Option(NetworkResponse.NetworkResponse) }),
@@ -125,6 +126,16 @@ const PageNavigation = Schema.Union([
   Schema.TaggedStruct("Activated", { id: Id, url: Url.Url, document: Target.DocumentId }),   // prerender activation is not implemented
   Schema.TaggedStruct("BecameDownload", { id: Id, url: Url.Url }),                          // only from goto with accept
   Schema.TaggedStruct("NoContent", { id: Id, url: Url.Url, response: Schema.Option(NetworkResponse.NetworkResponse) })   // likewise
+])
+
+// PageLifecycle: an event module on a page or a context, one event for each change that Page.frames, status and closed
+// only show as their latest value. page and frame in every variant; frames: "main" | "all" decides whose loads match
+const PageLifecycle = Schema.Union([
+  Schema.TaggedStruct("FrameAdded", { parent: Target.NavigableId }),
+  Schema.TaggedStruct("FrameRemoved", {}),                                                   // one for each nested frame too
+  Schema.TaggedStruct("DomContentLoaded", { document: Target.DocumentId, url: Url.Url }),
+  Schema.TaggedStruct("Loaded", { document: Target.DocumentId, url: Url.Url }),
+  Schema.TaggedStruct("Closed", { reason: Target.CloseReason })                             // before a context's stream ends
 ])
 
 // NetworkResponse: immutable; one redirect hop. NetworkRequest is its request-side twin

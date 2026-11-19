@@ -5,7 +5,7 @@
   ],
   "status": "missing",
   "api": [],
-  "notes": "No arbitrary event-name wait dispatcher; use each event module. Event-specific rows show which events are available.",
+  "notes": "No event-name dispatcher: each event module's `next(context, filter)` is the wait for that event, such as `PageLifecycle.next(context, { events: \"Closed\" })` or `PageNavigation.next(context, { waitUntil: \"load\" })`.",
   "capabilities": [],
   "audit": {
     "sources": [
