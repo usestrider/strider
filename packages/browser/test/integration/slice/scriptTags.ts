@@ -1,11 +1,12 @@
 /** Script injection, `addScriptTag`, into a page's or a frame's document, on every backend. */
 import { assert } from "@effect/vitest"
-import { Locator, Page } from "@usestrider/browser"
+import { Deadline, Locator, Page } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import { createHash } from "node:crypto"
 import * as fs from "node:fs/promises"
 import * as os from "node:os"
 import * as nodePath from "node:path"
+import * as Handles from "../../../src/internal/handles.ts"
 import { site } from "../adapter/harness.ts"
 import * as SharedContext from "./sharedContext.ts"
 import { newPage } from "./sharedContext.ts"
@@ -48,6 +49,31 @@ export const scriptTags = <R>(it: ReturnType<typeof SharedContext.guard<R>>) => 
       yield* page.goto(`${served.origin}/fixture?html=x`)
       yield* page.addScriptTag({ source: "window.inline = document.currentScript.tagName" })
       assert.strictEqual(yield* global(page, "inline"), "SCRIPT")
+    }).pipe(Effect.scoped))
+
+  it.effect("releases its refusal subscription when script injection returns", () =>
+    Effect.gen(function*() {
+      const served = yield* site
+      const page = yield* newPage
+      yield* page.goto(`${served.origin}/fixture?html=x`)
+      const channel = Handles.page(page).entry.events.console
+      const before = channel.subscribers.size
+      yield* page.addScriptTag({ source: "window.injected = true" })
+      assert.strictEqual(channel.subscribers.size, before, "only the returned handle belongs to the caller's scope")
+    }).pipe(Effect.scoped))
+
+  it.effect("accepts a hash-authorized script that causes another script to be refused", () =>
+    Effect.gen(function*() {
+      const served = yield* site
+      const page = yield* newPage
+      const source =
+        "const child = document.createElement('script'); child.textContent = 'window.childRan = true'; document.head.append(child); window.parentRan = true"
+      const hash = createHash("sha256").update(source).digest("base64")
+      const html = `<meta http-equiv="Content-Security-Policy" content="script-src 'sha256-${hash}'">`
+      yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`, { waitUntil: "load" })
+      yield* page.addScriptTag({ source }).pipe(Deadline.within("1 second"))
+      assert.strictEqual(yield* global(page, "parentRan"), true)
+      assert.strictEqual(yield* global(page, "childRan"), undefined)
     }).pipe(Effect.scoped))
 
   it.effect("runs inline and URL modules, waiting for a URL's load", () =>
