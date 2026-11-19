@@ -421,7 +421,7 @@ for (const [name, backend] of backends) {
           Effect.gen(function*() {
             const { origin } = yield* site
             const page = yield* Browser.newPage()
-            yield* page.goto(origin)
+            yield* page.goto(origin, { waitUntil: "load" })
             // Observe the real native peer ending, independently of the shim's delayed page notification.
             yield* page.evaluateInMainWorld(() => {
               document.body.innerHTML = "<pre id=\"native\">pending</pre><pre id=\"out\">pending</pre>"

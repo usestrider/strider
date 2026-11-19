@@ -58,8 +58,10 @@ export type Step =
   | { readonly _tag: "Placeholder"; readonly matcher: TextMatcher }
   | { readonly _tag: "AltText"; readonly matcher: TextMatcher }
   | { readonly _tag: "Title"; readonly matcher: TextMatcher }
-  | { readonly _tag: "TestId"; readonly id: string }
+  | { readonly _tag: "TestId"; readonly matcher: TextMatcher }
   | { readonly _tag: "Css"; readonly selector: string }
+  /** An XPath expression's element nodes, from the document or, chained, from each element so far. */
+  | { readonly _tag: "XPath"; readonly expression: string }
   | { readonly _tag: "Nth"; readonly index: number }
   | { readonly _tag: "First" }
   | { readonly _tag: "Last" }
@@ -474,7 +476,7 @@ export const Response = Schema.Union([
   Schema.TaggedStruct("InvalidSelector", {
     selector: Schema.String,
     message: Schema.String,
-    kind: Schema.optionalKey(Schema.Literal("role"))
+    kind: Schema.optionalKey(Schema.Literals(["role", "xpath"]))
   }),
   Schema.TaggedStruct("Title", { title: Schema.String }),
   Schema.TaggedStruct("Roles", {
@@ -632,8 +634,14 @@ export function engine(render: (root: SnapNode) => string) {
     elementFromPoint: method(Document.prototype, "elementFromPoint"),
     elementsFromPoint: method(Document.prototype, "elementsFromPoint"),
     documentFirstElementChild: getter(Document.prototype, "firstElementChild"),
-    documentQuerySelectorAll: method(Document.prototype, "querySelectorAll")
+    documentQuerySelectorAll: method(Document.prototype, "querySelectorAll"),
+    createElement: method(Document.prototype, "createElement"),
+    evaluate: method(Document.prototype, "evaluate"),
+    snapshotLength: getter(XPathResult.prototype, "snapshotLength"),
+    snapshotItem: method(XPathResult.prototype, "snapshotItem")
   }
+  /** `document.evaluate`'s result type, read once, like the methods above, so a replaced `XPathResult` can't change it. */
+  const ORDERED_NODE_SNAPSHOT_TYPE = XPathResult.ORDERED_NODE_SNAPSHOT_TYPE
   // The labelable elements, each with its own `labels` getter
   const nativeLabels = [
     HTMLButtonElement,
@@ -1758,7 +1766,7 @@ export function engine(render: (root: SnapNode) => string) {
   // Queries
   interface InvalidSelector {
     readonly invalidSelector: true
-    readonly kind?: "role" | undefined
+    readonly kind?: "role" | "xpath" | undefined
     readonly selector: string
     readonly message: string
   }
@@ -1838,8 +1846,54 @@ export function engine(render: (root: SnapNode) => string) {
   const documentElements = (): Array<Element> =>
     treeScope === null ? elementsUnder(document) : (treeScope.elements ??= elementsUnder(document))
 
+  /**
+   * An expression's element nodes from `context`, in document order: text, attribute and document nodes are
+   * skipped. It throws an invalid selector when the expression doesn't parse, uses a namespace prefix or doesn't
+   * give a node set.
+   */
+  const evaluateXPath = (context: Node, source: string, expression: string): Array<Element> => {
+    let result: XPathResult
+    try {
+      result = dom.evaluate(document, source, context, null, ORDERED_NODE_SNAPSHOT_TYPE, null)
+    } catch (error) {
+      throw {
+        invalidSelector: true,
+        kind: "xpath",
+        selector: expression,
+        message: error instanceof Error ? error.message : String(error)
+      } satisfies InvalidSelector
+    }
+    const found: Array<Element> = []
+    for (let index = 0, length = dom.snapshotLength(result); index < length; index++) {
+      const node = dom.snapshotItem(result, index)
+      if (node !== null && dom.nodeType(node) === Node.ELEMENT_NODE) found.push(node as Element)
+    }
+    return found
+  }
+
+  /**
+   * A `/` that starts a chained expression's first step: Playwright's rule, so `/li` reads as `./li` and `//li` as
+   * `.//li` from the element. Only the start is rewritten, so a union's later branch, as `//b` in `//a | //b`, keeps
+   * its absolute path. A bare `/`, alone or before `|`, is the root of the element's tree and is left as written.
+   */
+  const LEADING_STEP = /^(\s*)(?=\/)(?!\/\s*(?:\||$))/
+
+  /**
+   * An XPath step's matches from `scope`: from the document as written, and from an element with its leading `/`
+   * read from the element, so chaining searches inside as CSS does.
+   */
+  const xpathQuery = (scope: Document | Element, expression: string): Array<Element> =>
+    evaluateXPath(scope, scope === document ? expression : expression.replace(LEADING_STEP, "$1."), expression)
+
+  /**
+   * The detached element XPath is checked from: an empty tree, so the check searches nothing (an element, since
+   * Firefox refuses a text node as the context node).
+   */
+  let xpathProbe: Element | undefined
+
   /** The candidates of one query under `scope`, in tree order. */
   const query = (scope: Document | Element, step: Step): Array<Element> => {
+    if (step._tag === "XPath") return xpathQuery(scope, step.expression)
     const under = scope === document ? documentElements() : elementsUnder(scope)
     switch (step._tag) {
       case "Css": {
@@ -1910,7 +1964,11 @@ export function engine(render: (root: SnapNode) => string) {
       case "Title":
         return under.filter((element) => attributeMatches(element, "title", step.matcher))
       case "TestId":
-        return under.filter((element) => dom.getAttribute(element, "data-testid") === step.id)
+        return under.filter((element) => {
+          // The value as written: a test id isn't text, so its whitespace isn't collapsed.
+          const value = dom.getAttribute(element, "data-testid")
+          return value !== null && rawMatches(step.matcher, value)
+        })
       default:
         return []
     }
@@ -1946,6 +2004,11 @@ export function engine(render: (root: SnapNode) => string) {
           }
           break
         }
+        case "XPath":
+          // Checked as written on every resolve, from a detached element, so an empty scope still fails and no
+          // document is searched to do it. A valid expression stays valid with its leading step read from an element.
+          evaluateXPath(xpathProbe ??= dom.createElement(document, "div"), step.expression, step.expression)
+          break
         case "Filter":
           if (step.has !== null) validateSteps(step.has)
           if (step.hasNot !== null) validateSteps(step.hasNot)
@@ -3239,7 +3302,8 @@ export function engine(render: (root: SnapNode) => string) {
   const expected = (matcher: TextMatcher, text: string): boolean =>
     matcher._tag === "RegExp" ? new RegExp(matcher.source, matcher.flags).test(text) : text === collapse(matcher.value)
 
-  const classMatches = (matcher: TextMatcher, value: string): boolean =>
+  /** A value as written, such as a class or an attribute, matched without collapsing its whitespace. */
+  const rawMatches = (matcher: TextMatcher, value: string): boolean =>
     matcher._tag === "RegExp" ? new RegExp(matcher.source, matcher.flags).test(value) : value === matcher.value
 
   /** Checks an expectation once: whether it holds, and what was seen. */
@@ -3290,12 +3354,12 @@ export function engine(render: (root: SnapNode) => string) {
         if (expectation.list) {
           return {
             passed: texts.length === expectation.expected.length &&
-              texts.every((text, index) => classMatches(expectation.expected[index]!, text)),
+              texts.every((text, index) => rawMatches(expectation.expected[index]!, text)),
             observed: texts
           }
         }
         if (found.length !== 1) return { passed: false, observed: { matches: found.length } }
-        return { passed: classMatches(expectation.expected[0]!, texts[0]!), observed: texts[0] }
+        return { passed: rawMatches(expectation.expected[0]!, texts[0]!), observed: texts[0] }
       }
       default:
         break
@@ -3363,7 +3427,7 @@ export function engine(render: (root: SnapNode) => string) {
         const values = Array.from(control.selectedOptions, (option) => option.value)
         return {
           passed: values.length === expectation.expected.length &&
-            values.every((value, index) => classMatches(expectation.expected[index]!, value)),
+            values.every((value, index) => rawMatches(expectation.expected[index]!, value)),
           observed: values
         }
       }
@@ -4290,7 +4354,7 @@ export function engine(render: (root: SnapNode) => string) {
     actionFrameTimeout,
     evaluate,
     sampleViewport,
-    matchesValue: classMatches,
+    matchesValue: rawMatches,
     clearTreeCaches,
     failureResponse,
     now,

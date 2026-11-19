@@ -141,7 +141,8 @@ describe("Chromium video writer", () => {
         yield* Effect.gen(function*() {
           const page = yield* Browser.newPage()
           yield* page.goto(
-            "data:text/html,<body><script>var paints=0;setInterval(()=>document.body.textContent=++paints,20)</script>"
+            "data:text/html,<body><script>var paints=0;setInterval(()=>document.body.textContent=++paints,20)</script>",
+            { waitUntil: "load" }
           )
           const castScope = yield* Scope.make()
           const cast = yield* page.capability(Capability.Screencast).pipe(Scope.provide(castScope))
