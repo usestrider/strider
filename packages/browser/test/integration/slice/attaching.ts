@@ -264,7 +264,7 @@ export const attaching = (
               const browser = yield* Browser.Browser
               const context = yield* browser.defaultContext.control
               const tab = (yield* context.pages)[0]!
-              yield* tab.goto(adopted)
+              yield* tab.goto(adopted, { waitUntil: "load" })
               assert.strictEqual(yield* tab.getByRole("heading").readText, "Adopted")
             })).pipe(Effect.provide(launchPersistent(dir)))
           }), timeout)
@@ -281,7 +281,7 @@ export const attaching = (
               const url = fixtureUrl(origin, "<h1>Routed</h1>")
               const routed = yield* tab.route(url, () =>
                 Route.continue)
-              yield* tab.goto(url)
+              yield* tab.goto(url, { waitUntil: "load" })
               assert.strictEqual(yield* tab.getByRole("heading").readText, "Routed")
               assert.strictEqual(yield* routed.hits, 1)
             })).pipe(Effect.provide(launchPersistent(dir)))
@@ -334,7 +334,7 @@ export const attaching = (
               const pages = yield* browser.pages
               assert.isAbove(pages.length, 0, "the attached browser lists its open tabs")
               const tab = yield* pages[0]!.control
-              yield* tab.goto(`data:text/html,${encodeURIComponent("<h1>Adopted</h1>")}`)
+              yield* tab.goto(`data:text/html,${encodeURIComponent("<h1>Adopted</h1>")}`, { waitUntil: "load" })
               assert.strictEqual(yield* tab.getByRole("heading").readText, "Adopted")
             })).pipe(Effect.provide(attached))
           }), timeout)
@@ -351,7 +351,7 @@ export const attaching = (
                 assert.strictEqual(error.reason.capability, "acceptInsecureCerts")
               } else {
                 const page = yield* Browser.newPage({ acceptInsecureCerts: true })
-                yield* page.goto(secure.origin)
+                yield* page.goto(secure.origin, { waitUntil: "load" })
                 assert.strictEqual(yield* page.title, "secure")
               }
               const verified = yield* Browser.newPage()

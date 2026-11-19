@@ -16,6 +16,7 @@ import * as L1Target from "../../Target.ts"
 import type * as UserContext from "../../UserContext.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as Proxy from "../proxy.ts"
 import * as Urls from "../urls.ts"
 import { applyDownloads, restoreContext } from "./declare.ts"
 import { whileSwapping } from "./navigation.ts"
@@ -107,11 +108,16 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
       Kit.unsupported("acceptInsecureCerts", "CDP ignores certificate errors browser-wide, not per context")
     )
   }
+  if (Option.isSome(options.proxy) && options.proxy.value.scheme === "socks4") {
+    return yield* Effect.fail(
+      Kit.unsupported("userContexts.proxy.socks4", "Chromium's SOCKS4 resolves names locally; use socks5://")
+    )
+  }
   const { browserContextId } = yield* Kit.protocol(
     Target.createBrowserContext({
       disposeOnDetach: !options.reclaimable,
       ...(Option.isSome(options.proxy)
-        ? { proxyServer: options.proxy.value.server, proxyBypassList: options.proxy.value.bypass.join(",") }
+        ? { proxyServer: Proxy.endpoint(options.proxy.value), proxyBypassList: options.proxy.value.bypass.join(",") }
         : {})
     }).pipe(Protocol.on(state.root()))
   )

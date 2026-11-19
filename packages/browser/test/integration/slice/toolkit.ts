@@ -70,11 +70,14 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           Effect.scoped(Effect.gen(function*() {
             const served = yield* site
             const page = yield* SharedContext.newPage
-            yield* page.goto(`${served.origin}/fixture?html=${
-              encodeURIComponent(
-                "<span>Nearby label</span><input type=\"password\"><input type=\"password\" disabled><input type=\"password\" readonly>"
-              )
-            }`)
+            yield* page.goto(
+              `${served.origin}/fixture?html=${
+                encodeURIComponent(
+                  "<span>Nearby label</span><input type=\"password\"><input type=\"password\" disabled><input type=\"password\" readonly>"
+                )
+              }`,
+              { waitUntil: "load" }
+            )
             const before = yield* page.snapshot()
             const fields = [...before.refs.values()].filter((node) =>
               node.role._tag === "Inferred" && node.role.evidence.includes("password")
@@ -112,13 +115,16 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           Effect.scoped(Effect.gen(function*() {
             const served = yield* site
             const page = yield* SharedContext.newPage
-            yield* page.goto(`${served.origin}/fixture?html=${
-              encodeURIComponent(
-                "<label>Code <input id=\"code\" type=\"password\" role=\"textbox\" value=\"private-explicit\"></label>" +
-                  "<button aria-labelledby=\"code\">Show</button>" +
-                  "<input id=\"plain\" role=\"textbox\" value=\"ordinary-embedded\"><button aria-labelledby=\"plain\">Plain</button>"
-              )
-            }`)
+            yield* page.goto(
+              `${served.origin}/fixture?html=${
+                encodeURIComponent(
+                  "<label>Code <input id=\"code\" type=\"password\" role=\"textbox\" value=\"private-explicit\"></label>" +
+                    "<button aria-labelledby=\"code\">Show</button>" +
+                    "<input id=\"plain\" role=\"textbox\" value=\"ordinary-embedded\"><button aria-labelledby=\"plain\">Plain</button>"
+                )
+              }`,
+              { waitUntil: "load" }
+            )
             const snapshot = yield* page.snapshot()
             assert.include(snapshot.text, "button \"ordinary-embedded\"")
             assert.strictEqual(yield* page.getByRole("textbox", { name: "Code", exact: true }).count, 1)
@@ -148,7 +154,8 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                     `<input type="password" ${attributes}>` +
                       (source === "label" ? "<label for=\"labeled-secret\">Secret hint</label>" : "")
                   )
-                }`
+                }`,
+                { waitUntil: "load" }
               )
               const snapshot = yield* page.snapshot()
               const [field] = [...snapshot.refs.values()].filter((node) =>
@@ -216,7 +223,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             Effect.scoped(Effect.gen(function*() {
               const served = yield* site
               const page = yield* SharedContext.newPage
-              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(fixture)}`)
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(fixture)}`, { waitUntil: "load" })
               const snapshot = yield* page.snapshot()
               const fields = [...snapshot.refs.values()].filter((node) =>
                 node.role._tag === "Inferred" && node.role.evidence.includes("password")
@@ -254,11 +261,14 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             Effect.scoped(Effect.gen(function*() {
               const served = yield* site
               const page = yield* SharedContext.newPage
-              yield* page.goto(`${served.origin}/fixture?html=${
-                encodeURIComponent(
-                  `<input type="password" ${attribute}><input type="password" ${attribute}>`
-                )
-              }`)
+              yield* page.goto(
+                `${served.origin}/fixture?html=${
+                  encodeURIComponent(
+                    `<input type="password" ${attribute}><input type="password" ${attribute}>`
+                  )
+                }`,
+                { waitUntil: "load" }
+              )
               const snapshot = yield* page.snapshot()
               for (const [ref, node] of snapshot.refs) {
                 if (node.role._tag !== "Inferred" || !node.role.evidence.includes("password")) continue
@@ -540,13 +550,15 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             const served = yield* site
             const page = yield* SharedContext.newPage
             const field = "<label>Late secret<input type=\"password\"></label>"
-            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(field)}`)
+            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(field)}`, { waitUntil: "load" })
             const snapshot = yield* page.snapshot()
             const [node] = [...snapshot.refs.values()].filter((each) =>
               each.role._tag === "Inferred" && each.role.evidence.includes("password")
             )
             const query = ExportTest.locatorOf("page", Option.getOrThrow(node!.ref), snapshot)
-            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent("<main>Next step</main>")}`)
+            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent("<main>Next step</main>")}`, {
+              waitUntil: "load"
+            })
             let first = true
             const replay = {
               pipe: (resolve: (page: unknown) => unknown) =>
@@ -900,7 +912,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               const html = `<form onsubmit="event.preventDefault(); document.body.dataset.submitted='yes'">
 <label>Choice <select required><option value="">Choose</option><option>Ready</option></select></label>
 <button>Send</button></form>`
-              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`, { waitUntil: "load" })
               const tools = yield* BrowserToolkit.make({
                 context: page.context,
                 secrets: {},
@@ -940,7 +952,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               const page = yield* SharedContext.newPage
               const html = `<input id="field" aria-label="private-label" value="private-value">
 <button onclick="field.checkValidity();field.reportValidity()">Check</button><button>Quiet</button>`
-              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`, { waitUntil: "load" })
               yield* page.evaluateInMainWorld(() => {
                 ;(document.getElementById("field") as HTMLInputElement).setCustomValidity("private-message")
               })
@@ -1341,7 +1353,8 @@ for (const mode of ["open", "closed"]) {
                 encodeURIComponent(
                   "<h2><span contenteditable>private-mode</span></h2><iframe srcdoc=\"<h2><span contenteditable>private-frame</span></h2>\"></iframe>"
                 )
-              }`
+              }`,
+              { waitUntil: "load" }
             )
             for (
               const capture of [

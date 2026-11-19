@@ -6,8 +6,14 @@
   "parent": "method-framelocator-locator",
   "value": "XPath and Playwright selector DSL",
   "status": "missing",
-  "api": [],
-  "notes": "The locator constructor accepts CSS, not XPath, text=, >>, :has-text() or arbitrary registered selector engines. Use the dedicated text/role/filter APIs for their supported capabilities. For 1.0, XPath is planned; text=, >> and custom selector engines are excluded. The combined gap stays missing, including unimplemented forms without an exclusion decision.",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "xpath",
+      "url": "/docs/api/browser/Locator#xpath"
+    }
+  ],
+  "notes": "XPath is supported as a typed value, Locator.xpath(expression), rather than an xpath= or // string prefix: element nodes in document order; chained, a / that begins the first step, after optional whitespace, is read from each match, as Playwright does, while a bare /, alone or before |, is left as written; only the very start is rewritten, so a union's later branch and (//a)[1] stay document-relative (.//a | .//b keeps both inside); InvalidInput at once for a malformed, prefixed or non-node-set expression. text=, >> and custom selector engines are excluded for 1.0. :has-text() and the other Playwright pseudo-classes have no exclusion decision; filter({ hasText }) and getByText cover their text matching. The combined gap stays missing until every remaining form is built or excluded.",
   "capabilities": [],
   "requirements": []
 }

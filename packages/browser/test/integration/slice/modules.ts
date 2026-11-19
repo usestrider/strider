@@ -812,7 +812,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             const page = yield* SharedContext.newPage
             const links = yield* NetworkRequest.redirects(page)
             const sent = yield* NetworkRequest.next(page, { url: `${origin}/redirect-unfollowed` })
-            yield* page.goto(`${origin}/redirect-unfollowed`)
+            yield* page.goto(`${origin}/redirect-unfollowed`, { waitUntil: "load" })
             const request = yield* sent
             const hop = Option.getOrThrow(Handles.page(page).runtime.model.hop(request.hop))
             // The model's completion signal avoids depending on response-body collection to test links.

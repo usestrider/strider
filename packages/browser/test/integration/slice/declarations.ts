@@ -30,7 +30,7 @@ import type * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
-import type * as Scope from "effect/Scope"
+import * as Scope from "effect/Scope"
 import * as fs from "node:fs"
 import * as http from "node:http"
 import type * as net from "node:net"
@@ -185,11 +185,11 @@ export const declarations = (
           } else {
             const context = yield* Browser.newContext(options)
             const page = yield* context.newPage
-            yield* page.goto(origin)
+            yield* page.goto(origin, { waitUntil: "load" })
             assert.strictEqual(yield* page.title, "secure")
             // Browser.newPage must forward the same creation options.
             const shortcut = yield* Browser.newPage(options)
-            yield* shortcut.goto(origin)
+            yield* shortcut.goto(origin, { waitUntil: "load" })
             assert.strictEqual(yield* shortcut.title, "secure")
           }
           const stillRejected = yield* sibling.goto(`${origin}/after`).pipe(Effect.flip)
@@ -493,11 +493,11 @@ export const declarations = (
             yield* Effect.scoped(Effect.gen(function*() {
               const route = yield* page.route(`${origin}/hello*`, () =>
                 Route.fulfill(HttpServerResponse.html("<title>routed</title>")))
-              yield* page.goto(`${origin}/hello?route=${n}`)
+              yield* page.goto(`${origin}/hello?route=${n}`, { waitUntil: "load" })
               assert.strictEqual(yield* page.title, "routed")
               assert.strictEqual(yield* route.hits, 1)
             }))
-            yield* page.goto(`${origin}/hello?released=${n}`)
+            yield* page.goto(`${origin}/hello?released=${n}`, { waitUntil: "load" })
             assert.notStrictEqual(yield* page.title, "routed")
           }
         }), timeout)
@@ -602,7 +602,7 @@ export const declarations = (
               assert.deepStrictEqual(seen, ["current"])
               assert.strictEqual(yield* current.hits, intercepted ? 2 : 1)
               yield* current.remove
-              yield* page.goto(`${origin}/after`)
+              yield* page.goto(`${origin}/after`, { waitUntil: "load" })
               assert.strictEqual(yield* page.title, "network")
               assert.deepStrictEqual(seen, ["current"])
             }),
@@ -750,7 +750,7 @@ export const declarations = (
             const page = yield* SharedContext.newPage
             const route = yield* page.route(origin, () =>
               Route.fulfill(HttpServerResponse.html("<title>routed</title>")))
-            yield* page.goto(`${origin}/`)
+            yield* page.goto(`${origin}/`, { waitUntil: "load" })
             assert.strictEqual(yield* page.title, "routed")
             assert.strictEqual(yield* route.hits, 1)
           }))
@@ -1137,7 +1137,7 @@ export const declarations = (
           const page = yield* Browser.newPage({
             httpCredentials: { username: "strider", password: Redacted.make("secret") }
           })
-          yield* page.goto(`${origin}/first`).pipe(Deadline.within("5 seconds"))
+          yield* page.goto(`${origin}/first`, { waitUntil: "load" }).pipe(Deadline.within("5 seconds"))
           assert.strictEqual(yield* page.title, "denied")
           assert.strictEqual(first, 1)
           assert.strictEqual(second, 0)
@@ -1316,6 +1316,51 @@ export const declarations = (
             framed
           )
         }), timeout)
+
+      // Each step loads the parent afresh and needs the frame's document and the frame's own fetch from the same
+      // scope's route: on Chromium the document pauses on its parent's session, before the frame's target attaches, and
+      // the fetch on the frame's own session. The context's route comes first alone, so it alone must reach the frame
+      // of a new page; then the page's takes precedence, and each closed scope must stop answering.
+      it.effect("routes a page with a cross-site iframe and releases the routes", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { crossSite, origin } = yield* site
+          const fetched = "/fixture?html=server"
+          // The frame's document, which names its scope and then the scope its fetch's answer came from
+          const frameDocument = (scope: string) =>
+            `${frameBody}<script>fetch('${fetched}', { cache: 'no-store' }).then((response) => response.text()).then((tag) => { window.__tag = '${scope}/' + tag; report() })</script>`
+          const noStore = { "cache-control": "no-store" }
+          const route = (target: Page.Page | UserContext.UserContext, scope: string) =>
+            target.route(`${crossSite}/fixture*`, ({ request }) =>
+              Route.fulfill(
+                request.url === `${crossSite}${fetched}`
+                  ? HttpServerResponse.text(scope, { headers: noStore })
+                  : HttpServerResponse.text(frameDocument(scope), { contentType: "text/html", headers: noStore })
+              ))
+          // The server's own frame, at a URL the routes match
+          const parent = fixtureUrl(
+            origin,
+            `<title>parent</title><pre id="out">pending</pre><script>addEventListener('message', (e) => { document.getElementById('out').textContent = e.data })</script><iframe style="width:300px;height:200px;border:0" src="${
+              fixtureUrl(crossSite, frameDocument("server"))
+            }"></iframe>`
+          )
+          const loads = Effect.fnUntraced(function*(page: Page.Page, tag: string) {
+            yield* page.goto(parent)
+            yield* Expect.that(page.locator("#out").readText, tagged(tag))
+          })
+          const context = yield* Browser.newContext()
+          const contextRoute = yield* Effect.acquireRelease(Scope.make(), (scope, exit) =>
+            Scope.close(scope, exit))
+          yield* route(context, "context").pipe(Scope.provide(contextRoute))
+          const page = yield* context.newPage
+          yield* loads(page, "context/context")
+          yield* Effect.scoped(Effect.gen(function*() {
+            yield* route(page, "page")
+            yield* loads(page, "page/page")
+          }))
+          yield* loads(page, "context/context")
+          yield* Scope.close(contextRoute, Exit.void)
+          yield* loads(page, "server/server")
+        })), timeout)
 
       it.effect("runs init scripts in a page with a cross-site iframe and releases them", () =>
         crossSiteFrame(
@@ -1983,7 +2028,7 @@ export const declarations = (
             const page = yield* SharedContext.newPage
             const { origin } = yield* site
             yield* page.clock.install({ mode: "controlled", at: 1000 })
-            yield* page.goto(fixtureUrl(origin, `<p id="later">pending</p>`))
+            yield* page.goto(fixtureUrl(origin, `<p id="later">pending</p>`), { waitUntil: "load" })
             yield* page.evaluateInMainWorld(() => {
               const channel = new MessageChannel()
               channel.port1.onmessage = () => {
@@ -2134,16 +2179,19 @@ export const declarations = (
             const page = yield* SharedContext.newPage
             yield* page.clock.install({ mode: "controlled", at: "2026-01-01T00:00:00Z" })
             // The page's own script: Chromium hides from the page the errors of functions an evaluation made
-            yield* page.goto(fixtureUrl(
-              origin,
-              `<script>
+            yield* page.goto(
+              fixtureUrl(
+                origin,
+                `<script>
                 window.__reported = []
                 addEventListener("error", (event) => window.__reported.push(String(event.error?.message)))
                 setTimeout(() => { throw new Error("first") }, 100)
                 setTimeout(() => { throw new Error("second") }, 200)
                 setTimeout(() => { window.__after = true }, 300)
               </script>`
-            ))
+              ),
+              { waitUntil: "load" }
+            )
             const error = yield* failure(page.clock.adjust("1 second"), "adjust over a throwing timer")
             assert(PageClock.isPageClockError(error), String(error))
             assert(error.reason._tag === "EvaluationThrown", String(error))
