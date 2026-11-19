@@ -773,6 +773,67 @@ describe("ProtocolClient", () => {
       assert.strictEqual(command.sessionId, "S3", "the wheel must reach the nested frame, not its parent")
     }))
 
+  it.effect("sends frameless input outside every frame box on the page's session with no hit test", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire, { fold: makeFold().fold })
+      const pageSession = yield* attach(browser, client, "S1")
+      const frameSession = yield* attach(browser, client, "S2")
+      yield* client.root.drainObserved
+      const id = "page-1" as L1Target.NavigableId
+      const pageTarget = { targetId: "T-S1", session: pageSession }
+      const frameTarget = { targetId: "T-S2", session: frameSession }
+      const ready = yield* Deferred.make<void>()
+      yield* Deferred.succeed(ready, undefined)
+      const page = { id, target: pageTarget, ended: false, ready }
+      const rootFrame: Record<string, unknown> = { page, owner: pageTarget, parent: undefined }
+      const childFrame = { page, owner: frameTarget, parent: rootFrame }
+      const realm = {
+        id: "realm-1",
+        ended: false,
+        world: { _tag: "Isolated", name: "__strider_utility__" },
+        contextId: 7,
+        target: pageTarget
+      }
+      const document = { id: "document-1", frame: rootFrame, realms: new Set([realm]) }
+      rootFrame.document = document
+      const state = {
+        ids: {},
+        pages: new Map([[id, page]]),
+        frames: new Map<string, unknown>([["T-S1", rootFrame], ["T-S2", childFrame]]),
+        documents: new Map([["document-1", document]]),
+        realms: new Map([["realm-1", realm]]),
+        heldButtons: new Map(),
+        drags: new Map(),
+        pressedOn: new Map(),
+        pressedIn: new Map(),
+        interceptingDrags: new Set(["page-1"]),
+        navigables: new Map()
+      } as unknown as CdpState
+      const input = yield* dispatchCdpInput(state, id, [{
+        _tag: "Wheel",
+        x: 300,
+        y: 300,
+        deltaX: 0,
+        deltaY: 10,
+        modifiers: { alt: false, control: false, meta: false, shift: false }
+      }]).pipe(Effect.forkChild)
+      const methods: Array<string> = []
+      let command = yield* browser.next
+      while (true) {
+        methods.push(`${command.sessionId} ${command.method}`)
+        // The frame's element covers 10 to 210 on each axis; the point is outside it
+        const result = command.method === "Runtime.evaluate"
+          ? { result: { type: "object", value: [1, [10, 10, 210, 210]] } }
+          : {}
+        yield* browser.receive({ id: command.id, sessionId: command.sessionId, result })
+        if (command.method === "Input.dispatchMouseEvent") break
+        command = yield* browser.next
+      }
+      yield* Fiber.join(input)
+      assert.deepStrictEqual(methods, ["S1 Runtime.evaluate", "S1 Input.dispatchMouseEvent"])
+    }))
+
   it.effect("returns a command's result only after the fold has applied every event received before its reply", () =>
     Effect.gen(function*() {
       const browser = yield* makeBrowser
