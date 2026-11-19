@@ -5,8 +5,7 @@
  * there, such as `Locator.StrictViolation` or `PageNavigation.NavigationFailed`. The ones here are shared: a bad
  * argument, missing access, a capability the backend lacks, a protocol failure, the two ways an evaluated
  * function can fail, and a dialog that blocks the page. Match them with `Effect.catchReason`; each carries a
- * one-line `hint`, which its `message` includes. Two more are for what Strider inserts into a page: a style or script
- * the page's policy refuses, and a URL that fails to load.
+ * one-line `hint`, which its `message` includes.
  *
  * @stability unstable
  * @since 0.1.0
@@ -268,79 +267,6 @@ export class NotSerializable extends Schema.Error<NotSerializable>("@usestrider/
 }
 
 /**
- * Reason for a style or script the page's Content Security Policy refused to apply or run.
- *
- * **Details**
- *
- * `directive` is the policy directive that refused it, such as `style-src-elem`. The page's policy applies to what
- * Strider inserts into its document as it does to the page's own elements.
- *
- * **Example** (Skipping a theme the page's policy refuses)
- *
- * ```ts import.meta.vitest
- * import { Page } from "@usestrider/browser"
- * import { Effect } from "effect"
- *
- * const darken = Effect.fn("darken")(function*(page: Page.Page) {
- *   yield* page.addStyleTag({ source: "body { background: black }" }).pipe(
- *     Effect.catchReason(
- *       "PageError",
- *       "RefusedByPolicy",
- *       (refused) => Effect.logWarning(refused.directive)
- *     )
- *   )
- * })
- * ```
- *
- * @stability unstable
- * @category reasons
- * @since 0.1.0
- */
-export class RefusedByPolicy extends Schema.Error<RefusedByPolicy>("@usestrider/browser/Reason/RefusedByPolicy")({
-  _tag: Schema.tag("RefusedByPolicy"),
-  directive: Schema.String,
-  hint: Schema.String
-}) {
-  override get message(): string {
-    return `Refused by the page's Content Security Policy (${this.directive}): ${this.hint}`
-  }
-}
-
-/**
- * Reason for a stylesheet or script whose URL didn't load, such as one the server answered with an error.
- *
- * **Example** (Reporting a stylesheet that failed to load)
- *
- * ```ts import.meta.vitest
- * import { Page } from "@usestrider/browser"
- * import { Effect } from "effect"
- *
- * const theme = Effect.fn("theme")(function*(page: Page.Page, url: string) {
- *   yield* page.addStyleTag({ url }).pipe(
- *     Effect.catchReason(
- *       "PageError",
- *       "ResourceFailed",
- *       (failed) => Effect.logWarning(`No theme at ${failed.url}`)
- *     )
- *   )
- * })
- * ```
- *
- * @stability unstable
- * @category reasons
- * @since 0.1.0
- */
-export class ResourceFailed extends Schema.Error<ResourceFailed>("@usestrider/browser/Reason/ResourceFailed")({
-  _tag: Schema.tag("ResourceFailed"),
-  url: Schema.String,
-  hint: Schema.String
-}) {
-  override get message(): string {
-    return `${this.url} failed to load (${this.hint})`
-  }
-}
-
-/**
  * Reason for an operation on a page that a dialog blocks, when nothing will decide the dialog.
  *
  * **Details**
@@ -449,5 +375,84 @@ export class LocatorHandlerFailed extends Schema.Error<LocatorHandlerFailed>(
 }) {
   override get message(): string {
     return `Locator handler for ${this.trigger} failed (${this.hint})`
+  }
+}
+
+/**
+ * Reason for an element a caller added, such as a script tag, whose resource didn't load.
+ *
+ * **Details**
+ *
+ * The browser fired the element's `error` event: the URL was unreachable, answered with an error status, or
+ * wasn't a script it could run. It names no cause, since the page isn't told one.
+ *
+ * **Example** (Falling back when a library doesn't load)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const loadCharts = Effect.fn("loadCharts")(function*(page: Page.Page) {
+ *   yield* page.addScriptTag({ url: "https://cdn.example.com/charts.js" }).pipe(
+ *     Effect.catchReason(
+ *       "PageError",
+ *       "ResourceFailed",
+ *       () => page.addScriptTag({ url: "https://mirror.example.com/charts.js" })
+ *     )
+ *   )
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category reasons
+ * @since 0.1.0
+ */
+export class ResourceFailed extends Schema.Error<ResourceFailed>("@usestrider/browser/Reason/ResourceFailed")({
+  _tag: Schema.tag("ResourceFailed"),
+  url: Schema.String,
+  hint: Schema.String
+}) {
+  override get message(): string {
+    return `${this.url} didn't load (${this.hint})`
+  }
+}
+
+/**
+ * Reason for an element a caller added, such as a script tag, that the page's Content Security Policy refused.
+ *
+ * **Details**
+ *
+ * `directive` is the one the browser reports as refusing it, such as `script-src-elem`, and `blocked` is what it
+ * refused: the URL, or `inline`.
+ *
+ * **Example** (Logging the directive that refused a script)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const tryHelper = Effect.fn("tryHelper")(function*(page: Page.Page) {
+ *   yield* page.addScriptTag({ source: "window.helperReady = true" }).pipe(
+ *     Effect.catchReason(
+ *       "PageError",
+ *       "RefusedByPolicy",
+ *       (refused) => Effect.logWarning(`Refused under ${refused.directive}`)
+ *     )
+ *   )
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category reasons
+ * @since 0.1.0
+ */
+export class RefusedByPolicy extends Schema.Error<RefusedByPolicy>("@usestrider/browser/Reason/RefusedByPolicy")({
+  _tag: Schema.tag("RefusedByPolicy"),
+  directive: Schema.String,
+  blocked: Schema.String,
+  hint: Schema.String
+}) {
+  override get message(): string {
+    return `The page's Content Security Policy refused ${this.blocked} under ${this.directive} (${this.hint})`
   }
 }

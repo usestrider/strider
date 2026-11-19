@@ -48,6 +48,7 @@ describe("Shared-context digest control", () => {
             text: label,
             location: Option.none(),
             origin,
+            source: { _tag: "Page" },
             at: Adapter.now()
           })
           const exception = new UncaughtException.UncaughtException({

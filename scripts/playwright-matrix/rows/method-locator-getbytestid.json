@@ -20,14 +20,10 @@
     "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
   },
   "requirements": [],
-  "gaps": [
-    "method-locator-getbytestid-value-regexp-test-id"
-  ],
   "valueCoverage": [
     {
       "value": "RegExp test id",
-      "status": "missing",
-      "gap": "method-locator-getbytestid-value-regexp-test-id"
+      "status": "has"
     }
   ]
 }

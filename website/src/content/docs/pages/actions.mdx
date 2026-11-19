@@ -316,9 +316,13 @@ An upload through a file chooser, not an input, is answered with
 ## Dragging
 
 `dragTo` drags with the pointer. A native HTML drag (`draggable="true"`) works only on Chromium, and fails
-elsewhere with `Unsupported` before anything is sent; `html: "synthetic"` has the page dispatch the drag's events
-instead, on every browser. They're untrusted: their `isTrusted` is `false`, so a page that checks it can tell them
-from a user's:
+elsewhere with `Unsupported` before anything is sent. On Chromium, the target sees `dragenter` on the first move
+that reaches it, `dragover` on each move after, and `dragover` then `drop` at the release: the events of a drag
+Chromium runs itself, in the same number, with the first `dragover` one move later. Pressing Escape before
+the release cancels the drag: the target sees `dragleave`, the source `dragend`,
+and nothing sees a `drop`. `html: "synthetic"` has the page dispatch the
+drag's events instead, on every browser. They're untrusted: their `isTrusted` is `false`, so a page that checks it
+can tell them from a user's:
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -378,7 +382,10 @@ const zoomMap = Effect.fn("zoomMap")(function*(page: Page.Page) {
 })
 ```
 
-A click while Shift is held is a Shift-click; moves while a button is held are a drag. Input to one page goes one
+A click while Shift is held is a Shift-click; moves while a button is held are a drag. A drag that starts in a frame
+stays with that frame until the button is released, as a real pointer's does; on Firefox, moves outside a cross-site
+frame aren't sent, and the release lands at the last point inside it
+([Firefox](/docs/browsers/firefox)). The wheel always goes to what is under the pointer. Input to one page goes one
 gesture at a time, so two fibers acting on one page never interleave their presses: the second
 [waits its turn](/docs/deadlines#setting-a-deadline), within its deadline.
 

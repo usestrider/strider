@@ -11,7 +11,7 @@
       "url": "/docs/api/browser/Locator#Locator.locator"
     }
   ],
-  "notes": "Queries produce lazy locators; CSS selectors only. See selector differences below.",
+  "notes": "Queries produce lazy locators; a string is CSS, and Locator.xpath builds an XPath expression. See selector differences below.",
   "capabilities": [],
   "audit": {
     "sources": [

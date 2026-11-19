@@ -2,9 +2,9 @@
   "status": "has",
   "api": [
     {
-      "module": "Page",
-      "symbol": "StyleTag",
-      "url": "/docs/api/browser/Page#StyleTag"
+      "module": "StyleTag",
+      "symbol": "Source",
+      "url": "/docs/api/browser/StyleTag#Source"
     }
   ],
   "notes": "{ source } is the CSS text; path and url are the other members of the same union.",

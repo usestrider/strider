@@ -164,7 +164,8 @@ interface Node {
     | { readonly _tag: "Accessible"; readonly value: string }
     | { readonly _tag: "Inferred"; readonly value: string; readonly from: "text" | "title" | "placeholder" | "alt" | "nearbyLabel" }
     | { readonly _tag: "None" }
-  readonly states: ReadonlySet<"checked" | "expanded" | "selected" | "disabled" | "focused" | "pressed" | "invalid">
+  readonly states: ReadonlySet<"checked" | "checked=mixed" | "expanded" | "selected" | "disabled" | "focused" | "pressed" | "pressed=mixed" | "invalid">   // rendered as named: [checked=mixed]
+  readonly level?: number | undefined                    // a heading's, or an aria-level list item's, row's or tree item's: [level=2]
   readonly validationMessage: Option<string>
   readonly children: ReadonlyArray<Node>
 }
@@ -308,7 +309,14 @@ interface UserContext extends ObservedUserContext {     // two levels only: read
 }
 
 interface Options {                                      // UserContext.Options; an unset option keeps the browser's own value unless a default is stated
-  readonly acceptInsecureCerts?: boolean | undefined     // default false; Firefox and launched WebKit only; creation-only, explicit values refused on reclaim
+  readonly acceptInsecureCerts?: boolean | undefined     // default false; not attached WebKit, nor a reclaimable Chromium context; creation-only, explicit values refused on reclaim
+  readonly clientCertificates?: ReadonlyArray<{          // default none, and no proxy; Chromium and launched Firefox; not with proxy or a reclaimable context
+    readonly origin: string                              // HTTPS origin: scheme, hostname and effective port
+    readonly cert?: Uint8Array | undefined               // PEM, with key; or pfx alone
+    readonly key?: Redacted<Uint8Array> | undefined
+    readonly pfx?: Redacted<Uint8Array> | undefined
+    readonly passphrase?: Redacted<string> | undefined
+  }> | undefined                                         // loaded at creation (InvalidInput); a per-context loopback proxy presents them
   readonly proxy?: {
     readonly server: string                              // HTTP URL or host:port, default port 80; no userinfo, path, query or fragment
     readonly bypass?: ReadonlyArray<string> | undefined  // default []; hostnames or IP addresses, using native host matching
@@ -323,6 +331,7 @@ interface Options {                                      // UserContext.Options;
   readonly storageState?: StorageState.StorageState | undefined   // decoded with StorageState.Json
   readonly dialogs?: "dismiss" | "accept" | "leaveOpen" | undefined   // decision when no handler claims a dialog; default "dismiss"
   readonly focus?: "system" | "emulated" | undefined    // default "system"; "emulated" makes every page report focus, and keeps a page behind a popup rendering on Chromium (owned contexts only)
+  readonly bypassCSP?: boolean | undefined              // default false; true runs what pages' Content Security Policy forbids, in every frame, for the context's life; Chromium only, Firefox and WebKit refuse it
   readonly eventLog?: number | undefined                // retained events per module and page, for history; default 100, 0 keeps none
   readonly downloads?: "temporary" | "deny" | { readonly directory: string } | undefined   // default "temporary": a directory made for the context and removed after it
   readonly emulation?: Emulation.Emulation | undefined  // held for the context's life: emulate(...) without a scope
@@ -353,11 +362,16 @@ interface Emulation {
 - **Extra request headers.** `extraHTTPHeaders` applies to navigation and subresources. Names are case-insensitive; invalid names or non-string/invalid HTTP field values fail with `InvalidInput`. A registration replaces the map within its scope. Page headers merge over context headers, with page values winning. An empty page map retains context headers; removal restores the previous map. Request route overrides take precedence. Order is not guaranteed. Supported on Chromium, Firefox, and launched stock WebKit; attached stock WebKit refuses it. Unset configuration sends no header commands.
 - **One `emulate` call is one registration.** Removing it, or closing its scope, removes every field it set. Each field is a capability named for it: `emulation.viewport`, `emulation.viewport.mobile`, `emulation.userAgent`, `emulation.locale`, `emulation.timezone`, `emulation.geolocation`, `emulation.geolocation.unavailable`, `emulation.media`, `emulation.network.offline`, `emulation.network.throttling`, `emulation.cpuSlowdown`, `emulation.javaScript` (and `emulation.javaScript.disabled` for `"disabled"`), `emulation.touch`, `emulation.extraHTTPHeaders`, and `emulation.focus`. The call fails with `Unsupported` naming the first the backend can't apply, before anything is applied. Chromium applies every field. Firefox can't emulate media, touch, JavaScript, a mobile viewport, throttling, a CPU slowdown, or an unavailable position. WebKit sets the locale and position per context, the locale only before the context's pages exist (which `UserContext.Options.emulation` is), and can't emulate touch, throttling, a CPU slowdown, an unavailable position, or JavaScript disabled: with scripts off, stock WebKit gives the page no script context, so nothing can read or act on it. Most fields reach a loaded page at once; JavaScript, touch handlers, and WebKit's `navigator.userAgent` wait for its next document.
 - **Grants are recomputed.** Removing one leaves the others in force: the browser can only reset a context's grants together, so the library resets them and grants what remains. A name the browser doesn't know fails with `InvalidInput` naming it, and every origin is `permissions.anyOrigin`, which Firefox lacks.
-- **A proxy belongs to a new context.** HTTP proxy endpoints carry HTTP requests and HTTPS CONNECT tunnels;
-  HTTPS-to-proxy and SOCKS endpoints fail `Unsupported{userContexts.proxy.scheme}`. URL userinfo, paths, queries,
+- **A proxy belongs to a new context.** HTTP proxy endpoints carry HTTP requests and HTTPS CONNECT tunnels.
+  `socks5://` endpoints carry every destination on every backend, the proxy resolving names. `socks4://` resolves
+  names at the proxy on Firefox and launched WebKit (SOCKS4a); Chromium refuses it with
+  `Unsupported{userContexts.proxy.socks4}`. `https://` (TLS to the proxy) works on Chromium, with a certificate it
+  trusts; Firefox and WebKit refuse it with `Unsupported{userContexts.proxy.https}`. SOCKS credentials fail
+  `Unsupported{userContexts.proxy.socksCredentials}`, and other schemes `Unsupported{userContexts.proxy.scheme}`. URL userinfo, paths, queries,
   fragments, and non-host bypass entries fail `InvalidInput` without reflecting their text. Bypass entries are
-  hostnames or IP addresses, without URL, port, wildcard, or CIDR syntax, interpreted by the browser's native host
-  rules (which may also exclude subdomains). Localhost, 127.0.0.1, and ::1 stay direct. Omitting the proxy leaves
+  hostnames or IP addresses, without URL, port, wildcard, or CIDR syntax: a hostname matches itself, and
+  `.example.com` matches its subdomains only. Launched WebKit's resolver matches a hostname's subdomains too, so it
+  refuses the leading-dot form with `Unsupported{userContexts.proxy.bypassSuffix}`. Localhost, 127.0.0.1, and ::1 stay direct. Omitting the proxy leaves
   launch/system settings unchanged. The context and its pages release proxy connections with their scope.
 - **Proxy credentials answer proxy challenges only, once per request.** A second challenge is canceled; website
   auth routes retain their decisions. Passwords stay `Redacted` through protocol encoding and are absent from logs
@@ -411,8 +425,6 @@ interface Page extends ReadonlyPage {
   evaluateInMainWorld<Args extends ReadonlyArray<unknown>, A>(   // the page's own world; needs control
     fn: (...args: Args) => A | Promise<A>, ...args: Args
   ): Effect<JSHandle.Serialized<A>, PageError>
-  addStyleTag(tag: StyleTag): Effect<void, PageError | TargetGone | Timeout>
-    // { source } | { url } | { path }: a <style> or <link> in the current document, in the main world, once it applies
   evaluateHandle<Args extends ReadonlyArray<unknown>, A>(   // the isolated world, like evaluate
     fn: (...args: Args) => A | Promise<A>, ...args: Args
   ): Effect<JSHandle.JSHandle<Awaited<A>>, PageError, Scope>
@@ -424,6 +436,12 @@ interface Page extends ReadonlyPage {
   route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, NoInfer<P> | "request">, options?: Route.Options<P> | undefined): Effect<Route.Registration, Route.RouteError | TargetGone | Timeout, Scope | R>
   addLocatorHandler<E, R>(locator: Locator.Locator, handler: (locator: Locator.Locator) => Effect<void, E, R>, options?: { readonly times?: number; readonly noWaitAfter?: boolean }): Effect<Registration, PageError | TargetGone | Timeout, Scope | R> // page-local, serial, nonrecursive; default unlimited and wait for disappearance
   addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect<InitScript.InitScript, Declaration.DeclarationError | TargetGone | Timeout, Scope>
+  addScriptTag(script: ScriptTag.Source, options?: ScriptTag.Options | undefined): Effect<JSHandle.JSHandle<HTMLScriptElement>, PageError | TargetGone | Timeout, Scope>
+  addStyleTag(style: StyleTag.Source): Effect<JSHandle.JSHandle<HTMLStyleElement | HTMLLinkElement>, PageError | TargetGone | Timeout, Scope>
+    // { url }: a <link rel="stylesheet">; { source } | { path }: a <style>; returns once it has loaded
+    // once, in the current document, from its main world: a URL's load, a classic inline script having run,
+    // or an inline module accepted, not run;
+    // the page's CSP applies (RefusedByPolicy), and a URL that doesn't load is ResourceFailed
   emulate(settings: Emulation.Emulation): Effect<Declaration.Registration, Declaration.DeclarationError | TargetGone | Timeout, Scope>
   readonly activate: Effect<void, PageError | TargetGone | Timeout> // bring to front; rendering-based waits need it
   close(): Effect<void, PageError | TargetGone | Timeout>   // owned teardown: no beforeunload
@@ -485,7 +503,7 @@ Notes:
 - **Chromium `page.screenshot` calls belong to one main document.** The binding starts before element or layout preparation. A committed cross-document replacement before a terminal native capture reply fails promptly with `PageError{reason: Page.CaptureInvalidated}`, whose `document` and `replacement` identify both documents. A same-URL reload qualifies; hash/history changes and started-but-canceled navigations do not. Native reply receipt wins over a later replacement even if decoding finishes later; a replacement observed first wins over a late reply. An already terminal closure, crash, or deadline keeps its error. This does not cancel Chromium's command, prove temporary capture settings were restored, wait for destination load, retry, or silently return replacement-document pixels. A caller can request another capture explicitly. In the pinned Chromium 155.0.8059.79 regression, an immediate second capture returned replacement-document pixels at the requested 1100×1000 viewport dimensions, without a load wait, delay, or repair; this observation is not a general completion or restoration guarantee. This guard applies to `page.screenshot`; trace screenshot collection is outside this contract. Firefox, stock WebKit, subframe-only replacement, and hangs without a committed main-document replacement keep their existing behavior.
 
 - **Evaluated functions cross into the page.** They must be self-contained, and values travel as arguments. A `ReferenceError` from an evaluated function fails with `Reason.EvaluationThrown`, whose hint says so.
-- **Injected styles belong to the document.** `addStyleTag` makes one main-world call that appends a `<style>` (from `source`, or a `path` read through the layer's `FileSystem` with a `sourceURL` comment naming it) or a `<link rel="stylesheet">` (from `url`) to the head, or the root element without one, and returns on the element's `load`. The page's Content Security Policy applies: a `securitypolicyviolation` the element causes fails it with the shared `RefusedByPolicy{directive}`, which every backend dispatches before the element's `error`, and an `error` without one is `ResourceFailed{url}`. Strider keeps nothing: the element stays until the page removes it or the document is replaced, and no init script or listener exists before the call, so a page that never calls it does no added work (docs/decisions.md, "Pay for what you use"). It returns nothing rather than the element: Strider has no element handles, and a locator finds the element if a caller needs it.
+- **Injected styles belong to the document.** `addStyleTag` appends a `<style>` (from `source`, or a `path` read through the layer's `FileSystem` with a `sourceURL` comment naming it) or a `<link rel="stylesheet">` (from `url`) from the main world, through the same helper as `addScriptTag`, and returns the element on its `load`. The page's Content Security Policy applies, and only an enforced violation that is the element's own refuses it, as `RefusedByPolicy{directive}`: for a URL, one whose `blockedURI` is exactly the URL, dispatched before the element's `error`; for a `<style>`, one dispatched at the element, which settles the call itself, since Firefox fires no `error` after it. An `error` without one is `ResourceFailed{url}`, and a report-only policy refuses nothing. The element stays until the page removes it or the document is replaced, whatever becomes of its handle, and nothing exists before the call, so a page that never calls it does no added work (docs/decisions.md, "Pay for what you use").
 - **One name per world.** `evaluate` always runs in the isolated world, so a helper that takes a `ReadonlyPage` behaves the same when it is given a `Page`. The main world is `evaluateInMainWorld`, only on `Page`, so it is visible at every call site that uses it. So is running as a user gesture, where the backend supports it: `page.evaluateInMainWorld(openHelp).pipe(Page.withUserGesture)`.
 - **The type says what arrives.** Results cross by value, typed `Serialized<A>`. To validate a result instead of trusting the function's type, decode it: `.pipe(Effect.flatMap(Schema.decodeUnknownEffect(Cart)))`. Handles are opt-in and scoped.
 - **Evaluation goes again only when nothing ran.** A document that ends before the call is followed to the next one; one that ends during it fails the call with `TargetGone`, since the function may have run partly. A handle passed as an argument crosses as itself, into its own realm only; anything else crosses by value, and the first value that can't fails with `NotSerializable{path}`.
@@ -525,9 +543,9 @@ select nothing; strict reads fail with `NoMatch` and actions wait for a match un
 and `last` select the first and last match separately, and select nothing when the list is empty. Errors and
 traces preserve the selection as written: `nth(0)`, `nth(-1)`, `first`, or `last`.
 
-Pressed, expanded, and selected share readers between role filters and snapshots. ARIA keywords are ASCII case-insensitive, without trimming. Pressed is supported on buttons: absent or invalid values match false, and mixed matches neither boolean. Selected is supported on gridcell, option, row, tab, rowheader, columnheader, and treeitem: absent or invalid values match false. Expanded is supported only on expansion roles: absent matches neither boolean, and every present value other than true matches false. Native option.selected takes precedence over aria-selected; native details.open takes precedence over aria-expanded. Snapshots emit these positive markers only for exactly true, ignoring attributes on unsupported roles. Native details is an exception: open details emits expanded even with its ordinary group role, but group expanded filters still fail as invalid selectors. No expansion state is inferred for summary. These are Strider query and snapshot policies, not promises to reproduce browser accessibility trees; native precedence can differ from browser accessibility state.
+Pressed, expanded, and selected share readers between role filters and snapshots. ARIA keywords are ASCII case-insensitive, without trimming. Pressed is supported on buttons: absent or invalid values match false, and mixed matches neither boolean. Selected is supported on gridcell, option, row, tab, rowheader, columnheader, and treeitem: absent or invalid values match false. Expanded is supported only on expansion roles: absent matches neither boolean, and every present value other than true matches false. Native option.selected takes precedence over aria-selected; native details.open takes precedence over aria-expanded. Snapshots emit these positive markers only for exactly true, and `pressed=mixed` for a mixed pressed button, ignoring attributes on unsupported roles. Native details is an exception: open details emits expanded even with its ordinary group role, but group expanded filters still fail as invalid selectors. No expansion state is inferred for summary. These are Strider query and snapshot policies, not promises to reproduce browser accessibility trees; native precedence can differ from browser accessibility state.
 
-Checked state uses the native checked property for checkbox and radio inputs. ARIA roles `checkbox`, `radio`, `switch`, `menuitemcheckbox`, `menuitemradio`, `option`, and `treeitem` use `aria-checked`. ARIA keywords `true`, `false`, `mixed`, and `undefined` are recognized ASCII case-insensitively, without trimming. `mixed` is false on radio, menuitemradio, and switch; on checkbox, menuitemcheckbox, option, and treeitem it matches neither boolean filter and reads false for boolean reads and actions. Absent, empty, undefined, and unrecognized values use the role default: unsupported checking on option/treeitem, false on the other five roles. Unsupported reads and check/uncheck fail with `WrongElement` before input. This invalid-token fallback is Strider policy, so malformed optional state cannot authorize a click; it does not claim browser accessibility parity. Snapshots emit checked only for boolean true. Native indeterminate inputs match neither boolean filter while reads and snapshots retain native checked. Ordinary native options are unsupported unless they have a valid checked token. `aria-selected` and native option selection remain independent.
+Checked state uses the native checked property for checkbox and radio inputs. ARIA roles `checkbox`, `radio`, `switch`, `menuitemcheckbox`, `menuitemradio`, `option`, and `treeitem` use `aria-checked`. ARIA keywords `true`, `false`, `mixed`, and `undefined` are recognized ASCII case-insensitively, without trimming. `mixed` is false on radio, menuitemradio, and switch; on checkbox, menuitemcheckbox, option, and treeitem it matches neither boolean filter and reads false for boolean reads and actions. Absent, empty, undefined, and unrecognized values use the role default: unsupported checking on option/treeitem, false on the other five roles. Unsupported reads and check/uncheck fail with `WrongElement` before input. This invalid-token fallback is Strider policy, so malformed optional state cannot authorize a click; it does not claim browser accessibility parity. Snapshots emit checked for boolean true and `checked=mixed` for mixed. Native indeterminate inputs match neither boolean filter; reads retain native checked, while snapshots mark them `checked=mixed` instead of checked. Ordinary native options are unsupported unless they have a valid checked token. `aria-selected` and native option selection remain independent.
 
 ```ts
 interface ReadonlyLocator extends Queries<ReadonlyLocator>, Pipeable, Equal.Equal, Inspectable {
@@ -623,7 +641,28 @@ declare const bytes: (name: FileName | string, mimeType: MimeType | string, data
 // Locator.relative: only valid inside filter({ has })
 declare const relative: Queries<RelativeLocator>
 page.getByRole("row").filter({ has: Locator.relative.getByRole("button", { name: "Delete" }) })
+
+// Locator.xpath: an XPath expression for locator(selector: string | XPath); a string is always CSS
+declare const xpath: (expression: string) => XPath
+page.locator(Locator.xpath("//li[normalize-space()='Two'] | //li[@id='three']"))   // from the document
+page.locator("ul").locator(Locator.xpath("//li"))     // chained: a leading "/" reads as "./", inside each match
+page.locator("ul").locator(Locator.xpath(".//a | .//b"))   // only the start is rewritten: "//a | //b" would search the document for b
+item.locator(Locator.xpath(".."))                     // other axes reach where XPath says
+row.filter({ has: Locator.relative.locator(Locator.xpath("./td[2][.='Paid']")) })
 ```
+
+An XPath locator runs `document.evaluate` as an ordered node snapshot and keeps only its element nodes, in
+document order, so text and attribute nodes are skipped and a union matches both sides. From a page, or after
+`frame()`, the context node is the document; chained, it is each match so far, and an expression that starts with
+`/` is evaluated from it (`//li` as `.//li`). Only the start is rewritten, as Playwright does: in `//a | //b` the
+second branch searches the whole document, so a scoped union is written `.//a | .//b`, and a bare `/` is the root
+of the element's tree. XPath doesn't cross into a shadow root, though chained from an element inside one it
+searches that shadow tree. There is no namespace resolver: unprefixed names match HTML elements and a prefix is
+invalid. A malformed expression, a prefix, or a result that isn't a node set (`count(//li)`) fails with
+`InvalidInput` (`expected: "an XPath expression"`) when the locator is used, without waiting, even under a scope
+that matches nothing: each resolve checks the expression as written from a detached element. It is a query step of the engine already in
+each page, so a page that never uses one does no XPath work. Errors and traces describe it as
+`locator(Locator.xpath("…"))`.
 
 `fill` requires a string (also inside `Redacted`); other runtime values fail with `InvalidInput` before browser dispatch.
 For number inputs, it accepts empty clearing or a finite HTML floating-point string: optional minus, digits with an
@@ -701,7 +740,8 @@ interface ReadonlyFrameLocator extends Queries<ReadonlyLocator> {   // an iframe
   readonly owner: ReadonlyLocator                        // the iframe element
   frame(iframe: ReadonlyLocator): ReadonlyFrameLocator
 }                                                        // FrameLocator: the same queries returning Locator, and
-                                                         // addStyleTag(tag), into the iframe's current document
+                                                         // addScriptTag and addStyleTag, as Page's, in the frame's
+                                                         // current document
 
 // JSHandle
 interface JSHandle<A = unknown> extends Pipeable, Inspectable {   // a value in one realm, owned by the scope that acquired it
@@ -749,7 +789,7 @@ declare const toHaveRole: DualMatcher<Locator.ReadonlyLocator, [expected: string
 declare const toHaveCSS: DualMatcher<Locator.ReadonlyLocator, [name: string, expected: string | RegExp, options?: { readonly not?: boolean | undefined; readonly pseudo?: "before" | "after" | undefined } | undefined]>
 declare const toHaveAttribute: DualMatcher<Locator.ReadonlyLocator, [name: string, expected?: string | RegExp | undefined]>
 declare const toHaveCount: DualMatcher<Locator.ReadonlyLocator, [count: number]>
-declare const toMatchAria: DualMatcher<Locator.ReadonlyLocator, [pattern: AriaPattern.AriaPattern]>
+declare const toMatchAria: DualMatcher<Locator.ReadonlyLocator | Page.ReadonlyPage, [pattern: AriaPattern.AriaPattern, options?: { readonly not?: boolean | undefined } | undefined]>   // a page is matched from its document node; not waits for no match
 declare const toHaveURL: DualMatcher<Page.ReadonlyPage, [expected: string | RegExp]>
 declare const toHaveTitle: DualMatcher<Page.ReadonlyPage, [expected: string | RegExp]>
 // the general form: a subject and a condition
@@ -766,10 +806,13 @@ declare const because: { (why: string): <A>(condition: Condition<A>) => Conditio
 // a Condition is Pipeable: condition.pipe(Condition.because("…"))
 
 // AriaPattern: matched against snapshot({ sources: "aria" }); how children match is always stated
-declare const node: (role: AriaRole.AriaRole, name: string | RegExp, children: Children) => AriaPattern   // "" means no accessible name
+declare const node: (role: AriaRole.AriaRole, name: string | RegExp, children: Children, options?: NodeOptions | undefined) => AriaPattern   // "" means no accessible name
+// NodeOptions: { level, checked, pressed, expanded, selected, disabled, invalid, focused }; an omitted one isn't
+// compared, false requires its absence, and checked and pressed also take "mixed"
 declare const text: (value: string | RegExp) => AriaPattern
 declare const exactly: (...children: ReadonlyArray<AriaPattern>) => Children     // these children, in this order, and no others
 declare const including: (...children: ReadonlyArray<AriaPattern>) => Children   // these children in this order; others may come between
+declare const anywhere: (children: Children) => AriaPattern                      // the node, or any node beneath it, has these children
 declare const unchecked: Children                                                // children are not compared
 ```
 
@@ -832,7 +875,7 @@ declare const History: <S extends Schema.Top>(entry: S) => Schema.Struct<…>   
 | `Popup` | `Page` from a `Page`, otherwise `ObservedPage` | `url` | any page |
 | `NetworkRequest` | `NetworkRequest` | `url`, `method`, `resourceType`; `next` requires `url` | any page or context |
 | `NetworkResponse` | `NetworkResponse`, or `CapturedResponse<B>` given `body` | `url`, `method`, `status`; `next` requires `url`. `body` (any decoder of an `HttpIncomingMessage`, such as `HttpIncomingMessage.schemaBodyJson(Cart)`) needs inspect, applies to `next` and `stream`, and types their `where` | any page or context |
-| `ConsoleMessage` | `ConsoleMessage` | `level`, `text` | any page or context |
+| `ConsoleMessage` | `ConsoleMessage`, whose `source` is `Page` for the page's `console` calls or `Browser` with a `category` (`network`, `security`, …, `other`) for the browser's own (`console.source`: CDP; stock WebKit partial; Unsupported on BiDi, where every message is `Page`) | `level`, `text` | any page or context |
 | `UncaughtException` | `UncaughtException`: thrown errors and unhandled rejections; `kind` is `"unknown"` where the browser can't tell them apart (Firefox) | `message` | any page or context |
 | `Dialog` | `Dialog` | `kind` | any page; `Dialog.handle` needs `Page` |
 | `FileChooser` | `FileChooser`: data (`Single` or `Multiple`); `FileChooser.handle` gets it as `Pending` | `multiple` | `Page` |
@@ -1143,7 +1186,7 @@ Snapshots:
   - *inferred names:* visible text, `title`, `placeholder`, `alt`, a nearby label.
 - **Password controls.** Password inputs without an explicit ARIA role appear as `editable [ref=e1] [inferred: password]` when inferred interactivity is enabled. Their accessible names, including labels, titles, and placeholders, are retained; controls with no accessible name stay unnamed, without nearby-label inference. Disabled and read-only inputs retain this designation. Explicit ARIA roles are preserved. Password values do not contribute to snapshot names or find data, including when another element references the input for its name.
 - **Every inference is tagged with its evidence** in both the value and the text, so a model or a reader can tell `button "Save"` from `clickable "Save" [inferred: cursorPointer]`.
-- **`snapshot({ sources: "aria" })` is the pure accessibility tree,** which `Expect.toMatchAria` matches against.
+- **`snapshot({ sources: "aria" })` is the pure accessibility tree,** which `Expect.toMatchAria` matches against: a locator's from its match's node, a page's from its `document` node, named by its title. `AriaPattern.anywhere` matches a fragment at any depth beneath that root. Unlike the snapshot, neither form sees an iframe's contents: to match inside a frame, locate through `page.frame(...)`.
 - **The tree is the engine's,** the one `getByRole` matches, the same on every backend. An element with no role gives its children to its parent; hidden and inert elements are left out, and while a modal dialog is open, everything outside the topmost one; text is a `text` node unless it only repeats its parent's name, so a list item's text is its child, since a list item's name doesn't come from its content; an iframe is an `iframe` node with its frame's tree inside, whose refs are prefixed (`f1e3`). Click listeners aren't inferred on any backend yet (`snapshot.clickListeners`).
 - **Same node, same ref** while its document lives, so a renamed button keeps its ref. `generation` names the engine's ref table for the document. A ref never rebinds: its node removed is `StaleRef{Detached}`, its document replaced `Replaced`, a ref no snapshot of the document gave `OtherSnapshot`, and a table installed again `BindingLost`.
 - **Diffs are explicit** (`snapshot.diff(previous)`), never an automatic switch between full and delta output.
@@ -1429,6 +1472,8 @@ const carts = yield* NetworkResponse.history(page, { url: "https://app.example.c
 yield* page.getByRole("navigation").pipe(Expect.toMatchAria(
   AriaPattern.node("navigation", "Main", AriaPattern.including(
     AriaPattern.node("link", "Orders", AriaPattern.unchecked)))))
+yield* page.pipe(Expect.toMatchAria(   // a page's tree, matched at any depth
+  AriaPattern.anywhere(AriaPattern.including(AriaPattern.node("heading", "Orders", AriaPattern.unchecked)))))
 
 // 17. An operation of the program's own: one deadline, and a Timeout named for it that says how far it got
 const checkout = Operation.fn("checkout")(function*(page: Page.Page, card: string) {

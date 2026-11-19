@@ -11,12 +11,12 @@
       "url": "/docs/api/browser/Locator#FrameLocator.addStyleTag"
     }
   ],
-  "notes": "Adds a <style> or <link> in the main world of the iframe's current document and waits for it to apply; a CSP refusal fails with RefusedByPolicy and a failed load with ResourceFailed. It returns nothing rather than an ElementHandle: Strider has no element handles, and a locator finds the element.",
+  "notes": "Appends a <style> or <link rel=stylesheet> from the main world of the iframe's current document, so its CSP applies, and waits for the element's load. Returns a scoped JSHandle of the element, not an ElementHandle; a CSP refusal fails with RefusedByPolicy and a URL that doesn't load with ResourceFailed.",
   "capabilities": [],
   "audit": {
     "sources": [
       "packages/browser/src/Locator.ts",
-      "packages/browser/src/internal/styleTag.ts"
+      "packages/browser/src/StyleTag.ts"
     ],
     "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
   },

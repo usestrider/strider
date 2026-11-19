@@ -22,3 +22,10 @@ it("preserves role filters in shared query steps and descriptions", () => {
     includeHidden: false
   })
 })
+
+it("describes an XPath step as the constructor that built it", () => {
+  assert.strictEqual(
+    describeSteps([{ _tag: "Css", selector: "ul" }, { _tag: "XPath", expression: "//li[@id=\"two\"]" }]),
+    "locator(\"ul\").locator(Locator.xpath(\"//li[@id=\\\"two\\\"]\"))"
+  )
+})

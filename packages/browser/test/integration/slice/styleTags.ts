@@ -24,8 +24,9 @@ export const styleTags = (name: string, backend: Layer.Layer<Browser.Browser, un
           const served = yield* site
           const page = yield* newPage
           yield* page.goto(`${served.origin}/fixture?html=x`)
-          yield* page.addStyleTag({ source: "body { color: rgb(1, 2, 3) }" })
+          const element = yield* page.addStyleTag({ source: "body { color: rgb(1, 2, 3) }" })
           assert.strictEqual(yield* page.evaluateInMainWorld(bodyColor), "rgb(1, 2, 3)")
+          assert.strictEqual(yield* element.evaluate((style) => style.tagName), "STYLE")
         }).pipe(Effect.scoped))
 
       it.effect("applies a stylesheet from a URL once it has loaded", () =>
@@ -33,7 +34,11 @@ export const styleTags = (name: string, backend: Layer.Layer<Browser.Browser, un
           const served = yield* site
           const page = yield* newPage
           yield* page.goto(`${served.origin}/fixture?html=x`)
-          yield* page.addStyleTag({ url: stylesheet(served.origin, "body { color: rgb(4, 5, 6) }") })
+          const element = yield* page.addStyleTag({ url: stylesheet(served.origin, "body { color: rgb(4, 5, 6) }") })
+          assert.deepStrictEqual(
+            yield* element.evaluate((link) => [link.tagName, link.getAttribute("rel")]),
+            ["LINK", "stylesheet"]
+          )
           assert.strictEqual(yield* page.evaluateInMainWorld(bodyColor), "rgb(4, 5, 6)")
         }).pipe(Effect.scoped))
 
@@ -48,10 +53,10 @@ export const styleTags = (name: string, backend: Layer.Layer<Browser.Browser, un
           const file = nodePath.join(directory, "injected.css")
           yield* Effect.promise(() => fs.writeFile(file, "body { color: rgb(7, 8, 9) }"))
           yield* page.goto(`${served.origin}/fixture?html=x`)
-          yield* page.addStyleTag({ path: file })
+          const element = yield* page.addStyleTag({ path: file })
           assert.strictEqual(yield* page.evaluateInMainWorld(bodyColor), "rgb(7, 8, 9)")
           assert.isTrue(
-            (yield* page.evaluateInMainWorld(() => document.querySelector("style")?.textContent ?? "")).endsWith(
+            (yield* element.evaluate((style) => style.textContent ?? "")).endsWith(
               `\n/*# sourceURL=${file} */`
             )
           )
@@ -149,7 +154,8 @@ export const styleTags = (name: string, backend: Layer.Layer<Browser.Browser, un
           )
           const before = yield* page.evaluateInMainWorld(bodyColor)
           const frame = page.frame(page.locator("iframe"))
-          yield* frame.addStyleTag({ source: "body { color: rgb(1, 2, 3) }" })
+          const element = yield* frame.addStyleTag({ source: "body { color: rgb(1, 2, 3) }" })
+          assert.isTrue(yield* element.evaluate((style) => style.ownerDocument === document && window.top !== window))
           yield* frame.locator("body").pipe(Expect.toHaveCSS("color", "rgb(1, 2, 3)"))
           assert.strictEqual(yield* page.evaluateInMainWorld(bodyColor), before)
         }).pipe(Effect.scoped))

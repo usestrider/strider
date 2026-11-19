@@ -484,7 +484,7 @@ needs to find and, for a negative index, would name a different selection.
 `{ _tag: "FullPage" }` for a choice with nothing in it; and constructors (`Screenshot.fullPage`), which add a module
 to import for plain data.
 
-**Checked and selected are independent states.** The seven supported ARIA checkable roles share checked parsing across reads, expectations, filters, actions, and snapshots. ARIA keywords `true`, `false`, `mixed`, and `undefined` are recognized ASCII case-insensitively, without trimming. `mixed` is false on radio, menuitemradio, and switch; on checkbox, menuitemcheckbox, option, and treeitem it matches neither boolean filter and reads false for boolean reads and actions. Absent, empty, undefined, and unrecognized values use the role default: unsupported checking on option/treeitem, false on the other five roles. Unsupported reads and check/uncheck fail with `WrongElement` before input. This invalid-token fallback is Strider policy, so malformed optional state cannot authorize a click; it does not claim browser accessibility parity. Snapshots emit checked only for boolean true. Keyword recognition follows HTML enumerated keyword matching without trimming; role-specific mixed behavior follows [WAI-ARIA checked](https://www.w3.org/TR/wai-aria-1.2/#aria-checked). Native checkbox/radio checked and indeterminate properties retain precedence; native options keep selected independent from checked. Rejected: accepting arbitrary nonempty optional state, which allows malformed markup to authorize input; mirroring Chromium's arbitrary-invalid-to-true accessibility mapping, which grants that input and is not evidence of cross-browser parity; treating mixed identically on all roles, which loses the two-state roles' false state; using selected as checked or suppressing checked snapshots on selectable roles, which conflates or hides independent states. Snapshot representation remains a positive checked marker, not a mixed-state encoding.
+**Checked and selected are independent states.** The seven supported ARIA checkable roles share checked parsing across reads, expectations, filters, actions, and snapshots. ARIA keywords `true`, `false`, `mixed`, and `undefined` are recognized ASCII case-insensitively, without trimming. `mixed` is false on radio, menuitemradio, and switch; on checkbox, menuitemcheckbox, option, and treeitem it matches neither boolean filter and reads false for boolean reads and actions. Absent, empty, undefined, and unrecognized values use the role default: unsupported checking on option/treeitem, false on the other five roles. Unsupported reads and check/uncheck fail with `WrongElement` before input. This invalid-token fallback is Strider policy, so malformed optional state cannot authorize a click; it does not claim browser accessibility parity. Snapshots mark checked for boolean true and `checked=mixed` for mixed. Keyword recognition follows HTML enumerated keyword matching without trimming; role-specific mixed behavior follows [WAI-ARIA checked](https://www.w3.org/TR/wai-aria-1.2/#aria-checked). Native checkbox/radio checked and indeterminate properties retain precedence; native options keep selected independent from checked. Rejected: accepting arbitrary nonempty optional state, which allows malformed markup to authorize input; mirroring Chromium's arbitrary-invalid-to-true accessibility mapping, which grants that input and is not evidence of cross-browser parity; treating mixed identically on all roles, which loses the two-state roles' false state; using selected as checked or suppressing checked snapshots on selectable roles, which conflates or hides independent states; one `mixed` snapshot marker whose meaning is read from the role, which loses a native indeterminate checkbox's checked state when its role is button. Snapshots mark `checked=mixed`, from the checked reader, and `pressed=mixed`, from the pressed reader, so ARIA patterns can state them; each comes from its own reader, and the role isn't used to tell them apart.
 
 **Checking a label prefers its own checked state and clicks the label.** `check` and `uncheck` read the
 selected element's own checked state first, preserving ARIA checkable labels even when an associated control has
@@ -599,6 +599,21 @@ Chromium can acknowledge clearing device metrics before its native-view resize r
 release reproduced a successful clear followed by the overridden width. A clear reply alone cannot implement the
 restoration contract. Each target attempts to record its original width and height before its first viewport override; nested
 and replacement registrations retain those dimensions until the last override has been cleared and restored.
+A page with no opener that is paused for the debugger when it attaches, while a viewport is already in force,
+queues its reading of `innerWidth`, `innerHeight`, `screen.width`, and `screen.height` in its main world before the override, and nothing is awaited
+before it resumes. It reads what the restore compares, because the layout viewport's client size leaves out a
+scrollbar and at a fractional device scale rounds 1 px away, so a page back at its size would never match. The main
+world is read because no page script has run there before the page resumes. A renderer that answers the reading
+only after the override applies, as the headless shell does, shows the override in its size or its screen: a
+desktop override sets the size, and a mobile one lays the page out at another size but reports the override as the
+screen. So a reading whose size or screen equals the override's width and height, or one that fails, leaves the
+dimensions unknown, and the restore clears the override and warns without waiting. The cost is that a page whose
+own size, or whose own screen, equals the viewport's is not confirmed.
+A page given its viewport later, or one attached already running, as on connecting to a browser, is measured in the
+measurement world before its first override, as any other target is. Rejected: awaiting the measurement before the
+override and the resume, which costs every page opened under a viewport a renderer round trip before it starts,
+the common path; queuing `Page.getLayoutMetrics`, which measures the layout viewport rather than what the restore
+compares; and comparing the layout viewport at the restore instead, which a scrollbar on the released page breaks.
 While an override remains, release reapplies the current effective override. Per-target serialization recomputes
 that effective override when the command runs, including when registrations are released out of order.
 
@@ -624,7 +639,8 @@ platform chrome differs; reading the window's type from `Page.windowOpen`'s feat
 target they open; and skipping a removed context's restore, which would leave a released `context.emulate` waiting
 on the same popup.
 
-Measure in the named `__strider_viewport` isolated world for the target's main frame,
+Apart from that queued reading, which runs in the main world before any page script can, measure in the named
+`__strider_viewport` isolated world for the target's main frame, as the restore and a page already running do,
 passing the returned execution context id explicitly to `Runtime.evaluate`. Create or retrieve that world for each
 measurement rather than caching an execution context across navigation. Main-world lexical bindings and numeric
 or nonnumeric shadows must not supply the baseline. Missing, rejected, or nonfinite measurements do not prevent
@@ -1491,7 +1507,13 @@ owns a share; confirmed pre-creation rejection or confirmed unused rollback rele
 permanently pinning credentials on a definite unused failure and clearing another creation's pending or retained binding. Reject silently reusing another context's credentials, clearing a shared cache,
 preemptively sending secrets, modifying the parent environment, and inserting an HTTP relay or browser-process
 shim to disguise unsupported isolation. Bypass host matching stays native and is stated in the API; do not accept
-unverified wildcard, CIDR, SOCKS, or HTTPS-to-proxy configurations.
+unverified wildcard or CIDR configurations. Accept a SOCKS or HTTPS-to-proxy endpoint only where a backend's native
+setting was verified to carry it, with one meaning everywhere: SOCKS4 resolves names at the proxy, so Chromium,
+whose SOCKS4 resolves them locally, refuses it; HTTPS-to-proxy stays Chromium's, since Firefox's BiDi settings
+can't express it and WebKit's context certificate settings don't reach the proxy; a leading-dot bypass matches
+subdomains only, which WebKit's GLib resolver can't express. Each refusal names its capability. Rejected: emulating
+SOCKS4a or a suffix rule with a relay, and passing SOCKS credentials through WebKit's process environment. Like
+the rest of the proxy support, these are native settings of the context that asks, per [Pay for what you use](#pay-for-what-you-use).
 
 ## Native passkey testing
 
@@ -1499,7 +1521,7 @@ Virtual authenticators use native Chromium WebAuthn and belong to one page's sco
 
 ## Shared snapshot and role-filter states
 
-Snapshots and role filters use the same pressed, expanded, and selected readers, with positive snapshot markers only for exactly true. Preserve the documented query defaults and ASCII case-insensitive keywords without trimming, rather than introducing browser-dependent accessibility error handling or new malformed-token defaults. Native option selection and details open state take precedence over ARIA; open ordinary details is a native exception to snapshot role gating, without admitting group expanded filters or adding summary semantics. Reject independent attribute-only snapshot parsing because it contradicts query results, and reject copying browser accessibility trees because their native/ARIA conflict resolution can differ from Strider's existing native-property query contract.
+Snapshots and role filters use the same pressed, expanded, and selected readers, with positive snapshot markers only for exactly true, and `pressed=mixed` for a mixed pressed state. Preserve the documented query defaults and ASCII case-insensitive keywords without trimming, rather than introducing browser-dependent accessibility error handling or new malformed-token defaults. Native option selection and details open state take precedence over ARIA; open ordinary details is a native exception to snapshot role gating, without admitting group expanded filters or adding summary semantics. Reject independent attribute-only snapshot parsing because it contradicts query results, and reject copying browser accessibility trees because their native/ARIA conflict resolution can differ from Strider's existing native-property query contract.
 
 ## Route declaration boundary
 
@@ -1512,6 +1534,16 @@ Optional browser features do work only when requested, within the owning context
 never request a feature gain no interception, injected instrumentation, per-action checks, or retained request
 state for it. Additions must include paired default-path benchmarks so review can assess their cost. Reject
 always-on preparation for optional features: unused capabilities must not slow existing automation.
+
+## Client certificates through a per-context proxy
+
+No browser protocol Strider speaks sets a TLS client certificate for one context, so a context with
+`clientCertificates` routes its TLS traffic through a loopback proxy of its own, which ends each tunnel with a
+self-signed certificate only that context accepts, and opens its own connection to the site, presenting the
+matching certificate and checking the site's. Following [Pay for what you use](#pay-for-what-you-use), the proxy
+exists only for that context and closes with it. Rejected: launch-wide certificate stores or browser policies,
+which reach every context; and refusing plain HTTP on Firefox, whose user contexts take no PAC proxy, which would
+break `http://` pages there.
 
 ## Cooperative readiness checks
 
@@ -1617,6 +1649,18 @@ so rejection cannot create an unbounded challenge loop.
 The alternative of an ordered credential array is left to auth routes, which already express that selection.
 Optional interception follows [Pay for what you use](#pay-for-what-you-use).
 
+## Context test-id attribute
+
+The attribute `getByTestId` matches is a context's setting, chosen by the program that creates or reclaims the
+context, so sibling contexts never share it. The attribute lives in Strider, not in the browser, so a program that
+reclaims a context has no record of its creator's choice and names its own; omitting it keeps the current setting.
+A locator copies its context's attribute into its query when it is made, and a relative locator,
+which has no context, takes the attribute of the locator whose filter it is placed in. The page's engine reads the
+attribute from the query, so a context that keeps the default does no added work, following
+[Pay for what you use](#pay-for-what-you-use). Rejected: a global setting that can change at any time, as
+Playwright's `selectors.setTestIdAttribute` is, which leaks between tests that share a process and makes a locator's
+meaning depend on when it runs.
+
 ## Generated reference outputs and curated comparisons
 
 API indexes and the capability matrix's browser statuses and current evidence hashes are ignored outputs,
@@ -1678,7 +1722,7 @@ On stock WebKit, a function whose declaration takes over 96 KiB once JSON-encode
 
 ## Pointer input into an out-of-process frame goes on that frame's session
 
-On Chromium, pointer input (mouse, wheel and touch) whose points all land in frames of one out-of-process frame goes on that frame's own CDP session, in the coordinates of its outermost frame, from each frame's viewport origin that L1 already computes; any other input, such as a drag from the page into a frame, or input that names no frame, goes on the page's session in its coordinates. Input sent on the page's session is hit-tested in the browser process from the page's hit-test data, which includes an out-of-process frame only once its first compositor frame has been aggregated; until then, it reaches the parent's iframe element, and a click can split between the two documents. Input on the frame's own session is hit-tested from that frame, and goes to the frame itself while the data doesn't include it yet, so it reaches the frame before it has been drawn, with no wait. The trade-off: the browser doesn't hit-test the parent documents for this input, so an element of a parent drawn over the iframe doesn't intercept it; the locator's pointer check, which hit-tests each parent document at the point, refuses such a click before anything is sent, and an action with that check turned off sends it to the frame's element. Waiting for the frame's `Page.lifecycleEvent` `firstPaint`, as Strider did before, was rejected: Chromium reports it from a presentation callback that also runs when the frame is dropped, stamped with the time of the drop, so it can arrive before the frame is in the hit-test data, and a frame that paints nothing never reports it. CDP reports no event for the hit-test data, so no other signal shows when the page's session can route to the frame. Retries and delays were rejected: a retry can't undo input the parent already received, and no delay is known to be long enough.
+On Chromium, pointer input (mouse, wheel and touch) whose points all land in frames of one out-of-process frame goes on that frame's own CDP session, in the coordinates of its outermost frame, from each frame's viewport origin that L1 already computes. Input that names no frame (`page.mouse`, the touchscreen and the wheel) follows the same rule: on a page with an out-of-process frame, each session's frame element boxes are read once in an operation, a point inside one is hit-tested in each session from the page's down (`DOM.getNodeForLocation`, then `DOM.describeNode` and `DOM.getBoxModel` where it lands on a frame's element), and the event goes on the deepest out-of-process frame's session it lands in; from a press until every button is up, mouse and touch input goes where the press went, in the one press state a locator's press uses too, a release outside the frame included, until that frame's session or context ends (a wheel goes by its point), as a real pointer stays with the element it pressed. Firefox, which doesn't deliver page coordinates into a cross-site frame at all, does the same with a script call a level in a sandbox. Any other input, such as a locator's drag from the page into a frame, goes on the page's session in its coordinates; a frameless drag that starts in a frame stays with it until its buttons are up, or its session ends. Frameless input is hit-tested in each parent document on its way down, so an element drawn over the iframe takes it; a locator's input on the frame's session relies on the locator's own checks instead. Input sent on the page's session is hit-tested in the browser process from the page's hit-test data, which includes an out-of-process frame only once its first compositor frame has been aggregated; until then, it reaches the parent's iframe element, and a click can split between the two documents. Input on the frame's own session is hit-tested from that frame, and goes to the frame itself while the data doesn't include it yet, so it reaches the frame before it has been drawn, with no wait. The trade-off: the browser doesn't hit-test the parent documents for a locator's input on the frame's session, so an element of a parent drawn over the iframe doesn't intercept it; the locator's pointer check, which hit-tests each parent document at the point, refuses such a click before anything is sent, and an action with that check turned off sends it to the frame's element. Waiting for the frame's `Page.lifecycleEvent` `firstPaint`, as Strider did before, was rejected: Chromium reports it from a presentation callback that also runs when the frame is dropped, stamped with the time of the drop, so it can arrive before the frame is in the hit-test data, and a frame that paints nothing never reports it. CDP reports no event for the hit-test data, so no other signal shows when the page's session can route to the frame. Retries and delays were rejected: a retry can't undo input the parent already received, and no delay is known to be long enough. For input that names no frame, the hit test costs up to three calls for each level of frame it crosses, so it runs only at a point inside a frame element's box, and skipping it once a frame reports `firstPaint` was rejected for the reason above; leaving such input on the page's session, as a real pointer's would be, was rejected because it misses a frame that has just loaded on Chromium and every cross-site frame on Firefox.
 
 ## No requests for URLs the browser answers
 
@@ -1768,3 +1812,39 @@ command still unanswered sent waits for that reply by the same rule, rather than
 declaration, under the connection's own command deadline, and one that fails or never comes leaves the setting
 unknown, so the next change sends it again. Rejected: always awaiting the reply, which deadlocks with a held
 navigation, and never awaiting it, which leaves the setting unconfirmed when nothing stops the browser answering.
+
+## A Chromium HTML drag enters where it starts and drops alone
+
+On Chromium, the move that starts an intercepted HTML drag sends `dragEnter` alone, each later move `dragOver`, even to
+the same point, and the release `drop` alone. Chromium's `drop` command fires a `dragover` before the `drop`, so the
+page sees the drag events a drag Chromium runs itself fires, in the same number: `dragenter`, one `dragover` per move,
+and `drop`. Only the first `dragover` comes later, at the next move or the drop, where Chromium's own drag fires it with
+the `dragenter`. So no sequence of drag commands also gives a `dragover` while the button is still held after a single
+move: a drag of one held move shows its first `dragover` at the release or the next move. Sending `dragEnter` and
+`dragOver` at the move that starts the drag, which shows the drag over the target while the button is held, was
+rejected: every drop would then end with a second `dragover`, which Playwright's and Puppeteer's drag tests both reject.
+
+## Console messages name their source in one shared set of categories
+
+A `ConsoleMessage` carries a `source`: `Page` for the page's own `console` calls, or `Browser` with a `category` from
+one set every browser shares (`network`, `security`, `deprecation`, `intervention`, `violation`, `rendering`,
+`storage`, `other`). The source follows from the event that delivered the message, not from which domains are enabled.
+Each adapter maps its browser's names onto the set, and what fits none is `other`, so a program can filter for
+`security` the same way on every browser. Rejected: keeping each browser's own name beside the category, which would
+make that name part of the API and tie a program to one browser's wording; and a default `source` on the
+constructor, which would be a hidden default, and wrong for the browser's own messages.
+
+## Visual comparison lives in the test adapter
+
+Screenshot baselines are a test runner's concern, so `ScreenshotBaseline` lives in `@usestrider/vitest`, beside
+`TestRun`, following [Pay for what you use](#pay-for-what-you-use): the browser package gains no image code and its
+default path does no added work. Every baseline is named by the caller, because a name derived from the test title
+and a call counter is hidden state that shifts when a test is reordered. A missing baseline is written but its
+assertion still fails, so a first run never passes without anyone looking at the image; only an explicit update
+(`vitest -u`) writes and passes. Matching Playwright's nameless overload, and passing on a freshly written baseline,
+were rejected for those reasons. A name is restricted, not transformed: it must already be a lower-case file name
+(`^[a-z0-9][a-z0-9._-]*$`), and the browser and platform parts never contain `-`, so every key has one path and
+`<name>-<browser>-<platform>` reads one way. Rewriting any text into a readable file name was rejected, because no
+readable rewrite keeps every input distinct: a literal name can equal another's rewritten form. Names are lower-case
+because `Cart` and `cart` would share a file on a case-insensitive filesystem. The PNG codec and comparator are native rather than
+dependencies.

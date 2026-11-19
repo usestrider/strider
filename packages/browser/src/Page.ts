@@ -31,7 +31,6 @@ import type * as Declaration from "./Declaration.ts"
 import * as Diagnostics from "./Diagnostics.ts"
 import * as Dialog from "./Dialog.ts"
 import type * as Emulation from "./Emulation.ts"
-import type * as FilePath from "./FilePath.ts"
 import type * as InitScript from "./InitScript.ts"
 import * as ReasonCause from "./internal/reasonCause.ts"
 import type * as RoutePhaseDiagnostic from "./internal/routePhaseDiagnostic.ts"
@@ -45,7 +44,9 @@ import * as PageNavigation from "./PageNavigation.ts"
 import type * as Pixels from "./Pixels.ts"
 import * as Reason from "./Reason.ts"
 import type * as Route from "./Route.ts"
+import type * as ScriptTag from "./ScriptTag.ts"
 import type * as Snapshot from "./Snapshot.ts"
+import type * as StyleTag from "./StyleTag.ts"
 import * as Target from "./Target.ts"
 import * as Url from "./Url.ts"
 import type * as UserContext from "./UserContext.ts"
@@ -799,8 +800,8 @@ export interface Page extends ReadonlyPage {
   getByPlaceholder(text: string | RegExp, options?: Locator.TextOptions | undefined): Locator.Locator
   getByAltText(text: string | RegExp, options?: Locator.TextOptions | undefined): Locator.Locator
   getByTitle(text: string | RegExp, options?: Locator.TextOptions | undefined): Locator.Locator
-  getByTestId(id: string): Locator.Locator
-  locator(css: string): Locator.Locator
+  getByTestId(id: string | RegExp): Locator.Locator
+  locator(selector: string | Locator.XPath): Locator.Locator
   frame(iframe: Locator.ReadonlyLocator): Locator.FrameLocator
   snapshot(
     options?: Snapshot.Options | undefined
@@ -977,39 +978,6 @@ export interface Page extends ReadonlyPage {
     ...args: Args
   ): Effect.Effect<JSHandle.Serialized<A>, PageError | Target.TargetGone | Deadline.Timeout>
   /**
-   * Adds a stylesheet to the page's current document, from CSS source, a URL, or a file, and returns once it applies.
-   *
-   * **Details**
-   *
-   * `{ source }` and `{ path }` add a `<style>`; a file's text gets a `sourceURL` comment naming its path, so
-   * devtools show where the rules came from. `{ url }` adds a `<link rel="stylesheet">` and waits for it to load.
-   * The element goes at the end of the document's head, or of its root element when it has no head. It belongs to
-   * the document: it stays until the page's scripts remove it or the document is replaced, and a navigation
-   * doesn't add it again. Nothing is set up before the call.
-   *
-   * Fails with `RefusedByPolicy` when the page's Content Security Policy refuses the stylesheet, with
-   * `ResourceFailed` when its URL doesn't load, and with `InvalidInput` when a path can't be read or the browser's
-   * layer has no `FileSystem` and `Path` to read it with.
-   *
-   * **Gotchas**
-   *
-   * The element is inserted among the page's own scripts, so they can see it and its order among their own styles
-   * decides which rules win.
-   *
-   * **Example** (Hiding a cookie banner before a screenshot)
-   *
-   * ```ts import.meta.vitest
-   * import { Page } from "@usestrider/browser"
-   * import { Effect } from "effect"
-   *
-   * const hideBanner = Effect.fn("hideBanner")(function*(page: Page.Page) {
-   *   yield* page.addStyleTag({ source: "#cookie-banner { display: none }" })
-   *   return yield* page.screenshot()
-   * })
-   * ```
-   */
-  addStyleTag(tag: StyleTag): Effect.Effect<void, PageError | Target.TargetGone | Deadline.Timeout>
-  /**
    * Calls `fn` in the isolated world and returns its result as a handle, for values that can't come back by value.
    *
    * **Gotchas**
@@ -1179,6 +1147,72 @@ export interface Page extends ReadonlyPage {
   ): Effect.Effect<
     InitScript.InitScript,
     Declaration.DeclarationError | Target.TargetGone | Deadline.Timeout,
+    Scope.Scope
+  >
+  /**
+   * Adds a `<script>` element to the page's current document, returning it once it has loaded, run, or been
+   * accepted: a URL's script loads, a classic inline script runs, and an inline module is accepted without waiting
+   * for it to run.
+   *
+   * **When to use**
+   *
+   * Use to run a library or helper among the page's own scripts in the document that's already loaded; use
+   * `addInitScript` for code that must run in every new document, before the page's scripts.
+   *
+   * **Details**
+   *
+   * The element is added from the page's main world, so the page's Content Security Policy applies: a script it
+   * refuses fails with `RefusedByPolicy`, and a URL that doesn't load with `ResourceFailed`. See `ScriptTag` for
+   * what the call waits for. The handle is the element, released with the scope.
+   *
+   * **Example** (Loading a library from a URL)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const withLodash = Effect.fn("withLodash")(function*(page: Page.Page) {
+   *   yield* page.addScriptTag({ url: "https://cdn.example.com/lodash.min.js" })
+   *   return yield* page.evaluateInMainWorld(() => typeof Reflect.get(window, "_"))
+   * })
+   * ```
+   */
+  addScriptTag(
+    script: ScriptTag.Source,
+    options?: ScriptTag.Options | undefined
+  ): Effect.Effect<
+    JSHandle.JSHandle<HTMLScriptElement>,
+    PageError | Target.TargetGone | Deadline.Timeout,
+    Scope.Scope
+  >
+  /**
+   * Adds a stylesheet to the page's current document, from CSS source, a URL, or a file, returning its element
+   * once the stylesheet has loaded and its rules apply.
+   *
+   * **Details**
+   *
+   * The element is added from the page's main world, so the page's Content Security Policy applies: a stylesheet
+   * it refuses fails with `RefusedByPolicy`, and a URL that doesn't load with `ResourceFailed`. See `StyleTag` for
+   * the forms and what the call waits for. The handle is the element, released with the scope; the element stays in
+   * the document.
+   *
+   * **Example** (Hiding a cookie banner before a screenshot)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const hideBanner = Effect.fn("hideBanner")(function*(page: Page.Page) {
+   *   yield* page.addStyleTag({ source: "#cookie-banner { display: none }" })
+   *   return yield* page.screenshot()
+   * })
+   * ```
+   */
+  addStyleTag(
+    style: StyleTag.Source
+  ): Effect.Effect<
+    JSHandle.JSHandle<HTMLStyleElement | HTMLLinkElement>,
+    PageError | Target.TargetGone | Deadline.Timeout,
     Scope.Scope
   >
   /**
@@ -1454,39 +1488,9 @@ export const PageErrorReason = Schema.Union([
   Reason.BackendFailure,
   Reason.ViewportMismatch,
   Reason.PromptBlocking,
-  Reason.RefusedByPolicy,
-  Reason.ResourceFailed
+  Reason.ResourceFailed,
+  Reason.RefusedByPolicy
 ])
-
-/**
- * A stylesheet for `addStyleTag`: CSS source, a URL, or a file; which kind is always stated.
- *
- * **Details**
- *
- * - `{ source }` is CSS text.
- * - `{ url }` is a stylesheet's address, resolved against the document's.
- * - `{ path }` is a file on this machine, read when the stylesheet is added.
- *
- * **Example** (A file and a URL)
- *
- * ```ts import.meta.vitest
- * import { Page } from "@usestrider/browser"
- * import { Effect } from "effect"
- *
- * const theme = Effect.fn("theme")(function*(page: Page.Page) {
- *   yield* page.addStyleTag({ path: "./fixtures/print.css" })
- *   yield* page.addStyleTag({ url: "https://cdn.example.com/theme.css" })
- * })
- * ```
- *
- * @stability unstable
- * @category models
- * @since 0.1.0
- */
-export type StyleTag =
-  | { readonly source: string }
-  | { readonly url: string }
-  | { readonly path: FilePath.Local | string }
 
 /**
  * The reasons a page operation can fail.

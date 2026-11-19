@@ -98,6 +98,19 @@ export const removeFrame = (state: State, frame: FrameEntry, reason: L1Target.Cl
     }
     state.frames.delete(frame.frameId)
     state.navigables.delete(frame.id)
+    // A held mouse kept by a frame that is gone goes back to the page, and the frame starts no drag
+    const pressed = state.pressedIn.get(frame.page.id)
+    if (pressed?.includes(frame)) {
+      const left = pressed.filter((each) => each !== frame)
+      state.pressedIn.set(frame.page.id, left)
+      // The session keeps the mouse while a frame the press went to is still on it
+      if (
+        state.pressedOn.get(frame.page.id)?.target === frame.owner && frame.owner !== frame.page.target &&
+        !left.some((each) => each.owner === frame.owner)
+      ) {
+        state.pressedOn.delete(frame.page.id)
+      }
+    }
     retireFrame(state, frame.page.context, frame.frameId)
     if (frame.document !== undefined) {
       for (const realm of frame.document.realms) removeRealm(state, realm, reason)
@@ -119,6 +132,10 @@ export const endPage = (state: State, page: PageEntry, reason: L1Target.CloseRea
   state.credentialsAttempted.delete(pageCredentialsScope(page))
   state.pages.delete(page.id)
   state.heldButtons.delete(page.id)
+  state.touchCapture.delete(page.id)
+  state.pressedIn.delete(page.id)
+  state.pressedOn.delete(page.id)
+  state.escapeCanceled.delete(page.id)
   state.drags.delete(page.id)
   state.interceptingDrags.delete(page.id)
   for (const [id, obligation] of state.obligations) {
@@ -200,6 +217,7 @@ export const startNavigation = (
     traversal: type === "traversal",
     documentHop: undefined,
     status: undefined,
+    responded: false,
     failed: undefined,
     ended: false
   }

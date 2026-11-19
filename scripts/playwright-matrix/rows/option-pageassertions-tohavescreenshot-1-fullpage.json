@@ -1,12 +1,25 @@
 {
-  "status": "missing",
-  "api": [],
-  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "status": "has",
+  "api": [
+    {
+      "module": "ScreenshotBaseline",
+      "symbol": "toMatch",
+      "url": "/docs/api/vitest/ScreenshotBaseline#toMatch",
+      "package": "vitest"
+    }
+  ],
+  "notes": "area: \"fullPage\" option, passed to page.screenshot.",
   "capabilities": [],
   "id": "option-pageassertions-tohavescreenshot-1-fullpage",
   "upstream": [
     "method:PageAssertions.toHaveScreenshot#1"
   ],
   "option": "fullPage",
-  "requirements": []
+  "requirements": [],
+  "audit": {
+    "sources": [
+      "packages/vitest/src/ScreenshotBaseline.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  }
 }

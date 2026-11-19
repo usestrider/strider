@@ -59,7 +59,7 @@ Firefox renders a background tab about once a second, too seldom for an action t
 opens is its own window, and the default profile opens popups as windows too.
 
 A tab of an attached Firefox, or a popup under `LaunchProfile.stock`, is still a tab: call `yield* page.activate`
-before acting on it, as [Attaching](#attaching) shows. [`focus: "emulated"`](/docs/tools/testing#concurrent-pages) isn't available on Firefox.
+before acting on it, as [Attaching](#attaching) shows. [`focus: "emulated"`](/docs/tools/testing#concurrent-pages) isn't available on Firefox, and nor is `bypassCSP`, since Firefox doesn't implement it.
 
 ## Attaching
 
@@ -152,6 +152,11 @@ cache shows up as a request.
 
 **Console text is Firefox's own formatting,** which writes `%f` as printf does: `1.250000`.
 
+**The browser's own console messages are uncaught exceptions.** Firefox sends a Content Security Policy violation
+or a CORS failure as a script error, so it arrives as an [`UncaughtException`](/docs/events/events#history), and
+every console message's [`source`](/docs/events/console) is `Page`. The capability
+`console.source` is `unsupported` here.
+
 **Typing is key by key.** [Keyboard layouts](/docs/pages/actions#keys) send no AltGr or dead keys, and the page
 sees a US key's `code`. [`insertText`](/docs/pages/actions#the-keyboard-and-the-mouse) and `fill` send no key
 events to insert text, but the `beforeinput` before the text is Strider's own, since Firefox fires none: its
@@ -161,7 +166,9 @@ Firefox's own.
 **HTML drag and drop needs [`html: "synthetic"`](/docs/pages/actions#dragging):** Firefox starts a native drag but never drops it.
 
 **Input into a cross-site frame goes to the frame's document,** since Firefox doesn't route page coordinates into
-it. A drag between documents goes to the first one alone.
+it. A drag between documents goes to the first one alone: while a button pressed in a cross-site frame is held, a
+[`page.mouse`](/docs/pages/actions#the-keyboard-and-the-mouse) move outside the frame isn't sent, and the release is sent at the
+pointer's last point inside it.
 
 **[Routes](/docs/events/routes) do less.** No sending a request to a new URL, no fulfilling at the response phase
 (changing status and headers works), and no abort reason but `"failed"`: a decision Firefox can't apply fails with

@@ -9,6 +9,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import { assertPinned, chromium } from "../browsers.ts"
 import { attaching, chromiumAttachable } from "./attaching.ts"
+import { clientCertificates } from "./clientCertificates.ts"
 import { contents } from "./contents.ts"
 import { deadlines } from "./deadlines.ts"
 import { declarations } from "./declarations.ts"
@@ -19,6 +20,7 @@ import { recordings } from "./recordings.ts"
 import { requestBodies } from "./requestBodies.ts"
 import { requestSizes } from "./requestSizes.ts"
 import { requestTiming } from "./requestTiming.ts"
+import { screenshotBaselines } from "./screenshotBaselines.ts"
 import { slice } from "./slice.ts"
 import { stalledReadProbes } from "./stalledReadProbes.ts"
 import { storageReplacement } from "./storageReplacement.ts"
@@ -59,3 +61,5 @@ requestSizes("Chromium", backend)
 
 stalledReadProbes("Chromium", backend)
 styleTags("Chromium", backend)
+clientCertificates("Chromium", backend)
+screenshotBaselines("Chromium", backend)

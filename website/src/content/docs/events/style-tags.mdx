@@ -1,0 +1,78 @@
+---
+title: Style tags
+description: A stylesheet added once to the document a page already has.
+order: 5.6
+---
+
+A style tag is a stylesheet that [`page.addStyleTag`](/docs/api/browser/Page#Page.addStyleTag) adds to the page's
+current document, from a URL, CSS source as `{ source }`, or a file on this machine as
+[`{ path }`](/docs/api/browser/StyleTag#Source). It's added among the page's own scripts, so the page's Content
+Security Policy applies to it, and the call returns once its rules apply, with a handle to the element, released
+with its scope:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const stableScreenshot = Effect.fn("stableScreenshot")(function*(page: Page.Page) {
+  yield* page.addStyleTag({ source: ".clock, .ad { visibility: hidden }" })
+  return yield* page.screenshot()
+})
+```
+
+- A URL becomes a `<link rel="stylesheet">`, and the call waits for its `load` event.
+- Source and files become a `<style>`. A file is read when the call runs, and a `sourceURL` comment names it, so
+  the browser's developer tools show where the rules came from. Reading one needs the `FileSystem` and `Path`
+  services in the browser's layer.
+- The element belongs to the document: it stays until the page's scripts remove it or the document is replaced,
+  and a navigation doesn't add it again.
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const theme = Effect.fn("theme")(function*(page: Page.Page) {
+  yield* page.addStyleTag({ url: "https://cdn.example.com/print.css" })
+  yield* page.addStyleTag({ path: "./fixtures/high-contrast.css" })
+})
+```
+
+## In a frame
+
+A frame locator adds a stylesheet to its iframe's current document, and its policy applies:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const compactChat = Effect.fn("compactChat")(function*(page: Page.Page) {
+  const chat = page.frame(page.locator("iframe#chat"))
+  yield* chat.addStyleTag({ source: ".message { margin: 0 }" })
+})
+```
+
+## When it fails
+
+A stylesheet the page's policy refuses fails with `RefusedByPolicy`, which names the directive, and a URL that
+doesn't load fails with `ResourceFailed`. Either way the element stays in the document. A report-only policy
+refuses nothing.
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const optionalTheme = Effect.fn("optionalTheme")(function*(page: Page.Page) {
+  yield* page.addStyleTag({ url: "https://cdn.example.com/theme.css" }).pipe(
+    Effect.catchReason(
+      "PageError",
+      "RefusedByPolicy",
+      (refused) => Effect.logWarning(refused.directive)
+    ),
+    Effect.catchReason(
+      "PageError",
+      "ResourceFailed",
+      (failed) => Effect.logWarning(failed.url)
+    )
+  )
+})
+```

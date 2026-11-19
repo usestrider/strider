@@ -34,7 +34,9 @@ import * as Page from "../Page.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
 import * as Reason from "../Reason.ts"
 import type * as Route from "../Route.ts"
+import type * as ScriptTag from "../ScriptTag.ts"
 import type * as Snapshot from "../Snapshot.ts"
+import type * as StyleTag from "../StyleTag.ts"
 import * as Target from "../Target.ts"
 import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
@@ -62,7 +64,7 @@ import * as Routes from "./routes.ts"
 import * as Runtime from "./runtime.ts"
 import * as Snapshots from "./snapshot.ts"
 import * as Storage from "./storage.ts"
-import * as StyleTag from "./styleTag.ts"
+import * as Tags from "./tags.ts"
 import * as Urls from "./urls.ts"
 import * as Watchable from "./watchable.ts"
 
@@ -261,7 +263,7 @@ export const make = (owner: PageOwner): Page.Page => {
    * Calls a function in a world of the page's current document: the caller's isolated
    * world, or the main world with user activation inside `Page.withUserGesture`.
    */
-  const evaluationStep = <B, R>(
+  const evaluation = <B, R>(
     operation: string,
     world: Adapter.World,
     fn: Function,
@@ -306,18 +308,7 @@ export const make = (owner: PageOwner): Page.Page => {
         ),
         Effect.annotateSpans({ "browser.evaluation.user_gesture": gesture })
       )
-    })
-
-  /** `evaluationStep` as an operation of its own. */
-  const evaluation = <B, R>(
-    operation: string,
-    world: Adapter.World,
-    fn: Function,
-    args: ReadonlyArray<unknown>,
-    result: "value" | "handle",
-    then: (realm: Target.RealmId, value: Adapter.RemoteValue) => Effect.Effect<B, Evaluation.Failure, R>
-  ): Effect.Effect<B, Page.PageError | Target.TargetGone | Deadline.Timeout, R> =>
-    evaluationStep(operation, world, fn, args, result, then).pipe(
+    }).pipe(
       Operation.named(operation, {
         attributes: {
           "browser.page.id": entry.id,
@@ -623,25 +614,6 @@ export const make = (owner: PageOwner): Page.Page => {
         JSHandle.Serialized<A>,
         Page.PageError | Target.TargetGone | Deadline.Timeout
       >,
-    addStyleTag: (tag) =>
-      Effect.gen(function*() {
-        const id = (yield* Operation.record).id
-        const fail = (reason: Page.PageErrorReason) => pageError("Page.addStyleTag", reason, id)
-        const inserted = yield* StyleTag.resolve(runtime, tag).pipe(Effect.mapError(fail))
-        const settled = yield* evaluationStep(
-          "Page.addStyleTag",
-          { _tag: "Main" },
-          StyleTag.insert,
-          [inserted],
-          "value",
-          (_realm, value) => Evaluation.fromRemote(value)
-        )
-        return yield* StyleTag.settle(inserted, settled).pipe(Effect.mapError(fail))
-      }).pipe(
-        Operation.named("Page.addStyleTag", {
-          attributes: { "browser.page.id": entry.id, "browser.style_tag.kind": "url" in tag ? "url" : "inline" }
-        })
-      ),
     evaluateHandle: <Args extends ReadonlyArray<unknown>, A>(fn: (...args: Args) => A | Promise<A>, ...args: Args) =>
       evaluation(
         "Page.evaluateHandle",
@@ -683,6 +655,38 @@ export const make = (owner: PageOwner): Page.Page => {
       LocatorHandlers.add({ runtime, page: entry, grant: owner.grant }, locator, handler, options),
     addInitScript: (script, options) =>
       InitScripts.add({ runtime, scope: declared, operation: "Page.addInitScript" }, entry.context, script, options),
+    addScriptTag: Effect.fnUntraced(
+      function*(script: ScriptTag.Source, options?: ScriptTag.Options | undefined) {
+        const record = yield* Operation.record
+        return yield* Effect.gen(function*() {
+          const spec = yield* Effect.mapError(
+            Tags.script(runtime, script, options),
+            (reason): Tags.Failure => ({ _tag: "Reason", reason })
+          )
+          const realm = yield* Evaluation.pageRealm(runtime, entry, { _tag: "Main" }, record.id, record.budget.at)
+          return yield* Tags.insert<HTMLScriptElement>(runtime, realm, entry, spec, record)
+        }).pipe(
+          Effect.mapError(Tags.fail(record, (reason) => pageError("Page.addScriptTag", reason, record.id)))
+        )
+      },
+      Operation.named("Page.addScriptTag", { attributes: { "browser.page.id": entry.id } })
+    ),
+    addStyleTag: Effect.fnUntraced(
+      function*(style: StyleTag.Source) {
+        const record = yield* Operation.record
+        return yield* Effect.gen(function*() {
+          const spec = yield* Effect.mapError(Tags.style(runtime, style), (reason): Tags.Failure => ({
+            _tag: "Reason",
+            reason
+          }))
+          const realm = yield* Evaluation.pageRealm(runtime, entry, { _tag: "Main" }, record.id, record.budget.at)
+          return yield* Tags.insert<HTMLStyleElement | HTMLLinkElement>(runtime, realm, entry, spec, record)
+        }).pipe(
+          Effect.mapError(Tags.fail(record, (reason) => pageError("Page.addStyleTag", reason, record.id)))
+        )
+      },
+      Operation.named("Page.addStyleTag", { attributes: { "browser.page.id": entry.id } })
+    ),
     emulate: (settings) => Emulation.emulate({ runtime, scope: declared, operation: "Page.emulate" }, settings),
     activate: Effect.gen(function*() {
       const { id } = yield* Operation.record

@@ -1,12 +1,24 @@
 {
-  "status": "missing",
-  "api": [],
-  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "status": "different",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toMatchAria",
+      "url": "/docs/api/browser/Expect#toMatchAria"
+    }
+  ],
+  "notes": "There is no snapshot file to name: the pattern is a value in the test's code.",
   "capabilities": [],
   "id": "option-pageassertions-tomatchariasnapshot-2-name",
   "upstream": [
     "method:PageAssertions.toMatchAriaSnapshot#2"
   ],
   "option": "name",
-  "requirements": []
+  "requirements": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "typed-patterns-and-clock-modes",
+    "quote": "Where Playwright's surface is a string DSL, or overlaps itself, ours isn't and doesn't.",
+    "revision": "1e1cc9a79b79d3add569911248c8969acb662b1e"
+  }
 }

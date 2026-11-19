@@ -1,5 +1,0 @@
----
-"@usestrider/browser": patch
----
-
-Keep init scripts and clock calls working after a script write times out, on Chromium and Firefox. On Chromium, a declaration whose deadline passed while Chromium's reply to an init-script removal was still on its way left that script's identifier recorded, so the page's next declaration, such as a second `page.clock.adjust`, removed it again and failed with "Script not found". A page's init-script write on Chromium now runs to its end apart from the operation that asked for it, which still fails with `Timeout` at its deadline. On both browsers, a script removal that gets no reply at all is kept as unconfirmed rather than installed: the next write sends it again, and the browser's "not found" for that script settles it as removed, where before every later write tried again and failed or warned. An add that never gets any reply leaves a script Strider can't identify: on Chromium it stays until its page or frame ends, and on Firefox until the page, user context, or browser it was declared on ends.

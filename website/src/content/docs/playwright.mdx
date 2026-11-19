@@ -51,7 +51,7 @@ const orderStatus = Effect.fn("orderStatus")(function*(orderId: string) {
 | `locator.inputValue()`               | `locator.readValue`                                                                          |
 | `locator.getAttribute(name)`         | `locator.readAttribute(name)`, an `Option`                                                   |
 | `page.evaluate(fn)`                  | `page.evaluateInMainWorld(fn)`; `page.evaluate` runs in an isolated world, where the page's globals are invisible, and fails with `Unsupported` on WebKit |
-| `page.addStyleTag({ content })`      | [`page.addStyleTag({ source })`](/docs/pages/styles), which returns nothing rather than the element |
+| `page.addStyleTag({ content })`      | [`page.addStyleTag({ source })`](/docs/events/style-tags), which returns a handle to the element, released with its scope |
 | `page.locator(selector)`             | `page.locator(css)`, CSS only: `text=` and `:has-text()` become `getByText` or `filter({ hasText })`, and `>>` a locator inside a locator |
 | `locator.waitFor()`                  | `locator.pipe(Expect.toBeVisible)`                                                           |
 | `locator.waitFor({ state: "hidden" })` | `locator.pipe(Expect.toBeHidden)`                                                          |

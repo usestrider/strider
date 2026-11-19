@@ -16,6 +16,7 @@ import * as L1Target from "../../Target.ts"
 import type * as UserContext from "../../UserContext.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as Proxy from "../proxy.ts"
 import * as Urls from "../urls.ts"
 import { applyDownloads, restoreContext } from "./declare.ts"
 import { whileSwapping } from "./navigation.ts"
@@ -102,21 +103,34 @@ export const register = (handlers: Kit.Handlers<Event>) =>
 // ── Contexts and pages ────────────────────────────────────────────────────────────────────────────────────
 
 export const createUserContext = Effect.fnUntraced(function*(state: State, options: Adapter.UserContextOptions) {
-  if (options.acceptInsecureCerts) {
+  const certificateProxy = Option.getOrUndefined(options.certificateProxy ?? Option.none())
+  if ((options.acceptInsecureCerts || certificateProxy !== undefined) && options.reclaimable) {
     return yield* Effect.fail(
-      Kit.unsupported("acceptInsecureCerts", "CDP ignores certificate errors browser-wide, not per context")
+      Kit.unsupported(
+        certificateProxy === undefined ? "acceptInsecureCerts" : "clientCertificates",
+        "Each page's certificate override ends with the connection, which a reclaimable context outlives"
+      )
+    )
+  }
+  if (Option.isSome(options.proxy) && options.proxy.value.scheme === "socks4") {
+    return yield* Effect.fail(
+      Kit.unsupported("userContexts.proxy.socks4", "Chromium's SOCKS4 resolves names locally; use socks5://")
     )
   }
   const { browserContextId } = yield* Kit.protocol(
     Target.createBrowserContext({
       disposeOnDetach: !options.reclaimable,
       ...(Option.isSome(options.proxy)
-        ? { proxyServer: options.proxy.value.server, proxyBypassList: options.proxy.value.bypass.join(",") }
+        ? { proxyServer: Proxy.endpoint(options.proxy.value), proxyBypassList: options.proxy.value.bypass.join(",") }
+        : certificateProxy !== undefined
+        // HTTPS and WebSocket over TLS only, loopback included, so local sites get the certificate too
+        ? { proxyServer: `https=127.0.0.1:${certificateProxy}`, proxyBypassList: "<-loopback>" }
         : {})
     }).pipe(Protocol.on(state.root()))
   )
   const entry = new ContextEntry(state.ids.userContext(), browserContextId, false)
   if (options.focusEmulated) entry.focusEmulated = true
+  if (options.acceptInsecureCerts || certificateProxy !== undefined) entry.ignoreCertificateErrors = true
   if (options.requestSizes) entry.requestSizes = new Map()
   if (options.requestTiming) entry.requestTiming = new Map()
   entry.proxy = Option.getOrUndefined(options.proxy)

@@ -4,7 +4,8 @@ import { readFileSync } from "node:fs"
 import ts from "typescript"
 
 export interface Api {
-  readonly package?: "effect" | undefined
+  /** Where the symbol is declared: Effect, `@usestrider/vitest`, or by default `@usestrider/browser`. */
+  readonly package?: "effect" | "vitest" | undefined
   readonly source?: { readonly file: string; readonly quote: string } | undefined
   readonly module: string
   /** An exported name, or the fully qualified declaring type and member. */
@@ -18,10 +19,11 @@ export interface Decision {
   readonly revision?: string | undefined
 }
 const cache = new Map<string, Map<string, string>>()
-export const sourceSymbols = (module: string): Map<string, string> => {
-  const cached = cache.get(module)
+export const sourceSymbols = (module: string, pkg: "browser" | "vitest" = "browser"): Map<string, string> => {
+  const key = `${pkg}/${module}`
+  const cached = cache.get(key)
   if (cached) return cached
-  const file = `packages/browser/src/${module}.ts`
+  const file = `packages/${pkg}/src/${module}.ts`
   const source = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true)
   const symbols = new Map<string, string>()
   for (const statement of source.statements) {
@@ -48,7 +50,7 @@ export const sourceSymbols = (module: string): Map<string, string> => {
       }
     }
   }
-  cache.set(module, symbols)
+  cache.set(key, symbols)
   return symbols
 }
 export const assertApiLink = (api: Api): void => {
@@ -66,11 +68,12 @@ export const assertApiLink = (api: Api): void => {
     assert.ok(source.includes(`export const ${api.symbol}:`), "Effect API is not exported")
     return
   }
-  const anchor = sourceSymbols(api.module).get(api.symbol)
+  const pkg = api.package ?? "browser"
+  const anchor = sourceSymbols(api.module, pkg).get(api.symbol)
   assert.ok(anchor, `API symbol ${api.module}.${api.symbol} is not a public declaration`)
   assert.equal(
     api.url,
-    `/docs/api/browser/${api.module}#${anchor}`,
+    `/docs/api/${pkg}/${api.module}#${anchor}`,
     `API symbol/anchor mismatch: ${api.module}.${api.symbol}`
   )
 }

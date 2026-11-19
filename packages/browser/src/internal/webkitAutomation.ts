@@ -55,6 +55,16 @@ import * as WebKitWire from "./webkitWire.ts"
 export const automationArguments = (executablePath: string): Option.Option<ReadonlyArray<string>> =>
   executablePath.split(/[\\/]/).at(-1) === "MiniBrowser" ? Option.some(["--automation"]) : Option.none()
 
+/**
+ * The proxy a launched process reads from its environment, through GLib's resolver. Its SOCKS4 resolves names
+ * locally, and its SOCKS4a sends them to the proxy, which is what SOCKS4 means elsewhere.
+ */
+const proxyEnvironment = (proxy: Adapter.ProxyOptions) => {
+  const url = `${proxy.scheme === "socks4" ? "socks4a" : proxy.scheme}://${proxy.server}`
+  const all = proxy.scheme === "http" ? "" : url
+  return { http_proxy: url, https_proxy: url, HTTP_PROXY: url, HTTPS_PROXY: url, all_proxy: all, ALL_PROXY: all }
+}
+
 /** `self`'s value, or `None` once `deadline` passes on the live clock: a launched browser's time. */
 const byDeadline = (deadline: MonotonicInstant.MonotonicInstant) => <A, E, R>(self: Effect.Effect<A, E, R>) =>
   Effect.suspend(() =>
@@ -300,13 +310,8 @@ const spawnProcess = Effect.fnUntraced(function*(
         coreDumps: settings.coreDumps,
         env: {
           WEBKIT_INSPECTOR_SERVER: `127.0.0.1:${port}`,
+          ...(options.proxy === undefined ? {} : proxyEnvironment(options.proxy)),
           ...(options.proxy === undefined ? {} : {
-            http_proxy: `http://${options.proxy.server}`,
-            https_proxy: `http://${options.proxy.server}`,
-            HTTP_PROXY: `http://${options.proxy.server}`,
-            HTTPS_PROXY: `http://${options.proxy.server}`,
-            all_proxy: "",
-            ALL_PROXY: "",
             no_proxy: [...Proxy.loopback, ...options.proxy.bypass].join(","),
             NO_PROXY: [...Proxy.loopback, ...options.proxy.bypass].join(",")
           }),
