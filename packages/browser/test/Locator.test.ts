@@ -1,6 +1,6 @@
 /** Runtime validation for JavaScript callers that bypass Locator's TypeScript contract. */
 import { assert, describe, it } from "@effect/vitest"
-import { Browser, Deadline, Locator, Target } from "@usestrider/browser"
+import { Browser, Deadline, Locator, Target, UserContext } from "@usestrider/browser"
 import * as Cache from "effect/Cache"
 import * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
@@ -16,6 +16,7 @@ import { vi } from "vitest"
 import * as Adapter from "../src/internal/adapter.ts"
 import * as BrowserImpl from "../src/internal/browser.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
+import * as ClaimHooks from "../src/internal/claimHooks.ts"
 import * as Engine from "../src/internal/engine.ts"
 import * as Fake from "../src/internal/fake.ts"
 import * as Handles from "../src/internal/handles.ts"
@@ -1521,4 +1522,89 @@ describe("an action whose engine call is unanswered at the deadline", () => {
         }).pipe(Effect.scoped)
     )
   }
+})
+
+describe("UserContext.Options.testIdAttribute", () => {
+  const x = { _tag: "String", value: "x", exact: true }
+  const testIds = (locator: Locator.ReadonlyLocator): ReadonlyArray<unknown> => {
+    const found: Array<unknown> = []
+    const visit = (steps: ReadonlyArray<Engine.Step>) => {
+      for (const step of steps) {
+        if (step._tag === "TestId") found.push(step)
+        if (step._tag === "Filter") {
+          if (step.has !== null) visit(step.has)
+          if (step.hasNot !== null) visit(step.hasNot)
+        }
+      }
+    }
+    visit((locator as LocatorImpl).steps)
+    return found
+  }
+
+  for (
+    const name of [
+      "",
+      "data qa",
+      "data\"qa",
+      "data'qa",
+      "data>qa",
+      "data/qa",
+      "data=qa",
+      "data\u0007qa",
+      "data\u{1FFFE}qa",
+      "data\u{10FFFF}qa"
+    ]
+  ) {
+    it.effect(`refuses ${JSON.stringify(name)} with InvalidInput before creating a context`, () =>
+      Effect.gen(function*() {
+        const error = yield* Browser.newContext({ testIdAttribute: name }).pipe(Effect.flip)
+        assert(UserContext.isUserContextError(error))
+        assert(error.reason._tag === "InvalidInput")
+        assert.strictEqual(error.reason.input, "testIdAttribute")
+      }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+  }
+
+  it.effect("takes the test-id attribute of the program that recovers a context, and keeps it when omitted", () =>
+    Effect.gen(function*() {
+      const browser = yield* Browser.Browser
+      const context = yield* Browser.newContext({ testIdAttribute: "data-qa" })
+      const page = yield* context.newPage
+      const before = page.getByTestId("x")
+      const hooks = ClaimHooks.get(browser)
+      yield* hooks.context({ testIdAttribute: "data-test" }, { context: context.id })
+      assert.deepStrictEqual(testIds(page.getByTestId("x")), [{ _tag: "TestId", matcher: x, attribute: "data-test" }])
+      assert.deepStrictEqual(testIds(before), [{ _tag: "TestId", matcher: x, attribute: "data-qa" }])
+      yield* hooks.context({}, { context: context.id })
+      assert.deepStrictEqual(testIds(page.getByTestId("x")), [{ _tag: "TestId", matcher: x, attribute: "data-test" }])
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+
+  it.effect("carries the context's attribute in RegExp getByTestId steps, page-level and relative", () =>
+    Effect.gen(function*() {
+      const configured = yield* (yield* Browser.newContext({ testIdAttribute: "data-qa" })).newPage
+      const pattern = { _tag: "RegExp", source: "^row-", flags: "i" }
+      const qa = { _tag: "TestId", matcher: pattern, attribute: "data-qa" }
+      assert.deepStrictEqual(testIds(configured.getByTestId(/^row-/i)), [qa])
+      assert.deepStrictEqual(
+        testIds(configured.locator("li").filter({ has: Locator.relative.getByTestId(/^row-/i) })),
+        [qa]
+      )
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+
+  it.effect("fixes the context's attribute in every getByTestId step, relative ones where they're placed", () =>
+    Effect.gen(function*() {
+      const configured = yield* (yield* Browser.newContext({ testIdAttribute: "data-qa" })).newPage
+      const sibling = yield* (yield* Browser.newContext()).newPage
+      const qa = { _tag: "TestId", matcher: x, attribute: "data-qa" }
+      const standard = { _tag: "TestId", matcher: x, attribute: "data-testid" }
+      assert.deepStrictEqual(testIds(configured.getByTestId("x")), [qa])
+      assert.deepStrictEqual(testIds(configured.locator("main").getByTestId("x")), [qa])
+      assert.deepStrictEqual(testIds(configured.frame(configured.locator("iframe")).getByTestId("x")), [qa])
+      assert.deepStrictEqual(testIds(sibling.getByTestId("x")), [standard])
+      const relative = Locator.relative.getByTestId("x")
+      assert.deepStrictEqual(
+        testIds(configured.locator("li").filter({ has: relative, hasNot: relative })),
+        [qa, qa]
+      )
+      assert.deepStrictEqual(testIds(sibling.locator("li").filter({ has: relative })), [standard])
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
 })

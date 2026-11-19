@@ -13,6 +13,7 @@ import { webkitgtk } from "../browsers.ts"
 import { socketConnector } from "../sockets.ts"
 import { useXvfb } from "../stockWebKit.ts"
 import { attaching } from "./attaching.ts"
+import { clientCertificates } from "./clientCertificates.ts"
 import { contents } from "./contents.ts"
 import { deadlines } from "./deadlines.ts"
 import { declarations } from "./declarations.ts"
@@ -62,4 +63,5 @@ requestTiming("WebKit", backend)
 
 storageReplacement("WebKit", backend)
 requestSizes("WebKit", backend)
+clientCertificates("WebKit", backend)
 screenshotBaselines("WebKit", backend)

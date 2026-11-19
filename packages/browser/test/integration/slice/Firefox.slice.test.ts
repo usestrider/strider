@@ -10,6 +10,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import { assertPinned, firefox } from "../browsers.ts"
 import { attaching, firefoxAttachable } from "./attaching.ts"
+import { clientCertificates } from "./clientCertificates.ts"
 import { contents } from "./contents.ts"
 import { deadlines } from "./deadlines.ts"
 import { declarations } from "./declarations.ts"
@@ -70,4 +71,5 @@ storageReplacement("Firefox", backend)
 requestSizes("Firefox", backend)
 
 stalledReadProbes("Firefox", backend)
+clientCertificates("Firefox", backend)
 screenshotBaselines("Firefox", backend)

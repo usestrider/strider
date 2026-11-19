@@ -44,6 +44,7 @@ import * as PageNavigation from "./PageNavigation.ts"
 import type * as Pixels from "./Pixels.ts"
 import * as Reason from "./Reason.ts"
 import type * as Route from "./Route.ts"
+import type * as ScriptTag from "./ScriptTag.ts"
 import type * as Snapshot from "./Snapshot.ts"
 import * as Target from "./Target.ts"
 import * as Url from "./Url.ts"
@@ -799,7 +800,7 @@ export interface Page extends ReadonlyPage {
   getByAltText(text: string | RegExp, options?: Locator.TextOptions | undefined): Locator.Locator
   getByTitle(text: string | RegExp, options?: Locator.TextOptions | undefined): Locator.Locator
   getByTestId(id: string | RegExp): Locator.Locator
-  locator(css: string): Locator.Locator
+  locator(selector: string | Locator.XPath): Locator.Locator
   frame(iframe: Locator.ReadonlyLocator): Locator.FrameLocator
   snapshot(
     options?: Snapshot.Options | undefined
@@ -1148,6 +1149,42 @@ export interface Page extends ReadonlyPage {
     Scope.Scope
   >
   /**
+   * Adds a `<script>` element to the page's current document, returning it once it has loaded, run, or been
+   * accepted: a URL's script loads, a classic inline script runs, and an inline module is accepted without waiting
+   * for it to run.
+   *
+   * **When to use**
+   *
+   * Use to run a library or helper among the page's own scripts in the document that's already loaded; use
+   * `addInitScript` for code that must run in every new document, before the page's scripts.
+   *
+   * **Details**
+   *
+   * The element is added from the page's main world, so the page's Content Security Policy applies: a script it
+   * refuses fails with `RefusedByPolicy`, and a URL that doesn't load with `ResourceFailed`. See `ScriptTag` for
+   * what the call waits for. The handle is the element, released with the scope.
+   *
+   * **Example** (Loading a library from a URL)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const withLodash = Effect.fn("withLodash")(function*(page: Page.Page) {
+   *   yield* page.addScriptTag({ url: "https://cdn.example.com/lodash.min.js" })
+   *   return yield* page.evaluateInMainWorld(() => typeof Reflect.get(window, "_"))
+   * })
+   * ```
+   */
+  addScriptTag(
+    script: ScriptTag.Source,
+    options?: ScriptTag.Options | undefined
+  ): Effect.Effect<
+    JSHandle.JSHandle<HTMLScriptElement>,
+    PageError | Target.TargetGone | Deadline.Timeout,
+    Scope.Scope
+  >
+  /**
    * Overrides the given settings while the registration lives.
    *
    * **Details**
@@ -1419,7 +1456,9 @@ export const PageErrorReason = Schema.Union([
   Reason.Unsupported,
   Reason.BackendFailure,
   Reason.ViewportMismatch,
-  Reason.PromptBlocking
+  Reason.PromptBlocking,
+  Reason.ResourceFailed,
+  Reason.RefusedByPolicy
 ])
 
 /**

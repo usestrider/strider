@@ -444,7 +444,7 @@ root.querySelector("#inner").attachShadow({mode:"open"}).innerHTML = "<button>Ne
             const context = yield* Browser.newContext()
             for (let index = 0; index < 3; index++) {
               const page = yield* context.newPage
-              yield* page.goto(url)
+              yield* page.goto(url, { waitUntil: "load" })
               assert.strictEqual(yield* page.locator("#out").readText, "ready")
               yield* page.close()
             }
