@@ -564,6 +564,8 @@ for (
                 request.host === "proxy.test" && request.port === tlsPort && request.sent === "tls"
               )
             )
+            yield* page.goto(`${served.origin}/socks5-loopback`)
+            assert.isFalse(local.requests.some((request) => request.host === "127.0.0.1"))
             yield* refused(
               options(`socks5://${local.address}`, [], "socks-secret"),
               "userContexts.proxy.socksCredentials"
@@ -585,6 +587,8 @@ for (
           assert.isTrue(
             local.requests.some((request) => request.version === "socks4a" && request.host === "proxy.test")
           )
+          yield* page.goto(`${served.origin}/socks4-loopback`)
+          assert.isFalse(local.requests.some((request) => request.host === "127.0.0.1"))
         }), 60_000)
 
       it.effect("bypasses a domain's subdomains for a leading-dot entry, or refuses it", () =>
@@ -672,6 +676,20 @@ describe("Chromium trusted TLS proxy", () => {
               assert.isTrue(
                 local.requests.some((request) => request.url.endsWith("/trusted-proxy") && request.authenticated)
               )
+              yield* page.goto(`${served.origin}/tls-proxy-loopback`)
+              assert.isFalse(local.requests.some((request) => request.url.endsWith("/tls-proxy-loopback")))
+              if (authenticated) {
+                const secure = yield* tlsSite
+                const combinedProxy = yield* proxy({ username: "proxy-user", password: "tls-secret" }, { tls })
+                const accepting = yield* Browser.newPage({
+                  ...options(`https://${combinedProxy.address}`, [], "tls-secret"),
+                  acceptInsecureCerts: true
+                })
+                yield* accepting.goto(secure.origin.replace("127.0.0.1", "proxy.test"))
+                assert.isTrue(
+                  combinedProxy.requests.some((request) => request.method === "CONNECT" && request.authenticated)
+                )
+              }
             }).pipe(Effect.provide(
               Chromium.layer({
                 executablePath: chromium.executable,

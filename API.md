@@ -164,7 +164,8 @@ interface Node {
     | { readonly _tag: "Accessible"; readonly value: string }
     | { readonly _tag: "Inferred"; readonly value: string; readonly from: "text" | "title" | "placeholder" | "alt" | "nearbyLabel" }
     | { readonly _tag: "None" }
-  readonly states: ReadonlySet<"checked" | "expanded" | "selected" | "disabled" | "focused" | "pressed" | "invalid">
+  readonly states: ReadonlySet<"checked" | "checked=mixed" | "expanded" | "selected" | "disabled" | "focused" | "pressed" | "pressed=mixed" | "invalid">   // rendered as named: [checked=mixed]
+  readonly level?: number | undefined                    // a heading's, or an aria-level list item's, row's or tree item's: [level=2]
   readonly validationMessage: Option<string>
   readonly children: ReadonlyArray<Node>
 }
@@ -308,7 +309,14 @@ interface UserContext extends ObservedUserContext {     // two levels only: read
 }
 
 interface Options {                                      // UserContext.Options; an unset option keeps the browser's own value unless a default is stated
-  readonly acceptInsecureCerts?: boolean | undefined     // default false; Firefox and launched WebKit only; creation-only, explicit values refused on reclaim
+  readonly acceptInsecureCerts?: boolean | undefined     // default false; not attached WebKit, nor a reclaimable Chromium context; creation-only, explicit values refused on reclaim
+  readonly clientCertificates?: ReadonlyArray<{          // default none, and no proxy; Chromium and launched Firefox; not with proxy or a reclaimable context
+    readonly origin: string                              // HTTPS origin: scheme, hostname and effective port
+    readonly cert?: Uint8Array | undefined               // PEM, with key; or pfx alone
+    readonly key?: Redacted<Uint8Array> | undefined
+    readonly pfx?: Redacted<Uint8Array> | undefined
+    readonly passphrase?: Redacted<string> | undefined
+  }> | undefined                                         // loaded at creation (InvalidInput); a per-context loopback proxy presents them
   readonly proxy?: {
     readonly server: string                              // HTTP URL or host:port, default port 80; no userinfo, path, query or fragment
     readonly bypass?: ReadonlyArray<string> | undefined  // default []; hostnames or IP addresses, using native host matching
@@ -532,9 +540,9 @@ select nothing; strict reads fail with `NoMatch` and actions wait for a match un
 and `last` select the first and last match separately, and select nothing when the list is empty. Errors and
 traces preserve the selection as written: `nth(0)`, `nth(-1)`, `first`, or `last`.
 
-Pressed, expanded, and selected share readers between role filters and snapshots. ARIA keywords are ASCII case-insensitive, without trimming. Pressed is supported on buttons: absent or invalid values match false, and mixed matches neither boolean. Selected is supported on gridcell, option, row, tab, rowheader, columnheader, and treeitem: absent or invalid values match false. Expanded is supported only on expansion roles: absent matches neither boolean, and every present value other than true matches false. Native option.selected takes precedence over aria-selected; native details.open takes precedence over aria-expanded. Snapshots emit these positive markers only for exactly true, ignoring attributes on unsupported roles. Native details is an exception: open details emits expanded even with its ordinary group role, but group expanded filters still fail as invalid selectors. No expansion state is inferred for summary. These are Strider query and snapshot policies, not promises to reproduce browser accessibility trees; native precedence can differ from browser accessibility state.
+Pressed, expanded, and selected share readers between role filters and snapshots. ARIA keywords are ASCII case-insensitive, without trimming. Pressed is supported on buttons: absent or invalid values match false, and mixed matches neither boolean. Selected is supported on gridcell, option, row, tab, rowheader, columnheader, and treeitem: absent or invalid values match false. Expanded is supported only on expansion roles: absent matches neither boolean, and every present value other than true matches false. Native option.selected takes precedence over aria-selected; native details.open takes precedence over aria-expanded. Snapshots emit these positive markers only for exactly true, and `pressed=mixed` for a mixed pressed button, ignoring attributes on unsupported roles. Native details is an exception: open details emits expanded even with its ordinary group role, but group expanded filters still fail as invalid selectors. No expansion state is inferred for summary. These are Strider query and snapshot policies, not promises to reproduce browser accessibility trees; native precedence can differ from browser accessibility state.
 
-Checked state uses the native checked property for checkbox and radio inputs. ARIA roles `checkbox`, `radio`, `switch`, `menuitemcheckbox`, `menuitemradio`, `option`, and `treeitem` use `aria-checked`. ARIA keywords `true`, `false`, `mixed`, and `undefined` are recognized ASCII case-insensitively, without trimming. `mixed` is false on radio, menuitemradio, and switch; on checkbox, menuitemcheckbox, option, and treeitem it matches neither boolean filter and reads false for boolean reads and actions. Absent, empty, undefined, and unrecognized values use the role default: unsupported checking on option/treeitem, false on the other five roles. Unsupported reads and check/uncheck fail with `WrongElement` before input. This invalid-token fallback is Strider policy, so malformed optional state cannot authorize a click; it does not claim browser accessibility parity. Snapshots emit checked only for boolean true. Native indeterminate inputs match neither boolean filter while reads and snapshots retain native checked. Ordinary native options are unsupported unless they have a valid checked token. `aria-selected` and native option selection remain independent.
+Checked state uses the native checked property for checkbox and radio inputs. ARIA roles `checkbox`, `radio`, `switch`, `menuitemcheckbox`, `menuitemradio`, `option`, and `treeitem` use `aria-checked`. ARIA keywords `true`, `false`, `mixed`, and `undefined` are recognized ASCII case-insensitively, without trimming. `mixed` is false on radio, menuitemradio, and switch; on checkbox, menuitemcheckbox, option, and treeitem it matches neither boolean filter and reads false for boolean reads and actions. Absent, empty, undefined, and unrecognized values use the role default: unsupported checking on option/treeitem, false on the other five roles. Unsupported reads and check/uncheck fail with `WrongElement` before input. This invalid-token fallback is Strider policy, so malformed optional state cannot authorize a click; it does not claim browser accessibility parity. Snapshots emit checked for boolean true and `checked=mixed` for mixed. Native indeterminate inputs match neither boolean filter; reads retain native checked, while snapshots mark them `checked=mixed` instead of checked. Ordinary native options are unsupported unless they have a valid checked token. `aria-selected` and native option selection remain independent.
 
 ```ts
 interface ReadonlyLocator extends Queries<ReadonlyLocator>, Pipeable, Equal.Equal, Inspectable {
@@ -777,7 +785,7 @@ declare const toHaveRole: DualMatcher<Locator.ReadonlyLocator, [expected: string
 declare const toHaveCSS: DualMatcher<Locator.ReadonlyLocator, [name: string, expected: string | RegExp, options?: { readonly not?: boolean | undefined; readonly pseudo?: "before" | "after" | undefined } | undefined]>
 declare const toHaveAttribute: DualMatcher<Locator.ReadonlyLocator, [name: string, expected?: string | RegExp | undefined]>
 declare const toHaveCount: DualMatcher<Locator.ReadonlyLocator, [count: number]>
-declare const toMatchAria: DualMatcher<Locator.ReadonlyLocator, [pattern: AriaPattern.AriaPattern]>
+declare const toMatchAria: DualMatcher<Locator.ReadonlyLocator | Page.ReadonlyPage, [pattern: AriaPattern.AriaPattern, options?: { readonly not?: boolean | undefined } | undefined]>   // a page is matched from its document node; not waits for no match
 declare const toHaveURL: DualMatcher<Page.ReadonlyPage, [expected: string | RegExp]>
 declare const toHaveTitle: DualMatcher<Page.ReadonlyPage, [expected: string | RegExp]>
 // the general form: a subject and a condition
@@ -794,10 +802,13 @@ declare const because: { (why: string): <A>(condition: Condition<A>) => Conditio
 // a Condition is Pipeable: condition.pipe(Condition.because("…"))
 
 // AriaPattern: matched against snapshot({ sources: "aria" }); how children match is always stated
-declare const node: (role: AriaRole.AriaRole, name: string | RegExp, children: Children) => AriaPattern   // "" means no accessible name
+declare const node: (role: AriaRole.AriaRole, name: string | RegExp, children: Children, options?: NodeOptions | undefined) => AriaPattern   // "" means no accessible name
+// NodeOptions: { level, checked, pressed, expanded, selected, disabled, invalid, focused }; an omitted one isn't
+// compared, false requires its absence, and checked and pressed also take "mixed"
 declare const text: (value: string | RegExp) => AriaPattern
 declare const exactly: (...children: ReadonlyArray<AriaPattern>) => Children     // these children, in this order, and no others
 declare const including: (...children: ReadonlyArray<AriaPattern>) => Children   // these children in this order; others may come between
+declare const anywhere: (children: Children) => AriaPattern                      // the node, or any node beneath it, has these children
 declare const unchecked: Children                                                // children are not compared
 ```
 
@@ -1171,7 +1182,7 @@ Snapshots:
   - *inferred names:* visible text, `title`, `placeholder`, `alt`, a nearby label.
 - **Password controls.** Password inputs without an explicit ARIA role appear as `editable [ref=e1] [inferred: password]` when inferred interactivity is enabled. Their accessible names, including labels, titles, and placeholders, are retained; controls with no accessible name stay unnamed, without nearby-label inference. Disabled and read-only inputs retain this designation. Explicit ARIA roles are preserved. Password values do not contribute to snapshot names or find data, including when another element references the input for its name.
 - **Every inference is tagged with its evidence** in both the value and the text, so a model or a reader can tell `button "Save"` from `clickable "Save" [inferred: cursorPointer]`.
-- **`snapshot({ sources: "aria" })` is the pure accessibility tree,** which `Expect.toMatchAria` matches against.
+- **`snapshot({ sources: "aria" })` is the pure accessibility tree,** which `Expect.toMatchAria` matches against: a locator's from its match's node, a page's from its `document` node, named by its title. `AriaPattern.anywhere` matches a fragment at any depth beneath that root. Unlike the snapshot, neither form sees an iframe's contents: to match inside a frame, locate through `page.frame(...)`.
 - **The tree is the engine's,** the one `getByRole` matches, the same on every backend. An element with no role gives its children to its parent; hidden and inert elements are left out, and while a modal dialog is open, everything outside the topmost one; text is a `text` node unless it only repeats its parent's name, so a list item's text is its child, since a list item's name doesn't come from its content; an iframe is an `iframe` node with its frame's tree inside, whose refs are prefixed (`f1e3`). Click listeners aren't inferred on any backend yet (`snapshot.clickListeners`).
 - **Same node, same ref** while its document lives, so a renamed button keeps its ref. `generation` names the engine's ref table for the document. A ref never rebinds: its node removed is `StaleRef{Detached}`, its document replaced `Replaced`, a ref no snapshot of the document gave `OtherSnapshot`, and a table installed again `BindingLost`.
 - **Diffs are explicit** (`snapshot.diff(previous)`), never an automatic switch between full and delta output.
@@ -1457,6 +1468,8 @@ const carts = yield* NetworkResponse.history(page, { url: "https://app.example.c
 yield* page.getByRole("navigation").pipe(Expect.toMatchAria(
   AriaPattern.node("navigation", "Main", AriaPattern.including(
     AriaPattern.node("link", "Orders", AriaPattern.unchecked)))))
+yield* page.pipe(Expect.toMatchAria(   // a page's tree, matched at any depth
+  AriaPattern.anywhere(AriaPattern.including(AriaPattern.node("heading", "Orders", AriaPattern.unchecked)))))
 
 // 17. An operation of the program's own: one deadline, and a Timeout named for it that says how far it got
 const checkout = Operation.fn("checkout")(function*(page: Page.Page, card: string) {

@@ -57,7 +57,7 @@ import * as Operation from "./operation.ts"
 import * as Recorders from "./recorders.ts"
 import * as Runtime from "./runtime.ts"
 import * as Snapshots from "./snapshot.ts"
-import { describeSteps, matcher, queries, type Relative, roleStep, selectorStep } from "./steps.ts"
+import { describeSteps, matcher, place, queries, type Relative, roleStep, selectorStep } from "./steps.ts"
 import * as Tags from "./tags.ts"
 
 // ── Locators ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -269,7 +269,11 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     return this.with([...this.steps, { _tag: "Title", matcher: matcher(text, options?.exact) }])
   }
   getByTestId(id: string | RegExp) {
-    return this.with([...this.steps, { _tag: "TestId", matcher: matcher(id, true) }])
+    return this.with([...this.steps, {
+      _tag: "TestId",
+      matcher: matcher(id, true),
+      attribute: testIdAttribute(this.owner)
+    }])
   }
   locator(selector: string | Locator.XPath) {
     return this.with([...this.steps, selectorStep(selector)])
@@ -292,8 +296,8 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       _tag: "Filter",
       hasText: options.hasText === undefined ? null : matcher(options.hasText, false),
       hasNotText: options.hasNotText === undefined ? null : matcher(options.hasNotText, false),
-      has: options.has === undefined ? null : (options.has as Relative).steps,
-      hasNot: options.hasNot === undefined ? null : (options.hasNot as Relative).steps,
+      has: options.has === undefined ? null : place(options.has as Relative, testIdAttribute(this.owner)),
+      hasNot: options.hasNot === undefined ? null : place(options.hasNot as Relative, testIdAttribute(this.owner)),
       visible: options.visible ?? null
     }])
   }
@@ -2082,9 +2086,12 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
 export const refusal = (locator: Locator.Locator, operation: string, reason: Locator.LocatorErrorReason) =>
   (locator as LocatorImpl).error(operation, reason, Operation.idNow())
 
+/** The attribute `getByTestId` matches on the owner's page: its context's setting, read when a locator is made. */
+const testIdAttribute = (owner: Owner): string => owner.page.contextEntry.state.getUnsafe().settings.testIdAttribute
+
 /** A page's root locator queries. */
 export const pageQueries = (owner: Owner): Locator.Queries<Locator.Locator> =>
-  queries([], (steps) => new LocatorImpl(owner, steps))
+  queries([], (steps) => new LocatorImpl(owner, steps), () => testIdAttribute(owner))
 
 /** Whether `steps` begins with `prefix`. */
 const startsWith = (steps: ReadonlyArray<Engine.Step>, prefix: ReadonlyArray<Engine.Step>) =>
@@ -2098,7 +2105,7 @@ export const frameLocator = (owner: Owner, steps: ReadonlyArray<Engine.Step>): L
   const inside: ReadonlyArray<Engine.Step> = [...steps, { _tag: "Frame" }]
   const make = (each: ReadonlyArray<Engine.Step>) => new LocatorImpl(owner, each)
   return {
-    ...queries(inside, make),
+    ...queries(inside, make, () => testIdAttribute(owner)),
     owner: make(steps),
     frame: (iframe) => {
       if (!(iframe instanceof LocatorImpl) || iframe.owner.page.id !== owner.page.id) {
@@ -2115,7 +2122,7 @@ export const frameLocator = (owner: Owner, steps: ReadonlyArray<Engine.Step>): L
       return frameLocator(owner, iframe.steps)
     },
     addScriptTag: (script, options) =>
-      (queries(inside, make).locator(":root") as LocatorImpl).addScriptTagIn(
+      (queries(inside, make, () => testIdAttribute(owner)).locator(":root") as LocatorImpl).addScriptTagIn(
         "FrameLocator.addScriptTag",
         script,
         options

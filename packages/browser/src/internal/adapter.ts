@@ -821,6 +821,8 @@ export interface UserContextOptions {
    */
   readonly focusEmulated?: boolean | undefined
   readonly proxy: Option.Option<ProxyOptions>
+  /** The loopback port of the context's client certificate proxy, which its HTTPS traffic must go through. */
+  readonly certificateProxy?: Option.Option<number> | undefined
   readonly acceptInsecureCerts: boolean
 }
 

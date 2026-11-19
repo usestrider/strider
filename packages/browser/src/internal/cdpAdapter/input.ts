@@ -30,6 +30,7 @@ import {
   frameOf,
   type PageEntry,
   pageOf,
+  type PointerTarget,
   realmOf,
   type State,
   type TargetEntry
@@ -230,10 +231,166 @@ const pointerSession = Effect.fnUntraced(function*(
   return origin === undefined ? onPage : { target: owner, x: origin.x, y: origin.y }
 })
 
+/** Where pointer input that names no frame goes, and the out-of-process frame whose element its point hit, if any. */
+interface Aimed extends PointerTarget {
+  readonly frame?: FrameEntry | undefined
+}
+
+/**
+ * The session pointer input that names no frame goes on at a point in the page's coordinates, and its origin. It
+ * follows the rule of `pointerSession`: on a page with an out-of-process frame, each session from the page's down
+ * that owns one has its frame elements' boxes read (`frameBoxes`), once in an operation, and a point outside all of
+ * them goes on that session. A point inside one is hit-tested there (`DOM.getNodeForLocation`, which descends into
+ * frames of the same session, so an element drawn over the frame keeps the point), and where it lands on the
+ * element of a frame another session owns (`DOM.describeNode`), input goes on that session, from the element's
+ * content box (`DOM.getBoxModel`). A session that owns no out-of-process frame of the page is read no further, so a
+ * page without one costs no call, a point outside its out-of-process frames one call in an operation, and a point
+ * inside three more for each level. A point that hits nothing ends the search where it is.
+ */
+const framelessSession = Effect.fnUntraced(function*(state: State, page: PageEntry, x: number, y: number) {
+  let sent: Aimed = { target: page.target, x: 0, y: 0 }
+  while (true) {
+    const target = sent.target
+    // Whether this session owns an out-of-process frame is read from a state that holds every event received
+    // before the last reply, on any session: the protocol client hands over a reply only once those are folded, a
+    // nested frame's attachment on its parent frame's session included
+    // Sessions are told apart by target id: a frame's owner and its page's target needn't be one entry
+    const ownsRemote = [...state.frames.values()].some((each) =>
+      each.page === page && each.owner.targetId !== target.targetId && each.parent?.owner.targetId === target.targetId
+    )
+    if (!ownsRemote) return sent
+    const boxes = yield* frameBoxes(state, page, target)
+    // Boxes are padded by a pixel, as the hit test takes the pixel a point is in
+    const within = (box: Box) =>
+      x - sent.x >= box[0] - 1 && x - sent.x <= box[2] + 1 && y - sent.y >= box[1] - 1 && y - sent.y <= box[3] + 1
+    if (boxes !== undefined && !boxes.some(within)) return sent
+    const on = Protocol.on(target.session)
+    const found = yield* Kit.protocol(
+      Effect.gen(function*() {
+        // A point the session's document doesn't cover hits no node
+        // It takes whole CSS pixels: the pixel the point is in
+        const hit = yield* DOM.getNodeForLocation({
+          x: Math.floor(x - sent.x),
+          y: Math.floor(y - sent.y),
+          includeUserAgentShadowDOM: true,
+          ignorePointerEventsNone: false
+        }).pipe(on, Effect.catchIf((error) => error.reason._tag === "Rejected", () => Effect.succeed(undefined)))
+        if (hit === undefined) return undefined
+        const described = yield* DOM.describeNode({ backendNodeId: hit.backendNodeId }).pipe(on)
+        const child = frameOf(state, described.node.frameId)
+        if (child === undefined || child.page !== page || child.owner.targetId === target.targetId) return undefined
+        const box = yield* DOM.getBoxModel({ backendNodeId: hit.backendNodeId }).pipe(on)
+        return {
+          target: child.owner,
+          x: sent.x + box.model.content[0]!,
+          y: sent.y + box.model.content[1]!,
+          frame: child
+        }
+      })
+    )
+    if (found === undefined) return sent
+    sent = found
+  }
+})
+
+/** A frame element's bounds in its document's viewport: left, top, right and bottom. */
+type Box = readonly [number, number, number, number]
+
+/**
+ * The boxes of the frame elements each session's document holds, read once in an operation, by page and by the
+ * session's target id. A session whose boxes couldn't be read holds `undefined`, and its points are hit-tested.
+ * The boxes are those of the operation's start: a frame that moves, grows or appears while an operation's events
+ * are sent, as one its own input scrolls or a page's handler inserts, is where it was, so a point that has come
+ * into the frame since goes on the session above it. Chromium routes that input by its own hit-test data, which
+ * reaches the frame once it has been drawn, so only a frame not yet drawn misses it.
+ */
+const operationBoxes = new WeakMap<
+  Operation.Record,
+  WeakMap<PageEntry, Map<string, ReadonlyArray<Box> | undefined>>
+>()
+
+/**
+ * Reads the bounds of every frame element in a session's document, open shadow roots included, and the number
+ * that hold a window. A nested frame is drawn within its element, so a point outside every box is outside every
+ * frame the session holds, at any depth.
+ */
+const frameBoxesExpression = "(()=>{const b=[];let n=0;const walk=(r)=>{for(const e of r.querySelectorAll('*')){" +
+  "if(e.shadowRoot!==null)walk(e.shadowRoot);const l=e.localName;" +
+  "if(l==='iframe'||l==='frame'||l==='object'||l==='embed'){if(e.contentWindow!=null)n++;" +
+  "const c=e.getBoundingClientRect();b.push(c.left,c.top,c.right,c.bottom)}}};walk(document);return [n,b]})()"
+
+/**
+ * The boxes of the frame elements in the document of a session's frame, in that session's viewport, read in Strider's
+ * own world and kept for the operation (`operationBoxes`). Where they can't be trusted, it returns `undefined`: a
+ * session whose frames have no single root, a document not yet known, a failed read, or fewer frame elements with a
+ * window than the root frame has child frames, as when a closed shadow root hides one from the page's scripts.
+ */
+const frameBoxes = Effect.fnUntraced(function*(state: State, page: PageEntry, target: TargetEntry) {
+  const record = Option.getOrUndefined(yield* Operation.current)
+  let pages = record === undefined ? undefined : operationBoxes.get(record)
+  if (record !== undefined && pages === undefined) operationBoxes.set(record, pages = new WeakMap())
+  let sessions = pages?.get(page)
+  if (pages !== undefined && sessions === undefined) pages.set(page, sessions = new Map())
+  if (sessions?.has(target.targetId) === true) return sessions.get(target.targetId)
+  const read = Effect.gen(function*() {
+    const roots = [...state.frames.values()].filter((each) =>
+      each.page === page && each.owner.targetId === target.targetId &&
+      each.parent?.owner.targetId !== target.targetId
+    )
+    const root = roots.length === 1 ? roots[0]! : undefined
+    if (root?.document === undefined) return undefined
+    const children = [...state.frames.values()].filter((each) => each.parent === root).length
+    const realm = yield* realmOf(state, yield* Evaluation.realm(state, root.document.id, dragWorld))
+    const { result } = yield* Kit.protocol(
+      Runtime.evaluate({
+        expression: frameBoxesExpression,
+        contextId: realm.contextId as Runtime.ExecutionContextId,
+        returnByValue: true
+      }).pipe(Protocol.on(realm.target.session))
+    )
+    const value: unknown = result.value
+    if (!Array.isArray(value) || typeof value[0] !== "number" || !Array.isArray(value[1])) return undefined
+    const [count, flat] = value as [number, Array<unknown>]
+    if (count < children || flat.length % 4 !== 0 || flat.some((each) => typeof each !== "number")) return undefined
+    const boxes: Array<Box> = []
+    for (let i = 0; i < flat.length; i += 4) {
+      boxes.push([flat[i] as number, flat[i + 1] as number, flat[i + 2] as number, flat[i + 3] as number])
+    }
+    return boxes as ReadonlyArray<Box>
+  }).pipe(Effect.catch(() => Effect.succeed(undefined)))
+  const boxes = yield* read
+  sessions?.set(target.targetId, boxes)
+  return boxes
+})
+
+/** Where a page's held press went, while its session is still attached (`captured`). */
+const pressTarget = (state: State, page: L1Target.NavigableId): PointerTarget | undefined =>
+  captured(state, state.pressedOn, page)
+
+/**
+ * Where a page's held input went, while its session is still attached. A session that ends while it holds the
+ * pointer, as a frame's does when the frame is removed or navigates to another process, ends the capture, and the
+ * input after goes by its point again.
+ */
+const captured = (
+  state: State,
+  capture: Map<L1Target.NavigableId, PointerTarget>,
+  page: L1Target.NavigableId
+): PointerTarget | undefined => {
+  const held = capture.get(page)
+  if (held === undefined) return undefined
+  if (state.targets.get(held.target.session) === held.target) return held
+  capture.delete(page)
+  return undefined
+}
+
 /**
  * Input in the page's coordinates goes on the page's session; pages with child frames keep sequential
  * acknowledgments. Pointer input aimed into frames of one out-of-process session goes on that session, in its own
- * coordinates (`pointerSession`).
+ * coordinates (`pointerSession`). Pointer input that names no frame goes on the session under each event's point
+ (`framelessSession`); from a press until every button is up, or from a touch's start until its end, it goes where
+ the press or the start went, a release outside that frame included, as a pointer's input stays with the element
+ it pressed.
  */
 export const dispatchInput = Effect.fnUntraced(
   function*(
@@ -251,8 +408,24 @@ export const dispatchInput = Effect.fnUntraced(
       lands ?? (frame === undefined ? [] : [frame.frame]),
       (each) => frameById(state, each).pipe(Effect.mapError(Adapter.unsent))
     )
-    const sent = yield* pointerSession(page, frame, landed)
-    const on = Protocol.on(sent.target.session)
+    let sent = yield* pointerSession(page, frame, landed)
+    // Input that names neither a frame nor where its points land, as the page's devices send it; a locator names
+    // both, having checked what its points hit
+    const frameless = frame === undefined && lands === undefined
+    let aimed: { readonly x: number; readonly y: number; readonly sent: Aimed } | undefined
+    // The session under a point for input that names no frame, once for consecutive events at one point
+    const aim = (x: number, y: number) =>
+      aimed !== undefined && aimed.x === x && aimed.y === y
+        ? Effect.succeed(aimed.sent)
+        : framelessSession(state, page, x, y).pipe(
+          // A lookup before the call's first event is written fails with nothing sent
+          Effect.mapError((error) => written ? error : Adapter.unsent(error)),
+          Effect.map((found) => {
+            aimed = { x, y, sent: found }
+            return found
+          })
+        )
+    const on = <M extends string, P, A>(command: Protocol.Command<M, P, A>) => Protocol.on(command, sent.target.session)
     const onPageSession = Protocol.on(page.target.session)
     const click = Gestures.singleClick(events)
     if (
@@ -300,9 +473,21 @@ export const dispatchInput = Effect.fnUntraced(
       )
       return
     }
+    let written = false
     for (const event of events) {
+      written ||= event !== events[0]
       switch (event._tag) {
         case "Mouse": {
+          // A held press keeps input that names no frame, as one that names its frame keeps it below; an
+          // intercepted drag's events go by their points, as the gesture's points land
+          const holder = frameless && !state.drags.has(page.id) ? pressTarget(state, page.id) : undefined
+          let hit: FrameEntry | undefined
+          if (holder !== undefined) sent = holder
+          else if (frameless) {
+            const found = yield* aim(event.x, event.y)
+            hit = found.frame
+            sent = found
+          }
           state.heldButtons.set(page.id, event.buttons)
           const announced = state.drags.get(page.id)
           if (announced?.stale === true) {
@@ -319,7 +504,14 @@ export const dispatchInput = Effect.fnUntraced(
               Effect.ignore
             )
           }
-          if (event.type === "down") {
+          if (event.type === "down" && frameless) {
+            // The frame the lookup found takes the press, as a frame the press names does; a press on the page's
+            // own session lands in no frame it knows, so any of the page's documents may start its drag
+            if (holder === undefined) {
+              state.pressedIn.set(page.id, hit === undefined ? [] : [hit])
+              state.pressedOn.set(page.id, sent)
+            }
+          } else if (event.type === "down") {
             const pressedFrame = frame === undefined ? undefined : landed.find((each) => each.id === frame.frame)
             // The frame the press itself went to, not the gesture's destination
             state.pressedIn.set(page.id, pressedFrame === undefined ? landed : [pressedFrame])
@@ -329,7 +521,7 @@ export const dispatchInput = Effect.fnUntraced(
             const into = frame === undefined ? undefined : landed.find((each) => each.id === frame.frame)
             state.pressedOn.set(page.id, into === undefined ? sent : yield* pointerSession(page, frame, [into]))
           }
-          const captured = state.pressedOn.get(page.id) ?? sent
+          const captured = pressTarget(state, page.id) ?? sent
           const onCaptured = Protocol.on(captured.target.session)
           const drag = state.drags.get(page.id)
           if (drag !== undefined && event.type !== "down") {
@@ -368,6 +560,8 @@ export const dispatchInput = Effect.fnUntraced(
           break
         }
         case "Wheel":
+          // A wheel goes to what is under its point, a button held or not
+          if (frameless) sent = yield* aim(event.x, event.y)
           yield* Kit.protocol(
             Input.dispatchMouseEvent({
               type: "mouseWheel",
@@ -422,6 +616,13 @@ export const dispatchInput = Effect.fnUntraced(
           yield* Kit.protocol(Input.insertText({ text: Redacted.make(event.text) }).pipe(onPageSession))
           break
         case "Touch":
+          if (frameless) {
+            const first = event.points[0]
+            sent = captured(state, state.touchCapture, page.id) ??
+              (first === undefined ? { target: page.target, x: 0, y: 0 } : yield* aim(first.x, first.y))
+            if (event.type === "end" || event.type === "cancel") state.touchCapture.delete(page.id)
+            else state.touchCapture.set(page.id, sent)
+          }
           yield* Kit.protocol(
             Input.dispatchTouchEvent({
               type: event.type === "start"

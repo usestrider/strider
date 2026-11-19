@@ -25,11 +25,14 @@ import * as Adapter from "../src/internal/adapter.ts"
 import * as BidiWire from "../src/internal/bidiWire.ts"
 import * as BoundedAdapter from "../src/internal/boundedAdapter.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
+import { dispatchInput as dispatchCdpInput } from "../src/internal/cdpAdapter/input.ts"
+import type { State as CdpState } from "../src/internal/cdpAdapter/state.ts"
 import * as CdpWire from "../src/internal/cdpWire.ts"
 import * as Ingestion from "../src/internal/ingestion.ts"
 import * as Operation from "../src/internal/operation.ts"
 import * as ProtocolClient from "../src/internal/protocolClient.ts"
 import * as WebKitWire from "../src/internal/webkitWire.ts"
+import type * as L1Target from "../src/Target.ts"
 import { type FakeBrowser, makeBrowser } from "./utils/FakeBrowser.ts"
 
 interface Recorder {
@@ -486,7 +489,6 @@ describe("ProtocolClient", () => {
       }, CdpWire.wire)
       const fiber = yield* client.root.sendOrdered(click()).pipe(Effect.forkChild)
       const first = yield* browser.next
-      yield* Deferred.await(entered)
       yield* browser.receive({ id: first.id, error: { code: -32000, message: "rejected" } })
       yield* browser.delivered
       assert.isUndefined(fiber.pollUnsafe())
@@ -663,6 +665,173 @@ describe("ProtocolClient", () => {
       yield* Deferred.succeed(gate, undefined)
       yield* Fiber.join(drained)
       assert.deepStrictEqual(recorder.folded, ["1"])
+    }))
+
+  it.effect("routes frameless input after a nested attachment received on the parent session before the page's replies", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const original = makeFold().fold
+      let addNested = () => {}
+      const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire, {
+        fold: (control) => {
+          const fold = original(control)
+          return {
+            ...fold,
+            apply: (session, method, params, received) => {
+              const apply = fold.apply(session, method, params, received)
+              if (
+                method !== Target.attachedToTarget.method ||
+                (params as Target.AttachedToTargetParams).sessionId !== "S3"
+              ) return apply
+              return Effect.gen(function*() {
+                // The fold takes some turns of the scheduler; a reply must not reach its caller first
+                for (let i = 0; i < 50; i++) yield* Effect.yieldNow
+                addNested()
+                yield* apply
+              })
+            }
+          }
+        }
+      })
+      const pageSession = yield* attach(browser, client, "S1")
+      const parentSession = yield* attach(browser, client, "S2")
+      yield* client.root.drainObserved
+      const id = "page-1" as L1Target.NavigableId
+      const pageTarget = { targetId: "T-S1", session: pageSession }
+      const parentTarget = { targetId: "T-S2", session: parentSession }
+      // A page whose initial sync is applied, as the input's page lookup waits for that
+      const ready = yield* Deferred.make<void>()
+      yield* Deferred.succeed(ready, undefined)
+      const page = { id, target: pageTarget, ended: false, ready }
+      const rootFrame = { page, owner: pageTarget, parent: undefined }
+      const parentFrame = { page, owner: parentTarget, parent: rootFrame }
+      const frames = new Map<string, unknown>([["T-S1", rootFrame], ["T-S2", parentFrame]])
+      const state = { ids: {}, pages: new Map([[id, page]]), frames } as unknown as CdpState
+      addNested = () =>
+        frames.set("T-S3", {
+          page,
+          parent: parentFrame,
+          owner: { targetId: "T-S3", session: client.session("S3" as Protocol.SessionKey)! }
+        })
+      // A nested attachment is received on the parent OOPIF, not on the page session.
+      yield* browser.receive({
+        method: "Target.attachedToTarget",
+        sessionId: "S2",
+        params: {
+          sessionId: "S3",
+          targetInfo: { targetId: "T-S3", type: "iframe", title: "", url: "http://nested.test", attached: true },
+          waitingForDebugger: false
+        }
+      })
+      const input = yield* dispatchCdpInput(state, id, [{
+        _tag: "Wheel",
+        x: 150,
+        y: 100,
+        deltaX: 0,
+        deltaY: 10,
+        modifiers: { alt: false, control: false, meta: false, shift: false }
+      }]).pipe(Effect.forkChild)
+      const reply = (command: Awaited<Effect.Success<typeof browser.next>>) => {
+        const child = command.sessionId === "S1" ? "T-S2" : "T-S3"
+        const result = command.method === "DOM.getNodeForLocation" ?
+          { backendNodeId: 1, frameId: command.sessionId === "S1" ? "T-S1" : "T-S2" }
+          : command.method === "DOM.describeNode" ?
+          {
+            node: {
+              nodeId: 1,
+              backendNodeId: 1,
+              nodeType: 1,
+              nodeName: "IFRAME",
+              localName: "iframe",
+              nodeValue: "",
+              frameId: child
+            }
+          }
+          : command.method === "DOM.getBoxModel"
+          ? {
+            model: {
+              content: [10, 10, 210, 10, 210, 210, 10, 210],
+              padding: [],
+              border: [],
+              margin: [],
+              width: 200,
+              height: 200
+            }
+          }
+          : {}
+        return browser.receive({ id: command.id, sessionId: command.sessionId, result })
+      }
+      // The page's replies arrive after the nested attachment, so the input reads the frame tree only once that
+      // attachment is folded, though it was received on another session
+      let command = yield* browser.next
+      while (command.method !== "Input.dispatchMouseEvent") {
+        yield* reply(command)
+        command = yield* browser.next
+      }
+      yield* reply(command)
+      yield* Fiber.join(input)
+      assert.strictEqual(command.sessionId, "S3", "the wheel must reach the nested frame, not its parent")
+    }))
+
+  it.effect("sends frameless input outside every frame box on the page's session with no hit test", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire, { fold: makeFold().fold })
+      const pageSession = yield* attach(browser, client, "S1")
+      const frameSession = yield* attach(browser, client, "S2")
+      yield* client.root.drainObserved
+      const id = "page-1" as L1Target.NavigableId
+      const pageTarget = { targetId: "T-S1", session: pageSession }
+      const frameTarget = { targetId: "T-S2", session: frameSession }
+      const ready = yield* Deferred.make<void>()
+      yield* Deferred.succeed(ready, undefined)
+      const page = { id, target: pageTarget, ended: false, ready }
+      const rootFrame: Record<string, unknown> = { page, owner: pageTarget, parent: undefined }
+      const childFrame = { page, owner: frameTarget, parent: rootFrame }
+      const realm = {
+        id: "realm-1",
+        ended: false,
+        world: { _tag: "Isolated", name: "__strider_utility__" },
+        contextId: 7,
+        target: pageTarget
+      }
+      const document = { id: "document-1", frame: rootFrame, realms: new Set([realm]) }
+      rootFrame.document = document
+      const state = {
+        ids: {},
+        pages: new Map([[id, page]]),
+        frames: new Map<string, unknown>([["T-S1", rootFrame], ["T-S2", childFrame]]),
+        documents: new Map([["document-1", document]]),
+        realms: new Map([["realm-1", realm]]),
+        heldButtons: new Map(),
+        drags: new Map(),
+        pressedOn: new Map(),
+        pressedIn: new Map(),
+        interceptingDrags: new Set(["page-1"]),
+        navigables: new Map()
+      } as unknown as CdpState
+      const input = yield* dispatchCdpInput(state, id, [{
+        _tag: "Wheel",
+        x: 300,
+        y: 300,
+        deltaX: 0,
+        deltaY: 10,
+        modifiers: { alt: false, control: false, meta: false, shift: false }
+      }]).pipe(Effect.forkChild)
+      const methods: Array<string> = []
+      let command = yield* browser.next
+      while (true) {
+        methods.push(`${command.sessionId} ${command.method}`)
+        // The frame's element covers 10 to 210 on each axis; the point is outside it
+        const result = command.method === "Runtime.evaluate"
+          ? { result: { type: "object", value: [1, [10, 10, 210, 210]] } }
+          : {}
+        yield* browser.receive({ id: command.id, sessionId: command.sessionId, result })
+        if (command.method === "Input.dispatchMouseEvent") break
+        command = yield* browser.next
+      }
+      yield* Fiber.join(input)
+      assert.deepStrictEqual(methods, ["S1 Runtime.evaluate", "S1 Input.dispatchMouseEvent"])
     }))
 
   it.effect("returns a command's result only after the fold has applied every event received before its reply", () =>

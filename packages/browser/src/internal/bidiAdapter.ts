@@ -79,6 +79,9 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       ]),
       entry("userContexts", "supported"),
       entry("acceptInsecureCerts", "supported", ["native browser.createUserContext setting"]),
+      entry("clientCertificates", ownership === "launched" ? "partial" : "unsupported", [
+        "a loopback proxy per context, which forwards plain HTTP unchanged; needs a launched Firefox; not with proxy"
+      ]),
       entry("userContexts.proxy", "supported", [
         "http, socks5 and socks4 endpoints for HTTP, HTTPS and WebSocket destinations; .domain bypass matches subdomains only; loopback stays direct"
       ]),
@@ -417,7 +420,7 @@ export const connect: (
       evaluate: (realm, call) => Evaluation.evaluate(state, realm, call),
       releaseHandles: (list) => Evaluation.releaseHandles(state, list),
       textInsertion: "beforeInputAndEditingCommand",
-      dispatchInput: (page, events, frame) => Input.dispatchInput(state, page, events, frame),
+      dispatchInput: (page, events, frame, lands) => Input.dispatchInput(state, page, events, frame, lands),
       contentFrame: (node) => Input.contentFrame(state, node),
       releaseNodes: () => Effect.void,
       geometry: (node, kind) => Geometry.read(state, node, kind),

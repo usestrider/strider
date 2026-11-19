@@ -102,6 +102,14 @@ const firstAlpha = (png: Uint8Array): number => {
   return raw[4]!
 }
 
+/** A heading and a textbox inside a banner inside the body, for patterns that match at any depth. */
+const todos =
+  `<title>Todos</title><header><h1>todos</h1><input placeholder="What needs to be done?"></header><main><p>List</p></main>`
+
+/** A heading with a level, a heading element whose role takes none, and a checkbox and a toggle button that can be mixed. */
+const controls = `<h2>Plans</h2><h3 role="tab">Billing</h3><input type="checkbox" id="all" aria-label="All">` +
+  `<button aria-pressed="mixed">Bold</button><button>Plain</button>`
+
 /** A small page for snapshots: landmarks, controls, an inferred control, hidden content, a list and text. */
 const shop =
   `<title>Shop</title><h1>Shop</h1><nav aria-label="Main"><a href="#orders">Orders</a></nav><a id="gone" href="#gone">Gone</a>
@@ -2226,7 +2234,7 @@ export const contents = (
             assert.deepStrictEqual(snapshot.root.role, { _tag: "Aria", role: "document" })
             const text = snapshot.text
             assert.match(text, /^- document "Shop":/)
-            assert.match(text, /- heading "Shop" \[ref=e\d+\]/)
+            assert.match(text, /- heading "Shop" \[level=1\] \[ref=e\d+\]/)
             assert.match(text, /- navigation "Main" \[ref=e\d+\]:\n {4}- link "Orders" \[ref=e\d+\]/)
             assert.match(text, /- button "Save" \[ref=e\d+\]/)
             assert.match(
@@ -2358,7 +2366,7 @@ export const contents = (
             const snapshot = yield* page.snapshot()
             assert.match(
               snapshot.text,
-              /- iframe "Payment" \[ref=e\d+\]:\n {4}- heading "Inner" \[ref=f1e\d+\]\n {4}- button "Add" \[ref=f1e\d+\]/
+              /- iframe "Payment" \[ref=e\d+\]:\n {4}- heading "Inner" \[level=1\] \[ref=f1e\d+\]\n {4}- button "Add" \[ref=f1e\d+\]/
             )
             const add = [...snapshot.refs].find(([ref, node]) =>
               ref.startsWith("f1") && node.role.role === "button"
@@ -2428,6 +2436,155 @@ export const contents = (
               String(Option.getOrThrow(last).value),
               /- navigation "Main" \[ref=e\d+\]:\n {2}- link "Orders"/
             )
+          }))
+        }), timeout)
+
+      it.effect("matches a page's pattern at its document node", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, todos))
+            yield* page.pipe(Expect.toMatchAria(
+              AriaPattern.node(
+                "document",
+                "Todos",
+                AriaPattern.including(AriaPattern.node("banner", "", AriaPattern.unchecked))
+              )
+            ))
+          }))
+        }), timeout)
+
+      it.effect("matches a pattern anywhere beneath its subject", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, todos))
+            yield* page.pipe(Expect.toMatchAria(AriaPattern.anywhere(AriaPattern.including(
+              AriaPattern.node("heading", "todos", AriaPattern.unchecked),
+              AriaPattern.node("textbox", "What needs to be done?", AriaPattern.unchecked)
+            ))))
+            yield* page.locator("body").pipe(Expect.toMatchAria(AriaPattern.anywhere(AriaPattern.including(
+              AriaPattern.node("heading", "todos", AriaPattern.unchecked)
+            ))))
+          }))
+        }), timeout)
+
+      it.effect("with not, waits until the subject doesn't match", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, todos))
+            yield* page.evaluateInMainWorld(() => {
+              setTimeout(() =>
+                document.querySelector("h1")!.remove(), 300)
+            })
+            yield* page.pipe(Expect.toMatchAria(
+              AriaPattern.anywhere(AriaPattern.including(AriaPattern.node("heading", "todos", AriaPattern.unchecked))),
+              { not: true }
+            ))
+          }))
+        }), timeout)
+
+      it.effect("with not, fails with the tree it saw when the subject keeps matching", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, todos))
+            const failed = reasonOf(
+              yield* Effect.exit(
+                page.getByRole("banner").pipe(
+                  Expect.toMatchAria(AriaPattern.node("banner", "", AriaPattern.unchecked), { not: true }),
+                  Deadline.within("1 second")
+                )
+              )
+            )
+            assert.strictEqual(failed?._tag, "ExpectationFailed")
+            const error = failed as unknown as Expect.ExpectationFailed
+            assert.match(error.message, /not to match node\("banner"/)
+            assert.match(String(Option.getOrThrow(error.last).value), /^- banner \[ref=e\d+\]:\n {2}- heading "todos"/)
+          }))
+        }), timeout)
+
+      it.effect("compares the level and states a node pattern states, and only those", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, controls))
+            yield* page.evaluateInMainWorld(() => {
+              document.querySelector<HTMLInputElement>("#all")!.indeterminate = true
+            })
+            const anywhere = (pattern: AriaPattern.AriaPattern) => AriaPattern.anywhere(AriaPattern.including(pattern))
+            yield* page.pipe(Expect.toMatchAria(anywhere(
+              AriaPattern.node("heading", "Plans", AriaPattern.unchecked, { level: 2 })
+            )))
+            yield* page.pipe(Expect.toMatchAria(
+              anywhere(AriaPattern.node("heading", "Plans", AriaPattern.unchecked, { level: 3 })),
+              { not: true }
+            ))
+            yield* page.pipe(Expect.toMatchAria(anywhere(
+              AriaPattern.node("checkbox", "All", AriaPattern.unchecked, { checked: "mixed" })
+            )))
+            yield* page.pipe(Expect.toMatchAria(anywhere(
+              AriaPattern.node("button", "Bold", AriaPattern.unchecked, { pressed: "mixed", disabled: false })
+            )))
+            // false requires the state to be absent
+            yield* page.pipe(Expect.toMatchAria(
+              anywhere(AriaPattern.node("checkbox", "All", AriaPattern.unchecked, { checked: false })),
+              { not: true }
+            ))
+            yield* page.pipe(Expect.toMatchAria(anywhere(
+              AriaPattern.node("button", "Plain", AriaPattern.unchecked, { pressed: false })
+            )))
+          }))
+        }), timeout)
+
+      it.effect("keeps native mixed checking separate from a button's pressed state", () =>
+        Effect.gen(function*() {
+          const page = yield* SharedContext.newPage
+          yield* page.setContent(
+            "<input type=\"checkbox\" role=\"button\" aria-label=\"Toggle\" aria-pressed=\"true\">"
+          )
+          yield* page.evaluateInMainWorld(() => {
+            document.querySelector("input")!.indeterminate = true
+          })
+          assert.strictEqual(yield* page.getByRole("button", { pressed: true }).count, 1)
+          const snapshot = yield* page.snapshot({ sources: "aria" })
+          assert.match(snapshot.text, /- button "Toggle" \[checked=mixed\] \[pressed\]/)
+          yield* page.pipe(
+            Expect.toMatchAria(AriaPattern.anywhere(AriaPattern.including(
+              AriaPattern.node("button", "Toggle", AriaPattern.unchecked, { checked: "mixed", pressed: true })
+            ))),
+            Deadline.within("1 second")
+          )
+        }), timeout)
+
+      it.effect("snapshots carry a node's level and mixed state, and render them", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, controls))
+            yield* page.evaluateInMainWorld(() => {
+              document.querySelector<HTMLInputElement>("#all")!.indeterminate = true
+            })
+            const snapshot = yield* page.snapshot({ sources: "aria" })
+            assert.match(snapshot.text, /- heading "Plans" \[level=2\] \[ref=e\d+\]/)
+            // A level is the role's: a tab has none, even on an h3
+            assert.match(snapshot.text, /- tab "Billing" \[ref=e\d+\]/)
+            assert.match(snapshot.text, /- checkbox "All" \[checked=mixed\] \[ref=e\d+\]/)
+            assert.match(snapshot.text, /- button "Bold" \[pressed=mixed\] \[ref=e\d+\]/)
+            assert.match(snapshot.text, /- button "Plain" \[ref=e\d+\]/)
+            const nodes = [...snapshot.refs.values()]
+            const heading = nodes.find((node) => node.role.role === "heading")!
+            const checkbox = nodes.find((node) => node.role.role === "checkbox")!
+            assert.strictEqual(heading.level, 2)
+            assert.strictEqual(checkbox.level, undefined)
+            assert.deepStrictEqual([...checkbox.states], ["checked=mixed"])
           }))
         }), timeout)
 
