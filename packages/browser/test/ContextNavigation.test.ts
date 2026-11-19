@@ -42,7 +42,11 @@ const setup = Effect.fnUntraced(function*() {
     grant: Option.none()
   })
   const page = {} as Page.Page
-  Handles.registerPage(page, { runtime, entry: Option.getOrThrow(fold.page("first" as Target.NavigableId)), grant: Option.none() })
+  Handles.registerPage(page, {
+    runtime,
+    entry: Option.getOrThrow(fold.page("first" as Target.NavigableId)),
+    grant: Option.none()
+  })
   return { addPage, context, navigate, page }
 })
 

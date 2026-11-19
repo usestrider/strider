@@ -424,6 +424,7 @@ export const make = Effect.fnUntraced(function*(options: {
       closed: yield* Deferred.make<Target.CloseReason>(),
       events: {
         autoResolution: Events.make(target, cap),
+        navigation: Events.make(target, cap),
         request: Events.make(target, cap),
         response: Events.make(target, cap),
         console: Events.make(target, cap),
@@ -756,12 +757,18 @@ export const make = Effect.fnUntraced(function*(options: {
           if (Option.isSome(start)) {
             started.delete(fact.navigation)
             if (pages.has(start.value.page.id)) {
-              Events.publish(start.value.page.events.navigation, {
-                navigation: fact.navigation,
-                frame: start.value.frame,
-                url: endedAt(fact.outcome, start.value.url),
-                outcome: fact.outcome
-              })
+              publish(
+                ownerOfPage(Option.some(start.value.page)),
+                {
+                  navigation: fact.navigation,
+                  page: start.value.page.id,
+                  frame: start.value.frame,
+                  url: endedAt(fact.outcome, start.value.url),
+                  outcome: fact.outcome
+                },
+                (events) => events.navigation,
+                (events) => events.navigation
+              )
             }
           }
           yield* Deferred.succeed(navigation(fact.navigation).outcome, fact.outcome)

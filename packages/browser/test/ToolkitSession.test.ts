@@ -469,6 +469,7 @@ describe("Session's digest", () => {
           Effect.sync(() =>
             Events.publish(channel, {
               navigation: Schema.decodeUnknownSync(PageNavigation.Id)(id),
+              page: page.id,
               frame: page.id,
               url: navigation.url,
               outcome: { _tag: "Committed" as const, document: navigation.document, response: Option.none() }
@@ -496,6 +497,7 @@ describe("Session's digest", () => {
         Effect.sync(() =>
           Events.publish(channel, {
             navigation: id(value),
+            page: page.id,
             frame: page.id,
             url,
             outcome: { _tag: "Committed" as const, document, response: Option.none() }
@@ -548,6 +550,7 @@ describe("Session's digest", () => {
           Effect.sync(() =>
             Events.publish(channel, {
               navigation: id(value),
+              page: page.id,
               frame: page.id,
               url,
               outcome: { _tag: "Committed" as const, document, response: Option.none() }
@@ -610,6 +613,7 @@ describe("Session's digest", () => {
       yield* TestClock.adjust("1 millis")
       Events.publish(Handles.page(page).entry.events.navigation, {
         navigation: id,
+        page: page.id,
         frame: page.id,
         url,
         outcome: { _tag: "Committed" as const, document, response: Option.none() }
@@ -656,6 +660,7 @@ describe("Session's digest", () => {
       const page = Option.getOrThrow(session.named("main"))
       Events.publish(Handles.page(page).entry.events.navigation, {
         navigation: id,
+        page: page.id,
         frame: page.id,
         url,
         outcome: { _tag: "Committed", document, response: Option.none() }
@@ -842,6 +847,7 @@ describe("Session press refusals", () => {
         const url = Schema.decodeUnknownSync(Url.Url)(`https://example.test/${key}`)
         Events.publish(Handles.page(page).entry.events.navigation, {
           navigation: Schema.decodeUnknownSync(PageNavigation.Id)(key),
+          page: page.id,
           frame: page.id,
           url,
           outcome: {

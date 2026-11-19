@@ -25,6 +25,7 @@ import type * as Page from "./Page.ts"
 import type * as Subscription from "./Subscription.ts"
 import * as Target from "./Target.ts"
 import * as Url from "./Url.ts"
+import type * as UserContext from "./UserContext.ts"
 
 /**
  * Schema for the id of one navigation.
@@ -49,6 +50,9 @@ export type Id = typeof Id.Type
  *
  * **Details**
  *
+ * Every navigation names its `page`, and the `frame` it happened in: the page's own id for the page's document, or
+ * a frame's.
+ *
  * - `Committed`: a new document. `response` is `None` for `about:blank`, `data:` URLs, and `blob:` URLs, which the browser
  *   answers without a network request.
  * - `SameDocument`: the document stayed, through a fragment, the History API, or an intercepted navigation.
@@ -70,6 +74,7 @@ export type Id = typeof Id.Type
 export const PageNavigation = Schema.Union([
   Schema.TaggedStruct("Committed", {
     id: Id,
+    page: Target.NavigableId,
     frame: Target.NavigableId,
     url: Url.Url,
     document: Target.DocumentId,
@@ -77,16 +82,30 @@ export const PageNavigation = Schema.Union([
   }),
   Schema.TaggedStruct("SameDocument", {
     id: Id,
+    page: Target.NavigableId,
     frame: Target.NavigableId,
     url: Url.Url,
     document: Target.DocumentId,
     via: Schema.Literals(["fragment", "historyApi", "intercepted"])
   }),
-  Schema.TaggedStruct("Restored", { id: Id, frame: Target.NavigableId, url: Url.Url, document: Target.DocumentId }),
-  Schema.TaggedStruct("Activated", { id: Id, frame: Target.NavigableId, url: Url.Url, document: Target.DocumentId }),
-  Schema.TaggedStruct("BecameDownload", { id: Id, frame: Target.NavigableId, url: Url.Url }),
+  Schema.TaggedStruct("Restored", {
+    id: Id,
+    page: Target.NavigableId,
+    frame: Target.NavigableId,
+    url: Url.Url,
+    document: Target.DocumentId
+  }),
+  Schema.TaggedStruct("Activated", {
+    id: Id,
+    page: Target.NavigableId,
+    frame: Target.NavigableId,
+    url: Url.Url,
+    document: Target.DocumentId
+  }),
+  Schema.TaggedStruct("BecameDownload", { id: Id, page: Target.NavigableId, frame: Target.NavigableId, url: Url.Url }),
   Schema.TaggedStruct("NoContent", {
     id: Id,
+    page: Target.NavigableId,
     frame: Target.NavigableId,
     url: Url.Url,
     response: Schema.Option(NetworkResponse.NetworkResponse)
@@ -168,10 +187,14 @@ export interface NextFilter extends Filter {
 }
 
 /**
- * Subscribes to a page's navigations and returns the wait: an effect that gives the first match, the same each
- * time it runs.
+ * Subscribes to the navigations of a page, or of every page in a context, and returns the wait: an effect that
+ * gives the first match, the same each time it runs.
  *
  * **Details**
+ *
+ * On a context, the wait takes a navigation of any page in it, including pages opened after it subscribed, and
+ * the navigation's `page` says which. `next(context, { waitUntil: "load" })` waits for a page in the context to
+ * load.
  *
  * The wait settles on the first matching navigation to end, as `goto` would. If that navigation succeeded,
  * the wait gives its `PageNavigation` once its document reaches `waitUntil`; if it didn't, the wait fails with the
@@ -197,12 +220,31 @@ export interface NextFilter extends Filter {
  * })
  * ```
  *
+ * **Example** (Waiting for any page in a context to load)
+ *
+ * ```ts import.meta.vitest
+ * import { Page, PageNavigation, UserContext } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const openReceipt = Effect.fn("openReceipt")(
+ *   function*(context: UserContext.UserContext, page: Page.Page) {
+ *     const loaded = yield* PageNavigation.next(context, {
+ *       url: "https://shop.example.com/receipt",
+ *       waitUntil: "load"
+ *     })
+ *     yield* page.getByRole("link", { name: "Receipt" }).click()
+ *     const navigation = yield* loaded
+ *     return navigation.page
+ *   }
+ * )
+ * ```
+ *
  * @stability unstable
  * @category subscriptions
  * @since 0.1.0
  */
 export const next = <PE = never, PR = never>(
-  target: Page.ObservedPage,
+  target: Page.ObservedPage | UserContext.ObservedUserContext,
   filter?: NextFilter | undefined,
   where?: Subscription.Where<PageNavigation, PE, PR> | undefined
 ): Effect.Effect<
@@ -212,8 +254,13 @@ export const next = <PE = never, PR = never>(
 > => PageNavigationImpl.next(target, filter, where)
 
 /**
- * Subscribes to a page's navigations and emits every successful match from now on: `Committed`, `SameDocument`,
- * `Restored`, or `Activated`.
+ * Subscribes to the navigations of a page, or of every page in a context, and emits every successful match from
+ * now on: `Committed`, `SameDocument`, `Restored`, or `Activated`.
+ *
+ * **Details**
+ *
+ * On a context, the stream takes the navigations of pages opened after it subscribed too, and ends when the
+ * context closes. A page's subscription and its context's each get a navigation once.
  *
  * **Example** (Logging every URL a single-page app visits)
  *
@@ -235,7 +282,7 @@ export const next = <PE = never, PR = never>(
  * @since 0.1.0
  */
 export const stream = <PE = never, PR = never>(
-  target: Page.ObservedPage,
+  target: Page.ObservedPage | UserContext.ObservedUserContext,
   filter?: Filter | undefined,
   where?: Subscription.Where<PageNavigation, PE, PR> | undefined
 ): Effect.Effect<
@@ -245,7 +292,8 @@ export const stream = <PE = never, PR = never>(
 > => PageNavigationImpl.stream(target, filter, where)
 
 /**
- * Reads the successful navigations still in the page's event log, as `stream` emits them; never waits.
+ * Reads the successful navigations still in the event log of a page or a context, as `stream` emits them; never
+ * waits.
  *
  * **Details**
  *
@@ -271,7 +319,7 @@ export const stream = <PE = never, PR = never>(
  * @since 0.1.0
  */
 export const history = (
-  target: Page.ObservedPage,
+  target: Page.ObservedPage | UserContext.ObservedUserContext,
   filter?: Filter | undefined
 ): Effect.Effect<Subscription.History<PageNavigation>, Subscription.SubscriptionError> =>
   PageNavigationImpl.history(target, filter)

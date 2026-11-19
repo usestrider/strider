@@ -140,6 +140,8 @@ export interface RouteEntry {
 /** A navigation of a page, when it ended. */
 export interface NavigationEvent {
   readonly navigation: PageNavigation.Id
+  /** The page it happened in. */
+  readonly page: Target.NavigableId
   /** The navigable it happened in: the page's own id, or a frame's. */
   readonly frame: Target.NavigableId
   /** Where it ended: the committed document's URL, or the one a same-document navigation set; else where it was going. */
@@ -259,6 +261,7 @@ export interface PageEvents {
 /** The events of a context: the kinds its modules take a context for. */
 export interface ContextEvents {
   readonly autoResolution: Events.Channel<AutoResolutionEvent>
+  readonly navigation: Events.Channel<NavigationEvent>
   readonly request: Events.Channel<NetworkRequest.NetworkRequest>
   readonly response: Events.Channel<ResponseEvent>
   readonly console: Events.Channel<ConsoleMessage.ConsoleMessage>
