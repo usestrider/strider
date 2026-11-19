@@ -5,9 +5,11 @@ import type { Page } from "@usestrider/browser"
 import { Reason } from "@usestrider/browser"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import type * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
+import * as Scope from "effect/Scope"
 import { site } from "../adapter/harness.ts"
 import { supports } from "./capabilities.ts"
 import * as SharedContext from "./sharedContext.ts"
@@ -113,6 +115,60 @@ export const bindings = (name: string, backend: Layer.Layer<Browser.Browser, unk
           assert.strictEqual(received.length, 1)
         }).pipe(Effect.scoped))
 
+      it.effect("carries a sparse array argument as undefined entries", () =>
+        Effect.gen(function*() {
+          const page = yield* newPage
+          assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => new Array(1)), [undefined])
+          yield* page.exposeBinding(
+            "sparse",
+            { arguments: Schema.Tuple([Schema.Array(Schema.Undefined)]), result: Schema.Number },
+            ([items]) => Effect.succeed(items.length)
+          )
+          assert.strictEqual(
+            yield* page.evaluateInMainWorld(() => (window as any).sparse(new Array(1)) as Promise<number>),
+            1
+          )
+        }).pipe(Effect.scoped))
+
+      it.effect("omits function-valued object properties as evaluation arguments do", () =>
+        Effect.gen(function*() {
+          const page = yield* newPage
+          assert.deepStrictEqual(
+            yield* page.evaluateInMainWorld((value) => Object.keys(value), { kept: 1, omitted: () => 1 }),
+            ["kept"]
+          )
+          yield* page.exposeBinding(
+            "keysOf",
+            { arguments: Schema.Tuple([Schema.Unknown]), result: Schema.Array(Schema.String) },
+            ([value]) => Effect.succeed(Object.keys(value as object))
+          )
+          assert.deepStrictEqual(
+            yield* page.evaluateInMainWorld(() =>
+              (window as any).keysOf({ kept: 1, omitted: () => 1 }) as Promise<Array<string>>
+            ),
+            ["kept"]
+          )
+        }).pipe(Effect.scoped))
+
+      it.effect("rejects with a fixed message when invoking the handler throws", () =>
+        Effect.gen(function*() {
+          const page = yield* newPage
+          yield* page.exposeBinding("throws", numbers, (): Effect.Effect<number> => {
+            throw new Error("a secret the page must not see")
+          })
+          assert.strictEqual(yield* outcome(page, "throws", [2, 3]), "rejected Binding \"throws\" handler failed")
+        }).pipe(Effect.scoped))
+
+      it.effect("rejects with a fixed message when the handler interrupts itself", () =>
+        Effect.gen(function*() {
+          const page = yield* newPage
+          yield* page.exposeBinding("interrupts", numbers, () => Effect.interrupt)
+          assert.strictEqual(
+            yield* outcome(page, "interrupts", [2, 3]),
+            "rejected Binding \"interrupts\" handler failed"
+          )
+        }).pipe(Effect.scoped))
+
       it.effect("rejects a call past the 4096 a document may have waiting", () =>
         Effect.gen(function*() {
           const served = yield* site
@@ -212,6 +268,28 @@ export const bindings = (name: string, backend: Layer.Layer<Browser.Browser, unk
     })
 
     layer(backend, { excludeTestServices: true, timeout })((it) => {
+      it.effect("removes page and context bindings when their control grant ends", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const browser = yield* Browser.Browser
+          const first = (yield* browser.defaultContext.pages)[0]!
+          const grantScope = yield* Scope.fork(yield* Effect.scope)
+          const page = yield* first.control.pipe(Scope.provide(grantScope))
+          const context = yield* browser.defaultContext.control.pipe(Scope.provide(grantScope))
+          // The registration scope deliberately outlives the access grant.
+          yield* page.exposeBinding("pageOwned", numbers, ([a, b]) => Effect.succeed(a + b))
+          yield* context.exposeBinding("contextOwned", numbers, ([a, b]) => Effect.succeed(a + b))
+          assert.strictEqual(yield* outcome(page, "pageOwned", [1, 2]), "resolved 3")
+          assert.strictEqual(yield* outcome(page, "contextOwned", [1, 2]), "resolved 3")
+          yield* Scope.close(grantScope, Exit.void)
+          const again = yield* first.control
+          assert.deepStrictEqual(
+            yield* again.evaluateInMainWorld(
+              () => [typeof (window as any).pageOwned, typeof (window as any).contextOwned]
+            ),
+            ["undefined", "undefined"]
+          )
+        })))
+
       it.effect("a context binding is there before the page's scripts, in popups and in cross-site frames", () =>
         Effect.scoped(Effect.gen(function*() {
           const { crossSite, origin } = yield* site
