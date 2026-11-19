@@ -39,8 +39,9 @@ that replaces the built-ins it uses can change what queries find.
 | `getByPlaceholder(text)`             | inputs whose placeholder matches                               |
 | `getByAltText(text)`                 | images and areas whose alt text matches                        |
 | `getByTitle(text)`                   | elements whose `title` matches                                 |
-| `getByTestId(id)`                    | elements whose `data-testid` is `id`                           |
+| `getByTestId(id)`                    | elements whose `data-testid` is `id`, or matches it            |
 | `locator(css)`                       | elements matching a CSS selector                               |
+| `locator(Locator.xpath(expression))` | elements an XPath expression selects                           |
 
 Prefer `getByRole`: roles and names are what assistive technology sees, and they survive changes to markup and
 classes. An accessible name is what a screen reader announces for an element: a button's text, a field's label, or
@@ -50,11 +51,48 @@ its `aria-label`. They're computed by [HTML-AAM](https://www.w3.org/TR/html-aam-
 A malformed CSS selector fails with [`InvalidInput`](/docs/errors#three-kinds-of-failure) when used, without
 waiting.
 
+## XPath
+
+`Locator.xpath` wraps an XPath expression so `locator` reads it as XPath rather than CSS. It keeps the elements the
+expression selects, in document order, and skips text and attribute nodes. From a page it starts at the document.
+Chained after another query, it starts at each match, and a `/` that begins the first step, after optional
+whitespace, searches inside it, so `//li` reads as `.//li`. A bare `/`, alone or before `|`, is left as written.
+Only that very start is read that way: in `//a | //b` the second branch searches the whole page, so write
+`.//a | .//b` to keep both inside, and `(//a)[1]` stays document-relative too. Other axes, such as `..`, reach
+wherever they lead:
+
+```ts
+import { Locator, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const readOrder = Effect.fn("readOrder")(function*(page: Page.ReadonlyPage) {
+  const items = page.locator(
+    Locator.xpath("//li[normalize-space()='Two'] | //li[@id='three']")
+  )
+  const inBasket = page.locator("ul#basket").locator(Locator.xpath("//li")) // only the basket's items
+  const basket = page.getByText("Two").locator(Locator.xpath("..")) // the item's list
+  const paid = page.locator("tr").filter({
+    has: Locator.relative.locator(Locator.xpath("./td[2][.='Paid']"))
+  })
+  return [
+    yield* items.count,
+    yield* inBasket.count,
+    yield* basket.count,
+    yield* paid.count
+  ]
+})
+```
+
+XPath doesn't cross into a shadow root, though chained from an element inside one it searches that shadow tree.
+Names take no namespace prefix. An expression that doesn't parse, uses a
+prefix, or doesn't select nodes, such as `count(//li)`, fails with `InvalidInput` when used, without waiting.
+
 ## Matching text
 
 A string matches as a case-insensitive substring, so `name: "Save"` also finds "Save draft". `exact: true` matches
-the whole text, case-sensitively, and a `RegExp` is tested as given. A role's hidden elements match only with
-`includeHidden: true`:
+the whole text, case-sensitively, and a `RegExp` is tested as given. A test id isn't text: a string matches
+`data-testid` exactly, and a `RegExp` is tested against the attribute as written. A role's hidden elements match only
+with `includeHidden: true`:
 
 ```ts
 import { Expect, Page } from "@usestrider/browser"
@@ -69,6 +107,8 @@ const saveCart = Effect.fn("saveCart")(function*(page: Page.Page) {
   yield* save.click()
   const items = page.getByText(/^\d+ items?$/) // "1 item", "12 items"
   yield* items.pipe(Expect.toBeVisible)
+  const rows = page.getByTestId(/^row-/) // "row-1", "row-2"
+  yield* rows.pipe(Expect.toHaveCount(2))
   const cookies = page.getByRole("dialog", {
     name: "Cookie settings",
     includeHidden: true // even while hidden

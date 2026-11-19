@@ -547,13 +547,15 @@ export interface Options {
   } | undefined
 
   /**
-   * Routes this context's HTTP and HTTPS traffic through an HTTP proxy. `server` is an HTTP URL or
-   * `host:port`, without credentials, path, query, or fragment. An omitted port is 80.
+   * Routes this context's HTTP, HTTPS, and WebSocket traffic through a proxy. `server` is an `http://`,
+   * `https://`, `socks5://`, or `socks4://` URL, or `host:port` for HTTP, without credentials, path, query, or
+   * fragment. An omitted port is 80 for HTTP, 443 for HTTPS, and 1080 for SOCKS.
    *
    * **Details**
    *
    * `bypass` lists hostnames or IP addresses to connect to directly, without URLs, ports, wildcards, or CIDR.
-   * Host matching follows the browser's native proxy rules, which may also exclude subdomains. Loopback
+   * A hostname matches that host; `.example.com` matches the subdomains of `example.com`, not `example.com`
+   * itself. Launched stock WebKit refuses the leading-dot form, and also bypasses a hostname's subdomains. Loopback
    * destinations (`localhost`, `127.0.0.1`, and `::1`) remain direct on every backend.
    * Credentials answer proxy challenges once per request; website authentication still uses auth routes.
    * Stock WebKit supports proxies only when launched, and refuses credentials with `Unsupported`.
@@ -562,7 +564,10 @@ export interface Options {
    * life. Conflicting pending creations are refused. A confirmed creation rejection or unused setup
    * rollback releases only that creation's reservation; an uncertain outcome keeps it. Conflicting settings fail
    * with `Unsupported`, even after a successfully created context closes.
-   * SOCKS and HTTPS proxy endpoints are refused with `Unsupported`.
+   * A SOCKS proxy resolves the destination's name. Chromium refuses `socks4://`, whose names it would resolve
+   * itself; Firefox and stock WebKit speak SOCKS4a. Only Chromium connects to an `https://` proxy, which needs a
+   * certificate the browser trusts. A SOCKS proxy takes no credentials. Each refusal is `Unsupported` naming its
+   * capability.
    *
    * **Example** (An authenticated proxy)
    *
@@ -627,6 +632,31 @@ export interface Options {
    * @default "system"
    */
   readonly focus?: "system" | "emulated" | undefined
+  /**
+   * Lets the context's pages run what their Content Security Policy forbids: inline scripts, `eval`, and the
+   * scripts and tags you add, in every document and frame, cross-site ones included. `Unsupported` on Firefox,
+   * which doesn't implement it yet, and on WebKit (`bypassCSP`).
+   *
+   * **Details**
+   *
+   * It is set for the context's life, before its first page. A context that leaves it off keeps every policy.
+   *
+   * **Example** (Running an inline script a policy forbids)
+   *
+   * ```ts import.meta.vitest
+   * import { Browser } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const program = Effect.fn("program")(function*() {
+   *   const page = yield* Browser.newPage({ bypassCSP: true })
+   *   yield* page.goto("https://example.com")
+   *   return yield* page.evaluate(() => eval("1 + 1"))
+   * })
+   * ```
+   *
+   * @default false
+   */
+  readonly bypassCSP?: boolean | undefined
   /**
    * The keyboard layout that key presses and typing use on the context's pages: `press`, `pressSequentially`, and
    * `page.keyboard`. On Firefox a key event's `key` follows the layout, but its `code` is the one Firefox gives that

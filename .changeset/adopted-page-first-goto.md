@@ -1,5 +1,0 @@
----
-"@usestrider/browser": patch
----
-
-On Chromium, an operation on a page the program didn't open, such as a persistent profile's first tab from `context.pages` or a tab open in a browser attached with `Chromium.layerConnect`, now waits until Strider has read the page's frames before it sends anything, and a context's declarations, such as routes and emulation, are written to such a page once the browser has answered that read. Closing the page with `runBeforeUnload` waits too; a forced close and answering a prompt already open don't. Before, a `goto` made as soon as the page was listed timed out with "The navigation had no outcome before the deadline", since the events of its navigation arrived before that read and were dropped; with a route installed first, the navigation's paused request was never continued and `goto` timed out unanswered; and a close that ran `beforeunload` left its prompt undecided until the deadline. A navigation such a page finishes before Strider reads its frames is the document the page opens with, which `PageNavigation.next` doesn't receive.

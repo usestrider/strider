@@ -54,9 +54,11 @@ const describePlain = (steps: ReadonlyArray<Engine.Step>): string =>
       case "Title":
         return `getByTitle(${quote(step.matcher)}${exactly(step.matcher)})`
       case "TestId":
-        return `getByTestId(${JSON.stringify(step.id)})`
+        return `getByTestId(${quote(step.matcher)})`
       case "Css":
         return `locator(${JSON.stringify(step.selector)})`
+      case "XPath":
+        return `locator(Locator.xpath(${JSON.stringify(step.expression)}))`
       case "Nth":
         return `nth(${step.index})`
       case "First":
@@ -98,6 +100,12 @@ export const roleStep = (role: AriaRole.AriaRole, options: Locator.RoleOptions |
   )
 })
 
+/** `locator`'s step: a string is CSS, and `Locator.xpath` an XPath expression. */
+export const selectorStep = (selector: string | Locator.XPath): Engine.Step =>
+  typeof selector === "string"
+    ? { _tag: "Css", selector }
+    : { _tag: "XPath", expression: selector.expression }
+
 /** The queries, as steps appended to `steps`. */
 export const queries = <L>(
   steps: ReadonlyArray<Engine.Step>,
@@ -110,8 +118,8 @@ export const queries = <L>(
     make([...steps, { _tag: "Placeholder", matcher: matcher(text, options?.exact) }]),
   getByAltText: (text, options) => make([...steps, { _tag: "AltText", matcher: matcher(text, options?.exact) }]),
   getByTitle: (text, options) => make([...steps, { _tag: "Title", matcher: matcher(text, options?.exact) }]),
-  getByTestId: (id) => make([...steps, { _tag: "TestId", id }]),
-  locator: (css) => make([...steps, { _tag: "Css", selector: css }])
+  getByTestId: (id) => make([...steps, { _tag: "TestId", matcher: matcher(id, true) }]),
+  locator: (selector) => make([...steps, selectorStep(selector)])
 })
 
 const RelativeTypeId = "~@usestrider/browser/Locator/RelativeLocator"

@@ -59,7 +59,7 @@ Firefox renders a background tab about once a second, too seldom for an action t
 opens is its own window, and the default profile opens popups as windows too.
 
 A tab of an attached Firefox, or a popup under `LaunchProfile.stock`, is still a tab: call `yield* page.activate`
-before acting on it, as [Attaching](#attaching) shows. [`focus: "emulated"`](/docs/tools/testing#concurrent-pages) isn't available on Firefox.
+before acting on it, as [Attaching](#attaching) shows. [`focus: "emulated"`](/docs/tools/testing#concurrent-pages) isn't available on Firefox, and nor is `bypassCSP`, since Firefox doesn't implement it.
 
 ## Attaching
 
