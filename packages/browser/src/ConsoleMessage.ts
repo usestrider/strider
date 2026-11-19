@@ -27,6 +27,8 @@ import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Deadline from "./Deadline.ts"
 import * as ConsoleMessageImpl from "./internal/consoleMessage.ts"
+import * as NotBuilt from "./internal/notBuilt.ts"
+import type * as JSHandle from "./JSHandle.ts"
 import * as MonotonicInstant from "./MonotonicInstant.ts"
 import type * as Page from "./Page.ts"
 import type * as Subscription from "./Subscription.ts"
@@ -330,3 +332,107 @@ export const history = (
   filter?: Filter | undefined
 ): Effect.Effect<Subscription.History<ConsoleMessage>, Subscription.SubscriptionError> =>
   ConsoleMessageImpl.history(target, filter)
+
+/**
+ * A console message with handles to the values the page passed the console.
+ *
+ * **Details**
+ *
+ * The handles belong to the subscription that delivered the call: they end with its scope, or earlier with each
+ * handle's `release`. Two subscriptions that receive the same call each get their own handles, and one releasing its
+ * handles leaves the other's working. `args` is empty for a message the browser wrote itself.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export interface Call {
+  /** The message, as `next` and `stream` give it. */
+  readonly message: ConsoleMessage
+  /** The values passed to the console, in order. */
+  readonly args: ReadonlyArray<JSHandle.JSHandle>
+}
+
+/**
+ * Subscribes to console calls, each message with handles to its arguments, and returns the wait: an effect that
+ * gives the first match, the same each time it runs.
+ *
+ * **When to use**
+ *
+ * Use when a test reads the values a page logged, not only their text. A page or context keeps console arguments
+ * only while it has a subscription to calls; `next` and `stream` keep none.
+ *
+ * **Gotchas**
+ *
+ * - The arguments are what the browser reports, which differs from what the page passed when the first argument is
+ *   a format string: Chromium sends a `%s` argument as the string it formats to, and Firefox sends what it made of
+ *   the format. The `console.arguments` capability says how each backend's arguments are held.
+ * - Messages logged before the subscription have no arguments.
+ *
+ * **Example** (Reading the object a page logged)
+ *
+ * ```ts import.meta.vitest
+ * import { ConsoleMessage, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const loggedUser = Effect.fn("loggedUser")(function*(page: Page.Page) {
+ *   const logged = yield* ConsoleMessage.nextCall(page, { text: "user" })
+ *   yield* page.evaluateInMainWorld(() => console.log("user", { name: "Ada" }))
+ *   const call = yield* logged
+ *   return yield* call.args[1]!.read
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category subscriptions
+ * @since 0.1.0
+ */
+export const nextCall: <PE = never, PR = never>(
+  target: Page.ObservedPage | UserContext.ObservedUserContext,
+  filter?: Filter | undefined,
+  where?: Subscription.Where<ConsoleMessage, PE, PR> | undefined
+) => Effect.Effect<
+  Effect.Effect<Call, PE | Target.TargetGone | Deadline.Timeout>,
+  Subscription.SubscriptionError,
+  Scope.Scope | PR
+> = NotBuilt.fn("ConsoleMessage.nextCall")
+
+/**
+ * Subscribes to console calls and emits every match from now on, each message with handles to its arguments.
+ *
+ * **Gotchas**
+ *
+ * - The arguments are what the browser reports, which differs from what the page passed when the first argument is
+ *   a format string: Chromium sends a `%s` argument as the string it formats to, and Firefox sends what it made of
+ *   the format. The `console.arguments` capability says how each backend's arguments are held.
+ * - Every call's handles last until the subscription's scope closes, so release the ones a long stream is done with.
+ *
+ * **Example** (Collecting the objects a page logs)
+ *
+ * ```ts import.meta.vitest
+ * import { ConsoleMessage, Page } from "@usestrider/browser"
+ * import { Effect, Stream } from "effect"
+ *
+ * const loggedValues = Effect.fn("loggedValues")(function*(page: Page.Page) {
+ *   const calls = yield* ConsoleMessage.streamCalls(page)
+ *   return yield* calls.pipe(
+ *     Stream.take(3),
+ *     Stream.mapEffect((call) => Effect.forEach(call.args, (arg) => arg.read)),
+ *     Stream.runCollect
+ *   )
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category subscriptions
+ * @since 0.1.0
+ */
+export const streamCalls: <PE = never, PR = never>(
+  target: Page.ObservedPage | UserContext.ObservedUserContext,
+  filter?: Filter | undefined,
+  where?: Subscription.Where<ConsoleMessage, PE, PR> | undefined
+) => Effect.Effect<
+  Stream.Stream<Call, PE | Subscription.EventOverflow | Target.TargetGone>,
+  Subscription.SubscriptionError,
+  Scope.Scope | PR
+> = NotBuilt.fn("ConsoleMessage.streamCalls")

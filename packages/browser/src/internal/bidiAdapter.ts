@@ -119,6 +119,11 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
         "since Firefox serializes an `Error` without its message",
         "the text around an object a `%o` or `%O` format takes is separated from it by an extra space"
       ]),
+      entry("console.arguments", "partial", [
+        "an argument holds its value as Firefox serialized it at the call, so `evaluate` gets a copy, except that a " +
+        "node is the page's own",
+        "when the first argument is a format string, the arguments are what Firefox made of the format, not the call's"
+      ]),
       entry("console.source", "unsupported", [
         "the browser's own messages, such as a CSP violation or a CORS failure, arrive as uncaught exceptions, as " +
         "Firefox sends them as script errors, so every console message is the page's"
