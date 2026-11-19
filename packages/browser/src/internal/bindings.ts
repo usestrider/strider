@@ -24,7 +24,7 @@ import * as BrowserClock from "./browserClock.ts"
 import * as Handlers from "./handlers.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
-import type * as Runtime from "./runtime.ts"
+import * as Runtime from "./runtime.ts"
 import * as Serialization from "./serialization.ts"
 
 /** The page side. This function is serialized; it must not close over host code. */
@@ -284,6 +284,9 @@ export const expose = <A extends ReadonlyArray<unknown>, B, E, R>(
       const pages = page === undefined ? (yield* context.state.get).pages : [page]
       const documents: Array<Target.DocumentId> = []
       for (const each of pages) {
+        // A page still opening, such as a tab adopted by this operation, has documents the model doesn't hold yet,
+        // and the init script registered meanwhile doesn't run in them: wait for it to open, as evaluation does.
+        yield* Runtime.openState(each, record.id).pipe(BrowserClock.until(record.budget.at), Effect.ignore)
         const state = yield* each.state.get
         if (state.status._tag === "Open") documents.push(state.status.document.id)
         for (const frame of state.frames) documents.push(...Option.toArray(frame.document))
