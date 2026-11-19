@@ -5,8 +5,14 @@
  *
  * After each case, the context must hold no page, popup or worker; no route, grant, init script, emulation or other
  * declaration, its own or the browser's; and no cookie or storage. Cookies and storage are read from each of the
- * case's pages as it closes, because stock WebKit reports only what its open pages hold. A case that leaves anything
- * fails, naming what it left, and the next case gets a new context, so one case's leftovers don't fail the rest.
+ * case's pages as it closes, because stock WebKit reports only what its open pages hold. Nor may any origin a
+ * document of the context committed at, under the top-level origin that partitions it, hold `localStorage`, IndexedDB
+ * or a service-worker registration: each is read from the live realms of the closing page and its frames, a top-level
+ * origin none of them reads by navigating the page back to it (or, once the case's pages are gone, a page opened for
+ * it), and registrations by asking the origin, since Firefox and stock WebKit don't list service workers among a
+ * context's workers. A case that leaves anything fails, naming what it left, and the next case gets a new context, so
+ * one case's leftovers don't fail the rest; so does one whose frame's partition no live realm could read, without
+ * failing.
  */
 import { assert, type Vitest } from "@effect/vitest"
 import { Browser, Deadline, type Page, type StorageState, UserContext } from "@usestrider/browser"
