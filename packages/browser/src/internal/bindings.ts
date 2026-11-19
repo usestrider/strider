@@ -38,80 +38,11 @@ export const install = (name: string, bridge: string, token: string, transport: 
   const debug = global.console.debug.bind(global.console)
   const send = (payload: string) =>
     transport === "console" ? debug({ __striderWebSocket: token, payload }) : global[bridge](payload)
-  const { Array: ArrayType, Date: DateType, Map: MapType, Number: NumberType, Object: ObjectType } = global
-  const { RegExp: RegExpType, Set: SetType, WeakMap: WeakMapType, WeakSet: WeakSetType } = global
-  const NodeType = global.Node
-  const isArray = ArrayType.isArray
-  const keys = ObjectType.keys
-  // The values page.evaluate passes, as the remote values the host decodes them from.
-  class Unserializable {
-    readonly message: string
-    constructor(path: string, hint: string) {
-      this.message = `Not serializable at ${path} (${hint})`
-    }
-  }
-  const encode = (value: any, path: string, seen: Set<object>): unknown => {
-    switch (typeof value) {
-      case "undefined":
-        return { type: "undefined" }
-      case "string":
-      case "boolean":
-        return { type: typeof value, value }
-      case "number":
-        return {
-          type: "number",
-          value: NumberType.isNaN(value)
-            ? "NaN"
-            : ObjectType.is(value, -0)
-            ? "-0"
-            : value === Infinity
-            ? "Infinity"
-            : value === -Infinity
-            ? "-Infinity"
-            : value
-        }
-      case "bigint":
-        return { type: "bigint", value: String(value) }
-      case "function":
-      case "symbol":
-        throw new Unserializable(path, "Functions and symbols don't cross by value")
-    }
-    if (value === null) return { type: "null" }
-    if (typeof NodeType === "function" && value instanceof NodeType) {
-      throw new Unserializable(path, "DOM nodes don't cross by value")
-    }
-    if (value instanceof P || value instanceof WeakMapType || value instanceof WeakSetType) {
-      throw new Unserializable(path, "Promises and weak collections don't cross by value; pass their data instead")
-    }
-    if (seen.has(value)) throw new Unserializable(path, "The value refers to itself, which can't cross by value")
-    seen.add(value)
-    try {
-      if (value instanceof DateType) return { type: "date", value: value.toISOString() }
-      if (value instanceof RegExpType) return { type: "regexp", value: { pattern: value.source, flags: value.flags } }
-      if (isArray(value)) {
-        return { type: "array", value: value.map((item: unknown, i: number) => encode(item, `${path}[${i}]`, seen)) }
-      }
-      if (value instanceof SetType) {
-        return { type: "set", value: [...value].map((item, i) => encode(item, `${path}[${i}]`, seen)) }
-      }
-      if (value instanceof MapType) {
-        return {
-          type: "map",
-          value: [...value].map(([key, item], i) => [
-            typeof key === "string" ? key : encode(key, `${path}[${i}][0]`, seen),
-            encode(item, `${path}[${i}][1]`, seen)
-          ])
-        }
-      }
-      return {
-        type: "object",
-        value: keys(value).map((key: string) => [key, encode(value[key], `${path}.${key}`, seen)])
-      }
-    } finally {
-      seen.delete(value)
-    }
-  }
-  const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: unknown) => void }>()
+  // A call's arguments wait here until the host reads them by value, as an evaluation's result.
+  const pending = new Map<
+    number,
+    { args: unknown; resolve: (value: unknown) => void; reject: (error: unknown) => void }
+  >()
   let next = 0
   let live = true
   const call = (...args: Array<unknown>) =>
@@ -121,19 +52,20 @@ export const install = (name: string, bridge: string, token: string, transport: 
         return reject(new E(`Binding "${name}" has 4096 calls waiting for their answer; await some first`))
       }
       const id = ++next
-      let payload: string
-      try {
-        payload = stringify({ id, args: encode(args, "args", new Set()) })
-      } catch (error: any) {
-        return reject(error instanceof Unserializable ? new E(error.message) : error)
-      }
-      pending.set(id, { resolve, reject })
-      send(payload)
+      pending.set(id, { args, resolve, reject })
+      send(stringify({ id }))
     })
   global.Object.defineProperty(global, name, { value: call, configurable: true, writable: true })
   global.Object.defineProperty(global, key, {
     configurable: true,
     value: {
+      take: (id: number) => {
+        const waiting = pending.get(id)
+        if (waiting === undefined) return undefined
+        const args = waiting.args
+        waiting.args = undefined
+        return args
+      },
       settle: (id: number, ok: boolean, value: unknown) => {
         const waiting = pending.get(id)
         if (waiting === undefined) return
@@ -159,7 +91,7 @@ const keyOf = (token: string) => `globalThis[Symbol.for(${JSON.stringify("stride
 /** The names exposed in a context, by the context or by one of its pages. */
 const exposed = new WeakMap<Model.ContextEntry, { context: Set<string>; pages: Map<Target.NavigableId, Set<string>> }>()
 
-const Call = Schema.fromJsonString(Schema.Struct({ id: Schema.Number, args: Schema.Any }))
+const Call = Schema.fromJsonString(Schema.Struct({ id: Schema.Number }))
 
 const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : typeof error === "string" ? error : String(error)
@@ -246,36 +178,65 @@ export const expose = <A extends ReadonlyArray<unknown>, B, E, R>(
         userActivation: false
       }).pipe(Effect.asVoid)
     }
-    const answer = Effect.fnUntraced(function*(realm: Target.RealmId, payload: string, source: Binding.Source) {
-      const call = yield* Schema.decodeUnknownEffect(Call)(payload)
-      let given: unknown
-      try {
-        given = Serialization.fromRemote(call.args, "args")
-      } catch (error) {
-        if (!(error instanceof Serialization.Unserializable)) throw error
-        return yield* settle(
-          realm,
-          call.id,
-          false,
-          new Reason.NotSerializable({ path: error.path, hint: error.hint }).message
+    const failed = `Binding "${name}" handler failed`
+    const notSerializable = (error: Serialization.Unserializable) =>
+      new Reason.NotSerializable({ path: error.path, hint: error.hint }).message
+    // Every exit of a call it has an id for settles the page's promise: a rejection carries a failure's message, and
+    // anything else, a defect or an interruption, the fixed one, after it is logged.
+    const answer = (realm: Target.RealmId, id: number, source: Binding.Source) =>
+      Effect.gen(function*() {
+        const read = yield* adapter.evaluate(realm, {
+          functionDeclaration: `(id) => ${keyOf(token)}?.take(id)`,
+          arguments: [{ _tag: "Value", value: { type: "number", value: id } }],
+          awaitPromise: false,
+          result: "value",
+          releaseResult: true,
+          userActivation: false
+        })
+        if (read._tag === "Exception") return yield* Effect.die(new Error(read.text))
+        // As in an evaluation's arguments, a function or symbol is refused where it is an argument itself
+        const items = read.value.type === "array" ? read.value.value ?? [] : []
+        const refused = items.findIndex((item) => item.type === "function" || item.type === "symbol")
+        if (refused !== -1) {
+          return yield* settle(
+            realm,
+            id,
+            false,
+            notSerializable(
+              new Serialization.Unserializable(`args[${refused}]`, `A ${items[refused]!.type} can't cross by value`)
+            )
+          )
+        }
+        let given: unknown
+        try {
+          given = Serialization.fromRemote(read.value, "args")
+        } catch (error) {
+          if (!(error instanceof Serialization.Unserializable)) throw error
+          return yield* settle(realm, id, false, notSerializable(error))
+        }
+        const args = yield* Schema.decodeUnknownEffect(schemas.arguments)(given).pipe(Effect.exit)
+        if (Exit.isFailure(args)) {
+          const issue = Cause.findErrorOption(args.cause)
+          return yield* settle(realm, id, false, Option.isSome(issue) ? issue.value.message : "Invalid arguments")
+        }
+        const exit = yield* Effect.suspend(() => handler(args.value, source)).pipe(
+          Effect.flatMap(Schema.encodeEffect(schemas.result)),
+          Effect.provideContext(services),
+          Effect.exit
         )
-      }
-      const args = yield* Schema.decodeUnknownEffect(schemas.arguments)(given).pipe(Effect.exit)
-      if (Exit.isFailure(args)) {
-        const issue = Cause.findErrorOption(args.cause)
-        return yield* settle(realm, call.id, false, Option.isSome(issue) ? issue.value.message : "Invalid arguments")
-      }
-      const exit = yield* handler(args.value, source).pipe(
-        Effect.flatMap(Schema.encodeEffect(schemas.result)),
-        Effect.provideContext(services),
-        Effect.exit
+        if (Exit.isSuccess(exit)) return yield* settle(realm, id, true, exit.value)
+        const error = Cause.findErrorOption(exit.cause)
+        if (Option.isSome(error)) return yield* settle(realm, id, false, messageOf(error.value))
+        yield* Handlers.report(failed, exit.cause)
+        yield* settle(realm, id, false, failed)
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Handlers.report(failed, cause).pipe(
+            Effect.andThen(settle(realm, id, false, failed)),
+            Effect.ignore
+          )
+        )
       )
-      if (Exit.isSuccess(exit)) return yield* settle(realm, call.id, true, exit.value)
-      const error = Cause.findErrorOption(exit.cause)
-      if (Option.isSome(error)) return yield* settle(realm, call.id, false, messageOf(error.value))
-      yield* Handlers.report(`Binding "${name}" handler failed`, exit.cause)
-      yield* settle(realm, call.id, false, `Binding "${name}" handler failed`)
-    })
     const bridge: Adapter.HostBridge = {
       name: bridgeName,
       token,
@@ -299,7 +260,9 @@ export const expose = <A extends ReadonlyArray<unknown>, B, E, R>(
           Effect.flatMap((result) =>
             Option.isNone(result)
               ? Handlers.report(`Binding "${name}" call fetch deadline`, Cause.die("payload fetch did not complete"))
-              : answer(call.realm, result.value, call.source)
+              : Schema.decodeUnknownEffect(Call)(result.value).pipe(
+                Effect.flatMap(({ id }) => answer(call.realm, id, call.source))
+              )
           ),
           Effect.catchCause((cause) =>
             !live || !call.ownership.isAlive() ?
