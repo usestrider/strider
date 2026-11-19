@@ -1,6 +1,8 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Redacted from "effect/Redacted"
+import * as Scope from "effect/Scope"
 import * as fs from "node:fs"
 import * as http from "node:http"
 import * as https from "node:https"
@@ -154,6 +156,65 @@ describe("ClientCertificates", () => {
           })
         )
         assert.strictEqual(status, 101)
+      }).pipe(Effect.scoped))
+
+    it.effect("relays a refused chunked upgrade with close-delimited framing", () =>
+      Effect.gen(function*() {
+        const plain = yield* Effect.acquireRelease(
+          Effect.callback<http.Server>((resume) => {
+            const server = http.createServer((_, response) => {
+              response.writeHead(403, { "Transfer-Encoding": "chunked" })
+              response.write("upgrade ")
+              response.end("refused")
+            })
+            server.listen(0, "127.0.0.1", () => resume(Effect.succeed(server)))
+          }),
+          (server) => Effect.callback<void>((resume) => void server.close(() => resume(Effect.void)))
+        )
+        const port = (plain.address() as net.AddressInfo).port
+        const proxy = yield* ClientCertificates.serve(prepared([]), { acceptInsecureCerts: false })
+        const response = yield* Effect.promise(() =>
+          new Promise<string>((resolve, reject) => {
+            const socket = net.connect(proxy.port, "127.0.0.1", () =>
+              socket.write(
+                `GET http://127.0.0.1:${port}/ HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n`
+              ))
+            let text = ""
+            socket.on("data", (chunk) => text += chunk)
+            socket.on("error", reject)
+            socket.on("end", () => resolve(text))
+            socket.setTimeout(1000, () => socket.destroy(new Error("Refusal did not close")))
+          })
+        )
+        const [headers, body] = response.split("\r\n\r\n")
+        assert.match(headers!, /^HTTP\/1.1 403 /)
+        assert.match(headers!, /\r\nConnection: close/i)
+        assert.notMatch(headers!, /\r\n(?:transfer-encoding|content-length):/i)
+        assert.strictEqual(body, "upgrade refused")
+      }).pipe(Effect.scoped))
+
+    it.effect("closes an idle CONNECT socket when its owning scope closes", () =>
+      Effect.gen(function*() {
+        const scope = yield* Scope.make()
+        yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))
+        const proxy = yield* ClientCertificates.serve(prepared([]), { acceptInsecureCerts: false }).pipe(
+          Scope.provide(scope)
+        )
+        const socket = net.connect(proxy.port, "127.0.0.1")
+        const closed = new Promise<void>((resolve) => socket.once("close", () => resolve()))
+        yield* Effect.promise(() =>
+          new Promise<void>((resolve, reject) => {
+            socket.on("error", reject)
+            socket.once("connect", () => socket.write("CONNECT 127.0.0.1:443 HTTP/1.1\r\n\r\n"))
+            socket.once("data", (data) => {
+              assert.match(data.toString(), /^HTTP\/1.1 200 /)
+              resolve()
+            })
+          })
+        )
+        yield* Scope.close(scope, Exit.void)
+        yield* Effect.promise(() => closed)
+        assert.isTrue(socket.destroyed)
       }).pipe(Effect.scoped))
 
     it.effect("passes non-TLS binary CONNECT payloads beginning with 0x16 unchanged", () =>
