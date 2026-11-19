@@ -69,6 +69,13 @@ describe("png", () => {
     assert.throws(() => Png.decode(bytes), Png.PngError)
   })
 
+  it("refuses truncated chunk bodies and checksums", () => {
+    const bytes = Png.encode(solid(1, 1, white))
+    for (let length = 8; length < bytes.length; length++) {
+      assert.throws(() => Png.decode(bytes.subarray(0, length)), Png.PngError)
+    }
+  })
+
   it("refuses what it doesn't read", () => {
     assert.throws(() => Png.decode(Uint8Array.of(1, 2, 3)), /signature/)
     const sixteen = Buffer.from(Png.encode(solid(1, 1, white)))
@@ -303,6 +310,44 @@ describe("ScreenshotBaseline.toMatch", () => {
         assert.strictEqual(seen, engine, product)
       }
     }).pipe(Effect.runPromise))
+
+  it.effect("does not normalize an unknown product into a known engine", () =>
+    Effect.gen(function*() {
+      const keys: Array<string> = []
+      for (const product of ["firefox", "Fire-fox"]) {
+        const { provide } = harness({ protocol: "bidi", product })
+        yield* fakePage([solid(1, 1, white)]).pipe(
+          ScreenshotBaseline.toMatch("cart"),
+          Effect.provideService(ScreenshotBaseline.CurrentSettings, {
+            update: "none",
+            path: (key) => {
+              keys.push(key.browser)
+              return ScreenshotBaseline.defaultPath(key)
+            }
+          }),
+          provide("none"),
+          Effect.exit
+        )
+      }
+      assert.notStrictEqual(keys[0], keys[1])
+    }))
+
+  it("keeps an encoded name separate from its literal spelling", () => {
+    const key = { testFile: "/r/a.test.ts", browser: "chromium", platform: "linux" }
+    assert.notStrictEqual(
+      ScreenshotBaseline.defaultPath({ ...key, name: "cart/total" }),
+      ScreenshotBaseline.defaultPath({ ...key, name: "cart-total-0fe4f773" })
+    )
+  })
+
+  it("keeps the browser suffix separate from the name", () => {
+    const key = { testFile: "/r/a.test.ts", platform: "linux" }
+    // Strict encoding replaces a hyphen with itself and returns it unchanged.
+    assert.notStrictEqual(
+      ScreenshotBaseline.defaultPath({ ...key, name: "cart", browser: "foo-bar" }),
+      ScreenshotBaseline.defaultPath({ ...key, name: "cart-foo", browser: "bar" })
+    )
+  })
 
   it("keeps distinct baseline names separate", () => {
     const key = { testFile: "/r/a.test.ts", browser: "chromium", platform: "linux" }
