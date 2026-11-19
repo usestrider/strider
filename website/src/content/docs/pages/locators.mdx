@@ -41,6 +41,7 @@ that replaces the built-ins it uses can change what queries find.
 | `getByTitle(text)`                   | elements whose `title` matches                                 |
 | `getByTestId(id)`                    | elements whose test-id attribute is `id`, or matches it        |
 | `locator(css)`                       | elements matching a CSS selector                               |
+| `locator(Locator.xpath(expression))` | elements an XPath expression selects                           |
 
 Prefer `getByRole`: roles and names are what assistive technology sees, and they survive changes to markup and
 classes. An accessible name is what a screen reader announces for an element: a button's text, a field's label, or
@@ -74,6 +75,42 @@ const checkout = Effect.fn("checkout")(function*() {
 
 A name that isn't an HTML attribute name fails with [`InvalidInput`](/docs/errors#three-kinds-of-failure) before the
 context is created.
+
+## XPath
+
+`Locator.xpath` wraps an XPath expression so `locator` reads it as XPath rather than CSS. It keeps the elements the
+expression selects, in document order, and skips text and attribute nodes. From a page it starts at the document.
+Chained after another query, it starts at each match, and a `/` that begins the first step, after optional
+whitespace, searches inside it, so `//li` reads as `.//li`. A bare `/`, alone or before `|`, is left as written.
+Only that very start is read that way: in `//a | //b` the second branch searches the whole page, so write
+`.//a | .//b` to keep both inside, and `(//a)[1]` stays document-relative too. Other axes, such as `..`, reach
+wherever they lead:
+
+```ts
+import { Locator, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const readOrder = Effect.fn("readOrder")(function*(page: Page.ReadonlyPage) {
+  const items = page.locator(
+    Locator.xpath("//li[normalize-space()='Two'] | //li[@id='three']")
+  )
+  const inBasket = page.locator("ul#basket").locator(Locator.xpath("//li")) // only the basket's items
+  const basket = page.getByText("Two").locator(Locator.xpath("..")) // the item's list
+  const paid = page.locator("tr").filter({
+    has: Locator.relative.locator(Locator.xpath("./td[2][.='Paid']"))
+  })
+  return [
+    yield* items.count,
+    yield* inBasket.count,
+    yield* basket.count,
+    yield* paid.count
+  ]
+})
+```
+
+XPath doesn't cross into a shadow root, though chained from an element inside one it searches that shadow tree.
+Names take no namespace prefix. An expression that doesn't parse, uses a
+prefix, or doesn't select nodes, such as `count(//li)`, fails with `InvalidInput` when used, without waiting.
 
 ## Matching text
 

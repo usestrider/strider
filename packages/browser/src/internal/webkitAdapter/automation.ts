@@ -250,6 +250,19 @@ export const createUserContextLaunched = Effect.fnUntraced(
         Kit.unsupported("userContexts.proxy.credentials", "Stock WebKit does not support proxy credentials")
       )
     }
+    if (Option.isSome(options.proxy) && options.proxy.value.scheme === "https") {
+      return yield* Effect.fail(
+        Kit.unsupported("userContexts.proxy.https", "Stock WebKit's TLS connection to a proxy can't be verified")
+      )
+    }
+    if (Option.isSome(options.proxy) && options.proxy.value.bypass.some((host) => host.startsWith("."))) {
+      return yield* Effect.fail(
+        Kit.unsupported(
+          "userContexts.proxy.bypassSuffix",
+          "Stock WebKit's proxy resolver matches a domain with its subdomains, never its subdomains alone"
+        )
+      )
+    }
     const process = yield* state.automation!.launch({
       acceptInsecureCerts: options.acceptInsecureCerts,
       proxy: Option.getOrUndefined(options.proxy)
