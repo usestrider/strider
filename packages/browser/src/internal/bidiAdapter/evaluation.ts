@@ -13,6 +13,7 @@ import * as L1Target from "../../Target.ts"
 import * as UncaughtException from "../../UncaughtException.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as ConsolePreview from "../consolePreview.ts"
 import * as Operation from "../operation.ts"
 import * as Urls from "../urls.ts"
 import { confirmFrameRemoval } from "./contexts.ts"
@@ -140,6 +141,20 @@ export const localValue = (value: Adapter.RemoteValue): Script.LocalValue => {
 // ── Events ────────────────────────────────────────────────────────────────────────────────────────────────
 
 // How Firefox's text begins for a thrown value that isn't an object
+/**
+ * A console call's text from its arguments. Firefox applies the call's format itself, `%f` as printf does (QUIRKS.md,
+ * Q33), and sends what it made of the format and the arguments it took as the first argument, so the arguments are
+ * joined as they are. An `Error`'s serialization has neither its name nor its message, so a call with one keeps
+ * Firefox's own text.
+ */
+const textOf = (entry: {
+  readonly args?: ReadonlyArray<ConsolePreview.Serialized> | undefined
+  readonly text: string | null
+}): string => {
+  const texts = (entry.args ?? []).map(ConsolePreview.serialized)
+  return texts.length === 0 || texts.some((text) => text === undefined) ? entry.text ?? "" : texts.join(" ")
+}
+
 const uncaughtValue = "uncaught exception: "
 
 export const register = (handlers: Kit.Handlers<Event>) =>
@@ -252,9 +267,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
           message: new ConsoleMessage.ConsoleMessage({
             // The console method says what the page wrote; BiDi's level is coarser (`console.log` is `info`)
             level: Kit.consoleLevel("method" in params ? params.method : "log"),
-            // Firefox formats the call itself, `%f` as printf does (QUIRKS.md, Q33), and sends that text as the only
-            // argument, so it is the text
-            text: params.text ?? "",
+            text: textOf(params),
             location,
             origin,
             // The browser's own messages come as `javascript` entries, which read as uncaught exceptions

@@ -46,6 +46,7 @@ import * as Protocol from "../protocol/Protocol.ts"
 import * as Target from "../Target.ts"
 import * as Adapter from "./adapter.ts"
 import type * as ConsoleFormat from "./consoleFormat.ts"
+import * as ConsolePreview from "./consolePreview.ts"
 import type * as ProtocolClient from "./protocolClient.ts"
 import * as Urls from "./urls.ts"
 
@@ -553,22 +554,10 @@ export const consoleLevel = (type: string): ConsoleMessage.Level =>
     : "log"
 
 /** A console argument as CDP and WebKit describe one: a `Runtime.RemoteObject`. */
-export interface RemoteObject {
-  readonly type: string
-  readonly value?: unknown
-  readonly unserializableValue?: string | undefined
-  readonly description?: string | undefined
-}
+export type RemoteObject = ConsolePreview.Remote
 
-/** A remote object's text, as the console prints it. */
-export const textOf = (value: RemoteObject): string =>
-  value.type === "string"
-    ? String(value.value)
-    : value.unserializableValue !== undefined
-    ? value.unserializableValue
-    : value.value !== undefined && value.type !== "object"
-    ? String(value.value)
-    : value.description ?? value.type
+/** A remote object's text, as the console prints it: an object as a preview of its value. */
+export const textOf = (value: RemoteObject): string => ConsolePreview.remote(value)
 
 /** A console argument, for the Console Standard's formatter (QUIRKS.md, Q33). */
 export const argumentOf = (value: RemoteObject): ConsoleFormat.Argument => ({

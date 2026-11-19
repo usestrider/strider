@@ -192,8 +192,12 @@ export type Source = typeof Source.Type
  *
  * `text` has the call's format specifiers, such as `%s`, `%d`, and `%f`, applied as the Console Standard's formatter
  * applies them: Strider applies it to what Chromium and WebKit report, and Firefox applies its own, which writes
- * `%f` as printf does (`1.250000`). An object reads as its browser describes it, such as `Object`. `source` says
- * whether the page or the browser wrote it.
+ * `%f` as printf does (`1.250000`). An object reads as a preview of its value, as the browser's developer tools
+ * print it: `console.log([1, 2, 3], {a: 1}, window)` reads `[1, 2, 3] {a: 1} Window`. A preview shows an object's
+ * first five properties and an array's first hundred items, with `…` for the rest; inside it, a string is quoted
+ * and an object reads as its class (`{b: Object}`). An `Error` reads as its browser describes it, which on Chromium
+ * includes its stack. The `console` capability says where a backend's previews differ. `source` says whether the
+ * page or the browser wrote it.
  *
  * @stability unstable
  * @category models
