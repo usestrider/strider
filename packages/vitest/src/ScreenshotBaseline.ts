@@ -158,7 +158,8 @@ export interface Settings {
    */
   readonly update?: Update | undefined
   /**
-   * The baseline's path for a key. Return a distinct path for each key, or baselines overwrite each other.
+   * The baseline's path for a key. Return a distinct path for each key, or baselines overwrite each other;
+   * `defaultPath` does.
    *
    * @default `defaultPath`: `<test file's directory>/__screenshots__/<test file's name>/<name>-<browser>-<platform>.png`
    */
@@ -672,7 +673,9 @@ const run = (
  *
  * **Details**
  *
- * The baseline is a PNG keyed by test file, `name`, browser engine, and platform (`Key`), at `defaultPath`'s
+ * `name` is the baseline's file name as written: lower-case letters, digits, `.`, `_`, and `-`, starting with a
+ * letter or digit; any other name fails with `InvalidName` before anything is captured. The baseline is a PNG keyed
+ * by test file, `name`, browser engine, and platform (`Key`), at `defaultPath`'s
  * `__screenshots__/<test file>/<name>-<browser>-<platform>.png` beside the test file unless `CurrentSettings`
  * says otherwise. Each attempt captures the page, and it passes as soon as one matches. When two captures in a row
  * are byte-identical and still differ, it fails: with `Mismatch`, writing the actual, expected, and diff images,

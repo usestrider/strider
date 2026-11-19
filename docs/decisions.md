@@ -1788,4 +1788,9 @@ default path does no added work. Every baseline is named by the caller, because 
 and a call counter is hidden state that shifts when a test is reordered. A missing baseline is written but its
 assertion still fails, so a first run never passes without anyone looking at the image; only an explicit update
 (`vitest -u`) writes and passes. Matching Playwright's nameless overload, and passing on a freshly written baseline,
-were rejected for those reasons. The PNG codec and comparator are native rather than dependencies.
+were rejected for those reasons. A name is restricted, not transformed: it must already be a lower-case file name
+(`^[a-z0-9][a-z0-9._-]*$`), and the browser and platform parts never contain `-`, so every key has one path and
+`<name>-<browser>-<platform>` reads one way. Rewriting any text into a readable file name was rejected, because no
+readable rewrite keeps every input distinct: a literal name can equal another's rewritten form. Names are lower-case
+because `Cart` and `cart` would share a file on a case-insensitive filesystem. The PNG codec and comparator are native rather than
+dependencies.

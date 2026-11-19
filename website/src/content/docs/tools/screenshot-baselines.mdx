@@ -42,9 +42,10 @@ layer(BrowserLive)("checkout", (it) => {
 Each call names its baseline. The file is
 `__screenshots__/checkout.test.ts/checkout-chromium-linux.png`: the test file, the name, the browser engine, and the
 platform, since fonts and rendering differ between them. The engine comes from the browser's product, so Chrome and
-Chromium are `chromium`, stock WebKit is `webkit`, and Safari is `safari`. A name with characters other than letters,
-digits, `.`, `_`, and `-` also gets a short digest, so `cart/total` is `cart-total-0fe4f773` and never shares a file
-with `cart-total`.
+Chromium are `chromium`, Firefox is `firefox`, stock WebKit is `webkit`, and Safari is `safari`; any other browser
+gets an `other_` key of its own. The name is used as the file name exactly as you write it, so it must be lower-case
+letters, digits, `.`, `_`, and `-`, starting with a letter or digit: `checkout-page`, not `Checkout page` or
+`checkout/page`. Any other name fails with `InvalidName` before anything is captured.
 
 ## Writing and updating baselines
 
@@ -74,6 +75,7 @@ in a directory for the test file, attaching each to the test:
 | `SizeMismatch`    | actual and expected                                                 |
 | `MissingBaseline` | none (the baseline itself, when the update mode writes one)         |
 | `InvalidBaseline` | none                                                                |
+| `InvalidName`     | none                                                                |
 
 Two identical captures mean only that two screenshots agreed, not that the page has stopped rendering. A page whose
 captures keep changing fails at the operation's deadline. A baseline that isn't a PNG, or whose chunks' checksums
