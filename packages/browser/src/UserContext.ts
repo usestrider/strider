@@ -667,6 +667,31 @@ export interface Options {
    */
   readonly keyboardLayout?: Keyboard.Layout | undefined
   /**
+   * The attribute `getByTestId` matches on the context's pages, such as `"data-qa"`. Other contexts keep their
+   * own. A program that reclaims the context (`Ledger`) sets its own attribute, and omitting it keeps the current
+   * one. A locator keeps the attribute of the context it was made in; a relative locator, which has no context,
+   * takes the one of the locator whose `filter` it's placed in. A name that isn't an HTML attribute name, such as
+   * one with whitespace, quotes, `>`, `/`, or `=`, fails with `InvalidInput` before the context is created.
+   *
+   * **Example** (Finding elements by `data-qa`)
+   *
+   * ```ts import.meta.vitest
+   * import { Browser } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const checkout = Effect.fn("checkout")(function*() {
+   *   const context = yield* Browser.newContext({ testIdAttribute: "data-qa" })
+   *   const page = yield* context.newPage
+   *   yield* page.goto("https://shop.example/cart")
+   *   // Matches <button data-qa="checkout">
+   *   yield* page.getByTestId("checkout").click()
+   * })
+   * ```
+   *
+   * @default "data-testid"
+   */
+  readonly testIdAttribute?: string | undefined
+  /**
    * Events kept for `history`, per event module, for each page and for the context; 0 keeps none.
    *
    * @default 100

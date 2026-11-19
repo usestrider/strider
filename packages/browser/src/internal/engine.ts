@@ -58,7 +58,8 @@ export type Step =
   | { readonly _tag: "Placeholder"; readonly matcher: TextMatcher }
   | { readonly _tag: "AltText"; readonly matcher: TextMatcher }
   | { readonly _tag: "Title"; readonly matcher: TextMatcher }
-  | { readonly _tag: "TestId"; readonly matcher: TextMatcher }
+  /** Elements whose `attribute`, the context's test-id attribute when the locator was made, matches. */
+  | { readonly _tag: "TestId"; readonly matcher: TextMatcher; readonly attribute: string }
   | { readonly _tag: "Css"; readonly selector: string }
   /** An XPath expression's element nodes, from the document or, chained, from each element so far. */
   | { readonly _tag: "XPath"; readonly expression: string }
@@ -1966,7 +1967,7 @@ export function engine(render: (root: SnapNode) => string) {
       case "TestId":
         return under.filter((element) => {
           // The value as written: a test id isn't text, so its whitespace isn't collapsed.
-          const value = dom.getAttribute(element, "data-testid")
+          const value = dom.getAttribute(element, step.attribute)
           return value !== null && rawMatches(step.matcher, value)
         })
       default:
