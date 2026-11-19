@@ -71,7 +71,8 @@ export const readRealm = <E, R>(
  * partition is the page's top), then each top-level origin none of them read by navigating the page back to it
  * (`navigateBack`, which returns the realm of the document it committed, or `undefined`). A frame's origin under
  * another top that no live realm reads can't be read that way, and is returned as unread, as is a top-level origin
- * the page couldn't go back to.
+ * the page couldn't go back to, or whose root redirected to another origin: what that document held is still found,
+ * but it doesn't read the origin the page went back to.
  */
 export const storageLeft = Effect.fnUntraced(function*<R1, R2>(options: {
   readonly committed: ReadonlyArray<Partition>
@@ -97,11 +98,15 @@ export const storageLeft = Effect.fnUntraced(function*<R1, R2>(options: {
     }
     const realm = yield* Effect.orElseSucceed(options.navigateBack(partition.origin), () => undefined)
     const result = realm === undefined ? undefined : yield* options.read(realm)
-    if (result === undefined) unread.push(partition)
-    else {
-      found.push(...result.found)
-      read.add(keyOf(partition))
+    if (result === undefined) {
+      unread.push(partition)
+      continue
     }
+    // What the document holds counts, but only a document at the origin itself reads its partition: one that
+    // redirected elsewhere read another's
+    found.push(...result.found)
+    read.add(keyOf({ origin: result.origin, top: result.origin }))
+    if (result.origin !== partition.origin) unread.push(partition)
   }
   return { found: [...new Set(found)], unread }
 })
