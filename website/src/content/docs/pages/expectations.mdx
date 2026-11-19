@@ -25,7 +25,7 @@ const cartTotal = Effect.fn("cartTotal")(function*(page: Page.Page) {
 
 ## The matchers
 
-Each matcher takes a locator, except `toHaveURL` and `toHaveTitle`, which take the page:
+Each matcher takes a locator, except `toHaveURL` and `toHaveTitle`, which take the page, and `toMatchAria`, which takes either:
 
 | Matcher                                        | Passes when                                                      |
 | ---------------------------------------------- | ---------------------------------------------------------------- |
@@ -325,6 +325,26 @@ const alert = AriaPattern.anywhere(
 const todoPage = Effect.fn("todoPage")(function*(page: Page.Page) {
   yield* page.pipe(Expect.toMatchAria(todoForm))
   yield* page.getByRole("dialog").pipe(Expect.toMatchAria(alert, { not: true }))
+})
+```
+
+Neither a page nor a locator shows a pattern an iframe's contents: the tree stops at the `iframe` node. To match
+inside a frame, locate the subject through [`page.frame`](/docs/pages/locators#frames):
+
+```ts
+import { AriaPattern, Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const cardField = AriaPattern.anywhere(
+  AriaPattern.including(
+    AriaPattern.node("textbox", "Card number", AriaPattern.unchecked)
+  )
+)
+
+const paymentFrame = Effect.fn("paymentFrame")(function*(page: Page.Page) {
+  yield* page.frame(page.locator("#payment")).locator("body").pipe(
+    Expect.toMatchAria(cardField)
+  )
 })
 ```
 
