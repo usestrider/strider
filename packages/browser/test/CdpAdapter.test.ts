@@ -394,21 +394,48 @@ describe("CDP paused page initialization", () => {
 
 describe("CDP paused page viewport baseline", () => {
   for (
-    const { reading, mobile, own } of [
-      { reading: [800, 600], mobile: false, own: true },
-      { reading: [400, 300], mobile: false, own: false },
-      // A 400x700 mobile override without viewport metadata reports 980x1715 on the headless shell.
-      { reading: [980, 1715], mobile: true, own: false }
+    const { reading, width, height, mobile, own, name } of [
+      // Readings are [innerWidth, innerHeight, screen.width, screen.height]
+      {
+        reading: [800, 600, 800, 600],
+        width: 400,
+        height: 300,
+        mobile: false,
+        own: true,
+        name: "confirms its restore"
+      },
+      {
+        reading: [400, 300, 800, 600],
+        width: 400,
+        height: 300,
+        mobile: false,
+        own: false,
+        name: "leaves a reading whose size equals the override unknown"
+      },
+      // A late reading on the headless shell, under a 400x700 mobile override without viewport metadata: the
+      // layout is 980x1715, and the screen is the override's.
+      {
+        reading: [980, 1715, 400, 700],
+        width: 400,
+        height: 700,
+        mobile: true,
+        own: false,
+        name: "leaves a mobile-emulated reading whose screen equals the override unknown"
+      },
+      // A late reading on the headless shell, under a 1280x900 desktop override: the size is the override's, and
+      // the screen the page's own.
+      {
+        reading: [1280, 900, 800, 600],
+        width: 1280,
+        height: 900,
+        mobile: false,
+        own: false,
+        name: "leaves a desktop reading whose size equals the override unknown, whatever its screen"
+      }
     ] as const
   ) {
     it.effect(
-      `queues a paused page's size reading without awaiting it, ${
-        own
-          ? "and confirms its restore"
-          : mobile
-          ? "and leaves a mobile-emulated reading unknown"
-          : "and leaves a reading equal to the override unknown"
-      }`,
+      `queues a paused page's size reading without awaiting it, and ${name}`,
       () =>
         Effect.gen(function*() {
           const browser = yield* makeBrowser
@@ -417,7 +444,8 @@ describe("CDP paused page viewport baseline", () => {
           // The gate's reading, whose reply is held until the test releases it
           const held = yield* Deferred.make<Sent>()
           const isReading = (command: Sent) =>
-            command.method === "Runtime.evaluate" && command.params?.expression === "[innerWidth, innerHeight]" &&
+            command.method === "Runtime.evaluate" &&
+            command.params?.expression === "[innerWidth, innerHeight, screen.width, screen.height]" &&
             command.params?.contextId === undefined
           const reply = (command: Sent) =>
             browser.receive({
@@ -480,7 +508,7 @@ describe("CDP paused page viewport baseline", () => {
           const declared = yield* Scope.make()
           yield* adapter.declare({ _tag: "UserContext", context: adapter.defaultContext }, {
             _tag: "Override",
-            override: { _tag: "Viewport", width: 400, height: mobile ? 700 : 300, deviceScaleFactor: 1, mobile }
+            override: { _tag: "Viewport", width, height, deviceScaleFactor: 1, mobile }
           }).pipe(Scope.provide(declared))
           yield* browser.receive({
             method: "Target.attachedToTarget",
