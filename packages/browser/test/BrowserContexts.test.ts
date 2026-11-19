@@ -173,6 +173,9 @@ describe("Browser.contexts", () => {
           Effect.forkChild({ startImmediately: true })
         )
         yield* Deferred.await(kept.configuring)
+        if (check === "read") {
+          assert.deepStrictEqual((yield* browser.contexts).map((each) => each.id), [browser.defaultContext.id])
+        }
         yield* kept.sink!(kept.fact!)
         if (check === "read") {
           assert.deepStrictEqual((yield* browser.contexts).map((each) => each.id), [browser.defaultContext.id])
