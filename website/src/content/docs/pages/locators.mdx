@@ -54,7 +54,8 @@ waiting.
 
 A test id is an attribute that marks an element for tests, `data-testid` by default. A context's
 `testIdAttribute` option names another, such as `data-qa`, for every page in it; other contexts keep their own. A
-relative locator in `filter({ has })` uses the attribute of the locator it filters:
+program that reclaims a context names its own attribute the same way, and a locator keeps the attribute it was made
+with. A relative locator in `filter({ has })` uses the attribute of the locator it filters:
 
 ```ts
 import { Browser, Locator } from "@usestrider/browser"

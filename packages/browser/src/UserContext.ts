@@ -638,7 +638,8 @@ export interface Options {
   readonly keyboardLayout?: Keyboard.Layout | undefined
   /**
    * The attribute `getByTestId` matches on the context's pages, such as `"data-qa"`. Other contexts keep their
-   * own. A locator keeps the attribute of the context it was made in; a relative locator, which has no context,
+   * own. A program that reclaims the context (`Ledger`) sets its own attribute, and omitting it keeps the current
+   * one. A locator keeps the attribute of the context it was made in; a relative locator, which has no context,
    * takes the one of the locator whose `filter` it's placed in. A name that isn't an HTML attribute name, such as
    * one with whitespace, quotes, `>`, `/`, or `=`, fails with `InvalidInput` before the context is created.
    *

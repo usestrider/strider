@@ -1619,8 +1619,10 @@ Optional interception follows [Pay for what you use](#pay-for-what-you-use).
 
 ## Context test-id attribute
 
-The attribute `getByTestId` matches is a context's setting, fixed when the context is created, so sibling contexts
-never share it. A locator copies its context's attribute into its query when it is made, and a relative locator,
+The attribute `getByTestId` matches is a context's setting, chosen by the program that creates or reclaims the
+context, so sibling contexts never share it. The attribute lives in Strider, not in the browser, so a program that
+reclaims a context has no record of its creator's choice and names its own; omitting it keeps the current setting.
+A locator copies its context's attribute into its query when it is made, and a relative locator,
 which has no context, takes the attribute of the locator whose filter it is placed in. The page's engine reads the
 attribute from the query, so a context that keeps the default does no added work, following
 [Pay for what you use](#pay-for-what-you-use). Rejected: a global setting that can change at any time, as
