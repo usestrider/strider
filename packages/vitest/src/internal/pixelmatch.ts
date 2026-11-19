@@ -1,5 +1,5 @@
 /**
- * A pixel comparator after pixelmatch (ISC, Mapbox; THIRD_PARTY_NOTICES.md): pixels differ when their YIQ
+ * A pixel comparator after pixelmatch 5.3.0 (ISC, Mapbox; THIRD_PARTY_NOTICES.md): pixels differ when their YIQ
  * distance passes a threshold, unless the difference is anti-aliasing, which it detects from each pixel's
  * neighbours.
  */

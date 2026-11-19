@@ -1,12 +1,12 @@
 # Third-party notices
 
-`src/internal/pixelmatch.ts` follows the pixel comparison and anti-aliasing detection of pixelmatch
-(https://github.com/mapbox/pixelmatch), under the ISC license:
+`src/internal/pixelmatch.ts` follows the pixel comparison and anti-aliasing detection of pixelmatch 5.3.0
+(https://github.com/mapbox/pixelmatch/blob/v5.3.0/index.js), under the ISC license:
 
 ```
 ISC License
 
-Copyright (c) 2025, Mapbox
+Copyright (c) 2019, Mapbox
 
 Permission to use, copy, modify, and/or distribute this software for any purpose
 with or without fee is hereby granted, provided that the above copyright notice

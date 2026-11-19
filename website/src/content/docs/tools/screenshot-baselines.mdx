@@ -41,7 +41,10 @@ layer(BrowserLive)("checkout", (it) => {
 
 Each call names its baseline. The file is
 `__screenshots__/checkout.test.ts/checkout-chromium-linux.png`: the test file, the name, the browser engine, and the
-platform, since fonts and rendering differ between them.
+platform, since fonts and rendering differ between them. The engine comes from the browser's product, so Chrome and
+Chromium are `chromium`, stock WebKit is `webkit`, and Safari is `safari`. A name with characters other than letters,
+digits, `.`, `_`, and `-` also gets a short digest, so `cart/total` is `cart-total-0fe4f773` and never shares a file
+with `cart-total`.
 
 ## Writing and updating baselines
 
@@ -61,9 +64,20 @@ const neverWrite = Effect.provideService(ScreenshotBaseline.CurrentSettings, {
 
 ## When it fails
 
-The comparison captures until one capture matches, or until two in a row are the same and still differ. Then it
-fails with `ScreenshotBaselineError`, writes the actual, expected, and diff images under `.vitest-screenshots/`, and
-attaches them to the test. The diff shows changed pixels red and anti-aliasing, which never counts, yellow.
+The comparison captures until one capture matches, or until two in a row are the same image and still differ. Then
+it fails with `ScreenshotBaselineError`, whose `reason` says how, and writes images under `.vitest-screenshots/`,
+in a directory for the test file, attaching each to the test:
+
+| Reason            | Images written                                                      |
+| ----------------- | ------------------------------------------------------------------- |
+| `Mismatch`        | actual, expected, and a diff: changed pixels red, anti-aliasing yellow |
+| `SizeMismatch`    | actual and expected                                                 |
+| `MissingBaseline` | none (the baseline itself, when the update mode writes one)         |
+| `InvalidBaseline` | none                                                                |
+
+Two identical captures mean only that two screenshots agreed, not that the page has stopped rendering. A page whose
+captures keep changing fails at the operation's deadline. A baseline that isn't a PNG, or whose chunks' checksums
+don't match, is invalid.
 
 A pixel differs when its colour moves further than `threshold`, 0.2 by default. `maxDiffPixels` and
 `maxDiffPixelRatio` say how many pixels may differ; with neither, none may. `area`, `scale`, and `omitBackground`

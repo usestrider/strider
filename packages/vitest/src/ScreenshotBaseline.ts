@@ -31,6 +31,20 @@ import * as Png from "./internal/png.ts"
  * `area`, `scale`, and `omitBackground` are `Page.screenshot`'s; the image is always PNG. With neither
  * `maxDiffPixels` nor `maxDiffPixelRatio`, no pixel may differ; with either or both, each one given must hold.
  *
+ * **Example** (Allowing a few pixels to differ)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { ScreenshotBaseline } from "@usestrider/vitest"
+ * import { Effect } from "effect"
+ *
+ * const options: ScreenshotBaseline.Options = { threshold: 0.1, maxDiffPixels: 20 }
+ *
+ * const header = Effect.fn("header")(function*(page: Page.ReadonlyPage) {
+ *   yield* page.pipe(ScreenshotBaseline.toMatch("header", options))
+ * })
+ * ```
+ *
  * @stability unstable
  * @category models
  * @since 0.1.0
@@ -48,6 +62,16 @@ export interface Options extends Pick<Page.ScreenshotOptions, "area" | "scale" |
  * When baselines are written: `"none"`, never; `"missing"`, when there is none, failing the assertion all the
  * same; `"all"`, whenever the capture differs, passing it.
  *
+ * **Example** (Never writing baselines)
+ *
+ * ```ts import.meta.vitest
+ * import { ScreenshotBaseline } from "@usestrider/vitest"
+ * import { Effect } from "effect"
+ *
+ * const update: ScreenshotBaseline.Update = "none"
+ * const readOnly = Effect.provideService(ScreenshotBaseline.CurrentSettings, { update })
+ * ```
+ *
  * @stability unstable
  * @category models
  * @since 0.1.0
@@ -56,6 +80,18 @@ export type Update = "none" | "missing" | "all"
 
 /**
  * What names a baseline: the test file, the name given to `toMatch`, the browser engine, and the platform.
+ *
+ * **Example** (Keeping baselines per browser)
+ *
+ * ```ts import.meta.vitest
+ * import { ScreenshotBaseline } from "@usestrider/vitest"
+ *
+ * const path = (key: ScreenshotBaseline.Key) =>
+ *   ScreenshotBaseline.defaultPath(key).replace(
+ *     "__screenshots__",
+ *     `baselines/${key.browser}`
+ *   )
+ * ```
  *
  * @stability unstable
  * @category models
@@ -66,7 +102,11 @@ export interface Key {
   readonly testFile: string
   /** The name given to `toMatch`. */
   readonly name: string
-  /** `"chromium"`, `"firefox"`, or `"webkit"`, from the browser's protocol; no version. */
+  /**
+   * The browser engine, from the product the browser reports, with no version: `"chromium"` for Chrome and
+   * Chromium, `"firefox"`, `"webkit"` for stock WebKit, `"safari"`, or for any other product its name in
+   * lower-case letters and digits, such as `"webdriverbidi"`.
+   */
   readonly browser: string
   /** Node's `process.platform`, such as `"linux"` or `"darwin"`. */
   readonly platform: string
@@ -78,6 +118,16 @@ export interface Key {
  * **Details**
  *
  * Every field is optional and has a default, so a suite that never compares screenshots configures nothing.
+ *
+ * **Example** (Writing failure images elsewhere)
+ *
+ * ```ts import.meta.vitest
+ * import { ScreenshotBaseline } from "@usestrider/vitest"
+ * import { Effect } from "effect"
+ *
+ * const settings: ScreenshotBaseline.Settings = { outputDirectory: ".data/screenshots" }
+ * const withSettings = Effect.provideService(ScreenshotBaseline.CurrentSettings, settings)
+ * ```
  *
  * @stability unstable
  * @category models
@@ -92,15 +142,17 @@ export interface Settings {
    */
   readonly update?: Update | undefined
   /**
-   * The baseline's path for a key.
+   * The baseline's path for a key. Return a distinct path for each key, or baselines overwrite each other.
    *
-   * @default `<test file's directory>/__screenshots__/<test file's name>/<name>-<browser>-<platform>.png`
+   * @default `defaultPath`: `<test file's directory>/__screenshots__/<test file's name>/<name>-<browser>-<platform>.png`
    */
   readonly path?: ((key: Key) => string) | undefined
   /**
-   * The directory a failure writes its actual, expected, and diff images to, under
-   * `<test file's name>/<name>-<browser>-<platform>-{actual,expected,diff}.png`; relative paths resolve from
-   * the working directory.
+   * The directory a failure writes its images to, under `<test file's name>-<digest>/<name>-<browser>-<platform>-`
+   * followed by `actual.png`, `expected.png`, or `diff.png`, where the digest is 8 hex digits of the SHA-256 of the
+   * test file's absolute path, so test files of the same name don't share images. The name, browser, and platform
+   * are written as in `defaultPath`. A pixel mismatch writes all three images, a size mismatch the actual and
+   * expected ones, and a missing or invalid baseline none. Relative paths resolve from the working directory.
    *
    * @default ".vitest-screenshots"
    */
@@ -108,7 +160,7 @@ export interface Settings {
 }
 
 /**
- * Reference to the comparison settings, read by each `toMatch`.
+ * Reference to the comparison settings, read by each `toMatch`; by default `{}`, every setting at its default.
  *
  * **Example** (Keeping baselines in one directory)
  *
@@ -117,7 +169,8 @@ export interface Settings {
  * import { Effect } from "effect"
  *
  * const withBaselines = Effect.provideService(ScreenshotBaseline.CurrentSettings, {
- *   path: (key) => `baselines/${key.browser}/${key.name}.png`,
+ *   path: (key) =>
+ *     ScreenshotBaseline.defaultPath(key).replace("__screenshots__", "baselines"),
  *   outputDirectory: ".data/screenshots"
  * })
  * ```
@@ -135,6 +188,28 @@ const Size = Schema.Struct({ width: Schema.Int, height: Schema.Int })
 
 /**
  * The capture differs from the baseline by more than the options allow.
+ *
+ * **Example** (Logging how many pixels differed)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { ScreenshotBaseline } from "@usestrider/vitest"
+ * import { Effect } from "effect"
+ *
+ * const header = Effect.fn("header")(function*(page: Page.ReadonlyPage) {
+ *   yield* page.pipe(
+ *     ScreenshotBaseline.toMatch("header"),
+ *     Effect.tapError((error) =>
+ *       ScreenshotBaseline.isScreenshotBaselineError(error) &&
+ *         error.reason._tag === "Mismatch"
+ *         ? Effect.log(
+ *           `${error.reason.diffPixels} pixels differ; see ${error.reason.diff}`
+ *         )
+ *         : Effect.void
+ *     )
+ *   )
+ * })
+ * ```
  *
  * @stability unstable
  * @category reasons
@@ -159,6 +234,28 @@ export class Mismatch extends Schema.Error<Mismatch>("@usestrider/vitest/Screens
 /**
  * The capture and the baseline differ in size.
  *
+ * **Example** (Reporting a size change)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { ScreenshotBaseline } from "@usestrider/vitest"
+ * import { Effect } from "effect"
+ *
+ * const header = Effect.fn("header")(function*(page: Page.ReadonlyPage) {
+ *   yield* page.pipe(
+ *     ScreenshotBaseline.toMatch("header"),
+ *     Effect.tapError((error) =>
+ *       ScreenshotBaseline.isScreenshotBaselineError(error) &&
+ *         error.reason._tag === "SizeMismatch"
+ *         ? Effect.log(
+ *           `now ${error.reason.actualSize.width} wide, was ${error.reason.expectedSize.width}`
+ *         )
+ *         : Effect.void
+ *     )
+ *   )
+ * })
+ * ```
+ *
  * @stability unstable
  * @category reasons
  * @since 0.1.0
@@ -178,6 +275,27 @@ export class SizeMismatch extends Schema.Error<SizeMismatch>("@usestrider/vitest
 
 /**
  * There is no baseline. `written` says whether the capture was written as one, so the next run compares with it.
+ *
+ * **Example** (Noting a newly written baseline)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { ScreenshotBaseline } from "@usestrider/vitest"
+ * import { Effect } from "effect"
+ *
+ * const header = Effect.fn("header")(function*(page: Page.ReadonlyPage) {
+ *   yield* page.pipe(
+ *     ScreenshotBaseline.toMatch("header"),
+ *     Effect.tapError((error) =>
+ *       ScreenshotBaseline.isScreenshotBaselineError(error) &&
+ *         error.reason._tag === "MissingBaseline" &&
+ *         error.reason.written
+ *         ? Effect.log(`review ${error.reason.baseline}`)
+ *         : Effect.void
+ *     )
+ *   )
+ * })
+ * ```
  *
  * @stability unstable
  * @category reasons
@@ -200,6 +318,26 @@ export class MissingBaseline
 /**
  * The baseline isn't a PNG Strider reads: 8-bit and not interlaced.
  *
+ * **Example** (Reporting an unreadable baseline)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { ScreenshotBaseline } from "@usestrider/vitest"
+ * import { Effect } from "effect"
+ *
+ * const header = Effect.fn("header")(function*(page: Page.ReadonlyPage) {
+ *   yield* page.pipe(
+ *     ScreenshotBaseline.toMatch("header"),
+ *     Effect.tapError((error) =>
+ *       ScreenshotBaseline.isScreenshotBaselineError(error) &&
+ *         error.reason._tag === "InvalidBaseline"
+ *         ? Effect.logWarning(`${error.reason.baseline}: ${error.reason.detail}`)
+ *         : Effect.void
+ *     )
+ *   )
+ * })
+ * ```
+ *
  * @stability unstable
  * @category reasons
  * @since 0.1.0
@@ -221,6 +359,24 @@ const ScreenshotBaselineErrorTypeId = "~@usestrider/vitest/ScreenshotBaseline/Sc
 /**
  * The error of a failed comparison; `reason` says which way it failed.
  *
+ * **Example** (Recovering from a failed comparison)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { ScreenshotBaseline } from "@usestrider/vitest"
+ * import { Effect } from "effect"
+ *
+ * const header = Effect.fn("header")(function*(page: Page.ReadonlyPage) {
+ *   yield* page.pipe(
+ *     ScreenshotBaseline.toMatch("header"),
+ *     Effect.catchTag(
+ *       "ScreenshotBaselineError",
+ *       (error) => Effect.logWarning(error.message)
+ *     )
+ *   )
+ * })
+ * ```
+ *
  * @stability unstable
  * @category errors
  * @since 0.1.0
@@ -239,6 +395,15 @@ export class ScreenshotBaselineError
 
 /**
  * Checks whether a value is a `ScreenshotBaselineError`.
+ *
+ * **Example** (Telling a comparison failure from others)
+ *
+ * ```ts import.meta.vitest
+ * import { ScreenshotBaseline } from "@usestrider/vitest"
+ *
+ * const describe = (error: unknown) =>
+ *   ScreenshotBaseline.isScreenshotBaselineError(error) ? error.reason._tag : "other"
+ * ```
  *
  * @stability unstable
  * @category guards
@@ -285,7 +450,26 @@ const vitestUpdate = (): Update => {
 }
 
 /**
- * The default baseline path for a key: Vitest's screenshot layout.
+ * The default baseline path for a key: `__screenshots__/<test file's name>/<name>-<browser>-<platform>.png` in
+ * the test file's directory.
+ *
+ * **Details**
+ *
+ * A part with characters other than letters, digits, `.`, `_`, and (in the name) `-` keeps those, writes the rest
+ * as `-`, and gains `-` and the first 8 hex digits of its SHA-256, so `cart/total` is `cart-total-0fe4f773` and
+ * never shares a file with `cart-total`.
+ *
+ * **Example** (Moving baselines under one directory)
+ *
+ * ```ts import.meta.vitest
+ * import { ScreenshotBaseline } from "@usestrider/vitest"
+ * import { Effect } from "effect"
+ *
+ * const withBaselines = Effect.provideService(ScreenshotBaseline.CurrentSettings, {
+ *   path: (key) =>
+ *     ScreenshotBaseline.defaultPath(key).replace("__screenshots__", "baselines")
+ * })
+ * ```
  *
  * @stability unstable
  * @category constructors
@@ -390,7 +574,7 @@ const run = (
         yield* test.attach({ screenshot: FilePath.Local.make(file) })
       }
     })
-    // Captures until two in a row are the same image: the page has settled.
+    // Captures until two in a row are the same image.
     const stable = (previous: Uint8Array): Effect.Effect<
       Uint8Array,
       Page.PageError | Target.TargetGone | Deadline.Timeout
@@ -406,7 +590,7 @@ const run = (
       if (update === "all") return
       return yield* fail(new MissingBaseline({ baseline: path, written: true }))
     }
-    // Captures until one matches, or until the page settles on an image that doesn't.
+    // Captures until one matches, or until two in a row are the same image and don't.
     let previous: Uint8Array | undefined
     while (true) {
       const bytes = yield* capture
@@ -444,24 +628,25 @@ const run = (
   }).pipe(Operation.named("ScreenshotBaseline.toMatch", { attributes: { "browser.screenshot.name": name } }))
 
 /**
- * Expects the page's screenshot to match the baseline named `name`, capturing until one matches or the page
- * settles on an image that doesn't.
+ * Expects the page's screenshot to match the baseline named `name`, capturing until one matches or two captures
+ * in a row are the same image and differ from it.
  *
  * **Details**
  *
- * The baseline is a PNG keyed by test file, `name`, browser engine, and platform (`Key`), at
+ * The baseline is a PNG keyed by test file, `name`, browser engine, and platform (`Key`), at `defaultPath`'s
  * `__screenshots__/<test file>/<name>-<browser>-<platform>.png` beside the test file unless `CurrentSettings`
- * says otherwise. Each attempt captures the page; it passes as soon as one matches. Two identical captures in a
- * row that still differ fail with `Mismatch` or `SizeMismatch`, writing the actual, expected, and (for pixels)
- * diff images to the output directory and attaching them to the test. A page that never settles fails with the
- * operation's `Deadline.Timeout`. Pixels differ by YIQ colour distance past `threshold`, ignoring
- * anti-aliasing.
+ * says otherwise. Each attempt captures the page, and it passes as soon as one matches. When two captures in a row
+ * are byte-identical and still differ, it fails: with `Mismatch`, writing the actual, expected, and diff images,
+ * or with `SizeMismatch`, writing the actual and expected ones, to the output directory and attaching them to the
+ * test. Identical captures mean only that two screenshots agreed, not that rendering has stopped. A page whose
+ * captures keep changing fails with the operation's `Deadline.Timeout`. Pixels differ by YIQ colour distance past
+ * `threshold`, ignoring anti-aliasing.
  *
- * A missing baseline is written from a settled capture under the `"missing"` and `"all"` updates; under
- * `"missing"`, Vitest's default locally, the assertion still fails with `MissingBaseline`, so a first run never
- * passes unseen. Under `"all"` (`vitest -u`), a differing or unreadable baseline is rewritten and it passes.
- * Under `"none"`, Vitest's default on CI, nothing is written. Errors from `page.screenshot`, such as an
- * unsupported `scale`, pass through unchanged.
+ * A missing baseline is written, once two captures in a row agree, under the `"missing"` and `"all"` updates;
+ * under `"missing"`, Vitest's default locally, the assertion still fails with `MissingBaseline`, so a first run
+ * never passes unseen. Under `"all"` (`vitest -u`), a differing or unreadable baseline is rewritten the same way
+ * and it passes. Under `"none"`, Vitest's default on CI, nothing is written. A missing or invalid baseline writes
+ * no failure images. Errors from `page.screenshot`, such as an unsupported `scale`, pass through unchanged.
  *
  * **Gotchas**
  *
