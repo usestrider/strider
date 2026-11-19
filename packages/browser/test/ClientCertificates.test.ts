@@ -107,6 +107,74 @@ describe("ClientCertificates", () => {
         assert.isUndefined(yield* fetchThrough(proxy.port, `127.0.0.1:${port}`))
       }).pipe(Effect.scoped))
 
+    it.effect("forwards an HTTP WebSocket upgrade", () =>
+      Effect.gen(function*() {
+        const plain = yield* Effect.acquireRelease(
+          Effect.callback<http.Server>((resume) => {
+            const server = http.createServer()
+            server.on("upgrade", (_, socket) => {
+              socket.end("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n")
+            })
+            server.listen(0, "127.0.0.1", () => resume(Effect.succeed(server)))
+          }),
+          (server) => Effect.callback<void>((resume) => void server.close(() => resume(Effect.void)))
+        )
+        const port = (plain.address() as net.AddressInfo).port
+        const proxy = yield* ClientCertificates.serve(prepared([]), { acceptInsecureCerts: false })
+        const status = yield* Effect.promise(() =>
+          new Promise<number | undefined>((resolve) => {
+            const request = http.get({
+              host: "127.0.0.1",
+              port: proxy.port,
+              path: `http://127.0.0.1:${port}/socket`,
+              headers: { Connection: "Upgrade", Upgrade: "websocket" }
+            })
+            request.on("upgrade", (response, socket) => {
+              socket.destroy()
+              resolve(response.statusCode)
+            })
+            request.on("response", (response) => {
+              response.resume()
+              resolve(response.statusCode)
+            })
+            request.on("error", () => resolve(undefined))
+            request.setTimeout(1000, () => request.destroy(new Error("Upgrade did not complete")))
+          })
+        )
+        assert.strictEqual(status, 101)
+      }).pipe(Effect.scoped))
+
+    it.effect("passes non-TLS binary CONNECT payloads beginning with 0x16 unchanged", () =>
+      Effect.gen(function*() {
+        const echo = yield* Effect.acquireRelease(
+          Effect.callback<net.Server>((resume) => {
+            const server = net.createServer((socket) => socket.once("data", (data) => socket.end(data)))
+            server.listen(0, "127.0.0.1", () => resume(Effect.succeed(server)))
+          }),
+          (server) => Effect.callback<void>((resume) => void server.close(() => resume(Effect.void)))
+        )
+        const port = (echo.address() as net.AddressInfo).port
+        const proxy = yield* ClientCertificates.serve(prepared([]), { acceptInsecureCerts: false })
+        const payload = Buffer.from([0x16, 0, 0, 0, 0, 1, 2, 3])
+        const received = yield* Effect.promise(() =>
+          new Promise<Buffer>((resolve) => {
+            const socket = net.connect(
+              proxy.port,
+              "127.0.0.1",
+              () => socket.write(`CONNECT 127.0.0.1:${port} HTTP/1.1\r\n\r\n`)
+            )
+            const chunks: Array<Buffer> = []
+            socket.once("data", () => {
+              socket.on("data", (chunk: Buffer) => chunks.push(chunk))
+              socket.write(payload)
+            })
+            socket.on("error", () => socket.destroy())
+            socket.on("close", () => resolve(Buffer.concat(chunks)))
+          })
+        )
+        assert.deepStrictEqual(received, payload)
+      }).pipe(Effect.scoped))
+
     it.effect("passes a tunnel that isn't TLS through, and forwards plain HTTP", () =>
       Effect.gen(function*() {
         const plain = yield* Effect.acquireRelease(
