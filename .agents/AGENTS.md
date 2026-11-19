@@ -162,9 +162,9 @@ variants only where the browsers handle them differently. What the code decides 
 set of roles, is one rule: sample it, don't enumerate it. A suite whose cases keep nothing in their context opens its
 pages in one, which checks after each case that it still holds nothing (`slice/sharedContext.ts`), and the raw engine
 conformance cases share one context per backend the same way (`adapter/engineConnection.ts`). Both check every origin
-and frame partition the case's pages committed a document at, for `localStorage`, IndexedDB and service-worker
-registrations (`storageLeft.ts`), and replace the context when they can't read one; a raw engine case about contexts
-themselves opens its own (`freshPage`).
+and frame partition a page of the context committed a document at, closed or not, for `localStorage`, IndexedDB and
+service-worker registrations (`storageLeft.ts`), and replace the context when they can't read one, as when an origin's
+root redirects elsewhere; a raw engine case about contexts themselves opens its own (`freshPage`).
 
 The scheduled integration run guards Strider's own behavior; it doesn't measure parity with Playwright or Puppeteer. A
 case belongs in it when a rule of Strider's code needs guarding, or when a bug escaped once and its fix needs a test

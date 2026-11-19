@@ -1,13 +1,15 @@
 /**
  * Shared raw-engine connection and user context; pages, facts and waiters belong to one case only. Stock WebKit starts
  * a browser process for each context, which took most of a case's time, so the cases open their pages in one context
- * and, after each, the context must hold no page, popup or worker, and no cookie. Nor may any origin the case's page
- * or its frames committed a document at, under the top-level origin that partitions it, hold `localStorage`, IndexedDB
- * or a service-worker registration: each is read from the page's live realms before it closes, a top-level origin
- * none of them reads by navigating the page back to it, and registrations by asking the origin, since Firefox and
- * stock WebKit don't say which context a service worker belongs to. A case that leaves anything fails, naming what it
- * left, and the next case gets a new context; so does one whose frame's partition no live realm could read. A case
- * that is about contexts themselves asks for one of its own (`freshPage`).
+ * and, after each, the context must hold no page, popup or worker, and no cookie. Nor may any origin a document of
+ * the context committed at, in the case's page, its frames or a page or popup it opened and closed, under the
+ * top-level origin that partitions it, hold `localStorage`, IndexedDB or a service-worker registration: each is read
+ * from the case's page's live realms before it closes, a top-level origin none of them reads by navigating the page
+ * back to it, and registrations by asking the origin, since Firefox and stock WebKit don't say which context a service
+ * worker belongs to. A case that leaves anything fails, naming what it left, and the next case gets a new context; so
+ * does one, without failing, whose partition the page couldn't read: a frame's under another top that no live realm
+ * reads, or a top-level origin whose root redirects elsewhere. A case that is about contexts themselves asks for one
+ * of its own (`freshPage`).
  */
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
@@ -91,8 +93,11 @@ const tracker = () => {
   /** Each frame's page, and each page's current top-level origin. */
   const frames = new Map<Target.NavigableId, Target.NavigableId>()
   const tops = new Map<Target.NavigableId, string>()
-  /** Every origin a page's tree committed a document at, with the top-level origin that partitions it. */
-  const origins = new Map<Target.NavigableId, Map<string, StorageLeft.Partition>>()
+  /**
+   * Every origin a document of a context committed at, with the top-level origin that partitions it, until a read
+   * covers it: kept by context, so a page or popup the case closed still has its origins read.
+   */
+  const origins = new Map<UserContext.Id, Map<string, StorageLeft.Partition>>()
   const pageOf = (navigable: Target.NavigableId) => pages.has(navigable) ? navigable : frames.get(navigable)
   const observe = (fact: Adapter.Fact) => {
     switch (fact._tag) {
@@ -102,6 +107,10 @@ const tracker = () => {
       case "NavigableRemoved":
         pages.delete(fact.navigable)
         frames.delete(fact.navigable)
+        tops.delete(fact.navigable)
+        break
+      case "UserContextRemoved":
+        origins.delete(fact.context)
         break
       case "FrameAdded":
         frames.set(fact.frame, fact.page)
@@ -111,10 +120,11 @@ const tracker = () => {
         if (page === undefined) break
         if (page === fact.navigable) tops.set(page, fact.origin)
         const top = tops.get(page)
-        if (top === undefined || !StorageLeft.holdsStorage(fact.origin)) break
-        const held = origins.get(page) ?? new Map<string, StorageLeft.Partition>()
+        const context = pages.get(page)
+        if (top === undefined || context === undefined || !StorageLeft.holdsStorage(fact.origin)) break
+        const held = origins.get(context) ?? new Map<string, StorageLeft.Partition>()
         held.set(StorageLeft.keyOf({ origin: fact.origin, top }), { origin: fact.origin, top })
-        origins.set(page, held)
+        origins.set(context, held)
         break
       }
       case "RealmAdded":
@@ -142,11 +152,11 @@ const tracker = () => {
         realm,
         frame: navigable !== page
       })),
-    originsOf: (page: Target.NavigableId) => Array.from(origins.get(page)?.values() ?? []),
+    originsOf: (context: UserContext.Id) => Array.from(origins.get(context)?.values() ?? []),
     topOf: (page: Target.NavigableId) => tops.get(page),
-    forget: (page: Target.NavigableId) => {
-      origins.delete(page)
-      tops.delete(page)
+    /** Notes a context's partitions as read: they hold nothing a later case would find, or the case failed for it. */
+    read: (context: UserContext.Id, partitions: ReadonlyArray<StorageLeft.Partition>) => {
+      for (const partition of partitions) origins.get(context)?.delete(StorageLeft.keyOf(partition))
     },
     clear: () => {
       frames.clear()
@@ -191,9 +201,10 @@ export const make = Effect.fnUntraced(function*(backend: Backend) {
   })
 
   /**
-   * What a case left in the shared context while its page is still open: cookies, and the storage of every origin
-   * its page and frames held (`StorageLeft.storageLeft`). A frame's origin under another top that no live realm reads
-   * can't be read, so the context is replaced after the case (`unread`).
+   * What a case left in the shared context while its page is still open: cookies, and the storage of every origin a
+   * document of the context committed at, by any page, closed or not, read through the case's page
+   * (`StorageLeft.storageLeft`). A partition read is noted as read; one that can't be, such as a frame's origin under
+   * another top that no live realm reads, stays, so the context is replaced after the case (`unread`).
    */
   const storageLeft = Effect.fnUntraced(function*(
     connection: Held,
@@ -202,8 +213,9 @@ export const make = Effect.fnUntraced(function*(backend: Backend) {
     facts: ReturnType<typeof recorder>
   ) {
     const cookies = yield* connection.adapter.cookies(context)
+    const committed = seen.originsOf(context)
     const storage = yield* StorageLeft.storageLeft({
-      committed: seen.originsOf(page),
+      committed,
       realms: seen.realmsOf(page),
       top: seen.topOf(page),
       read: (realm) => StorageLeft.readRealm(connection.adapter.evaluate, realm),
@@ -214,7 +226,8 @@ export const make = Effect.fnUntraced(function*(backend: Backend) {
         return yield* connection.adapter.realm(ended.outcome.document, { _tag: "Main" })
       })
     })
-    seen.forget(page)
+    const unread = new Set(storage.unread.map(StorageLeft.keyOf))
+    seen.read(context, committed.filter((partition) => !unread.has(StorageLeft.keyOf(partition))))
     return {
       found: [
         ...new Set([...cookies.map((cookie) => `a cookie ${cookie.name} for ${cookie.domain}`), ...storage.found])
