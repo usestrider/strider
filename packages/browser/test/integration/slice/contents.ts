@@ -1872,6 +1872,100 @@ export const contents = (
           )
         }), timeout)
 
+      it.effect("lists a handle's own enumerable properties as handles, reading each once", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<p>a</p>`), { waitUntil: "load" })
+            const data = yield* page.evaluateHandleInMainWorld(() => {
+              let reads = 0
+              const value = { a: 1, b: "two", nested: { c: 3 } }
+              Object.defineProperty(value, "counted", { enumerable: true, get: () => ++reads })
+              Object.defineProperty(value, "hidden", { enumerable: false, value: 4 })
+              Reflect.set(window, "__reads", () => reads)
+              return value
+            })
+            const properties = yield* data.properties
+            assert.deepStrictEqual([...properties.keys()], ["a", "b", "nested", "counted"])
+            assert.strictEqual(yield* properties.get("a")!.read, 1)
+            assert.strictEqual(yield* properties.get("b")!.read, "two")
+            assert.strictEqual(properties.get("nested")!.realm, data.realm)
+            assert.strictEqual(yield* properties.get("nested")!.evaluate((nested) => (nested as { c: number }).c), 3)
+            assert.strictEqual(yield* properties.get("counted")!.read, 1)
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() => (Reflect.get(window, "__reads") as () => number)()),
+              1
+            )
+            const primitive = yield* page.evaluateHandleInMainWorld(() => 7)
+            assert.strictEqual((yield* primitive.properties).size, 0)
+            yield* data.release
+            const released = yield* Effect.exit(Effect.scoped(data.properties))
+            assert.isTrue(Exit.isFailure(released) && Option.isNone(Exit.findErrorOption(released)))
+          }))
+        }), timeout)
+
+      it.effect("previews a handle's value in its string, from the call that made it", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<p id="x">a</p>`), { waitUntil: "load" })
+            const number = yield* page.evaluateHandleInMainWorld(() => 42)
+            assert.strictEqual(String(number), `JSHandle(${number.realm} 42)`)
+            const text = yield* page.evaluateHandleInMainWorld(() => "hi")
+            assert.strictEqual(String(text), `JSHandle(${text.realm} "hi")`)
+            const array = yield* page.evaluateHandleInMainWorld(() => [1, 2, 3])
+            assert.strictEqual(String(array), `JSHandle(${array.realm} array)`)
+            const node = yield* page.evaluateHandleInMainWorld(() => document.querySelector("p"))
+            assert.strictEqual(String(node), `JSHandle(${node.realm} node <p>)`)
+            const object = yield* page.evaluateHandleInMainWorld(() => ({ a: 1 }))
+            assert.strictEqual(String(object), `JSHandle(${object.realm} object)`)
+          }))
+        }), timeout)
+
+      it.effect("hands out a locator's one match as a handle, and refuses several", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<p id="x">hello</p><p>a</p>`), { waitUntil: "load" })
+            if (yield* isolatedRefused(page.locator("#x").evaluateHandle((element) => element))) return
+            const handle = yield* page.locator("#x").evaluateHandle(
+              (element, suffix: string) => ({ id: element.id + suffix, element }),
+              "!"
+            )
+            assert.strictEqual(yield* handle.evaluate((value) => value.id), "x!")
+            assert.strictEqual(yield* handle.evaluate((value) => value.element.textContent), "hello")
+            const several = reasonOf(
+              yield* Effect.exit(page.locator("p").evaluateHandle((element) => element))
+            ) as unknown as Locator.LocatorError
+            assert.strictEqual(several.reason._tag, "StrictViolation")
+          }))
+        }), timeout)
+
+      it.effect("hands out handles in the page's own world, which cross only into it", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(
+              fixtureUrl(origin, `<script>window.secret = { answer: 42 }</script><p>a</p>`),
+              { waitUntil: "load" }
+            )
+            const secret = yield* page.evaluateHandleInMainWorld(() =>
+              Reflect.get(window, "secret") as { answer: number }
+            )
+            assert.strictEqual(yield* secret.evaluate((value) => value.answer), 42)
+            assert.strictEqual(yield* page.evaluateInMainWorld((value) => value.answer, secret), 42)
+            const crossed = reasonOf(yield* Effect.exit(page.evaluate((value) => value.answer, secret)))
+            assert.strictEqual(
+              crossed?.reason?._tag,
+              (yield* supports("isolatedWorlds")) ? "NotSerializable" : "Unsupported"
+            )
+          }))
+        }), timeout)
+
       it.effect("finds test ids by pattern, and names the pattern when it matches several", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
