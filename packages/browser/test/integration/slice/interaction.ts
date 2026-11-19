@@ -6167,7 +6167,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           )
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* newPage
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             yield* page.evaluateInMainWorld(() => {
               customElements.define(
                 "x-role-control",
