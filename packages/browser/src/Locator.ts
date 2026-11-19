@@ -1,10 +1,10 @@
 /**
  * Locators: how to find elements on a page, and the actions and reads that use them.
  *
- * A locator describes how to find elements and is resolved again on every attempt, so it never goes stale. A query
- * on a locator searches inside its matches. Reads happen once and never retry; the expectations that retry are
- * `Expect`. A ref from a snapshot is the exception: it's pinned to one node, and fails with `StaleRef` rather than
- * finding another.
+ * A locator describes how to find elements and is resolved again on every attempt, so it never goes stale. A query on a
+ * locator searches inside its matches, and `getByText` the matches themselves too. Reads happen once and never retry;
+ * the expectations that retry are `Expect`. A ref from a snapshot is the exception: it's pinned to one node, and fails
+ * with `StaleRef` rather than finding another.
  *
  * Before acting, a locator checks that its element is ready: visible, stable, enabled, and the rest of the action's
  * checks, tested in the page together on each attempt. The checks are named, can be turned off per call with
@@ -214,13 +214,15 @@ export interface RoleOptions {
 
   /**
    * The accessible name. A string matches as a case-insensitive substring unless `exact` is set; a `RegExp`
-   * is used as given.
+   * is used as given. Both sides have their whitespace collapsed first, so a non-breaking space in a name matches
+   * a space.
    *
    * @default any name
    */
   readonly name?: string | RegExp | undefined
   /**
-   * Match `name` exactly and case-sensitively.
+   * Match `name` exactly and case-sensitively. Whitespace is still collapsed on both sides, so a non-breaking space in
+   * a name matches a space.
    *
    * @default false
    */
@@ -271,11 +273,16 @@ export interface Queries<L> {
    * An element's role is the first token of its `role` attribute that Strider knows, or else its implicit
    * role under HTML-AAM, and its name is computed under accname 1.2. Elements outside the accessibility tree
    * (`aria-hidden`, `display: none`, `visibility: hidden`, the `hidden` attribute, and inert elements) aren't
-   * matched unless `includeHidden` is set. An element is inert when it or an ancestor has the `inert` attribute,
-   * or, while a modal dialog opened with `showModal()` is open, when it is outside the topmost one. The topmost
-   * modal dialog isn't inert because of its ancestors, so it and its content stay matched inside an inert subtree.
-   * The topmost is the open modal dialog that comes last in document order, open shadow roots included, which isn't
-   * always the one opened last.
+   * matched unless `includeHidden` is set, which also counts hidden descendants in their names. An element is inert
+   * when it or an ancestor has the `inert` attribute, or, while a modal dialog opened with `showModal()` is open,
+   * when it is outside the topmost one. The topmost modal dialog isn't inert because of its ancestors, so it and its
+   * content stay matched inside an inert subtree. The topmost is the open modal dialog that comes last in document
+   * order, open shadow roots included, which isn't always the one opened last.
+   *
+   * A name from content takes only the descendants whose role gives their text, as Chromium and Firefox do: text,
+   * generic and structural elements such as lists and paragraphs, and roles named from content. A nested tree
+   * item's group, or an `alert` inside a heading, adds nothing. An embedded combobox or listbox adds its selected
+   * options. Soft hyphens and zero-width spaces are dropped from a name, and non-breaking spaces are kept.
    *
    * Roles that prohibit naming, such as generic, paragraph, and code, have an empty name even with an author
    * label. Their descendants and referenced labels can still contribute to another element's name; an explicit
@@ -306,6 +313,11 @@ export interface Queries<L> {
    * isn't `innerText`, which depends on layout and differs between browsers. A string matches as a case-insensitive
    * substring, or with `exact` as the whole text, case-sensitively; a `RegExp` is tested as given. The document's
    * `head` isn't searched.
+   *
+   * Chained from a locator, it searches the locator's own element as well as the elements inside it, so
+   * `page.locator(".badge").getByText("Resolved")` finds the badge that says "Resolved". The other `getBy*` queries
+   * search only inside the locator's element. The same holds for `getByText` in a filter's `has` and `hasNot`:
+   * the element being tested counts.
    *
    * **Example** (Reading an order number)
    *
@@ -380,7 +392,12 @@ export interface Queries<L> {
    */
   getByTitle(text: string | RegExp, options?: TextOptions | undefined): L
   /**
-   * Elements whose `data-testid` attribute is `id`.
+   * Elements whose `data-testid` attribute is `id`, or matches it when `id` is a RegExp.
+   *
+   * **Details**
+   *
+   * A string matches the attribute exactly, case and whitespace included. A RegExp is tested against the attribute
+   * as written, with its own flags; its `g` flag is ignored. An element without the attribute never matches.
    *
    * **Example** (Reading the cart badge)
    *
@@ -392,8 +409,19 @@ export interface Queries<L> {
    *   return yield* page.getByTestId("cart-count").readText
    * })
    * ```
+   *
+   * **Example** (Counting the rows of a table)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const rowCount = Effect.fn("rowCount")(function*(page: Page.ReadonlyPage) {
+   *   return yield* page.getByTestId(/^row-/).count
+   * })
+   * ```
    */
-  getByTestId(id: string): L
+  getByTestId(id: string | RegExp): L
   /**
    * Elements matching a CSS selector. A malformed selector fails with `InvalidInput` as soon as the locator is
    * used, without waiting.
@@ -768,6 +796,13 @@ export interface ReadonlyLocator
   /**
    * Whether the one match is enabled now.
    *
+   * **Details**
+   *
+   * An element inside a button, or inside an element with the role `button`, `checkbox`, or `radio`, is enabled only
+   * when it and the nearest such control both are. The control is found through shadow roots and the slots the
+   * element is assigned to: a span inside a disabled button is disabled. Inputs, textareas, selects, and editable
+   * content are read on themselves alone. Native `disabled`, a disabled `fieldset`, and `aria-disabled` all count.
+   *
    * **Example** (Reading whether checkout is available)
    *
    * ```ts import.meta.vitest
@@ -920,7 +955,8 @@ export interface ReadonlyLocator
  * `filter({ visible: true })` excludes it, and `filter({ visible: false })` includes it. Opacity alone does
  * not make an action wait for a fade-in.
  *
- * The action's `visible` check requires CSS visibility, content visibility, and a nonempty box. Pointer actions
+ * The action's `visible` check requires CSS visibility, content visibility, and a nonempty box. An element with
+ * `display: contents` has no box, so it needs a visible child element or visible text instead. Pointer actions
  * also check that the point receives input. Non-pointer actions do not hit-test: `fill` and `clear` check enabled,
  * editable, and not inert; `focus`, `press`, and `pressSequentially` check not inert; `blur` has no checks by default; `selectOption` checks enabled;
  * `selectText` checks only visibility; `scrollIntoView` checks stability. `setInputFiles` runs no readiness checks.
@@ -1038,7 +1074,9 @@ export interface PointerOptions extends ActionOptions {
   /**
    * Where to point, from the top left of the element's padding box.
    * With no position, client rectangles are clipped by the viewport and all parent frames.
-   * With `receivesPointer` enabled, the first centre hitting the target or a descendant and its iframe in every parent is selected,
+   * With `receivesPointer` enabled, the first centre hitting the target or a descendant and its iframe in every parent is selected
+   * (for a target inside a `button`, `a`, or `role=button` or `role=link` element other than a form field or editable element,
+   * the nearest such element, found through shadow roots and slots, counts as the target, so a `pointer-events: none` label inside a button is clicked through the button),
    * allowing a later line when an earlier one is covered. Only centres are probed; if none hits, the check reports `Covered`.
    * Candidates are produced anew under the input permit.
    * Disabling `receivesPointer` uses the first geometric centre without coverage probes.
@@ -1226,7 +1264,7 @@ export interface Locator extends ReadonlyLocator {
   getByPlaceholder(text: string | RegExp, options?: TextOptions | undefined): Locator
   getByAltText(text: string | RegExp, options?: TextOptions | undefined): Locator
   getByTitle(text: string | RegExp, options?: TextOptions | undefined): Locator
-  getByTestId(id: string): Locator
+  getByTestId(id: string | RegExp): Locator
   locator(css: string): Locator
   frame(iframe: ReadonlyLocator): FrameLocator
   filter(options: FilterOptions): Locator
@@ -1248,8 +1286,10 @@ export interface Locator extends ReadonlyLocator {
    *
    * - The click is a move to the action point, then a press and a release, carrying the keys and buttons the page
    *   holds.
-   * - The gesture is guarded: the first of its pointer, mouse, touch, and click events must land in the element. If
-   *   the page covered it between the checks and the input, the gesture is stopped before the page's handlers see
+   * - The gesture is guarded: the first of its pointer, mouse, touch, and click events must land in the element that
+   *   receives the pointer for it: its nearest enclosing `button`, `[role=button]`, `a`, or `[role=link]`, found
+   *   through shadow roots and slots, or else the element itself, which an `input`, `textarea`, `select`, or
+   *   editable element always is. If the page covered it between the checks and the input, the gesture is stopped before the page's handlers see
    *   it, and the action checks again. With `receivesPointer` disabled the gesture isn't guarded, and lands on
    *   whatever covers the element.
    * - `modifiers` are pressed before the gesture and released after it. On a backend without
@@ -1527,7 +1567,11 @@ export interface Locator extends ReadonlyLocator {
    * **Details**
    *
    * - A text input, a textarea, or a `contenteditable` element is focused and its contents selected from an
-   *   isolated world of Strider's, then the value is inserted as text, as an input method would.
+   *   isolated world of Strider's, then the value is inserted as text, as an input method would: with no key
+   *   events, a cancelable `beforeinput` and then `input`. An empty value is the exception: the selected contents
+   *   are deleted by pressing Delete. An editor that cancels the `beforeinput` and writes the
+   *   text itself is filled. Firefox's `beforeinput` here is dispatched by Strider, untrusted (`isTrusted` is
+   *   `false`), since Firefox's editing command fires none; see `Keyboard.insertText`.
    * - An input whose value isn't typed (`date`, `time`, `color`, `range`, and their kin) has it set from that
    *   world, with `input` then `change` dispatched. Equivalent browser serialization is accepted, such as
    *   lowercase color hex or omitted zero seconds. A malformed value, or a range value changed by clamping
@@ -1878,7 +1922,7 @@ export interface FrameLocator extends ReadonlyFrameLocator {
   getByPlaceholder(text: string | RegExp, options?: TextOptions | undefined): Locator
   getByAltText(text: string | RegExp, options?: TextOptions | undefined): Locator
   getByTitle(text: string | RegExp, options?: TextOptions | undefined): Locator
-  getByTestId(id: string): Locator
+  getByTestId(id: string | RegExp): Locator
   locator(css: string): Locator
   frame(iframe: ReadonlyLocator): FrameLocator
 }

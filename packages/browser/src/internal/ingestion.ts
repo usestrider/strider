@@ -5,6 +5,9 @@
  * - **The worker** takes events in the order they were received. For each, it decodes and folds the events the
  *   fold needs, then publishes to subscribers, so the model is updated before anyone sees the event. It never
  *   waits on commands or on subscribers; a subscriber's buffer fills or slides on its own.
+ * - **Replies after events.** A command's reply waits, before its caller resumes, until the worker has handled
+ *   every message the reader queued before the reply, on any session (`caughtUp`), so an operation's result comes
+ *   after the events the browser sent before it, as on the wire.
  * - **Syncs.** A session the lifecycle attaches is held until the fold syncs it: its events are published but
  *   not folded until a snapshot of its state is in, and then those after the snapshot are folded on top.
  * - **Integrity.** Each session's queued events are limited in count and bytes. Going past a limit, or a folded
@@ -61,9 +64,14 @@ interface QueuedEvent {
 
 type Work =
   | QueuedEvent
-  | { readonly _tag: "Overloaded"; readonly ingest: Ingest; readonly failure: IntegrityFailure }
+  | {
+    readonly _tag: "Overloaded"
+    readonly received: number
+    readonly ingest: Ingest
+    readonly failure: IntegrityFailure
+  }
   | { readonly _tag: "Synced"; readonly ingest: Ingest; readonly synced: Synced }
-  | { readonly _tag: "End"; readonly ingest: Ingest; readonly reason: Protocol.SessionEnded }
+  | { readonly _tag: "End"; readonly received: number; readonly ingest: Ingest; readonly reason: Protocol.SessionEnded }
   | { readonly _tag: "Run"; readonly effect: Effect.Effect<void>; readonly done: Deferred.Deferred<void> }
 
 /** What ingestion needs from the client. */
@@ -92,6 +100,13 @@ export interface Ingestion {
   readonly end: (ingest: Ingest, reason: Protocol.SessionEnded, received: number) => void
   /** Waits until every event queued for the session so far has been folded and published. */
   readonly drained: (ingest: Ingest) => Effect.Effect<void>
+  /** The receive sequence of the last message queued on the connection, for `caughtUp`. */
+  readonly queued: () => number
+  /**
+   * Waits until the worker has handled every message queued through a receive sequence, on every session. A held
+   * session's events count once they are held, so this never waits on a sync.
+   */
+  readonly caughtUp: (through: number) => Effect.Effect<void>
   /** The worker, which runs until it is interrupted or the fold fails. */
   readonly worker: Effect.Effect<never>
   /** Delivers every end the worker hasn't, at once: for when the worker is gone. */
@@ -125,6 +140,10 @@ export const make: (options: Options) => Effect.Effect<Ingestion, never, Scope.S
     const ingests = new WeakMap<Session, Ingest>()
     const live = new Set<Ingest>()
     const runs = new Set<Deferred.Deferred<void>>()
+    // The connection's barrier: what the reader has queued, what the worker has handled, and who waits on it.
+    let queued = 0
+    let handled = 0
+    let catchUps: Array<{ readonly through: number; readonly done: Deferred.Deferred<void> }> = []
     const control: FoldControl = {
       sync: (session, sync, live) => {
         const ingest = ingests.get(session)
@@ -194,6 +213,7 @@ export const make: (options: Options) => Effect.Effect<Ingestion, never, Scope.S
       ingest.queuedEvents++
       ingest.queuedBytes += bytes
       ingest.lastQueued = received
+      queued = received
       Queue.offerUnsafe(inbox, { _tag: "Event", received, ingest, method, params, bytes, epoch: ingest.epoch })
       if (ingest.queuedEvents > limits.events || ingest.queuedBytes > limits.bytes) {
         // Everything queued for this session so far, this event included, is discarded
@@ -201,7 +221,7 @@ export const make: (options: Options) => Effect.Effect<Ingestion, never, Scope.S
         ingest.epoch++
         ingest.queuedEvents = 0
         ingest.queuedBytes = 0
-        Queue.offerUnsafe(inbox, { _tag: "Overloaded", ingest, failure })
+        Queue.offerUnsafe(inbox, { _tag: "Overloaded", received, ingest, failure })
       }
     }
 
@@ -209,7 +229,8 @@ export const make: (options: Options) => Effect.Effect<Ingestion, never, Scope.S
       ingest.ending = reason
       // Subscribers end after the events received before the end
       ingest.lastQueued = received
-      Queue.offerUnsafe(inbox, { _tag: "End", ingest, reason })
+      queued = received
+      Queue.offerUnsafe(inbox, { _tag: "End", received, ingest, reason })
     }
 
     const drained = (ingest: Ingest): Effect.Effect<void> =>
@@ -219,6 +240,24 @@ export const make: (options: Options) => Effect.Effect<Ingestion, never, Scope.S
         ingest.drains.push({ target: ingest.lastQueued, done })
         return Deferred.await(done)
       })
+
+    const caughtUp = (through: number): Effect.Effect<void> =>
+      Effect.suspend(() => {
+        if (handled >= through) return Effect.void
+        const done = Deferred.makeUnsafe<void>()
+        catchUps.push({ through, done })
+        return Deferred.await(done)
+      })
+
+    const handle = (through: number): void => {
+      handled = through
+      if (catchUps.length === 0) return
+      catchUps = catchUps.filter((catchUp) => {
+        if (catchUp.through > handled) return true
+        Deferred.doneUnsafe(catchUp.done, Effect.void)
+        return false
+      })
+    }
 
     // The fold hears of the end first, as of any event; then subscribers and waiters do.
     const finish = Effect.fnUntraced(function*(ingest: Ingest, reason: Protocol.SessionEnded) {
@@ -245,6 +284,10 @@ export const make: (options: Options) => Effect.Effect<Ingestion, never, Scope.S
         Effect.andThen(Effect.sync(() => {
           for (const done of runs) Deferred.doneUnsafe(done, Effect.void)
           runs.clear()
+          // Nothing is handled after this, so nothing waits on it
+          handled = Number.MAX_SAFE_INTEGER
+          for (const catchUp of catchUps) Deferred.doneUnsafe(catchUp.done, Effect.void)
+          catchUps = []
         }))
       )
     )
@@ -382,7 +425,16 @@ export const make: (options: Options) => Effect.Effect<Ingestion, never, Scope.S
       event,
       end,
       drained,
-      worker: Queue.take(inbox).pipe(Effect.flatMap(process), Effect.forever),
+      queued: () => queued,
+      caughtUp,
+      worker: Queue.take(inbox).pipe(
+        Effect.flatMap((work) =>
+          work._tag === "Run" || work._tag === "Synced"
+            ? process(work)
+            : Effect.andThen(process(work), Effect.sync(() => handle(work.received)))
+        ),
+        Effect.forever
+      ),
       finishAll
     } satisfies Ingestion
   }

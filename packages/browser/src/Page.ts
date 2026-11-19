@@ -798,7 +798,7 @@ export interface Page extends ReadonlyPage {
   getByPlaceholder(text: string | RegExp, options?: Locator.TextOptions | undefined): Locator.Locator
   getByAltText(text: string | RegExp, options?: Locator.TextOptions | undefined): Locator.Locator
   getByTitle(text: string | RegExp, options?: Locator.TextOptions | undefined): Locator.Locator
-  getByTestId(id: string): Locator.Locator
+  getByTestId(id: string | RegExp): Locator.Locator
   locator(css: string): Locator.Locator
   frame(iframe: Locator.ReadonlyLocator): Locator.FrameLocator
   snapshot(
@@ -1016,6 +1016,9 @@ export interface Page extends ReadonlyPage {
    * **Details**
    *
    * - The route is in force for requests that start after this declaration returns.
+   * - While a `"request"` or `"response"` route is in force, the requests of the page's documents, frames, and
+   *   dedicated workers bypass the browser's HTTP cache, so a request the route continues reaches the server.
+   *   The cache is used again once the last such route is removed; an `"auth"` route leaves it alone.
    * - The page's routes are asked before its context's, the most recent first; `Route.fallthrough` passes the
    *   request to the next.
    * - `options.phase` (`"request"`, `"response"`, or `"auth"`) decides what the handler is given and may decide.
@@ -1026,6 +1029,10 @@ export interface Page extends ReadonlyPage {
    *
    * On Chromium, a request already underway without response interception may not pick up a later response
    * route, even before its headers arrive. A response that does pause selects the current routes by precedence.
+   *
+   * On Chromium, the cache setting is confirmed before this returns, except while a navigation is under way in
+   * the page: then it is sent before this returns, and the new document has it from its commit. On Firefox, a
+   * dedicated worker's requests still use the cache.
    *
    * On Chromium, a route that matches a cross-origin request also sees its CORS preflight, an `OPTIONS`
    * request, which Firefox and WebKit don't show. WebKit pauses only a redirect's first hop.

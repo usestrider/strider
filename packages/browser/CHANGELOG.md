@@ -1,5 +1,54 @@
 # @usestrider/browser
 
+## 0.13.0
+
+### Breaking changes
+
+- **Accessible names follow accname's traversal rules** (#379), as Chromium, Firefox, and Playwright compute them. A hidden descendant of a label or an `aria-labelledby` target counts only when that element is itself hidden, and with `includeHidden` everywhere. Only the whole name is trimmed, so a whitespace-only child keeps its space, and children that aren't `display: inline`, and `<br>`, are separated by spaces. Soft hyphens and zero-width spaces are dropped and non-breaking spaces kept; name matching treats a non-breaking space as a space, with `exact` too. Name from content skips descendants whose role doesn't allow it, an embedded combobox or listbox contributes its selected options and a range control its value, CSS `content` is parsed (alternative text after `/`, `attr()`), an element that lists itself in `aria-labelledby` gives its own label there, and `title` no longer names a `none` or `presentation` element. Snapshot text includes `::before` and `::after` content. Update an exact `name`, a `toHaveAccessibleName` expectation, or a saved snapshot that relied on an old name to the name the browser reports.
+- **A controlled page clock follows Playwright's timeline rules** (#372). `adjust` and a forward `setTime` let the page's queued tasks run after each timer they fire, waiting while the page keeps posting messages, up to the operation's deadline, so a timer set at the end of a chain of the page's own messages fires within the same call; a timer set then with no delay waits 1 ms. A timer that throws is still reported to the page and the other timers still run, but the operation now fails with `PageClockError` whose reason is the new `EvaluationThrown`. `adjust` rounds a fractional duration up to a whole millisecond and rejects negative durations and ones that aren't finite with `InvalidInput`. `performance.now()` counts from 0 where the clock reaches a document, `performance.timeOrigin` is the clock's time then, and both carry on after `resume`. Each fired timer now costs real time, so a long `adjust` over a frequent interval can outlast its deadline: move far with `setTime` instead.
+- **Slotted content inherits `aria-hidden` and `aria-disabled` from the shadow elements it's slotted into** (#369), as the accessibility tree does. Role queries leave out slotted content under an `aria-hidden` shadow element, and an action on slotted content under an `aria-disabled` one waits for it to be enabled. Pass `includeHidden: true` to `getByRole` to find it, or `checks: { enabled: false }` to act on it.
+
+### Added
+
+- **`hitTest.shadowHostBoxes`** (#369), a capability that says whether the pointer check sees a shadow host's own boxes, such as a `::before`, drawn over its shadow content. It's `partial` on Firefox: a trial click on content under such a cover counts as ready there, while a real click is still stopped.
+
+### Fixed
+
+- **Pointer actions reach an element in a shadow root over content slotted into it** (#369), such as a link that wraps a `<slot>`, instead of failing as covered.
+- **A click, hover, or other pointer action on a `pointer-events: none` element inside a button or link goes through that button or link** (#373), as the browser hands it the click, instead of timing out with `NoPointerEvents`. A form field or editable element must still receive the pointer itself.
+- **An operation returns only after the events the browser sent before its reply are handled** (#360), so a history read right after it, such as `ConsoleMessage.history` after an evaluation that logged, holds what the browser reported. On Chromium, a script-routed WebSocket's calls that arrive while a frame or page is still being set up are answered.
+- **A `goto` to a URL whose scheme the browser can't load fails at once** with `NavigationFailed` on Chromium and Firefox (#386), such as `nosuchscheme:x` or `localhost:3000/x`, instead of timing out on Chromium and failing as `Unsupported` on Firefox. On Chromium, a navigation the page starts to one, or one stopped before its response, ends at once too.
+- **A second same-document `page.back()` or `page.forward()` in one document no longer times out on Firefox** (#383).
+- **The first `goto` on a Chromium page Strider didn't open no longer times out** (#376), such as a persistent profile's first tab or a tab open in a browser attached with `Chromium.layerConnect`; routes, HAR recording, and a `beforeunload` close work on it as soon as it's listed.
+- **Routes bypass the HTTP cache on Chromium and Firefox** (#378) while they're in force, so a request a route continues reaches the server instead of the cache. On Firefox, a dedicated worker's requests still use the cache.
+- **A popup that opens with no URL in a Chromium context with a script `routeWebSocket` gets the context's routes, headers, and overrides on its first navigation** (#374).
+- **Closing a Chromium context while a download is finishing no longer fails** removing its downloads directory with `ENOTEMPTY` (#377).
+- **A removed cross-site iframe leaves `page.frames` on Firefox** (#371), even when Firefox 158 loses its `contextDestroyed`.
+- **Init scripts and clock calls keep working after a script write times out** on Chromium and Firefox (#380), where the page's next declaration failed with "Script not found".
+
+## 0.12.0
+
+### Breaking changes
+
+- **`fill` and `insertText` send no key events on Firefox and stock WebKit** (#366). Text goes into the focused element, in whichever frame has focus, through the page's editing command, as Chromium's `Input.insertText` does: the page gets one cancelable `beforeinput` with the whole text, then `input`, and a canceled `beforeinput` inserts nothing. On Firefox, whose editing command fires no `beforeinput`, Strider dispatches that event itself, untrusted, and `input.insertText` is `partial` there. On stock WebKit a newline goes into a textarea as a line break instead of pressing Enter. Code that needs key events should type with `pressSequentially` or `keyboard.press`.
+- **Role queries, accessible names, and snapshots leave out inert elements** (#355): an element under `inert`, and, while a `showModal()` dialog is open, everything outside the topmost one. Readiness follows the same rule, so a modal dialog opened inside an inert subtree escapes it, and only the topmost open modal blocks the rest. A role locator that matched a button behind an open modal now matches nothing; pass `includeHidden: true` to match it on purpose.
+- **An element inside a disabled control is disabled** (#359). `isEnabled`, `toBeEnabled`, `toBeDisabled`, and the enabled check actions run read the nearest enclosing button, or element with the role `button`, `checkbox`, or `radio`, through shadow roots and slots. A click on a span inside `<button disabled>` used to report success with nothing clicked; it now waits for the button to be enabled.
+- **A chained `getByText` matches the locator's own element** (#362), as Playwright's does: `page.locator(".badge").getByText("Resolved")` finds the badge. A `filter` whose `has` or `hasNot` is built on `getByText` counts the element being tested. Search only inside with `locator.locator("*").getByText(…)`.
+- **`strider page new`, `goto`, the MCP tools, and `BrowserToolkit` wait for the parsed document** (#367), `domContentLoaded`, instead of returning at commit; `--wait-until` (`waitUntil` on the tools) chooses another point, and `export test` writes it. `find` reads the page on every call, so an early empty read no longer sticks. `Page.goto` still returns at commit.
+- **The `strider` digest reports each dialog in one line naming what decided it** (#368): a registration by its handle, another handler, or the context's policy. A handler's decision wasn't reported before, and a policy's was reported twice.
+
+### Fixed
+
+- **Chromium and stock WebKit report the browser's own console messages** (#358), such as a Content Security Policy violation, a request blocked by CORS, or a failed load, as `ConsoleMessage`s. Firefox sends them as script errors, so they arrive there as `UncaughtException`s, as its `console` capability says.
+- **`display: contents` elements are found by role** (#364), names that come through a `<slot>` are no longer empty, and such an element's text counts as visible.
+- **Firefox keeps a profile's cookies and localStorage** (#353): closing a launched Firefox asks it to close and waits up to five seconds for it to exit, as Chromium's does, so a `userDataDir` you own keeps what was written just before the close.
+- **Closing a Chromium context made with `emulation` no longer waits 30 seconds** to restore a viewport its removal discards (#354), and **releasing a viewport while a popup is open no longer waits for a size the popup never had** (#365).
+- **Headless Chromium and Firefox report a fine pointer with hover** (#357), so pages show their desktop layout under Strider's default launch.
+- **Overlapping `page.clock` calls and init scripts declared at once on Chromium** no longer fail with "Script not found" or leave a replaced script running (#356).
+- **A click with `receivesPointer` off lands on whatever covers the element** (#351), instead of being stopped by its own guard and retried until it timed out.
+- **A video writer gets `Deadline.DefaultBudget` to finish** after the recording ends (#361), 30 seconds unless set, instead of a fixed five, so a recording no longer fails while the encoder catches up.
+- **A `Timeout` with nothing observed names the call the browser left unanswered** (#363): "The browser didn't answer the call into the page before the deadline".
+
 ## 0.11.0
 
 ### Breaking changes

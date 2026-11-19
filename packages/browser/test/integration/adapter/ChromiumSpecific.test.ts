@@ -8,6 +8,7 @@ import { assert, describe, layer } from "@effect/vitest"
 import { Browser, BrowserWorker, Deadline, Expect, Ledger } from "@usestrider/browser"
 import * as BrowserCdp from "@usestrider/browser/cdp/Browser"
 import * as Page from "@usestrider/browser/cdp/Page"
+import * as Runtime from "@usestrider/browser/cdp/Runtime"
 import * as Target from "@usestrider/browser/cdp/Target"
 import { Chromium } from "@usestrider/browser/chromium"
 import { CdpConnection, Protocol, Transport } from "@usestrider/browser/protocol"
@@ -678,7 +679,7 @@ describe("Chromium adapter, CDP only", () => {
               const page = yield* Browser.newPage()
               const html =
                 `<button id="go">Go</button><script>window.log=[];for(const type of ['mousemove','mousedown','mouseup','click'])document.getElementById('go').addEventListener(type,e=>log.push([e.type,e.isTrusted,e.buttons]));</script>`
-              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`, { waitUntil: "load" })
               const click = yield* page.locator("#go").click().pipe(Deadline.within("5 seconds"), Effect.forkChild)
               yield* Deferred.await(entered)
               assert.deepStrictEqual(sent, [])
@@ -1512,7 +1513,7 @@ describe("Chromium adapter, CDP only", () => {
                   encodeURIComponent(child)
                 }`
                 const parent = `<body style="margin:0"><iframe style="border:0" src="${childUrl}"></iframe>`
-                yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(parent)}`)
+                yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(parent)}`, { waitUntil: "load" })
                 const frame = page.frame(page.locator("iframe"))
                 yield* frame.getByRole("button").pipe(Expect.toHaveText("0"))
                 const snapshot = yield* page.snapshot()
@@ -1673,7 +1674,7 @@ describe("Chromium adapter, CDP only", () => {
                 const page = yield* Browser.newPage()
                 const html =
                   `<button id="go">Go</button><script>window.inputLog=[];for(const type of ["mousedown","mouseup"])document.addEventListener(type,e=>inputLog.push(e.type))</script>`
-                yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+                yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`, { waitUntil: "load" })
                 const target = page.locator("#go")
                 assert(target instanceof LocatorImpl)
                 const error = yield* target.click().pipe(
@@ -1875,6 +1876,41 @@ describe("Chromium adapter, CDP only", () => {
           }),
         timeout
       )
+
+      it.effect("replays browser console entries when attaching to a loaded page", () =>
+        Effect.gen(function*() {
+          const { launched, transport } = yield* ChromiumLauncher.launchWithPort({ executablePath: executable })
+          const cdp = yield* CdpConnection.make(transport)
+          const targets = yield* Target.getTargets({}).pipe(Protocol.on(cdp.browser))
+          const target = targets.targetInfos.find((target) => target.type === "page")!
+          const { sessionId } = yield* Target.attachToTarget({ targetId: target.targetId, flatten: true }).pipe(
+            Protocol.on(cdp.browser)
+          )
+          const session = yield* cdp.session(sessionId)
+          yield* Runtime.evaluate({
+            expression: `
+            const meta = document.createElement('meta');
+            meta.httpEquiv = 'Content-Security-Policy';
+            meta.content = "style-src 'none'";
+            document.head.append(meta);
+            console.log('before replayed style');
+            const style = document.createElement('style');
+            style.textContent = 'body { color: red }';
+            document.head.append(style);
+            console.log('after replayed style');
+          `
+          }).pipe(Protocol.on(session))
+          const { port, browserPath } = yield* DevToolsActivePort.read(launched.userDataDir)
+          const facts = makeRecorder()
+          yield* CdpAdapter.connect(yield* Transport.webSocket(`ws://127.0.0.1:${port}${browserPath}`), {
+            sink: facts.sink,
+            ownership: "attached"
+          })
+          yield* facts.when("ConsoleMessage", (fact) => /Content Security Policy/i.test(fact.message.text))
+          const messages = facts.all("ConsoleMessage").map((fact) => fact.message.text)
+          assert.include(messages, "before replayed style")
+          assert.include(messages, "after replayed style")
+        }), timeout)
 
       it.effect(
         "attaches to a browser it doesn't own: adopts its tabs, pauses none of them",

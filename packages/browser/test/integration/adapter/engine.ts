@@ -99,6 +99,13 @@ const count = (response: Engine.Response) => {
   return response.count
 }
 
+// The accessible names of the elements marked data-t, in document order
+const namesOf = (response: Engine.Response) => {
+  assert(response._tag === "Roles", JSON.stringify(response))
+  return response.roles.map((each) => each.name)
+}
+const marked: Engine.Request = { op: "role", steps: [{ _tag: "Css", selector: "[data-t]" }] }
+
 // Count real rendering callbacks in the engine's realm, optionally changing the fixture at a chosen frame.
 // This checks the sampling contract without depending on the machine's frame rate or wall-clock latency.
 const countFrames = (onFrame = "") =>
@@ -1455,6 +1462,8 @@ export const engine = (backend: Backend) =>
                 })
               }`
             )
+            // Ordinary snapshots read assigned slots too, for the flat tree: field ancestry is what a masking one adds
+            let ordinaryReads: number | undefined
             for (const provenance of [false, true, false, true]) {
               yield* call(`() => { globalThis.fieldReads = 0; globalThis.editabilityReads = 0 }`, [])
               const response = yield* send(
@@ -1469,8 +1478,11 @@ export const engine = (backend: Backend) =>
               const reads = yield* call(`() => String(globalThis.fieldReads)`, [])
               assert(reads._tag === "Value" && reads.value.type === "string")
               if (provenance) {
-                assert.isAbove(Number(reads.value.value), 0)
-              } else assert.strictEqual(Number(reads.value.value), 0)
+                assert.isAbove(Number(reads.value.value), ordinaryReads!)
+              } else {
+                ordinaryReads ??= Number(reads.value.value)
+                assert.strictEqual(Number(reads.value.value), ordinaryReads)
+              }
               const classifications = yield* call(`() => String(globalThis.editabilityReads)`, [])
               assert(classifications._tag === "Value" && classifications.value.type === "string")
               if (provenance) {
@@ -2511,6 +2523,188 @@ export const engine = (backend: Backend) =>
             ])
           }), timeout)
 
+        it.effect("names from a reference skip its hidden descendants unless the reference itself is hidden", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<span id="shown">visible<span style="display:none"> none</span><span style="visibility:hidden"> hidden</span><span aria-hidden="true"> aria</span></span>
+<button data-t aria-labelledby="shown">x</button>
+<span id="gone" style="display:none">all <span>of it</span></span>
+<button data-t aria-labelledby="gone">y</button>
+<label for="field" aria-hidden="true">Hidden label</label><input data-t id="field">`
+            )
+            assert.deepStrictEqual(namesOf(yield* send(marked)), ["visible", "all of it", "Hidden label"])
+          }), timeout)
+
+        it.effect("names keep the space of whitespace-only content and trim only the whole name", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(backend, `<button data-t>button<span> </span>label</button>`)
+            assert.deepStrictEqual(namesOf(yield* send(marked)), ["button label"])
+          }), timeout)
+
+        it.effect("names separate every child that isn't display inline, and br", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<button data-t><span style="display:inline-block">one</span><span style="display:inline-block">two</span><span style="display:inline-block">three</span></button>
+<button data-t>one<br>two</button>`
+            )
+            assert.deepStrictEqual(namesOf(yield* send(marked)), ["one two three", "one two"])
+          }), timeout)
+
+        it.effect("names drop soft hyphens and zero-width spaces and keep non-breaking spaces", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<button data-t>1&shy;2&#8203;3</button><button data-t>a&nbsp;b</button>`
+            )
+            assert.deepStrictEqual(namesOf(yield* send(marked)), ["123", "a\u00a0b"])
+            // A name still matches as text does, a non-breaking space as a space
+            assert.strictEqual(count(yield* send({ op: "count", steps: [role("button", text("a b", true))] })), 1)
+          }), timeout)
+
+        it.effect("names from content skip descendants whose role doesn't allow it", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<div role="tree"><div data-t role="treeitem"><span>Top-level</span><div role="group"><div role="treeitem">Nested 1</div><div role="treeitem">Nested 2</div></div></div></div>
+<h2 data-t>Heading <i role="alert">alert</i></h2>
+<input data-t type="checkbox" id="flash"><label for="flash">Flash <span role="menu"><span role="menuitem" aria-selected="true">1</span><span role="menuitem">2</span></span> times</label>`
+            )
+            assert.deepStrictEqual(namesOf(yield* send(marked)), ["Top-level", "Heading", "Flash times"])
+          }), timeout)
+
+        it.effect("an embedded combobox or listbox contributes its selected option", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<label for="size">Size <div role="combobox"><div role="listbox"><div role="option">Small</div><div role="option" aria-selected="true">Medium</div></div></div></label><input data-t id="size">
+<label for="colour">Colour <div role="listbox"><div role="option">Red</div><div role="option" aria-selected="true">Blue</div></div></label><input data-t id="colour">`
+            )
+            assert.deepStrictEqual(namesOf(yield* send(marked)), ["Size Medium", "Colour Blue"])
+          }), timeout)
+
+        it.effect("names with hidden elements included keep the hidden descendants", () =>
+          Effect.gen(function*() {
+            // Hidden by its style, and inert: both count with hidden elements included
+            const { send } = yield* open(
+              backend,
+              `<button><span style="display:none">Save</span></button><button><span inert>Save</span></button>`
+            )
+            assert.strictEqual(
+              count(yield* send({ op: "count", steps: [role("button", text("Save", true), true)] })),
+              2
+            )
+          }), timeout)
+
+        it.effect("names read CSS content: alternative text, attr(), the element's own, hidden and block pseudos", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<style>
+#alt::before { content: "x" / "alt" }
+#image::before { content: url(data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7) / "alt" }
+#attr::before { content: attr(data-x) }
+#own { content: url(data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7) / "alt" }
+#none::before { content: "x"; display: none }
+#invisible::after { content: "x"; visibility: hidden }
+#block::before { content: "x"; display: block }
+</style>
+<button data-t id="alt">label</button>
+<button data-t id="image">label</button>
+<button data-t id="attr" data-x="pre">label</button>
+<div data-t role="button" id="own">label</div>
+<button data-t id="none">label</button>
+<button data-t id="invisible">label</button>
+<button data-t id="block">label</button>`
+            )
+            assert.deepStrictEqual(namesOf(yield* send(marked)), [
+              "altlabel",
+              "altlabel",
+              "prelabel",
+              "alt",
+              "label",
+              "label",
+              "x label"
+            ])
+          }), timeout)
+
+        it.effect("selected options preserve the surrounding reference traversal", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<label for="colour">Colour <span role="listbox"><span role="option" aria-selected="true"><span role="alert">Blue</span></span></span></label><input data-t id="colour">
+<button data-t aria-labelledby="choice"></button><span id="choice" role="listbox" aria-owns="selected"></span><span id="selected" role="option" aria-selected="true"><span role="alert">Green</span></span>`
+            )
+            assert.deepStrictEqual(namesOf(yield* send(marked)), ["Colour Blue", "Green"])
+          }), timeout)
+
+        it.effect("a native select in a label contributes its chosen option's label, or its first option's", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<label for="flash">Flash <select><option>1</option><option selected label="Two">2</option></select> times</label><input data-t id="flash">
+<label for="size">Size <select><option>Small</option><option>Large</option></select></label><input data-t id="size">`
+            )
+            assert.deepStrictEqual(namesOf(yield* send(marked)), ["Flash Two times", "Size Small"])
+          }), timeout)
+
+        it.effect("title doesn't name a presentational element", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(backend, `<button data-t>Go <span role="none" title="Bryan"></span></button>`)
+            assert.deepStrictEqual(namesOf(yield* send(marked)), ["Go"])
+          }), timeout)
+
+        it.effect("an element that lists itself in aria-labelledby gives its own label there", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<span id="file">Documentation.pdf</span><button data-t id="self" aria-label="Delete" aria-labelledby="self file">x</button>
+<input data-t id="search" value="typed" aria-label="Search" aria-labelledby="search">`
+            )
+            assert.deepStrictEqual(namesOf(yield* send(marked)), ["Delete Documentation.pdf", "Search"])
+          }), timeout)
+
+        it.effect("ID reference lists split on ASCII whitespace only", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<span id="for&nbsp;save">Label</span><button data-t id="save" aria-labelledby="for&nbsp;save\n\tsave">More</button>`
+            )
+            assert.deepStrictEqual(namesOf(yield* send(marked)), ["Label More"])
+          }), timeout)
+
+        it.effect("names from content follow aria-owns after the children", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<button data-t aria-owns="extra">Open</button><div id="extra">menu</div>`
+            )
+            assert.deepStrictEqual(namesOf(yield* send(marked)), ["Open menu"])
+          }), timeout)
+
+        it.effect("snapshot text includes ::before and ::after content", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<style>#p::before { content: "Hello " } #p::after { content: " world" }</style><p id="p">there</p>`
+            )
+            const snapshot = yield* send({ op: "snapshot", steps: null, interactivity: false, depth: null })
+            assert(snapshot._tag === "Snapshot")
+            assert.include(JSON.stringify(snapshot.root), `"Hello there world"`)
+          }), timeout)
+
+        it.effect("snapshot names show a non-breaking space as a space, and names keep it", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(backend, `<button data-t>a&nbsp;b</button>`)
+            assert.deepStrictEqual(namesOf(yield* send(marked)), ["a\u00a0b"])
+            const snapshot = yield* send({ op: "snapshot", steps: null, interactivity: false, depth: null })
+            assert(snapshot._tag === "Snapshot")
+            const name = snapshot.root.children[0]!.name
+            assert(name._tag === "Accessible", JSON.stringify(name))
+            assert.strictEqual(name.value, "a b")
+          }), timeout)
+
         it.effect("finds by role and name: substring by default, exact when asked, hidden only when asked", () =>
           Effect.gen(function*() {
             const { send } = yield* open(
@@ -2537,6 +2731,89 @@ export const engine = (backend: Backend) =>
               count(yield* send({ op: "count", steps: [role("button", text("Add to cart", true), true)] })),
               3
             )
+          }), timeout)
+
+        it.effect(
+          "finds a display: contents element by role, unless aria-hidden, its visibility or a display: none ancestor hides it",
+          () =>
+            Effect.gen(function*() {
+              const { send } = yield* open(
+                backend,
+                `<button id="shown" style="display:contents">Buy</button>
+<div aria-hidden="true"><button style="display:contents">Buy</button></div>
+<button style="display:contents;visibility:hidden">Buy</button>
+<div style="display:none"><button style="display:contents">Buy</button></div>`
+              )
+              assert.strictEqual(count(yield* send({ op: "count", steps: [role("button", text("Buy", true))] })), 1)
+              assert.strictEqual(
+                count(yield* send({ op: "count", steps: [role("button", text("Buy", true), true)] })),
+                4
+              )
+            }),
+          timeout
+        )
+
+        it.effect("names an element through a slot's assigned nodes and fallback content", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<div id="button"><span>foo</span></div><div id="assigned"><span>Email</span></div><div id="fallback"></div>`,
+              `() => {
+                document.getElementById('button').attachShadow({mode:'open'}).innerHTML = '<button><slot></slot></button>'
+                document.getElementById('assigned').attachShadow({mode:'open'}).innerHTML = '<label><slot></slot><input></label>'
+                document.getElementById('fallback').attachShadow({mode:'open'}).innerHTML = '<label><slot>Phone</slot><input></label>'
+              }`
+            )
+            assert.strictEqual(count(yield* send({ op: "count", steps: [role("button", text("foo", true))] })), 1)
+            assert.strictEqual(count(yield* send({ op: "count", steps: [role("textbox", text("Email", true))] })), 1)
+            assert.strictEqual(count(yield* send({ op: "count", steps: [role("textbox", text("Phone", true))] })), 1)
+          }), timeout)
+
+        it.effect(
+          "counts a display: contents element's text as visible, unless its visibility or opacity hides it",
+          () =>
+            Effect.gen(function*() {
+              const { send } = yield* open(
+                backend,
+                `<span id="shown" style="display:contents">hello</span>
+<span id="hidden" style="display:contents;visibility:hidden">hello</span>
+<span id="transparent" style="display:contents;opacity:0">hello</span>`
+              )
+              const shown = yield* send({ op: "visible", steps: [{ _tag: "Css", selector: "#shown" }] })
+              assert.deepStrictEqual(shown, { _tag: "Visible", count: 1, visible: true })
+              const hidden = yield* send({ op: "visible", steps: [{ _tag: "Css", selector: "#hidden" }] })
+              assert.deepStrictEqual(hidden, { _tag: "Visible", count: 1, visible: false })
+              const transparent = yield* send({ op: "visible", steps: [{ _tag: "Css", selector: "#transparent" }] })
+              assert.deepStrictEqual(transparent, { _tag: "Visible", count: 1, visible: false })
+            }),
+          timeout
+        )
+
+        it.effect("does not count a hidden slot's text as visible display: contents", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<div id="host">secret</div>`,
+              `() => {
+                document.getElementById('host').attachShadow({mode:'open'}).innerHTML =
+                  '<span id="contents" style="display:contents"><slot style="visibility:hidden"></slot></span>'
+              }`
+            )
+            const response = yield* send({ op: "visible", steps: [{ _tag: "Css", selector: "#contents" }] })
+            assert.deepStrictEqual(response, { _tag: "Visible", count: 1, visible: false })
+          }), timeout)
+
+        it.effect("leaves the text of a visibility: hidden display: contents element out of snapshots", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<p>public</p><span style="display:contents;visibility:hidden">secret</span>`
+            )
+            const snapshot = yield* send({ op: "snapshot", steps: null, interactivity: false, depth: null })
+            assert(snapshot._tag === "Snapshot")
+            const serialized = JSON.stringify(snapshot.root)
+            assert.include(serialized, "public")
+            assert.notInclude(serialized, "secret")
           }), timeout)
 
         // HTML takes inert nodes out of the accessibility tree: `inert` on the element or a flat-tree ancestor, and,
@@ -2751,6 +3028,102 @@ export const engine = (backend: Backend) =>
             )
           }), timeout)
 
+        it.effect("matches a text's scope element itself, and still the smallest element under it", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(backend, `<div class="row"><span class="badge">Resolved</span></div>`)
+            const className = (scope: string) =>
+              send({
+                op: "read",
+                steps: [{ _tag: "Css", selector: scope }, { _tag: "Text", matcher: text("Resolved") }],
+                read: { _tag: "Attribute", name: "class" }
+              })
+            assert.deepStrictEqual(yield* className(".row"), { _tag: "Read", value: "badge" })
+            assert.deepStrictEqual(yield* className(".badge"), { _tag: "Read", value: "badge" })
+          }), timeout)
+
+        it.effect("counts the candidate itself when a filter has a text", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(backend, `<div class="row"><span class="badge">Resolved</span></div>`)
+            const resolved = [{ _tag: "Text", matcher: text("Resolved") }] as const
+            const filtered = (has: typeof resolved | null, hasNot: typeof resolved | null) =>
+              send({
+                op: "count",
+                steps: [{ _tag: "Css", selector: "span" }, {
+                  _tag: "Filter",
+                  hasText: null,
+                  hasNotText: null,
+                  has,
+                  hasNot,
+                  visible: null
+                }]
+              })
+            assert.strictEqual(count(yield* filtered(resolved, null)), 1)
+            assert.strictEqual(count(yield* filtered(null, resolved)), 0)
+          }), timeout)
+
+        it.effect("deduplicates text matches across overlapping element scopes in tree order", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<div class="scope"><div class="scope" id="first">Resolved</div></div><div class="scope" id="second">Resolved</div>`
+            )
+            const steps: ReadonlyArray<Engine.Step> = [
+              { _tag: "Css", selector: ".scope" },
+              { _tag: "Text", matcher: text("Resolved") }
+            ]
+            assert.strictEqual(count(yield* send({ op: "count", steps })), 2)
+            for (const [index, id] of ["first", "second"].entries()) {
+              assert.deepStrictEqual(
+                yield* send({
+                  op: "read",
+                  steps: [...steps, { _tag: "Nth", index }],
+                  read: { _tag: "Attribute", name: "id" }
+                }),
+                { _tag: "Read", value: id }
+              )
+            }
+          }), timeout)
+
+        it.effect("matches text scopes around assigned and fallback slots without matching slots", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<div id="assigned">Checkout</div><div id="fallback"></div>
+<script>
+document.getElementById("assigned").attachShadow({ mode: "open" }).innerHTML =
+  '<button id="checkout"><slot></slot></button>'
+document.getElementById("fallback").attachShadow({ mode: "open" }).innerHTML =
+  '<button id="default"><slot>Default</slot></button>'
+</script>`
+            )
+            for (const [id, said] of [["checkout", "Checkout"], ["default", "Default"]] as const) {
+              assert.deepStrictEqual(
+                yield* send({
+                  op: "read",
+                  steps: [{ _tag: "Css", selector: `#${id}` }, { _tag: "Text", matcher: text(said) }],
+                  read: { _tag: "Attribute", name: "id" }
+                }),
+                { _tag: "Read", value: id }
+              )
+              assert.strictEqual(
+                count(
+                  yield* send({
+                    op: "count",
+                    steps: [{ _tag: "Css", selector: "slot" }, { _tag: "Text", matcher: text(said) }]
+                  })
+                ),
+                0
+              )
+            }
+          }), timeout)
+
+        it.effect("never matches a role's scope element itself", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(backend, `<button>Go</button>`)
+            const found = yield* send({ op: "count", steps: [{ _tag: "Css", selector: "button" }, role("button")] })
+            assert.strictEqual(count(found), 0)
+          }), timeout)
+
         it.effect("finds the element around a slot as the smallest that says a slotted text", () =>
           Effect.gen(function*() {
             const { send } = yield* open(
@@ -2801,6 +3174,31 @@ document.getElementById("list").attachShadow({ mode: "open" }).innerHTML = '<ul>
             assert.strictEqual(invalid._tag, "InvalidSelector")
           }), timeout)
 
+        it.effect("matches test ids exactly as written, by string or by pattern", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<p data-testid="row-1">a</p><p data-testid="row-2">b</p><p data-testid="Row-3">c</p>` +
+                `<p data-testid="row  4">d</p><p data-testid=" row-5">e</p><p>none</p>`
+            )
+            const testId = (matcher: Engine.TextMatcher) =>
+              send({ op: "count", steps: [{ _tag: "TestId", matcher }] }).pipe(Effect.map(count))
+            const pattern = (source: string, flags = ""): Engine.TextMatcher => ({ _tag: "RegExp", source, flags })
+            // A string is exact, case-sensitive and compared with the raw value.
+            assert.strictEqual(yield* testId(text("row-1", true)), 1)
+            assert.strictEqual(yield* testId(text("row", true)), 0)
+            assert.strictEqual(yield* testId(text("row-3", true)), 0)
+            assert.strictEqual(yield* testId(text("row-5", true)), 0)
+            // A pattern is tested against the raw value, with its own flags.
+            assert.strictEqual(yield* testId(pattern("^row-")), 2)
+            assert.strictEqual(yield* testId(pattern("^row-", "i")), 3)
+            assert.strictEqual(yield* testId(pattern("row  4")), 1)
+            assert.strictEqual(yield* testId(pattern("^row 4$")), 0)
+            assert.strictEqual(yield* testId(pattern("^ row-5$")), 1)
+            // An element without the attribute never matches, even a pattern that matches the empty string.
+            assert.strictEqual(yield* testId(pattern("")), 5)
+          }), timeout)
+
         it.effect("searches a scope's own open shadow root, and a root nested in it, with every kind of step", () =>
           Effect.gen(function*() {
             const { send } = yield* open(
@@ -2827,7 +3225,7 @@ document.getElementById("outer").attachShadow({ mode: "open" }).innerHTML =
             assert.strictEqual(yield* inHost({ _tag: "Placeholder", matcher: text("who") }), 1)
             assert.strictEqual(yield* inHost({ _tag: "AltText", matcher: text("logo") }), 1)
             assert.strictEqual(yield* inHost({ _tag: "Title", matcher: text("tip") }), 1)
-            assert.strictEqual(yield* inHost({ _tag: "TestId", id: "go" }), 1)
+            assert.strictEqual(yield* inHost({ _tag: "TestId", matcher: text("go", true) }), 1)
             const hasDeep: Engine.Step = {
               _tag: "Filter",
               hasText: null,

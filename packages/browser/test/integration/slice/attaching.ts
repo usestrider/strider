@@ -6,7 +6,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser, Dialog, Expect, Locator, Page, Popup, Route, Target, UserContext } from "@usestrider/browser"
+import { Browser, Dialog, Expect, Har, Locator, Page, Popup, Route, Target, UserContext } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import * as Equal from "effect/Equal"
 import * as Exit from "effect/Exit"
@@ -111,7 +111,8 @@ const byHeading = Effect.fnUntraced(function*(browser: Browser.Browser, heading:
 export const attaching = (
   name: "Chromium" | "Firefox" | "WebKit",
   backend: Layer.Layer<Browser.Browser, unknown>,
-  attachable: Option.Option<Attachable>
+  attachable: Option.Option<Attachable>,
+  persistent: Option.Option<(userDataDir: string) => Layer.Layer<Browser.Browser, unknown>> = Option.none()
 ) =>
   describe(`${name} attaching`, () => {
     layer(Layer.mergeAll(backend, NodeServices.layer, NodeSocket.layerWebSocketConstructor), {
@@ -224,10 +225,119 @@ export const attaching = (
           yield* Effect.scoped(Effect.flatMap(browser.defaultContext.control, (again) => again.cookies.clear))
         }), timeout)
 
+      // ── A page Strider didn't open, driven straight away ──
+
+      if (Option.isSome(persistent)) {
+        const launchPersistent = persistent.value
+        const adopted = `data:text/html,${encodeURIComponent("<h1>Adopted</h1>")}`
+
+        it.effect("records a persistent profile's first navigation in a context HAR", () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            const fs = yield* FileSystem.FileSystem
+            const dir = yield* fs.makeTempDirectoryScoped({ prefix: "strider-profile-" })
+            const url = fixtureUrl(origin, "<h1>Recorded</h1>")
+            const out = `${dir}/first.har`
+            yield* Effect.scoped(Effect.gen(function*() {
+              const browser = yield* Browser.Browser
+              const context = yield* browser.defaultContext.control
+              const tab = (yield* context.pages)[0]!
+              const har = yield* Har.record(context, { content: "embed", url, inFlightAtStop: "wait" })
+              yield* tab.goto(url)
+              yield* har.entries.waitFor((count) =>
+                count === 1
+              )
+              yield* har.exportHar(out)
+              const entries = JSON.parse(yield* fs.readFileString(out)).log.entries
+              assert.strictEqual(entries.length, 1)
+              assert.strictEqual(entries[0].request.url, url)
+              assert.strictEqual(entries[0].response.status, 200)
+              assert.strictEqual(entries[0].response.content.text, "<h1>Recorded</h1>")
+            })).pipe(Effect.provide(launchPersistent(dir)))
+          }), timeout)
+
+        it.effect("navigates a persistent profile's first tab as soon as it's listed", () =>
+          Effect.gen(function*() {
+            const fs = yield* FileSystem.FileSystem
+            const dir = yield* fs.makeTempDirectoryScoped({ prefix: "strider-profile-" })
+            yield* Effect.scoped(Effect.gen(function*() {
+              const browser = yield* Browser.Browser
+              const context = yield* browser.defaultContext.control
+              const tab = (yield* context.pages)[0]!
+              yield* tab.goto(adopted)
+              assert.strictEqual(yield* tab.getByRole("heading").readText, "Adopted")
+            })).pipe(Effect.provide(launchPersistent(dir)))
+          }), timeout)
+
+        it.effect("navigates a persistent profile's first tab through a route installed as soon as it's listed", () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            const fs = yield* FileSystem.FileSystem
+            const dir = yield* fs.makeTempDirectoryScoped({ prefix: "strider-profile-" })
+            yield* Effect.scoped(Effect.gen(function*() {
+              const browser = yield* Browser.Browser
+              const context = yield* browser.defaultContext.control
+              const tab = (yield* context.pages)[0]!
+              const url = fixtureUrl(origin, "<h1>Routed</h1>")
+              const routed = yield* tab.route(url, () =>
+                Route.continue)
+              yield* tab.goto(url)
+              assert.strictEqual(yield* tab.getByRole("heading").readText, "Routed")
+              assert.strictEqual(yield* routed.hits, 1)
+            })).pipe(Effect.provide(launchPersistent(dir)))
+          }), timeout)
+      }
+
       // ── Attaching, where the backend can ──
 
       if (Option.isSome(attachable)) {
         const start = attachable.value.start
+
+        it.effect("handles beforeunload when closing a tab immediately after attaching", () =>
+          Effect.gen(function*() {
+            if (!(yield* supports("close.runBeforeUnload"))) {
+              return
+            }
+            const { origin } = yield* site
+            const { layer: attached } = yield* start(tabUrl(origin, "First"), tabUrl(origin, "Second"))
+            yield* Effect.scoped(Effect.gen(function*() {
+              const browser = yield* Browser.Browser
+              for (const observed of yield* browser.pages) {
+                const tab = yield* observed.control
+                yield* tab.goto(
+                  fixtureUrl(
+                    origin,
+                    `<button>Edit</button><script>window.addEventListener("beforeunload", (e) => { e.preventDefault(); e.returnValue = "" })</script>`
+                  )
+                )
+                yield* tab.activate
+                yield* tab.getByRole("button", { name: "Edit" }).click()
+              }
+            })).pipe(Effect.provide(attached))
+            yield* Effect.scoped(Effect.gen(function*() {
+              const browser = yield* Browser.Browser
+              const tab = yield* (yield* browser.pages)[0]!.control
+              const handler = yield* Dialog.handle(tab, Dialog.acceptAll)
+              yield* tab.close({ runBeforeUnload: true })
+              yield* handler.handled.waitFor((count) =>
+                count === 1
+              )
+            })).pipe(Effect.provide(attached))
+          }), timeout)
+
+        it.effect("navigates an attached browser's open tab as soon as it's controlled", () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            const { layer: attached } = yield* start(tabUrl(origin, "First"), tabUrl(origin, "Second"))
+            yield* Effect.scoped(Effect.gen(function*() {
+              const browser = yield* Browser.Browser
+              const pages = yield* browser.pages
+              assert.isAbove(pages.length, 0, "the attached browser lists its open tabs")
+              const tab = yield* pages[0]!.control
+              yield* tab.goto(`data:text/html,${encodeURIComponent("<h1>Adopted</h1>")}`)
+              assert.strictEqual(yield* tab.getByRole("heading").readText, "Adopted")
+            })).pipe(Effect.provide(attached))
+          }), timeout)
 
         it.effect("isolates certificate acceptance in new contexts of an attached browser", () =>
           Effect.gen(function*() {

@@ -13,17 +13,21 @@ import {
   Expect,
   Page,
   PageClock,
+  Popup,
   Route,
   UncaughtException,
   UserContext
 } from "@usestrider/browser"
+import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Headers from "effect/http/Headers"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import type * as Layer from "effect/Layer"
+import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import type * as Scope from "effect/Scope"
@@ -33,9 +37,18 @@ import type * as net from "node:net"
 import * as os from "node:os"
 import * as path from "node:path"
 import { site, tlsSite } from "../adapter/harness.ts"
-import { responseRouteInFlight, status, supports } from "./capabilities.ts"
+import { cachesFetches, responseRouteInFlight, status, supports, workerFetchesBypassCache } from "./capabilities.ts"
+import * as SharedContext from "./sharedContext.ts"
 
 const timeout = 60_000
+
+/** The error `effect` failed with, or an assertion that names what succeeded. */
+const failure = <A, E, R>(effect: Effect.Effect<A, E, R>, what: string) =>
+  Effect.flatMap(Effect.exit(effect), (exit) => {
+    if (Exit.isSuccess(exit)) return Effect.die(new Error(`${what} succeeded`))
+    const error = Cause.findErrorOption(exit.cause)
+    return Option.isSome(error) ? Effect.succeed(error.value) : Effect.die(Cause.squash(exit.cause))
+  })
 
 const fixtureUrl = (origin: string, html: string) => `${origin}/fixture?html=${encodeURIComponent(html)}`
 
@@ -103,6 +116,53 @@ const crossSiteFrame = Effect.fnUntraced(function*(
 })
 
 const json = (value: unknown) => HttpServerResponse.jsonUnsafe(value)
+
+/**
+ * A page that says whether its inline script ran and whether a script its policy allows could `eval`: under the
+ * site's `/csp`, `blocked` and `refused` unless the policy is bypassed.
+ */
+const cspProbe =
+  `<pre id="inline">blocked</pre><pre id="eval">pending</pre><script>document.getElementById('inline').textContent = 'ran'</script><script src="/eval.js"></script>`
+
+const cspOutcome = (page: Page.Page) =>
+  Effect.all([page.locator("#inline").readText, page.locator("#eval").readText]).pipe(
+    Effect.map((texts) => texts.join(","))
+  )
+
+/**
+ * Runs an effect with a logger that also keeps the messages of its warnings and errors, so a case can check that
+ * a release logged none.
+ */
+const withWarnings = Effect.fnUntraced(function*<A, E, R>(effect: Effect.Effect<A, E, R>) {
+  const warnings: Array<string> = []
+  const loggers = yield* Logger.CurrentLoggers
+  const logger = Logger.make((entry) => {
+    if (entry.logLevel === "Warn" || entry.logLevel === "Error") {
+      warnings.push(
+        (Array.isArray(entry.message) ? entry.message : [entry.message]).map((part) =>
+          typeof part === "string" ? part : String(part)
+        ).join(" ")
+      )
+    }
+    for (const existing of loggers) existing.log(entry)
+  })
+  const value = yield* effect.pipe(Effect.provideService(Logger.CurrentLoggers, new Set([logger])))
+  return { value, warnings }
+})
+
+/** Opens a popup from a `target=_blank` link on the page, and returns it once it opens. */
+const openPopup = Effect.fnUntraced(function*(page: Page.Page, origin: string) {
+  yield* page.goto(
+    fixtureUrl(origin, `<a target="_blank" href="${fixtureUrl(origin, "<h1>Popup</h1>")}">Open popup</a>`)
+  )
+  const opened = yield* Popup.next(page)
+  yield* page.getByRole("link", { name: "Open popup" }).click()
+  const popup = yield* opened
+  yield* popup.getByRole("heading").pipe(Expect.toHaveText("Popup"))
+  return popup
+})
+
+const size = (page: Page.Page) => page.evaluateInMainWorld(() => [innerWidth, innerHeight] as const)
 
 export const declarations = (
   name: "Chromium" | "Firefox" | "WebKit",
@@ -189,6 +249,237 @@ export const declarations = (
           const gone = yield* read.viewportSize.pipe(Effect.flip)
           assert.strictEqual(gone._tag, "TargetGone")
         })), timeout)
+
+      // ── Viewport releases with a popup open ──
+
+      it.effect("releases a page's own context's viewport promptly after it opened a popup", () =>
+        Effect.gen(function*() {
+          if (!(yield* supports("emulation.viewport")) || !(yield* supports("popups.opener"))) {
+            return
+          }
+          const { origin } = yield* site
+          const { warnings } = yield* withWarnings(Effect.gen(function*() {
+            const released = yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage({ emulation: { viewport: { width: 1280, height: 720 } } })
+              const popup = yield* openPopup(page, origin)
+              assert.deepStrictEqual(yield* size(popup), [1280, 720])
+              return Date.now()
+            }))
+            const elapsed = Date.now() - released
+            assert.isBelow(elapsed, 5_000, `the scope's release took ${elapsed} ms`)
+          }))
+          assert.deepStrictEqual(
+            warnings.filter((warning) =>
+              warning.includes("Failed to release")
+            ),
+            []
+          )
+        }), timeout)
+
+      it.effect("releases a context's viewport while a popup is open, giving the popup its own size back", () =>
+        Effect.gen(function*() {
+          if (!(yield* supports("emulation.viewport")) || !(yield* supports("popups.opener"))) {
+            return
+          }
+          const { origin } = yield* site
+          const { warnings } = yield* withWarnings(Effect.scoped(Effect.gen(function*() {
+            const context = yield* Browser.newContext()
+            const page = yield* context.newPage
+            const natural = yield* size(page)
+            const declared = yield* context.emulate({ viewport: { width: 640, height: 480 } })
+            const popup = yield* openPopup(page, origin)
+            assert.deepStrictEqual(yield* size(popup), [640, 480])
+            const started = Date.now()
+            yield* declared.remove
+            const elapsed = Date.now() - started
+            assert.isBelow(elapsed, 5_000, `the viewport's release took ${elapsed} ms`)
+            assert.deepStrictEqual(yield* popup.viewportSize, Option.none())
+            assert.deepStrictEqual(yield* size(popup), natural)
+            assert.deepStrictEqual(yield* size(page), natural)
+          })))
+          assert.deepStrictEqual(
+            warnings.filter((warning) =>
+              warning.includes("Failed to release")
+            ),
+            []
+          )
+        }), timeout)
+
+      it.effect("releases a context's viewport while a popup in a window of its own is open", () =>
+        Effect.gen(function*() {
+          if (!(yield* supports("emulation.viewport")) || !(yield* supports("popups.opener"))) {
+            return
+          }
+          const { origin } = yield* site
+          const { warnings } = yield* withWarnings(Effect.scoped(Effect.gen(function*() {
+            const context = yield* Browser.newContext()
+            const page = yield* context.newPage
+            const declared = yield* context.emulate({ viewport: { width: 640, height: 480 } })
+            const target = fixtureUrl(origin, "<h1>Popup</h1>")
+            yield* page.goto(fixtureUrl(
+              origin,
+              `<button onclick="window.open('${target}', '_blank', 'width=400,height=300')">Open popup</button>`
+            ))
+            const opened = yield* Popup.next(page)
+            yield* page.getByRole("button", { name: "Open popup" }).click()
+            const popup = yield* opened
+            yield* popup.getByRole("heading").pipe(Expect.toHaveText("Popup"))
+            assert.deepStrictEqual(yield* size(popup), [640, 480])
+            const started = Date.now()
+            yield* declared.remove
+            const elapsed = Date.now() - started
+            assert.isBelow(elapsed, 5_000, `the viewport's release took ${elapsed} ms`)
+            assert.deepStrictEqual(yield* popup.viewportSize, Option.none())
+          })))
+          assert.deepStrictEqual(
+            warnings.filter((warning) =>
+              warning.includes("Failed to release")
+            ),
+            []
+          )
+          if (name === "Chromium") {
+            // Nothing in the popup's window records its size, so its restore isn't confirmed
+            assert.isTrue(warnings.some((warning) =>
+              warning.includes("could not be verified")
+            ))
+          }
+        }), timeout)
+
+      it.effect("releases a context's viewport after a popup in its own window opens a tab", () =>
+        Effect.gen(function*() {
+          if (!(yield* supports("emulation.viewport")) || !(yield* supports("popups.opener"))) {
+            return
+          }
+          const { origin } = yield* site
+          const { warnings } = yield* withWarnings(Effect.scoped(Effect.gen(function*() {
+            const context = yield* Browser.newContext()
+            const page = yield* context.newPage
+            const declared = yield* context.emulate({ viewport: { width: 640, height: 480 } })
+            const target = fixtureUrl(origin, "<h1>Popup</h1>")
+            yield* page.goto(fixtureUrl(
+              origin,
+              `<button onclick="window.open('${target}', '_blank', 'width=400,height=300')">Open popup</button>`
+            ))
+            const opened = yield* Popup.next(page)
+            yield* page.getByRole("button", { name: "Open popup" }).click()
+            const popup = yield* opened
+            yield* popup.getByRole("heading").pipe(Expect.toHaveText("Popup"))
+            assert.deepStrictEqual(yield* size(popup), [640, 480])
+            const nested = yield* openPopup(popup, origin)
+            assert.deepStrictEqual(yield* size(nested), [640, 480])
+            const started = Date.now()
+            yield* declared.remove
+            const elapsed = Date.now() - started
+            assert.isBelow(elapsed, 5_000, `the viewport's release took ${elapsed} ms`)
+            assert.deepStrictEqual(yield* popup.viewportSize, Option.none())
+            assert.deepStrictEqual(yield* nested.viewportSize, Option.none())
+            assert.notDeepEqual(yield* size(nested), [640, 480])
+          })))
+          assert.deepStrictEqual(
+            warnings.filter((warning) =>
+              warning.includes("Failed to release")
+            ),
+            []
+          )
+          // The popup window's restore isn't confirmed; the tab takes the original page's size and confirms it
+          assert.strictEqual(
+            warnings.filter((warning) =>
+              warning.includes("could not be verified")
+            ).length,
+            name === "Chromium" ? 1 : 0
+          )
+        }), timeout)
+
+      it.effect("releases a context's viewport after a popup window opens a tab once the original page closed", () =>
+        Effect.gen(function*() {
+          if (!(yield* supports("emulation.viewport")) || !(yield* supports("popups.opener"))) {
+            return
+          }
+          const { origin } = yield* site
+          const { warnings } = yield* withWarnings(Effect.scoped(Effect.gen(function*() {
+            const context = yield* Browser.newContext()
+            const page = yield* context.newPage
+            const declared = yield* context.emulate({ viewport: { width: 640, height: 480 } })
+            const target = fixtureUrl(origin, "<h1>Popup</h1>")
+            yield* page.goto(fixtureUrl(
+              origin,
+              `<button onclick="window.open('${target}', '_blank', 'width=400,height=300')">Open popup</button>`
+            ))
+            const opened = yield* Popup.next(page)
+            yield* page.getByRole("button", { name: "Open popup" }).click()
+            const popup = yield* opened
+            yield* popup.getByRole("heading").pipe(Expect.toHaveText("Popup"))
+            yield* page.close()
+            yield* popup.activate
+            // The tab can't join the popup's window, so it opens alone in a new one
+            const tab = yield* openPopup(popup, origin)
+            assert.deepStrictEqual(yield* size(tab), [640, 480])
+            const started = Date.now()
+            yield* declared.remove
+            const elapsed = Date.now() - started
+            assert.isBelow(elapsed, 5_000, `the viewport's release took ${elapsed} ms`)
+            assert.deepStrictEqual(yield* tab.viewportSize, Option.none())
+          })))
+          assert.deepStrictEqual(
+            warnings.filter((warning) =>
+              warning.includes("Failed to release")
+            ),
+            []
+          )
+          if (name === "Chromium") {
+            // The tab measured the size it inherited before its window laid it out, so its own size is unknown
+            assert.isTrue(warnings.some((warning) =>
+              warning.includes("could not be verified")
+            ))
+          }
+        }), timeout)
+
+      it.effect(
+        "releases a context's viewport after a popup window opens a tab with mobile emulation once the original page closed",
+        () =>
+          Effect.gen(function*() {
+            if (!(yield* supports("emulation.viewport.mobile")) || !(yield* supports("popups.opener"))) {
+              return
+            }
+            const { origin } = yield* site
+            const { warnings } = yield* withWarnings(Effect.scoped(Effect.gen(function*() {
+              const context = yield* Browser.newContext()
+              const page = yield* context.newPage
+              const declared = yield* context.emulate({ viewport: { width: 640, height: 480, mobile: true } })
+              const target = fixtureUrl(origin, "<h1>Popup</h1>")
+              yield* page.goto(fixtureUrl(
+                origin,
+                `<button onclick="window.open('${target}', '_blank', 'width=400,height=300')">Open popup</button>`
+              ))
+              const opened = yield* Popup.next(page)
+              yield* page.getByRole("button", { name: "Open popup" }).click()
+              const popup = yield* opened
+              yield* popup.getByRole("heading").pipe(Expect.toHaveText("Popup"))
+              yield* page.close()
+              yield* popup.activate
+              // The tab can't join the popup's window, so it opens alone in a new one
+              const tab = yield* openPopup(popup, origin)
+              const started = Date.now()
+              yield* declared.remove
+              const elapsed = Date.now() - started
+              assert.isBelow(elapsed, 5_000, `the viewport's release took ${elapsed} ms`)
+              assert.deepStrictEqual(yield* tab.viewportSize, Option.none())
+            })))
+            assert.deepStrictEqual(
+              warnings.filter((warning) =>
+                warning.includes("Failed to release")
+              ),
+              []
+            )
+            if (name === "Chromium") {
+              // The tab measured the size it inherited before its window laid it out, so its own size is unknown
+              assert.isTrue(warnings.some((warning) =>
+                warning.includes("could not be verified")
+              ))
+            }
+          }),
+        timeout
+      )
 
       // ── Routes ──
 
@@ -476,6 +767,212 @@ export const declarations = (
           }))
         }), timeout)
 
+      // A request a route continues goes to the server, a cacheable one too: the browser looks in its cache only
+      // after the pause, so a cache hit would answer it there, and the server would never see it
+      it.effect("sends each fetch of a cacheable URL a page's route continues to the server", () =>
+        Effect.gen(function*() {
+          const { origin, served } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const route = yield* page.route(`${origin}/cached.js*`, () =>
+              Route.continue)
+            const result = yield* run(
+              page,
+              origin,
+              `const read = () => fetch('/cached.js?page').then((r) => r.status); return [await read(), await read()]`
+            )
+            assert.deepStrictEqual(result, [200, 200])
+            const requested = served.filter((request) =>
+              request.path === "/cached.js?page"
+            )
+            assert.deepStrictEqual({ routed: yield* route.hits, served: requested.length }, { routed: 2, served: 2 })
+          }))
+        }), timeout)
+
+      it.effect(
+        "sends each fetch of a cacheable URL a context's route continues to the server, on a page opened after it",
+        () =>
+          Effect.gen(function*() {
+            const { origin, served } = yield* site
+            yield* Effect.scoped(Effect.gen(function*() {
+              const context = yield* Browser.newContext()
+              const route = yield* context.route(`${origin}/cached.js*`, () =>
+                Route.continue)
+              const page = yield* context.newPage
+              const result = yield* run(
+                page,
+                origin,
+                `const read = () => fetch('/cached.js?context').then((r) => r.status); return [await read(), await read()]`
+              )
+              assert.deepStrictEqual(result, [200, 200])
+              const requested = served.filter((request) =>
+                request.path === "/cached.js?context"
+              )
+              assert.deepStrictEqual({ routed: yield* route.hits, served: requested.length }, { routed: 2, served: 2 })
+            }))
+          }),
+        timeout
+      )
+
+      it.effect("sends each fetch of a cacheable URL from a new cross-site frame to the server", () =>
+        Effect.gen(function*() {
+          const { crossSite, origin, served } = yield* site
+          const page = yield* Browser.newPage()
+          const route = yield* page.route(`${crossSite}/cached.js*`, () =>
+            Route.continue)
+          const child = fixtureUrl(
+            crossSite,
+            `<script>(async () => { const read = () => fetch('/cached.js?frame').then((r) => r.status); parent.postMessage([await read(), await read()], '*') })()</script>`
+          )
+          const result = yield* run(
+            page,
+            origin,
+            `return new Promise((resolve) => { addEventListener('message', (event) => resolve(event.data), { once: true }); const frame = document.createElement('iframe'); frame.src = ${
+              JSON.stringify(child)
+            }; document.body.append(frame) })`
+          )
+          assert.deepStrictEqual(result, [200, 200])
+          assert.deepStrictEqual({
+            routed: yield* route.hits,
+            served: served.filter((request) =>
+              request.path === "/cached.js?frame"
+            ).length
+          }, { routed: 2, served: 2 })
+        }), timeout)
+
+      for (const scope of ["page", "context"] as const) {
+        it.effect(
+          `sends each fetch of a cacheable URL from a dedicated worker to the server while a ${scope} route is active`,
+          () =>
+            Effect.gen(function*() {
+              const { origin, served } = yield* site
+              const page = yield* Browser.newPage()
+              yield* (scope === "page" ? page : page.context).route(`${origin}/cached.js*`, () =>
+                Route.continue)
+              const script =
+                `onmessage = async ({ data }) => { const read = () => fetch(data).then((r) => r.status); postMessage([await read(), await read()]) }`
+              const result = yield* run(
+                page,
+                origin,
+                `return new Promise((resolve, reject) => { const worker = new Worker(URL.createObjectURL(new Blob([${
+                  JSON.stringify(script)
+                }], { type: 'text/javascript' }))); worker.onmessage = ({ data }) => { worker.terminate(); resolve(data) }; worker.onerror = reject; worker.postMessage(location.origin + '/cached.js?worker-${scope}') })`
+              )
+              assert.deepStrictEqual(result, [200, 200])
+              assert.strictEqual(
+                served.filter((request) =>
+                  request.path === `/cached.js?worker-${scope}`
+                ).length,
+                workerFetchesBypassCache[name] ? 2 : 1
+              )
+            }),
+          timeout
+        )
+      }
+
+      it.effect("answers a cacheable URL from the cache again once its page's last route is removed", () =>
+        Effect.gen(function*() {
+          const { origin, served } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const fetched = () =>
+              served.filter((request) =>
+                request.path === "/cached.js?released"
+              ).length
+            const read = `return fetch('/cached.js?released').then((r) => r.status)`
+            yield* Effect.scoped(Effect.gen(function*() {
+              yield* page.route(`${origin}/cached.js*`, () =>
+                Route.continue)
+              assert.strictEqual(yield* run(page, origin, read), 200)
+            }))
+            assert.strictEqual(yield* run(page, origin, read), 200)
+            const before = fetched()
+            assert.strictEqual(yield* run(page, origin, read), 200)
+            assert.strictEqual(fetched(), cachesFetches[name] ? before : before + 1)
+          }))
+        }), timeout)
+
+      it.effect(
+        "sends each fetch of a cacheable URL to the server from a document whose navigation was held as its route was declared",
+        () =>
+          Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            let arrived!: () => void
+            const arrival = new Promise<void>((resolve) => {
+              arrived = resolve
+            })
+            let release!: () => void
+            let served = 0
+            const server = yield* Effect.acquireRelease(
+              Effect.promise(() =>
+                new Promise<http.Server>((resolve, reject) => {
+                  const server = http.createServer((request, response) => {
+                    if (request.url === "/cached.js") {
+                      served++
+                      response.writeHead(200, { "content-type": "text/javascript", "cache-control": "max-age=3600" })
+                      response.end("// cached")
+                      return
+                    }
+                    release = () => {
+                      response.writeHead(200, { "content-type": "text/html", "cache-control": "no-store" })
+                      response.end(
+                        `<pre id="out">pending</pre><script>(async () => { const read = () => fetch('/cached.js').then((r) => r.status); return [await read(), await read()] })().then((value) => { document.getElementById('out').textContent = JSON.stringify(value) })</script>`
+                      )
+                    }
+                    arrived()
+                  })
+                  server.once("error", reject)
+                  server.listen(0, "127.0.0.1", () =>
+                    resolve(server))
+                })
+              ),
+              (server) =>
+                Effect.promise(() =>
+                  new Promise<void>((resolve) => {
+                    server.close(() =>
+                      resolve()
+                    )
+                    server.closeAllConnections()
+                  })
+                )
+            )
+            const origin = `http://127.0.0.1:${(server.address() as net.AddressInfo).port}`
+            const navigation = yield* page.goto(`${origin}/held`).pipe(Effect.forkChild)
+            yield* Effect.promise(() => arrival).pipe(Effect.timeout("10 seconds"))
+            const route = yield* page.route(`${origin}/cached.js`, () => Route.continue)
+            release()
+            yield* Fiber.join(navigation)
+            const out = page.locator("#out")
+            yield* Expect.that(out.readText, Condition.make("finished", (text: string) => text !== "pending"))
+            assert.deepStrictEqual(JSON.parse(yield* out.readText), [200, 200])
+            assert.deepStrictEqual({ routed: yield* route.hits, served }, { routed: 2, served: 2 })
+          }),
+        timeout
+      )
+
+      it.effect(
+        "answers a cacheable URL from the cache in a context without routes while another context's route is in force",
+        () =>
+          Effect.gen(function*() {
+            const { origin, served } = yield* site
+            yield* Effect.scoped(Effect.gen(function*() {
+              const routed = yield* Browser.newContext()
+              yield* routed.route(`${origin}/cached.js*`, () => Route.continue)
+              const other = yield* Browser.newContext()
+              const page = yield* other.newPage
+              const result = yield* run(
+                page,
+                origin,
+                `const read = () => fetch('/cached.js?other').then((r) => r.status); return [await read(), await read()]`
+              )
+              assert.deepStrictEqual(result, [200, 200])
+              const requested = served.filter((request) => request.path === "/cached.js?other")
+              assert.strictEqual(requested.length, cachesFetches[name] ? 1 : 2)
+            }))
+          }),
+        timeout
+      )
+
       it.effect("rejects an invalid HTTP credential origin without exposing credentials", () =>
         Effect.gen(function*() {
           const error = yield* Browser.newContext({
@@ -518,10 +1015,8 @@ export const declarations = (
                 password: Redacted.make("secret")
               }
             })
-            yield* canceled.context.route("**", () =>
-              Route.fallthrough, { phase: "auth" })
-            const cancel = yield* canceled.route("**", () =>
-              Route.continue, { phase: "auth" })
+            yield* canceled.context.route("**", () => Route.fallthrough, { phase: "auth" })
+            const cancel = yield* canceled.route("**", () => Route.continue, { phase: "auth" })
             yield* canceled.goto(`${origin}/auth`)
             yield* canceled.getByText("who are you?").pipe(Expect.toBeVisible)
             yield* cancel.remove
@@ -626,16 +1121,13 @@ export const declarations = (
                   }
                 })
                 server.once("error", reject)
-                server.listen(0, "127.0.0.1", () =>
-                  resolve(server))
+                server.listen(0, "127.0.0.1", () => resolve(server))
               })
             ),
             (server) =>
               Effect.promise(() =>
                 new Promise<void>((resolve) => {
-                  server.close(() =>
-                    resolve()
-                  )
+                  server.close(() => resolve())
                   server.closeAllConnections()
                 })
               )
@@ -657,8 +1149,7 @@ export const declarations = (
             const page = yield* Browser.newPage()
             const registered = page.route(
               `${origin}/auth`,
-              () =>
-                Route.provideCredentials({ username: "strider", password: Redacted.make("secret") }),
+              () => Route.provideCredentials({ username: "strider", password: Redacted.make("secret") }),
               {
                 phase: "auth"
               }
@@ -682,8 +1173,7 @@ export const declarations = (
           }
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
-            yield* page.route(`${origin}/auth`, () =>
-              Route.continue, { phase: "auth" })
+            yield* page.route(`${origin}/auth`, () => Route.continue, { phase: "auth" })
             yield* page.goto(`${origin}/auth`)
             yield* page.getByText("who are you?").pipe(Expect.toBeVisible)
           }))
@@ -1064,6 +1554,28 @@ export const declarations = (
           }))
         }), timeout)
 
+      it.effect("reports a fine pointer with hover to a page of a default context", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            // Strider drives the page with a mouse, so a desktop page sees one, headless or not
+            assert.deepStrictEqual(
+              yield* run(
+                page,
+                origin,
+                "return ['(hover: hover)', '(any-hover: hover)', '(pointer: fine)', '(any-pointer: fine)'].map((query) => [query, matchMedia(query).matches])"
+              ),
+              [
+                ["(hover: hover)", true],
+                ["(any-hover: hover)", true],
+                ["(pointer: fine)", true],
+                ["(any-pointer: fine)", true]
+              ]
+            )
+          }))
+        }), timeout)
+
       it.effect("emulates each field, or fails naming what the backend can't", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -1187,6 +1699,51 @@ export const declarations = (
             }
           }))
         }), timeout)
+
+      // ── Content Security Policy ──
+
+      it.effect(
+        "runs inline scripts and eval under a forbidding policy in a context that bypasses it, where the backend can",
+        () =>
+          Effect.gen(function*() {
+            const { crossSite, origin } = yield* site
+            if (!(yield* supports("bypassCSP"))) {
+              const error = yield* Browser.newContext({ bypassCSP: true }).pipe(
+                Deadline.within("1 second"),
+                Effect.flip,
+                Effect.scoped
+              )
+              assert(UserContext.isUserContextError(error) && error.reason._tag === "Unsupported", String(error))
+              return
+            }
+            yield* Effect.scoped(Effect.gen(function*() {
+              const bypassing = yield* Browser.newContext({ bypassCSP: true })
+              const page = yield* bypassing.newPage
+              yield* page.goto(`${origin}/csp?html=${encodeURIComponent(cspProbe)}`)
+              assert.strictEqual(yield* cspOutcome(page), "ran,ran")
+              // A cross-site navigation, and a cross-site iframe, each in a renderer of its own on Chromium
+              yield* page.goto(`${crossSite}/csp?html=${encodeURIComponent(cspProbe)}`)
+              assert.strictEqual(yield* cspOutcome(page), "ran,ran")
+              yield* page.goto(fixtureUrl(
+                origin,
+                `<pre id="out">pending</pre><script>addEventListener('message', (e) => { document.getElementById('out').textContent = e.data })</script><iframe src="${crossSite}/csp?html=${
+                  encodeURIComponent(cspProbe)
+                }"></iframe>`
+              ))
+              yield* Expect.that(
+                page.locator("#out").readText,
+                Condition.make("reported", (text: string) =>
+                  text !== "pending")
+              )
+              assert.strictEqual(yield* page.locator("#out").readText, "ran,ran")
+              // A context in the same browser that doesn't ask keeps the policy
+              const other = yield* Browser.newPage()
+              yield* other.goto(`${origin}/csp?html=${encodeURIComponent(cspProbe)}`)
+              assert.strictEqual(yield* cspOutcome(other), "blocked,refused")
+            }))
+          }),
+        timeout
+      )
 
       it.effect("creates a context with permissions and emulated focus, where the backend can", () =>
         Effect.gen(function*() {
@@ -1350,6 +1907,324 @@ export const declarations = (
             const read = "return new Date().toISOString()"
             assert.strictEqual(yield* run(first, origin, read), "2026-03-03T04:03:03.000Z")
             assert.strictEqual(yield* run(second, origin, read), "2026-03-03T04:03:03.000Z")
+          }))
+        }), timeout)
+
+      it.effect("waits for every document when a timer throws a value without a string conversion", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const first = yield* Browser.newPage()
+          yield* first.context.clock.install({ mode: "controlled", at: 1000 })
+          const second = yield* first.context.newPage
+          const { origin } = yield* site
+          yield* second.goto(fixtureUrl(origin, "<p>second</p>"))
+          yield* first.evaluateInMainWorld(() => {
+            setTimeout(() => {
+              throw Object.create(null)
+            }, 1)
+          })
+          yield* second.evaluateInMainWorld(() => {
+            let count = 0
+            setInterval(() =>
+              Reflect.set(window, "__count", ++count), 1)
+          })
+          const error = yield* failure(first.context.clock.adjust(1000), "adjust over a throwing value")
+          assert.deepStrictEqual(
+            yield* second.evaluateInMainWorld(() => [Date.now(), Reflect.get(window, "__count")]),
+            [2000, 1000]
+          )
+          assert(PageClock.isPageClockError(error) && error.reason._tag === "EvaluationThrown", String(error))
+        })), timeout)
+
+      // Playwright's controlled clock is the reference for the timeline's rules in these cases
+    })
+
+    // Cases that keep nothing in their context share one
+    layer(SharedContext.layer(backend), { excludeTestServices: true, timeout })((suite) => {
+      const it = SharedContext.guard(suite)
+
+      it.effect("runs a timer scheduled at the end of a long chain of messages", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const page = yield* SharedContext.newPage
+          yield* page.clock.install({ mode: "controlled", at: 1000 })
+          yield* page.evaluateInMainWorld(() => {
+            // Window messages and port messages, handed on one after another
+            const channel = new MessageChannel()
+            let messages = 0
+            const next = () => {
+              if (++messages === 200) {
+                setTimeout(() =>
+                  Reflect.set(window, "__done", true), 100)
+              } else if (messages % 2 === 0) {
+                channel.port2.postMessage(null)
+              } else window.postMessage("clock-chain", "*")
+            }
+            channel.port1.onmessage = next
+            addEventListener("message", (event) => {
+              if (event.data === "clock-chain") {
+                next()
+              }
+            })
+            setTimeout(next, 100)
+          })
+          yield* page.clock.adjust(1000)
+          assert.strictEqual(
+            yield* page.evaluateInMainWorld(() =>
+              Reflect.get(window, "__done") === true
+            ),
+            true
+          )
+        })), timeout)
+
+      it.effect(
+        "times out over a page that posts messages without end, after running its timers, and keeps its clock usable",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            const { origin } = yield* site
+            yield* page.clock.install({ mode: "controlled", at: 1000 })
+            yield* page.goto(fixtureUrl(origin, `<p id="later">pending</p>`))
+            yield* page.evaluateInMainWorld(() => {
+              const channel = new MessageChannel()
+              channel.port1.onmessage = () => {
+                if (Reflect.get(window, "__stop") !== true) {
+                  channel.port2.postMessage(null)
+                }
+              }
+              setTimeout(() =>
+                channel.port2.postMessage(null), 100)
+              setTimeout(() => {
+                document.getElementById("later")!.textContent = "fired"
+              }, 500)
+            })
+            const error = yield* failure(
+              page.clock.adjust(1000).pipe(Deadline.within("1 second")),
+              "adjust over endless messages"
+            )
+            assert(Deadline.isTimeout(error), String(error))
+            // Past the deadline, the page stops waiting for its messages and runs the remaining timers
+            yield* Expect.that(
+              page.locator("#later").readText,
+              Condition.make("fired", (text: string) =>
+                text === "fired")
+            )
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() => {
+                Reflect.set(window, "__stop", true)
+                return Date.now()
+              }),
+              2000
+            )
+            // The clock is usable again: the next adjustment runs once the page stops posting
+            yield* page.clock.adjust(1)
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() =>
+                Date.now()
+              ),
+              2001
+            )
+          })),
+        timeout
+      )
+
+      it.effect("starts controlled performance time when replacing a fixed clock", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const page = yield* SharedContext.newPage
+          const fixed = yield* page.clock.install({ mode: "fixed", at: 500 })
+          yield* fixed.remove
+          yield* page.clock.install({ mode: "controlled", at: 1000 })
+          yield* page.clock.adjust(100)
+          assert.deepStrictEqual(
+            yield* page.evaluateInMainWorld(() => [Date.now(), performance.now(), performance.timeOrigin]),
+            [1100, 100, 1000]
+          )
+        })), timeout)
+
+      it.effect("keeps resumed animation frame timestamps on the performance timeline", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const page = yield* SharedContext.newPage
+          const { origin } = yield* site
+          yield* page.goto(fixtureUrl(origin, "<p>frame</p>"))
+          yield* page.clock.install({ mode: "controlled", at: 1000 })
+          yield* page.clock.adjust(1_000_000)
+          yield* page.evaluateInMainWorld(() => {
+            Reflect.set(
+              window,
+              "__frame",
+              new Promise((resolve) => {
+                requestAnimationFrame((at) =>
+                  resolve([at, performance.now()])
+                )
+              })
+            )
+          })
+          yield* page.clock.resume
+          const pending = yield* page.evaluateInMainWorld(() =>
+            Reflect.get(window, "__frame") as Promise<[number, number]>
+          )
+          const next = yield* page.evaluateInMainWorld(() =>
+            new Promise<[number, number]>((resolve) => {
+              requestAnimationFrame((at) =>
+                resolve([at, performance.now()])
+              )
+            })
+          )
+          for (const [at, now] of [pending, next]) {
+            assert(
+              at !== undefined && now !== undefined && at >= 1_000_000 && at <= now,
+              `frame ${at}, performance.now ${now}`
+            )
+          }
+        })), timeout)
+
+      it.effect("runs the page's tasks between the timers an adjustment fires", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.clock.install({ mode: "controlled", at: "2026-01-01T00:00:00Z" })
+            yield* page.goto(fixtureUrl(origin, "<p>clock</p>"))
+            // A timer hands off through a real task, which sets a timer due within the same adjustment
+            yield* page.evaluateInMainWorld(() => {
+              const channel = new MessageChannel()
+              channel.port1.onmessage = () =>
+                setTimeout(() =>
+                  Reflect.set(window, "__done", true), 100)
+              setTimeout(() =>
+                channel.port2.postMessage(null), 100)
+            })
+            yield* page.clock.adjust("1 second")
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() =>
+                Reflect.get(window, "__done") === true
+              ),
+              true
+            )
+          }))
+        }), timeout)
+
+      it.effect("gives a 0 ms timer set inside a timer at least 1 ms", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.clock.install({ mode: "controlled", at: "2026-01-01T00:00:00Z" })
+            yield* page.goto(fixtureUrl(origin, "<p>clock</p>"))
+            yield* page.evaluateInMainWorld(() => {
+              const log: Array<string> = []
+              Reflect.set(window, "__log", log)
+              setTimeout(() => {
+                log.push("outer")
+                setTimeout(() =>
+                  log.push("inner"), 0)
+              }, 1000)
+            })
+            const log = page.evaluateInMainWorld(() => [...(Reflect.get(window, "__log") as Array<string>)])
+            yield* page.clock.adjust(1000)
+            assert.deepStrictEqual(yield* log, ["outer"])
+            yield* page.clock.adjust(1)
+            assert.deepStrictEqual(yield* log, ["outer", "inner"])
+          }))
+        }), timeout)
+
+      it.effect("fails an adjustment with a timer's error, after running the rest and reporting it", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.clock.install({ mode: "controlled", at: "2026-01-01T00:00:00Z" })
+            // The page's own script: Chromium hides from the page the errors of functions an evaluation made
+            yield* page.goto(fixtureUrl(
+              origin,
+              `<script>
+                window.__reported = []
+                addEventListener("error", (event) => window.__reported.push(String(event.error?.message)))
+                setTimeout(() => { throw new Error("first") }, 100)
+                setTimeout(() => { throw new Error("second") }, 200)
+                setTimeout(() => { window.__after = true }, 300)
+              </script>`
+            ))
+            const error = yield* failure(page.clock.adjust("1 second"), "adjust over a throwing timer")
+            assert(PageClock.isPageClockError(error), String(error))
+            assert(error.reason._tag === "EvaluationThrown", String(error))
+            assert.strictEqual(error.reason.exception.message, "first")
+            assert.deepStrictEqual(
+              yield* page.evaluateInMainWorld(() => [
+                Reflect.get(window, "__reported"),
+                Reflect.get(window, "__after") === true,
+                new Date().toISOString()
+              ]),
+              [["first", "second"], true, "2026-01-01T00:00:01.000Z"]
+            )
+          }))
+        }), timeout)
+
+      it.effect("rejects durations that aren't finite, and negative adjustments", () =>
+        Effect.gen(function*() {
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            for (const by of [Number.NaN, Number.POSITIVE_INFINITY]) {
+              const error = yield* failure(
+                page.clock.install({ mode: "offset", by }),
+                `install({ mode: "offset", by: ${by} })`
+              )
+              assert(Declaration.isDeclarationError(error), `offset ${by}: ${String(error)}`)
+              assert.strictEqual(error.reason._tag, "InvalidInput", `offset ${by}`)
+            }
+            yield* page.clock.install({ mode: "controlled", at: "2026-01-01T00:00:00Z" })
+            for (const by of [Number.NaN, Number.POSITIVE_INFINITY, -5]) {
+              const error = yield* failure(page.clock.adjust(by), `adjust(${by})`)
+              assert(PageClock.isPageClockError(error), `adjust ${by}: ${String(error)}`)
+              assert.strictEqual(error.reason._tag, "InvalidInput", `adjust ${by}`)
+            }
+          }))
+        }), timeout)
+
+      it.effect("keeps Date.now() a whole millisecond after a fractional adjustment or offset", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            const controlled = yield* page.clock.install({ mode: "controlled", at: 1000 })
+            yield* page.goto(fixtureUrl(origin, "<p>clock</p>"))
+            yield* page.clock.adjust(0.5)
+            // The adjustment rounds up to a whole millisecond
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() =>
+                Date.now()
+              ),
+              1001
+            )
+            yield* controlled.remove
+            const offset = yield* page.clock.install({ mode: "offset", by: 0.5 })
+            assert.deepStrictEqual(
+              yield* run(page, origin, "return [Number.isInteger(Date.now()), Number.isInteger(new Date().getTime())]"),
+              [true, true]
+            )
+            yield* offset.remove
+          }))
+        }), timeout)
+
+      it.effect("counts performance.now() from 0 where the clock reaches a document, from its timeOrigin", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.clock.install({ mode: "controlled", at: 1000 })
+            yield* page.goto(fixtureUrl(origin, "<p>clock</p>"))
+            const read = page.evaluateInMainWorld(() => [performance.now(), performance.timeOrigin])
+            assert.deepStrictEqual(yield* read, [0, 1000])
+            yield* page.clock.adjust(1000)
+            assert.deepStrictEqual(yield* read, [1000, 1000])
+            // Setting the time back moves neither; forward, it passes time, as an adjustment does
+            yield* page.clock.setTime(500)
+            assert.deepStrictEqual(yield* read, [1000, 1000])
+            yield* page.clock.setTime(3000)
+            assert.deepStrictEqual(yield* read, [3500, 1000])
+            // After resuming, it carries on in real time from there
+            yield* page.clock.resume
+            const [now, timeOrigin] = yield* read
+            assert(now! >= 3500 && now! < 3500 + 60_000, String(now))
+            assert.strictEqual(timeOrigin, 1000)
           }))
         }), timeout)
     })

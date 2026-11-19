@@ -20,7 +20,9 @@ import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as ChildProcess from "effect/process/ChildProcess"
 import * as Stream from "effect/Stream"
+import * as Tracer from "effect/Tracer"
 import * as CdpWire from "../../src/internal/cdpWire.ts"
+import * as ChromiumLauncher from "../../src/internal/chromiumLauncher.ts"
 import * as DevToolsActivePort from "../../src/internal/devToolsActivePort.ts"
 import * as ProtocolClient from "../../src/internal/protocolClient.ts"
 import { assertPinned, chromium } from "./browsers.ts"
@@ -74,6 +76,39 @@ describe("Chromium over CDP", () => {
   // The real clock: these tests wait on a real browser.
   layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
     (it) => {
+      for (const debugging of ["pipe", "port"] as const) {
+        it.effect(
+          `records the working headless pointer settings for ${debugging} launches`,
+          () =>
+            Effect.gen(function*() {
+              const spans: Array<Tracer.NativeSpan> = []
+              const tracer = Tracer.make({
+                span(options) {
+                  const span = new Tracer.NativeSpan(options)
+                  spans.push(span)
+                  return span
+                }
+              })
+              yield* Effect.scoped(Effect.gen(function*() {
+                const launcher = debugging === "pipe" ? ChromiumLauncher.launch : ChromiumLauncher.launchWithPort
+                const { transport } = yield* launcher({ executablePath: executable })
+                const cdp = yield* CdpConnection.make(transport)
+                const { page } = yield* openPage(cdp)
+                const result = yield* Runtime.evaluate({
+                  expression:
+                    "['(hover: hover)', '(any-hover: hover)', '(pointer: fine)', '(any-pointer: fine)'].every(q => matchMedia(q).matches)",
+                  returnByValue: true
+                }).pipe(Protocol.on(page))
+                assert.strictEqual(result.result.value, true)
+              })).pipe(Effect.withTracer(tracer))
+              const launch = spans.find((span) => span.name === "Chromium.launch")
+              assert(launch !== undefined)
+              assert.include(JSON.stringify(Object.fromEntries(launch.attributes)), "primaryHoverType=2")
+            }),
+          timeout
+        )
+      }
+
       it.effect("drives a page over the pipe", () =>
         Effect.gen(function*() {
           const { cdp } = yield* connect()

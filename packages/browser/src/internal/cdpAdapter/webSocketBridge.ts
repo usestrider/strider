@@ -49,6 +49,9 @@ let pending:
     >
   >
   | undefined
+// Delivers the calls and captures parked for a realm the fold didn't know yet. The fold calls it whenever it makes
+// a realm usable, as its context is created or a pending one is announced, so a call parked while the target's
+// session was held reaches the bridge once the sync folds its realm, with no later event to prompt it.
 export const flush = (state: State, target: TargetEntry): void => {
   const holders = pending?.get(target)
   if (holders === undefined) return

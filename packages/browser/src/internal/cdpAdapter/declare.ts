@@ -4,6 +4,8 @@
  * to be removed skips the release of its own file chooser, challenge, credential, download and override
  * declarations; if the removal is refused, `restoreContext` reconciles its targets with the declarations that remain.
  */
+import * as Cause from "effect/Cause"
+import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -18,6 +20,7 @@ import * as Fetch from "../../cdp/Fetch.ts"
 import * as Network from "../../cdp/Network.ts"
 import * as Page from "../../cdp/Page.ts"
 import * as Runtime from "../../cdp/Runtime.ts"
+import type * as Target from "../../cdp/Target.ts"
 import type * as Deadline from "../../Deadline.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
 import type * as Adapter from "../adapter.ts"
@@ -26,7 +29,7 @@ import * as Cleanup from "../declarationCleanup.ts"
 import * as Declarations from "../declarations.ts"
 import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
-import { contextLock } from "./state.ts"
+import { contextLock, downloadDirectory, forgetRetiredFrames } from "./state.ts"
 import { type ContextEntry, type PageEntry, placement, type State, type TargetEntry } from "./state.ts"
 import { installWebSocketGates } from "./targets.ts"
 import * as WebSocketBridge from "./webSocketBridge.ts"
@@ -221,7 +224,7 @@ const applyOverride = (
         // A tab in a context that emulates focus for its life renders only with it
         return Emulation.setFocusEmulationEnabled({ enabled: target.page?.context.focusEmulated === true }).pipe(on)
       case "CacheDisabled":
-        return Network.setCacheDisabled({ cacheDisabled: false }).pipe(on)
+        return sendCache(target, cacheDisabled(state, target, effective), on)
     }
   }
   switch (override._tag) {
@@ -265,35 +268,190 @@ const applyOverride = (
         enabled: override.enabled || target.page?.context.focusEmulated === true
       }).pipe(on)
     case "CacheDisabled":
-      return Network.setCacheDisabled({ cacheDisabled: override.disabled }).pipe(on)
+      return sendCache(target, cacheDisabled(state, target, effective), on)
   }
+}
+
+/**
+ * Whether a target's HTTP cache is off: where the `CacheDisabled` override says so, or a request- or
+ * response-phase intercept is in force for its page. Chromium looks in its HTTP cache after the request-stage
+ * pause, so a request an intercept continues would be answered from the cache, never reaching the server.
+ */
+const cacheDisabled = (
+  state: State,
+  target: TargetEntry,
+  effective: ReadonlyMap<Adapter.Override["_tag"], Adapter.Override>
+) => {
+  const override = effective.get("CacheDisabled")
+  if (override?._tag === "CacheDisabled" && override.disabled) return true
+  if (target.page === undefined) return false
+  const intercepts = state.registry.intercepts(placement(target.page))
+  return intercepts.request.length > 0 || intercepts.response.length > 0
+}
+
+const sendCache = (target: TargetEntry, disabled: boolean, on: Send) =>
+  Effect.suspend(() => {
+    if (target.cacheDisabled !== "unknown" && disabled === (target.cacheDisabled ?? false)) return Effect.void
+    target.cacheDisabled = disabled
+    return Network.setCacheDisabled({ cacheDisabled: disabled }).pipe(on)
+  })
+
+/** Whether a cross-document navigation is under way in a frame the target owns, or about to be. */
+const navigationPending = (state: State, target: TargetEntry) =>
+  [...state.frames.values()].some((frame) =>
+    frame.owner === target &&
+    (frame.expected.list.length > 0 || [...frame.navigations.values()].some((navigation) => !navigation.sameDocument))
+  )
+
+/**
+ * The cache setting a declaration or its release changes, sent to a live target and confirmed, except while a
+ * navigation is under way in it. The renderer answers the command, and Chromium holds the reply while a
+ * cross-process navigation is under way, until the new document commits: a route declared while the navigation
+ * waits on its server, which may wait on the caller, would never return. So the wait for the reply ends once a
+ * navigation is pending in the target; the command, written before, reaches the new document at its commit. The
+ * reply is awaited apart from the declaration, under the connection's own deadline for a command: one that fails
+ * or never comes leaves the setting unknown, so the next change sends it again. A declaration that wants the value
+ * a command still unanswered sent waits for that reply, by the same rule, rather than sending it again.
+ */
+const applyCache = (state: State, target: TargetEntry) => {
+  // Until the navigation is pending in the target, or the reply comes
+  const until = (confirmed: Fiber.Fiber<void, Protocol.ProtocolError>) =>
+    Effect.raceFirst(
+      Fiber.join(confirmed),
+      state.buffer.waitFor(() => navigationPending(state, target) || undefined)
+    )
+  return withOverrides(
+    target,
+    Effect.suspend(() => {
+      const wanted = cacheDisabled(state, target, state.registry.overrides(placement(target.page!)))
+      // A declaration that wants the value an unconfirmed command sent waits for that command's reply too
+      const outstanding = target.cacheConfirmation
+      if (outstanding !== undefined && outstanding.disabled === wanted && target.cacheDisabled === wanted) {
+        return Effect.succeed(until(outstanding.fiber))
+      }
+      let confirmation: Effect.Effect<void, Protocol.ProtocolError> = Effect.void
+      return sendCache(
+        target,
+        wanted,
+        (command) =>
+          Effect.gen(function*() {
+            // A connection already tearing down sets nothing more
+            if (state.cleanupScope.state._tag === "Closed") return
+            const reply = yield* target.session.start(command, state.cleanupScope).pipe(
+              Operation.detached,
+              Effect.provideService(ProtocolClient.CommandDeadline, Option.none())
+            )
+            const entry: { readonly disabled: boolean; fiber: Fiber.Fiber<void, Protocol.ProtocolError> } = {
+              disabled: wanted,
+              fiber: undefined!
+            }
+            entry.fiber = yield* reply.pipe(
+              Effect.tapError((error) =>
+                Effect.sync(() => {
+                  target.cacheDisabled = "unknown"
+                }).pipe(
+                  Effect.andThen(
+                    error.reason._tag === "SessionEnded"
+                      ? Effect.void
+                      : Effect.logWarning("Failed to confirm the CDP cache setting", error)
+                  )
+                )
+              ),
+              Effect.asVoid,
+              Effect.ensuring(Effect.sync(() => {
+                if (target.cacheConfirmation === entry) target.cacheConfirmation = undefined
+              })),
+              Effect.forkIn(state.cleanupScope)
+            )
+            if (entry.fiber.pollUnsafe() === undefined) target.cacheConfirmation = entry
+            confirmation = until(entry.fiber)
+          })
+      ).pipe(Effect.map(() => confirmation))
+    })
+  ).pipe(
+    Effect.flatten,
+    Effect.catchIf(
+      (error) => error._tag === "ProtocolError" && error.reason._tag === "SessionEnded",
+      () => Effect.void
+    )
+  )
 }
 
 // Two applications that overlap on a target would both remove the same identifier, which Chromium rejects the
 // second time, and the identifier one of them added would be overwritten, its script left to run in every later
 // document. So the registry is read under the target's permit, held until each identifier is recorded: in a new
 // target's gate, until the gate's scope closes, after the replies.
+//
+// Outside a gate, the write runs to its end in a fiber the connection owns, apart from the operation that asked for
+// it: each command waits for its reply under `Protocol.CommandTimeout`, not the operation's deadline, and the caller
+// waits for the write only until its own deadline. A removal that gets no reply even then may or may not have taken
+// effect, so its identifier is kept as unconfirmed, and each later write removes it again; for that identifier alone,
+// Chromium's "Script not found" settles it as removed. An add that gets no reply has no identifier to keep: if its
+// reply comes late, the protocol client's late-reply handler removes the script it installed; if none ever comes,
+// the script stays until the target ends, as Chromium has no command that lists a target's scripts. In a gate, a
+// reply the gate's scope abandons goes to the same late-reply handler.
 const scriptLock = (target: TargetEntry) => target.scriptLock ??= Semaphore.makeUnsafe(1)
 
-const applyScripts = (state: State, target: TargetEntry, page: PageEntry) =>
-  scriptLock(target).withPermits(1)(writeScripts(state, target, page))
+const applyScripts = Effect.fnUntraced(function*(state: State, target: TargetEntry, page: PageEntry) {
+  const write = scriptLock(target).withPermits(1)(writeScripts(state, target, page)).pipe(
+    Operation.detached,
+    Effect.provideService(ProtocolClient.CommandDeadline, Option.none())
+  )
+  // A connection already tearing down cannot own a new fiber; its commands end with its transport.
+  if (state.cleanupScope.state._tag === "Closed") return yield* write
+  return yield* Fiber.join(yield* write.pipe(Effect.forkIn(state.cleanupScope)))
+})
+
+/** Whether a removal failed without an answer, so may still have taken effect. */
+const unanswered = (cause: Cause.Cause<Protocol.ProtocolError>) =>
+  Cause.hasInterrupts(cause) ||
+  Option.exists(Cause.findErrorOption(cause), (error) => error.reason._tag === "NoReply")
+
+const scriptNotFound = (error: Protocol.ProtocolError) =>
+  error.reason._tag === "Rejected" && error.reason.description === "Script not found"
+
+/**
+ * Removes an init script, recorded under `key` or unconfirmed, and updates the record by the answer. A removal waits
+ * for its reply, so it is never staged: a new target's gate, a page with WebSocket routes included, starts with nothing
+ * recorded or unconfirmed, and sends none.
+ */
+const removeScript = (target: TargetEntry, identifier: string, key?: string) => {
+  const unconfirmed = target.unconfirmedScripts ??= new Set()
+  const settled = Effect.sync(() => {
+    unconfirmed.delete(identifier)
+    if (key !== undefined) target.scripts.delete(key)
+  })
+  return Page.removeScriptToEvaluateOnNewDocument({ identifier: identifier as Page.ScriptIdentifier }).pipe(
+    Protocol.on(target.session),
+    Effect.catchIf((error) => unconfirmed.has(identifier) && scriptNotFound(error), () => Effect.void),
+    Effect.onExit((exit) =>
+      Exit.isSuccess(exit)
+        ? settled
+        : unanswered(exit.cause)
+        ? Effect.sync(() => {
+          unconfirmed.add(identifier)
+          if (key !== undefined) target.scripts.delete(key)
+        })
+        : Effect.void
+    )
+  )
+}
 
 const writeScripts = Effect.fnUntraced(function*(state: State, target: TargetEntry, page: PageEntry, setup?: Setup) {
-  const on = setup?.send ?? Protocol.on(target.session)
   const bundles = state.registry.bundles(placement(page))
+  for (const identifier of Array.from(target.unconfirmedScripts ?? [])) yield* removeScript(target, identifier)
   for (const [key, identifier] of Array.from(target.scripts)) {
-    if (!bundles.has(key)) {
-      target.scripts.delete(key)
-      yield* Page.removeScriptToEvaluateOnNewDocument({ identifier: identifier as Page.ScriptIdentifier }).pipe(on)
-    }
+    if (!bundles.has(key)) yield* removeScript(target, identifier, key)
   }
   for (const [key, bundle] of bundles) {
-    if (bundle.webSockets !== undefined) yield* WebSocketBridge.prepare(state, target, bundle.webSockets)
-    const previous = target.scripts.get(key)
-    if (previous !== undefined) {
-      yield* Page.removeScriptToEvaluateOnNewDocument({ identifier: previous as Page.ScriptIdentifier }).pipe(on)
-      target.scripts.delete(key)
+    if (bundle.webSockets !== undefined) {
+      // The bridge's bindings go before its capture script, which calls them; a paused page queues them with the
+      // rest of its setup, so they reach the page before it resumes.
+      const bindings = yield* WebSocketBridge.prepare(state, target, bundle.webSockets, setup === undefined)
+      if (setup !== undefined) { for (const binding of bindings) yield* setup.send(binding) }
     }
+    const previous = target.scripts.get(key)
+    if (previous !== undefined) yield* removeScript(target, previous, key)
     const command = Page.addScriptToEvaluateOnNewDocument({
       source: bundle.source,
       ...(bundle.world._tag === "Isolated" ? { worldName: bundle.world.name } : {})
@@ -370,16 +528,84 @@ const withOverrides = <A, E, R>(target: TargetEntry, effect: Effect.Effect<A, E,
 }
 
 /**
- * The kinds a new target is configured with: those declared for its page, and focus emulation where its context
- * holds it for its life, even when no declaration of it remains.
+ * The kinds a new target is configured with: those declared for its page, focus emulation where its context
+ * holds it for its life, even when no declaration of it remains, and the cache setting where an intercept turns
+ * the cache off.
  */
-const kindsFor = (page: PageEntry, overrides: ReadonlyMap<Adapter.Override["_tag"], Adapter.Override>) => {
+const kindsFor = (
+  state: State,
+  page: PageEntry,
+  overrides: ReadonlyMap<Adapter.Override["_tag"], Adapter.Override>
+) => {
   const kinds = [...overrides.keys()]
   if (page.context.focusEmulated === true && !overrides.has("FocusEmulation")) kinds.push("FocusEmulation")
+  if (!overrides.has("CacheDisabled")) {
+    const intercepts = state.registry.intercepts(placement(page))
+    if (intercepts.request.length > 0 || intercepts.response.length > 0) kinds.push("CacheDisabled")
+  }
   return kinds
 }
 
+/** The browser window that holds a page target, read once and kept. */
+const windowOf = (state: State, target: TargetEntry) =>
+  target.windowId !== undefined
+    ? Effect.succeed(target.windowId)
+    : BrowserCdp.getWindowForTarget({ targetId: target.targetId as Target.TargetID }).pipe(
+      Protocol.on(state.root()),
+      Effect.map(({ windowId }) => {
+        target.windowId = windowId
+        return windowId
+      })
+    )
+
+type Dimensions = { readonly width: number; readonly height: number }
+
+/**
+ * A popup's original dimensions, decided at its gate, or undefined for a page with no opener, which measures its
+ * own. Chromium starts a tab's renderer at its opener's layout, which is the override's while the opener emulates a
+ * viewport, and lays it out at its window's size only once the override is cleared, so a popup's gate measures a
+ * size it may never return to. Only a page of its window says what that size is: a window that `window.open` opens
+ * as a popup holds no tabs, so a popup that shares its window with another page of its context is a tab, and tabs
+ * in one window have one size. It takes that page's recorded dimensions. A popup alone in its window, beside no page
+ * with recorded dimensions, or whose window can't be read has unknown dimensions (null), so its restore clears the
+ * override without confirming it.
+ */
+const popupBaseline = Effect.fnUntraced(function*(
+  state: State,
+  target: TargetEntry,
+  page: PageEntry
+): Effect.fn.Return<Dimensions | null | undefined> {
+  if (page.openerId === undefined) return undefined
+  const own = yield* windowOf(state, target).pipe(Effect.option)
+  if (Option.isNone(own)) return null
+  const others = [...state.targets.values()].filter((other) =>
+    other !== target && other.kind === "page" && !other.ended && other.page !== undefined &&
+    other.page.context === page.context && other.viewport !== undefined && other.viewport !== null
+  )
+  const windows = yield* Effect.forEach(
+    others,
+    (other) => windowOf(state, other).pipe(Effect.option),
+    { concurrency: "unbounded" }
+  )
+  const mate = others.find((_, index) => {
+    const window = windows[index]!
+    return Option.isSome(window) && window.value === own.value
+  })
+  return mate?.viewport ?? null
+})
+
 /** What a new page or frame gets before its scripts run: the declarations in force for its page. */
+/**
+ * The cache setting a dedicated worker starts with, written before it resumes, with the replies of its other
+ * domains: by the rule a page's follows.
+ */
+export const workerCache = (state: State, target: TargetEntry, on: Send) =>
+  Effect.suspend(() =>
+    target.page === undefined
+      ? Effect.void
+      : sendCache(target, cacheDisabled(state, target, state.registry.overrides(placement(target.page))), on)
+  )
+
 export const configureTarget = Effect.fnUntraced(
   function*(state: State, target: TargetEntry, page: PageEntry, setup?: Setup) {
     if (setup === undefined) {
@@ -389,7 +615,7 @@ export const configureTarget = Effect.fnUntraced(
           Effect.suspend(() => {
             const overrides = state.registry.overrides(placement(page))
             return Effect.forEach(
-              kindsFor(page, overrides),
+              kindsFor(state, page, overrides),
               (kind) => kind === "Viewport" ? Effect.void : applyOverride(state, target, kind, overrides),
               {
                 discard: true
@@ -410,7 +636,7 @@ export const configureTarget = Effect.fnUntraced(
           yield* (target.overrideLock ??= Semaphore.makeUnsafe(1)).takeScoped(1)
           const overrides = state.registry.overrides(placement(page))
           yield* Effect.forEach(
-            kindsFor(page, overrides),
+            kindsFor(state, page, overrides),
             (kind) => kind === "Viewport" ? Effect.void : applyOverride(state, target, kind, overrides, setup.send),
             {
               discard: true
@@ -423,11 +649,16 @@ export const configureTarget = Effect.fnUntraced(
           if (override?._tag !== "Viewport") {
             return
           }
-          // The initial blank document has no scrollbars. Queue its dimensions before changing them, without
-          // creating an isolated world whose identifier would require a renderer reply before resume.
-          yield* setup.send(Page.getLayoutMetrics(), ({ cssLayoutViewport }) => {
-            target.viewport = { width: cssLayoutViewport.clientWidth, height: cssLayoutViewport.clientHeight }
-          })
+          const baseline = yield* popupBaseline(state, target, page)
+          if (baseline !== undefined) {
+            target.viewport = baseline
+          } else {
+            // The initial blank document has no scrollbars. Queue its dimensions before changing them, without
+            // creating an isolated world whose identifier would require a renderer reply before resume.
+            yield* setup.send(Page.getLayoutMetrics(), ({ cssLayoutViewport }) => {
+              target.viewport = { width: cssLayoutViewport.clientWidth, height: cssLayoutViewport.clientHeight }
+            })
+          }
           yield* setup.send(Emulation.setDeviceMetricsOverride({
             width: override.width,
             height: override.height,
@@ -453,22 +684,32 @@ export const configureTarget = Effect.fnUntraced(
 
 const targetsInScope = (state: State, scope: Adapter.DeclarationScope) =>
   [...state.targets.values()].filter((target) =>
-    target.page !== undefined && !target.ended && (target.kind === "page" || target.kind === "iframe") &&
+    target.page !== undefined && !target.ended &&
+    (target.kind === "page" || target.kind === "iframe" || target.kind === "worker") &&
     Declarations.covers(scope, placement(target.page))
   )
 
 const applyToTarget = (state: State, declaration: Adapter.Declaration, target: TargetEntry) => {
   const page = target.page!
+  // A dedicated worker keeps a cache setting of its own, and takes no other declaration through here
+  if (target.kind === "worker") {
+    return declaration._tag === "Intercept" ||
+        (declaration._tag === "Override" && declaration.override._tag === "CacheDisabled")
+      ? applyCache(state, target)
+      : Effect.void
+  }
   switch (declaration._tag) {
     case "InitScript":
       return applyScripts(state, target, page)
     case "Intercept":
+      return applyIntercepts(state, target, page).pipe(Effect.andThen(applyCache(state, target)))
     case "Challenges":
       return applyIntercepts(state, target, page)
     case "Override":
       if (declaration.override._tag === "Viewport") {
         return viewport(state, target, state.registry.overrides(placement(page)))
       }
+      if (declaration.override._tag === "CacheDisabled") return applyCache(state, target)
       return withOverrides(
         target,
         Effect.suspend(() =>
@@ -488,8 +729,19 @@ const applyToTarget = (state: State, declaration: Adapter.Declaration, target: T
   }
 }
 
+// A page in its initial sync discards the events received before the frame tree's reply, so a declaration writes
+// to it only once that reply is in: one sent before could pause a request that no one continues, which also keeps
+// Chromium from answering the tree. It doesn't wait for the rest of the sync, which can be held up by a dialog or
+// the renderer. A release doesn't wait at all, since what it sends causes no events the model needs.
 const applyDeclaration = (state: State, declaration: Adapter.Declaration, scope: Adapter.DeclarationScope) =>
-  Effect.forEach(targetsInScope(state, scope), (target) => applyToTarget(state, declaration, target), {
+  Effect.forEach(targetsInScope(state, scope), (target) => {
+    const read = target.page!.treeRead
+    return Deferred.isDoneUnsafe(read)
+      ? applyToTarget(state, declaration, target)
+      : Deferred.await(read).pipe(
+        Effect.andThen(Effect.suspend(() => target.ended ? Effect.void : applyToTarget(state, declaration, target)))
+      )
+  }, {
     concurrency: "unbounded",
     discard: true
   })
@@ -535,9 +787,9 @@ const retire = (state: State, scope: Adapter.DeclarationScope, declaration: Adap
 
 /**
  * What the declarations in force say, sent again to a context's targets, after a removal the browser refused left
- * in place a context whose declarations' releases were skipped because it was to go. Each target's interception
- * and file chooser are reset on their own, and each override whose release was skipped is released as it would
- * have been: a reset that fails is logged and the others still run.
+ * in place a context whose declarations' releases were skipped because it was to go. Each target's interception,
+ * cache setting and file chooser are reset on their own, and each override whose release was skipped is released
+ * as it would have been: a reset that fails is logged and the others still run.
  */
 export const restoreContext = (state: State, context: ContextEntry) => {
   const scope: Adapter.DeclarationScope = { _tag: "UserContext", context: context.id }
@@ -549,7 +801,8 @@ export const restoreContext = (state: State, context: ContextEntry) => {
       (target) =>
         // Each reset stands alone: one that fails is logged and leaves the others to run
         Effect.all([
-          applyIntercepts(state, target, target.page!).pipe(releaseErrors),
+          target.kind === "worker" ? Effect.void : applyIntercepts(state, target, target.page!).pipe(releaseErrors),
+          applyCache(state, target).pipe(releaseErrors),
           target.kind === "page"
             ? Page.setInterceptFileChooserDialog({
               enabled: state.registry.fileChooser(placement(target.page!))
@@ -587,6 +840,15 @@ export const declare = Effect.fnUntraced(function*(
   }
   const id = state.ids.registration()
   state.registry.add(scope, declaration, id)
+  const downloadsIn = () =>
+    scope._tag === "UserContext"
+      ? [state.contexts.get(scope.context)].filter((context) => context !== undefined)
+      : [...state.contexts.values()]
+  if (declaration._tag === "Downloads" && declaration.behavior._tag === "Allow") {
+    for (const context of downloadsIn()) {
+      if (!context.isDefault) context.keepsEndedFrames = true
+    }
+  }
   const registrationContext = yield* Effect.context<never>()
   yield* Scope.addFinalizer(
     yield* Effect.scope,
@@ -597,7 +859,15 @@ export const declare = Effect.fnUntraced(function*(
       const unconfirmed = yield* Cleanup.Unconfirmed
       // Registry removal is synchronous, before any caller stops waiting or prior settings are restored.
       state.registry.remove(id)
-      const release = "retiring" in declaration && declaration.retiring?.() === true
+      const retiring = "retiring" in declaration && declaration.retiring?.() === true
+      // A context left open no longer needs its ended frames once no declaration gives its downloads a directory,
+      // whatever the browser's reset below comes to; one retiring keeps them until it is removed
+      if (declaration._tag === "Downloads" && !retiring) {
+        for (const context of downloadsIn()) {
+          if (Option.isNone(downloadDirectory(state, context.id))) forgetRetiredFrames(state, context)
+        }
+      }
+      const release = retiring
         // The context is removed right after: undoing the declaration would only add a round trip, or for a
         // viewport a wait on a renderer that may never report its size again
         ? Effect.sync(() => retire(state, scope, declaration))

@@ -241,7 +241,7 @@ An entry with no marker is open.
 **Q75. BiDi has no command to insert text** (Browser). Text is typed as key actions, so `insertText`, and `fill`, fire key events for each character on Firefox, and on no other backend.
 - *We:* `input.insertText` is `partial` on BiDi, saying so.
 - *Reconsider:* if BiDi adds one.
-- **Kept**: the spec has no command to insert text.
+- **Resolved** in `487e913`: text goes in with the page's editing command, `execCommand("insertText")`, in the focused document, after a cancelable `beforeinput` the engine dispatches, since Firefox's command fires none; no key events are sent. `input.insertText` stays `partial` for that `beforeinput`'s `isTrusted`.
 
 **Q76. Only Chromium can finish an HTML drag, and only when asked to** (Browser). Chromium starts an HTML drag from input only when each move names the button held (`button`, not just `buttons`). Headless, it finishes a drag of one move itself, but one of more moves never ends; with `Input.setInterceptDrags` on, it hands the drag to the client to finish with drag events. Firefox starts one from WebDriver actions and never drops it. WebKit's protocol has no drag commands.
 - *We:* the CDP adapter turns interception on with the first move that holds a button, learns from the page whether that move started a drag (Q88), and finishes the drags it intercepts: `dragEnter` at the move that starts one, `dragOver` at each later move, and `drop` at the release, which Chromium precedes with a `dragover` of its own. Escape during one sends a `dragOver` outside the viewport and `dragCancel` instead of the key, so the target sees `dragleave` and the source `dragend`, and the release after it is a mouse release. `input.dragAndDrop` is unsupported elsewhere, so `dragTo` from a draggable element fails there with `Unsupported` before anything is sent. Drags by pointer events work everywhere.
@@ -319,6 +319,7 @@ An entry with no marker is open.
 - *Seen:* the slices' `dblclick`, `mouse.click` with `clickCount: 2`, a second `mouse.wheel`, and `fill("one\ntwo")` into a `textarea`.
 - *We:* one `dispatchInput` is one sequence, a step per event; each browser process's wheel state is kept, and each scroll adds to it; a newline in inserted text is pressed as Enter, which in a form's `input` submits it, where the other backends insert nothing.
 - *Reconsider:* the newline in an `input`, if a use fills one with text that has one.
+- **Resolved** in `487e913`, the newline: text is no longer inserted by `InsertByKey`, but with the page's editing command, which inserts a newline as a line break in a textarea or contenteditable element and never submits a form, as on the other backends.
 
 **Q224. Stock WebKit's Automation finishes input that opens a dialog at once** (Browser). When a dialog opens, Automation answers the input pending on the page (`WebAutomationSession::willShowJavaScriptDialog`), so a click whose handler calls `confirm` returns before the dialog is decided, where every other backend's returns after, and the dialog is reported only when asked (Q206).
 - *Seen:* on a page with `dialogs: "leaveOpen"`, a click that opened a `confirm` succeeded, rather than failing with `PromptBlocking`.

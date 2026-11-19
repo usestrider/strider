@@ -294,6 +294,17 @@ export interface UserContext extends ObservedUserContext {
    * already underway without response interception may miss a later response route. Existing response pauses
    * select the current routes by precedence.
    *
+   * While a `"request"` or `"response"` route is in force, the requests of the context's documents, frames, and
+   * dedicated workers bypass the browser's HTTP cache, so a request the route continues reaches the server. The
+   * cache is used again once the last such route is removed; an `"auth"` route leaves it alone.
+   *
+   * **Gotchas**
+   *
+   * On Chromium, the cache setting is confirmed before this returns, except on a page a navigation is under way
+   * in: there it is sent before this returns, and the new document has it from its commit. On Firefox, a
+   * dedicated worker's requests still use the cache, and a popup another context opens while this route is in
+   * force may send its first requests past the cache too, before it gets its own context's setting.
+   *
    * The phase defaults to `"request"`. Response-only handlers require `{ phase: "response" }`, and
    * authentication handlers require `{ phase: "auth" }`. When options may omit the phase, the handler must
    * also handle `"request"`; union phases require a handler compatible with every possible phase.
@@ -616,6 +627,31 @@ export interface Options {
    * @default "system"
    */
   readonly focus?: "system" | "emulated" | undefined
+  /**
+   * Lets the context's pages run what their Content Security Policy forbids: inline scripts, `eval`, and the
+   * scripts and tags you add, in every document and frame, cross-site ones included. `Unsupported` on Firefox,
+   * which doesn't implement it yet, and on WebKit (`bypassCSP`).
+   *
+   * **Details**
+   *
+   * It is set for the context's life, before its first page. A context that leaves it off keeps every policy.
+   *
+   * **Example** (Running an inline script a policy forbids)
+   *
+   * ```ts import.meta.vitest
+   * import { Browser } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const program = Effect.fn("program")(function*() {
+   *   const page = yield* Browser.newPage({ bypassCSP: true })
+   *   yield* page.goto("https://example.com")
+   *   return yield* page.evaluate(() => eval("1 + 1"))
+   * })
+   * ```
+   *
+   * @default false
+   */
+  readonly bypassCSP?: boolean | undefined
   /**
    * The keyboard layout that key presses and typing use on the context's pages: `press`, `pressSequentially`, and
    * `page.keyboard`. On Firefox a key event's `key` follows the layout, but its `code` is the one Firefox gives that

@@ -227,6 +227,7 @@ export class Record implements Operation.Operation {
   private overlap: Diagnostics.DispatchState = { _tag: "NotSent" }
   private beforeOverlap: Diagnostics.DispatchState = { _tag: "NotSent" }
   private replyUncertain = false
+  private unanswered: { readonly hint: string; readonly at: MonotonicInstant.MonotonicInstant } | undefined
 
   cleanup: Diagnostics.CleanupState = { _tag: "NotNeeded" }
   readonly history: Array<Diagnostics.ObservedValue> = []
@@ -336,6 +337,16 @@ export class Record implements Operation.Operation {
     this.mark({ _tag: "Acknowledged", result })
   }
 
+  /**
+   * A call the browser left unanswered at the deadline `at`: its `Timeout`'s hint, which this operation's and its
+   * enclosing operations' `Timeout`s take where their callers give none. An enclosing operation with a later deadline
+   * didn't end with the call, so it takes the hint only at its own deadline.
+   */
+  noteUnanswered(hint: string, at: MonotonicInstant.MonotonicInstant = this.budget.at): void {
+    if (at >= this.budget.at) this.unanswered = { hint, at }
+    for (const parent of this.parents) parent.noteUnanswered(hint, at)
+  }
+
   /** Summarizes cleanup owned by this operation; known failure takes precedence over unfinished work. */
   noteCleanup(cleanup: Diagnostics.CleanupState): void {
     const priority = { NotNeeded: 0, Completed: 1, Pending: 2, Failed: 3 }
@@ -398,7 +409,8 @@ export class Record implements Operation.Operation {
 
   /**
    * The operation's `Timeout`, in the phase its record shows, or in `phase` where what it waits for isn't its own
-   * doing: an event wait's `waitingForEvent`.
+   * doing: an event wait's `waitingForEvent`. Its hint is `hint`, or, where that is `None`, the hint of a call the
+   * browser left unanswered at the deadline (`noteUnanswered`), which says what the operation was waiting on.
    */
   timeout(hint: Option.Option<string>, phase?: Phase): Deadline.Timeout {
     const last = Option.fromNullishOr(this.history.at(-1))
@@ -408,7 +420,7 @@ export class Record implements Operation.Operation {
       budget: this.budget.budget,
       last,
       history: [...this.history],
-      hint,
+      hint: Option.orElse(hint, () => Option.fromUndefinedOr(this.unanswered?.hint)),
       diagnostics: this.diagnostics()
     })
   }

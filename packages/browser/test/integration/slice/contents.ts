@@ -15,14 +15,17 @@ import {
   Locator,
   Page,
   Pixels,
+  Route,
   Snapshot,
   StorageState,
+  UncaughtException,
   Url
 } from "@usestrider/browser"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
+import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
@@ -31,6 +34,7 @@ import type * as Scope from "effect/Scope"
 import * as Tracer from "effect/Tracer"
 import * as zlib from "node:zlib"
 import { vi } from "vitest"
+import * as Engine from "../../../src/internal/engine.ts"
 import { LocatorImpl } from "../../../src/internal/locator.ts"
 import * as Runtime from "../../../src/internal/runtime.ts"
 import * as Protocol from "../../../src/protocol/Protocol.ts"
@@ -273,29 +277,44 @@ export const contents = (
           const target = page.frame(page.locator("iframe")).locator("#target")
           assert(target instanceof LocatorImpl)
           const adapter = target.owner.runtime.model.adapter
-          const original = adapter.dispatchInput
           const ready = yield* Deferred.make<void>()
           const release = yield* Deferred.make<void>()
           let held = false
-          const dispatchInput: typeof original = Effect.fnUntraced(function*(...args: Parameters<typeof original>) {
-            if (!held) {
-              held = true
-              yield* Deferred.succeed(ready, undefined)
-              yield* Deferred.await(release)
+          const hold = Effect.suspend(() => {
+            if (held) {
+              return Effect.void
             }
-            return yield* original(...args)
+            held = true
+            return Deferred.succeed(ready, undefined).pipe(Effect.andThen(Deferred.await(release)))
           })
+          // The insertion is held where it reaches the page: the protocol's command where the backend has one,
+          // otherwise the engine's insert request
+          const native = adapter.textInsertion === "native"
+          const original = { dispatchInput: adapter.dispatchInput, evaluate: adapter.evaluate }
+          const dispatchInput: typeof original.dispatchInput = (...args) =>
+            hold.pipe(Effect.andThen(original.dispatchInput(...args)))
+          const evaluate: typeof original.evaluate = (realm, call) => {
+            const argument = call.arguments[0]
+            const request = call.functionDeclaration === Engine.run && argument?._tag === "Value" &&
+                argument.value.type === "string"
+              ? JSON.parse(argument.value.value) as Engine.Request :
+              undefined
+            return request?.op === "insert"
+              ? hold.pipe(Effect.andThen(original.evaluate(realm, call)))
+              : original.evaluate(realm, call)
+          }
           const replacement = `<input id="other" value="replacement"><script>
             const other = document.getElementById("other"); other.focus(); other.setSelectionRange(11, 11);
           </script>`
           yield* Effect.acquireUseRelease(
             Effect.sync(() =>
-              Object.assign(adapter, { dispatchInput })
+              Object.assign(adapter, native ? { dispatchInput } : { evaluate })
             ),
             () =>
               Effect.gen(function*() {
                 const fill = yield* target.fill("new").pipe(Deadline.within("2 seconds"), Effect.forkScoped)
-                yield* Deferred.await(ready).pipe(Deadline.within("2 seconds"))
+                // Deadline.within bounds operations only: a hold that never comes must fail the case in seconds
+                yield* Deferred.await(ready).pipe(Effect.timeout("2 seconds"))
                 const replaced = yield* page.setContent(replacement).pipe(Deadline.within("250 millis"), Effect.exit)
                 yield* Deferred.succeed(release, undefined)
                 const filled = yield* Fiber.await(fill).pipe(Deadline.within("2 seconds"))
@@ -320,7 +339,7 @@ export const contents = (
             () =>
               Deferred.succeed(release, undefined).pipe(
                 Effect.andThen(Effect.sync(() =>
-                  Object.assign(adapter, { dispatchInput: original })
+                  Object.assign(adapter, original)
                 ))
               )
           )
@@ -473,6 +492,32 @@ export const contents = (
           )
         }), timeout)
 
+      it.effect("an evaluation's console messages are in the history once it returns", () =>
+        Effect.gen(function*() {
+          const page = yield* SharedContext.newPage
+          yield* page.evaluateInMainWorld(() => console.log("first"))
+          yield* page.evaluateInMainWorld(() => console.log("second"))
+          yield* page.evaluateInMainWorld(() => console.log("third"))
+          assert.deepStrictEqual((yield* ConsoleMessage.history(page)).entries.map((entry) => entry.text), [
+            "first",
+            "second",
+            "third"
+          ])
+          yield* page.evaluateInMainWorld(() => {
+            for (let i = 0; i <= 300; i++) console.log(`message${i}`)
+          })
+          const history = yield* ConsoleMessage.history(page)
+          assert.deepStrictEqual(
+            history.entries.map((entry) => entry.text),
+            Array.from({ length: 301 }, (_, i) => `message${i}`).slice(-100)
+          )
+          const { origin } = yield* site
+          yield* page.goto(fixtureUrl(origin, "<title>Console</title>"))
+          yield* page.reload({ waitUntil: "load" })
+          yield* page.evaluateInMainWorld(() => console.log("after reload"))
+          assert.strictEqual((yield* ConsoleMessage.history(page)).entries.at(-1)?.text, "after reload")
+        }), timeout)
+
       it.effect("setContent settles when the page silences console.debug", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -504,6 +549,112 @@ export const contents = (
           ])
         }), timeout)
 
+      it.effect("reports repeated browser console entries on stock WebKit", () =>
+        Effect.gen(function*() {
+          if (name !== "WebKit") return
+          const page = yield* SharedContext.newPage
+          yield* page.setContent(`<meta http-equiv="Content-Security-Policy" content="style-src 'none'">`)
+          const done = yield* ConsoleMessage.next(page, { text: "blocked styles finished" })
+          yield* page.evaluateInMainWorld(() => {
+            for (let i = 0; i < 2; i++) {
+              const style = document.createElement("style")
+              style.textContent = "body { color: red }"
+              document.head.append(style)
+            }
+            console.log("blocked styles finished")
+          })
+          yield* done
+          const entries = (yield* ConsoleMessage.history(page, { level: "error" })).entries
+          assert.lengthOf(entries, 2)
+          assert.match(entries[0]!.text, /Content Security Policy/i)
+          assert.strictEqual(entries[0]!.text, entries[1]!.text)
+        }), timeout)
+
+      it.effect("records synchronous browser and script console entries before evaluation returns", () =>
+        Effect.gen(function*() {
+          // Firefox 158 sends the CSP error, a `log.entryAdded` of type `javascript`, only after the evaluation's
+          // reply, so nothing orders it before the evaluation returns there. Its two console calls do precede it.
+          if (name === "Firefox") {
+            return
+          }
+          const page = yield* SharedContext.newPage
+          yield* page.setContent(`<meta http-equiv="Content-Security-Policy" content="style-src 'none'">`)
+          yield* page.evaluateInMainWorld(() => {
+            console.log("before blocked style")
+            const style = document.createElement("style")
+            style.textContent = "body { color: red }"
+            document.head.append(style)
+            console.log("after blocked style")
+          })
+          const entries = (yield* ConsoleMessage.history(page)).entries.map((entry) =>
+            entry.text
+          )
+          assert.lengthOf(entries, 3, JSON.stringify(entries))
+          assert.strictEqual(entries[0], "before blocked style")
+          assert.match(entries[1]!, /Content Security Policy/i)
+          assert.strictEqual(entries[2], "after blocked style")
+        }), timeout)
+
+      it.effect("reports the browser's own CSP and CORS errors at level error, as each browser sends them", () =>
+        Effect.gen(function*() {
+          const page = yield* SharedContext.newPage
+          yield* page.route("https://csp.test/**", () =>
+            Route.fulfill(HttpServerResponse.text("<title>CSP</title><div style=\"color: red\">styled</div>", {
+              contentType: "text/html",
+              headers: { "content-security-policy": "style-src 'none'" }
+            })))
+          yield* page.route("https://cors.test/**", () =>
+            Route.fulfill(HttpServerResponse.text("{}", { contentType: "application/json" })))
+          // Each browser words these itself; what they share is the policy each names.
+          const csp = /Content.Security.Policy/i
+          const cors = /CORS|Access-Control|access control/i
+          // Firefox 158 sends both as `log.entryAdded` of type `javascript`, the type BiDi keeps for uncaught
+          // exceptions, so they arrive as exceptions. WebKitGTK 2.54.1 sends one of its CORS messages, "Fetch API
+          // cannot load …", on the `javascript` channel at level `error`, which Strider reads as an uncaught
+          // exception, so that one does too.
+          const asExceptions = name === "Firefox"
+          const corsLogged: Effect.Effect<unknown, unknown> = asExceptions
+            ? yield* UncaughtException.next(page, { message: cors }).pipe(Deadline.within("5 seconds"))
+            : yield* ConsoleMessage.next(page, { level: "error", text: cors }).pipe(Deadline.within("5 seconds"))
+          const fetchRejected: Effect.Effect<unknown, unknown> = name === "WebKit"
+            ? yield* UncaughtException.next(page, { message: /Fetch API cannot load/ }).pipe(
+              Deadline.within("5 seconds")
+            )
+            : Effect.void
+          yield* page.goto("https://csp.test/")
+          yield* page.evaluateInMainWorld(() =>
+            fetch("https://cors.test/data").then(() =>
+              "loaded", () =>
+              "blocked")
+          )
+          yield* Effect.exit(corsLogged)
+          yield* Effect.exit(fetchRejected)
+          const errors = (yield* ConsoleMessage.history(page, { level: "error" })).entries.map((entry) =>
+            entry.text
+          )
+          const exceptions = (yield* UncaughtException.history(page)).entries.map((entry) =>
+            `${entry.name}: ${entry.message}`
+          )
+          const reported = asExceptions ? exceptions : errors
+          assert.isTrue(
+            reported.some((text) =>
+              csp.test(text)
+            ),
+            `a CSP error among ${JSON.stringify(reported)}`
+          )
+          assert.isTrue(reported.some((text) => cors.test(text)), `a CORS error among ${JSON.stringify(reported)}`)
+          if (name === "Firefox") {
+            assert.deepStrictEqual(errors, [])
+          } else {
+            assert.deepStrictEqual(
+              exceptions.filter((text) => !/Fetch API cannot load/.test(text)),
+              [],
+              "no other exception"
+            )
+            assert.strictEqual(exceptions.length, name === "WebKit" ? 1 : 0, JSON.stringify(exceptions))
+          }
+        }), timeout)
+
       it.effect("setContent replaces a parsed document still waiting for deferred scripts", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -513,7 +664,9 @@ export const contents = (
             { waitUntil: "commit" }
           )
           assert.strictEqual(
-            yield* page.evaluateInMainWorld(() => document.readyState),
+            yield* page.evaluateInMainWorld(() =>
+              document.readyState
+            ),
             "interactive"
           )
           yield* page.setContent("<title>Replacement</title>", { waitUntil: "domContentLoaded" }).pipe(
@@ -1127,7 +1280,9 @@ export const contents = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(origin, `<script>window.secret = 42</script><p id="x">hello</p>`))
+            yield* page.goto(fixtureUrl(origin, `<script>window.secret = 42</script><p id="x">hello</p>`), {
+              waitUntil: "load"
+            })
             if (
               yield* isolatedRefused(page.evaluate(() =>
                 1
@@ -1510,6 +1665,24 @@ export const contents = (
               ? ["script.disown", "script.disown"]
               : ["Runtime.releaseObject", "Runtime.releaseObjectGroup"]
           )
+        }), timeout)
+
+      it.effect("finds test ids by pattern, and names the pattern when it matches several", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(
+              fixtureUrl(origin, `<p data-testid="row-1">a</p><p data-testid="row-2">b</p><p data-testid="total">c</p>`)
+            )
+            assert.strictEqual(yield* page.getByTestId(/^row-/).count, 2)
+            assert.strictEqual(yield* page.getByTestId(/^ROW-1$/i).readText, "a")
+            const error = reasonOf(
+              yield* Effect.exit(page.getByTestId(/^row-/i).readText)
+            ) as unknown as Locator.LocatorError
+            assert.strictEqual(error.reason._tag, "StrictViolation")
+            assert.strictEqual(error.locator, "page.getByTestId(/^row-/i)")
+          }))
         }), timeout)
 
       it.effect("evaluates with the locator's one match first, in the isolated world", () =>
@@ -1963,7 +2136,7 @@ export const contents = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(origin, shop))
+            yield* page.goto(fixtureUrl(origin, shop), { waitUntil: "load" })
             const snapshot = yield* page.snapshot()
             const refOf = (role: string, name: string) =>
               [...snapshot.refs].find(([, node]) =>
@@ -2371,7 +2544,9 @@ export const contents = (
           const { crossSite, origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
-            yield* page.goto(fixtureUrl(origin, `<script>document.cookie = "plain=1; path=/"</script><p>hi</p>`))
+            yield* page.goto(fixtureUrl(origin, `<script>document.cookie = "plain=1; path=/"</script><p>hi</p>`), {
+              waitUntil: "load"
+            })
             const jar = page.context.cookies
             if (!(yield* fullySupports("cookies"))) {
               // Where a context's list is the cookies its pages are sent (QUIRKS.md, Q225), one shows once a page is
@@ -2473,7 +2648,8 @@ export const contents = (
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
             yield* page.goto(
-              fixtureUrl(origin, `<script>localStorage.setItem("a", "1"); sessionStorage.setItem("s", "x")</script>`)
+              fixtureUrl(origin, `<script>localStorage.setItem("a", "1"); sessionStorage.setItem("s", "x")</script>`),
+              { waitUntil: "load" }
             )
             assert.deepStrictEqual(yield* page.localStorage.get("a"), Option.some("1"))
             assert.deepStrictEqual(yield* page.localStorage.get("missing"), Option.none())
@@ -2533,7 +2709,7 @@ document.getElementById("form").addEventListener("submit", (event) => {
 </script>`
           const json = yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* Browser.newPage()
-            yield* page.goto(fixtureUrl(origin, login))
+            yield* page.goto(fixtureUrl(origin, login), { waitUntil: "load" })
             yield* page.frame(page.locator("#widget")).locator("#out").pipe(Expect.toHaveText("w1"))
             yield* page.getByLabel("Email").fill("me@example.com")
             yield* page.getByLabel("Password").fill(Redacted.make("hunter2"))

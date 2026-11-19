@@ -115,7 +115,20 @@ export const register = <S, P, D, E, R>(
     const fibers = yield* FiberSet.make<Outcome>()
     const handled = yield* SubscriptionRef.make(0)
     const id = options.page.id
+    // In force once this returns: an obligation folded after it is this handler's to decide
+    const scope = yield* Scope.fork(yield* Effect.scope)
+    const registered: Declaration.HandlerRegistration = {
+      remove: Scope.close(scope, Exit.void),
+      handled: Watchable.make({
+        ref: handled,
+        project: Option.some,
+        ended: () => Option.none(),
+        target: { _tag: "Page", id },
+        operation: options.operation
+      })
+    }
     const registration: Model.Handler<S> = {
+      registration: registered,
       decide: Effect.fnUntraced(function*(subject: S) {
         // The user handler, preparation and application share one deadline and one scope-owned fiber.
         const at = (clock.now() + Duration.toMillis(budget) * 1e6) as MonotonicInstant.MonotonicInstant
@@ -184,19 +197,6 @@ export const register = <S, P, D, E, R>(
         return Option.some(outcome.decision)
       })
     }
-    // In force once this returns: an obligation folded after it is this handler's to decide
-    const scope = yield* Scope.fork(yield* Effect.scope)
     yield* options.add(registration).pipe(Scope.provide(scope))
-    const remove = Scope.close(scope, Exit.void)
-    const registered: Declaration.HandlerRegistration = {
-      remove,
-      handled: Watchable.make({
-        ref: handled,
-        project: Option.some,
-        ended: () => Option.none(),
-        target: { _tag: "Page", id },
-        operation: options.operation
-      })
-    }
     return registered
   })
