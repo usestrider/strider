@@ -31,6 +31,8 @@ const setup = Effect.fnUntraced(function*() {
     } as never)
     yield* fold.sink({ _tag: "DocumentReadiness", document: document as Target.DocumentId, readiness: "interactive" })
     yield* fold.sink({ _tag: "DocumentReadiness", document: document as Target.DocumentId, readiness: "complete" })
+    // Reported again, as Chromium and WebKit can: no second event
+    yield* fold.sink({ _tag: "DocumentReadiness", document: document as Target.DocumentId, readiness: "complete" })
   })
   const addFrame = (frame: string, page: string) =>
     fold.sink({

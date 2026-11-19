@@ -21,6 +21,7 @@ import {
   NetworkRequest,
   NetworkResponse,
   Page,
+  PageLifecycle,
   PageNavigation,
   Reason,
   Subscription,
@@ -328,6 +329,42 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             assert.strictEqual(yield* handler.handled, 0)
           }))
         }), timeout)
+
+      // ── PageNavigation and PageLifecycle on a context ──
+
+      it.effect(
+        "reports a context's navigations, frames, loads and closes from pages opened after it subscribed, and no other context's",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() => `<iframe srcdoc="<p>inside</p>"></iframe>`)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const context = yield* Browser.newContext()
+              const elsewhere = yield* Browser.newPage()
+              const before = yield* context.newPage
+              yield* before.goto(url, { waitUntil: "load" })
+              const navigations = yield* PageNavigation.stream(context)
+              const lifecycle = yield* PageLifecycle.stream(context, { events: ["FrameAdded", "Loaded", "Closed"] })
+              const seen = yield* Effect.forkScoped(Stream.runCollect(Stream.take(navigations, 1)))
+              const happened = yield* Effect.forkScoped(
+                Stream.runCollect(Stream.takeUntil(lifecycle, (event) => event._tag === "Closed"))
+              )
+              yield* elsewhere.goto(url)
+              const later = yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* context.newPage
+                yield* page.goto(url, { waitUntil: "load" })
+                return page.id
+              }))
+              const [navigation] = yield* Fiber.join(seen)
+              assert.strictEqual(navigation!.page, later)
+              const events = Array.from(yield* Fiber.join(happened))
+              assert.isTrue(events.every((event) => event.page === later))
+              assert.isTrue(events.some((event) => event._tag === "FrameAdded"))
+              assert.isTrue(events.some((event) => event._tag === "Loaded" && event.url === url))
+              assert.strictEqual(events.at(-1)!._tag, "Closed")
+            }))
+          }),
+        timeout
+      )
 
       // ── ConsoleMessage, UncaughtException ──
 

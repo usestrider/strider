@@ -599,16 +599,16 @@ export const make = Effect.fnUntraced(function*(options: {
             document: Option.none(),
             url: Urls.reported("about:blank")
           }
-          yield* update(page.value.state, (state) => ({
-            ...state,
-            frames: [...state.frames.filter((each) => each.id !== fact.frame), frame]
-          }))
           publishLifecycle(page.value, {
             _tag: "FrameAdded",
             page: page.value.id,
             frame: fact.frame,
             parent: fact.parent
           })
+          yield* update(page.value.state, (state) => ({
+            ...state,
+            frames: [...state.frames.filter((each) => each.id !== fact.frame), frame]
+          }))
           return
         }
         case "NavigationStarted": {
@@ -716,6 +716,19 @@ export const make = Effect.fnUntraced(function*(options: {
           const document = documents.get(fact.document)
           if (document === undefined) return
           const page = pages.get(document.navigable)
+          // The event first, then the state: `goto` returns once the state has it, and a subscription its caller
+          // makes then must not see it. A backend can report a readiness more than once; the event is the change.
+          const state = yield* document.state.get
+          const owner = page ?? frames.get(document.navigable)
+          if (state.readiness !== fact.readiness && owner !== undefined && pages.has(owner.id)) {
+            publishLifecycle(owner, {
+              _tag: fact.readiness === "interactive" ? "DomContentLoaded" : "Loaded",
+              page: owner.id,
+              frame: document.navigable,
+              document: document.id,
+              url: state.url
+            })
+          }
           if (page !== undefined) {
             yield* updateOpen(page, (open) =>
               open.document.id === fact.document
@@ -723,16 +736,6 @@ export const make = Effect.fnUntraced(function*(options: {
                 : open)
           }
           yield* update(document.state, (state) => ({ ...state, readiness: fact.readiness }))
-          const owner = page ?? frames.get(document.navigable)
-          if (owner !== undefined && pages.has(owner.id)) {
-            publishLifecycle(owner, {
-              _tag: fact.readiness === "interactive" ? "DomContentLoaded" : "Loaded",
-              page: owner.id,
-              frame: document.navigable,
-              document: document.id,
-              url: (yield* document.state.get).url
-            })
-          }
           return
         }
         case "RealmAdded": {
