@@ -17,6 +17,7 @@ import * as L1Target from "../../Target.ts"
 import type * as UserContext from "../../UserContext.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as Proxy from "../proxy.ts"
 import * as Urls from "../urls.ts"
 import * as Cleanup from "./cleanup.ts"
 import { applyCache, applyKind, recoverViewport } from "./declare.ts"
@@ -142,7 +143,14 @@ export const confirmFrameRemoval = (state: State, navigable: NavigableEntry) => 
 export const createUserContext = Effect.fnUntraced(function*(state: State, options: Adapter.UserContextOptions) {
   let settle = (_retain: boolean): void => {}
   if (Option.isSome(options.proxy)) {
-    const { server, credentials } = options.proxy.value
+    const { credentials, scheme } = options.proxy.value
+    if (scheme === "https") {
+      return yield* Effect.fail(
+        Kit.unsupported("userContexts.proxy.https", "Firefox's BiDi proxy settings have no TLS connection to the proxy")
+      )
+    }
+    // socks5://h:p and http://h:p are different endpoints, with different credentials
+    const server = Proxy.endpoint(options.proxy.value)
     if (credentials !== undefined && state.options.ownership !== "launched") {
       return yield* Effect.fail(
         Kit.unsupported(
@@ -189,12 +197,20 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
           ...(options.acceptInsecureCerts ? { acceptInsecureCerts: true } : {}),
           ...(Option.isSome(options.proxy)
             ? {
-              proxy: {
-                proxyType: "manual",
-                httpProxy: options.proxy.value.server,
-                sslProxy: options.proxy.value.server,
-                noProxy: [...options.proxy.value.bypass]
-              }
+              proxy: options.proxy.value.scheme === "http"
+                ? {
+                  proxyType: "manual",
+                  httpProxy: options.proxy.value.server,
+                  sslProxy: options.proxy.value.server,
+                  noProxy: [...options.proxy.value.bypass]
+                }
+                : {
+                  // Firefox's SOCKS4 sends names for the proxy to resolve (SOCKS4a)
+                  proxyType: "manual",
+                  socksProxy: options.proxy.value.server,
+                  socksVersion: options.proxy.value.scheme === "socks4" ? 4 : 5,
+                  noProxy: [...options.proxy.value.bypass]
+                }
             }
             : {})
         })).pipe(Effect.onError((cause) =>

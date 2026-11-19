@@ -58,8 +58,10 @@ export type Step =
   | { readonly _tag: "Placeholder"; readonly matcher: TextMatcher }
   | { readonly _tag: "AltText"; readonly matcher: TextMatcher }
   | { readonly _tag: "Title"; readonly matcher: TextMatcher }
-  | { readonly _tag: "TestId"; readonly id: string }
+  | { readonly _tag: "TestId"; readonly matcher: TextMatcher }
   | { readonly _tag: "Css"; readonly selector: string }
+  /** An XPath expression's element nodes, from the document or, chained, from each element so far. */
+  | { readonly _tag: "XPath"; readonly expression: string }
   | { readonly _tag: "Nth"; readonly index: number }
   | { readonly _tag: "First" }
   | { readonly _tag: "Last" }
@@ -199,13 +201,36 @@ export type Expectation =
   | { readonly _tag: "Attribute"; readonly name: string; readonly expected: TextMatcher | null }
   | { readonly _tag: "Count"; readonly count: number }
   | { readonly _tag: "Title"; readonly expected: TextMatcher }
-  /** The one match's accessibility tree matches a pattern. */
-  | { readonly _tag: "Aria"; readonly pattern: Pattern }
+  /**
+   * The one match's accessibility tree, or with `document` the page's from its document node, matches a pattern;
+   * with `not`, it doesn't.
+   */
+  | { readonly _tag: "Aria"; readonly pattern: Pattern; readonly document: boolean; readonly not: boolean }
 
 /** A pattern over the accessibility tree, as `AriaPattern` builds it. */
 export type Pattern =
-  | { readonly _tag: "Node"; readonly role: string; readonly name: TextMatcher; readonly children: PatternChildren }
+  | {
+    readonly _tag: "Node"
+    readonly role: string
+    readonly name: TextMatcher
+    readonly children: PatternChildren
+    readonly states: PatternStates
+  }
   | { readonly _tag: "Text"; readonly value: TextMatcher }
+  /** A node, at the subject or at any depth beneath it, whose children match. */
+  | { readonly _tag: "Anywhere"; readonly children: PatternChildren }
+
+/** The level and states a node pattern compares; an omitted one isn't compared. */
+export interface PatternStates {
+  readonly level?: number | undefined
+  readonly checked?: boolean | "mixed" | undefined
+  readonly pressed?: boolean | "mixed" | undefined
+  readonly expanded?: boolean | undefined
+  readonly selected?: boolean | undefined
+  readonly disabled?: boolean | undefined
+  readonly invalid?: boolean | undefined
+  readonly focused?: boolean | undefined
+}
 
 /** How a pattern's children are matched. */
 export type PatternChildren =
@@ -242,6 +267,8 @@ export interface SnapNode {
     }
     | { readonly _tag: "None" }
   readonly states: ReadonlyArray<string>
+  /** A heading's, list item's, row's or tree item's level, when it has one. */
+  readonly level?: number | undefined
   readonly editable?: boolean | undefined
   readonly validationMessage: string | null
   readonly children: ReadonlyArray<SnapNode>
@@ -272,6 +299,7 @@ export const SnapNode: Schema.Codec<SnapNode> = Schema.Struct({
     Schema.TaggedStruct("None", {})
   ]),
   states: Schema.Array(Schema.String),
+  level: Schema.optional(Schema.Number),
   editable: Schema.optional(Schema.Boolean),
   validationMessage: Schema.NullOr(Schema.String),
   children: Schema.Array(Schema.suspend((): Schema.Codec<SnapNode> => SnapNode)),
@@ -448,7 +476,7 @@ export const Response = Schema.Union([
   Schema.TaggedStruct("InvalidSelector", {
     selector: Schema.String,
     message: Schema.String,
-    kind: Schema.optionalKey(Schema.Literal("role"))
+    kind: Schema.optionalKey(Schema.Literals(["role", "xpath"]))
   }),
   Schema.TaggedStruct("Title", { title: Schema.String }),
   Schema.TaggedStruct("Roles", {
@@ -501,6 +529,7 @@ export function renderText(root: SnapNode): string {
     }
     let out = `${indent}- ${node.role.role}`
     if (node.name._tag !== "None") out += ` ${JSON.stringify(node.name.value)}`
+    if (node.level !== undefined) out += ` [level=${node.level}]`
     for (const state of node.states) out += ` [${state}]`
     if (node.validationMessage != null) out += ` [validationMessage=${JSON.stringify(node.validationMessage)}]`
     if (node.ref !== null) out += ` [ref=${node.ref}]`
@@ -605,8 +634,14 @@ export function engine(render: (root: SnapNode) => string) {
     elementFromPoint: method(Document.prototype, "elementFromPoint"),
     elementsFromPoint: method(Document.prototype, "elementsFromPoint"),
     documentFirstElementChild: getter(Document.prototype, "firstElementChild"),
-    documentQuerySelectorAll: method(Document.prototype, "querySelectorAll")
+    documentQuerySelectorAll: method(Document.prototype, "querySelectorAll"),
+    createElement: method(Document.prototype, "createElement"),
+    evaluate: method(Document.prototype, "evaluate"),
+    snapshotLength: getter(XPathResult.prototype, "snapshotLength"),
+    snapshotItem: method(XPathResult.prototype, "snapshotItem")
   }
+  /** `document.evaluate`'s result type, read once, like the methods above, so a replaced `XPathResult` can't change it. */
+  const ORDERED_NODE_SNAPSHOT_TYPE = XPathResult.ORDERED_NODE_SNAPSHOT_TYPE
   // The labelable elements, each with its own `labels` getter
   const nativeLabels = [
     HTMLButtonElement,
@@ -1731,7 +1766,7 @@ export function engine(render: (root: SnapNode) => string) {
   // Queries
   interface InvalidSelector {
     readonly invalidSelector: true
-    readonly kind?: "role" | undefined
+    readonly kind?: "role" | "xpath" | undefined
     readonly selector: string
     readonly message: string
   }
@@ -1811,8 +1846,54 @@ export function engine(render: (root: SnapNode) => string) {
   const documentElements = (): Array<Element> =>
     treeScope === null ? elementsUnder(document) : (treeScope.elements ??= elementsUnder(document))
 
+  /**
+   * An expression's element nodes from `context`, in document order: text, attribute and document nodes are
+   * skipped. It throws an invalid selector when the expression doesn't parse, uses a namespace prefix or doesn't
+   * give a node set.
+   */
+  const evaluateXPath = (context: Node, source: string, expression: string): Array<Element> => {
+    let result: XPathResult
+    try {
+      result = dom.evaluate(document, source, context, null, ORDERED_NODE_SNAPSHOT_TYPE, null)
+    } catch (error) {
+      throw {
+        invalidSelector: true,
+        kind: "xpath",
+        selector: expression,
+        message: error instanceof Error ? error.message : String(error)
+      } satisfies InvalidSelector
+    }
+    const found: Array<Element> = []
+    for (let index = 0, length = dom.snapshotLength(result); index < length; index++) {
+      const node = dom.snapshotItem(result, index)
+      if (node !== null && dom.nodeType(node) === Node.ELEMENT_NODE) found.push(node as Element)
+    }
+    return found
+  }
+
+  /**
+   * A `/` that starts a chained expression's first step: Playwright's rule, so `/li` reads as `./li` and `//li` as
+   * `.//li` from the element. Only the start is rewritten, so a union's later branch, as `//b` in `//a | //b`, keeps
+   * its absolute path. A bare `/`, alone or before `|`, is the root of the element's tree and is left as written.
+   */
+  const LEADING_STEP = /^(\s*)(?=\/)(?!\/\s*(?:\||$))/
+
+  /**
+   * An XPath step's matches from `scope`: from the document as written, and from an element with its leading `/`
+   * read from the element, so chaining searches inside as CSS does.
+   */
+  const xpathQuery = (scope: Document | Element, expression: string): Array<Element> =>
+    evaluateXPath(scope, scope === document ? expression : expression.replace(LEADING_STEP, "$1."), expression)
+
+  /**
+   * The detached element XPath is checked from: an empty tree, so the check searches nothing (an element, since
+   * Firefox refuses a text node as the context node).
+   */
+  let xpathProbe: Element | undefined
+
   /** The candidates of one query under `scope`, in tree order. */
   const query = (scope: Document | Element, step: Step): Array<Element> => {
+    if (step._tag === "XPath") return xpathQuery(scope, step.expression)
     const under = scope === document ? documentElements() : elementsUnder(scope)
     switch (step._tag) {
       case "Css": {
@@ -1883,7 +1964,11 @@ export function engine(render: (root: SnapNode) => string) {
       case "Title":
         return under.filter((element) => attributeMatches(element, "title", step.matcher))
       case "TestId":
-        return under.filter((element) => dom.getAttribute(element, "data-testid") === step.id)
+        return under.filter((element) => {
+          // The value as written: a test id isn't text, so its whitespace isn't collapsed.
+          const value = dom.getAttribute(element, "data-testid")
+          return value !== null && rawMatches(step.matcher, value)
+        })
       default:
         return []
     }
@@ -1919,6 +2004,11 @@ export function engine(render: (root: SnapNode) => string) {
           }
           break
         }
+        case "XPath":
+          // Checked as written on every resolve, from a detached element, so an empty scope still fails and no
+          // document is searched to do it. A valid expression stays valid with its leading step read from an element.
+          evaluateXPath(xpathProbe ??= dom.createElement(document, "div"), step.expression, step.expression)
+          break
         case "Filter":
           if (step.has !== null) validateSteps(step.has)
           if (step.hasNot !== null) validateSteps(step.hasNot)
@@ -3212,7 +3302,8 @@ export function engine(render: (root: SnapNode) => string) {
   const expected = (matcher: TextMatcher, text: string): boolean =>
     matcher._tag === "RegExp" ? new RegExp(matcher.source, matcher.flags).test(text) : text === collapse(matcher.value)
 
-  const classMatches = (matcher: TextMatcher, value: string): boolean =>
+  /** A value as written, such as a class or an attribute, matched without collapsing its whitespace. */
+  const rawMatches = (matcher: TextMatcher, value: string): boolean =>
     matcher._tag === "RegExp" ? new RegExp(matcher.source, matcher.flags).test(value) : value === matcher.value
 
   /** Checks an expectation once: whether it holds, and what was seen. */
@@ -3221,6 +3312,11 @@ export function engine(render: (root: SnapNode) => string) {
     if (expectation._tag === "Title") {
       const title = collapse(dom.title(document))
       return { passed: expected(expectation.expected, title), observed: title }
+    }
+    if (expectation._tag === "Aria" && expectation.document) {
+      const root = documentNode({ interactivity: false, depth: null })
+      const matches = matchPattern(expectation.pattern, root)
+      return { passed: expectation.not ? !matches : matches, observed: render(root) }
     }
     const found = resolve(steps)
     switch (expectation._tag) {
@@ -3258,12 +3354,12 @@ export function engine(render: (root: SnapNode) => string) {
         if (expectation.list) {
           return {
             passed: texts.length === expectation.expected.length &&
-              texts.every((text, index) => classMatches(expectation.expected[index]!, text)),
+              texts.every((text, index) => rawMatches(expectation.expected[index]!, text)),
             observed: texts
           }
         }
         if (found.length !== 1) return { passed: false, observed: { matches: found.length } }
-        return { passed: classMatches(expectation.expected[0]!, texts[0]!), observed: texts[0] }
+        return { passed: rawMatches(expectation.expected[0]!, texts[0]!), observed: texts[0] }
       }
       default:
         break
@@ -3331,7 +3427,7 @@ export function engine(render: (root: SnapNode) => string) {
         const values = Array.from(control.selectedOptions, (option) => option.value)
         return {
           passed: values.length === expectation.expected.length &&
-            values.every((value, index) => classMatches(expectation.expected[index]!, value)),
+            values.every((value, index) => rawMatches(expectation.expected[index]!, value)),
           observed: values
         }
       }
@@ -3357,7 +3453,8 @@ export function engine(render: (root: SnapNode) => string) {
       }
       case "Aria": {
         const root = rootNode(element, { interactivity: false, depth: null })
-        return { passed: matchPattern(expectation.pattern, root), observed: render(root) }
+        const matches = matchPattern(expectation.pattern, root)
+        return { passed: expectation.not ? !matches : matches, observed: render(root) }
       }
       case "Attribute": {
         const value = dom.getAttribute(element, expectation.name)
@@ -3566,12 +3663,16 @@ export function engine(render: (root: SnapNode) => string) {
 
   const statesOf = (element: Element, role: string | null): Array<string> => {
     const states: Array<string> = []
-    if (checkedOf(element) === true) states.push("checked")
+    const checked = checkedState(element).state
+    if (checked === "mixed") states.push("checked=mixed")
+    else if (checked === true) states.push("checked")
     if (expandedOf(element) === true) states.push("expanded")
     if (selectedOf(element) === true) states.push("selected")
     if ((INTERACTIVE.has(role ?? "") || dom.matches(element, ":disabled")) && !enabled(element)) states.push("disabled")
     if (deepActive() === element) states.push("focused")
-    if (pressedOf(element) === true) states.push("pressed")
+    const pressed = pressedOf(element)
+    if (pressed === "mixed") states.push("pressed=mixed")
+    else if (pressed === true) states.push("pressed")
     if (validationMessageOf(element) !== null) states.push("invalid")
     return states
   }
@@ -3839,6 +3940,8 @@ export function engine(render: (root: SnapNode) => string) {
         ...(field && namesFromContent.has(element) ? { from: "text" as const } : {}),
         ...(namesFromFields.has(element) ? { fieldContent: true } : {})
       }
+    // Only a role that takes a level has one, so an h2 with role="tab" has none
+    const level_ = role._tag === "Aria" && LEVEL_ROLES.has(role.role) ? levelOf(element) : 0
     let children = frame || (walk.depth !== null && level >= walk.depth) ? [] : childrenOf(element, level + 1, walk)
     // Text that only repeats the node's name isn't a node of its own
     if (
@@ -3851,6 +3954,7 @@ export function engine(render: (root: SnapNode) => string) {
       role,
       name,
       states: statesOf(element, role._tag === "Aria" ? role.role : null),
+      ...(level_ > 0 ? { level: level_ } : {}),
       ...(field ? { editable: true } : {}),
       validationMessage: validationMessageOf(element),
       children,
@@ -3899,10 +4003,34 @@ export function engine(render: (root: SnapNode) => string) {
     if (pattern._tag === "Text") {
       return node.role._tag === "Aria" && node.role.role === "text" && nameMatches(pattern.value, node.name)
     }
+    if (pattern._tag === "Anywhere") return matchAnywhere(pattern.children, node)
     if (node.role._tag !== "Aria" || node.role.role !== pattern.role || !nameMatches(pattern.name, node.name)) {
       return false
     }
-    const children = pattern.children
+    return statesMatch(pattern.states, node) && matchChildren(pattern.children, node)
+  }
+
+  /** Whether a node has the level and states a pattern states. */
+  const statesMatch = (states: PatternStates, node: SnapNode): boolean => {
+    if (states.level !== undefined && node.level !== states.level) return false
+    const has = (state: string) => node.states.includes(state)
+    const checked = has("checked") ? true : has("checked=mixed") ? "mixed" : false
+    const pressed = has("pressed") ? true : has("pressed=mixed") ? "mixed" : false
+    if (states.checked !== undefined && states.checked !== checked) return false
+    if (states.pressed !== undefined && states.pressed !== pressed) return false
+    for (const state of ["expanded", "selected", "disabled", "invalid", "focused"] as const) {
+      const expected = states[state]
+      if (expected !== undefined && has(state) !== expected) return false
+    }
+    return true
+  }
+
+  /** Whether the node, or any node beneath it, has children that match. */
+  const matchAnywhere = (children: PatternChildren, node: SnapNode): boolean =>
+    matchChildren(children, node) || node.children.some((child) => matchAnywhere(children, child))
+
+  /** Whether a node's children match as a pattern states. */
+  const matchChildren = (children: PatternChildren, node: SnapNode): boolean => {
     switch (children._tag) {
       case "Unchecked":
         return true
@@ -4226,7 +4354,7 @@ export function engine(render: (root: SnapNode) => string) {
     actionFrameTimeout,
     evaluate,
     sampleViewport,
-    matchesValue: classMatches,
+    matchesValue: rawMatches,
     clearTreeCaches,
     failureResponse,
     now,

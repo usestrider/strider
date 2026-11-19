@@ -236,6 +236,13 @@ export interface State extends Kit.Ending {
   readonly contexts: Map<UserContext.Id, ContextEntry>
   readonly contextsByBidi: Map<string, ContextEntry>
   readonly navigables: Map<string, NavigableEntry>
+  /**
+   * The context, and its origin and size, that a page's pointer input naming no frame went to when a button was
+   * pressed, until every button is up; the mouse input between goes there too, while it lasts.
+   */
+  readonly mouseCapture: Map<L1Target.NavigableId, import("./input.ts").PointerTarget>
+  /** The same for a touch, from its start until it ends or is canceled. */
+  readonly touchCapture: Map<L1Target.NavigableId, import("./input.ts").PointerTarget>
   readonly navigablesById: Map<L1Target.NavigableId, NavigableEntry>
   /** Why each page that ended did, for an operation that names it after. */
   readonly endedPages: Map<L1Target.NavigableId, L1Target.CloseReason>
@@ -314,6 +321,8 @@ export const make = (options: {
     contextsByBidi: new Map([[defaultContext.bidi, defaultContext]]),
     navigables: new Map(),
     navigablesById: new Map(),
+    mouseCapture: new Map(),
+    touchCapture: new Map(),
     endedPages: new Map(),
     documents: new Map(),
     realms: new Map(),

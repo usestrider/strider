@@ -80,8 +80,12 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       entry("userContexts", "supported"),
       entry("acceptInsecureCerts", "supported", ["native browser.createUserContext setting"]),
       entry("userContexts.proxy", "supported", [
-        "HTTP proxy endpoints for HTTP and HTTPS destinations; loopback stays direct"
+        "http, socks5 and socks4 endpoints for HTTP, HTTPS and WebSocket destinations; .domain bypass matches subdomains only; loopback stays direct"
       ]),
+      entry("userContexts.proxy.socks4", "supported", ["names are resolved at the proxy (SOCKS4a)"]),
+      entry("userContexts.proxy.https", "unsupported", ["BiDi proxy settings have no TLS connection to the proxy"]),
+      entry("userContexts.proxy.socksCredentials", "unsupported", ["the browser offers no SOCKS authentication"]),
+      entry("userContexts.proxy.bypassSuffix", "supported"),
       entry("userContexts.proxy.credentials", ownership === "launched" ? "partial" : "unsupported", [
         "requires a freshly launched browser; one credential pair per proxy endpoint for the connection lifetime"
       ]),
@@ -215,6 +219,7 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       entry("emulation.extraHTTPHeaders", "supported"),
       entry("emulation.touch", "unsupported", ["Firefox doesn't implement emulation.setTouchOverride"]),
       entry("emulation.focus", "unsupported", ["WebDriver BiDi has no focus emulation"]),
+      entry("bypassCSP", "unsupported", ["Firefox doesn't implement browsingContext.setBypassCSP"]),
       entry("screenshot.cssScale", "unsupported", ["WebDriver BiDi captures device pixels only"]),
       entry("screenshot.omitBackground", "unsupported", ["WebDriver BiDi has no background override"]),
       entry("pdf.headerFooter", "unsupported", ["WebDriver BiDi prints no header or footer"]),
@@ -414,7 +419,7 @@ export const connect: (
       evaluate: (realm, call) => Evaluation.evaluate(state, realm, call),
       releaseHandles: (list) => Evaluation.releaseHandles(state, list),
       textInsertion: "beforeInputAndEditingCommand",
-      dispatchInput: (page, events, frame) => Input.dispatchInput(state, page, events, frame),
+      dispatchInput: (page, events, frame, lands) => Input.dispatchInput(state, page, events, frame, lands),
       contentFrame: (node) => Input.contentFrame(state, node),
       releaseNodes: () => Effect.void,
       geometry: (node, kind) => Geometry.read(state, node, kind),
