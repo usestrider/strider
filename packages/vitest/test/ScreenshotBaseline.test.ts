@@ -62,6 +62,13 @@ describe("png", () => {
     )
   })
 
+  it("refuses a PNG with a corrupt chunk checksum", () => {
+    const bytes = Uint8Array.from(Png.encode(solid(1, 1, white)))
+    // Damage only the IHDR checksum, leaving the image and header readable.
+    bytes[29] = bytes[29]! ^ 1
+    assert.throws(() => Png.decode(bytes), Png.PngError)
+  })
+
   it("refuses what it doesn't read", () => {
     assert.throws(() => Png.decode(Uint8Array.of(1, 2, 3)), /signature/)
     const sixteen = Buffer.from(Png.encode(solid(1, 1, white)))
@@ -100,7 +107,7 @@ const fakePage = (images: ReadonlyArray<Png.Image>) => {
   } as unknown as Page.ReadonlyPage
 }
 
-const harness = () => {
+const harness = (info = { protocol: "cdp", product: "Chrome/155.0" }) => {
   const directory = mkdtempSync(join(tmpdir(), "strider-screenshots-"))
   const attached: Array<string> = []
   const testRun: TestRun.TestRun = {
@@ -115,7 +122,7 @@ const harness = () => {
     }),
     attach: (artifact) => Effect.sync(() => attached.push((artifact as { screenshot: string }).screenshot))
   }
-  const browser = { info: { protocol: "cdp" } } as unknown as Browser.Browser
+  const browser = { info } as unknown as Browser.Browser
   const provide = (update: ScreenshotBaseline.Update) =>
   <A, E>(
     effect: Effect.Effect<A, E, Browser.Browser | TestRun.TestRun>
@@ -224,6 +231,55 @@ describe("ScreenshotBaseline.toMatch", () => {
       yield* fakePage([solid(4, 4, white)]).pipe(ScreenshotBaseline.toMatch("cart"), provide("all"))
       assert.strictEqual(Png.decode(readFileSync(baseline)).width, 4)
     }))
+
+  it.effect("keeps Safari and Firefox baselines separate over BiDi", () =>
+    Effect.gen(function*() {
+      const keys: Array<string> = []
+      for (const product of ["firefox", "Safari"]) {
+        const { provide } = harness({ protocol: "bidi", product })
+        yield* fakePage([solid(1, 1, white)]).pipe(
+          ScreenshotBaseline.toMatch("cart"),
+          Effect.provideService(ScreenshotBaseline.CurrentSettings, {
+            update: "none",
+            path: (key) => {
+              keys.push(key.browser)
+              return ScreenshotBaseline.defaultPath(key)
+            }
+          }),
+          provide("none"),
+          Effect.exit
+        )
+      }
+      assert.notStrictEqual(keys[0], keys[1])
+    }))
+
+  it.effect("keeps failure artifacts from different test files separate", () =>
+    Effect.gen(function*() {
+      const outputDirectory = mkdtempSync(join(tmpdir(), "strider-shared-results-"))
+      const paths: Array<string> = []
+      // Each harness has a different directory but the same test-file basename.
+      for (let index = 0; index < 2; index++) {
+        const { attached, provide } = harness()
+        yield* fakePage([solid(1, 1, white)]).pipe(ScreenshotBaseline.toMatch("cart"), provide("all"))
+        yield* fakePage([solid(1, 1, black)]).pipe(
+          ScreenshotBaseline.toMatch("cart"),
+          Effect.provideService(ScreenshotBaseline.CurrentSettings, { update: "none", outputDirectory }),
+          provide("none"),
+          Effect.exit
+        )
+        assert.strictEqual(attached.length, 3)
+        paths.push(...attached)
+      }
+      assert.strictEqual(new Set(paths).size, 6)
+    }))
+
+  it("keeps distinct baseline names separate", () => {
+    const key = { testFile: "/r/a.test.ts", browser: "chromium", platform: "linux" }
+    assert.notStrictEqual(
+      ScreenshotBaseline.defaultPath({ ...key, name: "cart/total" }),
+      ScreenshotBaseline.defaultPath({ ...key, name: "cart-total" })
+    )
+  })
 
   it("keys the default path by file, name, browser and platform", () => {
     assert.strictEqual(
