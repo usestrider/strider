@@ -1128,7 +1128,7 @@ export interface Page extends ReadonlyPage {
    * logged. The function is in the main world of documents already open and of every document after, before their
    * own scripts, and not in workers. Removing it deletes it from open documents and rejects the calls still
    * waiting. A name the page or its context already exposes fails with `NameTaken`.
-   * A document holds at most 4096 waiting calls per binding; the next one rejects. The name must be a JavaScript identifier, or the call fails with `InvalidInput`.
+   * A document holds at most 4096 waiting calls per binding; the next one rejects. The name must be ASCII letters, digits, `_` or `$`, not starting with a digit (`/^[A-Za-z_$][\w$]*$/`), or the call fails with `InvalidInput`.
    *
    * **Example** (Reading a value the test holds)
    *

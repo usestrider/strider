@@ -40,9 +40,17 @@ export const install = (name: string, bridge: string, token: string, transport: 
     transport === "console" ? debug({ __striderWebSocket: token, payload }) : global[bridge](payload)
   // A call's arguments wait here until the host reads them by value, as an evaluation's result.
   let unread = 0
+  // The newest batch a read took, which tells a failed batch whose read ran from one whose read never did
+  let lastDrained = 0
   const pending = new Map<
     number,
-    { args: unknown; taken: boolean; resolve: (value: unknown) => void; reject: (error: unknown) => void }
+    {
+      args: unknown
+      taken: boolean
+      batch: number
+      resolve: (value: unknown) => void
+      reject: (error: unknown) => void
+    }
   >()
   let next = 0
   let live = true
@@ -53,7 +61,7 @@ export const install = (name: string, bridge: string, token: string, transport: 
         return reject(new E(`Binding "${name}" has 4096 calls waiting for their answer; await some first`))
       }
       const id = ++next
-      pending.set(id, { args, taken: false, resolve, reject })
+      pending.set(id, { args, taken: false, batch: 0, resolve, reject })
       // One notice when the document's unread calls go from none to some: a read takes them all
       if (unread++ === 0) send(stringify({}))
     })
@@ -62,16 +70,29 @@ export const install = (name: string, bridge: string, token: string, transport: 
     configurable: true,
     value: {
       // Every call not yet read, as [id, arguments] pairs: one read answers a burst of calls.
-      drain: () => {
+      // Hands over every unread call as batch `batch`; each stays in `pending`, under its batch, until settled.
+      drain: (batch: number) => {
         const calls: Array<[number, unknown]> = []
         for (const [id, waiting] of pending) {
           if (waiting.taken) continue
           waiting.taken = true
+          waiting.batch = batch
           calls.push([id, waiting.args])
-          waiting.args = undefined
         }
         unread = 0
+        lastDrained = batch
         return calls
+      },
+      // A batch the host couldn't read: rejects its calls, or, where the read never ran, the calls it would have
+      // taken, and lets the next call send a notice.
+      fail: (batch: number, message: string) => {
+        const drained = batch <= lastDrained
+        for (const [id, waiting] of pending) {
+          if (drained ? waiting.batch !== batch : waiting.taken) continue
+          pending.delete(id)
+          waiting.reject(new E(message))
+        }
+        if (!drained) unread = 0
       },
       settle: (id: number, ok: boolean, value: unknown) => {
         const waiting = pending.get(id)
@@ -190,10 +211,22 @@ export const expose = <A extends ReadonlyArray<unknown>, B, E, R>(
     // Every exit of a call it has an id for settles the page's promise: a rejection carries a failure's message, and
     // anything else, a defect or an interruption, the fixed one, after it is logged.
     // Reads every call the document has not yet handed over, by value, and answers each one.
-    const drainAll = Effect.fnUntraced(function*(realm: Target.RealmId, source: Binding.Source) {
+    let batches = 0
+    const failBatch = (realm: Target.RealmId, batch: number) =>
+      adapter.evaluate(realm, {
+        functionDeclaration: `(batch, message) => { ${keyOf(token)}?.fail(batch, message) }`,
+        arguments: [
+          { _tag: "Value", value: { type: "number", value: batch } },
+          { _tag: "Value", value: { type: "string", value: failed } }
+        ],
+        awaitPromise: false,
+        result: "value",
+        userActivation: false
+      }).pipe(Effect.ignore)
+    const drainAll = Effect.fnUntraced(function*(realm: Target.RealmId, source: Binding.Source, batch: number) {
       const read = yield* adapter.evaluate(realm, {
-        functionDeclaration: `() => ${keyOf(token)}?.drain() ?? []`,
-        arguments: [],
+        functionDeclaration: `(batch) => ${keyOf(token)}?.drain(batch) ?? []`,
+        arguments: [{ _tag: "Value", value: { type: "number", value: batch } }],
         awaitPromise: false,
         result: "value",
         releaseResult: true,
@@ -269,19 +302,23 @@ export const expose = <A extends ReadonlyArray<unknown>, B, E, R>(
       ended: () => {}
     }
     yield* Stream.fromQueue(incoming).pipe(
-      Stream.runForEach((call) =>
-        call.payload.pipe(
+      Stream.runForEach((call) => {
+        // Every notice gets a batch, so a read that fails, or never runs, rejects the calls it stood for
+        const batch = ++batches
+        return call.payload.pipe(
           Effect.interruptible,
           BrowserClock.timeoutOn(clock, Duration.toMillis(budget)),
           Effect.flatMap((result) =>
             Option.isNone(result)
-              ? Handlers.report(`Binding "${name}" call fetch deadline`, Cause.die("payload fetch did not complete"))
-              : drainAll(call.realm, call.source)
+              ? Effect.die("payload fetch did not complete")
+              : drainAll(call.realm, call.source, batch)
           ),
           Effect.catchCause((cause) =>
             !live || !call.ownership.isAlive() ?
               Effect.void :
-              Handlers.report(`Binding "${name}" call failed`, cause)
+              Handlers.report(`Binding "${name}" call failed`, cause).pipe(
+                Effect.andThen(failBatch(call.realm, batch))
+              )
           ),
           Effect.ensuring(Effect.suspend(() => {
             calls.delete(call)
@@ -289,7 +326,7 @@ export const expose = <A extends ReadonlyArray<unknown>, B, E, R>(
           })),
           Effect.forkIn(scope)
         )
-      ),
+      }),
       Operation.detached,
       Effect.provideContext(environment),
       Effect.forkIn(scope)
