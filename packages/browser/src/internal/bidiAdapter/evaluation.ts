@@ -140,7 +140,6 @@ export const localValue = (value: Adapter.RemoteValue): Script.LocalValue => {
 
 // ── Events ────────────────────────────────────────────────────────────────────────────────────────────────
 
-// How Firefox's text begins for a thrown value that isn't an object
 /**
  * A console call's text from its arguments. Firefox applies the call's format itself, `%f` as printf does (QUIRKS.md,
  * Q33), and sends what it made of the format and the arguments it took as the first argument, so the arguments are
@@ -155,6 +154,7 @@ const textOf = (entry: {
   return texts.length === 0 || texts.some((text) => text === undefined) ? entry.text ?? "" : texts.join(" ")
 }
 
+// How Firefox's text begins for a thrown value that isn't an object
 const uncaughtValue = "uncaught exception: "
 
 export const register = (handlers: Kit.Handlers<Event>) =>
