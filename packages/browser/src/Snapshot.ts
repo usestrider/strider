@@ -167,8 +167,9 @@ export type Name = typeof Name.Type
  * **Details**
  *
  * Pressed, expanded, and selected appear only when their role-filter reader returns true.
- * `mixed` replaces `checked` for an indeterminate checkbox or `aria-checked="mixed"`, and replaces `pressed` for a
- * button with `aria-pressed="mixed"`; text renders it as `[checked=mixed]` or, on a button, `[pressed=mixed]`.
+ * `checked=mixed` replaces `checked` for an indeterminate checkbox or `aria-checked="mixed"`, and `pressed=mixed`
+ * replaces `pressed` for a button with `aria-pressed="mixed"`. Each comes from its own state, so a node can carry
+ * both, and text renders each as it is named: `[checked=mixed]`, `[pressed=mixed]`.
  * ARIA keywords are ASCII case-insensitive without trimming; unsupported roles contribute no marker.
  * Native option selection and details open state take precedence over ARIA attributes.
  * Open details carries expanded even with its ordinary group role; group expanded filters remain invalid.
@@ -181,12 +182,13 @@ export type Name = typeof Name.Type
  */
 export const State = Schema.Literals([
   "checked",
-  "mixed",
+  "checked=mixed",
   "expanded",
   "selected",
   "disabled",
   "focused",
   "pressed",
+  "pressed=mixed",
   "invalid"
 ])
 

@@ -2436,7 +2436,7 @@ export const contents = (
             const checkbox = nodes.find((node) => node.role.role === "checkbox")!
             assert.strictEqual(heading.level, 2)
             assert.strictEqual(checkbox.level, undefined)
-            assert.deepStrictEqual([...checkbox.states], ["mixed"])
+            assert.deepStrictEqual([...checkbox.states], ["checked=mixed"])
           }))
         }), timeout)
 

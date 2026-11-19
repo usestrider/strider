@@ -57,6 +57,15 @@ export const isAriaPattern = (u: unknown): u is AriaPattern => Predicate.hasProp
  * The level and states a node pattern compares. An omitted one isn't compared; `true` requires the state, and
  * `false` requires its absence.
  *
+ * **Example** (Matching a pressed toggle that isn't disabled)
+ *
+ * ```ts import.meta.vitest
+ * import { AriaPattern } from "@usestrider/browser"
+ *
+ * const options: AriaPattern.NodeOptions = { pressed: true, disabled: false }
+ * const bold = AriaPattern.node("button", "Bold", AriaPattern.unchecked, options)
+ * ```
+ *
  * @stability unstable
  * @category models
  * @since 0.1.0

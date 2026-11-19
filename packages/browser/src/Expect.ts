@@ -666,6 +666,9 @@ export const toHaveCount: DualMatcher<Locator.ReadonlyLocator, [count: number]> 
  * page's title, in the main frame. Both are the roots `snapshot({ sources: "aria" })` returns. Use
  * `AriaPattern.anywhere` to match a node at any depth beneath the subject.
  *
+ * Neither form sees an iframe's contents: the tree it matches stops at each `iframe` node, unlike a snapshot, which
+ * includes them. To match inside a frame, locate the subject through `page.frame`.
+ *
  * With `not: true`, it waits until the subject doesn't match. A locator's missing and multiple matches retry until
  * exactly one matches, with `not` too. A failure's last observed value is the subject's tree as text.
  *
@@ -701,6 +704,21 @@ export const toHaveCount: DualMatcher<Locator.ReadonlyLocator, [count: number]> 
  *     AriaPattern.anywhere(
  *       AriaPattern.including(
  *         AriaPattern.node("heading", "Orders", AriaPattern.unchecked)
+ *       )
+ *     )
+ *   ))
+ * ```
+ *
+ * **Example** (Checking a form inside an iframe)
+ *
+ * ```ts import.meta.vitest
+ * import { AriaPattern, Expect, Page } from "@usestrider/browser"
+ *
+ * const paymentForm = (page: Page.ReadonlyPage) =>
+ *   page.frame(page.locator("#payment")).getByRole("form").pipe(Expect.toMatchAria(
+ *     AriaPattern.anywhere(
+ *       AriaPattern.including(
+ *         AriaPattern.node("textbox", "Card number", AriaPattern.unchecked)
  *       )
  *     )
  *   ))

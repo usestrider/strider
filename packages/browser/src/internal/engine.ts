@@ -528,14 +528,7 @@ export function renderText(root: SnapNode): string {
     let out = `${indent}- ${node.role.role}`
     if (node.name._tag !== "None") out += ` ${JSON.stringify(node.name.value)}`
     if (node.level !== undefined) out += ` [level=${node.level}]`
-    // A button's mixed state is its pressed state's; any other node's, its checked state's
-    for (const state of node.states) {
-      out += state !== "mixed"
-        ? ` [${state}]`
-        : node.role._tag === "Aria" && node.role.role === "button"
-        ? " [pressed=mixed]"
-        : " [checked=mixed]"
-    }
+    for (const state of node.states) out += ` [${state}]`
     if (node.validationMessage != null) out += ` [validationMessage=${JSON.stringify(node.validationMessage)}]`
     if (node.ref !== null) out += ` [ref=${node.ref}]`
     if (node.role._tag === "Inferred") out += ` [inferred: ${node.role.evidence.join(", ")}]`
@@ -3607,14 +3600,14 @@ export function engine(render: (root: SnapNode) => string) {
   const statesOf = (element: Element, role: string | null): Array<string> => {
     const states: Array<string> = []
     const checked = checkedState(element).state
-    if (checked === "mixed") states.push("mixed")
+    if (checked === "mixed") states.push("checked=mixed")
     else if (checked === true) states.push("checked")
     if (expandedOf(element) === true) states.push("expanded")
     if (selectedOf(element) === true) states.push("selected")
     if ((INTERACTIVE.has(role ?? "") || dom.matches(element, ":disabled")) && !enabled(element)) states.push("disabled")
     if (deepActive() === element) states.push("focused")
     const pressed = pressedOf(element)
-    if (pressed === "mixed") states.push("mixed")
+    if (pressed === "mixed") states.push("pressed=mixed")
     else if (pressed === true) states.push("pressed")
     if (validationMessageOf(element) !== null) states.push("invalid")
     return states
@@ -3957,10 +3950,8 @@ export function engine(render: (root: SnapNode) => string) {
   const statesMatch = (states: PatternStates, node: SnapNode): boolean => {
     if (states.level !== undefined && node.level !== states.level) return false
     const has = (state: string) => node.states.includes(state)
-    // A node's mixed state is a button's pressed state, and any other node's checked state
-    const button = node.role._tag === "Aria" && node.role.role === "button"
-    const checked = has("checked") ? true : !button && has("mixed") ? "mixed" : false
-    const pressed = has("pressed") ? true : button && has("mixed") ? "mixed" : false
+    const checked = has("checked") ? true : has("checked=mixed") ? "mixed" : false
+    const pressed = has("pressed") ? true : has("pressed=mixed") ? "mixed" : false
     if (states.checked !== undefined && states.checked !== checked) return false
     if (states.pressed !== undefined && states.pressed !== pressed) return false
     for (const state of ["expanded", "selected", "disabled", "invalid", "focused"] as const) {
