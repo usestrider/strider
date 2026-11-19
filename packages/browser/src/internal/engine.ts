@@ -3883,7 +3883,8 @@ export function engine(render: (root: SnapNode) => string) {
         ...(field && namesFromContent.has(element) ? { from: "text" as const } : {}),
         ...(namesFromFields.has(element) ? { fieldContent: true } : {})
       }
-    const level_ = levelOf(element)
+    // Only a role that takes a level has one, so an h2 with role="tab" has none
+    const level_ = role._tag === "Aria" && LEVEL_ROLES.has(role.role) ? levelOf(element) : 0
     let children = frame || (walk.depth !== null && level >= walk.depth) ? [] : childrenOf(element, level + 1, walk)
     // Text that only repeats the node's name isn't a node of its own
     if (
