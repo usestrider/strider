@@ -3,6 +3,7 @@ import { assert, describe, layer } from "@effect/vitest"
 import type { Browser } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
+import { createServer } from "node:http"
 import { site } from "../adapter/harness.ts"
 import * as SharedContext from "./sharedContext.ts"
 
@@ -12,6 +13,65 @@ const fixtureUrl = (origin: string, html: string) => `${origin}/fixture?html=${e
 export const sharedContextChecks = (name: string, backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} shared context`, () => {
     layer(SharedContext.layer(backend), { excludeTestServices: true, timeout })((it) => {
+      it.effect(
+        "replaces the shared context when revisiting an origin redirects elsewhere",
+        () =>
+          Effect.gen(function*() {
+            const { crossSite } = yield* site
+            const server = yield* Effect.acquireRelease(
+              Effect.callback<ReturnType<typeof createServer>>((resume) => {
+                const server = createServer((request, response) => {
+                  if (request.url === "/") {
+                    response.writeHead(302, { location: `${crossSite}/fixture` })
+                    response.end()
+                  } else {
+                    response.writeHead(200, { "content-type": "text/html" })
+                    response.end("<p>storage origin</p>")
+                  }
+                })
+                server.listen(0, "127.0.0.1", () => resume(Effect.succeed(server)))
+              }),
+              (server) =>
+                Effect.callback<void>((resume) => {
+                  server.closeAllConnections()
+                  server.close(() => resume(Effect.void))
+                })
+            )
+            const address = server.address()
+            assert(address !== null && typeof address !== "string")
+            const origin = `http://127.0.0.1:${address.port}`
+            const shared = yield* SharedContext.Shared
+            const before = yield* shared.current
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* SharedContext.newPage
+              yield* page.goto(`${origin}/write`)
+              yield* page.evaluateInMainWorld(() => localStorage.setItem("redirected-origin", "left"))
+              yield* page.goto(`${crossSite}/fixture`)
+            }))
+            const left = yield* shared.settle
+            const after = yield* shared.current
+            const read = yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* SharedContext.newPage
+              yield* page.goto(`${origin}/read`)
+              return yield* page.evaluateInMainWorld(() => {
+                const value = localStorage.getItem("redirected-origin")
+                localStorage.clear()
+                return value
+              })
+            }))
+            yield* shared.settle
+            assert.notStrictEqual(
+              after,
+              before,
+              `redirect was accepted as a storage read; next case read ${JSON.stringify(read)}; leftovers: ${
+                left.join("; ")
+              }`
+            )
+            assert.isNull(read)
+          }),
+        timeout
+      )
+
       const leaves = Effect.fnUntraced(
         function*(source: "previous document" | "cross-origin frame" | "service worker") {
           const { origin, crossSite } = yield* site
