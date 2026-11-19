@@ -3452,6 +3452,47 @@ document.getElementById("outer").attachShadow({ mode: "open" }).innerHTML =
             assert.deepStrictEqual(next, Exit.succeed({ _tag: "Value", value: { type: "number", value: 0 } }))
           }), timeout)
 
+        it.effect("rejects raw-engine storage left by a closed second page", () =>
+          Effect.gen(function*() {
+            const { origin, crossSite } = yield* site
+            const leaked = yield* Effect.scoped(Effect.gen(function*() {
+              const opened = yield* open(backend, "<p>first</p>", undefined, origin)
+              const second = yield* opened.adapter.createPage(opened.context)
+              const navigation = yield* opened.adapter.navigate(second, `${crossSite}/fixture`, {
+                referrer: Option.none()
+              })
+              const ended = yield* opened.facts.when("NavigationEnded", (fact) =>
+                fact.navigation === navigation)
+              assert(ended.outcome._tag === "Committed")
+              const realm = yield* opened.adapter.realm(ended.outcome.document, { _tag: "Main" })
+              const written = yield* opened.adapter.evaluate(realm, {
+                functionDeclaration:
+                  "() => { localStorage.setItem(\"closed-page\", \"left\"); return localStorage.getItem(\"closed-page\") }",
+                arguments: [],
+                awaitPromise: true,
+                result: "value",
+                userActivation: false
+              })
+              assert.deepStrictEqual(written, { _tag: "Value", value: { type: "string", value: "left" } })
+              yield* opened.adapter.closePage(second, { runBeforeUnload: false })
+              yield* opened.facts.when("NavigableRemoved", (fact) =>
+                fact.navigable === second)
+            })).pipe(Effect.exit)
+            const next = yield* Effect.scoped(Effect.gen(function*() {
+              const opened = yield* open(backend, "<p>next</p>", undefined, crossSite)
+              return yield* opened.call(
+                "() => { const value = localStorage.getItem(\"closed-page\"); localStorage.clear(); return value }",
+                []
+              )
+            }))
+            assert.isTrue(
+              Exit.isFailure(leaked),
+              `cleanup accepted the closed page's storage; next case: ${JSON.stringify(next)}`
+            )
+            assert.include(String(Exit.isFailure(leaked) ? leaked.cause : ""), "localStorage")
+            assert.deepStrictEqual(next, { _tag: "Value", value: { type: "null" } })
+          }), timeout)
+
         it.effect("rejects a raw-engine popup left open after its opener closes", () =>
           Effect.gen(function*() {
             const { origin } = yield* site
