@@ -1013,6 +1013,63 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
         timeout
       )
 
+      it.effect("hands out handles in a worker's realm, which end with the worker", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            button("Start", "window.worker = new Worker('/worker.js')") + button("Stop", "window.worker.terminate()")
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(url)
+            const started = yield* BrowserWorker.next(page)
+            yield* page.getByText("Start").click()
+            const worker = yield* started
+            const made = worker.evaluateHandle(() => self)
+            if (name === "Firefox") {
+              const error = yield* Effect.flip(made)
+              assert(BrowserWorker.isBrowserWorkerError(error), String(error))
+              assert.deepInclude(error.reason, { _tag: "Unsupported", capability: "workers.evaluate" })
+              return
+            }
+            const global = yield* made
+            assert.strictEqual(global.realm, worker.realm)
+            assert.strictEqual(yield* global.evaluate((scope) => scope.location.pathname), "/worker.js")
+            const doubled = yield* worker.evaluateHandle((n: number) => ({ n: n * 2 }), 21)
+            assert.strictEqual(yield* worker.evaluate((value) => value.n, doubled as unknown as { n: number }), 42)
+            yield* page.getByText("Stop").click()
+            yield* worker.closed
+            const gone = yield* Effect.flip(global.evaluate((scope) => scope.location.pathname))
+            assert.strictEqual(gone._tag, "TargetGone", String(gone))
+            const ended = yield* Effect.flip(worker.evaluateHandle(() => self))
+            assert.strictEqual(ended._tag, "TargetGone", String(ended))
+          }))
+        }), timeout)
+
+      it.effect(
+        "ends a worker handle held for a script that never loads when the worker ends",
+        () =>
+          Effect.gen(function*() {
+            // Only Chromium holds a dedicated worker's evaluations until its script loads
+            if (name !== "Chromium") return
+            const { url } = yield* fixture(() =>
+              button("Start", "window.worker = new Worker('/stalled-worker.js')") +
+              button("Stop", "window.worker.terminate()")
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(url)
+              const started = yield* BrowserWorker.next(page)
+              yield* page.getByText("Start").click()
+              const worker = yield* started
+              const pending = yield* worker.evaluateHandle(() => self).pipe(Effect.flip, Effect.forkScoped)
+              yield* page.getByText("Stop").click()
+              const error = yield* Fiber.join(pending)
+              assert.strictEqual(error._tag, "TargetGone", String(error))
+            }))
+          }),
+        timeout
+      )
+
       it.effect("finds a context's service worker where the backend says whose it is", () =>
         Effect.gen(function*() {
           const { origin, url } = yield* fixture(() => button("Register", "navigator.serviceWorker.register('/sw.js')"))
