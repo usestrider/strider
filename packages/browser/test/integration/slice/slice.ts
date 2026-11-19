@@ -447,7 +447,9 @@ root.querySelector("#inner").attachShadow({mode:"open"}).innerHTML = "<button>Ne
           assert.isTrue(listed.includes(context))
           yield* Scope.close(scope, Exit.void)
           yield* context.closed
-          assert.isFalse((yield* browser.contexts).some((each) => each.id === context.id))
+          assert.isFalse((yield* browser.contexts).some((each) =>
+            each.id === context.id
+          ))
         }), timeout)
 
       it.effect("opens pages in a context one after another, each closed before the next", () =>

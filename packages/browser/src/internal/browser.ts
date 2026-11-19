@@ -386,6 +386,22 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
   const handles = new WeakMap<Model.PageEntry, Page.Page>()
   const observedHandles = new WeakMap<Model.PageEntry, Page.ObservedPage>()
   const denied = new WeakMap<Model.ContextEntry, UserContext.UserContext>()
+  // The observed handle of each context the connection lists but didn't create
+  const observedContexts = new WeakMap<Model.ContextEntry, UserContext.ObservedUserContext>()
+  // Contexts being created or reclaimed: until each has its handle, `contexts` lists none it doesn't know, so a
+  // context this connection is creating is never listed as observed
+  let settlingContexts = 0
+  const settling = <A, E, R>(self: Effect.Effect<A, E, R>) =>
+    Effect.suspend(() => {
+      settlingContexts++
+      return Effect.ensuring(
+        self,
+        Effect.suspend(() => {
+          settlingContexts--
+          return model.touchContexts
+        })
+      )
+    })
 
   /** Whether the connection controls a page for its whole life: it created the page, or the page's context. */
   const lifelong = (entry: Model.PageEntry) =>
@@ -892,7 +908,10 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       }
       if (ownership === undefined) Handoff.ownContext(entry, ownerScope)
       return context
-    }).pipe(Operation.named(mode !== undefined && "context" in mode ? "UserContext.reclaim" : "Browser.newContext"))
+    }).pipe(
+      settling,
+      Operation.named(mode !== undefined && "context" in mode ? "UserContext.reclaim" : "Browser.newContext")
+    )
 
   // Setup is interruptible; ownership, registrations and delivery share a single commit region.
   const recover = <A>(
@@ -930,6 +949,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
   })
 
   const defaultEntry = yield* model.context(adapter.defaultContext)
+  const defaultContext = makeObservedContext(runtime, defaultEntry, upgradeContext(defaultEntry))
   const browser: Browser.Browser = {
     [BrowserTypeId]: BrowserTypeId,
     info: adapter.info,
@@ -962,7 +982,34 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       target: { _tag: "Browser" },
       operation: "Browser.pages.waitFor"
     }),
-    defaultContext: makeObservedContext(runtime, defaultEntry, upgradeContext(defaultEntry))
+    defaultContext,
+    contexts: Watchable.make({
+      ref: model.contexts,
+      project: (entries) => {
+        const listed: Array<UserContext.ObservedUserContext> = [defaultContext]
+        for (const entry of entries) {
+          if (entry === defaultEntry) continue
+          const created = contexts.get(entry.id)
+          if (created !== undefined) {
+            listed.push(created)
+            continue
+          }
+          const known = observedContexts.get(entry)
+          if (known !== undefined) {
+            listed.push(known)
+            continue
+          }
+          if (settlingContexts > 0) return Option.none()
+          const context = makeObservedContext(runtime, entry, upgradeContext(entry))
+          observedContexts.set(entry, context)
+          listed.push(context)
+        }
+        return Option.some(listed)
+      },
+      ended: () => Option.none(),
+      target: { _tag: "Browser" },
+      operation: "Browser.contexts.waitFor"
+    })
   }
   ClaimHooks.register(browser, { runtime, context: newContext, recover })
   return browser

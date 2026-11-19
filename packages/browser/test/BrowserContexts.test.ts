@@ -8,6 +8,7 @@ import { Browser, UserContext } from "@usestrider/browser"
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Equal from "effect/Equal"
+import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Adapter from "../src/internal/adapter.ts"
 import * as BrowserImpl from "../src/internal/browser.ts"
@@ -63,7 +64,7 @@ describe("Browser.contexts", () => {
       yield* Effect.scoped(Effect.gen(function*() {
         const waiting = yield* browser.contexts.waitFor((list) => list.length >= 2).pipe(Effect.forkChild)
         const context = yield* Browser.newContext()
-        const listed = yield* waiting.await.pipe(Effect.flatten)
+        const listed = yield* Fiber.join(waiting)
         assert.strictEqual(listed[1], context)
       }))
     }).pipe(Effect.provide(Browser.layerTest(""))))

@@ -503,12 +503,15 @@ export const attaching = (
               const { layer: attached } = yield* start(tabUrl(origin, "First"), tabUrl(origin, "Second"))
               yield* Effect.scoped(Effect.gen(function*() {
                 const created = yield* Browser.newContext()
+                // A second connection of its own, beside the first
                 const seen = yield* Effect.gen(function*() {
                   const browser = yield* Browser.Browser
                   const listed = yield* browser.contexts
                   assert.strictEqual(listed[0], browser.defaultContext)
-                  return listed.find((each) => each.id !== browser.defaultContext.id)
-                }).pipe(Effect.provide(attached))
+                  return listed.find((each) =>
+                    each.id !== browser.defaultContext.id
+                  )
+                }).pipe(Effect.provide(Layer.fresh(attached)))
                 // Found from the browser's own list of contexts, though no page is open in it
                 assert.isDefined(seen)
                 assert.isFalse("newPage" in seen!)

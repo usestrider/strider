@@ -415,6 +415,10 @@ export interface Model {
 
   /** Every page of the browser, in the order they were added. */
   readonly pages: Readable<ReadonlyArray<PageEntry>>
+  /** Every context of the browser, in the order they were added, until it is removed or the connection is lost. */
+  readonly contexts: Readable<ReadonlyArray<ContextEntry>>
+  /** Announces `contexts` again, unchanged, once a context has its handle. */
+  readonly touchContexts: Effect.Effect<void>
   /** A page the model keeps, by id. */
   readonly page: (id: Target.NavigableId) => Option.Option<PageEntry>
   /** A document the model keeps, by id, until it ends. */
@@ -522,6 +526,8 @@ export const make = Effect.fnUntraced(function*() {
         scope: modelScope,
         adapter: bounded,
         pages: fold.pages,
+        contexts: fold.contexts,
+        touchContexts: fold.touchContexts,
         page: fold.page,
         document: fold.document,
         documentOf: fold.documentOf,
