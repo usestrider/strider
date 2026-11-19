@@ -97,7 +97,7 @@ export interface Fold {
   readonly lost: Deferred.Deferred<void>
 
   // Commands
-  readonly context: (id: UserContext.Id, isDefault: boolean) => Effect.Effect<Model.ContextEntry>
+  readonly context: (id: UserContext.Id, isDefault: boolean, created?: boolean) => Effect.Effect<Model.ContextEntry>
   readonly configure: (context: Model.ContextEntry, settings: Model.ContextSettings) => Effect.Effect<void>
   readonly observeStorageSources: (
     context: Model.ContextEntry,
@@ -1132,7 +1132,7 @@ export const make = Effect.fnUntraced(function*(options: {
     response: (hop) => responses.get(hop),
     hop: (hop) => hops.get(hop),
     lost,
-    context: (id, isDefault) => apply(ensureContext(id, isDefault)),
+    context: (id, isDefault, created) => apply(ensureContext(id, isDefault, created)),
     configure: (context, settings) => apply(update(context.state, (state) => ({ ...state, settings }))),
     navigation: (id) => apply(Effect.sync(() => navigation(id))),
     forget: (id) => apply(Effect.sync(() => void navigations.delete(id))),

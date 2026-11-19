@@ -10,6 +10,7 @@ import * as Clock from "effect/Clock"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Equal from "effect/Equal"
+import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as TestClock from "effect/testing/TestClock"
@@ -191,4 +192,43 @@ describe("Browser.contexts", () => {
       }).pipe(Effect.provide(replyFirst(kept)))
     })
   }
+
+  it.effect("lists a context whose creation failed after the browser reported it, as observed", () =>
+    Effect.gen(function*() {
+      const browser = yield* Browser.Browser
+      const failed = yield* Effect.exit(Effect.scoped(Browser.newContext()))
+      assert.isTrue(Exit.isFailure(failed))
+      const listed = yield* browser.contexts
+      assert.strictEqual(listed.length, 2)
+      assert.isFalse("newPage" in listed[1]!)
+    }).pipe(Effect.provide(
+      Layer.unwrap(Clock.clockWith((clock) =>
+        Effect.sync(() =>
+          Layer.provideMerge(
+            BrowserImpl.layer((sink) =>
+              Effect.map(
+                Fake.connect([], {
+                  info: new Browser.Info(Fake.info),
+                  capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+                })(sink),
+                (fake) => ({
+                  ...fake,
+                  // The browser reports the context, then the creation fails, so setup never has its entry
+                  createUserContext: (options: Parameters<typeof fake.createUserContext>[0]) =>
+                    Effect.andThen(
+                      fake.createUserContext(options),
+                      Effect.fail(
+                        new Adapter.AdapterError({
+                          reason: { _tag: "Unsupported", capability: "createUserContext", hint: "in the test" }
+                        })
+                      )
+                    )
+                })
+              )
+            ),
+            Layer.succeed(BrowserClock.CurrentClock, BrowserClock.fromClock(clock))
+          )
+        )
+      ))
+    )))
 })

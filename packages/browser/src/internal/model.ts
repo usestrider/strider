@@ -438,6 +438,11 @@ export interface Model {
 
   /** A context's entry, made now if its fact hasn't arrived yet, as when its creation's reply comes first. */
   readonly context: (id: UserContext.Id) => Effect.Effect<ContextEntry>
+  /**
+   * A context this connection's `createUserContext` just made: when the reply comes before the browser's report, the
+   * entry is made here, marked as awaiting its handle, as the report would have made it.
+   */
+  readonly createdContext: (id: UserContext.Id) => Effect.Effect<ContextEntry>
   /** Sets a context's settings, as the library creates it. */
   readonly configure: (context: ContextEntry, settings: ContextSettings) => Effect.Effect<void>
   /** Observes storage sources only within the requesting context's scope. */
@@ -537,6 +542,7 @@ export const make = Effect.fnUntraced(function*() {
         hop: fold.hop,
         lost: fold.lost,
         context: (id) => fold.context(id, false),
+        createdContext: (id) => fold.context(id, false, true),
         configure: fold.configure,
         observeStorageSources: fold.observeStorageSources,
         navigation: fold.navigation,

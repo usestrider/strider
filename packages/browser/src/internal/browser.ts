@@ -388,6 +388,8 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
   const denied = new WeakMap<Model.ContextEntry, UserContext.UserContext>()
   // The observed handle of each context the connection lists but didn't create
   const observedContexts = new WeakMap<Model.ContextEntry, UserContext.ObservedUserContext>()
+  // Context setups running, so the last to end can list a context a failed creation left marked
+  let setups = 0
 
   /** Whether the connection controls a page for its whole life: it created the page, or the page's context. */
   const lifelong = (entry: Model.PageEntry) =>
@@ -519,6 +521,28 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
     settle: (operation, navigation, frame, url, at, outcome, id) =>
       Navigation.settle(model, operation, navigation, frame, url, at, outcome, id)
   }
+
+  /** Ends a context setup: lists the context it made, and once no setup runs, any a failed creation left marked. */
+  const settled = (awaiting: { entry?: Model.ContextEntry }) =>
+    Effect.suspend(() => {
+      setups--
+      let changed = false
+      if (awaiting.entry?.awaitingHandle === true) {
+        awaiting.entry.awaitingHandle = false
+        changed = true
+      }
+      // A creation that failed after the browser reported its context, before setup had the entry, leaves it
+      // marked: once no setup runs, any still marked is listed, as observed
+      if (setups === 0) {
+        for (const entry of model.contexts.getUnsafe()) {
+          if (entry.awaitingHandle === true) {
+            entry.awaitingHandle = false
+            changed = true
+          }
+        }
+      }
+      return changed ? model.touchContexts : Effect.void
+    })
 
   const setupContext = (
     options?: UserContext.Options,
@@ -751,7 +775,11 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
             requestSizes: options?.requestSizes
           })).pipe(
             Effect.catch(failed),
-            Effect.flatMap(model.context)
+            Effect.flatMap((id) =>
+              mode !== undefined && "context" in mode ? model.context(id) : model.createdContext(id)
+            ),
+            // Set as the entry is acquired, so setup's end lists it even if setup is interrupted right after
+            Effect.tap((entry) => Effect.sync(() => void (awaiting.entry = entry)))
           ),
         (entry) =>
           (!committed() || (reclaimable && Handoff.leavesOpen(ownerScope)) ? Effect.void : model.remove(entry)).pipe(
@@ -762,7 +790,6 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
             }))
           )
       )
-      awaiting.entry = entry
       // A context this scope created is removed with it, which closes the pages it released in it
       if (mode === undefined || !("context" in mode)) {
         model.removedWith(entry, ownerScope, () => committed() && !(reclaimable && Handoff.leavesOpen(ownerScope)))
@@ -898,11 +925,11 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       if (ownership === undefined) Handoff.ownContext(entry, ownerScope)
       return context
     }).pipe(
-      Effect.ensuring(Effect.suspend(() => {
-        if (awaiting.entry?.awaitingHandle !== true) return Effect.void
-        awaiting.entry.awaitingHandle = false
-        return model.touchContexts
-      })),
+      (self) =>
+        Effect.suspend(() => {
+          setups++
+          return Effect.ensuring(self, settled(awaiting))
+        }),
       Operation.named(mode !== undefined && "context" in mode ? "UserContext.reclaim" : "Browser.newContext")
     )
   }
