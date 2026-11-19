@@ -33,3 +33,20 @@ it("closes with its scope after a WebSocket client leaves without a close frame"
   const deadline = new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 1000))
   assert.strictEqual(await Promise.race([closed, deadline]), "closed")
 })
+
+it("closes with its scope while a WebSocket client is still connected", async () => {
+  const scope = Effect.runSync(Scope.make())
+  const { origin } = await Effect.runPromise(Scope.provide(site, scope))
+  const socket = await upgraded(origin)
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    const closed = Effect.runPromise(Scope.close(scope, Exit.void)).then(() => "closed" as const)
+    const deadline = new Promise<"pending">((resolve) => {
+      timer = setTimeout(() => resolve("pending"), 1000)
+    })
+    assert.strictEqual(await Promise.race([closed, deadline]), "closed")
+  } finally {
+    clearTimeout(timer)
+    socket.destroy()
+  }
+})
