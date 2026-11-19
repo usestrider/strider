@@ -31,6 +31,25 @@ const twoTabs = Effect.fn("twoTabs")(function*() {
 
 A context and its pages close with the scope that made them, popups included.
 
+`browser.contexts` lists the browser's contexts, kept up to date as they open and close: the default context first,
+then the others in the order they were added. A context you made is listed as the handle `newContext` returned:
+
+```ts
+import { Browser } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const listed = Effect.fn("listed")(function*() {
+  const browser = yield* Browser.Browser
+  const context = yield* Browser.newContext()
+  const contexts = yield* browser.contexts
+  return contexts.includes(context)
+}, Effect.scoped)
+```
+
+A context someone else made, such as one in a browser you attached to, is listed as an observed context, whose
+`control` gives access for a scope, as the default context's does. A context another client makes after you
+connect is listed once a page opens in it.
+
 ## Settings for a context's life
 
 Options to `newContext` or `newPage` hold for the context's life. They apply before its first page loads, so what
