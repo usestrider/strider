@@ -1036,8 +1036,11 @@ when requested rather than introducing separate name strings or speculative opti
 An event being published is not a completed match: delivery can load and decode a response body or wait for a
 navigation, and a caller predicate can reject it or still be running. A one-shot wait commits exactly one outcome:
 completed delivery accepted by its predicate, delivery/predicate failure, its registration-time deadline, target
-end, or acquiring-scope cancellation. Target end commits `TargetGone` in the channel's end path rather than waiting
-for its worker to take another queued entry. A channel that already ended commits that failure at registration.
+end, or acquiring-scope cancellation. Entries queued before target end, while none is being delivered, are still the
+wait's: the queue ends after them, so the worker delivers and checks them first and fails the wait with
+`TargetGone` only once it is empty. A delivery or predicate already running when the target ends may be blocked on
+it, so then target end commits `TargetGone` in the channel's end path.
+A channel that already ended commits that failure at registration.
 Scope cancellation commits before stopping workers; completed results, errors, and timeouts remain latched.
 
 The model's end path only commits immutable terminal data and signals the waiter; it runs no delivery, predicate,
