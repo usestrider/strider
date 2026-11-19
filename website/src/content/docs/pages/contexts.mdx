@@ -31,6 +31,36 @@ const twoTabs = Effect.fn("twoTabs")(function*() {
 
 A context and its pages close with the scope that made them, popups included.
 
+## Events across a context
+
+The event modules that take a page also take a context, for the events of every page in it, including pages opened
+after you subscribe. Each event names its page. This waits for whichever page of the context loads the receipt, and
+then for that page to close:
+
+```ts
+import { Page, PageLifecycle, PageNavigation, UserContext } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const printReceipt = Effect.fn("printReceipt")(
+  function*(context: UserContext.UserContext, page: Page.Page) {
+    const receipt = yield* PageNavigation.next(context, {
+      url: "**/receipt",
+      waitUntil: "load"
+    })
+    const closed = yield* PageLifecycle.next(context, { events: "Closed" })
+    yield* page.getByRole("button", { name: "Print receipt" }).click()
+    const opened = yield* receipt
+    const gone = yield* closed
+    return { opened: opened.page, closed: gone.page }
+  }
+)
+```
+
+[`PageLifecycle`](/docs/events/kinds#frames-loads-and-closes) reports frames added and removed, loads, and closes;
+console messages, requests, responses, dialogs, downloads, and workers have
+[modules of their own](/docs/events/events#event-modules). A context's subscription and a page's each get an event
+once.
+
 ## Settings for a context's life
 
 Options to `newContext` or `newPage` hold for the context's life. They apply before its first page loads, so what

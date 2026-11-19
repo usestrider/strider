@@ -878,7 +878,8 @@ declare const History: <S extends Schema.Top>(entry: S) => Schema.Struct<…>   
 
 | Module | Emits | Filter | Targets |
 |---|---|---|---|
-| `PageNavigation` | `PageNavigation` | `url`, `frames` (`"main"`, or `"all"` for its frames' too); `next` also takes `waitUntil` | any page |
+| `PageNavigation` | `PageNavigation`, naming its `page` and `frame` | `url`, `frames` (`"main"`, or `"all"` for its frames' too); `next` also takes `waitUntil` | any page or context |
+| `PageLifecycle` | `PageLifecycle`: `FrameAdded`, `FrameRemoved`, `DomContentLoaded`, `Loaded`, `Closed`, each naming its `page` and `frame` | `events`, `frames` (`"main"`, or `"all"` for its frames' loads too) | any page or context; a context's stream has each page's `Closed` before it ends |
 | `Popup` | `Page` from a `Page`, otherwise `ObservedPage` | `url` | any page |
 | `NetworkRequest` | `NetworkRequest` | `url`, `method`, `resourceType`; `next` requires `url` | any page or context |
 | `NetworkResponse` | `NetworkResponse`, or `CapturedResponse<B>` given `body` | `url`, `method`, `status`; `next` requires `url`. `body` (any decoder of an `HttpIncomingMessage`, such as `HttpIncomingMessage.schemaBodyJson(Cart)`) needs inspect, applies to `next` and `stream`, and types their `where` | any page or context |

@@ -66,7 +66,8 @@ Each module has the verbs above, and filters on fields of its own:
 
 | Module              | Reports                                                     | Filter                             |
 | ------------------- | ----------------------------------------------------------- | ---------------------------------- |
-| [`PageNavigation`](/docs/events/kinds#navigations) | navigations of the page, and optionally its frames           | `url`, `frames`, and `waitUntil` for `next` |
+| [`PageNavigation`](/docs/events/kinds#navigations) | navigations of the page or every page of a context, and optionally their frames | `url`, `frames`, and `waitUntil` for `next` |
+| [`PageLifecycle`](/docs/events/kinds#frames-loads-and-closes) | frames added and removed, loads, and pages closing             | `events`, `frames`                 |
 | [`Popup`](/docs/events/kinds#popups) | pages this page opened                                       | `url`                              |
 | [`Dialog`](/docs/events/kinds#dialogs-and-file-choosers) | alerts, confirms, prompts, and `beforeunload`                | `kind`                             |
 | [`FileChooser`](/docs/events/kinds#dialogs-and-file-choosers) | file pickers the page opened                                 | `multiple`                         |

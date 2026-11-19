@@ -299,9 +299,7 @@ export const next = <A, B, PE, PR, DE = never>(
       if (Option.isSome(delivering)) {
         return Option.some(delivery.unfinished(delivering.value))
       }
-      const late = channel.entries.filter((entry) =>
-        entry.sequence < since && accepts(entry)
-      ).at(-1)
+      const late = channel.entries.filter((entry) => entry.sequence < since && accepts(entry)).at(-1)
       return late === undefined ? Option.none() : Option.some(
         `${kind.noun} came ${
           Math.round((subscribed - late.at) / 1e6)
@@ -332,9 +330,7 @@ export const next = <A, B, PE, PR, DE = never>(
     // Notify at the deadline, but leave this scope attached until the delivery worker exits.
     // Closing it here would detach it before its uninterruptible work has stopped.
     yield* record.bound(Effect.never, missed, "waitingForEvent").pipe(
-      Effect.onExit((exit) =>
-        Effect.sync(() => commit(exit))
-      ),
+      Effect.onExit((exit) => Effect.sync(() => commit(exit))),
       Effect.forkIn(lifetime)
     )
     yield* Effect.raceFirst(work, Deferred.await(deferred)).pipe(

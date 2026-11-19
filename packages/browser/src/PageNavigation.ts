@@ -67,6 +67,20 @@ export type Id = typeof Id.Type
  * navigation set; for `BecameDownload` and `NoContent`, the URL it was going to. `frame` is where it happened:
  * the page's own id, or a frame's.
  *
+ * **Example** (Encoding the navigations of a context for a report)
+ *
+ * ```ts import.meta.vitest
+ * import { PageNavigation, Subscription, UserContext } from "@usestrider/browser"
+ * import { Effect, Schema } from "effect"
+ *
+ * const report = Effect.fn("report")(function*(context: UserContext.ObservedUserContext) {
+ *   const log = yield* PageNavigation.history(context)
+ *   return Schema.encodeUnknownSync(Subscription.History(PageNavigation.PageNavigation))(
+ *     log
+ *   )
+ * })
+ * ```
+ *
  * @stability unstable
  * @category schemas
  * @since 0.1.0

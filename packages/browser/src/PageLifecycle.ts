@@ -35,6 +35,20 @@ import type * as UserContext from "./UserContext.ts"
  * - `Loaded`: a document in `frame` finished loading, with its images, styles, and subframes.
  * - `Closed`: the page closed, for `reason`. For a page, `frame` is the page's own id.
  *
+ * **Example** (Encoding the frames a page added for a report)
+ *
+ * ```ts import.meta.vitest
+ * import { Page, PageLifecycle, Subscription } from "@usestrider/browser"
+ * import { Effect, Schema } from "effect"
+ *
+ * const report = Effect.fn("report")(function*(page: Page.ObservedPage) {
+ *   const log = yield* PageLifecycle.history(page, { events: "FrameAdded" })
+ *   return Schema.encodeUnknownSync(Subscription.History(PageLifecycle.PageLifecycle))(
+ *     log
+ *   )
+ * })
+ * ```
+ *
  * @stability unstable
  * @category schemas
  * @since 0.1.0
@@ -92,6 +106,22 @@ export type PageLifecycle = typeof PageLifecycle.Type
 
 /**
  * Which events to match.
+ *
+ * **Example** (Every load in a context, frames' included)
+ *
+ * ```ts import.meta.vitest
+ * import { PageLifecycle, UserContext } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const loads: PageLifecycle.Filter = { events: "Loaded", frames: "all" }
+ *
+ * const loadedUrls = Effect.fn("loadedUrls")(
+ *   function*(context: UserContext.ObservedUserContext) {
+ *     const log = yield* PageLifecycle.history(context, loads)
+ *     return log.entries.flatMap((event) => event._tag === "Loaded" ? [event.url] : [])
+ *   }
+ * )
+ * ```
  *
  * @stability unstable
  * @category models
