@@ -3179,5 +3179,181 @@ document.getElementById("form").addEventListener("submit", (event) => {
             yield* page.frames.waitFor((tree) => tree.children.length === 0)
           }))
         }), timeout)
+
+      // ── Frame handles ──
+
+      it.effect("navigates a child frame, cross-site included, to each readiness, and reports it in its status", () =>
+        Effect.gen(function*() {
+          const { crossSite, origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(
+              fixtureUrl(origin, `<iframe id="child" src="${fixtureUrl(origin, "<p>first</p>")}"></iframe>`)
+            )
+            yield* page.frame(page.locator("#child")).locator("p").pipe(Expect.toHaveText("first"))
+            const frame = yield* page.frame(page.locator("#child")).resolve
+            assert.notStrictEqual(frame.id, page.id)
+            // The handle is on a frame of this page
+            assert.strictEqual(frame.page.id, page.id)
+            if (!(yield* supports("navigation.childFrames"))) {
+              const refused = reasonOf(yield* Effect.exit(frame.goto(fixtureUrl(crossSite, "<p>never</p>"))))
+              assert.strictEqual(refused?.reason?._tag, "Unsupported")
+              return
+            }
+            const targets = [
+              ["commit", fixtureUrl(crossSite, "<p>committed</p>")],
+              ["domContentLoaded", fixtureUrl(origin, "<p>parsed</p><img src=\"/pending-image\">")],
+              ["load", fixtureUrl(crossSite, "<p>loaded</p>")]
+            ] as const
+            for (const [waitUntil, url] of targets) {
+              const navigation = yield* frame.goto(url, { waitUntil })
+              assert.strictEqual(navigation.url, url)
+              const status = yield* frame.status
+              assert.strictEqual(status._tag, "Attached")
+              if (status._tag !== "Attached") {
+                return
+              }
+              assert.strictEqual(status.url, url)
+              if (waitUntil !== "commit") {
+                assert.isTrue(Option.isSome(status.document))
+                assert.include(
+                  waitUntil === "load" ? ["complete"] : ["interactive", "complete"],
+                  Option.getOrThrow(status.document).readiness
+                )
+              }
+            }
+            // The page's own document stays where it was, and its tree shows the frame's new URL
+            assert.include(yield* page.url, origin)
+            yield* page.frames.waitFor((tree) =>
+              tree.children[0]?.url === targets[2][1]
+            )
+            // Waiting on the status is the frame's load-state wait
+            yield* frame.status.waitFor((status) =>
+              status._tag === "Attached" && Option.isSome(status.document) &&
+              status.document.value.readiness === "complete"
+            )
+          }))
+        }), timeout)
+
+      it.effect("fails a frame's goto when the frame detaches mid-navigation, and its status says so", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(
+              fixtureUrl(origin, `<iframe id="child" src="${fixtureUrl(origin, "<p>first</p>")}"></iframe>`)
+            )
+            yield* page.frame(page.locator("#child")).locator("p").pipe(Expect.toHaveText("first"))
+            const frame = yield* page.frame(page.locator("#child")).resolve
+            if (!(yield* supports("navigation.childFrames"))) {
+              return
+            }
+            // The image never finishes, so the frame's document never loads until it goes away
+            const pending = yield* frame.goto(
+              fixtureUrl(origin, "<p>pending</p><img src=\"/pending-image\">"),
+              { waitUntil: "load" }
+            ).pipe(Effect.forkScoped)
+            yield* page.frame(page.locator("#child")).locator("p").pipe(Expect.toHaveText("pending"))
+            yield* page.evaluateInMainWorld(() =>
+              document.getElementById("child")!.remove()
+            )
+            const failed = reasonOf(yield* Fiber.await(pending))
+            assert.strictEqual(failed?.reason?._tag, "TargetGone")
+            assert.strictEqual((yield* frame.status)._tag, "Detached")
+            const after = reasonOf(
+              yield* Effect.exit(frame.evaluateInMainWorld(() =>
+                1
+              ))
+            )
+            assert.strictEqual(after?.reason?._tag, "TargetGone")
+          }))
+        }), timeout)
+
+      it.effect("evaluates in a frame's own realms, holds a handle there, and finds its frames by id", () =>
+        Effect.gen(function*() {
+          const { crossSite, origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            const inner = fixtureUrl(crossSite, "<p>inner</p><script>window.innerGlobal = 'inner'</script>")
+            // The iframe sits in a closed shadow root, where no locator reaches it
+            yield* page.goto(fixtureUrl(
+              origin,
+              `<script>window.outerGlobal = 'outer'</script><div id="host"></div><script>document.getElementById("host").attachShadow({ mode: "closed" }).innerHTML = '<iframe src="${inner}"></iframe>'</script>`
+            ))
+            const tree = yield* page.frames.waitFor((tree) =>
+              tree.children.length === 1 && tree.children[0]!.url === inner
+            )
+            const frame = yield* page.frameById(tree.children[0]!.id)
+            assert.strictEqual(frame.id, tree.children[0]!.id)
+            assert.strictEqual(frame.page.id, page.id)
+            yield* frame.locator("p").pipe(Expect.toHaveText("inner"))
+            // The main world sees the frame's own globals, not its parent's
+            assert.deepStrictEqual(
+              yield* frame.evaluateInMainWorld(() => [
+                Reflect.get(window, "innerGlobal"),
+                Reflect.get(window, "outerGlobal") ?? null,
+                location.href
+              ]),
+              ["inner", null, inner]
+            )
+            if (yield* supports("isolatedWorlds")) {
+              assert.strictEqual(
+                yield* frame.evaluate(() =>
+                  Reflect.get(window, "innerGlobal") ?? null
+                ),
+                null
+              )
+              assert.strictEqual(
+                yield* frame.evaluate(() =>
+                  document.querySelector("p")!.textContent
+                ),
+                "inner"
+              )
+            }
+            const handle = yield* frame.evaluateHandle(() => ({ where: location.origin }))
+            assert.deepStrictEqual(yield* handle.read, { where: crossSite })
+            // The root's id gives the page's own frame
+            const root = yield* page.frameById(page.id)
+            assert.strictEqual(yield* root.evaluateInMainWorld(() => Reflect.get(window, "outerGlobal")), "outer")
+            // An id the page has no frame for fails
+            const unknown = reasonOf(yield* Effect.exit(page.frameById("no-such-frame" as typeof page.id)))
+            assert.isDefined(unknown)
+          }))
+        }), timeout)
+
+      it.effect(
+        "resolves a frame locator to the frame its iframe holds now, and an old handle reports it detached",
+        () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* SharedContext.newPage
+              yield* page.goto(
+                fixtureUrl(origin, `<iframe id="child" src="${fixtureUrl(origin, "<p>old</p>")}"></iframe>`)
+              )
+              const locator = page.frame(page.locator("#child"))
+              yield* locator.locator("p").pipe(Expect.toHaveText("old"))
+              const old = yield* locator.resolve
+              assert.strictEqual((yield* old.status)._tag, "Attached")
+              yield* page.evaluateInMainWorld((url: string) => {
+                const replacement = document.createElement("iframe")
+                replacement.id = "child"
+                replacement.src = url
+                document.getElementById("child")!.replaceWith(replacement)
+              }, fixtureUrl(origin, "<p>new</p>"))
+              yield* old.status.waitFor((status) =>
+                status._tag === "Detached"
+              )
+              yield* locator.locator("p").pipe(Expect.toHaveText("new"))
+              const current = yield* locator.resolve
+              assert.notStrictEqual(current.id, old.id)
+              assert.strictEqual(
+                yield* current.evaluateInMainWorld(() => document.querySelector("p")!.textContent),
+                "new"
+              )
+            }))
+          }),
+        timeout
+      )
     })
   })
