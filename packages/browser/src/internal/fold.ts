@@ -509,6 +509,13 @@ export const make = Effect.fnUntraced(function*(options: {
           if (fact.requestSizes) entry.sizes ??= new Map()
           return
         }
+        case "UserContextReleased": {
+          const context = contexts.get(fact.context)
+          if (context === undefined || context.awaitingHandle !== true) return
+          context.awaitingHandle = false
+          yield* update(contextList, (list) => [...list])
+          return
+        }
         case "UserContextRemoved": {
           const context = contexts.get(fact.context)
           if (context === undefined) return

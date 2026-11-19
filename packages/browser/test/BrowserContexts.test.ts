@@ -193,7 +193,7 @@ describe("Browser.contexts", () => {
     })
   }
 
-  it.effect("lists a context whose creation failed after the browser reported it, as observed", () =>
+  it.effect("lists a context a failed creation couldn't remove, as observed", () =>
     Effect.gen(function*() {
       const browser = yield* Browser.Browser
       const failed = yield* Effect.exit(Effect.scoped(Browser.newContext()))
@@ -213,10 +213,14 @@ describe("Browser.contexts", () => {
                 })(sink),
                 (fake) => ({
                   ...fake,
-                  // The browser reports the context, then the creation fails, so setup never has its entry
+                  // The browser reports the context, then the creation fails and can't remove it, so it releases it
+                  // before setup ever has its entry
                   createUserContext: (options: Parameters<typeof fake.createUserContext>[0]) =>
                     Effect.andThen(
-                      fake.createUserContext(options),
+                      Effect.flatMap(
+                        fake.createUserContext(options),
+                        (context) => sink({ _tag: "UserContextReleased", context })
+                      ),
                       Effect.fail(
                         new Adapter.AdapterError({
                           reason: { _tag: "Unsupported", capability: "createUserContext", hint: "in the test" }

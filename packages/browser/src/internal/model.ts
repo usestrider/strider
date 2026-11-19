@@ -518,7 +518,15 @@ export const make = Effect.fnUntraced(function*() {
   const attach = (connected: Adapter.AdapterConnection): Effect.Effect<Model, never, Scope.Scope> =>
     Effect.gen(function*() {
       attached = connected
-      const bounded = BoundedAdapter.make(connected)
+      const bounded = BoundedAdapter.make({
+        ...connected,
+        // A removal that fails releases a context still being created, such as one a late cleanup removes after
+        // its creator's deadline: it is listed as observed rather than hidden
+        removeUserContext: (id) =>
+          connected.removeUserContext(id).pipe(
+            Effect.onError(() => fold.sink({ _tag: "UserContextReleased", context: id }))
+          )
+      })
       yield* ownership.attach(connected, bounded.claims)
       yield* connected.closed.pipe(
         Effect.andThen(fold.loseConnection(new Target.ConnectionLost({}))),

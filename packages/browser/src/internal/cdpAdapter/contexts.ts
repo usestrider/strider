@@ -16,6 +16,9 @@ import * as L1Target from "../../Target.ts"
 import type * as UserContext from "../../UserContext.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as BrowserClock from "../browserClock.ts"
+import * as Operation from "../operation.ts"
+import * as ProtocolClient from "../protocolClient.ts"
 import * as Urls from "../urls.ts"
 import { applyDownloads, restoreContext } from "./declare.ts"
 import { whileSwapping } from "./navigation.ts"
@@ -115,6 +118,16 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
         : {})
     }).pipe(Protocol.on(state.root()))
   )
+  // From the reply on, every failure, including interruption, removes the context under a fresh budget
+  return yield* initializeContext(state, browserContextId, options).pipe(Effect.uninterruptible)
+})
+
+/** Seeds a context Chromium just created, and removes it if that fails; its id, once it is ready. */
+const initializeContext = Effect.fnUntraced(function*(
+  state: State,
+  browserContextId: string,
+  options: Adapter.UserContextOptions
+) {
   const entry = new ContextEntry(state.ids.userContext(), browserContextId, false)
   if (options.focusEmulated) entry.focusEmulated = true
   if (options.requestSizes) entry.requestSizes = new Map()
@@ -133,9 +146,33 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
       ...(options.requestSizes ? { requestSizes: true } : {})
     })
   )
-  yield* Kit.protocol(applyDownloads(state, entry))
+  yield* Kit.protocol(applyDownloads(state, entry)).pipe(
+    Effect.interruptible,
+    Effect.onError(() => rollback(state, entry.id))
+  )
   return entry.id
 })
+
+/** The rollback's budget, fresh: the creation's own may have passed. */
+const rollbackMillis = 5000
+
+/**
+ * Removes a context whose initialization failed. When the removal can't be confirmed, the context is released: the
+ * connection no longer creates it, so it is listed as one it observes.
+ */
+const rollback = (state: State, id: UserContext.Id) =>
+  Operation.detached(Effect.gen(function*() {
+    const at = yield* BrowserClock.after(rollbackMillis)
+    const removed = yield* removeUserContext(state, id).pipe(
+      Effect.provideService(ProtocolClient.CommandDeadline, Option.some(at)),
+      BrowserClock.until(at),
+      Effect.map(Option.isSome),
+      Effect.catch(() => Effect.succeed(false))
+    )
+    if (removed) return
+    yield* Effect.logWarning(`CDP context ${id} initialization rollback could not confirm removal`)
+    yield* state.buffer.run(() => state.buffer.emit({ _tag: "UserContextReleased", context: id }))
+  }))
 
 export const removeUserContext = Effect.fnUntraced(function*(state: State, id: UserContext.Id) {
   const context = yield* contextOf(state, id)

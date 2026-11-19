@@ -221,6 +221,11 @@ export type Fact =
     readonly requestSizes?: boolean | undefined
   }
   | { readonly _tag: "UserContextRemoved"; readonly context: UserContext.Id }
+  /**
+   * The connection no longer creates the context, which stays open: a failed creation whose removal couldn't be
+   * confirmed. It is listed as a context the connection observes.
+   */
+  | { readonly _tag: "UserContextReleased"; readonly context: UserContext.Id }
   | {
     readonly _tag: "PageAdded"
     readonly page: Target.NavigableId

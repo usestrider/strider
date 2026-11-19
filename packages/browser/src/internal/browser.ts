@@ -388,8 +388,6 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
   const denied = new WeakMap<Model.ContextEntry, UserContext.UserContext>()
   // The observed handle of each context the connection lists but didn't create
   const observedContexts = new WeakMap<Model.ContextEntry, UserContext.ObservedUserContext>()
-  // Context setups running, so the last to end can list a context a failed creation left marked
-  let setups = 0
 
   /** Whether the connection controls a page for its whole life: it created the page, or the page's context. */
   const lifelong = (entry: Model.PageEntry) =>
@@ -522,26 +520,12 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       Navigation.settle(model, operation, navigation, frame, url, at, outcome, id)
   }
 
-  /** Ends a context setup: lists the context it made, and once no setup runs, any a failed creation left marked. */
+  /** Ends a context setup: lists the context it made, as its handle or, if setup failed, as observed. */
   const settled = (awaiting: { entry?: Model.ContextEntry }) =>
     Effect.suspend(() => {
-      setups--
-      let changed = false
-      if (awaiting.entry?.awaitingHandle === true) {
-        awaiting.entry.awaitingHandle = false
-        changed = true
-      }
-      // A creation that failed after the browser reported its context, before setup had the entry, leaves it
-      // marked: once no setup runs, any still marked is listed, as observed
-      if (setups === 0) {
-        for (const entry of model.contexts.getUnsafe()) {
-          if (entry.awaitingHandle === true) {
-            entry.awaitingHandle = false
-            changed = true
-          }
-        }
-      }
-      return changed ? model.touchContexts : Effect.void
+      if (awaiting.entry?.awaitingHandle !== true) return Effect.void
+      awaiting.entry.awaitingHandle = false
+      return model.touchContexts
     })
 
   const setupContext = (
@@ -925,11 +909,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       if (ownership === undefined) Handoff.ownContext(entry, ownerScope)
       return context
     }).pipe(
-      (self) =>
-        Effect.suspend(() => {
-          setups++
-          return Effect.ensuring(self, settled(awaiting))
-        }),
+      Effect.ensuring(Effect.suspend(() => settled(awaiting))),
       Operation.named(mode !== undefined && "context" in mode ? "UserContext.reclaim" : "Browser.newContext")
     )
   }

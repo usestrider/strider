@@ -3880,79 +3880,104 @@ describe("CDP WebSocket bridge", () => {
 })
 
 describe("CDP context publication", () => {
-  it.effect("lists a context whose fact arrives after caller timeout and whose initialization fails", () =>
-    Effect.gen(function*() {
-      const wire = yield* makeBrowser
-      const queued = yield* Deferred.make<void>()
-      const deliver = yield* Deferred.make<void>()
-      const finished = yield* Deferred.make<void>()
-      let initializationFailure: Adapter.AdapterError | undefined
-      let createdId: Adapter.Fact & { readonly _tag: "UserContextAdded" } | undefined
-      yield* Effect.gen(function*() {
-        while (true) {
-          const command = yield* wire.next
-          yield* wire.receive({
-            id: command.id,
-            sessionId: command.sessionId,
-            result: command.method === "Browser.getVersion"
-              ? {
-                protocolVersion: "1.3",
-                product: "Chrome/155.0.8059.79",
-                revision: "test",
-                userAgent: "HeadlessChrome",
-                jsVersion: "test"
-              }
-              : command.method === "Target.getBrowserContexts"
-              ? { browserContextIds: [] }
-              : command.method === "Target.createBrowserContext"
-              ? { browserContextId: "late-context" }
-              : {}
-          })
+  const lateCreation = Effect.fnUntraced(function*(refuseDisposal: boolean) {
+    const wire = yield* makeBrowser
+    const queued = yield* Deferred.make<void>()
+    const deliver = yield* Deferred.make<void>()
+    const finished = yield* Deferred.make<void>()
+    let initializationFailure: Adapter.AdapterError | undefined
+    const sent: Array<string> = []
+    let createdId: Adapter.Fact & { readonly _tag: "UserContextAdded" } | undefined
+    yield* Effect.gen(function*() {
+      while (true) {
+        const command = yield* wire.next
+        sent.push(command.method)
+        // The new context's initialization fails
+        if (
+          command.method === "Browser.setDownloadBehavior" &&
+          (command.params as { browserContextId?: string } | undefined)?.browserContextId === "late-context"
+        ) {
+          yield* wire.receive({ id: command.id, error: { code: -32000, message: "refused in the test" } })
+          continue
         }
-      }).pipe(Effect.forkScoped)
-      const services = yield* Layer.build(BrowserImpl.layer((sink) =>
-        CdpAdapter.connect(wire.transport, {
-          ownership: "attached",
-          sink: Effect.fnUntraced(function*(fact) {
-            if (fact._tag === "UserContextAdded" && fact.created) {
-              createdId = fact
-              // Hold delivery in the fold worker across the caller's deadline.
-              yield* Deferred.succeed(queued, undefined)
-              yield* Deferred.await(deliver)
+        if (refuseDisposal && command.method === "Target.disposeBrowserContext") {
+          yield* wire.receive({ id: command.id, error: { code: -32000, message: "refused in the test" } })
+          continue
+        }
+        yield* wire.receive({
+          id: command.id,
+          sessionId: command.sessionId,
+          result: command.method === "Browser.getVersion"
+            ? {
+              protocolVersion: "1.3",
+              product: "Chrome/155.0.8059.79",
+              revision: "test",
+              userAgent: "HeadlessChrome",
+              jsVersion: "test"
             }
-            yield* sink(fact)
-          })
-        }).pipe(Effect.map((adapter) => ({
-          ...adapter,
-          createUserContext: (options: Adapter.UserContextOptions) =>
-            adapter.createUserContext(options).pipe(
-              Effect.tapError((error) =>
-                Effect.sync(() => {
-                  initializationFailure = error
-                })
-              ),
-              Effect.ensuring(Deferred.succeed(finished, undefined))
-            )
-        })))
-      ))
-      const browser = Context.get(services, Browser.Browser)
-      const creating = yield* browser.newContext().pipe(
-        Deadline.within("100 millis"),
-        Effect.exit,
-        Effect.forkChild({ startImmediately: true })
-      )
-      yield* Deferred.await(queued)
-      yield* TestClock.adjust("100 millis")
-      assert.isTrue(Exit.isFailure(yield* Fiber.join(creating)))
-      assert.strictEqual((yield* browser.contexts).length, 1)
-      yield* Deferred.succeed(deliver, undefined)
-      // CDP's following applyDownloads uses the expired command budget and fails; no id is returned for cleanup.
-      yield* Deferred.await(finished)
-      assert.isDefined(initializationFailure, "CDP initialization must fail after the expired deadline")
-      assert.isDefined(createdId)
-      const listed = yield* browser.contexts
-      assert.strictEqual(listed.length, 2, "the late context must not stay hidden after every setup ended")
-      assert.strictEqual(listed[1]!.id, createdId!.context)
+            : command.method === "Target.getBrowserContexts"
+            ? { browserContextIds: [] }
+            : command.method === "Target.createBrowserContext"
+            ? { browserContextId: "late-context" }
+            : {}
+        })
+      }
+    }).pipe(Effect.forkScoped)
+    const services = yield* Layer.build(BrowserImpl.layer((sink) =>
+      CdpAdapter.connect(wire.transport, {
+        ownership: "attached",
+        sink: Effect.fnUntraced(function*(fact) {
+          if (fact._tag === "UserContextAdded" && fact.created) {
+            createdId = fact
+            // Hold delivery in the fold worker across the caller's deadline.
+            yield* Deferred.succeed(queued, undefined)
+            yield* Deferred.await(deliver)
+          }
+          yield* sink(fact)
+        })
+      }).pipe(Effect.map((adapter) => ({
+        ...adapter,
+        createUserContext: (options: Adapter.UserContextOptions) =>
+          adapter.createUserContext(options).pipe(
+            Effect.tapError((error) =>
+              Effect.sync(() => {
+                initializationFailure = error
+              })
+            ),
+            Effect.ensuring(Deferred.succeed(finished, undefined))
+          )
+      })))
+    ))
+    const browser = Context.get(services, Browser.Browser)
+    const creating = yield* browser.newContext().pipe(
+      Deadline.within("100 millis"),
+      Effect.exit,
+      Effect.forkChild({ startImmediately: true })
+    )
+    yield* Deferred.await(queued)
+    yield* TestClock.adjust("100 millis")
+    assert.isTrue(Exit.isFailure(yield* Fiber.join(creating)))
+    assert.strictEqual((yield* browser.contexts).length, 1)
+    yield* Deferred.succeed(deliver, undefined)
+    // Its initialization fails, and the creation removes the context under a budget of its own
+    yield* Deferred.await(finished)
+    assert.isDefined(initializationFailure, "CDP initialization must fail after the expired deadline")
+    assert.isDefined(createdId)
+    assert.include(sent, "Target.disposeBrowserContext")
+    return { listed: yield* browser.contexts, context: createdId!.context }
+  }, onTestClock)
+
+  it.effect("removes a context whose fact arrives after caller timeout and whose initialization fails", () =>
+    Effect.gen(function*() {
+      const { listed } = yield* lateCreation(false)
+      assert.strictEqual(listed.length, 1, "the failed creation's context is removed")
+    }))
+
+  it.effect("lists that context as observed when the browser refuses its removal", () =>
+    Effect.gen(function*() {
+      const { listed, context } = yield* lateCreation(true)
+      assert.strictEqual(listed.length, 2, "the late context must not stay hidden")
+      assert.strictEqual(listed[1]!.id, context)
       assert.isFalse("newPage" in listed[1]!)
-    }).pipe(onTestClock))
+    }))
 })
