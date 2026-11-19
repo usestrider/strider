@@ -543,10 +543,12 @@ export const contents = (
             console.log("after marker text")
           })
           yield* logged
-          assert.deepStrictEqual((yield* ConsoleMessage.history(page)).entries.map((entry) => entry.text), [
+          const messages = (yield* ConsoleMessage.history(page)).entries
+          assert.deepStrictEqual(messages.map((entry) => entry.text), [
             "__striderDocumentOpened",
             "after marker text"
           ])
+          assert.deepStrictEqual(messages.map((entry) => entry.source), [{ _tag: "Page" }, { _tag: "Page" }])
         }), timeout)
 
       it.effect("reports repeated browser console entries on stock WebKit", () =>
@@ -639,19 +641,34 @@ export const contents = (
           const errors = messages.map((entry) =>
             entry.text
           )
-          // Each is the browser's own: the CSP and CORS errors about security, and the blocked fetch's failed load
-          // about the network. Where a browser can't tell, it reports none as a message
-          assert.deepStrictEqual(
-            messages.map((entry) =>
-              entry.source
-            ),
-            messages.map((entry): ConsoleMessage.Source => ({
-              _tag: "Browser",
-              category: /Failed to load resource/.test(entry.text) ? "network" : "security"
-            })),
-            JSON.stringify(errors)
-          )
-          if (!(yield* supports("console.source"))) assert.deepStrictEqual(errors, [])
+          if (yield* supports("console.source")) {
+            // Each is the browser's own: the CSP and CORS errors about security, and the failed load the blocked
+            // fetch causes about the network. WebKit's failed load names Access-Control too, so it is told apart
+            // first, and can't stand in for the CORS error
+            const failedLoad = /^Failed to load resource/
+            const expectedSource = (text: string): ConsoleMessage.Source | undefined =>
+              failedLoad.test(text)
+                ? { _tag: "Browser", category: "network" }
+                : csp.test(text) || cors.test(text)
+                ? { _tag: "Browser", category: "security" }
+                : undefined
+            for (const entry of messages) {
+              assert.deepStrictEqual(entry.source, expectedSource(entry.text), entry.text)
+            }
+            const required: ReadonlyArray<readonly [string, (text: string) => boolean]> = [
+              ["the CSP error", (text) =>
+                !failedLoad.test(text) && csp.test(text)],
+              ["the CORS error", (text) =>
+                !failedLoad.test(text) && cors.test(text)],
+              ["the failed load", (text) => failedLoad.test(text)]
+            ]
+            for (const [what, matches] of required) {
+              assert.isTrue(errors.some(matches), `${what} among ${JSON.stringify(errors)}`)
+            }
+          } else {
+            // Where a browser can't tell, it reports none of them as a console message
+            assert.deepStrictEqual(errors, [])
+          }
           const exceptions = (yield* UncaughtException.history(page)).entries.map((entry) =>
             `${entry.name}: ${entry.message}`
           )
