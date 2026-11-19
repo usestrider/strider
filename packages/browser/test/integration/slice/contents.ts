@@ -570,6 +570,31 @@ export const contents = (
           assert.strictEqual(entries[0]!.text, entries[1]!.text)
         }), timeout)
 
+      it.effect("records synchronous browser and script console entries before evaluation returns", () =>
+        Effect.gen(function*() {
+          // Firefox 158 sends the CSP error, a `log.entryAdded` of type `javascript`, only after the evaluation's
+          // reply, so nothing orders it before the evaluation returns there. Its two console calls do precede it.
+          if (name === "Firefox") {
+            return
+          }
+          const page = yield* SharedContext.newPage
+          yield* page.setContent(`<meta http-equiv="Content-Security-Policy" content="style-src 'none'">`)
+          yield* page.evaluateInMainWorld(() => {
+            console.log("before blocked style")
+            const style = document.createElement("style")
+            style.textContent = "body { color: red }"
+            document.head.append(style)
+            console.log("after blocked style")
+          })
+          const entries = (yield* ConsoleMessage.history(page)).entries.map((entry) =>
+            entry.text
+          )
+          assert.lengthOf(entries, 3, JSON.stringify(entries))
+          assert.strictEqual(entries[0], "before blocked style")
+          assert.match(entries[1]!, /Content Security Policy/i)
+          assert.strictEqual(entries[2], "after blocked style")
+        }), timeout)
+
       it.effect("reports the browser's own CSP and CORS errors at level error, as each browser sends them", () =>
         Effect.gen(function*() {
           const page = yield* SharedContext.newPage
@@ -611,7 +636,12 @@ export const contents = (
             `${entry.name}: ${entry.message}`
           )
           const reported = asExceptions ? exceptions : errors
-          assert.isTrue(reported.some((text) => csp.test(text)), `a CSP error among ${JSON.stringify(reported)}`)
+          assert.isTrue(
+            reported.some((text) =>
+              csp.test(text)
+            ),
+            `a CSP error among ${JSON.stringify(reported)}`
+          )
           assert.isTrue(reported.some((text) => cors.test(text)), `a CORS error among ${JSON.stringify(reported)}`)
           if (name === "Firefox") {
             assert.deepStrictEqual(errors, [])
@@ -1635,6 +1665,24 @@ export const contents = (
               ? ["script.disown", "script.disown"]
               : ["Runtime.releaseObject", "Runtime.releaseObjectGroup"]
           )
+        }), timeout)
+
+      it.effect("finds test ids by pattern, and names the pattern when it matches several", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(
+              fixtureUrl(origin, `<p data-testid="row-1">a</p><p data-testid="row-2">b</p><p data-testid="total">c</p>`)
+            )
+            assert.strictEqual(yield* page.getByTestId(/^row-/).count, 2)
+            assert.strictEqual(yield* page.getByTestId(/^ROW-1$/i).readText, "a")
+            const error = reasonOf(
+              yield* Effect.exit(page.getByTestId(/^row-/i).readText)
+            ) as unknown as Locator.LocatorError
+            assert.strictEqual(error.reason._tag, "StrictViolation")
+            assert.strictEqual(error.locator, "page.getByTestId(/^row-/i)")
+          }))
         }), timeout)
 
       it.effect("evaluates with the locator's one match first, in the isolated world", () =>

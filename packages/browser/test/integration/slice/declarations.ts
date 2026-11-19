@@ -118,6 +118,18 @@ const crossSiteFrame = Effect.fnUntraced(function*(
 const json = (value: unknown) => HttpServerResponse.jsonUnsafe(value)
 
 /**
+ * A page that says whether its inline script ran and whether a script its policy allows could `eval`: under the
+ * site's `/csp`, `blocked` and `refused` unless the policy is bypassed.
+ */
+const cspProbe =
+  `<pre id="inline">blocked</pre><pre id="eval">pending</pre><script>document.getElementById('inline').textContent = 'ran'</script><script src="/eval.js"></script>`
+
+const cspOutcome = (page: Page.Page) =>
+  Effect.all([page.locator("#inline").readText, page.locator("#eval").readText]).pipe(
+    Effect.map((texts) => texts.join(","))
+  )
+
+/**
  * Runs an effect with a logger that also keeps the messages of its warnings and errors, so a case can check that
  * a release logged none.
  */
@@ -1667,6 +1679,51 @@ export const declarations = (
           }))
         }), timeout)
 
+      // ── Content Security Policy ──
+
+      it.effect(
+        "runs inline scripts and eval under a forbidding policy in a context that bypasses it, where the backend can",
+        () =>
+          Effect.gen(function*() {
+            const { crossSite, origin } = yield* site
+            if (!(yield* supports("bypassCSP"))) {
+              const error = yield* Browser.newContext({ bypassCSP: true }).pipe(
+                Deadline.within("1 second"),
+                Effect.flip,
+                Effect.scoped
+              )
+              assert(UserContext.isUserContextError(error) && error.reason._tag === "Unsupported", String(error))
+              return
+            }
+            yield* Effect.scoped(Effect.gen(function*() {
+              const bypassing = yield* Browser.newContext({ bypassCSP: true })
+              const page = yield* bypassing.newPage
+              yield* page.goto(`${origin}/csp?html=${encodeURIComponent(cspProbe)}`)
+              assert.strictEqual(yield* cspOutcome(page), "ran,ran")
+              // A cross-site navigation, and a cross-site iframe, each in a renderer of its own on Chromium
+              yield* page.goto(`${crossSite}/csp?html=${encodeURIComponent(cspProbe)}`)
+              assert.strictEqual(yield* cspOutcome(page), "ran,ran")
+              yield* page.goto(fixtureUrl(
+                origin,
+                `<pre id="out">pending</pre><script>addEventListener('message', (e) => { document.getElementById('out').textContent = e.data })</script><iframe src="${crossSite}/csp?html=${
+                  encodeURIComponent(cspProbe)
+                }"></iframe>`
+              ))
+              yield* Expect.that(
+                page.locator("#out").readText,
+                Condition.make("reported", (text: string) =>
+                  text !== "pending")
+              )
+              assert.strictEqual(yield* page.locator("#out").readText, "ran,ran")
+              // A context in the same browser that doesn't ask keeps the policy
+              const other = yield* Browser.newPage()
+              yield* other.goto(`${origin}/csp?html=${encodeURIComponent(cspProbe)}`)
+              assert.strictEqual(yield* cspOutcome(other), "blocked,refused")
+            }))
+          }),
+        timeout
+      )
+
       it.effect("creates a context with permissions and emulated focus, where the backend can", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -1920,7 +1977,7 @@ export const declarations = (
         })), timeout)
 
       it.effect(
-        "times out over a page that posts messages without end, after running its timers",
+        "times out over a page that posts messages without end, after running its timers, and keeps its clock usable",
         () =>
           Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
@@ -1957,6 +2014,14 @@ export const declarations = (
                 return Date.now()
               }),
               2000
+            )
+            // The clock is usable again: the next adjustment runs once the page stops posting
+            yield* page.clock.adjust(1)
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() =>
+                Date.now()
+              ),
+              2001
             )
           })),
         timeout

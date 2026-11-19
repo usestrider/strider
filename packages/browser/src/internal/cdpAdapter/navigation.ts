@@ -52,6 +52,22 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         isSameDocument(params.navigationType)
       )
     })
+    .on(Page.frameStoppedLoading, (params, { state }) => {
+      const frame = state.frames.get(params.frameId)
+      if (frame === undefined) return
+      // A frame stops loading once no navigation request is left on it, so one a newer navigation replaced has
+      // already ended. A document request aborted before any response, as for a URL whose scheme the browser
+      // won't load, then ended its navigation. A download is decided from a response, so it isn't one of these
+      for (const navigation of [...frame.navigations.values()]) {
+        if (navigation.sameDocument || navigation.failed !== "net::ERR_ABORTED" || navigation.responded) continue
+        endNavigation(
+          state,
+          navigation,
+          { _tag: "Failed", error: navigation.failed, errorDocument: Option.none() },
+          "cdp:Page.frameStoppedLoading"
+        )
+      }
+    })
     .on(Page.frameNavigated, (params, { state, target }) => {
       if (target === undefined) return
       const f = params.frame

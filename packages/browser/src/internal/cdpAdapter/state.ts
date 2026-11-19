@@ -116,6 +116,11 @@ export interface TargetEntry {
     | undefined
   /** Each init script bundle's identifier in Chromium, by its key, written under `scriptLock`. */
   readonly scripts: Map<string, string>
+  /**
+   * The init script identifiers whose removal Chromium never answered, so may still be installed, written under
+   * `scriptLock`: each write sends their removal again.
+   */
+  unconfirmedScripts?: Set<string> | undefined
   ended: boolean
   /** Original renderer dimensions, retained until restoration completes; null means the original is unknown. */
   viewport?: { readonly width: number; readonly height: number } | null | undefined
@@ -215,6 +220,8 @@ export interface NavigationEntry extends Kit.NavigationNode {
   readonly traversal: boolean
   documentHop: NetworkRequest.HopId | undefined
   status: number | undefined
+  /** Whether the document request's latest hop has had its response; a redirect starts a hop with none. */
+  responded: boolean
   failed: string | undefined
 }
 

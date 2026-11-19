@@ -163,6 +163,7 @@ describe("Firefox over WebDriver BiDi", () => {
           const cases: ReadonlyArray<readonly [string, object]> = [
             ["Nope.nothing", {}],
             ["browsingContext.reload", { context, ignoreCache: true }],
+            ["browsingContext.navigate", { context, url: "nosuchscheme:x" }],
             ["browsingContext.navigate", { context }],
             ["browsingContext.navigate", { context: "nope", url: "about:blank" }],
             ["script.callFunction", {
