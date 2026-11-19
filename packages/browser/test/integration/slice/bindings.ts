@@ -169,6 +169,29 @@ export const bindings = (name: string, backend: Layer.Layer<Browser.Browser, unk
           )
         }).pipe(Effect.scoped))
 
+      it.effect("settles every call in a batch whose argument getter throws", () =>
+        Effect.gen(function*() {
+          const page = yield* newPage
+          yield* page.exposeBinding(
+            "readArgument",
+            { arguments: Schema.Tuple([Schema.Unknown]), result: Schema.Number },
+            () => Effect.succeed(1)
+          )
+          const settled = yield* page.evaluateInMainWorld(() => {
+            const bad = {
+              get value(): number {
+                throw new Error("argument getter failed")
+              }
+            }
+            return Promise.allSettled([
+              (window as any).readArgument(bad),
+              (window as any).readArgument({ value: 1 })
+            ]).then((results) => results.map((result) => result.status))
+          })
+          assert.strictEqual(settled.length, 2)
+          assert.strictEqual(yield* outcome(page, "readArgument", [{ value: 2 }]), "resolved 1")
+        }).pipe(Effect.scoped))
+
       it.effect("rejects a call past the 4096 a document may have waiting", () =>
         Effect.gen(function*() {
           const served = yield* site
