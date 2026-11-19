@@ -3304,7 +3304,9 @@ document.getElementById("list").attachShadow({ mode: "open" }).innerHTML = '<ul>
                 `<p data-testid="row  4">d</p><p data-testid=" row-5">e</p><p>none</p>`
             )
             const testId = (matcher: Engine.TextMatcher) =>
-              send({ op: "count", steps: [{ _tag: "TestId", matcher }] }).pipe(Effect.map(count))
+              send({ op: "count", steps: [{ _tag: "TestId", matcher, attribute: "data-testid" }] }).pipe(
+                Effect.map(count)
+              )
             const pattern = (source: string, flags = ""): Engine.TextMatcher => ({ _tag: "RegExp", source, flags })
             // A string is exact, case-sensitive and compared with the raw value.
             assert.strictEqual(yield* testId(text("row-1", true)), 1)
@@ -3347,7 +3349,10 @@ document.getElementById("outer").attachShadow({ mode: "open" }).innerHTML =
             assert.strictEqual(yield* inHost({ _tag: "Placeholder", matcher: text("who") }), 1)
             assert.strictEqual(yield* inHost({ _tag: "AltText", matcher: text("logo") }), 1)
             assert.strictEqual(yield* inHost({ _tag: "Title", matcher: text("tip") }), 1)
-            assert.strictEqual(yield* inHost({ _tag: "TestId", matcher: text("go", true) }), 1)
+            assert.strictEqual(
+              yield* inHost({ _tag: "TestId", matcher: text("go", true), attribute: "data-testid" }),
+              1
+            )
             const hasDeep: Engine.Step = {
               _tag: "Filter",
               hasText: null,

@@ -1,12 +1,30 @@
 {
-  "status": "missing",
-  "api": [],
-  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "status": "different",
+  "api": [
+    {
+      "module": "Deadline",
+      "symbol": "within",
+      "url": "/docs/api/browser/Deadline#within"
+    }
+  ],
+  "notes": "The operation's deadline bounds the comparison; compose Deadline.within or interrupt the fiber instead of passing a timeout or signal.",
   "capabilities": [],
   "id": "option-locatorassertions-tohavescreenshot-2-timeout",
   "upstream": [
     "method:LocatorAssertions.toHaveScreenshot#2"
   ],
   "option": "timeout",
-  "requirements": []
+  "requirements": [],
+  "audit": {
+    "sources": [
+      "packages/vitest/src/ScreenshotBaseline.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "composable-operation-deadlines",
+    "quote": "There is one deadline per operation, inherited by nested calls and only ever shortened.",
+    "revision": "5da4654f6e92648c58f91515e69c3280b49d79fc"
+  }
 }

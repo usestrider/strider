@@ -1,7 +1,14 @@
 {
-  "status": "missing",
-  "api": [],
-  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "status": "has",
+  "api": [
+    {
+      "module": "ScreenshotBaseline",
+      "symbol": "toMatch",
+      "url": "/docs/api/vitest/ScreenshotBaseline#toMatch",
+      "package": "vitest"
+    }
+  ],
+  "notes": "scale option (\"css\" or \"device\"), passed to page.screenshot; Unsupported where the backend can't.",
   "capabilities": [],
   "id": "option-pageassertions-tohavescreenshot-1-scale",
   "upstream": [
@@ -12,11 +19,17 @@
   "valueCoverage": [
     {
       "value": "css",
-      "status": "missing"
+      "status": "has"
     },
     {
       "value": "device",
-      "status": "missing"
+      "status": "has"
     }
-  ]
+  ],
+  "audit": {
+    "sources": [
+      "packages/vitest/src/ScreenshotBaseline.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  }
 }

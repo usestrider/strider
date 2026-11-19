@@ -5801,6 +5801,29 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
+      it.effect(
+        "finds test ids by its context's attribute, which a sibling context and relative locators keep apart",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<ul><li data-qa="row">QA <b data-qa="mark">q</b></li><li data-testid="row">Standard <b data-testid="mark">t</b></li></ul>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const configured = yield* (yield* Browser.newContext({ testIdAttribute: "data-qa" })).newPage
+              const sibling = yield* newPage
+              yield* configured.goto(url)
+              yield* sibling.goto(url)
+              yield* configured.getByTestId("row").pipe(Expect.toHaveText("QA q"))
+              yield* sibling.getByTestId("row").pipe(Expect.toHaveText("Standard t"))
+              // A relative locator reads the attribute of the context it is placed in
+              const marked = { has: Locator.relative.getByTestId("mark") }
+              yield* configured.locator("li").filter(marked).pipe(Expect.toHaveText("QA q"))
+              yield* sibling.locator("li").filter(marked).pipe(Expect.toHaveText("Standard t"))
+            }))
+          }),
+        timeout
+      )
+
       it.effect("drags with HTML drag events the page dispatches, on every backend", () =>
         Effect.gen(function*() {
           const write = (id: string, text: string) => `document.getElementById('${id}').textContent = ${text}`

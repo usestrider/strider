@@ -1535,6 +1535,16 @@ never request a feature gain no interception, injected instrumentation, per-acti
 state for it. Additions must include paired default-path benchmarks so review can assess their cost. Reject
 always-on preparation for optional features: unused capabilities must not slow existing automation.
 
+## Client certificates through a per-context proxy
+
+No browser protocol Strider speaks sets a TLS client certificate for one context, so a context with
+`clientCertificates` routes its TLS traffic through a loopback proxy of its own, which ends each tunnel with a
+self-signed certificate only that context accepts, and opens its own connection to the site, presenting the
+matching certificate and checking the site's. Following [Pay for what you use](#pay-for-what-you-use), the proxy
+exists only for that context and closes with it. Rejected: launch-wide certificate stores or browser policies,
+which reach every context; and refusing plain HTTP on Firefox, whose user contexts take no PAC proxy, which would
+break `http://` pages there.
+
 ## Cooperative readiness checks
 
 Opted-in checks use a separate document- and operation-bound execution protocol, sharing the ordinary readiness
@@ -1638,6 +1648,18 @@ submission is bounded to one attempt across a native request and its whole redir
 so rejection cannot create an unbounded challenge loop.
 The alternative of an ordered credential array is left to auth routes, which already express that selection.
 Optional interception follows [Pay for what you use](#pay-for-what-you-use).
+
+## Context test-id attribute
+
+The attribute `getByTestId` matches is a context's setting, chosen by the program that creates or reclaims the
+context, so sibling contexts never share it. The attribute lives in Strider, not in the browser, so a program that
+reclaims a context has no record of its creator's choice and names its own; omitting it keeps the current setting.
+A locator copies its context's attribute into its query when it is made, and a relative locator,
+which has no context, takes the attribute of the locator whose filter it is placed in. The page's engine reads the
+attribute from the query, so a context that keeps the default does no added work, following
+[Pay for what you use](#pay-for-what-you-use). Rejected: a global setting that can change at any time, as
+Playwright's `selectors.setTestIdAttribute` is, which leaks between tests that share a process and makes a locator's
+meaning depend on when it runs.
 
 ## Generated reference outputs and curated comparisons
 
@@ -1801,3 +1823,28 @@ the `dragenter`. So no sequence of drag commands also gives a `dragover` while t
 move: a drag of one held move shows its first `dragover` at the release or the next move. Sending `dragEnter` and
 `dragOver` at the move that starts the drag, which shows the drag over the target while the button is held, was
 rejected: every drop would then end with a second `dragover`, which Playwright's and Puppeteer's drag tests both reject.
+
+## Console messages name their source in one shared set of categories
+
+A `ConsoleMessage` carries a `source`: `Page` for the page's own `console` calls, or `Browser` with a `category` from
+one set every browser shares (`network`, `security`, `deprecation`, `intervention`, `violation`, `rendering`,
+`storage`, `other`). The source follows from the event that delivered the message, not from which domains are enabled.
+Each adapter maps its browser's names onto the set, and what fits none is `other`, so a program can filter for
+`security` the same way on every browser. Rejected: keeping each browser's own name beside the category, which would
+make that name part of the API and tie a program to one browser's wording; and a default `source` on the
+constructor, which would be a hidden default, and wrong for the browser's own messages.
+
+## Visual comparison lives in the test adapter
+
+Screenshot baselines are a test runner's concern, so `ScreenshotBaseline` lives in `@usestrider/vitest`, beside
+`TestRun`, following [Pay for what you use](#pay-for-what-you-use): the browser package gains no image code and its
+default path does no added work. Every baseline is named by the caller, because a name derived from the test title
+and a call counter is hidden state that shifts when a test is reordered. A missing baseline is written but its
+assertion still fails, so a first run never passes without anyone looking at the image; only an explicit update
+(`vitest -u`) writes and passes. Matching Playwright's nameless overload, and passing on a freshly written baseline,
+were rejected for those reasons. A name is restricted, not transformed: it must already be a lower-case file name
+(`^[a-z0-9][a-z0-9._-]*$`), and the browser and platform parts never contain `-`, so every key has one path and
+`<name>-<browser>-<platform>` reads one way. Rewriting any text into a readable file name was rejected, because no
+readable rewrite keeps every input distinct: a literal name can equal another's rewritten form. Names are lower-case
+because `Cart` and `cart` would share a file on a case-insensitive filesystem. The PNG codec and comparator are native rather than
+dependencies.

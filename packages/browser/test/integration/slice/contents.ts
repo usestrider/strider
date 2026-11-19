@@ -42,6 +42,7 @@ import * as Protocol from "../../../src/protocol/Protocol.ts"
 import { pngRegion } from "../../pngRegion.ts"
 import { site } from "../adapter/harness.ts"
 import { fullySupports, supports } from "./capabilities.ts"
+import { scriptTags } from "./scriptTags.ts"
 import * as SharedContext from "./sharedContext.ts"
 
 const timeout = 60_000
@@ -149,6 +150,7 @@ export const contents = (
   describe(`${name} contents`, () => {
     layer(SharedContext.layer(backend), { excludeTestServices: true, timeout })((suite) => {
       const it = SharedContext.guard(suite)
+      scriptTags(name, it)
 
       it.effect("preserves viewport assertions while a locator handler is registered", () =>
         Effect.gen(function*() {
@@ -552,10 +554,12 @@ export const contents = (
             console.log("after marker text")
           })
           yield* logged
-          assert.deepStrictEqual((yield* ConsoleMessage.history(page)).entries.map((entry) => entry.text), [
+          const messages = (yield* ConsoleMessage.history(page)).entries
+          assert.deepStrictEqual(messages.map((entry) => entry.text), [
             "__striderDocumentOpened",
             "after marker text"
           ])
+          assert.deepStrictEqual(messages.map((entry) => entry.source), [{ _tag: "Page" }, { _tag: "Page" }])
         }), timeout)
 
       it.effect("reports repeated browser console entries on stock WebKit", () =>
@@ -595,13 +599,19 @@ export const contents = (
             document.head.append(style)
             console.log("after blocked style")
           })
-          const entries = (yield* ConsoleMessage.history(page)).entries.map((entry) =>
+          const messages = (yield* ConsoleMessage.history(page)).entries
+          const entries = messages.map((entry) =>
             entry.text
           )
           assert.lengthOf(entries, 3, JSON.stringify(entries))
           assert.strictEqual(entries[0], "before blocked style")
           assert.match(entries[1]!, /Content Security Policy/i)
           assert.strictEqual(entries[2], "after blocked style")
+          assert.deepStrictEqual(messages.map((entry) => entry.source), [
+            { _tag: "Page" },
+            { _tag: "Browser", category: "security" },
+            { _tag: "Page" }
+          ])
         }), timeout)
 
       it.effect("reports the browser's own CSP and CORS errors at level error, as each browser sends them", () =>
@@ -638,17 +648,44 @@ export const contents = (
           )
           yield* Effect.exit(corsLogged)
           yield* Effect.exit(fetchRejected)
-          const errors = (yield* ConsoleMessage.history(page, { level: "error" })).entries.map((entry) =>
+          const messages = (yield* ConsoleMessage.history(page, { level: "error" })).entries
+          const errors = messages.map((entry) =>
             entry.text
           )
+          if (yield* supports("console.source")) {
+            // Each is the browser's own: the CSP and CORS errors about security, and the failed load the blocked
+            // fetch causes about the network. WebKit's failed load names Access-Control too, so it is told apart
+            // first, and can't stand in for the CORS error
+            const failedLoad = /^Failed to load resource/
+            const expectedSource = (text: string): ConsoleMessage.Source | undefined =>
+              failedLoad.test(text)
+                ? { _tag: "Browser", category: "network" }
+                : csp.test(text) || cors.test(text)
+                ? { _tag: "Browser", category: "security" }
+                : undefined
+            for (const entry of messages) {
+              assert.deepStrictEqual(entry.source, expectedSource(entry.text), entry.text)
+            }
+            const required: ReadonlyArray<readonly [string, (text: string) => boolean]> = [
+              ["the CSP error", (text) =>
+                !failedLoad.test(text) && csp.test(text)],
+              ["the CORS error", (text) =>
+                !failedLoad.test(text) && cors.test(text)],
+              ["the failed load", (text) => failedLoad.test(text)]
+            ]
+            for (const [what, matches] of required) {
+              assert.isTrue(errors.some(matches), `${what} among ${JSON.stringify(errors)}`)
+            }
+          } else {
+            // Where a browser can't tell, it reports none of them as a console message
+            assert.deepStrictEqual(errors, [])
+          }
           const exceptions = (yield* UncaughtException.history(page)).entries.map((entry) =>
             `${entry.name}: ${entry.message}`
           )
           const reported = asExceptions ? exceptions : errors
           assert.isTrue(
-            reported.some((text) =>
-              csp.test(text)
-            ),
+            reported.some((text) => csp.test(text)),
             `a CSP error among ${JSON.stringify(reported)}`
           )
           assert.isTrue(reported.some((text) => cors.test(text)), `a CORS error among ${JSON.stringify(reported)}`)
@@ -664,6 +701,41 @@ export const contents = (
           }
         }), timeout)
 
+      it.effect("reports a failed load as the browser's own network message", () =>
+        Effect.gen(function*() {
+          const page = yield* SharedContext.newPage
+          yield* page.route("https://load.test/", () =>
+            Route.fulfill(HttpServerResponse.text("<title>Load</title><img src=\"/missing.png\">", {
+              contentType: "text/html"
+            })))
+          yield* page.route("https://load.test/*.png", () =>
+            Route.fulfill(HttpServerResponse.text("missing", { status: 404, contentType: "text/plain" })))
+          const tellsSource = yield* supports("console.source")
+          const failed: Effect.Effect<unknown, unknown> = tellsSource
+            ? yield* ConsoleMessage.next(page, { level: "error", text: /404/ })
+            : Effect.void
+          yield* page.goto("https://load.test/")
+          yield* failed.pipe(Deadline.within("5 seconds"))
+          const messages = (yield* ConsoleMessage.history(page)).entries
+          const sources = messages.map((entry) =>
+            entry.source
+          )
+          if (tellsSource) {
+            assert.deepStrictEqual(
+              messages.filter((entry) =>
+                /404/.test(entry.text)
+              ).map((entry) =>
+                entry.source
+              ),
+              [{ _tag: "Browser", category: "network" }],
+              JSON.stringify(messages.map((entry) => entry.text))
+            )
+          } else {
+            // Firefox writes nothing to the console for a failed image; its browser messages arrive as exceptions
+            assert.isFalse(sources.some((source) => source._tag === "Browser"), JSON.stringify(sources))
+          }
+        }), timeout)
+
       it.effect("setContent replaces a parsed document still waiting for deferred scripts", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -674,9 +746,7 @@ export const contents = (
           )
           // Commit comes before parsing: wait for the parser to finish, while the deferred script still holds load
           yield* Expect.that(
-            page.evaluateInMainWorld(() =>
-              document.readyState
-            ),
+            page.evaluateInMainWorld(() => document.readyState),
             Condition.make("parsed", (state: DocumentReadyState) => state !== "loading")
           )
           assert.strictEqual(

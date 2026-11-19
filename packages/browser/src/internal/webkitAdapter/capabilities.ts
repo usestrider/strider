@@ -43,6 +43,7 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
       ]),
       entry("acceptInsecureCerts", "unsupported", ["an attached process cannot be reconfigured"]),
       entry("userContexts.proxy", "unsupported", ["an attached process cannot be reconfigured"]),
+      entry("clientCertificates", "unsupported", ["stock WebKit takes a proxy only at launch"]),
       entry("userContexts.proxy.credentials", "unsupported", ["stock WebKit does not support proxy credentials"]),
       entry("userContexts.proxy.socks4", "unsupported", ["an attached process cannot be reconfigured"]),
       entry("userContexts.proxy.https", "unsupported", ["the TLS connection to the proxy can't be verified"]),
@@ -88,9 +89,12 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
       entry("interception.redirects", "partial", ["only a redirect's first hop pauses"]),
       entry("bodies", "supported"),
       entry("console", "supported", [
-        "a message with only primitive arguments is attributed to the main frame",
-        "the browser's \"Fetch API cannot load … due to access control checks\" arrives as an uncaught exception: " +
-        "WebKit sends it on its `javascript` channel at level `error`, which Strider reads as an uncaught exception"
+        "a message with only primitive arguments is attributed to the main frame"
+      ]),
+      entry("console.source", "partial", [
+        "the browser's \"Fetch API cannot load … due to access control checks\" arrives as an uncaught exception, " +
+        "with no source: WebKit sends it on its `javascript` channel at level `error`, which Strider reads as an " +
+        "uncaught exception"
       ]),
       entry("prompts", "unsupported", [
         "stock WebKit's inspector has no Dialog domain: a dialog blocks the page unreported"

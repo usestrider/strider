@@ -1,7 +1,7 @@
 {
   "status": "missing",
   "api": [],
-  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "notes": "ScreenshotBaseline.toMatch captures through page.screenshot, which has no injected stylesheet yet.",
   "capabilities": [],
   "id": "option-locatorassertions-tohavescreenshot-2-stylepath",
   "upstream": [

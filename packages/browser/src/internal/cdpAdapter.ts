@@ -81,7 +81,12 @@ export const capabilities = (
       ]),
       entry("input.topLevelDesignMode", "supported"),
       entry("userContexts", "supported"),
-      entry("acceptInsecureCerts", "unsupported", ["CDP ignores certificate errors browser-wide, not per context"]),
+      entry("acceptInsecureCerts", "partial", [
+        "per-page certificate override on each of the context's pages; refused for a reclaimable context"
+      ]),
+      entry("clientCertificates", "partial", [
+        "a loopback proxy per context for HTTPS and WebSocket over TLS; not with proxy or a reclaimable context"
+      ]),
       entry("userContexts.proxy", "supported", [
         "http, https and socks5 endpoints for HTTP, HTTPS and WebSocket destinations; .domain bypass matches subdomains only; loopback stays direct"
       ]),
@@ -115,6 +120,7 @@ export const capabilities = (
       ]),
       entry("bodies", "supported"),
       entry("console", "supported"),
+      entry("console.source", "supported"),
       entry("prompts", "supported"),
       entry("prompts.kind", "supported"),
       entry("navigation.sameDocument", "supported"),

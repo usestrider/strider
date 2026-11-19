@@ -6,8 +6,11 @@
  * one failure can be one message on one browser and several on another. On Firefox they arrive as uncaught
  * exceptions instead, as Firefox sends them as script errors. Stock WebKit's "Fetch API cannot load … due to access
  * control checks" arrives as an uncaught exception too: WebKit sends it on its `javascript` channel at level `error`,
- * which is how Strider reads an uncaught exception on WebKit. Each backend's `console` capability says what it
- * reports.
+ * which is how Strider reads an uncaught exception on WebKit. Each backend's `console.source` capability says which
+ * of the browser's own messages it reports.
+ *
+ * A message's `source` says whether the page wrote it, with a `console` call, or the browser did, and for the
+ * browser's own what it is about, such as `security` for a CSP violation or `network` for a failed load.
  *
  * A message is reported to its page and its context: a dedicated worker's messages reach its page, and a shared or
  * service worker's only its context. Each backend's `console` capability says what it reports from workers.
@@ -77,13 +80,120 @@ export const SourceLocation = Schema.Struct({
 export type SourceLocation = typeof SourceLocation.Type
 
 /**
+ * Schema for what a message the browser wrote to the console is about.
+ *
+ * **Details**
+ *
+ * One set serves every browser, and a browser's own name for what it sends isn't kept; what maps to none of these is
+ * `other`:
+ *
+ * - `network`: a failed or blocked load, on Chromium and WebKit.
+ * - `security`: a Content Security Policy violation or a request CORS blocked, on Chromium and WebKit.
+ * - `deprecation`, `intervention` and `violation`: a deprecated feature, a request the browser changed or refused
+ *   to protect the user, and a slow handler or forced layout, on Chromium.
+ * - `rendering`: what rendering reports, on Chromium and WebKit.
+ * - `storage`: what storage reports, on Chromium and WebKit. Chromium's application cache messages are `storage`.
+ * - `other`: everything else, such as Chromium's `xml` and `recommendation` messages and WebKit's `css`, `media`
+ *   and `content-blocker` ones.
+ *
+ * **Example** (Counting the browser's messages by category)
+ *
+ * ```ts import.meta.vitest
+ * import { ConsoleMessage, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const countByCategory = Effect.fn("countByCategory")(
+ *   function*(page: Page.ObservedPage) {
+ *     const messages = yield* ConsoleMessage.history(page)
+ *     const counts = new Map<ConsoleMessage.Category, number>()
+ *     for (const message of messages.entries) {
+ *       if (message.source._tag === "Browser") {
+ *         const category = message.source.category
+ *         counts.set(category, (counts.get(category) ?? 0) + 1)
+ *       }
+ *     }
+ *     return counts
+ *   }
+ * )
+ * ```
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 0.1.0
+ */
+export const Category = Schema.Literals([
+  "network",
+  "security",
+  "deprecation",
+  "intervention",
+  "violation",
+  "rendering",
+  "storage",
+  "other"
+])
+
+/**
+ * What a message the browser wrote to the console is about.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export type Category = typeof Category.Type
+
+/**
+ * Schema for who wrote a console message: the page, with a `console` call in a page or worker, or the browser,
+ * with its `category`.
+ *
+ * **Gotchas**
+ *
+ * Firefox sends the browser's own messages as script errors, so they arrive as uncaught exceptions and every
+ * console message on Firefox is `Page`. Stock WebKit sends "Fetch API cannot load … due to access control checks"
+ * the same way. The `console.source` capability says so.
+ *
+ * **Example** (The CSP violations a page caused)
+ *
+ * ```ts import.meta.vitest
+ * import { ConsoleMessage, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const securityMessages = Effect.fn("securityMessages")(
+ *   function*(page: Page.ObservedPage) {
+ *     const messages = yield* ConsoleMessage.history(page)
+ *     return messages.entries.filter((message) =>
+ *       message.source._tag === "Browser" && message.source.category === "security"
+ *     )
+ *   }
+ * )
+ * ```
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 0.1.0
+ */
+export const Source = Schema.Union([
+  Schema.TaggedStruct("Page", {}),
+  Schema.TaggedStruct("Browser", { category: Category })
+])
+
+/**
+ * Who wrote a console message: the page, or the browser with what its message is about.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export type Source = typeof Source.Type
+
+/**
  * One message written to the console.
  *
  * **Details**
  *
  * `text` has the call's format specifiers, such as `%s`, `%d`, and `%f`, applied as the Console Standard's formatter
  * applies them: Strider applies it to what Chromium and WebKit report, and Firefox applies its own, which writes
- * `%f` as printf does (`1.250000`). An object reads as its browser describes it, such as `Object`.
+ * `%f` as printf does (`1.250000`). An object reads as its browser describes it, such as `Object`. `source` says
+ * whether the page or the browser wrote it.
  *
  * @stability unstable
  * @category models
@@ -94,6 +204,7 @@ export class ConsoleMessage extends Schema.Class<ConsoleMessage>("@usestrider/br
   text: Schema.String,
   location: Schema.Option(SourceLocation),
   origin: Target.EventOrigin,
+  source: Source,
   at: MonotonicInstant.MonotonicInstant
 }) {}
 

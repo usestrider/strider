@@ -309,7 +309,14 @@ interface UserContext extends ObservedUserContext {     // two levels only: read
 }
 
 interface Options {                                      // UserContext.Options; an unset option keeps the browser's own value unless a default is stated
-  readonly acceptInsecureCerts?: boolean | undefined     // default false; Firefox and launched WebKit only; creation-only, explicit values refused on reclaim
+  readonly acceptInsecureCerts?: boolean | undefined     // default false; not attached WebKit, nor a reclaimable Chromium context; creation-only, explicit values refused on reclaim
+  readonly clientCertificates?: ReadonlyArray<{          // default none, and no proxy; Chromium and launched Firefox; not with proxy or a reclaimable context
+    readonly origin: string                              // HTTPS origin: scheme, hostname and effective port
+    readonly cert?: Uint8Array | undefined               // PEM, with key; or pfx alone
+    readonly key?: Redacted<Uint8Array> | undefined
+    readonly pfx?: Redacted<Uint8Array> | undefined
+    readonly passphrase?: Redacted<string> | undefined
+  }> | undefined                                         // loaded at creation (InvalidInput); a per-context loopback proxy presents them
   readonly proxy?: {
     readonly server: string                              // HTTP URL or host:port, default port 80; no userinfo, path, query or fragment
     readonly bypass?: ReadonlyArray<string> | undefined  // default []; hostnames or IP addresses, using native host matching
@@ -429,6 +436,10 @@ interface Page extends ReadonlyPage {
   route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, NoInfer<P> | "request">, options?: Route.Options<P> | undefined): Effect<Route.Registration, Route.RouteError | TargetGone | Timeout, Scope | R>
   addLocatorHandler<E, R>(locator: Locator.Locator, handler: (locator: Locator.Locator) => Effect<void, E, R>, options?: { readonly times?: number; readonly noWaitAfter?: boolean }): Effect<Registration, PageError | TargetGone | Timeout, Scope | R> // page-local, serial, nonrecursive; default unlimited and wait for disappearance
   addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect<InitScript.InitScript, Declaration.DeclarationError | TargetGone | Timeout, Scope>
+  addScriptTag(script: ScriptTag.Source, options?: ScriptTag.Options | undefined): Effect<JSHandle.JSHandle<HTMLScriptElement>, PageError | TargetGone | Timeout, Scope>
+    // once, in the current document, from its main world: a URL's load, a classic inline script having run,
+    // or an inline module accepted, not run;
+    // the page's CSP applies (RefusedByPolicy), and a URL that doesn't load is ResourceFailed
   emulate(settings: Emulation.Emulation): Effect<Declaration.Registration, Declaration.DeclarationError | TargetGone | Timeout, Scope>
   readonly activate: Effect<void, PageError | TargetGone | Timeout> // bring to front; rendering-based waits need it
   close(): Effect<void, PageError | TargetGone | Timeout>   // owned teardown: no beforeunload
@@ -725,7 +736,8 @@ interface HeldKey { readonly release: Effect<void> }     // idempotent; the scop
 interface ReadonlyFrameLocator extends Queries<ReadonlyLocator> {   // an iframe's document, entered by its element; lazy like any locator
   readonly owner: ReadonlyLocator                        // the iframe element
   frame(iframe: ReadonlyLocator): ReadonlyFrameLocator
-}                                                        // FrameLocator: the same queries returning Locator
+}                                                        // FrameLocator: the same queries returning Locator, and
+                                                         // addScriptTag, as Page's, in the frame's current document
 
 // JSHandle
 interface JSHandle<A = unknown> extends Pipeable, Inspectable {   // a value in one realm, owned by the scope that acquired it
@@ -859,7 +871,7 @@ declare const History: <S extends Schema.Top>(entry: S) => Schema.Struct<…>   
 | `Popup` | `Page` from a `Page`, otherwise `ObservedPage` | `url` | any page |
 | `NetworkRequest` | `NetworkRequest` | `url`, `method`, `resourceType`; `next` requires `url` | any page or context |
 | `NetworkResponse` | `NetworkResponse`, or `CapturedResponse<B>` given `body` | `url`, `method`, `status`; `next` requires `url`. `body` (any decoder of an `HttpIncomingMessage`, such as `HttpIncomingMessage.schemaBodyJson(Cart)`) needs inspect, applies to `next` and `stream`, and types their `where` | any page or context |
-| `ConsoleMessage` | `ConsoleMessage` | `level`, `text` | any page or context |
+| `ConsoleMessage` | `ConsoleMessage`, whose `source` is `Page` for the page's `console` calls or `Browser` with a `category` (`network`, `security`, …, `other`) for the browser's own (`console.source`: CDP; stock WebKit partial; Unsupported on BiDi, where every message is `Page`) | `level`, `text` | any page or context |
 | `UncaughtException` | `UncaughtException`: thrown errors and unhandled rejections; `kind` is `"unknown"` where the browser can't tell them apart (Firefox) | `message` | any page or context |
 | `Dialog` | `Dialog` | `kind` | any page; `Dialog.handle` needs `Page` |
 | `FileChooser` | `FileChooser`: data (`Single` or `Multiple`); `FileChooser.handle` gets it as `Pending` | `multiple` | `Page` |

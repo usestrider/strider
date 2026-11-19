@@ -142,6 +142,15 @@ export const confirmFrameRemoval = (state: State, navigable: NavigableEntry) => 
 
 export const createUserContext = Effect.fnUntraced(function*(state: State, options: Adapter.UserContextOptions) {
   let settle = (_retain: boolean): void => {}
+  const certificateProxy = Option.getOrUndefined(options.certificateProxy ?? Option.none())
+  if (certificateProxy !== undefined && state.options.ownership !== "launched") {
+    return yield* Effect.fail(
+      Kit.unsupported(
+        "clientCertificates",
+        "Client certificates need a Firefox Strider launched, whose profile lets a context's proxy carry loopback"
+      )
+    )
+  }
   if (Option.isSome(options.proxy)) {
     const { credentials, scheme } = options.proxy.value
     if (scheme === "https") {
@@ -194,23 +203,36 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
       // Keep ownership of a successful create reply until setup has installed its rollback path.
       const { userContext } = yield* Kit.protocol(
         state.send(BrowserBidi.createUserContext({
-          ...(options.acceptInsecureCerts ? { acceptInsecureCerts: true } : {}),
+          // A client certificate context accepts its proxy's own certificate; the proxy checks the site's
+          ...(options.acceptInsecureCerts || certificateProxy !== undefined ? { acceptInsecureCerts: true } : {}),
           ...(Option.isSome(options.proxy)
             ? {
+              // Launched profiles let proxies carry loopback; it stays direct here
               proxy: options.proxy.value.scheme === "http"
                 ? {
                   proxyType: "manual",
                   httpProxy: options.proxy.value.server,
                   sslProxy: options.proxy.value.server,
-                  noProxy: [...options.proxy.value.bypass]
+                  noProxy: [...new Set([...Proxy.loopback, ...options.proxy.value.bypass])]
                 }
                 : {
                   // Firefox's SOCKS4 sends names for the proxy to resolve (SOCKS4a)
                   proxyType: "manual",
                   socksProxy: options.proxy.value.server,
                   socksVersion: options.proxy.value.scheme === "socks4" ? 4 : 5,
-                  noProxy: [...options.proxy.value.bypass]
+                  noProxy: [...new Set([...Proxy.loopback, ...options.proxy.value.bypass])]
                 }
+            }
+            : certificateProxy !== undefined
+            ? {
+              // Firefox refuses a PAC proxy for a user context, and sends TLS straight to an sslProxy given alone,
+              // so all of the context's traffic goes to the certificate proxy, which forwards plain HTTP as it is
+              proxy: {
+                proxyType: "manual",
+                httpProxy: `127.0.0.1:${certificateProxy}`,
+                sslProxy: `127.0.0.1:${certificateProxy}`,
+                noProxy: []
+              }
             }
             : {})
         })).pipe(Effect.onError((cause) =>

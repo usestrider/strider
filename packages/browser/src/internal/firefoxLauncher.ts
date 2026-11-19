@@ -74,9 +74,15 @@ export const headlessPointerPrefs: Prefs = {
 
 /** The preferences a launch writes: the profile's, and when headless, its pointer's, unless the profile sets them. */
 export const prefsFor = (options: Settings): Prefs => {
-  const profile = options.profilePrefs ?? profilePrefs[options.profile ?? "automation"]
+  const profile = { ...(options.profilePrefs ?? profilePrefs[options.profile ?? "automation"]), ...loopbackProxyPrefs }
   return options.headless ?? true ? { ...headlessPointerPrefs, ...profile } : profile
 }
+
+/**
+ * Lets a context's proxy carry loopback traffic, which a client certificate context needs for local sites. Every
+ * other proxied context lists loopback in its bypass, so loopback stays direct there (`bidiAdapter/contexts.ts`).
+ */
+export const loopbackProxyPrefs: Prefs = { "network.proxy.allow_hijacking_localhost": true }
 
 /** A `user.js` that sets preferences. */
 export const userJs = (prefs: Prefs): string =>
