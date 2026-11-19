@@ -154,7 +154,7 @@ cache shows up as a request.
 
 **The browser's own console messages are uncaught exceptions.** Firefox sends a Content Security Policy violation
 or a CORS failure as a script error, so it arrives as an [`UncaughtException`](/docs/events/events#history), and
-every console message's [`source`](/docs/events/kinds#console-messages) is `Page`. The capability
+every console message's [`source`](/docs/events/console) is `Page`. The capability
 `console.source` is `unsupported` here.
 
 **Typing is key by key.** [Keyboard layouts](/docs/pages/actions#keys) send no AltGr or dead keys, and the page

@@ -6,12 +6,11 @@
  * one failure can be one message on one browser and several on another. On Firefox they arrive as uncaught
  * exceptions instead, as Firefox sends them as script errors. Stock WebKit's "Fetch API cannot load … due to access
  * control checks" arrives as an uncaught exception too: WebKit sends it on its `javascript` channel at level `error`,
- * which is how Strider reads an uncaught exception on WebKit. Each backend's `console` capability says what it
- * reports.
+ * which is how Strider reads an uncaught exception on WebKit. Each backend's `console.source` capability says which
+ * of the browser's own messages it reports.
  *
  * A message's `source` says whether the page wrote it, with a `console` call, or the browser did, and for the
- * browser's own what it is about, such as `security` for a CSP violation or `network` for a failed load. Each
- * backend's `console.source` capability says how far it can tell them apart.
+ * browser's own what it is about, such as `security` for a CSP violation or `network` for a failed load.
  *
  * A message is reported to its page and its context: a dedicated worker's messages reach its page, and a shared or
  * service worker's only its context. Each backend's `console` capability says what it reports from workers.
@@ -96,6 +95,27 @@ export type SourceLocation = typeof SourceLocation.Type
  * - `storage`: what storage reports, on Chromium and WebKit. Chromium's application cache messages are `storage`.
  * - `other`: everything else, such as Chromium's `xml` and `recommendation` messages and WebKit's `css`, `media`
  *   and `content-blocker` ones.
+ *
+ * **Example** (Counting the browser's messages by category)
+ *
+ * ```ts import.meta.vitest
+ * import { ConsoleMessage, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const countByCategory = Effect.fn("countByCategory")(
+ *   function*(page: Page.ObservedPage) {
+ *     const messages = yield* ConsoleMessage.history(page)
+ *     const counts = new Map<ConsoleMessage.Category, number>()
+ *     for (const message of messages.entries) {
+ *       if (message.source._tag === "Browser") {
+ *         const category = message.source.category
+ *         counts.set(category, (counts.get(category) ?? 0) + 1)
+ *       }
+ *     }
+ *     return counts
+ *   }
+ * )
+ * ```
  *
  * @stability unstable
  * @category schemas
