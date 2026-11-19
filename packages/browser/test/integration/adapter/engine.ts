@@ -302,6 +302,33 @@ export const engine = (backend: Backend) =>
           timeout
         )
 
+        it.effect("rewrites only an XPath leading step, preserving root unions and parenthesized paths", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(backend, "<a>outside</a><div id=\"scope\"><a>inside</a></div>")
+            for (
+              const [expression, expected] of [
+                [" \t\n//a", 1],
+                ["/ a", 1],
+                ["(//a)[1]", 1],
+                ["(//a)[.='outside']", 1],
+                ["/ | //a", 2],
+                [" \t/ \n| //a", 2],
+                ["/ \t\n", 0]
+              ] as const
+            ) {
+              assert.strictEqual(
+                count(
+                  yield* send({
+                    op: "count",
+                    steps: [{ _tag: "Css", selector: "#scope" }, { _tag: "XPath", expression }]
+                  })
+                ),
+                expected,
+                expression
+              )
+            }
+          }), timeout)
+
         it.effect("evaluates XPath within a shadow tree when CSS supplies its context element", () =>
           Effect.gen(function*() {
             const { send } = yield* open(
