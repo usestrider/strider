@@ -16,6 +16,7 @@ import { vi } from "vitest"
 import * as Adapter from "../src/internal/adapter.ts"
 import * as BrowserImpl from "../src/internal/browser.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
+import * as ClaimHooks from "../src/internal/claimHooks.ts"
 import * as Engine from "../src/internal/engine.ts"
 import * as Fake from "../src/internal/fake.ts"
 import * as Handles from "../src/internal/handles.ts"
@@ -1539,7 +1540,19 @@ describe("UserContext.Options.testIdAttribute", () => {
     return found
   }
 
-  for (const name of ["", "data qa", "data\"qa", "data'qa", "data>qa", "data/qa", "data=qa", "data\u0007qa"]) {
+  for (
+    const name of [
+      "",
+      "data qa",
+      "data\"qa",
+      "data'qa",
+      "data>qa",
+      "data/qa",
+      "data=qa",
+      "data\u0007qa",
+      "data\u{1FFFE}qa"
+    ]
+  ) {
     it.effect(`refuses ${JSON.stringify(name)} with InvalidInput before creating a context`, () =>
       Effect.gen(function*() {
         const error = yield* Browser.newContext({ testIdAttribute: name }).pipe(Effect.flip)
@@ -1548,6 +1561,16 @@ describe("UserContext.Options.testIdAttribute", () => {
         assert.strictEqual(error.reason.input, "testIdAttribute")
       }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
   }
+
+  it.effect("refuses to change the creation-time test-id attribute when recovering a context", () =>
+    Effect.gen(function*() {
+      const browser = yield* Browser.Browser
+      const context = yield* Browser.newContext({ testIdAttribute: "data-qa" })
+      const hooks = ClaimHooks.get(browser)
+      const error = yield* hooks.context({ testIdAttribute: "data-test" }, { context: context.id }).pipe(Effect.flip)
+      assert(UserContext.isUserContextError(error))
+      assert.strictEqual(error.reason._tag, "InvalidInput")
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
 
   it.effect("fixes the context's attribute in every getByTestId step, relative ones where they're placed", () =>
     Effect.gen(function*() {
