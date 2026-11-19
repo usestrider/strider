@@ -6,7 +6,6 @@
  * adapter opts in only the targets the declaration covers, so a context without a binding gets none of it.
  */
 import * as Cause from "effect/Cause"
-import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -40,6 +39,7 @@ export const install = (name: string, bridge: string, token: string, transport: 
   const send = (payload: string) =>
     transport === "console" ? debug({ __striderWebSocket: token, payload }) : global[bridge](payload)
   // A call's arguments wait here until the host reads them by value, as an evaluation's result.
+  let unread = 0
   const pending = new Map<
     number,
     { args: unknown; taken: boolean; resolve: (value: unknown) => void; reject: (error: unknown) => void }
@@ -54,7 +54,8 @@ export const install = (name: string, bridge: string, token: string, transport: 
       }
       const id = ++next
       pending.set(id, { args, taken: false, resolve, reject })
-      send(stringify({ id }))
+      // One notice when the document's unread calls go from none to some: a read takes them all
+      if (unread++ === 0) send(stringify({}))
     })
   global.Object.defineProperty(global, name, { value: call, configurable: true, writable: true })
   global.Object.defineProperty(global, key, {
@@ -69,6 +70,7 @@ export const install = (name: string, bridge: string, token: string, transport: 
           calls.push([id, waiting.args])
           waiting.args = undefined
         }
+        unread = 0
         return calls
       },
       settle: (id: number, ok: boolean, value: unknown) => {
@@ -80,6 +82,7 @@ export const install = (name: string, bridge: string, token: string, transport: 
       },
       remove: () => {
         live = false
+        unread = 0
         if (global[name] === call) delete global[name]
         for (const waiting of pending.values()) waiting.reject(new E(`Binding "${name}" was removed`))
         pending.clear()
@@ -95,8 +98,6 @@ const keyOf = (token: string) => `globalThis[Symbol.for(${JSON.stringify("stride
 
 /** The names exposed in a context, by the context or by one of its pages. */
 const exposed = new WeakMap<Model.ContextEntry, { context: Set<string>; pages: Map<Target.NavigableId, Set<string>> }>()
-
-const Call = Schema.fromJsonString(Schema.Struct({ id: Schema.Number }))
 
 const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : typeof error === "string" ? error : String(error)
@@ -188,86 +189,27 @@ export const expose = <A extends ReadonlyArray<unknown>, B, E, R>(
       new Reason.NotSerializable({ path: error.path, hint: error.hint }).message
     // Every exit of a call it has an id for settles the page's promise: a rejection carries a failure's message, and
     // anything else, a defect or an interruption, the fixed one, after it is logged.
-    // The arguments of a document's calls, read by value in batches: a call whose notice arrives while a read is
-    // under way waits for that read, and one more read follows if it didn't carry the call.
-    interface Drain {
-      readonly waiting: Map<number, Deferred.Deferred<Adapter.RemoteValue, Adapter.AdapterError | Deadline.Timeout>>
-      readonly read: Set<number>
-      draining: boolean
-      again: boolean
-    }
-    const drains = new Map<Target.RealmId, Drain>()
-    const slot = (realm: Target.RealmId, id: number) => {
-      let drain = drains.get(realm)
-      if (drain === undefined) {
-        drains.set(realm, drain = { waiting: new Map(), read: new Set(), draining: false, again: false })
-      }
-      let waiting = drain.waiting.get(id)
-      if (waiting === undefined) drain.waiting.set(id, waiting = Deferred.makeUnsafe())
-      return { drain, waiting }
-    }
-    const drainOnce = (
-      realm: Target.RealmId,
-      drain: Drain
-    ): Effect.Effect<void, Adapter.AdapterError | Deadline.Timeout> =>
-      Effect.gen(function*() {
-        do {
-          drain.again = false
-          const read = yield* adapter.evaluate(realm, {
-            functionDeclaration: `() => ${keyOf(token)}?.drain() ?? []`,
-            arguments: [],
-            awaitPromise: false,
-            result: "value",
-            releaseResult: true,
-            userActivation: false
-          })
-          if (read._tag === "Exception") return yield* Effect.die(new Error(read.text))
-          for (const entry of read.value.type === "array" ? read.value.value ?? [] : []) {
-            const pair = entry.type === "array" ? entry.value ?? [] : []
-            const first = pair[0]
-            const args = pair[1]
-            if (first?.type !== "number" || args === undefined) continue
-            const id = Number(first.value)
-            drain.read.add(id)
-            Deferred.doneUnsafe(slot(realm, id).waiting, Exit.succeed(args))
-          }
-        } while (drain.again)
-      }).pipe(
-        Effect.onExit((exit) =>
-          Effect.sync(() => {
-            drain.draining = false
-            if (Exit.isSuccess(exit)) return
-            for (const [id, waiting] of drain.waiting) {
-              if (!drain.read.has(id)) Deferred.doneUnsafe(waiting, Exit.failCause(exit.cause))
-            }
-          })
-        )
-      )
-    const argumentsOf = (realm: Target.RealmId, id: number) =>
-      Effect.suspend(() => {
-        const { drain, waiting } = slot(realm, id)
-        const start = drain.read.has(id)
-          ? Effect.void
-          : drain.draining
-          ? Effect.sync(() => {
-            drain.again = true
-          })
-          : Effect.suspend(() => {
-            drain.draining = true
-            return drainOnce(realm, drain).pipe(Effect.ignore, Effect.forkIn(scope), Effect.asVoid)
-          })
-        return start.pipe(
-          Effect.andThen(Deferred.await(waiting)),
-          Effect.ensuring(Effect.sync(() => {
-            drain.waiting.delete(id)
-            drain.read.delete(id)
-            if (drain.waiting.size === 0 && !drain.draining) drains.delete(realm)
-          }))
-        )
+    // Reads every call the document has not yet handed over, by value, and answers each one.
+    const drainAll = Effect.fnUntraced(function*(realm: Target.RealmId, source: Binding.Source) {
+      const read = yield* adapter.evaluate(realm, {
+        functionDeclaration: `() => ${keyOf(token)}?.drain() ?? []`,
+        arguments: [],
+        awaitPromise: false,
+        result: "value",
+        releaseResult: true,
+        userActivation: false
       })
-    const answer = (realm: Target.RealmId, id: number, source: Binding.Source) =>
+      if (read._tag === "Exception") return yield* Effect.die(new Error(read.text))
+      for (const entry of read.value.type === "array" ? read.value.value ?? [] : []) {
+        const pair = entry.type === "array" ? entry.value ?? [] : []
+        const first = pair[0]
+        if (first?.type !== "number") continue
+        yield* answer(realm, Number(first.value), pair[1] ?? { type: "undefined" }, source).pipe(Effect.forkIn(scope))
+      }
+    })
+    const answer = (realm: Target.RealmId, id: number, remote: Adapter.RemoteValue, source: Binding.Source) =>
       Effect.gen(function*() {
-        const read = { value: yield* argumentsOf(realm, id) }
+        const read = { value: remote }
         // As in an evaluation's arguments, a function or symbol is refused where it is an argument itself
         const items = read.value.type === "array" ? read.value.value ?? [] : []
         const refused = items.findIndex((item) => item.type === "function" || item.type === "symbol")
@@ -334,9 +276,7 @@ export const expose = <A extends ReadonlyArray<unknown>, B, E, R>(
           Effect.flatMap((result) =>
             Option.isNone(result)
               ? Handlers.report(`Binding "${name}" call fetch deadline`, Cause.die("payload fetch did not complete"))
-              : Schema.decodeUnknownEffect(Call)(result.value).pipe(
-                Effect.flatMap(({ id }) => answer(call.realm, id, call.source))
-              )
+              : drainAll(call.realm, call.source)
           ),
           Effect.catchCause((cause) =>
             !live || !call.ownership.isAlive() ?
