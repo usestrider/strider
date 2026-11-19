@@ -1149,7 +1149,9 @@ export interface Page extends ReadonlyPage {
     Scope.Scope
   >
   /**
-   * Adds a `<script>` element to the page's current document and waits for it to load or run, returning it.
+   * Adds a `<script>` element to the page's current document, returning it once it has loaded, run, or been
+   * accepted: a URL's script loads, a classic inline script runs, and an inline module is accepted without waiting
+   * for it to run.
    *
    * **When to use**
    *

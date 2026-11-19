@@ -17,6 +17,10 @@
  * **Gotchas**
  *
  * Unlike an init script, a script tag runs once, in the current document: a navigation doesn't bring it back.
+ * On WebKit, a refusal names no script, so when an inline script that the policy allows adds another inline
+ * script that it refuses, the call can't tell the refusal isn't its own: it fails with `Timeout` at its deadline,
+ * though the script ran. Chromium and Firefox name the refused script and return.
+ *
  * The element's text is the source given, so a policy that allows it by its hash allows it here; a `{ path }`
  * adds its `sourceURL` comment. A report-only policy refuses nothing. Page scripts can see and tamper with the
  * element, as with anything in the main world.

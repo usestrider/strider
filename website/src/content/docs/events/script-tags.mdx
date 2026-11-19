@@ -24,6 +24,8 @@ const chartsReady = Effect.fn("chartsReady")(function*(page: Page.Page) {
 - A script from a URL is done when the call returns: it waits for the element's `load` event.
 - A classic inline script runs inside the call.
 - A script the policy refuses fails with `RefusedByPolicy`, and a URL that doesn't load with `ResourceFailed`.
+- On WebKit, an inline script that adds another inline script the policy refuses ends in a `Timeout` at the call's
+  deadline, though it ran: WebKit's refusal doesn't say which script it refused.
 
 ## Modules
 
