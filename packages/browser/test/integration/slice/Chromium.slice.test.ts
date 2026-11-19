@@ -19,6 +19,7 @@ import { recordings } from "./recordings.ts"
 import { requestBodies } from "./requestBodies.ts"
 import { requestSizes } from "./requestSizes.ts"
 import { requestTiming } from "./requestTiming.ts"
+import { sharedContextChecks } from "./sharedContextChecks.ts"
 import { slice } from "./slice.ts"
 import { stalledReadProbes } from "./stalledReadProbes.ts"
 import { storageReplacement } from "./storageReplacement.ts"
@@ -55,5 +56,6 @@ requestTiming("Chromium", backend)
 
 storageReplacement("Chromium", backend)
 requestSizes("Chromium", backend)
+sharedContextChecks("Chromium", backend)
 
 stalledReadProbes("Chromium", backend)

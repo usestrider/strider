@@ -21,6 +21,7 @@ import { recycling } from "./recycledBrowser.ts"
 import { requestBodies } from "./requestBodies.ts"
 import { requestSizes } from "./requestSizes.ts"
 import { requestTiming } from "./requestTiming.ts"
+import { sharedContextChecks } from "./sharedContextChecks.ts"
 import { slice } from "./slice.ts"
 import { stalledReadProbes } from "./stalledReadProbes.ts"
 import { storageReplacement } from "./storageReplacement.ts"
@@ -67,5 +68,6 @@ requestTiming("Firefox", backend)
 
 storageReplacement("Firefox", backend)
 requestSizes("Firefox", backend)
+sharedContextChecks("Firefox", backend)
 
 stalledReadProbes("Firefox", backend)

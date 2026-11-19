@@ -1,4 +1,14 @@
-/** Shared raw-engine connection; pages, facts and waiters belong to one case only. */
+/**
+ * Shared raw-engine connection and user context; pages, facts and waiters belong to one case only. Stock WebKit starts
+ * a browser process for each context, which took most of a case's time, so the cases open their pages in one context
+ * and, after each, the context must hold no page, popup or worker, and no cookie. Nor may any origin the case's page
+ * or its frames committed a document at, under the top-level origin that partitions it, hold `localStorage`, IndexedDB
+ * or a service-worker registration: each is read from the page's live realms before it closes, a top-level origin
+ * none of them reads by navigating the page back to it, and registrations by asking the origin, since Firefox and
+ * stock WebKit don't say which context a service worker belongs to. A case that leaves anything fails, naming what it
+ * left, and the next case gets a new context; so does one whose frame's partition no live realm could read. A case
+ * that is about contexts themselves asks for one of its own (`freshPage`).
+ */
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -7,6 +17,7 @@ import * as Scope from "effect/Scope"
 import type * as Adapter from "../../../src/internal/adapter.ts"
 import type * as Target from "../../../src/Target.ts"
 import type * as UserContext from "../../../src/UserContext.ts"
+import * as StorageLeft from "../storageLeft.ts"
 import type { Backend } from "./harness.ts"
 
 type Requirements = Exclude<Effect.Services<ReturnType<Backend["connect"]>>, Scope.Scope>
@@ -68,16 +79,96 @@ interface Held {
   readonly adapter: Adapter.AdapterConnection
   readonly scope: Scope.Closeable
   readonly token: object
+  /** The context the cases share, made by the first case that asks for it. */
+  context: UserContext.Id | undefined
+}
+
+/** The pages, worker realms and window realms the connection's facts show, so a case's leftovers can be named. */
+const tracker = () => {
+  const pages = new Map<Target.NavigableId, UserContext.Id>()
+  const workers = new Map<Target.RealmId, { readonly url: string; readonly context: UserContext.Id | undefined }>()
+  const windows = new Map<Target.RealmId, Target.NavigableId>()
+  /** Each frame's page, and each page's current top-level origin. */
+  const frames = new Map<Target.NavigableId, Target.NavigableId>()
+  const tops = new Map<Target.NavigableId, string>()
+  /** Every origin a page's tree committed a document at, with the top-level origin that partitions it. */
+  const origins = new Map<Target.NavigableId, Map<string, StorageLeft.Partition>>()
+  const pageOf = (navigable: Target.NavigableId) => pages.has(navigable) ? navigable : frames.get(navigable)
+  const observe = (fact: Adapter.Fact) => {
+    switch (fact._tag) {
+      case "PageAdded":
+        pages.set(fact.page, fact.context)
+        break
+      case "NavigableRemoved":
+        pages.delete(fact.navigable)
+        frames.delete(fact.navigable)
+        break
+      case "FrameAdded":
+        frames.set(fact.frame, fact.page)
+        break
+      case "DocumentCommitted": {
+        const page = pageOf(fact.navigable)
+        if (page === undefined) break
+        if (page === fact.navigable) tops.set(page, fact.origin)
+        const top = tops.get(page)
+        if (top === undefined || !StorageLeft.holdsStorage(fact.origin)) break
+        const held = origins.get(page) ?? new Map<string, StorageLeft.Partition>()
+        held.set(StorageLeft.keyOf({ origin: fact.origin, top }), { origin: fact.origin, top })
+        origins.set(page, held)
+        break
+      }
+      case "RealmAdded":
+        if (fact.kind._tag === "Window") windows.set(fact.realm, fact.kind.navigable)
+        else {
+          const page = Option.getOrUndefined(fact.kind.page)
+          workers.set(fact.realm, {
+            url: String(fact.kind.url),
+            context: Option.getOrUndefined(fact.kind.context) ?? (page === undefined ? undefined : pages.get(page))
+          })
+        }
+        break
+      case "RealmRemoved":
+        windows.delete(fact.realm)
+        workers.delete(fact.realm)
+    }
+  }
+  return {
+    observe,
+    pagesIn: (context: UserContext.Id) => Array.from(pages).filter(([, owner]) => owner === context),
+    workersIn: (context: UserContext.Id) => Array.from(workers.values()).filter((worker) => worker.context === context),
+    /** The live window realms of a page and its frames, each with the partition it reads. */
+    realmsOf: (page: Target.NavigableId) =>
+      Array.from(windows).filter(([, navigable]) => pageOf(navigable) === page).map(([realm, navigable]) => ({
+        realm,
+        frame: navigable !== page
+      })),
+    originsOf: (page: Target.NavigableId) => Array.from(origins.get(page)?.values() ?? []),
+    topOf: (page: Target.NavigableId) => tops.get(page),
+    forget: (page: Target.NavigableId) => {
+      origins.delete(page)
+      tops.delete(page)
+    },
+    clear: () => {
+      frames.clear()
+      tops.clear()
+      origins.clear()
+      pages.clear()
+      workers.clear()
+      windows.clear()
+    }
+  }
 }
 
 export const make = Effect.fnUntraced(function*(backend: Backend) {
   const services = yield* Effect.context<Requirements>()
   let held: Held | undefined
   let active: ReturnType<typeof recorder> | undefined
+  const seen = tracker()
 
   const reset = Effect.suspend(() => {
     const previous = held
     held = undefined
+    seen.clear()
     return previous === undefined ? Effect.void : Scope.close(previous.scope, Exit.void)
   })
   yield* Effect.addFinalizer(() => reset)
@@ -87,17 +178,53 @@ export const make = Effect.fnUntraced(function*(backend: Backend) {
     if (held !== undefined) return
     const scope = yield* Scope.make()
     const token = {}
-    const result = yield* backend.connect((fact) =>
-      held?.token !== token || active === undefined ? Effect.void : active.sink(fact)
-    ).pipe(
+    const result = yield* backend.connect((fact) => {
+      if (held?.token !== token) return Effect.void
+      seen.observe(fact)
+      return active === undefined ? Effect.void : active.sink(fact)
+    }).pipe(
       Scope.provide(scope),
       Effect.provide(services),
       Effect.onError(() => Scope.close(scope, Exit.void))
     )
-    held = { adapter: result.adapter, scope, token }
+    held = { adapter: result.adapter, scope, token, context: undefined }
   })
 
-  const page = Effect.gen(function*() {
+  /**
+   * What a case left in the shared context while its page is still open: cookies, and the storage of every origin
+   * its page and frames held (`StorageLeft.storageLeft`). A frame's origin under another top that no live realm reads
+   * can't be read, so the context is replaced after the case (`unread`).
+   */
+  const storageLeft = Effect.fnUntraced(function*(
+    connection: Held,
+    context: UserContext.Id,
+    page: Target.NavigableId,
+    facts: ReturnType<typeof recorder>
+  ) {
+    const cookies = yield* connection.adapter.cookies(context)
+    const storage = yield* StorageLeft.storageLeft({
+      committed: seen.originsOf(page),
+      realms: seen.realmsOf(page),
+      top: seen.topOf(page),
+      read: (realm) => StorageLeft.readRealm(connection.adapter.evaluate, realm),
+      navigateBack: Effect.fnUntraced(function*(origin: string) {
+        const navigation = yield* connection.adapter.navigate(page, `${origin}/`, { referrer: Option.none() })
+        const ended = yield* facts.when("NavigationEnded", (fact) => fact.navigation === navigation)
+        if (ended.outcome._tag !== "Committed") return undefined
+        return yield* connection.adapter.realm(ended.outcome.document, { _tag: "Main" })
+      })
+    })
+    seen.forget(page)
+    return {
+      found: [
+        ...new Set([...cookies.map((cookie) => `a cookie ${cookie.name} for ${cookie.domain}`), ...storage.found])
+      ],
+      unread: storage.unread
+    }
+  })
+
+  /** Opens a page for one case, in the shared context or, with `fresh`, in a context of its own. */
+  const open = Effect.fnUntraced(function*(fresh: boolean) {
     const connection = held
     if (connection === undefined) {
       return yield* Effect.die(new Error("Raw engine connection was not prepared in a hook"))
@@ -108,15 +235,35 @@ export const make = Effect.fnUntraced(function*(backend: Backend) {
     let context: UserContext.Id | undefined
     let page: Target.NavigableId | undefined
 
+    const left: Array<string> = []
+    let unread = false
     yield* Effect.addFinalizer((exit) =>
       Effect.gen(function*() {
         const cleaned = yield* Effect.exit(
           Effect.gen(function*() {
+            const shared = fresh ? undefined : connection.context
             if (page !== undefined) {
+              if (shared !== undefined) {
+                const storage = yield* storageLeft(connection, shared, page, facts)
+                left.push(...storage.found)
+                unread = storage.unread.length > 0
+              }
               yield* connection.adapter.closePage(page, { runBeforeUnload: false })
               yield* facts.when("NavigableRemoved", (fact) => fact.navigable === page)
             }
-            if (context !== undefined) {
+            if (shared !== undefined) {
+              const pages = seen.pagesIn(shared)
+              if (pages.length > 0) left.push(`${pages.length} page(s) open`)
+              left.push(...seen.workersIn(shared).map((worker) => `a worker at ${worker.url}`))
+              // The next case gets a new context, so one case's leftovers don't fail the rest
+              // as does a case whose storage on some origin couldn't be read, which is isolated by that instead
+              if (left.length > 0 || unread) {
+                connection.context = undefined
+                yield* connection.adapter.removeUserContext(shared)
+                yield* facts.when("UserContextRemoved", (fact) => fact.context === shared)
+              }
+            }
+            if (fresh && context !== undefined) {
               yield* connection.adapter.removeUserContext(context)
               yield* facts.when("UserContextRemoved", (fact) => fact.context === context)
             }
@@ -136,17 +283,19 @@ export const make = Effect.fnUntraced(function*(backend: Backend) {
           if (Exit.isFailure(cleaned)) return yield* Effect.failCause(cleaned.cause).pipe(Effect.orDie)
           return yield* closed
         }
+        if (Exit.isSuccess(exit) && left.length > 0) {
+          return yield* Effect.die(new Error(`The case left in the shared context: ${[...new Set(left)].join("; ")}`))
+        }
       })
     )
     // The finalizer precedes acquisition; interruption before an identity returns discards the whole connection.
-    context = yield* connection.adapter.createUserContext({
-      proxy: Option.none(),
-      acceptInsecureCerts: false
-    })
+    const options = { proxy: Option.none(), acceptInsecureCerts: false }
+    if (fresh) context = yield* connection.adapter.createUserContext(options)
+    else context = connection.context ??= yield* connection.adapter.createUserContext(options)
     page = yield* connection.adapter.createPage(context)
     return { adapter: connection.adapter, page, context, facts }
   })
-  return { prepare, reset, page }
+  return { prepare, reset, page: open(false), freshPage: open(true) }
 })
 
 export class Shared extends Context.Service<Shared, Effect.Success<ReturnType<typeof make>>>()("engine/Shared") {}
