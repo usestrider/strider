@@ -309,7 +309,14 @@ interface UserContext extends ObservedUserContext {     // two levels only: read
 }
 
 interface Options {                                      // UserContext.Options; an unset option keeps the browser's own value unless a default is stated
-  readonly acceptInsecureCerts?: boolean | undefined     // default false; Firefox and launched WebKit only; creation-only, explicit values refused on reclaim
+  readonly acceptInsecureCerts?: boolean | undefined     // default false; not attached WebKit, nor a reclaimable Chromium context; creation-only, explicit values refused on reclaim
+  readonly clientCertificates?: ReadonlyArray<{          // default none, and no proxy; Chromium and launched Firefox; not with proxy or a reclaimable context
+    readonly origin: string                              // HTTPS origin: scheme, hostname and effective port
+    readonly cert?: Uint8Array | undefined               // PEM, with key; or pfx alone
+    readonly key?: Redacted<Uint8Array> | undefined
+    readonly pfx?: Redacted<Uint8Array> | undefined
+    readonly passphrase?: Redacted<string> | undefined
+  }> | undefined                                         // loaded at creation (InvalidInput); a per-context loopback proxy presents them
   readonly proxy?: {
     readonly server: string                              // HTTP URL or host:port, default port 80; no userinfo, path, query or fragment
     readonly bypass?: ReadonlyArray<string> | undefined  // default []; hostnames or IP addresses, using native host matching

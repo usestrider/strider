@@ -43,6 +43,7 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
       ]),
       entry("acceptInsecureCerts", "unsupported", ["an attached process cannot be reconfigured"]),
       entry("userContexts.proxy", "unsupported", ["an attached process cannot be reconfigured"]),
+      entry("clientCertificates", "unsupported", ["stock WebKit takes a proxy only at launch"]),
       entry("userContexts.proxy.credentials", "unsupported", ["stock WebKit does not support proxy credentials"]),
       entry("userContexts.proxy.socks4", "unsupported", ["an attached process cannot be reconfigured"]),
       entry("userContexts.proxy.https", "unsupported", ["the TLS connection to the proxy can't be verified"]),

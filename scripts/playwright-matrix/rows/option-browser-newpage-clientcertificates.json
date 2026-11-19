@@ -4,9 +4,17 @@
     "method:Browser.newPage"
   ],
   "option": "clientCertificates",
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding public option; the parent row does not imply option parity.",
-  "capabilities": [],
+  "status": "has",
+  "api": [
+    {
+      "module": "UserContext",
+      "symbol": "Options",
+      "url": "/docs/api/browser/UserContext#Options"
+    }
+  ],
+  "notes": "Browser.newPage takes the same clientCertificates option and creates its context through the same setup; a per-context loopback proxy presents them on Chromium and launched Firefox. Stock WebKit, connected Firefox, reclaimable contexts, and proxy together refuse it.",
+  "capabilities": [
+    "clientCertificates"
+  ],
   "requirements": []
 }

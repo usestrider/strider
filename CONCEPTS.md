@@ -485,6 +485,21 @@ including control connections. A bypass hostname matches that host and `.example
 the domain; stock WebKit's resolver matches a hostname's subdomains too and can't express the suffix form, so it
 refuses it. Unknown schemes, SOCKS credentials, WebKit credentials, and settings for an existing WebKit process are
 explicit refusals, each naming its capability.
+Launched Firefox profiles let a context's proxy carry loopback, so the BiDi adapter adds the three loopback hosts
+to every user proxy's bypass, HTTP and SOCKS alike.
+
+Client certificates are a context-owned TLS proxy. A context created with `clientCertificates` starts a proxy on
+127.0.0.1 in the context's scope, before the context, so it closes after the context is removed, with every socket
+it opened; a context without them starts nothing. Chromium sends the context's HTTPS and WebSocket-over-TLS
+traffic there, loopback included; Firefox, whose user contexts take no PAC proxy, sends all of it, and the proxy
+forwards plain HTTP and its upgrades unchanged. The proxy is the trust boundary: it ends each tunnel whose first
+bytes are a ClientHello with a self-signed certificate that only this context accepts (Chromium's per-page
+`Security.setIgnoreCertificateErrors`, Firefox's context `acceptInsecureCerts`), opens its own TLS connection to
+the site, presents the certificate whose origin matches by scheme, hostname, and effective port, and verifies the
+site against Node's trusted certificates and hostname unless the context accepts insecure certificates. Other
+tunnels pass through unchanged. A site it can't reach or verify closes the browser's connection. Keys and
+passphrases stay Redacted until the proxy loads them, at creation. Stock WebKit, a connected Firefox, a
+reclaimable context, and a context with `proxy` of any scheme refuse the option.
 
 Context HTTP credentials install a context-owned auth route before user routes and an auth-phase intercept only
 when configured, following [Pay for what you use](docs/decisions.md#pay-for-what-you-use). Page routes and later
