@@ -2395,6 +2395,26 @@ export const contents = (
           }))
         }), timeout)
 
+      it.effect("keeps native mixed checking separate from a button's pressed state", () =>
+        Effect.gen(function*() {
+          const page = yield* SharedContext.newPage
+          yield* page.setContent(
+            "<input type=\"checkbox\" role=\"button\" aria-label=\"Toggle\" aria-pressed=\"true\">"
+          )
+          yield* page.evaluateInMainWorld(() => {
+            document.querySelector("input")!.indeterminate = true
+          })
+          assert.strictEqual(yield* page.getByRole("button", { pressed: true }).count, 1)
+          const snapshot = yield* page.snapshot({ sources: "aria" })
+          assert.match(snapshot.text, /- button "Toggle" \[checked=mixed\] \[pressed\]/)
+          yield* page.pipe(
+            Expect.toMatchAria(AriaPattern.anywhere(AriaPattern.including(
+              AriaPattern.node("button", "Toggle", AriaPattern.unchecked, { checked: "mixed", pressed: true })
+            ))),
+            Deadline.within("1 second")
+          )
+        }), timeout)
+
       it.effect("snapshots carry a node's level and mixed state, and render them", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
