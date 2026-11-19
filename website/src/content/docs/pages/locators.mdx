@@ -55,9 +55,11 @@ waiting.
 
 `Locator.xpath` wraps an XPath expression so `locator` reads it as XPath rather than CSS. It keeps the elements the
 expression selects, in document order, and skips text and attribute nodes. From a page it starts at the document.
-Chained after another query, it starts at each match, and an expression that starts with `/` searches inside it,
-so `//li` reads as `.//li`. Only the start is read that way: in `//a | //b` the second branch searches the whole
-page, so write `.//a | .//b` to keep both inside. Other axes, such as `..`, reach wherever they lead:
+Chained after another query, it starts at each match, and a `/` that begins the first step, after optional
+whitespace, searches inside it, so `//li` reads as `.//li`. A bare `/`, alone or before `|`, is left as written.
+Only that very start is read that way: in `//a | //b` the second branch searches the whole page, so write
+`.//a | .//b` to keep both inside, and `(//a)[1]` stays document-relative too. Other axes, such as `..`, reach
+wherever they lead:
 
 ```ts
 import { Locator, Page } from "@usestrider/browser"

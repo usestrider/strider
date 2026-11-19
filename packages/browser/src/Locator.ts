@@ -413,11 +413,12 @@ export interface Queries<L> {
    * **Details**
    *
    * A string is always CSS, which searches open shadow roots too. An XPath expression is evaluated from the
-   * document, from a page or after `frame`, or from each element matched so far when chained. Chained, an
-   * expression that starts with `/` searches inside the element, so `//li` reads as `.//li`; only its start is
-   * read that way, so in `//a | //b` the second branch searches the whole document, and `.//a | .//b` keeps both
-   * inside. Other axes, such as `..` or `following-sibling::`, reach wherever they lead. See `Locator.xpath` for
-   * the rest of its rules.
+   * document, from a page or after `frame`, or from each element matched so far when chained. Chained, a `/`
+   * that begins the expression's first step, after optional whitespace, is read from the element, so `//li` reads
+   * as `.//li` and searches inside it; a bare `/`, alone or before `|`, is left as written. Only that very start
+   * is rewritten: in `//a | //b` the second branch searches the whole document (`.//a | .//b` keeps both inside),
+   * and `(//a)[1]` stays document-relative. Other axes, such as `..` or `following-sibling::`, reach wherever
+   * they lead. See `Locator.xpath` for the rest of its rules.
    *
    * **Example** (Submitting a form found by CSS)
    *
@@ -1845,8 +1846,10 @@ export interface XPath {
  * The expression is evaluated with the browser's `document.evaluate`, and only the element nodes it selects are
  * kept: text and attribute nodes are skipped. A union (`a | b`) matches the elements of both, in document order.
  * From a page, or after `frame`, the expression starts from the document; chained after another query, it starts
- * from each element matched so far, and one that starts with `/` searches inside it (`//li` reads as `.//li`). It
- * has no namespace prefixes: an unprefixed name matches an HTML element.
+ * from each element matched so far. There, a `/` that begins the first step, after optional whitespace, is read
+ * from the element, so `//li` reads as `.//li` and searches inside it; a bare `/`, alone or before `|`, is the
+ * root of the element's tree and is left as written. It has no namespace prefixes: an unprefixed name matches an
+ * HTML element.
  *
  * An expression that doesn't parse, uses a prefix, or selects something other than nodes, such as `count(//li)`,
  * fails with `InvalidInput` each time the locator is used, without waiting, even when the query before it matches
@@ -1854,8 +1857,9 @@ export interface XPath {
  *
  * **Gotchas**
  *
- * Chained, only the start of the expression is read from the element. In `//a | //b` the second branch searches
- * the whole document; write `.//a | .//b` to keep both inside.
+ * Chained, only the very start of the expression is read from the element. In `//a | //b` the second branch
+ * searches the whole document; write `.//a | .//b` to keep both inside. Parentheses aren't looked into either, so
+ * `(//a)[1]` stays document-relative; write `(.//a)[1]` for the first one inside.
  *
  * XPath doesn't cross into a shadow root, so from the page it never finds an element inside one. Chained from an
  * element that is itself inside a shadow root, it searches that shadow tree.
