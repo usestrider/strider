@@ -1,0 +1,94 @@
+---
+title: Snapshot baselines
+description: Comparing bytes a test produces with a stored file.
+order: 1.8
+---
+
+`SnapshotBaseline.toMatch` compares a value your test already has, such as a PDF, a download, or a PNG drawn in the
+page, with a baseline file stored beside the test file. A `.png` name is compared by its pixels, and any other name
+byte for byte. It comes with `@usestrider/vitest`, and needs the browser and `TestRun` that `VitestBrowser.layer`
+provides.
+
+```ts title="invoice.test.ts"
+import { NodeServices } from "@effect/platform-node"
+import { layer } from "@effect/vitest"
+import { Browser } from "@usestrider/browser"
+import { Chromium } from "@usestrider/browser/chromium"
+import { SnapshotBaseline, VitestBrowser } from "@usestrider/vitest"
+import { Effect, Layer } from "effect"
+
+const BrowserLive = VitestBrowser.layer(
+  Chromium.layer({ executablePath: "/usr/bin/chromium" }).pipe(
+    Layer.provide(NodeServices.layer)
+  )
+)
+
+layer(BrowserLive)("invoice", (it) => {
+  it.effect("prints the same", (context) =>
+    Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      yield* page.goto("https://shop.example.com/invoice/42")
+      const pdf = yield* page.pdf()
+      yield* SnapshotBaseline.toMatch(pdf, "invoice.pdf")
+    }).pipe(Effect.scoped, VitestBrowser.withTest(context)))
+})
+```
+
+The name carries the file's extension, and the baseline keeps it: this one is
+`__snapshots__/invoice.test.ts/invoice-chromium-linux.pdf`, keyed by the test file, the name, the browser engine,
+and the platform, as [screenshot baselines](/docs/tools/screenshot-baselines) are. Vitest's own snapshot file,
+`__snapshots__/invoice.test.ts.snap`, sits beside that directory, so the two never mix. The name follows the
+screenshot rule and must end in an extension of letters and digits: `invoice.pdf`, not `invoice` or `Invoice.pdf`.
+Any other name fails with `InvalidName`.
+
+The value is compared once, as given: unlike a screenshot, there is nothing to capture again. Baselines are written
+and updated as screenshots are: a first run writes the file and still fails, `vitest -u` rewrites what differs and
+passes, and CI writes nothing. `SnapshotBaseline.CurrentSettings` sets the update mode, the path, and the output
+directory, apart from `ScreenshotBaseline`'s.
+
+## Images
+
+A `.png` value is compared by its pixels, with the options `ScreenshotBaseline.toMatch` takes: `threshold`,
+`maxDiffPixels`, and `maxDiffPixelRatio`.
+
+```ts
+import { SnapshotBaseline } from "@usestrider/vitest"
+import { Effect } from "effect"
+
+const chart = Effect.fn("chart")(function*(png: Uint8Array) {
+  yield* SnapshotBaseline.toMatch(png, "chart.png", { maxDiffPixels: 20 })
+})
+```
+
+A JPEG, or any other image format, is compared byte for byte: Strider decodes only PNG.
+
+## When it fails
+
+It fails with `SnapshotBaselineError`, whose `reason` says how, and writes files under `.vitest-snapshots/`, in a
+directory for the test file, with the name's extension. Only images are attached to the test.
+
+| Reason            | Files written                                                    |
+| ----------------- | ---------------------------------------------------------------- |
+| `BytesMismatch`   | actual and expected; the reason gives the first differing byte   |
+| `Mismatch`        | actual, expected, and a diff image, attached                     |
+| `SizeMismatch`    | actual and expected images, attached                             |
+| `MissingBaseline` | none (the baseline itself, when the update mode writes one)      |
+| `InvalidBaseline` | none                                                             |
+| `InvalidValue`    | none: a `.png` value that isn't a PNG Strider reads              |
+| `InvalidName`     | none                                                             |
+
+## Text
+
+Text needs no Strider matcher: Vitest's `toMatchFileSnapshot` compares a string with a file, follows `-u`, and shows
+a text diff.
+
+```ts
+import { Effect } from "effect"
+import { expect } from "vitest"
+
+const summary = Effect.fn("summary")(function*(text: string) {
+  yield* Effect.promise(() =>
+    expect(text).toMatchFileSnapshot("__snapshots__/summary.txt")
+  )
+})
+```

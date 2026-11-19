@@ -231,7 +231,9 @@ export class BytesMismatch extends Schema.Error<BytesMismatch>("@usestrider/vite
  *   SnapshotBaseline.toMatch(png, "chart.png").pipe(
  *     Effect.tapError((error) =>
  *       error.reason._tag === "Mismatch"
- *         ? Effect.log(`${error.reason.diffPixels} pixels differ; see ${error.reason.diff}`)
+ *         ? Effect.log(
+ *           `${error.reason.diffPixels} pixels differ; see ${error.reason.diff}`
+ *         )
  *         : Effect.void
  *     )
  *   )
@@ -270,7 +272,9 @@ export class Mismatch extends Schema.Error<Mismatch>("@usestrider/vitest/Snapsho
  *   SnapshotBaseline.toMatch(png, "chart.png").pipe(
  *     Effect.tapError((error) =>
  *       error.reason._tag === "SizeMismatch"
- *         ? Effect.log(`now ${error.reason.actualSize.width} wide, was ${error.reason.expectedSize.width}`)
+ *         ? Effect.log(
+ *           `now ${error.reason.actualSize.width} wide, was ${error.reason.expectedSize.width}`
+ *         )
  *         : Effect.void
  *     )
  *   )
@@ -432,7 +436,10 @@ const SnapshotBaselineErrorTypeId = "~@usestrider/vitest/SnapshotBaseline/Snapsh
  *
  * const invoice = (pdf: Uint8Array) =>
  *   SnapshotBaseline.toMatch(pdf, "invoice.pdf").pipe(
- *     Effect.catchTag("SnapshotBaselineError", (error) => Effect.logWarning(error.message))
+ *     Effect.catchTag(
+ *       "SnapshotBaselineError",
+ *       (error) => Effect.logWarning(error.message)
+ *     )
  *   )
  * ```
  *
@@ -443,7 +450,15 @@ const SnapshotBaselineErrorTypeId = "~@usestrider/vitest/SnapshotBaseline/Snapsh
 export class SnapshotBaselineError
   extends Schema.TaggedError<SnapshotBaselineError>(SnapshotBaselineErrorTypeId)("SnapshotBaselineError", {
     name: Schema.String,
-    reason: Schema.Union([BytesMismatch, Mismatch, SizeMismatch, MissingBaseline, InvalidBaseline, InvalidValue, InvalidName])
+    reason: Schema.Union([
+      BytesMismatch,
+      Mismatch,
+      SizeMismatch,
+      MissingBaseline,
+      InvalidBaseline,
+      InvalidValue,
+      InvalidName
+    ])
   })
 {
   readonly [SnapshotBaselineErrorTypeId] = SnapshotBaselineErrorTypeId
