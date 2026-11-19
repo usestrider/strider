@@ -613,6 +613,8 @@ export function engine(render: (root: SnapNode) => string) {
     snapshotLength: getter(XPathResult.prototype, "snapshotLength"),
     snapshotItem: method(XPathResult.prototype, "snapshotItem")
   }
+  /** `document.evaluate`'s result type, read once, like the methods above, so a replaced `XPathResult` can't change it. */
+  const ORDERED_NODE_SNAPSHOT_TYPE = XPathResult.ORDERED_NODE_SNAPSHOT_TYPE
   // The labelable elements, each with its own `labels` getter
   const nativeLabels = [
     HTMLButtonElement,
@@ -1818,14 +1820,14 @@ export function engine(render: (root: SnapNode) => string) {
     treeScope === null ? elementsUnder(document) : (treeScope.elements ??= elementsUnder(document))
 
   /**
-   * An XPath expression's element nodes from `context`, in document order. Chained, an expression that starts with
-   * `/` is read from the element, as `.//li` for `//li`, so it searches inside as CSS does.
+   * An expression's element nodes from `context`, in document order: text, attribute and document nodes are
+   * skipped. It throws an invalid selector when the expression doesn't parse, uses a namespace prefix or doesn't
+   * give a node set.
    */
-  const xpathQuery = (context: Node, expression: string): Array<Element> => {
-    const source = context === document || !expression.startsWith("/") ? expression : `.${expression}`
+  const evaluateXPath = (context: Node, source: string, expression: string): Array<Element> => {
     let result: XPathResult
     try {
-      result = dom.evaluate(document, source, context, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null)
+      result = dom.evaluate(document, source, context, null, ORDERED_NODE_SNAPSHOT_TYPE, null)
     } catch (error) {
       throw {
         invalidSelector: true,
@@ -1843,10 +1845,23 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   /**
-   * The XPath expressions this engine has checked, and the detached element it checks them from at no cost (an
-   * element, since Firefox refuses a text node as the context node).
+   * A `/` that starts a chained expression's first step: Playwright's rule, so `/li` reads as `./li` and `//li` as
+   * `.//li` from the element. Only the start is rewritten, so a union's later branch, as `//b` in `//a | //b`, keeps
+   * its absolute path. A bare `/`, alone or before `|`, is the root of the element's tree and is left as written.
    */
-  const checkedXPaths = new Set<string>()
+  const LEADING_STEP = /^(\s*)(?=\/)(?!\/\s*(?:\||$))/
+
+  /**
+   * An XPath step's matches from `scope`: from the document as written, and from an element with its leading `/`
+   * read from the element, so chaining searches inside as CSS does.
+   */
+  const xpathQuery = (scope: Document | Element, expression: string): Array<Element> =>
+    evaluateXPath(scope, scope === document ? expression : expression.replace(LEADING_STEP, "$1."), expression)
+
+  /**
+   * The detached element XPath is checked from: an empty tree, so the check searches nothing (an element, since
+   * Firefox refuses a text node as the context node).
+   */
   let xpathProbe: Element | undefined
 
   /** The candidates of one query under `scope`, in tree order. */
@@ -1959,12 +1974,9 @@ export function engine(render: (root: SnapNode) => string) {
           break
         }
         case "XPath":
-          // Parsed and type-checked once, from a detached node, so an empty scope still fails and no document is
-          // searched to do it
-          if (!checkedXPaths.has(step.expression)) {
-            xpathQuery(xpathProbe ??= dom.createElement(document, "div"), step.expression)
-            checkedXPaths.add(step.expression)
-          }
+          // Checked as written on every resolve, from a detached element, so an empty scope still fails and no
+          // document is searched to do it. A valid expression stays valid with its leading step read from an element.
+          evaluateXPath(xpathProbe ??= dom.createElement(document, "div"), step.expression, step.expression)
           break
         case "Filter":
           if (step.has !== null) validateSteps(step.has)

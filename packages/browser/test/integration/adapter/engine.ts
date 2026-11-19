@@ -281,22 +281,26 @@ export const engine = (backend: Backend) =>
             )
           }), timeout)
 
-        it.effect("reads only a chained XPath expression's start from its scope, so a union's later branch is absolute", () =>
-          Effect.gen(function*() {
-            const { send } = yield* open(backend, "<div id=\"scope\"><a>inside</a></div><b>outside</b>")
-            for (const [expression, expected] of [["//a | //b", 2], [".//a | .//b", 1]] as const) {
-              assert.strictEqual(
-                count(
-                  yield* send({
-                    op: "count",
-                    steps: [{ _tag: "Css", selector: "#scope" }, { _tag: "XPath", expression }]
-                  })
-                ),
-                expected,
-                expression
-              )
-            }
-          }), timeout)
+        it.effect(
+          "reads only a chained XPath expression's start from its scope, so a union's later branch is absolute",
+          () =>
+            Effect.gen(function*() {
+              const { send } = yield* open(backend, "<div id=\"scope\"><a>inside</a></div><b>outside</b>")
+              for (const [expression, expected] of [["//a | //b", 2], [".//a | .//b", 1]] as const) {
+                assert.strictEqual(
+                  count(
+                    yield* send({
+                      op: "count",
+                      steps: [{ _tag: "Css", selector: "#scope" }, { _tag: "XPath", expression }]
+                    })
+                  ),
+                  expected,
+                  expression
+                )
+              }
+            }),
+          timeout
+        )
 
         it.effect("evaluates XPath within a shadow tree when CSS supplies its context element", () =>
           Effect.gen(function*() {

@@ -414,8 +414,10 @@ export interface Queries<L> {
    *
    * A string is always CSS, which searches open shadow roots too. An XPath expression is evaluated from the
    * document, from a page or after `frame`, or from each element matched so far when chained. Chained, an
-   * expression that starts with `/` searches inside the element, so `//li` reads as `.//li`, while other axes,
-   * such as `..` or `following-sibling::`, reach wherever they lead. See `Locator.xpath` for the rest of its rules.
+   * expression that starts with `/` searches inside the element, so `//li` reads as `.//li`; only its start is
+   * read that way, so in `//a | //b` the second branch searches the whole document, and `.//a | .//b` keeps both
+   * inside. Other axes, such as `..` or `following-sibling::`, reach wherever they lead. See `Locator.xpath` for
+   * the rest of its rules.
    *
    * **Example** (Submitting a form found by CSS)
    *
@@ -1814,6 +1816,17 @@ const XPathTypeId = "~@usestrider/browser/Locator/XPath"
 /**
  * An XPath expression for `locator`, built with `Locator.xpath`, so it is never mistaken for CSS.
  *
+ * **Example** (Keeping an XPath expression to reuse)
+ *
+ * ```ts import.meta.vitest
+ * import { Locator, Page } from "@usestrider/browser"
+ *
+ * const paidCell: Locator.XPath = Locator.xpath("./td[2][.='Paid']")
+ *
+ * const paidRows = (page: Page.ReadonlyPage) =>
+ *   page.locator("tr").filter({ has: Locator.relative.locator(paidCell) })
+ * ```
+ *
  * @stability unstable
  * @category models
  * @since 0.1.0
@@ -1832,15 +1845,20 @@ export interface XPath {
  * The expression is evaluated with the browser's `document.evaluate`, and only the element nodes it selects are
  * kept: text and attribute nodes are skipped. A union (`a | b`) matches the elements of both, in document order.
  * From a page, or after `frame`, the expression starts from the document; chained after another query, it starts
- * from each element matched so far, and one that starts with `/` searches inside it. It has no namespace prefixes:
- * an unprefixed name matches an HTML element.
+ * from each element matched so far, and one that starts with `/` searches inside it (`//li` reads as `.//li`). It
+ * has no namespace prefixes: an unprefixed name matches an HTML element.
  *
  * An expression that doesn't parse, uses a prefix, or selects something other than nodes, such as `count(//li)`,
- * fails with `InvalidInput` as soon as the locator is used, without waiting.
+ * fails with `InvalidInput` each time the locator is used, without waiting, even when the query before it matches
+ * nothing.
  *
  * **Gotchas**
  *
- * XPath can't see into shadow roots, so unlike CSS it never matches an element inside one.
+ * Chained, only the start of the expression is read from the element. In `//a | //b` the second branch searches
+ * the whole document; write `.//a | .//b` to keep both inside.
+ *
+ * XPath doesn't cross into a shadow root, so from the page it never finds an element inside one. Chained from an
+ * element that is itself inside a shadow root, it searches that shadow tree.
  *
  * **Example** (Finding the items that are named Two or have the id three)
  *

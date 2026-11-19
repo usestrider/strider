@@ -56,7 +56,8 @@ waiting.
 `Locator.xpath` wraps an XPath expression so `locator` reads it as XPath rather than CSS. It keeps the elements the
 expression selects, in document order, and skips text and attribute nodes. From a page it starts at the document.
 Chained after another query, it starts at each match, and an expression that starts with `/` searches inside it,
-so `//li` reads as `.//li`. Other axes, such as `..`, reach wherever they lead:
+so `//li` reads as `.//li`. Only the start is read that way: in `//a | //b` the second branch searches the whole
+page, so write `.//a | .//b` to keep both inside. Other axes, such as `..`, reach wherever they lead:
 
 ```ts
 import { Locator, Page } from "@usestrider/browser"
@@ -80,7 +81,8 @@ const readOrder = Effect.fn("readOrder")(function*(page: Page.ReadonlyPage) {
 })
 ```
 
-XPath can't see into shadow roots, and names take no namespace prefix. An expression that doesn't parse, uses a
+XPath doesn't cross into a shadow root, though chained from an element inside one it searches that shadow tree.
+Names take no namespace prefix. An expression that doesn't parse, uses a
 prefix, or doesn't select nodes, such as `count(//li)`, fails with `InvalidInput` when used, without waiting.
 
 ## Matching text

@@ -624,7 +624,8 @@ page.getByRole("row").filter({ has: Locator.relative.getByRole("button", { name:
 // Locator.xpath: an XPath expression for locator(selector: string | XPath); a string is always CSS
 declare const xpath: (expression: string) => XPath
 page.locator(Locator.xpath("//li[normalize-space()='Two'] | //li[@id='three']"))   // from the document
-page.locator("ul").locator(Locator.xpath("//li"))     // chained: "/…" reads as "./…", inside each match
+page.locator("ul").locator(Locator.xpath("//li"))     // chained: a leading "/" reads as "./", inside each match
+page.locator("ul").locator(Locator.xpath(".//a | .//b"))   // only the start is rewritten: "//a | //b" would search the document for b
 item.locator(Locator.xpath(".."))                     // other axes reach where XPath says
 row.filter({ has: Locator.relative.locator(Locator.xpath("./td[2][.='Paid']")) })
 ```
@@ -632,10 +633,13 @@ row.filter({ has: Locator.relative.locator(Locator.xpath("./td[2][.='Paid']")) }
 An XPath locator runs `document.evaluate` as an ordered node snapshot and keeps only its element nodes, in
 document order, so text and attribute nodes are skipped and a union matches both sides. From a page, or after
 `frame()`, the context node is the document; chained, it is each match so far, and an expression that starts with
-`/` is evaluated from it (`//li` as `.//li`). XPath doesn't enter shadow roots, and there is no namespace resolver:
-unprefixed names match HTML elements and a prefix is invalid. A malformed expression, a prefix, or a result that
-isn't a node set (`count(//li)`) fails with `InvalidInput` (`expected: "an XPath expression"`) when the locator
-is used, without waiting, even under a scope that matches nothing. It is a query step of the engine already in
+`/` is evaluated from it (`//li` as `.//li`). Only the start is rewritten, as Playwright does: in `//a | //b` the
+second branch searches the whole document, so a scoped union is written `.//a | .//b`, and a bare `/` is the root
+of the element's tree. XPath doesn't cross into a shadow root, though chained from an element inside one it
+searches that shadow tree. There is no namespace resolver: unprefixed names match HTML elements and a prefix is
+invalid. A malformed expression, a prefix, or a result that isn't a node set (`count(//li)`) fails with
+`InvalidInput` (`expected: "an XPath expression"`) when the locator is used, without waiting, even under a scope
+that matches nothing: each resolve checks the expression as written from a detached element. It is a query step of the engine already in
 each page, so a page that never uses one does no XPath work. Errors and traces describe it as
 `locator(Locator.xpath("…"))`.
 
