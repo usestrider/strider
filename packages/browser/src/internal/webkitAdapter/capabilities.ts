@@ -43,7 +43,16 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
       ]),
       entry("acceptInsecureCerts", "unsupported", ["an attached process cannot be reconfigured"]),
       entry("userContexts.proxy", "unsupported", ["an attached process cannot be reconfigured"]),
+      entry("clientCertificates", "unsupported", ["stock WebKit takes a proxy only at launch"]),
       entry("userContexts.proxy.credentials", "unsupported", ["stock WebKit does not support proxy credentials"]),
+      entry("userContexts.proxy.socks4", "unsupported", ["an attached process cannot be reconfigured"]),
+      entry("userContexts.proxy.https", "unsupported", ["the TLS connection to the proxy can't be verified"]),
+      entry("userContexts.proxy.socksCredentials", "unsupported", [
+        "proxy credentials would enter the process environment"
+      ]),
+      entry("userContexts.proxy.bypassSuffix", "unsupported", [
+        "the proxy resolver matches a domain with its subdomains, never its subdomains alone"
+      ]),
       entry("boundingBox.frameTransforms", "supported"),
       entry("hitTest.shadowHostBoxes", "supported"),
       entry("isolatedWorlds", "unsupported", [
@@ -80,9 +89,12 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
       entry("interception.redirects", "partial", ["only a redirect's first hop pauses"]),
       entry("bodies", "supported"),
       entry("console", "supported", [
-        "a message with only primitive arguments is attributed to the main frame",
-        "the browser's \"Fetch API cannot load … due to access control checks\" arrives as an uncaught exception: " +
-        "WebKit sends it on its `javascript` channel at level `error`, which Strider reads as an uncaught exception"
+        "a message with only primitive arguments is attributed to the main frame"
+      ]),
+      entry("console.source", "partial", [
+        "the browser's \"Fetch API cannot load … due to access control checks\" arrives as an uncaught exception, " +
+        "with no source: WebKit sends it on its `javascript` channel at level `error`, which Strider reads as an " +
+        "uncaught exception"
       ]),
       entry("prompts", "unsupported", [
         "stock WebKit's inspector has no Dialog domain: a dialog blocks the page unreported"
@@ -253,8 +265,9 @@ export const launchedCapabilities = (info: Browser.Info, video = false) => {
     acceptInsecureCerts: ["supported", ["native capability in the context-owned process"]],
     userContexts: ["supported", ["each context is a browser process of its own"]],
     "userContexts.proxy": ["supported", [
-      "isolated process environment; HTTP proxy endpoints only; loopback stays direct"
+      "isolated process environment; http, socks5 and socks4 endpoints; loopback stays direct"
     ]],
+    "userContexts.proxy.socks4": ["supported", ["names are resolved at the proxy (SOCKS4a)"]],
     "pauseOnStart.popups": ["unsupported", [
       "a page a page opens is found when the browser lists it, and isn't paused"
     ]],

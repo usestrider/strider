@@ -80,9 +80,16 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       ]),
       entry("userContexts", "supported"),
       entry("acceptInsecureCerts", "supported", ["native browser.createUserContext setting"]),
-      entry("userContexts.proxy", "supported", [
-        "HTTP proxy endpoints for HTTP and HTTPS destinations; loopback stays direct"
+      entry("clientCertificates", ownership === "launched" ? "partial" : "unsupported", [
+        "a loopback proxy per context, which forwards plain HTTP unchanged; needs a launched Firefox; not with proxy"
       ]),
+      entry("userContexts.proxy", "supported", [
+        "http, socks5 and socks4 endpoints for HTTP, HTTPS and WebSocket destinations; .domain bypass matches subdomains only; loopback stays direct"
+      ]),
+      entry("userContexts.proxy.socks4", "supported", ["names are resolved at the proxy (SOCKS4a)"]),
+      entry("userContexts.proxy.https", "unsupported", ["BiDi proxy settings have no TLS connection to the proxy"]),
+      entry("userContexts.proxy.socksCredentials", "unsupported", ["the browser offers no SOCKS authentication"]),
+      entry("userContexts.proxy.bypassSuffix", "supported"),
       entry("userContexts.proxy.credentials", ownership === "launched" ? "partial" : "unsupported", [
         "requires a freshly launched browser; one credential pair per proxy endpoint for the connection lifetime"
       ]),
@@ -107,9 +114,11 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       entry("network.challenges", "supported"),
       entry("bodies", "supported", ["only with a body collection declared before the request"]),
       entry("console", "partial", [
-        "a dedicated worker's messages are attributed to its page, and shared and service workers' aren't reported",
+        "a dedicated worker's messages are attributed to its page, and shared and service workers' aren't reported"
+      ]),
+      entry("console.source", "unsupported", [
         "the browser's own messages, such as a CSP violation or a CORS failure, arrive as uncaught exceptions, as " +
-        "Firefox sends them as script errors"
+        "Firefox sends them as script errors, so every console message is the page's"
       ]),
       entry("prompts", "supported"),
       entry("prompts.kind", "supported"),
@@ -424,7 +433,7 @@ export const connect: (
       evaluate: (realm, call) => Evaluation.evaluate(state, realm, call),
       releaseHandles: (list) => Evaluation.releaseHandles(state, list),
       textInsertion: "beforeInputAndEditingCommand",
-      dispatchInput: (page, events, frame) => Input.dispatchInput(state, page, events, frame),
+      dispatchInput: (page, events, frame, lands) => Input.dispatchInput(state, page, events, frame, lands),
       contentFrame: (node) => Input.contentFrame(state, node),
       releaseNodes: () => Effect.void,
       geometry: (node, kind) => Geometry.read(state, node, kind),

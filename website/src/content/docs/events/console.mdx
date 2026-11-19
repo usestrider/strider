@@ -1,0 +1,32 @@
+---
+title: Console messages
+description: What the page and the browser write to the console, and which of them wrote it.
+order: 2.5
+---
+
+A page's console messages are events, with the
+[`next`, `stream`, and `history`](/docs/events/events#next-stream-and-history) every event module has, filtered by
+`level` and `text`. Each one's `source` says who wrote it: `Page` for the page's own `console` calls, in the page or its
+workers, or `Browser` for what the browser writes there itself, with a `category` such as `security` for a Content
+Security Policy violation or `network` for a resource that failed to load. A test can check that a page broke no
+policy without matching on the text:
+
+```ts
+import { ConsoleMessage, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const securityMessages = Effect.fn("securityMessages")(
+  function*(page: Page.ObservedPage) {
+    const messages = yield* ConsoleMessage.history(page)
+    return messages.entries.filter((message) =>
+      message.source._tag === "Browser" && message.source.category === "security"
+    )
+  }
+)
+```
+
+The categories are one set for every browser, listed in
+[`ConsoleMessage.Category`](/docs/api/browser/ConsoleMessage#Category); what a browser sends that fits none is
+`other`. Firefox sends the browser's own messages as script errors, so they arrive as
+[uncaught exceptions](/docs/api/browser/UncaughtException) and every console message there is `Page`. WebKit
+does the same with "Fetch API cannot load … due to access control checks".

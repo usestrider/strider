@@ -58,6 +58,19 @@ const routes: Record<string, Route> = {
     })
     response.end(new URL(request.url ?? "/", "http://site").searchParams.get("html") ?? "")
   },
+  // Any page, as `/fixture`, under a policy that only reports scripts that aren't the site's own
+  "/csp-report-only": (request, response) => {
+    response.writeHead(200, {
+      "content-type": "text/html; charset=utf-8",
+      "content-security-policy-report-only": "script-src 'self'"
+    })
+    response.end(new URL(request.url ?? "/", "http://site").searchParams.get("html") ?? "")
+  },
+  // Any script: its source is the `js` parameter
+  "/script": (request, response) => {
+    response.writeHead(200, { "content-type": "text/javascript; charset=utf-8" })
+    response.end(new URL(request.url ?? "/", "http://site").searchParams.get("js") ?? "")
+  },
   // An error page: a commit with a status of 404
   "/missing": (_request, response) => html(response, `<title>missing</title><p>No such page</p>`, 404),
   "/204": (_request, response) => {
@@ -280,8 +293,10 @@ self.addEventListener("fetch", (event) => {
     )
 }
 
-// A WebSocket that echoes text frames, enough for one test.
+// A WebSocket that echoes text frames, enough for one test. A peer that ends its side without a close frame, as when
+// a proxy's tunnel is cut, ends the socket too: http.Server's sockets are half-open, so it would stay open otherwise.
 const upgrade = (request: http.IncomingMessage, socket: net.Socket) => {
+  socket.on("end", () => socket.end())
   const key = request.headers["sec-websocket-key"]
   const accept = createHash("sha1").update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest("base64")
   socket.write(
@@ -312,7 +327,7 @@ const upgrade = (request: http.IncomingMessage, socket: net.Socket) => {
 
 /** Serves the site for the scope. */
 export const site: Effect.Effect<Site, never, Scope.Scope> = Effect.acquireRelease(
-  Effect.callback<{ server: http.Server; site: Site }>((resume) => {
+  Effect.callback<{ server: http.Server; upgraded: Set<net.Socket>; site: Site }>((resume) => {
     const served: Array<Served> = []
     const waiting = new Set<{ readonly path: string; readonly resume: () => void }>()
     const requested = (path: string) =>
@@ -337,15 +352,22 @@ export const site: Effect.Effect<Site, never, Scope.Scope> = Effect.acquireRelea
       if (route !== undefined) return route(request, response, siteRef)
       html(response, `<title>${url.pathname}</title><p>${url.pathname}</p>`)
     })
-    server.on("upgrade", upgrade)
+    // closeAllConnections() doesn't reach upgraded sockets, so the release destroys them itself
+    const upgraded = new Set<net.Socket>()
+    server.on("upgrade", (request: http.IncomingMessage, socket: net.Socket) => {
+      upgraded.add(socket)
+      socket.on("close", () => upgraded.delete(socket))
+      upgrade(request, socket)
+    })
     server.listen(0, "127.0.0.1", () => {
       const { port } = server.address() as net.AddressInfo
       siteRef = { origin: `http://127.0.0.1:${port}`, crossSite: `http://localhost:${port}`, served, requested }
-      resume(Effect.succeed({ server, site: siteRef }))
+      resume(Effect.succeed({ server, upgraded, site: siteRef }))
     })
   }),
-  ({ server }) =>
+  ({ server, upgraded }) =>
     Effect.callback<void>((resume) => {
+      for (const socket of upgraded) socket.destroy()
       server.closeAllConnections()
       server.close(() => resume(Effect.void))
     })
@@ -493,3 +515,33 @@ export const json = (value: Adapter.RemoteValue): unknown => {
       return value.type
   }
 }
+
+/** A self-signed key pair for `127.0.0.1`, which no browser trusts. */
+export const selfSigned = Effect.acquireRelease(
+  Effect.sync(() => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-proxy-tls-"))
+    const key = path.join(directory, "key.pem")
+    const cert = path.join(directory, "cert.pem")
+    execFileSync(openssl, [
+      "req",
+      "-x509",
+      "-newkey",
+      "ec",
+      "-pkeyopt",
+      "ec_paramgen_curve:prime256v1",
+      "-nodes",
+      "-keyout",
+      key,
+      "-out",
+      cert,
+      "-days",
+      "1",
+      "-subj",
+      "/CN=127.0.0.1",
+      "-addext",
+      "subjectAltName=IP:127.0.0.1"
+    ], { stdio: "ignore" })
+    return { directory, key: fs.readFileSync(key), cert: fs.readFileSync(cert) }
+  }),
+  ({ directory }) => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true }))
+)

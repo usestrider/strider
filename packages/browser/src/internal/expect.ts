@@ -544,13 +544,24 @@ export const toHaveCount = (locator: Locator.ReadonlyLocator, count: number) =>
     `to match ${count} element${count === 1 ? "" : "s"}`
   )
 
-export const toMatchAria = (locator: Locator.ReadonlyLocator, pattern: AriaPattern.AriaPattern) => {
+export const toMatchAria = (
+  subject: Locator.ReadonlyLocator | Page.ReadonlyPage,
+  pattern: AriaPattern.AriaPattern,
+  options?: { readonly not?: boolean | undefined } | undefined
+) => {
   const data = AriaPatterns.pattern(pattern)
-  return expectLocator(
-    locator,
-    { _tag: "Aria", pattern: data },
+  const not = options?.not ?? false
+  const condition = `${not ? "not " : ""}to match ${AriaPatterns.describe(data)}`
+  if (Locator.isLocator(subject)) {
+    return expectLocator(subject, { _tag: "Aria", pattern: data, document: false, not }, "toMatchAria", condition)
+  }
+  // A page's pattern is matched from its document node, in the main frame, as its title is read.
+  const { entry, grant, runtime } = Handles.page(subject)
+  return expectIn(
+    { runtime, page: entry, grant, steps: [], description: `page ${subject.id}` },
+    { _tag: "Aria", pattern: data, document: true, not },
     "toMatchAria",
-    `to match ${AriaPatterns.describe(data)}`
+    condition
   )
 }
 

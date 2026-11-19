@@ -10,42 +10,276 @@ import * as Script from "../../bidi-protocol/Script.ts"
 import type * as L1Target from "../../Target.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as Operation from "../operation.ts"
 import { buttons, keyValue } from "./mapping.ts"
-import { documentOf, navigableById, navigableOf, type State } from "./state.ts"
+import { documentOf, navigableById, type NavigableEntry, navigableOf, type State } from "./state.ts"
+
+/** A context pointer input goes on, the origin of its viewport in the page's coordinates, and its size. */
+export interface PointerTarget {
+  readonly navigable: NavigableEntry
+  readonly x: number
+  readonly y: number
+  readonly width: number
+  readonly height: number
+}
+
+/**
+ * The context pointer input that names no frame goes on at a point in the page's coordinates, and its origin.
+ * Firefox delivers page coordinates into a frame of the page's origin but not into one of another, so in a context
+ * holding a frame whose origin isn't its parent's (`crossesOrigin`) the boxes of its frame elements are read
+ * (`frameBoxes`), once in an operation, and a point outside all of them stays in that context. A point inside one is
+ * hit-tested in a sandbox, through open shadow roots, so an element drawn over the frame keeps the point, and where
+ * it lands on a frame's element, input goes to that frame's context, from the element's content box. A context
+ * holding none costs no call, a point outside its frames one call in an operation, and a point inside one more for
+ * each level; a point that hits no frame element ends the search where it is.
+ */
+const framelessContext = Effect.fnUntraced(function*(state: State, page: NavigableEntry, x: number, y: number) {
+  // The frame tree read here holds every event received before the reply the caller acted on: the protocol client
+  // hands over a reply only once those are folded, a frame's commit included
+  let sent: PointerTarget = { navigable: page, x: 0, y: 0, width: Infinity, height: Infinity }
+  while (crossesOrigin(sent.navigable)) {
+    const boxes = yield* frameBoxes(state, page, sent.navigable)
+    const within = (box: Box) =>
+      x - sent.x >= box[0] && x - sent.x <= box[2] && y - sent.y >= box[1] && y - sent.y <= box[3]
+    if (boxes !== undefined && !boxes.some(within)) return sent
+    const reply = yield* Kit.protocol(state.send(Script.callFunction({
+      functionDeclaration: hitFrame,
+      target: { context: sent.navigable.bidi, sandbox: "__strider_utility__" },
+      arguments: [{ type: "number", value: x - sent.x }, { type: "number", value: y - sent.y }],
+      awaitPromise: false,
+      resultOwnership: "none"
+    })))
+    const value = reply.type === "success" && reply.result.type === "array" ? reply.result.value : undefined
+    const [window, ...box] = value ?? []
+    const numbers = box.map((each) => each.type === "number" && typeof each.value === "number" ? each.value : NaN)
+    const child = window?.type === "window" ? navigableOf(state, window.value.context) : undefined
+    if (child === undefined || child.page !== page || numbers.length !== 4 || numbers.some(Number.isNaN)) return sent
+    sent = {
+      navigable: child,
+      x: sent.x + numbers[0]!,
+      y: sent.y + numbers[1]!,
+      width: numbers[2]!,
+      height: numbers[3]!
+    }
+  }
+  return sent
+})
+
+/** A frame element's bounds in its document's viewport: left, top, right and bottom. */
+type Box = readonly [number, number, number, number]
+
+/**
+ * The boxes of the frame elements each context's document holds, read once in an operation, by page and by
+ * context. A context whose boxes couldn't be read holds `undefined`, and its points are hit-tested. The boxes are
+ * those of the operation's start: a frame that moves, grows or appears while an operation's events are sent, as
+ * one its own input scrolls or a page's handler inserts, is where it was, so a point that has come into the frame
+ * since goes to the context above it, which Firefox doesn't deliver into a frame of another origin.
+ */
+const operationBoxes = new WeakMap<
+  Operation.Record,
+  WeakMap<NavigableEntry, Map<NavigableEntry, ReadonlyArray<Box> | undefined>>
+>()
+
+/**
+ * The number of frame elements in a document that hold a window, then the bounds of each frame element, open
+ * shadow roots included. A nested frame is drawn within its element, so a point outside every box is outside every
+ * frame the document holds, at any depth.
+ */
+const readFrameBoxes = `() => {
+  const boxes = []
+  let windows = 0
+  const walk = (root) => {
+    for (const element of root.querySelectorAll("*")) {
+      if (element.shadowRoot !== null) walk(element.shadowRoot)
+      const name = element.localName
+      if (name !== "iframe" && name !== "frame" && name !== "object" && name !== "embed") continue
+      if (element.contentWindow != null) windows++
+      const rect = element.getBoundingClientRect()
+      boxes.push(rect.left, rect.top, rect.right, rect.bottom)
+    }
+  }
+  walk(document)
+  return [windows, ...boxes]
+}`
+
+/**
+ * The boxes of the frame elements in a context's document, in its viewport, read in Strider's own sandbox and kept
+ * for the operation (`operationBoxes`). Where they can't be trusted, it returns `undefined`: a failed read, or fewer
+ * frame elements with a window than the context has child contexts, as when a closed shadow root hides one from the
+ * page's scripts.
+ */
+const frameBoxes = Effect.fnUntraced(function*(state: State, page: NavigableEntry, navigable: NavigableEntry) {
+  const record = Option.getOrUndefined(yield* Operation.current)
+  let pages = record === undefined ? undefined : operationBoxes.get(record)
+  if (record !== undefined && pages === undefined) operationBoxes.set(record, pages = new WeakMap())
+  let contexts = pages?.get(page)
+  if (pages !== undefined && contexts === undefined) pages.set(page, contexts = new Map())
+  if (contexts?.has(navigable) === true) return contexts.get(navigable)
+  const boxes = yield* Kit.protocol(state.send(Script.callFunction({
+    functionDeclaration: readFrameBoxes,
+    target: { context: navigable.bidi, sandbox: "__strider_utility__" },
+    arguments: [],
+    awaitPromise: false,
+    resultOwnership: "none"
+  }))).pipe(
+    Effect.map((reply): ReadonlyArray<Box> | undefined => {
+      const value = reply.type === "success" && reply.result.type === "array" ? reply.result.value : undefined
+      const numbers = (value ?? []).map((each) =>
+        each.type === "number" && typeof each.value === "number" ? each.value : NaN
+      )
+      const [windows, ...flat] = numbers
+      if (
+        windows === undefined || numbers.some(Number.isNaN) || flat.length % 4 !== 0 ||
+        windows < navigable.children.size
+      ) return undefined
+      const boxes: Array<Box> = []
+      for (let i = 0; i < flat.length; i += 4) boxes.push([flat[i]!, flat[i + 1]!, flat[i + 2]!, flat[i + 3]!])
+      return boxes
+    }),
+    Effect.catch(() => Effect.succeed(undefined))
+  )
+  contexts?.set(navigable, boxes)
+  return boxes
+})
+
+/** The origin of a context's document; one at `about:` has its parent's, as `about:blank` and `srcdoc` do. */
+const originOf = (navigable: NavigableEntry): string | undefined => {
+  const url = navigable.document?.url
+  if (url === undefined || url.startsWith("about:")) {
+    return navigable.parent === undefined ? undefined : originOf(navigable.parent)
+  }
+  return URL.parse(url)?.origin
+}
+
+/**
+ * Whether a context holds, at any depth, a frame whose origin isn't its parent's. Origin is narrower than site, so
+ * this also holds for a frame of the same site and another origin, which costs a call it didn't need.
+ */
+const crossesOrigin = (navigable: NavigableEntry): boolean =>
+  [...navigable.children].some((child) => originOf(child) !== originOf(navigable) || crossesOrigin(child))
+
+/**
+ * The window of the frame element at a point, through open shadow roots, and its content box: left, top, width and
+ * height.
+ */
+const hitFrame = `(x, y) => {
+  let element = document.elementFromPoint(x, y)
+  while (element !== null && element.shadowRoot !== null) {
+    const inner = element.shadowRoot.elementFromPoint(x, y)
+    if (inner === null || inner === element) break
+    element = inner
+  }
+  if (element === null || (element.localName !== "iframe" && element.localName !== "frame") || element.contentWindow === null) return null
+  const rect = element.getBoundingClientRect()
+  const style = getComputedStyle(element)
+  const left = rect.left + element.clientLeft + parseFloat(style.paddingLeft)
+  const top = rect.top + element.clientTop + parseFloat(style.paddingTop)
+  const width = element.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+  const height = element.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom)
+  return [element.contentWindow, left, top, width, height]
+}`
+
+/**
+ * Where a page's held input went, while the context it went to is still there. A context destroyed while it holds
+ * the pointer ends the capture, and the input after goes by its point again.
+ */
+const captured = (
+  state: State,
+  capture: Map<L1Target.NavigableId, PointerTarget>,
+  page: L1Target.NavigableId
+): PointerTarget | undefined => {
+  const held = capture.get(page)
+  if (held === undefined) return undefined
+  if (!held.navigable.removed && state.navigablesById.get(held.navigable.id) === held.navigable) return held
+  capture.delete(page)
+  return undefined
+}
 
 /** A source of actions as it is built, its actions added in order. */
 type Building =
   | {
+    readonly context: BrowsingContext
     readonly type: "pointer"
     readonly id: "strider-mouse" | "strider-touch"
     readonly parameters: Input.PointerParameters
     readonly actions: Array<Input.PointerSourceAction>
   }
-  | { readonly type: "wheel"; readonly id: "strider-wheel"; readonly actions: Array<Input.WheelSourceAction> }
-  | { readonly type: "key"; readonly id: "strider-keyboard"; readonly actions: Array<Input.KeySourceAction> }
+  | {
+    readonly context: BrowsingContext
+    readonly type: "wheel"
+    readonly id: "strider-wheel"
+    readonly actions: Array<Input.WheelSourceAction>
+  }
+  | {
+    readonly context: BrowsingContext
+    readonly type: "key"
+    readonly id: "strider-keyboard"
+    readonly actions: Array<Input.KeySourceAction>
+  }
+
+type BrowsingContext = NavigableEntry["bidi"]
 
 export const dispatchInput = Effect.fnUntraced(
   function*(
     state: State,
     id: L1Target.NavigableId,
     events: ReadonlyArray<Adapter.InputEvent>,
-    frame?: { readonly frame: L1Target.NavigableId; readonly origin: { readonly x: number; readonly y: number } }
+    frame?: { readonly frame: L1Target.NavigableId; readonly origin: { readonly x: number; readonly y: number } },
+    lands?: ReadonlyArray<L1Target.NavigableId>
   ) {
+    // Input that names neither a frame nor where its points land, as the page's devices send it; a locator names
+    // both, having checked what its points hit
+    const frameless = frame === undefined && lands === undefined
     // Whatever fails before the actions are written sent nothing
     const navigable = yield* navigableById(state, id).pipe(Effect.mapError(Adapter.unsent))
-    // Firefox doesn't deliver page coordinates into a cross-site frame, so input aimed inside a frame goes to
+    // Firefox doesn't deliver page coordinates into a frame of another origin, so input aimed inside a frame goes to
     // the frame's own context, in its own coordinates
     const target = frame === undefined ? undefined : state.navigablesById.get(frame.frame)
-    const context = (target ?? navigable.page).bidi
-    const dx = target === undefined || frame === undefined ? 0 : frame.origin.x
-    const dy = target === undefined || frame === undefined ? 0 : frame.origin.y
-    // Consecutive events of one kind go in one source of actions, in order
+    const named: PointerTarget = {
+      navigable: target ?? navigable.page,
+      x: target === undefined || frame === undefined ? 0 : frame.origin.x,
+      y: target === undefined || frame === undefined ? 0 : frame.origin.y,
+      width: Infinity,
+      height: Infinity
+    }
+    let sent = named
+    let aimed: { readonly x: number; readonly y: number; readonly sent: PointerTarget } | undefined
+    // Pointer input that names no frame goes to the context under each event's point, once for consecutive events
+    // at one point; from a press until every button is up, or from a touch's start until its end, it goes where the
+    // press or the start went
+    const aim = Effect.fnUntraced(function*(
+      x: number,
+      y: number,
+      capture?: Map<L1Target.NavigableId, PointerTarget>
+    ) {
+      if (!frameless) return named
+      const held = capture === undefined ? undefined : captured(state, capture, navigable.page.id)
+      if (held !== undefined) return held
+      if (aimed === undefined || aimed.x !== x || aimed.y !== y) {
+        // Every action is written after the loop, so a lookup fails with nothing sent
+        aimed = {
+          x,
+          y,
+          sent: yield* framelessContext(state, navigable.page, x, y).pipe(Effect.mapError(Adapter.unsent))
+        }
+      }
+      return aimed.sent
+    })
+    // Firefox refuses a point outside the viewport of the context it is sent to. A pointer held in a frame and
+    // moved outside it stays at its last point in the frame, and its release is sent there, so the frame that got
+    // the press gets the release
+    const inside = (x: number, y: number) =>
+      x - sent.x >= 0 && y - sent.y >= 0 && x - sent.x < sent.width && y - sent.y < sent.height
+    const dx = () => sent.x
+    const dy = () => sent.y
+    // Consecutive events of one kind to one context go in one source of actions, in order
     const sources: Array<Building> = []
     const pointer = (id: "strider-mouse" | "strider-touch") => {
       const last = sources.at(-1)
-      if (last?.type === "pointer" && last.id === id) return last.actions
+      if (last?.type === "pointer" && last.id === id && last.context === sent.navigable.bidi) return last.actions
       const actions: Array<Input.PointerSourceAction> = []
       sources.push({
+        context: sent.navigable.bidi,
         type: "pointer",
         id,
         parameters: { pointerType: id === "strider-mouse" ? "mouse" : "touch" },
@@ -55,32 +289,39 @@ export const dispatchInput = Effect.fnUntraced(
     }
     const wheel = () => {
       const last = sources.at(-1)
-      if (last?.type === "wheel") return last.actions
+      if (last?.type === "wheel" && last.context === sent.navigable.bidi) return last.actions
       const actions: Array<Input.WheelSourceAction> = []
-      sources.push({ type: "wheel", id: "strider-wheel", actions })
+      sources.push({ context: sent.navigable.bidi, type: "wheel", id: "strider-wheel", actions })
       return actions
     }
     const key = () => {
       const last = sources.at(-1)
       if (last?.type === "key") return last.actions
       const actions: Array<Input.KeySourceAction> = []
-      sources.push({ type: "key", id: "strider-keyboard", actions })
+      sources.push({ context: named.navigable.bidi, type: "key", id: "strider-keyboard", actions })
       return actions
     }
     for (const event of events) {
       switch (event._tag) {
         case "Mouse": {
+          sent = yield* aim(event.x, event.y, state.mouseCapture)
+          if (frameless) {
+            if (event.buttons === 0) state.mouseCapture.delete(navigable.page.id)
+            else state.mouseCapture.set(navigable.page.id, sent)
+          }
           const actions = pointer("strider-mouse")
           const button = buttons[event.button] ?? 0
-          actions.push({ type: "pointerMove", x: event.x - dx, y: event.y - dy })
+          if (inside(event.x, event.y)) actions.push({ type: "pointerMove", x: event.x - dx(), y: event.y - dy() })
           if (event.type !== "move") actions.push({ type: event.type === "down" ? "pointerDown" : "pointerUp", button })
           break
         }
         case "Wheel":
+          // A wheel goes to what is under its point, a button held or not
+          sent = yield* aim(event.x, event.y)
           wheel().push({
             type: "scroll",
-            x: Math.round(event.x - dx),
-            y: Math.round(event.y - dy),
+            x: Math.round(event.x - dx()),
+            y: Math.round(event.y - dy()),
             deltaX: Math.round(event.deltaX),
             deltaY: Math.round(event.deltaY)
           })
@@ -98,10 +339,18 @@ export const dispatchInput = Effect.fnUntraced(
           // WebDriver BiDi has no command to insert text: L1 inserts it through the engine (`textInsertion`)
           return yield* Effect.die(new Error("WebDriver BiDi inserts text through the engine, never as input"))
         case "Touch": {
+          const first = event.points[0]
+          sent = first === undefined
+            ? captured(state, state.touchCapture, navigable.page.id) ?? named
+            : yield* aim(first.x, first.y, state.touchCapture)
+          if (frameless) {
+            if (event.type === "end" || event.type === "cancel") state.touchCapture.delete(navigable.page.id)
+            else state.touchCapture.set(navigable.page.id, sent)
+          }
           const actions = pointer("strider-touch")
           for (const point of event.points) {
-            if (event.type === "move" || event.type === "start") {
-              actions.push({ type: "pointerMove", x: point.x - dx, y: point.y - dy })
+            if ((event.type === "move" || event.type === "start") && inside(point.x, point.y)) {
+              actions.push({ type: "pointerMove", x: point.x - dx(), y: point.y - dy() })
             }
             if (event.type === "start") actions.push({ type: "pointerDown", button: 0 })
             if (event.type === "end" || event.type === "cancel") actions.push({ type: "pointerUp", button: 0 })
@@ -111,7 +360,9 @@ export const dispatchInput = Effect.fnUntraced(
       }
     }
     for (const source of sources) {
-      yield* Kit.protocol(state.send(Input.performActions({ context, actions: [source] })))
+      const { context, ...action } = source
+      if (action.actions.length === 0) continue
+      yield* Kit.protocol(state.send(Input.performActions({ context, actions: [action] })))
     }
   }
 )

@@ -121,10 +121,44 @@ const localHttps = Effect.fn("localHttps")(function*() {
 }, Effect.scoped)
 ```
 
-Certificate checks remain enabled by default and in sibling contexts. Firefox and launched stock WebKit support
-this option; Chromium refuses `true` with `Unsupported` because its override affects the whole browser. Attached
-stock WebKit cannot create contexts. `Browser.newPage` accepts the same option. It is fixed at creation:
-`UserContext.reclaim` refuses either explicit value and preserves the existing setting when omitted.
+Certificate checks remain enabled by default and in sibling contexts. Chromium, Firefox, and launched stock WebKit
+support this option; on Chromium every page of the context ignores certificate errors, and a reclaimable context
+refuses `true` with `Unsupported`. Attached stock WebKit cannot create contexts. `Browser.newPage` accepts the same
+option. It is fixed at creation: `UserContext.reclaim` refuses either explicit value and preserves the existing
+setting when omitted.
+
+A site that asks for a TLS client certificate gets one from `clientCertificates`: each entry names an HTTPS origin
+and gives a PEM certificate with its key, or a PFX archive with its passphrase. The key, archive, and passphrase are
+`Redacted`:
+
+```ts
+import { Browser } from "@usestrider/browser"
+import { Effect, FileSystem, Redacted } from "effect"
+
+const internalSite = Effect.fn("internalSite")(function*() {
+  const fs = yield* FileSystem.FileSystem
+  const context = yield* Browser.newContext({
+    clientCertificates: [{
+      origin: "https://internal.example.com",
+      pfx: Redacted.make(yield* fs.readFile("client.pfx")),
+      passphrase: Redacted.make("archive passphrase")
+    }]
+  })
+  const page = yield* context.newPage
+  yield* page.goto("https://internal.example.com")
+}, Effect.scoped)
+```
+
+The origin matches scheme, hostname, and effective port, and a certificate that can't be loaded fails with
+`InvalidInput` when the context is created. The context's HTTPS traffic goes through a proxy Strider runs on
+127.0.0.1 for that context alone, which presents the certificate and checks the site's own certificate against
+Node's trusted certificates, unless `acceptInsecureCerts` is set. Chromium and a Firefox Strider launched support
+it; stock WebKit, a Firefox Strider connected to, a reclaimable context, and a context with `proxy` refuse it with
+`Unsupported`.
+
+Pages in such a context connect to sites over HTTP/1.1, since the proxy doesn't offer HTTP/2. On Chromium, the
+context's service workers don't accept the proxy's certificate, so their own HTTPS requests may fail; the same
+holds for a service worker's requests to an untrusted site under `acceptInsecureCerts`.
 
 ## Settings for a while
 

@@ -4,8 +4,8 @@ description: Giving each context its own proxy.
 order: 6
 ---
 
-A context's `proxy` option routes its HTTP and HTTPS requests through an HTTP proxy you choose, in place of the
-browser's launch or system settings.
+A context's `proxy` option routes its HTTP, HTTPS, and WebSocket requests through an HTTP or SOCKS proxy you
+choose, in place of the browser's launch or system settings.
 
 ## Routing a context
 
@@ -25,7 +25,28 @@ const visit = Effect.fn("visit")(function*() {
 
 The endpoint may also be `proxy.example.com:8080`; an omitted port is 80. It takes no username, password, path,
 query, or fragment. HTTP destinations use the proxy directly; HTTPS destinations use CONNECT and retain normal
-certificate verification. HTTPS proxy endpoints and SOCKS fail with `Unsupported`.
+certificate verification.
+
+## SOCKS and TLS proxies
+
+A `socks5://` endpoint carries every destination through a SOCKS proxy, which resolves the destination's name:
+
+```ts
+import { Browser } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const viaSocks = Effect.fn("viaSocks")(function*() {
+  const page = yield* Browser.newPage({
+    proxy: { server: "socks5://proxy.example.com:1080" }
+  })
+  yield* page.goto("https://shop.example.com")
+}, Effect.scoped)
+```
+
+An omitted SOCKS port is 1080. `socks4://` also resolves names at the proxy on Firefox and launched WebKit;
+Chromium refuses it, because its SOCKS4 resolves names itself. An `https://` endpoint, reached over TLS, works on
+Chromium only, with a certificate the browser trusts. A SOCKS endpoint takes no credentials. Each refusal fails
+with `Unsupported` naming its capability, which the browser's capability table also lists.
 
 Each context has its own proxy settings. Its pages and connections close with its scope. Chromium and Firefox
 apply settings per context; launched WebKit applies them to that context's browser process. An already-running
@@ -51,8 +72,9 @@ const staging = Effect.fn("staging")(function*() {
 }, Effect.scoped)
 ```
 
-Entries contain no URL scheme, port, wildcard, or CIDR range. Matching uses the browser's native host rules,
-which may also exclude subdomains. `localhost`, `127.0.0.1`, and `::1` always stay direct, so browser control
+Entries contain no URL scheme, port, wildcard, or CIDR range. A hostname matches that host, and
+`.example.com` matches the subdomains of `example.com` but not `example.com` itself. Launched WebKit refuses the
+leading-dot form, and its hostname entries also match their subdomains. `localhost`, `127.0.0.1`, and `::1` always stay direct, so browser control
 connections also avoid the proxy.
 
 ## Proxy credentials

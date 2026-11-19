@@ -62,6 +62,7 @@ test("independent public members and matrix rows validate and merge without gene
         "packages/tools/docs",
         "packages/tools/utils",
         "packages/browser/src",
+        "packages/vitest/src",
         "packages/browser/package.json",
         "docs/decisions.md",
         ".gitignore"

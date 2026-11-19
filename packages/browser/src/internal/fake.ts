@@ -122,6 +122,7 @@ export const capabilities: ReadonlyArray<Browser.CapabilityEntry> = [
   entry("network.challenges", "unsupported", ["the timeline's requests are never paused"]),
   entry("bodies", "supported", ["every body is empty"]),
   entry("console", "unsupported", ["the timeline has no console messages"]),
+  entry("console.source", "unsupported", ["the timeline has no console messages"]),
   entry("fileChooser", "unsupported", [noDom]),
   entry("downloads", "unsupported", ["the timeline has no downloads"]),
   entry("screenshot", "unsupported", ["nothing is painted"]),

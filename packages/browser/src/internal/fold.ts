@@ -60,7 +60,8 @@ const defaultSettings: Model.ContextSettings = {
   reclaimable: false,
   policy: Option.none(),
   eventLog: defaultEventLog,
-  keyboardLayout: "us"
+  keyboardLayout: "us",
+  testIdAttribute: "data-testid"
 }
 
 /** How a target's end ends its event streams: normally when it was closed, or with `TargetGone` otherwise. */

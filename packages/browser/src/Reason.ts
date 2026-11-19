@@ -377,3 +377,82 @@ export class LocatorHandlerFailed extends Schema.Error<LocatorHandlerFailed>(
     return `Locator handler for ${this.trigger} failed (${this.hint})`
   }
 }
+
+/**
+ * Reason for an element a caller added, such as a script tag, whose resource didn't load.
+ *
+ * **Details**
+ *
+ * The browser fired the element's `error` event: the URL was unreachable, answered with an error status, or
+ * wasn't a script it could run. It names no cause, since the page isn't told one.
+ *
+ * **Example** (Falling back when a library doesn't load)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const loadCharts = Effect.fn("loadCharts")(function*(page: Page.Page) {
+ *   yield* page.addScriptTag({ url: "https://cdn.example.com/charts.js" }).pipe(
+ *     Effect.catchReason(
+ *       "PageError",
+ *       "ResourceFailed",
+ *       () => page.addScriptTag({ url: "https://mirror.example.com/charts.js" })
+ *     )
+ *   )
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category reasons
+ * @since 0.1.0
+ */
+export class ResourceFailed extends Schema.Error<ResourceFailed>("@usestrider/browser/Reason/ResourceFailed")({
+  _tag: Schema.tag("ResourceFailed"),
+  url: Schema.String,
+  hint: Schema.String
+}) {
+  override get message(): string {
+    return `${this.url} didn't load (${this.hint})`
+  }
+}
+
+/**
+ * Reason for an element a caller added, such as a script tag, that the page's Content Security Policy refused.
+ *
+ * **Details**
+ *
+ * `directive` is the one the browser reports as refusing it, such as `script-src-elem`, and `blocked` is what it
+ * refused: the URL, or `inline`.
+ *
+ * **Example** (Logging the directive that refused a script)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const tryHelper = Effect.fn("tryHelper")(function*(page: Page.Page) {
+ *   yield* page.addScriptTag({ source: "window.helperReady = true" }).pipe(
+ *     Effect.catchReason(
+ *       "PageError",
+ *       "RefusedByPolicy",
+ *       (refused) => Effect.logWarning(`Refused under ${refused.directive}`)
+ *     )
+ *   )
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category reasons
+ * @since 0.1.0
+ */
+export class RefusedByPolicy extends Schema.Error<RefusedByPolicy>("@usestrider/browser/Reason/RefusedByPolicy")({
+  _tag: Schema.tag("RefusedByPolicy"),
+  directive: Schema.String,
+  blocked: Schema.String,
+  hint: Schema.String
+}) {
+  override get message(): string {
+    return `The page's Content Security Policy refused ${this.blocked} under ${this.directive} (${this.hint})`
+  }
+}

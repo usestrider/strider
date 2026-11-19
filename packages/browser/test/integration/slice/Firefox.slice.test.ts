@@ -10,6 +10,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import { assertPinned, firefox } from "../browsers.ts"
 import { attaching, firefoxAttachable } from "./attaching.ts"
+import { clientCertificates } from "./clientCertificates.ts"
 import { contents } from "./contents.ts"
 import { deadlines } from "./deadlines.ts"
 import { declarations } from "./declarations.ts"
@@ -21,6 +22,7 @@ import { recycling } from "./recycledBrowser.ts"
 import { requestBodies } from "./requestBodies.ts"
 import { requestSizes } from "./requestSizes.ts"
 import { requestTiming } from "./requestTiming.ts"
+import { screenshotBaselines } from "./screenshotBaselines.ts"
 import { slice } from "./slice.ts"
 import { stalledReadProbes } from "./stalledReadProbes.ts"
 import { storageReplacement } from "./storageReplacement.ts"
@@ -69,3 +71,5 @@ storageReplacement("Firefox", backend)
 requestSizes("Firefox", backend)
 
 stalledReadProbes("Firefox", backend)
+clientCertificates("Firefox", backend)
+screenshotBaselines("Firefox", backend)

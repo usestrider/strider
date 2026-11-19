@@ -267,6 +267,114 @@ export const engine = (backend: Backend) =>
     ).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor)))
     layer(fixture, { excludeTestServices: true })(
       (it) => {
+        it.effect("accepts an XPath document root result and skips the non-element node", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(backend, "<b>inside</b>")
+            assert.strictEqual(
+              count(
+                yield* send({
+                  op: "count",
+                  steps: [{ _tag: "XPath", expression: "/" }]
+                })
+              ),
+              0
+            )
+          }), timeout)
+
+        it.effect(
+          "reads only a chained XPath expression's start from its scope, so a union's later branch is absolute",
+          () =>
+            Effect.gen(function*() {
+              const { send } = yield* open(backend, "<div id=\"scope\"><a>inside</a></div><b>outside</b>")
+              for (const [expression, expected] of [["//a | //b", 2], [".//a | .//b", 1]] as const) {
+                assert.strictEqual(
+                  count(
+                    yield* send({
+                      op: "count",
+                      steps: [{ _tag: "Css", selector: "#scope" }, { _tag: "XPath", expression }]
+                    })
+                  ),
+                  expected,
+                  expression
+                )
+              }
+            }),
+          timeout
+        )
+
+        it.effect("rewrites only an XPath leading step, preserving root unions and parenthesized paths", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(backend, "<a>outside</a><div id=\"scope\"><a>inside</a></div>")
+            for (
+              const [expression, expected] of [
+                [" \t\n//a", 1],
+                ["/ a", 1],
+                ["(//a)[1]", 1],
+                ["(//a)[.='outside']", 1],
+                ["/ | //a", 2],
+                [" \t/ \n| //a", 2],
+                ["/ \t\n", 0]
+              ] as const
+            ) {
+              assert.strictEqual(
+                count(
+                  yield* send({
+                    op: "count",
+                    steps: [{ _tag: "Css", selector: "#scope" }, { _tag: "XPath", expression }]
+                  })
+                ),
+                expected,
+                expression
+              )
+            }
+          }), timeout)
+
+        it.effect("evaluates XPath within a shadow tree when CSS supplies its context element", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              "<div id=\"host\"></div>",
+              `() => {
+                document.getElementById("host").attachShadow({ mode: "open" }).innerHTML =
+                  '<section id="scope"><b>inside</b></section>'
+              }`
+            )
+            assert.strictEqual(
+              count(
+                yield* send({
+                  op: "count",
+                  steps: [{ _tag: "XPath", expression: "//b" }]
+                })
+              ),
+              0
+            )
+            assert.strictEqual(
+              count(
+                yield* send({
+                  op: "count",
+                  steps: [{ _tag: "Css", selector: "#scope" }, { _tag: "XPath", expression: "//b" }]
+                })
+              ),
+              1
+            )
+          }), timeout)
+
+        it.effect("keeps XPath snapshot evaluation independent of a replaced global after installation", () =>
+          Effect.gen(function*() {
+            const { send, call } = yield* open(backend, "<b>inside</b>")
+            const replaced = yield* call(`() => { globalThis.XPathResult = undefined }`, [])
+            assert.strictEqual(replaced._tag, "Value")
+            assert.strictEqual(
+              count(
+                yield* send({
+                  op: "count",
+                  steps: [{ _tag: "XPath", expression: "//b" }]
+                })
+              ),
+              1
+            )
+          }), timeout)
+
         it.effect("reuses same-frame stability inside a reachable scrolling layout", () =>
           Effect.gen(function*() {
             const { call } = yield* open(
@@ -315,7 +423,11 @@ export const engine = (backend: Backend) =>
                 cap: 200
               })
               assert.strictEqual(response._tag, "NotReady", JSON.stringify(response))
-              if (response._tag === "NotReady") assert(response.history.some((reason) => reason._tag === "Disabled"))
+              if (response._tag === "NotReady") {
+                assert(response.history.some((reason) =>
+                  reason._tag === "Disabled"
+                ))
+              }
             }), timeout)
         }
 
@@ -3182,7 +3294,9 @@ document.getElementById("list").attachShadow({ mode: "open" }).innerHTML = '<ul>
                 `<p data-testid="row  4">d</p><p data-testid=" row-5">e</p><p>none</p>`
             )
             const testId = (matcher: Engine.TextMatcher) =>
-              send({ op: "count", steps: [{ _tag: "TestId", matcher }] }).pipe(Effect.map(count))
+              send({ op: "count", steps: [{ _tag: "TestId", matcher, attribute: "data-testid" }] }).pipe(
+                Effect.map(count)
+              )
             const pattern = (source: string, flags = ""): Engine.TextMatcher => ({ _tag: "RegExp", source, flags })
             // A string is exact, case-sensitive and compared with the raw value.
             assert.strictEqual(yield* testId(text("row-1", true)), 1)
@@ -3225,7 +3339,10 @@ document.getElementById("outer").attachShadow({ mode: "open" }).innerHTML =
             assert.strictEqual(yield* inHost({ _tag: "Placeholder", matcher: text("who") }), 1)
             assert.strictEqual(yield* inHost({ _tag: "AltText", matcher: text("logo") }), 1)
             assert.strictEqual(yield* inHost({ _tag: "Title", matcher: text("tip") }), 1)
-            assert.strictEqual(yield* inHost({ _tag: "TestId", matcher: text("go", true) }), 1)
+            assert.strictEqual(
+              yield* inHost({ _tag: "TestId", matcher: text("go", true), attribute: "data-testid" }),
+              1
+            )
             const hasDeep: Engine.Step = {
               _tag: "Filter",
               hasText: null,

@@ -21,6 +21,7 @@ import * as Log from "../../cdp/Log.ts"
 import * as Network from "../../cdp/Network.ts"
 import * as Page from "../../cdp/Page.ts"
 import * as Runtime from "../../cdp/Runtime.ts"
+import * as Security from "../../cdp/Security.ts"
 import * as Target from "../../cdp/Target.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
 import * as L1Target from "../../Target.ts"
@@ -326,6 +327,15 @@ const snapshot = Effect.fnUntraced(function*(
         send: Effect.fnUntraced(function*(command, receive) {
           const reply = yield* target.session.start(command, scope)
           declarations.push(reply.pipe(Effect.tap(({ result }) => Effect.sync(() => receive?.(result))), Effect.asVoid))
+        }),
+        read: Effect.fnUntraced(function*(command, receive) {
+          const reply = yield* target.session.start(command, scope)
+          replies.push(reply.pipe(
+            Effect.match({
+              onFailure: () => receive(undefined),
+              onSuccess: ({ result }) => receive(result)
+            })
+          ))
         })
       }
       const enable: Setup["send"] = Effect.fnUntraced(function*(command) {
@@ -334,6 +344,7 @@ const snapshot = Effect.fnUntraced(function*(
       yield* enable(Page.enable())
       yield* enable(Page.setLifecycleEventsEnabled({ enabled: true }))
       yield* enable(Network.enable({}))
+      if (page?.context.ignoreCertificateErrors) yield* enable(Security.setIgnoreCertificateErrors({ ignore: true }))
       const tree = yield* target.session.start(Page.getFrameTree(), scope)
       // Runtime's replay follows the tree on the wire, so its contexts survive the snapshot's boundary.
       replies.push((yield* target.session.start(Runtime.enable(), scope)).pipe(Effect.asVoid))
@@ -358,7 +369,10 @@ const snapshot = Effect.fnUntraced(function*(
       yield* Effect.all([
         Page.enable().pipe(on),
         Page.setLifecycleEventsEnabled({ enabled: true }).pipe(on),
-        Network.enable({}).pipe(on)
+        Network.enable({}).pipe(on),
+        page?.context.ignoreCertificateErrors
+          ? Security.setIgnoreCertificateErrors({ ignore: true }).pipe(on)
+          : Effect.void
       ], { concurrency: "unbounded", discard: true })
       const tree = yield* target.session.sendSequenced(Page.getFrameTree())
       yield* read

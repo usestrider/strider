@@ -72,6 +72,7 @@ export const groups: ReadonlyArray<{ readonly label: string; readonly names: Rea
     label: "Events",
     names: {
       console: "Console messages",
+      "console.source": "Whether a console message came from the page or the browser, `source`",
       "exceptions.kind": "Telling a throw from an unhandled rejection",
       prompts: "Dialogs",
       "prompts.kind": "Which kind a dialog is",
