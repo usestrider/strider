@@ -25,7 +25,9 @@ import type * as BoundedAdapter from "../../../src/internal/boundedAdapter.ts"
 import * as BrowserClock from "../../../src/internal/browserClock.ts"
 import * as Handles from "../../../src/internal/handles.ts"
 import * as Operation from "../../../src/internal/operation.ts"
+import type * as Target from "../../../src/Target.ts"
 import { connection, type Record as TraceRecord } from "../failureTrace.ts"
+import * as StorageLeft from "../storageLeft.ts"
 import { Recycler } from "./recycledBrowser.ts"
 
 /** A declaration in force, on a context or the whole browser. */
@@ -84,10 +86,64 @@ interface Held {
   readonly scope: Scope.Closeable
   /** The declarations made with the context, which are its own for its life. */
   readonly baseline: ReadonlySet<Declared>
+  /** Each http(s) partition a document of the context committed at and no read has covered since. */
+  readonly committed: Map<string, StorageLeft.Partition>
 }
+
+/**
+ * Reads, from a page about to close, the storage of the partitions its context committed documents at
+ * (`StorageLeft.storageLeft`): from the live realms of the page and its frames, then each top-level origin none of
+ * them read by navigating the page back to it. A partition read is no longer pending; one that couldn't be read stays.
+ */
+const readPage = Effect.fnUntraced(
+  function*(held: Held, page: Page.Page) {
+    const target = Handles.target(page)
+    if (target._tag !== "Page") return []
+    const { entry, runtime } = target.behind
+    const { model } = runtime
+    const pending = Array.from(held.committed.values())
+    const realmOf = Effect.fnUntraced(function*(navigable: Target.NavigableId) {
+      const document = yield* model.documentOf(navigable)
+      if (Option.isNone(document)) return undefined
+      return yield* model.adapter.realm(document.value, { _tag: "Main" }).pipe(Effect.orElseSucceed(() => undefined))
+    })
+    const state = yield* entry.state.get
+    const realms: Array<{ readonly realm: Target.RealmId; readonly frame: boolean }> = []
+    for (
+      const { id, frame } of [{ id: entry.id, frame: false }, ...state.frames.map(({ id }) => ({ id, frame: true }))]
+    ) {
+      const realm = yield* realmOf(id)
+      if (realm !== undefined) realms.push({ realm, frame })
+    }
+    const top = yield* page.url.pipe(
+      Effect.map((url) => new URL(String(url)).origin),
+      Effect.orElseSucceed(() => undefined)
+    )
+    const result = yield* StorageLeft.storageLeft({
+      committed: pending,
+      realms,
+      top,
+      read: (realm) => StorageLeft.readRealm(model.adapter.evaluate, realm),
+      navigateBack: (origin) => Effect.andThen(page.goto(`${origin}/`), realmOf(entry.id))
+    })
+    const unread = new Set(result.unread.map(StorageLeft.keyOf))
+    for (const partition of pending) {
+      const key = StorageLeft.keyOf(partition)
+      if (!unread.has(key)) held.committed.delete(key)
+    }
+    return result.found
+  },
+  Deadline.within("5 seconds"),
+  // A read that didn't finish leaves its partitions pending, so the context is replaced after the case
+  Effect.orElseSucceed((): ReadonlyArray<string> => []),
+  Operation.named("Test.sharedContextStorage"),
+  Operation.detached
+)
 
 export class Shared extends Context.Service<Shared, {
   readonly current: Effect.Effect<UserContext.UserContext>
+  /** Reads, from a case's page about to close, the storage its context's documents committed at, and notes it. */
+  readonly read: (page: Page.Page) => Effect.Effect<void>
   /** The scope that lives as long as the suite: background work the harness still owns runs in it. */
   readonly owner: Scope.Scope
   /** Records what a case's page found in the context as it closed. */
@@ -116,7 +172,15 @@ export const layer = <E>(backend: Layer.Layer<Browser.Browser, E>) =>
           watchDeclarations(adapter, declared)
           watched.add(adapter)
         }
-        return { context, scope, baseline: new Set(declared) } satisfies Held
+        // Every origin a document of the context commits at, under the top-level origin that partitions it
+        const committed = new Map<string, StorageLeft.Partition>()
+        yield* behindOf(context).runtime.model.observeStorageSources(behindOf(context).entry, (origins, cookieOnly) => {
+          const origin = origins.at(-1)
+          if (cookieOnly === true || origin === undefined || !StorageLeft.holdsStorage(origin)) return
+          const partition = { origin, top: origins[0]! }
+          committed.set(StorageLeft.keyOf(partition), partition)
+        }).pipe(Scope.provide(scope))
+        return { context, scope, baseline: new Set(declared), committed } satisfies Held
       })
       let held: Held = yield* open
       const notes: Array<string> = []
@@ -150,11 +214,24 @@ export const layer = <E>(backend: Layer.Layer<Browser.Browser, E>) =>
         current: Effect.sync(() => held.context),
         owner: outer,
         note: (found) => Effect.sync(() => void notes.push(...found)),
+        read: (page) => Effect.flatMap(readPage(held, page), (found) => Effect.sync(() => void notes.push(...found))),
         settle: Effect.gen(function*() {
+          // A top-level origin no closing page read, as one whose page the case closed itself, is read from a page
+          // opened for it
+          if (Array.from(held.committed.values()).some((partition) => partition.origin === partition.top)) {
+            const current = held
+            const read = yield* Effect.exit(
+              Effect.scoped(Effect.flatMap(current.context.newPage, (page) => readPage(current, page)))
+            )
+            if (Exit.isSuccess(read)) notes.push(...read.value)
+          }
+          // What no read reached, such as a gone frame's partition under another top, isolates the case by a new
+          // context, without failing it
+          const unread = held.committed.size > 0
           const found = yield* left
           const stats = Option.isSome(recycler) ? yield* recycler.value.stats : undefined
           const recycle = stats !== undefined && stats.pages >= stats.limit
-          if (found.length > 0 || recycle) {
+          if (found.length > 0 || unread || recycle) {
             yield* Scope.close(held.scope, Exit.void)
             if (recycle) yield* Option.getOrThrow(recycler).run
             held = yield* open
@@ -283,7 +360,9 @@ export const newPage = Effect.gen(function*() {
   const context = yield* shared.current
   const page = yield* context.newPage
   yield* Effect.addFinalizer(() =>
-    readStorage(shared.note, context, page, connection("shared-context"), "5 seconds", shared.owner)
+    readStorage(shared.note, context, page, connection("shared-context"), "5 seconds", shared.owner).pipe(
+      Effect.andThen(shared.read(page))
+    )
   )
   return page
 })

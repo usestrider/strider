@@ -17,6 +17,7 @@ import * as Scope from "effect/Scope"
 import type * as Adapter from "../../../src/internal/adapter.ts"
 import type * as Target from "../../../src/Target.ts"
 import type * as UserContext from "../../../src/UserContext.ts"
+import * as StorageLeft from "../storageLeft.ts"
 import type { Backend } from "./harness.ts"
 
 type Requirements = Exclude<Effect.Services<ReturnType<Backend["connect"]>>, Scope.Scope>
@@ -91,7 +92,7 @@ const tracker = () => {
   const frames = new Map<Target.NavigableId, Target.NavigableId>()
   const tops = new Map<Target.NavigableId, string>()
   /** Every origin a page's tree committed a document at, with the top-level origin that partitions it. */
-  const origins = new Map<Target.NavigableId, Map<string, Partition>>()
+  const origins = new Map<Target.NavigableId, Map<string, StorageLeft.Partition>>()
   const pageOf = (navigable: Target.NavigableId) => pages.has(navigable) ? navigable : frames.get(navigable)
   const observe = (fact: Adapter.Fact) => {
     switch (fact._tag) {
@@ -110,9 +111,9 @@ const tracker = () => {
         if (page === undefined) break
         if (page === fact.navigable) tops.set(page, fact.origin)
         const top = tops.get(page)
-        if (top === undefined || !/^https?:/.test(fact.origin)) break
-        const held = origins.get(page) ?? new Map<string, Partition>()
-        held.set(keyOf({ origin: fact.origin, top }), { origin: fact.origin, top })
+        if (top === undefined || !StorageLeft.holdsStorage(fact.origin)) break
+        const held = origins.get(page) ?? new Map<string, StorageLeft.Partition>()
+        held.set(StorageLeft.keyOf({ origin: fact.origin, top }), { origin: fact.origin, top })
         origins.set(page, held)
         break
       }
@@ -158,29 +159,6 @@ const tracker = () => {
   }
 }
 
-/** An origin's storage as a document under a top-level origin reads it: frames' storage is partitioned by the top. */
-interface Partition {
-  readonly origin: string
-  readonly top: string
-}
-
-const keyOf = (partition: Partition) => `${partition.origin} under ${partition.top}`
-
-/**
- * What a document can reach of its origin's storage: `localStorage`, IndexedDB and service-worker registrations,
- * found by asking the origin rather than by which context a backend says a worker belongs to. An opaque origin has
- * none.
- */
-const storageRead = `async () => {
-  const count = async (read) => { try { return await read() } catch { return 0 } }
-  return JSON.stringify({
-    origin: location.origin,
-    localStorage: await count(() => localStorage.length),
-    databases: await count(async () => typeof indexedDB.databases === "function" ? (await indexedDB.databases()).length : 0),
-    registrations: await count(async () => navigator.serviceWorker ? (await navigator.serviceWorker.getRegistrations()).length : 0)
-  })
-}`
-
 export const make = Effect.fnUntraced(function*(backend: Backend) {
   const services = yield* Effect.context<Requirements>()
   let held: Held | undefined
@@ -212,34 +190,10 @@ export const make = Effect.fnUntraced(function*(backend: Backend) {
     held = { adapter: result.adapter, scope, token, context: undefined }
   })
 
-  /** Reads one realm's storage, naming what it holds; `undefined` when the realm has gone. */
-  const readRealm = Effect.fnUntraced(function*(connection: Held, realm: Target.RealmId) {
-    const read = yield* Effect.exit(connection.adapter.evaluate(realm, {
-      functionDeclaration: storageRead,
-      arguments: [],
-      awaitPromise: true,
-      result: "value",
-      userActivation: false
-    }))
-    if (Exit.isFailure(read) || read.value._tag !== "Value" || read.value.value.type !== "string") return undefined
-    const held = JSON.parse(read.value.value.value) as {
-      readonly origin: string
-      readonly localStorage: number
-      readonly databases: number
-      readonly registrations: number
-    }
-    const found: Array<string> = []
-    if (held.localStorage > 0) found.push(`${held.localStorage} localStorage item(s) on ${held.origin}`)
-    if (held.databases > 0) found.push(`${held.databases} IndexedDB database(s) on ${held.origin}`)
-    if (held.registrations > 0) found.push(`${held.registrations} service worker registration(s) on ${held.origin}`)
-    return { origin: held.origin, found }
-  })
-
   /**
    * What a case left in the shared context while its page is still open: cookies, and the storage of every origin
-   * its page and frames held. Live realms are read first; a top-level origin none of them reads is read by navigating
-   * the page back to it. A frame's origin under another top that no live realm reads can't be read that way, so the
-   * context is replaced after the case (`unread`).
+   * its page and frames held (`StorageLeft.storageLeft`). A frame's origin under another top that no live realm reads
+   * can't be read, so the context is replaced after the case (`unread`).
    */
   const storageLeft = Effect.fnUntraced(function*(
     connection: Held,
@@ -247,40 +201,26 @@ export const make = Effect.fnUntraced(function*(backend: Backend) {
     page: Target.NavigableId,
     facts: ReturnType<typeof recorder>
   ) {
-    const found: Array<string> = []
     const cookies = yield* connection.adapter.cookies(context)
-    found.push(...cookies.map((cookie) => `a cookie ${cookie.name} for ${cookie.domain}`))
-    const read = new Set<string>()
-    for (const { realm, frame } of seen.realmsOf(page)) {
-      const top = seen.topOf(page)
-      const result = yield* readRealm(connection, realm)
-      if (result === undefined || top === undefined) continue
-      found.push(...result.found)
-      read.add(keyOf({ origin: result.origin, top: frame ? top : result.origin }))
-    }
-    const unread: Array<Partition> = []
-    for (const partition of seen.originsOf(page)) {
-      if (read.has(keyOf(partition))) continue
-      if (partition.origin !== partition.top) {
-        unread.push(partition)
-        continue
-      }
-      const probe = yield* Effect.exit(Effect.gen(function*() {
-        const navigation = yield* connection.adapter.navigate(page, `${partition.origin}/`, { referrer: Option.none() })
+    const storage = yield* StorageLeft.storageLeft({
+      committed: seen.originsOf(page),
+      realms: seen.realmsOf(page),
+      top: seen.topOf(page),
+      read: (realm) => StorageLeft.readRealm(connection.adapter.evaluate, realm),
+      navigateBack: Effect.fnUntraced(function*(origin: string) {
+        const navigation = yield* connection.adapter.navigate(page, `${origin}/`, { referrer: Option.none() })
         const ended = yield* facts.when("NavigationEnded", (fact) => fact.navigation === navigation)
         if (ended.outcome._tag !== "Committed") return undefined
-        const realm = yield* connection.adapter.realm(ended.outcome.document, { _tag: "Main" })
-        return yield* readRealm(connection, realm)
-      }))
-      const result = Exit.isSuccess(probe) ? probe.value : undefined
-      if (result === undefined) unread.push(partition)
-      else {
-        found.push(...result.found)
-        read.add(keyOf(partition))
-      }
-    }
+        return yield* connection.adapter.realm(ended.outcome.document, { _tag: "Main" })
+      })
+    })
     seen.forget(page)
-    return { found: [...new Set(found)], unread }
+    return {
+      found: [
+        ...new Set([...cookies.map((cookie) => `a cookie ${cookie.name} for ${cookie.domain}`), ...storage.found])
+      ],
+      unread: storage.unread
+    }
   })
 
   /** Opens a page for one case, in the shared context or, with `fresh`, in a context of its own. */
