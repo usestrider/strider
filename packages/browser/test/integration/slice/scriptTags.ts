@@ -48,6 +48,16 @@ export const scriptTags = <R>(
       assert.strictEqual(reasonOf(error)?._tag, "ResourceFailed")
     }).pipe(Effect.scoped))
 
+  it.effect("reports a policy refusal for a script URL with a fragment", () =>
+    Effect.gen(function*() {
+      const served = yield* site
+      const page = yield* newPage
+      yield* page.goto(`${served.origin}/csp?html=x`)
+      const url = `${script(served.crossSite, "window.fromFragment = true")}#script`
+      const error = yield* page.addScriptTag({ url }).pipe(Effect.flip)
+      assert.strictEqual(reasonOf(error)?._tag, "RefusedByPolicy")
+    }).pipe(Effect.scoped))
+
   it.effect("runs inline source before returning", () =>
     Effect.gen(function*() {
       const served = yield* site

@@ -1,8 +1,11 @@
 /** Style injection, `addStyleTag`, into a page's or a frame's document, on every backend. */
 import { assert, describe, layer } from "@effect/vitest"
 import { type Browser, Expect } from "@usestrider/browser"
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import type * as Layer from "effect/Layer"
+import { createHash } from "node:crypto"
 import * as fs from "node:fs/promises"
 import * as os from "node:os"
 import * as nodePath from "node:path"
@@ -142,6 +145,64 @@ export const styleTags = (name: string, backend: Layer.Layer<Browser.Browser, un
             }
           }).pipe(Effect.scoped))
       }
+
+      it.effect("keeps an allowed inline style independent of other inline refusals", () =>
+        Effect.gen(function*() {
+          const served = yield* site
+          const page = yield* newPage
+          const source = "body { color: rgb(51, 52, 53) }"
+          const hash = createHash("sha256").update(source).digest("base64")
+          yield* page.goto(`${served.origin}/fixture?html=${
+            encodeURIComponent(
+              `<meta http-equiv="Content-Security-Policy" content="style-src 'sha256-${hash}'; script-src 'none'"><body>x</body>`
+            )
+          }`)
+          yield* page.evaluateInMainWorld(() => {
+            const observer = new MutationObserver(() => {
+              observer.disconnect()
+              const otherStyle = document.createElement("style")
+              otherStyle.textContent = "body { color: red }"
+              const otherScript = document.createElement("script")
+              otherScript.textContent = "window.otherRan = true"
+              document.head.append(otherStyle, otherScript)
+            })
+            observer.observe(document.head, { childList: true })
+          })
+          const element = yield* page.addStyleTag({ source })
+          assert.strictEqual(yield* element.evaluate((style) => style.textContent), source)
+          assert.strictEqual(yield* page.evaluateInMainWorld(bodyColor), "rgb(51, 52, 53)")
+          assert.deepStrictEqual(
+            yield* page.evaluateInMainWorld(() => [
+              document.querySelectorAll("style").length,
+              document.querySelectorAll("script").length,
+              Reflect.get(window, "otherRan") === undefined
+            ]),
+            [2, 1, true]
+          )
+        }).pipe(Effect.scoped))
+
+      it.effect("reports a policy refusal for a stylesheet URL with a fragment", () =>
+        Effect.gen(function*() {
+          const served = yield* site
+          const page = yield* newPage
+          yield* page.goto(`${served.origin}/style-csp?html=x`)
+          const url = `${stylesheet(served.crossSite, "body { color: red }")}#theme`
+          const error = yield* page.addStyleTag({ url }).pipe(Effect.flip)
+          assert(error._tag === "PageError")
+          assert.strictEqual(error.reason._tag, "RefusedByPolicy")
+        }).pipe(Effect.scoped))
+
+      it.effect("releases the handle without removing its stylesheet", () =>
+        Effect.gen(function*() {
+          const served = yield* site
+          const page = yield* newPage
+          yield* page.goto(`${served.origin}/fixture?html=x`)
+          const element = yield* page.addStyleTag({ source: "body { color: rgb(61, 62, 63) }" }).pipe(Effect.scoped)
+          const exit = yield* element.evaluate((style) => style.tagName).pipe(Effect.exit)
+          assert(Exit.isFailure(exit))
+          assert.include(String(Cause.squash(exit.cause)), "the handle was released")
+          assert.strictEqual(yield* page.evaluateInMainWorld(bodyColor), "rgb(61, 62, 63)")
+        }).pipe(Effect.scoped))
 
       it.effect("injects into a cross-site iframe's document through its frame locator", () =>
         Effect.gen(function*() {
