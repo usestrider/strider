@@ -628,6 +628,31 @@ export interface Options {
    */
   readonly focus?: "system" | "emulated" | undefined
   /**
+   * Lets the context's pages run what their Content Security Policy forbids: inline scripts, `eval`, and the
+   * scripts and tags you add, in every document and frame, cross-site ones included. `Unsupported` on Firefox,
+   * which doesn't implement it yet, and on WebKit (`bypassCSP`).
+   *
+   * **Details**
+   *
+   * It is set for the context's life, before its first page. A context that leaves it off keeps every policy.
+   *
+   * **Example** (Running an inline script a policy forbids)
+   *
+   * ```ts import.meta.vitest
+   * import { Browser } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const program = Effect.fn("program")(function*() {
+   *   const page = yield* Browser.newPage({ bypassCSP: true })
+   *   yield* page.goto("https://example.com")
+   *   return yield* page.evaluate(() => eval("1 + 1"))
+   * })
+   * ```
+   *
+   * @default false
+   */
+  readonly bypassCSP?: boolean | undefined
+  /**
    * The keyboard layout that key presses and typing use on the context's pages: `press`, `pressSequentially`, and
    * `page.keyboard`. On Firefox a key event's `key` follows the layout, but its `code` is the one Firefox gives that
    * key on a US keyboard, and there are no AltGr or dead keys. WebKit types characters and named keys, not a
