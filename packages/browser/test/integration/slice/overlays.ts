@@ -3,6 +3,9 @@ import { assert } from "@effect/vitest"
 import { Capability } from "@usestrider/browser"
 import type { Page } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
+import * as Scope from "effect/Scope"
 import { pngRegion } from "../../pngRegion.ts"
 import { site } from "../adapter/harness.ts"
 import type * as SharedContext from "./sharedContext.ts"
@@ -24,6 +27,27 @@ const opened = Effect.fnUntraced(function*(html: string) {
   yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
   return page
 })
+
+/** Whether the 4×4 pixels at (`x`, `y`) are the colour `test` accepts. */
+const pixelsAt = Effect.fnUntraced(function*(
+  page: Page.Page,
+  x: number,
+  y: number,
+  test: (pixel: ReadonlyArray<number>) => boolean
+) {
+  const pixels = pngRegion(yield* page.screenshot(), { x, y, width: 4, height: 4 })
+  return pixels.every(test)
+})
+const isRed = (pixel: ReadonlyArray<number>) => pixel[0]! > 240 && pixel[1]! < 10 && pixel[2]! < 10
+const isWhite = (pixel: ReadonlyArray<number>) => pixel.slice(0, 3).every((channel) => channel > 245)
+const isDark = (pixel: ReadonlyArray<number>) => pixel.slice(0, 3).every((channel) => channel < 60)
+
+/** A 60×60 button at the page's top left that records when it was clicked in the title. */
+const button = `<style>body{margin:0}button{position:absolute;left:0;top:0;width:60px;height:60px;margin:0}</style>` +
+  `<button onclick="document.title = 'clicked'">Go</button>`
+
+/** A point marker 40 pixels square, red, centered on the action's point. */
+const point = "background:rgb(255,0,0);width:40px;height:40px"
 
 /** The overlay cases, registered in a suite whose shared context they leave as they found it. */
 export const overlays = <R>(it: ReturnType<typeof SharedContext.guard<R>>) => {
@@ -108,5 +132,92 @@ export const overlays = <R>(it: ReturnType<typeof SharedContext.guard<R>>) => {
       yield* overlay.chapter("<b>Checkout</b>", { description: "Paying by card", duration: "500 millis" })
       assert.isAtLeast(performance.now() - started, 500)
       assert.strictEqual(yield* page.getByText("Checkout").count, 0)
+    }))
+  it.effect("draws an action's annotation and waits its duration before the input", () =>
+    Effect.gen(function*() {
+      const page = yield* opened(button)
+      const overlay = yield* page.capability(Capability.Overlay)
+      yield* overlay.actions({ duration: "1 second", style: { point } })
+      const started = performance.now()
+      const click = yield* page.getByRole("button", { name: "Go" }).click().pipe(Effect.forkChild)
+      let shown = false
+      while (!shown && performance.now() - started < 900) shown = yield* pixelsAt(page, 14, 14, isRed)
+      const title = yield* page.title
+      yield* Fiber.join(click)
+      assert.isTrue(shown)
+      assert.notStrictEqual(title, "clicked")
+      assert.strictEqual(yield* page.title, "clicked")
+      assert.isAtLeast(performance.now() - started, 1_000)
+    }))
+
+  it.effect("draws a cursor at the last action's point, and none with cursor none", () =>
+    Effect.gen(function*() {
+      const page = yield* opened(button)
+      const overlay = yield* page.capability(Capability.Overlay)
+      yield* Effect.scoped(Effect.gen(function*() {
+        yield* overlay.actions({ duration: "0 millis" })
+        yield* page.getByRole("button", { name: "Go" }).click()
+        assert.isTrue(yield* pixelsAt(page, 32, 35, isDark))
+      }))
+      yield* page.evaluateInMainWorld(() => {
+        document.querySelector("button")!.style.background = "white"
+        document.querySelector("button")!.style.border = "0"
+      })
+      yield* overlay.actions({ duration: "0 millis", cursor: "none" })
+      yield* page.getByRole("button", { name: "Go" }).click()
+      assert.isTrue(yield* pixelsAt(page, 32, 35, isWhite))
+    }))
+
+  it.effect("annotates an action in an iframe at its point in the top-level page", () =>
+    Effect.gen(function*() {
+      const page = yield* opened(
+        `<style>body{margin:0}iframe{position:absolute;left:100px;top:100px;width:200px;height:200px;border:0}</style>` +
+          `<iframe srcdoc="${button.replaceAll("\"", "&quot;")}"></iframe>`
+      )
+      const overlay = yield* page.capability(Capability.Overlay)
+      yield* overlay.actions({ duration: "1 second", style: { point } })
+      const target = page.frame(page.locator("iframe")).getByRole("button", { name: "Go" })
+      const started = performance.now()
+      const click = yield* target.click().pipe(Effect.forkChild)
+      let shown = false
+      while (!shown && performance.now() - started < 900) shown = yield* pixelsAt(page, 114, 114, isRed)
+      yield* Fiber.join(click)
+      assert.isTrue(shown)
+    }))
+
+  it.effect("runs actions undelayed once the scope of actions closes", () =>
+    Effect.gen(function*() {
+      const page = yield* opened(button)
+      const overlay = yield* page.capability(Capability.Overlay)
+      yield* Effect.scoped(overlay.actions({ duration: "1 second" }))
+      const started = performance.now()
+      yield* page.getByRole("button", { name: "Go" }).click()
+      assert.isBelow(performance.now() - started, 900)
+      assert.strictEqual(yield* page.title, "clicked")
+    }))
+
+  it.effect("annotates actions alongside a locator handler, released in either order", () =>
+    Effect.gen(function*() {
+      const page = yield* opened(button)
+      const overlay = yield* page.capability(Capability.Overlay)
+      const go = page.getByRole("button", { name: "Go" })
+      const timed = Effect.gen(function*() {
+        const started = performance.now()
+        yield* go.click()
+        return performance.now() - started
+      })
+      for (const handlerFirst of [true, false]) {
+        const handler = yield* Scope.make()
+        const actions = yield* Scope.make()
+        yield* page.addLocatorHandler(page.locator("#never"), () => Effect.void).pipe(Scope.provide(handler))
+        yield* overlay.actions({ duration: "400 millis" }).pipe(Scope.provide(actions))
+        assert.isAtLeast(yield* timed, 400)
+        yield* Scope.close(handlerFirst ? handler : actions, Exit.void)
+        const between = yield* timed
+        if (handlerFirst) assert.isAtLeast(between, 400)
+        else assert.isBelow(between, 390)
+        yield* Scope.close(handlerFirst ? actions : handler, Exit.void)
+        assert.isBelow(yield* timed, 390)
+      }
     }))
 }
