@@ -21,7 +21,7 @@ import { selfSigned, site, tlsSite } from "./adapter/harness.ts"
 import { proxy } from "./adapter/proxy.ts"
 import { socks } from "./adapter/socks.ts"
 import { chromium, firefox, webkitgtk } from "./browsers.ts"
-import { firefoxAttachable } from "./slice/attaching.ts"
+import { chromiumAttachable, firefoxAttachable } from "./slice/attaching.ts"
 import { supports } from "./slice/capabilities.ts"
 import { socketConnector } from "./sockets.ts"
 import { startMiniBrowser, useXvfb } from "./stockWebKit.ts"
@@ -687,12 +687,14 @@ describe("Chromium trusted TLS proxy", () => {
 
 describe("Attached browser proxy refusals", () => {
   layer(services, { excludeTestServices: true })((it) => {
-    for (const backend of ["Firefox", "WebKit"] as const) {
+    for (const backend of ["Chromium", "Firefox", "WebKit"] as const) {
       it.effect(
         `${backend} refuses unsupported proxy options according to its capability table`,
         () =>
           Effect.gen(function*() {
-            const attached = backend === "Firefox"
+            const attached = backend === "Chromium"
+              ? (yield* chromiumAttachable(Chromium.layerConnect).start("about:blank", "about:blank")).layer
+              : backend === "Firefox"
               ? (yield* firefoxAttachable(Firefox.layerConnect).start("about:blank", "about:blank")).layer
               : WebKit.layerAttach((yield* startMiniBrowser("about:blank")).endpoint).pipe(Layer.provide(services))
             yield* Effect.gen(function*() {
