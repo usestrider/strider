@@ -1,0 +1,71 @@
+---
+title: Script tags
+description: A script added once to the document a page already has.
+order: 5.5
+---
+
+A script tag is a `<script>` element that `page.addScriptTag` adds to the page's current document, from a URL,
+JavaScript source as `{ source }`, or a file on this machine as [`{ path }`](/docs/api/browser/ScriptTag#Source).
+It's added among the page's own scripts, so the page's Content Security Policy applies to it, and it runs once: a
+navigation doesn't bring it back, as it does an [init script](/docs/events/init-scripts). The call returns a handle
+to the element, released with its scope:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const chartsReady = Effect.fn("chartsReady")(function*(page: Page.Page) {
+  yield* page.goto("https://app.example.com/reports")
+  yield* page.addScriptTag({ url: "https://cdn.example.com/charts.js" })
+  yield* page.addScriptTag({ source: "window.drawCharts()" })
+})
+```
+
+- A script from a URL is done when the call returns: it waits for the element's `load` event.
+- A classic inline script runs inside the call.
+- A script the policy refuses fails with `RefusedByPolicy`, and a URL that doesn't load with `ResourceFailed`.
+
+## Modules
+
+With `type: "module"`, an inline module returns once the browser has accepted it, without waiting for it to run,
+since a module can wait on its own `await`s. Wait on something the module sets:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const widgetMounted = Effect.fn("widgetMounted")(function*(page: Page.Page) {
+  yield* page.evaluateInMainWorld(() => {
+    Reflect.set(
+      window,
+      "mounted",
+      new Promise((resolve) => Reflect.set(window, "markMounted", resolve))
+    )
+  })
+  yield* page.addScriptTag(
+    {
+      source:
+        "import { mount } from '/widget.js'; await mount(); window.markMounted(true)"
+    },
+    { type: "module" }
+  )
+  return yield* page.evaluateInMainWorld(() =>
+    Reflect.get(window, "mounted") as Promise<boolean>
+  )
+})
+```
+
+## Frames
+
+A frame locator adds a script tag to its iframe's current document the same way, cross-site iframes included. The
+iframe must be in the page when the call runs:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const prepareEditor = Effect.fn("prepareEditor")(function*(page: Page.Page) {
+  const editor = page.frame(page.locator("iframe#editor"))
+  yield* editor.addScriptTag({ source: "window.editorReady = true" })
+})
+```

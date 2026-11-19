@@ -386,6 +386,23 @@ export class LocatorHandlerFailed extends Schema.Error<LocatorHandlerFailed>(
  * The browser fired the element's `error` event: the URL was unreachable, answered with an error status, or
  * wasn't a script it could run. It names no cause, since the page isn't told one.
  *
+ * **Example** (Falling back when a library doesn't load)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const loadCharts = Effect.fn("loadCharts")(function*(page: Page.Page) {
+ *   yield* page.addScriptTag({ url: "https://cdn.example.com/charts.js" }).pipe(
+ *     Effect.catchReason(
+ *       "PageError",
+ *       "ResourceFailed",
+ *       () => page.addScriptTag({ url: "https://mirror.example.com/charts.js" })
+ *     )
+ *   )
+ * })
+ * ```
+ *
  * @stability unstable
  * @category reasons
  * @since 0.1.0
@@ -407,6 +424,23 @@ export class ResourceFailed extends Schema.Error<ResourceFailed>("@usestrider/br
  *
  * `directive` is the one the browser reports as refusing it, such as `script-src-elem`, and `blocked` is what it
  * refused: the URL, or `inline`.
+ *
+ * **Example** (Logging the directive that refused a script)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const tryHelper = Effect.fn("tryHelper")(function*(page: Page.Page) {
+ *   yield* page.addScriptTag({ source: "window.helperReady = true" }).pipe(
+ *     Effect.catchReason(
+ *       "PageError",
+ *       "RefusedByPolicy",
+ *       (refused) => Effect.logWarning(`Refused under ${refused.directive}`)
+ *     )
+ *   )
+ * })
+ * ```
  *
  * @stability unstable
  * @category reasons

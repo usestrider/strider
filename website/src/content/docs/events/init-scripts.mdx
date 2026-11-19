@@ -83,26 +83,4 @@ const steadyDashboard = Effect.fn("steadyDashboard")(function*(page: Page.Page) 
 })
 ```
 
-## A script for the current document
-
-`addScriptTag` adds a `<script>` element to the document a page already has, once, and waits for it: a URL until it
-loads, `{ source }` or [`{ path }`](/docs/api/browser/ScriptTag#Source) until it has run. It's added among the page's
-own scripts, so the page's Content Security Policy applies, and a navigation doesn't bring it back. A frame locator
-adds one to its iframe's document the same way:
-
-```ts
-import { Page } from "@usestrider/browser"
-import { Effect } from "effect"
-
-const chartsReady = Effect.fn("chartsReady")(function*(page: Page.Page) {
-  yield* page.goto("https://app.example.com/reports")
-  yield* page.addScriptTag({ url: "https://cdn.example.com/charts.js" }, {
-    type: "module"
-  })
-  const editor = page.frame(page.locator("iframe#editor"))
-  yield* editor.addScriptTag({ source: "window.editorReady = true" })
-})
-```
-
-- A script the policy refuses fails with `RefusedByPolicy`, and a URL that doesn't load with `ResourceFailed`.
-- It returns a handle to the element, released with its scope.
+To run a script once in the document a page already has, add a [script tag](/docs/events/script-tags).

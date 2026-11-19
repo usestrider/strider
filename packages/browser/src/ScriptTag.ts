@@ -5,9 +5,10 @@
  * - **Where.** The element is appended to the document's `<head>`, or to its root when it has none, from the
  *   document's main world, so it runs among the page's own scripts and the page's Content Security Policy applies
  *   to it.
- * - **What the call waits for.** A script from a URL: its `load` event. Inline source, a classic script or a module:
- *   until it has run, or thrown. A `type` that isn't JavaScript or a module, such as `importmap` or a data
- *   block: only the append.
+ * - **What the call waits for.** A script from a URL: its `load` event. A classic inline script runs inside the
+ *   call. An inline module: until the browser has accepted it, not until it has run, since its top-level `await`
+ *   can hold it; wait on something it sets. A `type` that isn't JavaScript or a module, such as `importmap` or a
+ *   data block: only the append.
  * - **How it fails.** A URL that doesn't load fails with `ResourceFailed`; a script the page's policy refuses, from
  *   a URL or inline, fails with `RefusedByPolicy`, naming the directive. Either way the element stays in the
  *   document. An inline script that throws doesn't fail the call: the page reports it as its own
@@ -16,8 +17,9 @@
  * **Gotchas**
  *
  * Unlike an init script, a script tag runs once, in the current document: a navigation doesn't bring it back.
- * Inline JavaScript gets one more line, after its own, that tells Strider it ran, so the element's text isn't
- * exactly the source given. Page scripts can see and tamper with the element, as with anything in the main world.
+ * The element's text is the source given, so a policy that allows it by its hash allows it here; a `{ path }`
+ * adds its `sourceURL` comment. A report-only policy refuses nothing. Page scripts can see and tamper with the
+ * element, as with anything in the main world.
  *
  * @stability unstable
  * @since 0.1.0

@@ -11,7 +11,7 @@
       "url": "/docs/api/browser/Page#Page.addScriptTag"
     }
   ],
-  "notes": "Appends the element from the main world, so the page's CSP applies; waits for a URL's load or inline JavaScript to run, modules included. Returns a scoped JSHandle of the element, not an ElementHandle; a CSP refusal fails with RefusedByPolicy and a URL that doesn't load with ResourceFailed.",
+  "notes": "Appends the element from the main world, so the page's CSP applies, with the caller's text unchanged. Waits for a URL's load; a classic inline script runs inside the call; an inline module returns once accepted, not run, as Playwright's does. Returns a scoped JSHandle of the element, not an ElementHandle; a CSP refusal fails with RefusedByPolicy and a URL that doesn't load with ResourceFailed.",
   "capabilities": [],
   "audit": {
     "sources": [
