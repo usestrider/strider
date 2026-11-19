@@ -30,6 +30,7 @@ import type * as Deadline from "../Deadline.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
 import type * as JSHandle from "../JSHandle.ts"
 import type * as Locator from "../Locator.ts"
+import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import * as Page from "../Page.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
 import * as Reason from "../Reason.ts"
@@ -180,6 +181,153 @@ export const observed = (owner: ObservedOwner): Page.ObservedPage => {
   return page
 }
 
+/**
+ * What runs a navigation or an evaluation in one navigable of a page: the page's own, or one of its frames. `ended`
+ * fails once the navigable is gone, and `error` makes the operation's own error from a reason.
+ */
+export interface Driven<E> {
+  readonly runtime: Runtime.Runtime
+  readonly entry: Model.PageEntry
+  readonly navigable: Target.NavigableId
+  readonly ended: Effect.Effect<never, Target.TargetGone>
+  readonly error: (operation: string, reason: Page.PageErrorReason, id: Diagnostics.OperationId) => E
+  readonly attributes: Readonly<Record<string, string>>
+  /** The realm of a world in the navigable's current document. */
+  readonly realm: (
+    world: Adapter.World,
+    id: Diagnostics.OperationId,
+    at: MonotonicInstant.MonotonicInstant
+  ) => Effect.Effect<Target.RealmId, Evaluation.Failure>
+  /** What a deadline before the call says the navigable had: "page" or "frame". */
+  readonly noun: string
+}
+
+/** Waits for a navigation the adapter started, then for `waitUntil` on the document it committed. */
+export const navigateIn = <E>(
+  target: Driven<E>,
+  operation: string,
+  url: Option.Option<Url.Url>,
+  start: (
+    id: Diagnostics.OperationId
+  ) => Effect.Effect<Option.Option<PageNavigation.Id>, Target.TargetGone | E | Deadline.Timeout>,
+  waitUntil: PageNavigation.LoadState,
+  accept: ReadonlyArray<"download" | "noContent"> = [],
+  reached: (
+    result: PageNavigation.PageNavigation,
+    id: Diagnostics.OperationId
+  ) => Effect.Effect<void, Target.TargetGone> = () => Effect.void
+) => {
+  const model = target.runtime.model
+  return Effect.gen(function*() {
+    const record = yield* Operation.record
+    const id = record.id
+    const budget = record.budget
+    // The command that starts it is bounded too: a browser that never answers it can't keep the caller waiting
+    record.markSent()
+    const started = yield* record.bound(
+      start(id),
+      () => Option.some("The browser didn't answer the navigation before the deadline; it may have started")
+    )
+    if (Option.isNone(started)) return Option.none<PageNavigation.PageNavigation>()
+    record.markConfirmed()
+    const navigation = yield* model.navigation(started.value)
+    const outcome = yield* record.bound(
+      Deferred.await(navigation.outcome),
+      () => Option.some("The navigation had no outcome before the deadline")
+    ).pipe(Effect.ensuring(model.forget(started.value)))
+    // Where it ended: the document's URL, which a same-document navigation set, or where it was going
+    const document = "document" in outcome ? model.document(outcome.document) : Option.none()
+    const at = Option.isSome(document)
+      ? (yield* document.value.state.get).url
+      : Option.getOrElse(url, () => Urls.reported(""))
+    const result = yield* Navigation.settle(
+      model,
+      operation,
+      started.value,
+      target.navigable,
+      url,
+      at,
+      outcome,
+      id,
+      accept
+    ).pipe(Effect.mapError((error) => target.error(operation, error.reason, id)))
+    if (!(yield* Navigated.reached(model, result, waitUntil, Option.some(budget.at)))) {
+      return yield* Effect.fail(record.timeout(Option.some(`The document committed but didn't reach ${waitUntil}`)))
+    }
+    yield* reached(result, id)
+    return Option.some(result)
+  }).pipe(
+    Effect.raceFirst(target.ended),
+    Operation.named(operation, {
+      attributes: {
+        ...target.attributes,
+        "browser.navigation.wait_until": waitUntil,
+        ...(Option.isSome(url) ? { "url.full": url.value } : {})
+      }
+    })
+  )
+}
+
+/**
+ * Calls a function in a world of the navigable's current document: the caller's isolated world, or the main world
+ * with user activation inside `Page.withUserGesture`.
+ */
+export const evaluateIn = <E, B, R>(
+  target: Driven<E>,
+  operation: string,
+  world: Adapter.World,
+  fn: Function,
+  args: ReadonlyArray<unknown>,
+  result: "value" | "handle",
+  then: (realm: Target.RealmId, value: Adapter.RemoteValue) => Effect.Effect<B, Evaluation.Failure, R>
+): Effect.Effect<B, E | Target.TargetGone | Deadline.Timeout, R> =>
+  Effect.gen(function*() {
+    const runtime = target.runtime
+    const record = yield* Operation.record
+    const id = record.id
+    const budget = record.budget
+    const gesture = world._tag === "Main" && (yield* Effect.service(Page.UserGesture))
+    return yield* Effect.gen(function*() {
+      const realm = yield* target.realm(world, id, budget.at)
+      const values = yield* Evaluation.toLocal(args, realm)
+      const group = yield* Evaluation.groupFor(runtime, realm, result)
+      // The call is on its way: a deadline after it can't say the function didn't run
+      const value = yield* Evaluation.call(runtime, {
+        dispatch: record,
+        realm,
+        functionDeclaration: FunctionSource.declaration(fn),
+        arguments: values,
+        result,
+        group,
+        userActivation: gesture,
+        page: Option.some(target.entry),
+        at: budget.at,
+        id
+      })
+      return yield* then(realm, value)
+    }).pipe(
+      Effect.mapError((failure) =>
+        failure._tag === "Gone"
+          ? failure.error
+          : failure._tag === "Deadline"
+          ? record.timeout(Option.some(
+            record.dispatch._tag === "MayHaveBeenSent"
+              ? `The ${target.noun} didn't answer before the deadline; the function may still be running`
+              : `The ${target.noun} had no document to evaluate in before the deadline`
+          ))
+          : target.error(operation, failure.reason, id)
+      ),
+      Effect.annotateSpans({ "browser.evaluation.user_gesture": gesture })
+    )
+  }).pipe(
+    Operation.named(operation, {
+      attributes: {
+        ...target.attributes,
+        "browser.evaluation.world": world._tag === "Main" ? "main" : world.name
+      }
+    })
+  )
+
 export const make = (owner: PageOwner): Page.Page => {
   const { runtime, entry } = owner
   const model = runtime.model
@@ -201,7 +349,18 @@ export const make = (owner: PageOwner): Page.Page => {
     return mapped._tag !== "Reason" ? mapped.error : pageError(operation, mapped.reason, id)
   }
 
-  /** Waits for a navigation the adapter started, then for `waitUntil` on the document it committed. */
+  /** The page's own navigable, where its navigations and evaluations run. */
+  const self: Driven<Page.PageError> = {
+    runtime,
+    entry,
+    navigable: entry.id,
+    ended: Runtime.pageEnded(entry),
+    error: pageError,
+    attributes: { "browser.page.id": entry.id },
+    realm: (world, id, at) => Evaluation.pageRealm(runtime, entry, world, id, at),
+    noun: "page"
+  }
+
   const navigate = (
     operation: string,
     url: Option.Option<Url.Url>,
@@ -210,59 +369,8 @@ export const make = (owner: PageOwner): Page.Page => {
     ) => Effect.Effect<Option.Option<PageNavigation.Id>, Target.TargetGone | Page.PageError | Deadline.Timeout>,
     waitUntil: PageNavigation.LoadState,
     accept: ReadonlyArray<"download" | "noContent"> = []
-  ) =>
-    Effect.gen(function*() {
-      const record = yield* Operation.record
-      const id = record.id
-      const budget = record.budget
-      // The command that starts it is bounded too: a browser that never answers it can't keep the caller waiting
-      record.markSent()
-      const started = yield* record.bound(
-        start(id),
-        () => Option.some("The browser didn't answer the navigation before the deadline; it may have started")
-      )
-      if (Option.isNone(started)) return Option.none<PageNavigation.PageNavigation>()
-      record.markConfirmed()
-      const navigation = yield* model.navigation(started.value)
-      const outcome = yield* record.bound(
-        Deferred.await(navigation.outcome),
-        () => Option.some("The navigation had no outcome before the deadline")
-      ).pipe(Effect.ensuring(model.forget(started.value)))
-      // Where it ended: the document's URL, which a same-document navigation set, or where it was going
-      const document = "document" in outcome ? model.document(outcome.document) : Option.none()
-      const at = Option.isSome(document)
-        ? (yield* document.value.state.get).url
-        : Option.getOrElse(url, () => Urls.reported(""))
-      const result = yield* Navigation.settle(
-        model,
-        operation,
-        started.value,
-        entry.id,
-        url,
-        at,
-        outcome,
-        id,
-        accept
-      )
-      if (!(yield* Navigated.reached(model, result, waitUntil, Option.some(budget.at)))) {
-        return yield* Effect.fail(record.timeout(Option.some(`The document committed but didn't reach ${waitUntil}`)))
-      }
-      return Option.some(result)
-    }).pipe(
-      Effect.raceFirst(Runtime.pageEnded(entry)),
-      Operation.named(operation, {
-        attributes: {
-          "browser.page.id": entry.id,
-          "browser.navigation.wait_until": waitUntil,
-          ...(Option.isSome(url) ? { "url.full": url.value } : {})
-        }
-      })
-    )
+  ) => navigateIn(self, operation, url, start, waitUntil, accept)
 
-  /**
-   * Calls a function in a world of the page's current document: the caller's isolated
-   * world, or the main world with user activation inside `Page.withUserGesture`.
-   */
   const evaluation = <B, R>(
     operation: string,
     world: Adapter.World,
@@ -270,53 +378,7 @@ export const make = (owner: PageOwner): Page.Page => {
     args: ReadonlyArray<unknown>,
     result: "value" | "handle",
     then: (realm: Target.RealmId, value: Adapter.RemoteValue) => Effect.Effect<B, Evaluation.Failure, R>
-  ): Effect.Effect<B, Page.PageError | Target.TargetGone | Deadline.Timeout, R> =>
-    Effect.gen(function*() {
-      const record = yield* Operation.record
-      const id = record.id
-      const budget = record.budget
-      const gesture = world._tag === "Main" && (yield* Effect.service(Page.UserGesture))
-      return yield* Effect.gen(function*() {
-        const realm = yield* Evaluation.pageRealm(runtime, entry, world, id, budget.at)
-        const values = yield* Evaluation.toLocal(args, realm)
-        const group = yield* Evaluation.groupFor(runtime, realm, result)
-        // The call is on its way: a deadline after it can't say the function didn't run
-        const value = yield* Evaluation.call(runtime, {
-          dispatch: record,
-          realm,
-          functionDeclaration: FunctionSource.declaration(fn),
-          arguments: values,
-          result,
-          group,
-          userActivation: gesture,
-          page: Option.some(entry),
-          at: budget.at,
-          id
-        })
-        return yield* then(realm, value)
-      }).pipe(
-        Effect.mapError((failure) =>
-          failure._tag === "Gone"
-            ? failure.error
-            : failure._tag === "Deadline"
-            ? record.timeout(Option.some(
-              record.dispatch._tag === "MayHaveBeenSent"
-                ? "The page didn't answer before the deadline; the function may still be running"
-                : "The page had no document to evaluate in before the deadline"
-            ))
-            : pageError(operation, failure.reason, id)
-        ),
-        Effect.annotateSpans({ "browser.evaluation.user_gesture": gesture })
-      )
-    }).pipe(
-      Operation.named(operation, {
-        attributes: {
-          "browser.page.id": entry.id,
-          "browser.evaluation.world": world._tag === "Main" ? "main" : world.name
-        }
-      })
-    )
-
+  ) => evaluateIn(self, operation, world, fn, args, result, then)
   const page: Page.Page = {
     ...observeMembers(owner),
     ...queries,

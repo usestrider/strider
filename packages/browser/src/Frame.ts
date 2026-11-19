@@ -10,9 +10,12 @@
  * @since 0.1.0
  */
 import type * as Effect from "effect/Effect"
+import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Deadline from "./Deadline.ts"
+import * as Diagnostics from "./Diagnostics.ts"
+import * as ReasonCause from "./internal/reasonCause.ts"
 import type * as JSHandle from "./JSHandle.ts"
 import * as Page from "./Page.ts"
 import type * as PageNavigation from "./PageNavigation.ts"
@@ -84,6 +87,10 @@ export interface ObservedFrame {
   /**
    * The frame's state; ends with `Detached`, or when its page closes. Waiting for a readiness on it is waiting for
    * the frame's load state.
+   *
+   * **Gotchas**
+   *
+   * Stock WebKit doesn't report a child frame's readiness: there, a child frame's document stays `loading`.
    */
   readonly status: Watchable.Watchable<Status>
 }
@@ -115,7 +122,7 @@ export interface ReadonlyFrame extends ObservedFrame {
   evaluate<Args extends ReadonlyArray<unknown>, A>(
     fn: (...args: Args) => A | Promise<A>,
     ...args: Args
-  ): Effect.Effect<JSHandle.Serialized<A>, Page.PageError | Target.TargetGone | Deadline.Timeout>
+  ): Effect.Effect<JSHandle.Serialized<A>, FrameError | Target.TargetGone | Deadline.Timeout>
 }
 
 /**
@@ -141,12 +148,13 @@ export interface Frame extends ReadonlyFrame {
   /**
    * Navigates the frame to `url`, and returns the navigation once the frame's new document reaches `waitUntil`.
    * The page's own document stays where it is. A frame removed before then fails the navigation with `TargetGone`.
-   * On WebKit the frame navigates by script, so `referrer` isn't available.
+   * On WebKit the frame navigates by script, and a child frame's `waitUntil` other than `"commit"` fails with
+   * `Unsupported`, since WebKit doesn't report its readiness.
    */
   goto(
     url: string,
     options?: Page.GotoOptions | undefined
-  ): Effect.Effect<PageNavigation.PageNavigation, Page.PageError | Target.TargetGone | Deadline.Timeout>
+  ): Effect.Effect<PageNavigation.PageNavigation, FrameError | Target.TargetGone | Deadline.Timeout>
   /**
    * Calls `fn` among the frame's own scripts, in its current document's main world, and returns its result by
    * value. It has `Page.evaluateInMainWorld`'s rules.
@@ -154,7 +162,7 @@ export interface Frame extends ReadonlyFrame {
   evaluateInMainWorld<Args extends ReadonlyArray<unknown>, A>(
     fn: (...args: Args) => A | Promise<A>,
     ...args: Args
-  ): Effect.Effect<JSHandle.Serialized<A>, Page.PageError | Target.TargetGone | Deadline.Timeout>
+  ): Effect.Effect<JSHandle.Serialized<A>, FrameError | Target.TargetGone | Deadline.Timeout>
   /**
    * Calls `fn` in the same world as `Page.evaluateHandle`, in the frame's current document, and returns a handle
    * on its result, released when the scope closes.
@@ -162,5 +170,70 @@ export interface Frame extends ReadonlyFrame {
   evaluateHandle<Args extends ReadonlyArray<unknown>, A>(
     fn: (...args: Args) => A | Promise<A>,
     ...args: Args
-  ): Effect.Effect<JSHandle.JSHandle<Awaited<A>>, Page.PageError | Target.TargetGone | Deadline.Timeout, Scope.Scope>
+  ): Effect.Effect<JSHandle.JSHandle<Awaited<A>>, FrameError | Target.TargetGone | Deadline.Timeout, Scope.Scope>
 }
+
+/**
+ * Schema for why a frame operation failed: the reasons a page operation can fail with, for navigation and
+ * evaluation.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 0.1.0
+ */
+export const FrameErrorReason = Page.PageErrorReason
+
+/**
+ * Why a frame operation failed: the reasons a page operation can fail with, for navigation and evaluation.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export type FrameErrorReason = typeof FrameErrorReason.Type
+
+const FrameErrorTypeId = "~@usestrider/browser/Frame/FrameError"
+
+/**
+ * Error for a frame operation that failed: its navigation or an evaluation in it.
+ *
+ * **Example** (Recovering from a frame's failed navigation)
+ *
+ * ```ts import.meta.vitest
+ * import type { Frame } from "@usestrider/browser"
+ * import { Effect, Option } from "effect"
+ *
+ * const tryOpen = Effect.fn("tryOpen")(function*(frame: Frame.Frame, url: string) {
+ *   return yield* frame.goto(url).pipe(
+ *     Effect.map(Option.some),
+ *     Effect.catchReason("FrameError", "NavigationFailed", () => Effect.succeedNone)
+ *   )
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category errors
+ * @since 0.1.0
+ */
+export class FrameError extends Schema.TaggedError<FrameError>(FrameErrorTypeId)("FrameError", {
+  operation: Schema.String,
+  reason: FrameErrorReason,
+  diagnostics: Diagnostics.Diagnostics
+}) {
+  readonly [FrameErrorTypeId] = FrameErrorTypeId
+  override get message(): string {
+    return `${this.operation}: ${this.reason.message}`
+  }
+  override get cause(): unknown {
+    return ReasonCause.of(this.reason)
+  }
+}
+
+/**
+ * Checks whether a value is a `FrameError`.
+ *
+ * @stability unstable
+ * @category guards
+ * @since 0.1.0
+ */
+export const isFrameError = (u: unknown): u is FrameError => Predicate.hasProperty(u, FrameErrorTypeId)

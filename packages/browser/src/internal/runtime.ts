@@ -542,8 +542,8 @@ const routing = <A, E = never, R = never>(
   })
 
 /**
- * The frame a frame locator's steps enter now: its iframe's frame, once the frame has a document; `None` when no
- * iframe matches, or it holds no frame or document yet.
+ * The frame a frame locator's steps enter now: its iframe's frame, once the frame has a document; `Missing` when no
+ * iframe matches, or it holds no frame or document yet, and the engine's answer for an iframe it can't enter.
  */
 export const frameAt = (
   runtime: Runtime,
@@ -551,13 +551,22 @@ export const frameAt = (
   steps: ReadonlyArray<Engine.Step>,
   id: Diagnostics.OperationId,
   at: MonotonicInstant.MonotonicInstant
-): Effect.Effect<Option.Option<Target.NavigableId>, SendFailure> =>
-  routing(runtime, page, steps, false, id, at, (route) =>
-    Effect.succeed(Option.some(
-      route._tag === "Entered"
-        ? Option.fromUndefinedOr(route.routed.hops.at(-1)?.frame)
-        : Option.none<Target.NavigableId>()
-    )))
+): Effect.Effect<
+  | { readonly _tag: "Entered"; readonly frame: Target.NavigableId }
+  | { readonly _tag: "Missing" }
+  | { readonly _tag: "Answer"; readonly response: Engine.Response },
+  SendFailure
+> =>
+  routing(runtime, page, steps, false, id, at, (route) => {
+    const last = route.routed.hops.at(-1)
+    return Effect.succeed(Option.some(
+      route._tag === "Answer"
+        ? { _tag: "Answer" as const, response: route.response }
+        : route._tag === "Entered" && last !== undefined
+        ? { _tag: "Entered" as const, frame: last.frame }
+        : { _tag: "Missing" as const }
+    ))
+  })
 
 /** What the engine answered, and where. */
 export interface Answer {

@@ -1166,7 +1166,8 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
             : this.sendFailure(operation, failure, record)
         )
       )
-      if (Option.isNone(found)) {
+      if (found._tag === "Answer") return yield* this.unmatched(operation, found.response, record.id)
+      if (found._tag === "Missing") {
         return yield* Effect.fail(
           this.error(
             operation,
@@ -1175,7 +1176,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
           )
         )
       }
-      return FrameImpl.make({ runtime, page, grant, id: found.value })
+      return FrameImpl.make({ runtime, page, grant, id: found.frame })
     }).pipe(Operation.named(operation, { attributes: { "browser.page.id": this.owner.page.id } }))
   }
 
@@ -2155,7 +2156,7 @@ export const frameLocator = (owner: Owner, steps: ReadonlyArray<Engine.Step>): L
         script,
         options
       ),
-    resolve: make(steps).resolveFrame(inside) as Locator.FrameLocator["resolve"],
+    resolve: make(steps).resolveFrame(inside),
     toString: () => `FrameLocator(page.frame(page.${describeSteps(steps)}))`
   } as Locator.FrameLocator
 }

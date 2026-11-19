@@ -124,7 +124,7 @@ export const capabilities = (
       entry("prompts", "supported"),
       entry("prompts.kind", "supported"),
       entry("navigation.sameDocument", "supported"),
-      entry("navigation.childFrames", "supported"),
+      entry("frames.readiness", "supported"),
       entry("navigation.traverse", "supported"),
       entry("frames.contentFrame", "supported"),
       entry("screenshot.format", "supported"),

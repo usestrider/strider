@@ -1981,7 +1981,8 @@ export interface ReadonlyFrameLocator extends Queries<ReadonlyLocator> {
   /**
    * A handle on the frame the iframe holds now. The handle keeps to that frame: when the iframe is replaced or
    * removed, it reports `Detached`, while this frame locator finds the new iframe. It fails with `NoMatch` when no
-   * iframe matches, or the one that matches holds no document yet.
+   * iframe matches, or the one that matches holds no document yet, and with the locator's reason, such as
+   * `StrictViolation`, when its iframe can't be entered.
    *
    * **Example** (Holding a frame across its navigations)
    *

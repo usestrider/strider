@@ -8,10 +8,12 @@ import * as HttpUrl from "effect/http/Url"
 import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import * as Stream from "effect/Stream"
+import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as Deadline from "../Deadline.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
-import type * as Frame from "../Frame.ts"
+import * as Frame from "../Frame.ts"
 import type * as JSHandle from "../JSHandle.ts"
+import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import * as Page from "../Page.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
 import * as Reason from "../Reason.ts"
@@ -21,11 +23,9 @@ import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
 import * as BrowserClock from "./browserClock.ts"
 import * as Evaluation from "./evaluation.ts"
-import * as FunctionSource from "./functionSource.ts"
 import type * as Model from "./model.ts"
-import * as Navigated from "./navigated.ts"
-import * as Navigation from "./navigation.ts"
 import * as Operation from "./operation.ts"
+import * as PageImpl from "./page.ts"
 import type { Readable } from "./readable.ts"
 import * as Runtime from "./runtime.ts"
 import * as Urls from "./urls.ts"
@@ -110,6 +110,9 @@ const pageEnded = ({ page }: View): Option.Option<Target.CloseReason> =>
 const pageError = (operation: string, reason: Page.PageErrorReason, id: Diagnostics.OperationId) =>
   new Page.PageError({ operation, reason, diagnostics: Operation.diagnostics(id) })
 
+const frameError = (operation: string, reason: Frame.FrameErrorReason, id: Diagnostics.OperationId) =>
+  new Frame.FrameError({ operation, reason, diagnostics: Operation.diagnostics(id) })
+
 /** A handle on one frame of a page, at the access the page was reached with. */
 export const make = (owner: Owner): Frame.Frame => {
   const { runtime, page: entry, id: frame } = owner
@@ -137,16 +140,11 @@ export const make = (owner: Owner): Frame.Frame => {
         ))
   )
 
-  const failure = (operation: string, id: Diagnostics.OperationId, error: Adapter.AdapterError | Deadline.Timeout) => {
-    const mapped = Operation.fromAdapter(error, id, runtime.backend)
-    return mapped._tag !== "Reason" ? mapped.error : pageError(operation, mapped.reason, id)
-  }
-
   /** The realm of a world in the frame's current document, following the frame to its next one if it ends. */
   const realm = (
     world: Adapter.World,
     id: Diagnostics.OperationId,
-    at: Parameters<typeof BrowserClock.left>[0]
+    at: MonotonicInstant.MonotonicInstant
   ): Effect.Effect<Target.RealmId, Evaluation.Failure> =>
     Effect.gen(function*() {
       while (true) {
@@ -177,6 +175,17 @@ export const make = (owner: Owner): Frame.Frame => {
       }
     })
 
+  const driven: PageImpl.Driven<Frame.FrameError> = {
+    runtime,
+    entry,
+    navigable: frame,
+    ended,
+    error: frameError,
+    attributes: { "browser.page.id": entry.id, "browser.frame.id": frame },
+    realm,
+    noun: "frame"
+  }
+
   const evaluation = <B, R>(
     operation: string,
     world: Adapter.World,
@@ -184,58 +193,41 @@ export const make = (owner: Owner): Frame.Frame => {
     args: ReadonlyArray<unknown>,
     result: "value" | "handle",
     then: (realm: Target.RealmId, value: Adapter.RemoteValue) => Effect.Effect<B, Evaluation.Failure, R>
-  ): Effect.Effect<B, Page.PageError | Target.TargetGone | Deadline.Timeout, R> =>
-    Effect.gen(function*() {
-      yield* Access.check(owner.grant)
-      const record = yield* Operation.record
-      const id = record.id
-      const at = record.budget.at
-      const gesture = world._tag === "Main" && (yield* Effect.service(Page.UserGesture))
-      return yield* Effect.gen(function*() {
-        const found = yield* realm(world, id, at)
-        const values = yield* Evaluation.toLocal(args, found)
-        const group = yield* Evaluation.groupFor(runtime, found, result)
-        const value = yield* Evaluation.call(runtime, {
-          dispatch: record,
-          realm: found,
-          functionDeclaration: FunctionSource.declaration(fn),
-          arguments: values,
-          result,
-          group,
-          userActivation: gesture,
-          page: Option.some(entry),
-          at,
-          id
-        })
-        return yield* then(found, value)
-      }).pipe(
-        Effect.mapError((failure) =>
-          failure._tag === "Gone"
-            ? failure.error
-            : failure._tag === "Deadline"
-            ? record.timeout(Option.some(
-              record.dispatch._tag === "MayHaveBeenSent"
-                ? "The frame didn't answer before the deadline; the function may still be running"
-                : "The frame had no document to evaluate in before the deadline"
-            ))
-            : pageError(operation, failure.reason, id)
-        )
-      )
-    }).pipe(
-      Operation.named(operation, {
-        attributes: {
-          "browser.page.id": entry.id,
-          "browser.frame.id": frame,
-          "browser.evaluation.world": world._tag === "Main" ? "main" : world.name
-        }
-      })
+  ) =>
+    Effect.flatMap(
+      Access.check(owner.grant),
+      () => PageImpl.evaluateIn(driven, operation, world, fn, args, result, then)
     )
+
+  /**
+   * A document that ends before its readiness counts as reached, as for a page; one that ended with its frame
+   * didn't get there.
+   */
+  const stillAttached = Effect.fnUntraced(
+    function*(result: PageNavigation.PageNavigation, id: Diagnostics.OperationId) {
+      if (result._tag !== "Committed") return
+      const committed = model.document(result.document)
+      const why = Option.isSome(committed) ? yield* Deferred.poll(committed.value.ended) : Option.none()
+      const detached = Option.isSome(why)
+        ? (yield* why.value)._tag === "FrameDetached"
+        : Option.isNone((yield* state.get).frame)
+      if (detached) {
+        return yield* Effect.fail(
+          new Target.TargetGone({
+            target,
+            reason: new Target.FrameDetached({}),
+            diagnostics: Operation.diagnostics(id)
+          })
+        )
+      }
+    }
+  )
 
   const goto = (url: string, options?: Page.GotoOptions | undefined) => {
     const operation = "Frame.goto"
     const parsed = HttpUrl.fromString(url)
     if (Result.isFailure(parsed)) {
-      return Effect.fail(pageError(
+      return Effect.fail(frameError(
         operation,
         new Reason.InvalidInput({
           input: "url",
@@ -249,67 +241,40 @@ export const make = (owner: Owner): Frame.Frame => {
     const waitUntil = options?.waitUntil ?? "commit"
     return Effect.gen(function*() {
       yield* Access.check(owner.grant)
-      const record = yield* Operation.record
-      const id = record.id
-      record.markSent()
-      const started = yield* record.bound(
-        model.adapter.navigate(frame, href, { referrer: Option.none() }).pipe(
-          Effect.mapError((error) => failure(operation, id, error))
-        ),
-        () => Option.some("The browser didn't answer the navigation before the deadline; it may have started")
-      )
-      record.markConfirmed()
-      const navigation = yield* model.navigation(started)
-      const outcome = yield* record.bound(
-        Deferred.await(navigation.outcome),
-        () => Option.some("The navigation had no outcome before the deadline")
-      ).pipe(Effect.ensuring(model.forget(started)))
-      const document = "document" in outcome ? model.document(outcome.document) : Option.none()
-      const at = Option.isSome(document) ? (yield* document.value.state.get).url : Urls.reported(href)
-      const result = yield* Navigation.settle(
-        model,
+      // A child frame's readiness is only waited for where the browser reports it
+      if (frame !== entry.id && waitUntil !== "commit") {
+        const capabilities = yield* SubscriptionRef.get(model.adapter.capabilities)
+        const readiness = capabilities.entries.find((each) => each.name === "frames.readiness")
+        if (readiness !== undefined && readiness.status !== "supported") {
+          return yield* Effect.fail(frameError(
+            operation,
+            new Reason.Unsupported({
+              capability: "frames.readiness",
+              backend: runtime.backend,
+              hint: `${
+                readiness.limitations.join("; ") || `${runtime.backend} doesn't report a frame's readiness`
+              }; wait until "commit" instead`
+            }),
+            Operation.idNow()
+          ))
+        }
+      }
+      return yield* PageImpl.navigateIn(
+        driven,
         operation,
-        started,
-        frame,
         Option.some(Urls.reported(href)),
-        at,
-        outcome,
-        id,
-        options?.accept ?? []
-      )
-      if (!(yield* Navigated.reached(model, result, waitUntil, Option.some(record.budget.at)))) {
-        return yield* Effect.fail(record.timeout(Option.some(`The document committed but didn't reach ${waitUntil}`)))
-      }
-      // A document that ends before its readiness counts as reached, as for a page; one that ended with its frame
-      // didn't get there
-      if (result._tag === "Committed") {
-        const committed = model.document(result.document)
-        const why = Option.isSome(committed) ? yield* Deferred.poll(committed.value.ended) : Option.none()
-        const detached = Option.isSome(why)
-          ? (yield* why.value)._tag === "FrameDetached"
-          : Option.isNone((yield* state.get).frame)
-        if (detached) {
-          return yield* Effect.fail(
-            new Target.TargetGone({
-              target,
-              reason: new Target.FrameDetached({}),
-              diagnostics: Operation.diagnostics(id)
+        (id) =>
+          Effect.map(model.adapter.navigate(frame, href, { referrer: Option.none() }), Option.some).pipe(
+            Effect.mapError((error) => {
+              const mapped = Operation.fromAdapter(error, id, runtime.backend)
+              return mapped._tag !== "Reason" ? mapped.error : frameError(operation, mapped.reason, id)
             })
-          )
-        }
-      }
-      return result
-    }).pipe(
-      Effect.raceFirst(ended),
-      Operation.named(operation, {
-        attributes: {
-          "browser.page.id": entry.id,
-          "browser.frame.id": frame,
-          "browser.navigation.wait_until": waitUntil,
-          "url.full": href
-        }
-      })
-    ) as Effect.Effect<PageNavigation.PageNavigation, Page.PageError | Target.TargetGone | Deadline.Timeout>
+          ),
+        waitUntil,
+        options?.accept ?? [],
+        stillAttached
+      ).pipe(Effect.map(Option.getOrThrow))
+    })
   }
 
   return {
@@ -331,7 +296,7 @@ export const make = (owner: Owner): Frame.Frame => {
         args,
         "value",
         (_realm, value) => Evaluation.fromRemote(value)
-      ) as Effect.Effect<JSHandle.Serialized<A>, Page.PageError | Target.TargetGone | Deadline.Timeout>,
+      ) as Effect.Effect<JSHandle.Serialized<A>, Frame.FrameError | Target.TargetGone | Deadline.Timeout>,
     evaluateInMainWorld: <Args extends ReadonlyArray<unknown>, A>(
       fn: (...args: Args) => A | Promise<A>,
       ...args: Args
@@ -343,7 +308,7 @@ export const make = (owner: Owner): Frame.Frame => {
         args,
         "value",
         (_realm, value) => Evaluation.fromRemote(value)
-      ) as Effect.Effect<JSHandle.Serialized<A>, Page.PageError | Target.TargetGone | Deadline.Timeout>,
+      ) as Effect.Effect<JSHandle.Serialized<A>, Frame.FrameError | Target.TargetGone | Deadline.Timeout>,
     evaluateHandle: <Args extends ReadonlyArray<unknown>, A>(fn: (...args: Args) => A | Promise<A>, ...args: Args) =>
       evaluation(
         "Frame.evaluateHandle",
