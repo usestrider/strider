@@ -13,6 +13,7 @@ import * as Logger from "effect/Logger"
 import * as Redacted from "effect/Redacted"
 import * as Stream from "effect/Stream"
 import * as Tracer from "effect/Tracer"
+import { createHash, X509Certificate } from "node:crypto"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
@@ -20,9 +21,10 @@ import { selfSigned, site, tlsSite } from "./adapter/harness.ts"
 import { proxy } from "./adapter/proxy.ts"
 import { socks } from "./adapter/socks.ts"
 import { chromium, firefox, webkitgtk } from "./browsers.ts"
+import { firefoxAttachable } from "./slice/attaching.ts"
 import { supports } from "./slice/capabilities.ts"
 import { socketConnector } from "./sockets.ts"
-import { useXvfb } from "./stockWebKit.ts"
+import { startMiniBrowser, useXvfb } from "./stockWebKit.ts"
 
 const options = (
   server: string,
@@ -645,3 +647,74 @@ for (
     })
   })
 }
+
+describe("Chromium trusted TLS proxy", () => {
+  layer(services, { excludeTestServices: true })((it) => {
+    for (const authenticated of [false, true]) {
+      it.effect(
+        `routes through a trusted TLS proxy with credentials ${authenticated ? "configured" : "omitted"}`,
+        () =>
+          Effect.gen(function*() {
+            const tls = yield* selfSigned
+            const spki = new X509Certificate(tls.cert).publicKey.export({ type: "spki", format: "der" })
+            const hash = createHash("sha256").update(spki).digest("base64")
+            const served = yield* site
+            const local = yield* proxy(authenticated ? { username: "proxy-user", password: "tls-secret" } : undefined, {
+              tls
+            })
+            yield* Effect.gen(function*() {
+              assert.isTrue(yield* supports("userContexts.proxy.https"))
+              const page = yield* Browser.newPage(
+                options(`https://${local.address}`, [], authenticated ? "tls-secret" : undefined)
+              )
+              yield* page.goto(`${served.origin.replace("127.0.0.1", "proxy.test")}/trusted-proxy`)
+              assert.isTrue(served.served.some((request) => request.path === "/trusted-proxy"))
+              assert.isTrue(
+                local.requests.some((request) => request.url.endsWith("/trusted-proxy") && request.authenticated)
+              )
+            }).pipe(Effect.provide(
+              Chromium.layer({
+                executablePath: chromium.executable,
+                args: [`--ignore-certificate-errors-spki-list=${hash}`]
+              }).pipe(Layer.provide(services))
+            ))
+          }),
+        60_000
+      )
+    }
+  })
+})
+
+describe("Attached browser proxy refusals", () => {
+  layer(services, { excludeTestServices: true })((it) => {
+    for (const backend of ["Firefox", "WebKit"] as const) {
+      it.effect(
+        `${backend} refuses unsupported proxy options according to its capability table`,
+        () =>
+          Effect.gen(function*() {
+            const attached = backend === "Firefox"
+              ? (yield* firefoxAttachable(Firefox.layerConnect).start("about:blank", "about:blank")).layer
+              : WebKit.layerAttach((yield* startMiniBrowser("about:blank")).endpoint).pipe(Layer.provide(services))
+            yield* Effect.gen(function*() {
+              const createsContexts = yield* supports("userContexts")
+              for (
+                const [settings, capability] of [
+                  [options("https://127.0.0.1:8080"), "userContexts.proxy.https"],
+                  [options("socks4://127.0.0.1:8080"), "userContexts.proxy.socks4"],
+                  [options("http://127.0.0.1:8080", [".example.com"]), "userContexts.proxy.bypassSuffix"],
+                  [options("http://127.0.0.1:8080", [], "secret"), "userContexts.proxy.credentials"]
+                ] as const
+              ) {
+                if (!(yield* supports(capability))) {
+                  yield* refused(settings, createsContexts ? capability : "userContexts")
+                }
+              }
+              assert.isFalse(yield* supports("userContexts.proxy.socksCredentials"))
+              yield* refused(options("socks5://127.0.0.1:8080", [], "secret"), "userContexts.proxy.socksCredentials")
+            }).pipe(Effect.provide(attached))
+          }),
+        60_000
+      )
+    }
+  })
+})

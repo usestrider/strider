@@ -5122,3 +5122,30 @@ describe("BiDi frame removal without contextDestroyed", () => {
       }))
   }
 })
+
+it.effect("keeps proxy credential bindings separate by scheme at the same host and port", () =>
+  Effect.gen(function*() {
+    let next = 0
+    const { state } = yield* withPage({
+      "browser.createUserContext": () => Effect.succeed({ userContext: `proxy-${next++}` }),
+      "network.addIntercept": { intercept: "proxy-intercept" }
+    })
+    for (const scheme of ["http", "socks5", "socks4"] as const) {
+      yield* Contexts.createUserContext(state, {
+        proxy: Option.some({
+          scheme,
+          server: "proxy.test:8080",
+          bypass: [],
+          ...(scheme === "http"
+            ? { credentials: { username: "user", password: Redacted.make("fixture-password") } }
+            : {})
+        }),
+        acceptInsecureCerts: false
+      })
+    }
+    assert.deepStrictEqual([...state.proxyBindings.keys()], [
+      "http://proxy.test:8080",
+      "socks5://proxy.test:8080",
+      "socks4://proxy.test:8080"
+    ])
+  }))

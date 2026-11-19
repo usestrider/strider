@@ -70,7 +70,8 @@ describe("proxy options", () => {
       "..example.com",
       "example.com.",
       ".192.0.2.1",
-      ".[::1]"
+      ".[::1]",
+      ".[2001:db8::1]"
     ]
   ) {
     it.effect(`refuses unsupported bypass syntax ${host}`, () =>
