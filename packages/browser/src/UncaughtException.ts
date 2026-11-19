@@ -3,6 +3,12 @@
  *
  * An exception is reported to its page and its context, as console messages are.
  *
+ * On Firefox, a message the browser writes to the console itself, such as a Content Security Policy violation or a
+ * request blocked by CORS, arrives here too, with no stack, as Firefox sends it as a script error. On stock WebKit,
+ * "Fetch API cannot load … due to access control checks" arrives here too: WebKit sends it on its `javascript`
+ * channel at level `error`, which is how Strider reads an uncaught exception on WebKit. Each backend's `console`
+ * capability says so.
+ *
  * @stability unstable
  * @since 0.1.0
  */
@@ -125,6 +131,13 @@ export const stream = <PE = never, PR = never>(
 
 /**
  * Reads the uncaught exceptions still in the event log; never waits.
+ *
+ * **Details**
+ *
+ * An operation returns only after the events the browser sent before answering it have been handled, so what
+ * it caused is here once it returns, as far as the browser reported it by then and the log still keeps it.
+ * The exception is a target whose state is still being read, as when it has just attached or its events
+ * overflowed: its events reach the log once that read completes.
  *
  * **Example** (Errors so far, and whether the log dropped any)
  *

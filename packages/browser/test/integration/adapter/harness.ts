@@ -35,6 +35,8 @@ export interface Site {
   /** The same server under another site, for out-of-process frames: `http://localhost:port`. */
   readonly crossSite: string
   readonly served: ReadonlyArray<Served>
+  /** Completes once the site has been asked for `path`, its query included, now or earlier. */
+  readonly requested: (path: string) => Effect.Effect<void>
 }
 
 type Route = (request: http.IncomingMessage, response: http.ServerResponse, site: Site) => void
@@ -304,10 +306,25 @@ const upgrade = (request: http.IncomingMessage, socket: net.Socket) => {
 export const site: Effect.Effect<Site, never, Scope.Scope> = Effect.acquireRelease(
   Effect.callback<{ server: http.Server; site: Site }>((resume) => {
     const served: Array<Served> = []
+    const waiting = new Set<{ readonly path: string; readonly resume: () => void }>()
+    const requested = (path: string) =>
+      Effect.callback<void>((resume) => {
+        if (served.some((request) => request.path === path)) return resume(Effect.void)
+        const waiter = { path, resume: () => resume(Effect.void) }
+        waiting.add(waiter)
+        return Effect.sync(() => waiting.delete(waiter))
+      })
     let siteRef: Site
     const server = http.createServer((request, response) => {
       const url = new URL(request.url ?? "/", "http://site")
-      served.push({ method: request.method ?? "GET", path: url.pathname + url.search, headers: request.headers })
+      const path = url.pathname + url.search
+      served.push({ method: request.method ?? "GET", path, headers: request.headers })
+      for (const waiter of waiting) {
+        if (waiter.path === path) {
+          waiting.delete(waiter)
+          waiter.resume()
+        }
+      }
       const route = routes[url.pathname]
       if (route !== undefined) return route(request, response, siteRef)
       html(response, `<title>${url.pathname}</title><p>${url.pathname}</p>`)
@@ -315,7 +332,7 @@ export const site: Effect.Effect<Site, never, Scope.Scope> = Effect.acquireRelea
     server.on("upgrade", upgrade)
     server.listen(0, "127.0.0.1", () => {
       const { port } = server.address() as net.AddressInfo
-      siteRef = { origin: `http://127.0.0.1:${port}`, crossSite: `http://localhost:${port}`, served }
+      siteRef = { origin: `http://127.0.0.1:${port}`, crossSite: `http://localhost:${port}`, served, requested }
       resume(Effect.succeed({ server, site: siteRef }))
     })
   }),

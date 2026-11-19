@@ -1,6 +1,7 @@
 /** Shared image timing, writer backpressure and bounded finish for native and polled video. */
 import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
@@ -8,6 +9,7 @@ import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
+import * as Deadline from "../Deadline.ts"
 import * as Reason from "../Reason.ts"
 import type * as VideoWriter from "../VideoWriter.ts"
 import * as Adapter from "./adapter.ts"
@@ -32,6 +34,8 @@ export const record = Effect.fnUntraced(function*(
   directory: string
 ) {
   const clock = yield* BrowserClock.CurrentClock
+  // The writer's finish is bounded so a hung writer can't hang scope close; how long it may take is the caller's.
+  const finishBudget = yield* Deadline.DefaultBudget
   const started = clock.now()
   let stopped = started
   const scope = yield* Effect.acquireRelease(Scope.make(), (scope) => Scope.close(scope, Exit.void))
@@ -137,8 +141,10 @@ export const record = Effect.fnUntraced(function*(
         Effect.mapError((error) => backendFailure(error.message)),
         Effect.raceFirst(
           Deferred.await(ended).pipe(
-            Effect.andThen(clock.sleep(5000)),
-            Effect.andThen(Effect.fail(backendFailure("The writer did not finish within 5 seconds")))
+            Effect.andThen(clock.sleep(Duration.toMillis(finishBudget))),
+            Effect.andThen(
+              Effect.fail(backendFailure(`The writer did not finish within ${Duration.format(finishBudget)}`))
+            )
           )
         ),
         Effect.tap(() =>

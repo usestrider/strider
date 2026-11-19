@@ -36,6 +36,36 @@ export const responseRouteInFlight: Readonly<Record<"Chromium" | "Firefox" | "We
 }
 
 /**
+ * Whether a page's second fetch of a cacheable URL, with no route in force, is answered from the HTTP cache: stock
+ * WebKit's MiniBrowser sends it to the server again.
+ */
+export const cachesFetches: Readonly<Record<"Chromium" | "Firefox" | "WebKit", boolean>> = {
+  Chromium: true,
+  Firefox: true,
+  WebKit: false
+}
+
+/**
+ * Whether a dedicated worker's requests bypass the HTTP cache while a route is in force: Firefox answers a worker's
+ * second fetch of a cacheable URL from its cache even while the session's cache behavior is `bypass`.
+ */
+export const workerFetchesBypassCache: Readonly<Record<"Chromium" | "Firefox" | "WebKit", boolean>> = {
+  Chromium: true,
+  Firefox: false,
+  WebKit: true
+}
+
+/**
+ * Whether the browser reports the end of a navigation the page starts to a URL whose scheme it can't load: Firefox
+ * reports the navigation's start and never its end, so no outcome comes for it.
+ */
+export const endsUnloadablePageNavigation: Readonly<Record<"Chromium" | "Firefox" | "WebKit", boolean>> = {
+  Chromium: true,
+  Firefox: false,
+  WebKit: true
+}
+
+/**
  * How a backend that reports `input.fractionalPointer` as partial places a fractional pointer position: Firefox
  * rounds to the nearest whole pixel, and launched WebKit truncates the fraction.
  */

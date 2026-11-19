@@ -16,7 +16,9 @@ const recorded = "Firefox 158.0, recorded 2026-10-20; checked by test/integratio
  * BiDi's error table. The spec names every error code, so rows match the code alone; a code the table doesn't
  * know is `Unrecognized`, as are those no `RejectReason` fits (`no such history entry`, `no such network data`).
  * Firefox reports a command it doesn't implement as `unknown command`, and an argument it doesn't implement as
- * `unsupported operation`; both are `Unsupported`.
+ * `unsupported operation`; both are `Unsupported`. Firefox also answers `unsupported operation` to a navigation to a
+ * URL it won't load, such as one with a scheme it has no handler for: that is the URL refused, not a gap in the
+ * browser, so the command's navigation fails like any other it never started.
  */
 export const errors: ReadonlyArray<ErrorMatcher> = [
   {
@@ -30,6 +32,12 @@ export const errors: ReadonlyArray<ErrorMatcher> = [
     becomes: { _tag: "Unsupported" },
     evidence:
       `${spec}: "unsupported operation"; browsingContext.reload with ignoreCache, "Argument "ignoreCache" is not supported yet.", ${recorded}`
+  },
+  {
+    match: { code: "unsupported operation", message: { includes: "is not allowed in this context" } },
+    becomes: { _tag: "Rejected", reason: "InvalidArgument" },
+    evidence:
+      `${spec}: "unsupported operation"; browsingContext.navigate to nosuchscheme:x, "Navigation to "nosuchscheme:x" is not allowed in this context", ${recorded}`
   },
   {
     match: { code: "invalid argument" },

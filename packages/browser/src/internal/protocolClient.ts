@@ -129,8 +129,8 @@ export const defaultLimits: Limits = { events: 10_000, bytes: 256 * 1024 * 1024 
 
 /**
  * The deadline of the operation a command is sent in, which replaces `Protocol.CommandTimeout` for it
- * (`boundedAdapter.ts`): the command waits for its reply until then, on the live clock, and then fails with
- * `NoReply`. A command in a region that can't be interrupted ends at the deadline too.
+ * (`boundedAdapter.ts`): the command waits for its reply, and for the events received before it to be handled,
+ * until then, on the live clock, and then fails with `NoReply`. A command in a region that can't be interrupted ends at the deadline too.
  */
 export const CommandDeadline: Context.Reference<Option.Option<MonotonicInstant.MonotonicInstant>> = Context.Reference(
   "@usestrider/browser/internal/ProtocolClient/CommandDeadline",
@@ -400,6 +400,8 @@ interface Pending {
   readonly reply: Deferred.Deferred<unknown, Protocol.ProtocolError>
   /** The receive sequence number of the reply. */
   received: number
+  /** The last message queued for the worker when the reply arrived, which the caller waits to be handled. */
+  through: number | undefined
   onReceipt?: ((received: number) => void) | undefined
   onOutcome?: ((outcome: "success" | "failure" | "sessionEnded") => void) | undefined
   replied: boolean
@@ -504,6 +506,7 @@ export const make: (
       release,
       reply: Deferred.makeUnsafe(),
       received: 0,
+      through: undefined,
       replied: false,
       raw: undefined,
       late: undefined
@@ -561,6 +564,10 @@ export const make: (
     run(handler({ session: state.handle, method: entry.method, params: entry.params, result: entry.raw, release }))
   }
 
+  // Waits until the worker has handled every message received before the entry's reply.
+  const caughtUp = (entry: Pending): Effect.Effect<void> =>
+    Effect.suspend(() => entry.through === undefined ? Effect.void : ingestion.caughtUp(entry.through))
+
   /** A registered command: writing it, the wait for its reply, and giving up on that reply. */
   const prepare = Effect.fnUntraced(function*<M extends string, P, A>(
     state: SessionState,
@@ -587,10 +594,13 @@ export const make: (
     entry.onOutcome = onOutcome
     entry.onReceipt = yield* ReplyReceived
     let consumed = false
+    let abandoned = false
     // The caller stopped waiting. A reply still to come is dropped, or handed to the late-reply handler; one
-    // that arrived but wasn't consumed goes straight to the handler.
+    // that arrived but wasn't consumed goes straight to the handler. Only the first call gives the reply up, so
+    // the timeout, a staged command's scope and an ordered command's failure never hand it off twice.
     const abandon = Effect.sync(() => {
-      if (consumed) return
+      if (consumed || abandoned) return
+      abandoned = true
       if (pending.get(entry.id) === entry) {
         if (onLate === undefined) unregister(entry)
         else entry.late = onLate
@@ -598,9 +608,16 @@ export const make: (
         runLate(entry, onLate)
       }
     })
+    // The caller resumes only once every message received before the reply has been handled, and the command's
+    // budget covers that wait too. Running out after the reply arrived leaves the reply to `abandon`, which hands
+    // a resource-creating one to the late-reply handler.
+    const replied = Deferred.await(entry.reply).pipe(
+      Effect.tap(() => caughtUp(entry)),
+      Effect.tapError(() => caughtUp(entry))
+    )
     // The browser clock rechecks the monotonic deadline when a timer fires early.
     const awaited = Duration.isFinite(timeout)
-      ? Deferred.await(entry.reply).pipe(
+      ? replied.pipe(
         BrowserClock.timeoutOn(replyBrowserClock, Duration.toMillis(timeout)),
         Effect.flatMap((reply) =>
           Option.isSome(reply)
@@ -608,7 +625,7 @@ export const make: (
             : Effect.andThen(abandon, Effect.fail(failure(new Protocol.NoReply({ method, timeout }))))
         )
       )
-      : Deferred.await(entry.reply)
+      : replied
     const tracing = yield* Tracing.TraceProtocolCommands
     return {
       write: transport.send(wire.encode(entry.id, method, encoded, state.key)).pipe(
@@ -809,6 +826,7 @@ export const make: (
         if (entry === undefined) return
         unregister(entry)
         entry.received = received
+        entry.through = ingestion.queued()
         entry.onReceipt?.(received)
         settle(entry, incoming._tag === "Reply" ? "success" : "failure")
         if (incoming._tag === "ErrorReply") {

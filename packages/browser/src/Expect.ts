@@ -192,6 +192,13 @@ export const toBeHidden: Matcher<Locator.ReadonlyLocator> = (locator) => ExpectI
 /**
  * Expects the one match to be enabled.
  *
+ * **Details**
+ *
+ * An element inside a button, or inside an element with the role `button`, `checkbox`, or `radio`, is enabled only
+ * when it and the nearest such control both are. The control is found through shadow roots and the slots the
+ * element is assigned to: a span inside a disabled button is disabled. Inputs, textareas, selects, and editable
+ * content are read on themselves alone. Native `disabled`, a disabled `fieldset`, and `aria-disabled` all count.
+ *
  * **Example** (Checking that a complete form can be submitted)
  *
  * ```ts import.meta.vitest
@@ -212,6 +219,13 @@ export const toBeEnabled: Matcher<Locator.ReadonlyLocator> = (locator) => Expect
 
 /**
  * Expects the one match to be disabled.
+ *
+ * **Details**
+ *
+ * An element inside a button, or inside an element with the role `button`, `checkbox`, or `radio`, is enabled only
+ * when it and the nearest such control both are. The control is found through shadow roots and the slots the
+ * element is assigned to: a span inside a disabled button is disabled. Inputs, textareas, selects, and editable
+ * content are read on themselves alone. Native `disabled`, a disabled `fieldset`, and `aria-disabled` all count.
  *
  * **Example** (Checking that a sold-out item can't be added)
  *
@@ -361,7 +375,8 @@ export const toHaveText: DualMatcher<
  *
  * **Details**
  *
- * Strings match the whole name after whitespace is collapsed. Regular expressions test the computed name.
+ * Strings match the whole name after whitespace is collapsed on both sides, so a non-breaking space matches a
+ * space. Regular expressions test the computed name, which keeps non-breaking spaces.
  * `ignoreCase` overrides a regular expression's `i` flag when supplied; otherwise strings are case-sensitive
  * and regular expressions keep their flags. Hidden elements have an empty name; hidden labels can name a
  * visible element. Roles that prohibit naming, such as generic, paragraph, and code, have an empty name;

@@ -623,9 +623,13 @@ export const conformance = (backend: Backend) =>
                 modifiers: none,
                 autoRepeat: false
               },
-              { _tag: "InsertText", text: "éllo" }
+              // An adapter that doesn't insert text natively is never sent it: L1 inserts through the engine
+              ...(world.adapter.textInsertion === "native" ? [{ _tag: "InsertText" as const, text: "éllo" }] : [])
             ])
-            assert.strictEqual(yield* evaluate(world, page, "() => document.querySelector('#t').value"), "héllo")
+            assert.strictEqual(
+              yield* evaluate(world, page, "() => document.querySelector('#t').value"),
+              world.adapter.textInsertion === "native" ? "héllo" : "h"
+            )
           }), timeout)
 
         it.effect("carries the buttons held through a drag, and sends Enter as Enter", () =>
@@ -1608,7 +1612,7 @@ export const conformance = (backend: Backend) =>
             const owner = realm.kind.worker._tag === "Dedicated"
               ? Option.getOrUndefined(realm.kind.worker.owner)
               : undefined
-            assert.include([realm.realm, owner], message.realm)
+            assert.include([realm.realm, owner], Option.getOrUndefined(message.realm))
           }), timeout)
 
         it.effect("reports a WebSocket's frames", () =>
