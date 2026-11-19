@@ -689,7 +689,6 @@ export const contents = (
           yield* page.goto("https://load.test/")
           yield* failed.pipe(Deadline.within("5 seconds"))
           const messages = (yield* ConsoleMessage.history(page)).entries
-          console.log("FAILED-LOAD", JSON.stringify(messages.map((entry) => [entry.level, entry.text, entry.source])))
           const sources = messages.map((entry) =>
             entry.source
           )
