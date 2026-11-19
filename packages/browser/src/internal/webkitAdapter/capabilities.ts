@@ -187,6 +187,7 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
         "emulation.touch",
         "emulation.focus"
       ].map((name) => entry(name, "unsupported", [noEmulation])),
+      entry("bypassCSP", "unsupported", ["stock WebKit's inspector can't set a page's Content Security Policy aside"]),
       entry("snapshot.clickListeners", "unsupported", ["WebKit can't list event listeners"]),
       entry("capability.virtualAuthenticator", "unsupported", [
         "Stock WebKit Automation refuses credential management; inspector has no WebAuthn domain"
@@ -233,6 +234,8 @@ export const overrideCapability = (override: Adapter.Override): string | undefin
       return "emulation.touch"
     case "FocusEmulation":
       return "emulation.focus"
+    case "BypassCsp":
+      return "bypassCSP"
     default:
       return undefined
   }

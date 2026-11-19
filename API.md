@@ -323,6 +323,7 @@ interface Options {                                      // UserContext.Options;
   readonly storageState?: StorageState.StorageState | undefined   // decoded with StorageState.Json
   readonly dialogs?: "dismiss" | "accept" | "leaveOpen" | undefined   // decision when no handler claims a dialog; default "dismiss"
   readonly focus?: "system" | "emulated" | undefined    // default "system"; "emulated" makes every page report focus, and keeps a page behind a popup rendering on Chromium (owned contexts only)
+  readonly bypassCSP?: boolean | undefined              // default false; true runs what pages' Content Security Policy forbids, in every frame, for the context's life; Chromium only, Firefox and WebKit refuse it
   readonly eventLog?: number | undefined                // retained events per module and page, for history; default 100, 0 keeps none
   readonly downloads?: "temporary" | "deny" | { readonly directory: string } | undefined   // default "temporary": a directory made for the context and removed after it
   readonly emulation?: Emulation.Emulation | undefined  // held for the context's life: emulate(...) without a scope

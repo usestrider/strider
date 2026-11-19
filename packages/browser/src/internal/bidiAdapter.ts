@@ -217,6 +217,7 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       entry("emulation.extraHTTPHeaders", "supported"),
       entry("emulation.touch", "unsupported", ["Firefox doesn't implement emulation.setTouchOverride"]),
       entry("emulation.focus", "unsupported", ["WebDriver BiDi has no focus emulation"]),
+      entry("bypassCSP", "unsupported", ["Firefox doesn't implement browsingContext.setBypassCSP"]),
       entry("screenshot.cssScale", "unsupported", ["WebDriver BiDi captures device pixels only"]),
       entry("screenshot.omitBackground", "unsupported", ["WebDriver BiDi has no background override"]),
       entry("pdf.headerFooter", "unsupported", ["WebDriver BiDi prints no header or footer"]),
