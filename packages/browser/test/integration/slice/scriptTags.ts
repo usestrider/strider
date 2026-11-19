@@ -186,4 +186,19 @@ export const scriptTags = <R>(it: ReturnType<typeof SharedContext.guard<R>>) => 
       )
       assert.strictEqual(yield* global(page, "inFrame"), undefined)
     }).pipe(Effect.scoped))
+
+  it.effect("fails with RefusedByPolicy when a cross-site iframe's CSP refuses inline source", () =>
+    Effect.gen(function*() {
+      const served = yield* site
+      const page = yield* newPage
+      yield* page.goto(
+        `${served.origin}/fixture?html=${
+          encodeURIComponent(`<iframe src="${served.crossSite}/csp?html=frame"></iframe>`)
+        }`
+      )
+      const error = yield* page.frame(page.locator("iframe")).addScriptTag({ source: "window.refused = true" }).pipe(
+        Effect.flip
+      )
+      assert.strictEqual(reasonOf(error)?._tag, "RefusedByPolicy")
+    }).pipe(Effect.scoped))
 }
