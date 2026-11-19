@@ -265,8 +265,8 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
   getByTitle(text: string | RegExp, options?: Locator.TextOptions) {
     return this.with([...this.steps, { _tag: "Title", matcher: matcher(text, options?.exact) }])
   }
-  getByTestId(id: string) {
-    return this.with([...this.steps, { _tag: "TestId", id }])
+  getByTestId(id: string | RegExp) {
+    return this.with([...this.steps, { _tag: "TestId", matcher: matcher(id, true) }])
   }
   locator(css: string) {
     return this.with([...this.steps, { _tag: "Css", selector: css }])

@@ -1768,3 +1768,14 @@ command still unanswered sent waits for that reply by the same rule, rather than
 declaration, under the connection's own command deadline, and one that fails or never comes leaves the setting
 unknown, so the next change sends it again. Rejected: always awaiting the reply, which deadlocks with a held
 navigation, and never awaiting it, which leaves the setting unconfirmed when nothing stops the browser answering.
+
+## A Chromium HTML drag enters where it starts and drops alone
+
+On Chromium, the move that starts an intercepted HTML drag sends `dragEnter` alone, each later move `dragOver`, even to
+the same point, and the release `drop` alone. Chromium's `drop` command fires a `dragover` before the `drop`, so the
+page sees the drag events a drag Chromium runs itself fires, in the same number: `dragenter`, one `dragover` per move,
+and `drop`. Only the first `dragover` comes later, at the next move or the drop, where Chromium's own drag fires it with
+the `dragenter`. So no sequence of drag commands also gives a `dragover` while the button is still held after a single
+move: a drag of one held move shows its first `dragover` at the release or the next move. Sending `dragEnter` and
+`dragOver` at the move that starts the drag, which shows the drag over the target while the button is held, was
+rejected: every drop would then end with a second `dragover`, which Playwright's and Puppeteer's drag tests both reject.

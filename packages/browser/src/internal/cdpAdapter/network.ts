@@ -193,6 +193,9 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         request.sentReported = false
         request.redirects++
         request.hop = state.ids.hop(request.id, request.redirects)
+        if (request.navigation !== undefined && request.requestId === request.navigation.loaderId) {
+          request.navigation.responded = false
+        }
         request.url = params.request.url
         request.sentBodies[request.redirects] = sentBody(state, target, params.request)
         state.hops.set(request.hop, request)
@@ -297,6 +300,9 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       const request = state.requests.get(requestKey(target, params.requestId))
       if (request === undefined) return
       request.network = servedBy(request, params.response) === "network" && params.response.status !== 304
+      if (request.navigation !== undefined && request.requestId === request.navigation.loaderId) {
+        request.navigation.responded = true
+      }
       request.frame?.page.context.requestTiming?.get(request.hop)?.response(
         servedBy(request, params.response) === "network" ? params.response.timing : undefined
       )
@@ -409,7 +415,8 @@ export const register = (handlers: Kit.Handlers<Event>) =>
           "cdp:Network.loadingFailed"
         )
       }
-      // An abort stays pending until a download, a new navigation or an error page says what it was
+      // An abort stays pending until a download, a new navigation, an error page or the frame's
+      // `Page.frameStoppedLoading` says what it was
     })
     .on(Network.webSocketCreated, (params, { state, target }) => {
       if (target === undefined) return

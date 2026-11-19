@@ -507,6 +507,33 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
           }), timeout)
       }
 
+      it.effect("traverses back, back and forward through two pushState entries", () =>
+        Effect.gen(function*() {
+          if (!(yield* supports("navigation.sameDocument")) || !(yield* supports("navigation.traverse"))) return
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(fixtureUrl(origin, "<p>history</p>"))
+            const base = yield* page.url
+            yield* page.evaluateInMainWorld(() => {
+              history.pushState({}, "", "/first")
+              history.pushState({}, "", "/second")
+            })
+            yield* page.pipe(Expect.toHaveURL(`${origin}/second`))
+            for (
+              const [direction, url] of [["back", `${origin}/first`], ["back", base], [
+                "forward",
+                `${origin}/first`
+              ]] as const
+            ) {
+              const outcome = yield* page[direction]().pipe(Deadline.within("5 seconds"))
+              assert(Option.isSome(outcome))
+              assert.strictEqual(outcome.value._tag, "SameDocument")
+              yield* page.pipe(Expect.toHaveURL(url))
+            }
+          }))
+        }), timeout)
+
       it.effect("preserves page.url through same-document fragment changes and removal", () =>
         Effect.gen(function*() {
           if (!(yield* supports("navigation.sameDocument"))) return
@@ -782,7 +809,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             const page = yield* Browser.newPage()
             const links = yield* NetworkRequest.redirects(page)
             const sent = yield* NetworkRequest.next(page, { url: `${origin}/redirect-unfollowed` })
-            yield* page.goto(`${origin}/redirect-unfollowed`)
+            yield* page.goto(`${origin}/redirect-unfollowed`, { waitUntil: "load" })
             const request = yield* sent
             const hop = Option.getOrThrow(Handles.page(page).runtime.model.hop(request.hop))
             // The model's completion signal avoids depending on response-body collection to test links.
