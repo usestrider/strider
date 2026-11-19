@@ -61,7 +61,7 @@ export const normalize = (
       typeof host !== "string" || host === "" || /[\s/\\*,;?#@%]/.test(host) ||
       host.startsWith("..") || host.endsWith(".") || (host.startsWith("[") && !host.endsWith("]")) ||
       // A leading dot names a domain's subdomains, which an IP address has none of
-      (host.startsWith(".") && /^[\d.:[\]]*$/.test(host.slice(1)))
+      (host.startsWith(".") && isAddress(host.slice(1)))
     ) return invalid()
     const name = host.startsWith(".") ? host.slice(1) : host
     const parsed = URL.parse(`http://${name.includes(":") && !name.startsWith("[") ? `[${name}]` : name}`)
@@ -77,6 +77,15 @@ export const normalize = (
         : { credentials: { username: options.credentials.username, password: options.credentials.password } })
     } satisfies Adapter.ProxyOptions
   )
+}
+
+/**
+ * Whether `host` is an IPv4 or IPv6 address, bracketed or not, as the URL parser reads it: it turns every IPv4
+ * form, shorthand such as `127.1` or `0x7f.1` included, into four decimal parts, and keeps IPv6 in brackets.
+ */
+const isAddress = (host: string) => {
+  const hostname = URL.parse(`http://${host.includes(":") && !host.startsWith("[") ? `[${host}]` : host}`)?.hostname
+  return hostname !== undefined && (hostname.startsWith("[") || /^\d+\.\d+\.\d+\.\d+$/.test(hostname))
 }
 
 /** The proxy endpoint schemes Strider knows; a backend may still refuse one through its capability table. */
