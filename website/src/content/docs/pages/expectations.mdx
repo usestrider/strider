@@ -457,6 +457,31 @@ const viewport = Effect.fn("viewport")(function*(page: Page.Page) {
 - A DOM node can't come back by value: [`evaluateHandle`](/docs/api/browser/Page#Page.evaluateHandle) gives a
   handle, released with its scope.
 
+A handle is a reference to a value that stays in the page, in one realm. `page.evaluateHandle` and
+`locator.evaluateHandle` make one in the isolated world, `evaluateHandleInMainWorld` makes one among the page's
+scripts, on WebKit too, and `handle.properties` gives a handle for each of a value's own enumerable properties:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const cartItems = Effect.fn("cartItems")(function*(page: Page.Page) {
+  const cart = yield* page.evaluateHandleInMainWorld(() =>
+    Reflect.get(window, "cart") as Record<string, number>
+  )
+  const items = yield* cart.properties
+  const quantities: Array<readonly [string, number]> = []
+  for (const [name, item] of items) {
+    quantities.push([name, (yield* item.read) as number])
+  }
+  return quantities
+})
+```
+
+- A handle passes into calls in its own realm only: a main-world handle given to `page.evaluate` fails with
+  `NotSerializable`.
+- Its string previews the value it held when it was made, such as `JSHandle(R3 node <p>)`.
+
 To read every locator match together, use `evaluateAll`. It passes an empty array when nothing matches:
 
 ```ts

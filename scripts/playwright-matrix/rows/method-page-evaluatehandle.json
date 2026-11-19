@@ -9,9 +9,14 @@
       "module": "Page",
       "symbol": "Page.evaluateHandle",
       "url": "/docs/api/browser/Page#Page.evaluateHandle"
+    },
+    {
+      "module": "Page",
+      "symbol": "Page.evaluateHandleInMainWorld",
+      "url": "/docs/api/browser/Page#Page.evaluateHandleInMainWorld"
     }
   ],
-  "notes": "Returns an isolated-world handle. No main-world handle evaluation equivalent.",
+  "notes": "Page.evaluateHandle returns an isolated-world handle; Page.evaluateHandleInMainWorld returns one in the page's own world, on every backend. A handle crosses only into calls in its own realm.",
   "capabilities": [
     "isolatedWorlds"
   ],
@@ -22,14 +27,10 @@
     "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
   },
   "requirements": [],
-  "gaps": [
-    "method-page-evaluatehandle-value-main-world-handles"
-  ],
   "valueCoverage": [
     {
       "value": "main-world handles",
-      "status": "missing",
-      "gap": "method-page-evaluatehandle-value-main-world-handles"
+      "status": "has"
     }
   ]
 }

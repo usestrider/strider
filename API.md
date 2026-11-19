@@ -428,6 +428,9 @@ interface Page extends ReadonlyPage {
   evaluateHandle<Args extends ReadonlyArray<unknown>, A>(   // the isolated world, like evaluate
     fn: (...args: Args) => A | Promise<A>, ...args: Args
   ): Effect<JSHandle.JSHandle<Awaited<A>>, PageError, Scope>
+  evaluateHandleInMainWorld<Args extends ReadonlyArray<unknown>, A>(   // the page's own world, on every backend
+    fn: (...args: Args) => A | Promise<A>, ...args: Args
+  ): Effect<JSHandle.JSHandle<Awaited<A>>, PageError, Scope>
   readonly keyboard: Keyboard.Keyboard
   readonly mouse: Mouse.Mouse
   readonly clock: PageClock.PageClock
@@ -587,6 +590,9 @@ operation deadline apply as for `evaluate`; a timeout after dispatch cannot canc
 
 
 interface Locator extends ReadonlyLocator {             // queries, chainers and first/last return Locator
+  evaluateHandle<Args extends ReadonlyArray<unknown>, B>(   // evaluate's resolution, the result as a scoped handle
+    fn: (element: Element, ...args: Args) => B | Promise<B>, ...args: Args
+  ): Effect<JSHandle.JSHandle<Awaited<B>>, LocatorError, Scope>
   click(options?: ClickOptions | undefined): Effect<void, LocatorError>
   dblclick(options?: ClickOptions | undefined): Effect<void, LocatorError>
   tap(options?: PointerOptions | undefined): Effect<void, LocatorError>              // touch
@@ -746,8 +752,10 @@ interface JSHandle<A = unknown> extends Pipeable, Inspectable {   // a value in 
     Effect<Serialized<B>, JSHandleError>
   evaluateHandle<Args extends ReadonlyArray<unknown>, B>(fn: (value: A, ...args: Args) => B | Promise<B>, ...args: Args):
     Effect<JSHandle<Awaited<B>>, JSHandleError, Scope>
+  readonly properties: Effect<ReadonlyMap<string, JSHandle>, JSHandleError, Scope>   // own enumerable, each getter once
   readonly read: Effect<Serialized<A>, JSHandleError>    // the value itself, by value
   readonly release: Effect<void>                         // early release; idempotent
+  toString(): string                                     // realm and a preview from the call that made it
 }
 ```
 

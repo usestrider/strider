@@ -1,7 +1,7 @@
 {
   "status": "missing",
   "api": [],
-  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "notes": "No corresponding public option for this contract.",
   "capabilities": [],
   "id": "option-locator-evaluatehandle-exposefunctions",
   "upstream": [
