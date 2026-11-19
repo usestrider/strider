@@ -599,6 +599,21 @@ Chromium can acknowledge clearing device metrics before its native-view resize r
 release reproduced a successful clear followed by the overridden width. A clear reply alone cannot implement the
 restoration contract. Each target attempts to record its original width and height before its first viewport override; nested
 and replacement registrations retain those dimensions until the last override has been cleared and restored.
+A page with no opener that is paused for the debugger when it attaches, while a viewport is already in force,
+queues its reading of `innerWidth`, `innerHeight`, `screen.width`, and `screen.height` in its main world before the override, and nothing is awaited
+before it resumes. It reads what the restore compares, because the layout viewport's client size leaves out a
+scrollbar and at a fractional device scale rounds 1 px away, so a page back at its size would never match. The main
+world is read because no page script has run there before the page resumes. A renderer that answers the reading
+only after the override applies, as the headless shell does, shows the override in its size or its screen: a
+desktop override sets the size, and a mobile one lays the page out at another size but reports the override as the
+screen. So a reading whose size or screen equals the override's width and height, or one that fails, leaves the
+dimensions unknown, and the restore clears the override and warns without waiting. The cost is that a page whose
+own size, or whose own screen, equals the viewport's is not confirmed.
+A page given its viewport later, or one attached already running, as on connecting to a browser, is measured in the
+measurement world before its first override, as any other target is. Rejected: awaiting the measurement before the
+override and the resume, which costs every page opened under a viewport a renderer round trip before it starts,
+the common path; queuing `Page.getLayoutMetrics`, which measures the layout viewport rather than what the restore
+compares; and comparing the layout viewport at the restore instead, which a scrollbar on the released page breaks.
 While an override remains, release reapplies the current effective override. Per-target serialization recomputes
 that effective override when the command runs, including when registrations are released out of order.
 
@@ -624,7 +639,8 @@ platform chrome differs; reading the window's type from `Page.windowOpen`'s feat
 target they open; and skipping a removed context's restore, which would leave a released `context.emulate` waiting
 on the same popup.
 
-Measure in the named `__strider_viewport` isolated world for the target's main frame,
+Apart from that queued reading, which runs in the main world before any page script can, measure in the named
+`__strider_viewport` isolated world for the target's main frame, as the restore and a page already running do,
 passing the returned execution context id explicitly to `Runtime.evaluate`. Create or retrieve that world for each
 measurement rather than caching an execution context across navigation. Main-world lexical bindings and numeric
 or nonnumeric shadows must not supply the baseline. Missing, rejected, or nonfinite measurements do not prevent
