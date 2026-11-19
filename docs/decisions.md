@@ -1779,3 +1779,13 @@ the `dragenter`. So no sequence of drag commands also gives a `dragover` while t
 move: a drag of one held move shows its first `dragover` at the release or the next move. Sending `dragEnter` and
 `dragOver` at the move that starts the drag, which shows the drag over the target while the button is held, was
 rejected: every drop would then end with a second `dragover`, which Playwright's and Puppeteer's drag tests both reject.
+
+## Visual comparison lives in the test adapter
+
+Screenshot baselines are a test runner's concern, so `ScreenshotBaseline` lives in `@usestrider/vitest`, beside
+`TestRun`, following [Pay for what you use](#pay-for-what-you-use): the browser package gains no image code and its
+default path does no added work. Every baseline is named by the caller, because a name derived from the test title
+and a call counter is hidden state that shifts when a test is reordered. A missing baseline is written but its
+assertion still fails, so a first run never passes without anyone looking at the image; only an explicit update
+(`vitest -u`) writes and passes. Matching Playwright's nameless overload, and passing on a freshly written baseline,
+were rejected for those reasons. The PNG codec and comparator are native rather than dependencies.
