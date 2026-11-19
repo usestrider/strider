@@ -80,8 +80,12 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       entry("userContexts", "supported"),
       entry("acceptInsecureCerts", "supported", ["native browser.createUserContext setting"]),
       entry("userContexts.proxy", "supported", [
-        "HTTP proxy endpoints for HTTP and HTTPS destinations; loopback stays direct"
+        "http, socks5 and socks4 endpoints for HTTP, HTTPS and WebSocket destinations; .domain bypass matches subdomains only; loopback stays direct"
       ]),
+      entry("userContexts.proxy.socks4", "supported", ["names are resolved at the proxy (SOCKS4a)"]),
+      entry("userContexts.proxy.https", "unsupported", ["BiDi proxy settings have no TLS connection to the proxy"]),
+      entry("userContexts.proxy.socksCredentials", "unsupported", ["the browser offers no SOCKS authentication"]),
+      entry("userContexts.proxy.bypassSuffix", "supported"),
       entry("userContexts.proxy.credentials", ownership === "launched" ? "partial" : "unsupported", [
         "requires a freshly launched browser; one credential pair per proxy endpoint for the connection lifetime"
       ]),

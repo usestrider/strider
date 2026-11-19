@@ -834,6 +834,93 @@ export const contents = (
           }
         }), timeout)
 
+      it.effect("an XPath locator from the page matches the elements of a union in document order", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* SharedContext.newPage
+          yield* page.goto(fixtureUrl(origin, "<ul><li id=\"three\">Three</li><li> One </li><li>  Two  </li></ul>"))
+          const items = page.locator(Locator.xpath("//li[normalize-space()='Two'] | //li[@id='three']"))
+          assert.strictEqual(yield* items.count, 2)
+          assert.strictEqual(yield* items.first.readText, "Three")
+          assert.strictEqual(yield* items.last.readText, "Two")
+        }), timeout)
+
+      it.effect("a chained XPath locator searches inside its scope, and other axes reach outside it", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* SharedContext.newPage
+          yield* page.goto(fixtureUrl(
+            origin,
+            "<ul id=\"a\"><li>A1</li></ul><ul id=\"b\"><li>B1</li><li>B2</li></ul>"
+          ))
+          assert.strictEqual(yield* page.locator(Locator.xpath("//li")).count, 3)
+          assert.strictEqual(yield* page.locator("#b").locator(Locator.xpath("//li")).count, 2)
+          assert.strictEqual(yield* page.locator("#b").locator(Locator.xpath("/li")).count, 2)
+          const parent = page.getByText("A1").locator(Locator.xpath(".."))
+          assert.deepStrictEqual(yield* parent.readAttribute("id"), Option.some("a"))
+          const next = page.locator("#a").locator(Locator.xpath("following-sibling::ul"))
+          assert.deepStrictEqual(yield* next.readAttribute("id"), Option.some("b"))
+        }), timeout)
+
+      it.effect("filter's has takes a relative XPath locator, evaluated from each candidate", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* SharedContext.newPage
+          yield* page.goto(fixtureUrl(
+            origin,
+            "<table><tr><td>Ann</td><td>Paid</td></tr><tr><td>Bob</td><td>Due</td></tr><tr><td>Paid</td><td>Cy</td></tr></table>"
+          ))
+          const paid = page.locator("tr").filter({ has: Locator.relative.locator(Locator.xpath("./td[2][.='Paid']")) })
+          assert.strictEqual(yield* paid.count, 1)
+          assert.strictEqual(yield* paid.locator("td").first.readText, "Ann")
+        }), timeout)
+
+      it.effect("an XPath locator after a frame boundary starts from the iframe's document", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* SharedContext.newPage
+          const child = fixtureUrl(origin, "<p>inside</p>")
+          yield* page.goto(fixtureUrl(origin, `<p>outside</p><iframe src="${child}"></iframe>`))
+          const inside = page.frame(page.locator("iframe")).locator(Locator.xpath("//p"))
+          assert.strictEqual(yield* inside.readText, "inside")
+          assert.strictEqual(yield* inside.count, 1)
+        }), timeout)
+
+      it.effect("an XPath locator keeps only the elements its expression selects", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* SharedContext.newPage
+          yield* page.goto(fixtureUrl(origin, "<ul><li id=\"one\">One</li><li>Two</li></ul>"))
+          assert.strictEqual(yield* page.locator(Locator.xpath("//li/text() | //li[@id='one']")).count, 1)
+          assert.strictEqual(yield* page.locator(Locator.xpath("//li/@id")).count, 0)
+        }), timeout)
+
+      it.effect("an XPath expression that is malformed or selects no nodes fails at once with InvalidInput", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* SharedContext.newPage
+          yield* page.goto(fixtureUrl(origin, "<ul><li>One</li></ul>"))
+          for (const expression of ["//li[", "count(//li)", "//svg:rect"]) {
+            for (
+              const locator of [
+                page.locator(Locator.xpath(expression)),
+                page.locator("#missing").locator(Locator.xpath(expression))
+              ]
+            ) {
+              const error = yield* locator.readText.pipe(Deadline.within("1 second"), Effect.flip)
+              assert(Locator.isLocatorError(error), String(error))
+              assert.strictEqual(error.reason._tag, "InvalidInput", expression)
+              if (error.reason._tag === "InvalidInput") {
+                assert.strictEqual(error.reason.input, "selector")
+                assert.strictEqual(error.reason.expected, "an XPath expression")
+              }
+            }
+          }
+          const error = yield* page.locator(Locator.xpath("count(//li)")).count.pipe(Effect.flip)
+          assert(Locator.isLocatorError(error), String(error))
+          assert.strictEqual(error.locator, "page.locator(Locator.xpath(\"count(//li)\"))")
+        }), timeout)
+
       it.effect("reads bounding boxes without visibility checks, scrolling or input", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -997,9 +1084,17 @@ export const contents = (
             y: Math.min(...red.map((p) =>
               p.y
             )),
-            width: Math.max(...red.map((p) => p.x)) - Math.min(...red.map((p) => p.x)) +
+            width: Math.max(...red.map((p) =>
+              p.x
+            )) - Math.min(...red.map((p) =>
+              p.x
+            )) +
               1,
-            height: Math.max(...red.map((p) => p.y)) - Math.min(...red.map((p) => p.y)) + 1
+            height: Math.max(...red.map((p) =>
+              p.y
+            )) - Math.min(...red.map((p) =>
+              p.y
+            )) + 1
           }
           // Stock WebKit paints iframe contents differently from coincident slotted light-DOM boxes.
           // Native paint is the reference here; rasterized edges may differ by one pixel.
@@ -1111,7 +1206,9 @@ export const contents = (
               if (
                 !["scaling", "nested CSS zoom"].includes(rule.name) &&
                 (yield* frameRectRefused(target.boundingBox))
-              ) continue
+              ) {
+                continue
+              }
               const box = Option.getOrThrow(yield* target.boundingBox)
               for (const key of ["x", "y", "width", "height"] as const) {
                 assert.closeTo(box[key], expected[key], .05, `${rule.name} ${key}, scrolled=${scrolled}`)
@@ -1481,14 +1578,25 @@ export const contents = (
               assert.strictEqual(reason.exception.message, "boom")
             }
             const rejected = reasonOf(
-              yield* Effect.exit(evaluate(() => Promise.reject(new Error("later"))))
+              yield* Effect.exit(evaluate(() =>
+                Promise.reject(new Error("later"))
+              ))
             )
             assert.strictEqual((rejected as unknown as Page.PageError).reason._tag, "EvaluationThrown")
             const argument = reasonOf(
-              yield* Effect.exit(evaluate((value: unknown) => value, { fn: () => 1, nested: [Symbol("s")] }))
+              yield* Effect.exit(evaluate((value: unknown) =>
+                value, {
+                fn: () =>
+                  1,
+                nested: [Symbol("s")]
+              }))
             )
             assert.deepInclude((argument as unknown as Page.PageError).reason, { _tag: "NotSerializable" })
-            const node = reasonOf(yield* Effect.exit(evaluate(() => document.body as unknown)))
+            const node = reasonOf(
+              yield* Effect.exit(evaluate(() =>
+                document.body as unknown
+              ))
+            )
             const nodeReason = (node as unknown as Page.PageError).reason
             assert.strictEqual(nodeReason._tag, "NotSerializable")
           }))
@@ -1521,7 +1629,8 @@ export const contents = (
                 throw "Foo: bar"
               }
             ], (fn) =>
-              Effect.map(thrownBy(fn), (exception) => `${exception?.name}: ${exception?.message}`))
+              Effect.map(thrownBy(fn), (exception) =>
+                `${exception?.name}: ${exception?.message}`))
             assert.deepStrictEqual(thrown, [
               "Error: qwerty",
               "Error: null",
@@ -1602,15 +1711,27 @@ export const contents = (
               yield* isolatedRefused(page.evaluateHandle(() =>
                 document.body
               ))
-            ) return
-            const body = yield* page.evaluateHandle(() => document.body)
+            ) {
+              return
+            }
+            const body = yield* page.evaluateHandle(() =>
+              document.body
+            )
             assert.isTrue(JSHandle.isJSHandle(body))
-            assert.strictEqual(yield* body.evaluate((element) => element.tagName), "BODY")
             assert.strictEqual(
-              yield* body.evaluate((element, id: string) => element.querySelector(`#${id}`)!.textContent, "x"),
+              yield* body.evaluate((element) =>
+                element.tagName
+              ),
+              "BODY"
+            )
+            assert.strictEqual(
+              yield* body.evaluate((element, id: string) =>
+                element.querySelector(`#${id}`)!.textContent, "x"),
               "hello"
             )
-            const paragraph = yield* body.evaluateHandle((element) => element.querySelector("p")!)
+            const paragraph = yield* body.evaluateHandle((element) =>
+              element.querySelector("p")!
+            )
             assert.strictEqual(yield* paragraph.evaluate((element) => element.id), "x")
             const data = yield* page.evaluateHandle(() => ({ a: 1, list: [1, 2] }))
             assert.deepStrictEqual(yield* data.read, { a: 1, list: [1, 2] })
@@ -2597,9 +2718,7 @@ export const contents = (
             // The loopback origin is a secure context over http, so a request to it sends a Secure cookie
             yield* jar.set({ name: "safe", value: "3", scope: { url: origin }, secure: true })
             const all = yield* jar.list
-            const token = all.find((cookie) =>
-              cookie.name === "token"
-            )!
+            const token = all.find((cookie) => cookie.name === "token")!
             assert.strictEqual(Redacted.value(token.value), "secret")
             assert.strictEqual(token.path, "/app")
             assert.deepStrictEqual(token.sameSite, Option.some("lax"))

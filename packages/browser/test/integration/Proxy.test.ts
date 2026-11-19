@@ -286,6 +286,7 @@ describe("stock WebKit proxy feasibility", () => {
               })
               const refused = yield* adapter.createUserContext({
                 proxy: Option.some({
+                  scheme: "http",
                   server: local.address,
                   bypass: [],
                   credentials: { username: "proxy-user", password: Redacted.make("fixture-secret") }
