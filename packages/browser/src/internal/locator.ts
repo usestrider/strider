@@ -48,6 +48,7 @@ import * as Evaluation from "./evaluation.ts"
 import type * as Execution from "./execution.ts"
 import * as FileInputImpl from "./fileInput.ts"
 import * as Filters from "./filters.ts"
+import * as FrameImpl from "./frame.ts"
 import * as FunctionSource from "./functionSource.ts"
 import * as Geometry from "./geometry.ts"
 import * as Input from "./input.ts"
@@ -1151,6 +1152,33 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     })
   }
 
+  /** `frameLocator.resolve`: a handle on the frame this iframe locator's element holds now. */
+  resolveFrame(inside: ReadonlyArray<Engine.Step>) {
+    const operation = "FrameLocator.resolve"
+    return Effect.gen({ self: this }, function*() {
+      yield* Access.check(this.owner.grant)
+      const record = yield* Operation.record
+      const { runtime, page, grant } = this.owner
+      const found = yield* Runtime.frameAt(runtime, page, inside, record.id, record.budget.at).pipe(
+        Effect.mapError((failure) =>
+          failure._tag === "Deadline"
+            ? record.timeout(Option.fromUndefinedOr(failure.hint))
+            : this.sendFailure(operation, failure, record)
+        )
+      )
+      if (Option.isNone(found)) {
+        return yield* Effect.fail(
+          this.error(
+            operation,
+            new Locator.NoMatch({ hint: "No iframe matched that holds a frame with a document" }),
+            record.id
+          )
+        )
+      }
+      return FrameImpl.make({ runtime, page, grant, id: found.value })
+    }).pipe(Operation.named(operation, { attributes: { "browser.page.id": this.owner.page.id } }))
+  }
+
   // ── Errors ──
 
   error(
@@ -2127,6 +2155,7 @@ export const frameLocator = (owner: Owner, steps: ReadonlyArray<Engine.Step>): L
         script,
         options
       ),
+    resolve: make(steps).resolveFrame(inside) as Locator.FrameLocator["resolve"],
     toString: () => `FrameLocator(page.frame(page.${describeSteps(steps)}))`
   } as Locator.FrameLocator
 }

@@ -49,6 +49,7 @@ import * as Devices from "./devices.ts"
 import * as Emulation from "./emulation.ts"
 import * as Evaluation from "./evaluation.ts"
 import * as ExpectSource from "./expectSource.ts"
+import * as FrameImpl from "./frame.ts"
 import * as FunctionSource from "./functionSource.ts"
 import * as Guarded from "./guarded.ts"
 import * as Handles from "./handles.ts"
@@ -320,6 +321,7 @@ export const make = (owner: PageOwner): Page.Page => {
     ...observeMembers(owner),
     ...queries,
     frame: (iframe) => LocatorImpl.pageFrame({ runtime, page: entry, grant: owner.grant }, iframe),
+    frameById: (id) => FrameImpl.byId({ runtime, page: entry, grant: owner.grant }, id),
     get viewportSize() {
       return Effect.gen(function*() {
         const record = yield* Operation.record

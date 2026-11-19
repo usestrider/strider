@@ -27,6 +27,7 @@ import type * as AriaRole from "./AriaRole.ts"
 import type * as Deadline from "./Deadline.ts"
 import * as Diagnostics from "./Diagnostics.ts"
 import type * as FileInput from "./FileInput.ts"
+import type * as Frame from "./Frame.ts"
 import * as ReasonCause from "./internal/reasonCause.ts"
 import * as Steps from "./internal/steps.ts"
 import type * as JSHandle from "./JSHandle.ts"
@@ -1978,6 +1979,24 @@ export interface ReadonlyFrameLocator extends Queries<ReadonlyLocator> {
    */
   readonly owner: ReadonlyLocator
   /**
+   * A handle on the frame the iframe holds now. The handle keeps to that frame: when the iframe is replaced or
+   * removed, it reports `Detached`, while this frame locator finds the new iframe. It fails with `NoMatch` when no
+   * iframe matches, or the one that matches holds no document yet.
+   *
+   * **Example** (Holding a frame across its navigations)
+   *
+   * ```ts import.meta.vitest
+   * import type { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const frameOf = Effect.fn("frameOf")(function*(page: Page.ReadonlyPage) {
+   *   const frame = yield* page.frame(page.locator("iframe")).resolve
+   *   return frame.id
+   * })
+   * ```
+   */
+  readonly resolve: Effect.Effect<Frame.ReadonlyFrame, LocatorError | Target.TargetGone | Deadline.Timeout>
+  /**
    * Enters a nested iframe, found by a locator built from this frame locator.
    *
    * **Gotchas**
@@ -2031,6 +2050,7 @@ export interface FrameLocator extends ReadonlyFrameLocator {
   getByTestId(id: string | RegExp): Locator
   locator(selector: string | XPath): Locator
   frame(iframe: ReadonlyLocator): FrameLocator
+  readonly resolve: Effect.Effect<Frame.Frame, LocatorError | Target.TargetGone | Deadline.Timeout>
   /**
    * Adds a `<script>` element to the iframe's current document, returning it once it has loaded, run, or been
    * accepted: a URL's script loads, a classic inline script runs, and an inline module is accepted without waiting

@@ -541,6 +541,24 @@ const routing = <A, E = never, R = never>(
     }
   })
 
+/**
+ * The frame a frame locator's steps enter now: its iframe's frame, once the frame has a document; `None` when no
+ * iframe matches, or it holds no frame or document yet.
+ */
+export const frameAt = (
+  runtime: Runtime,
+  page: Model.PageEntry,
+  steps: ReadonlyArray<Engine.Step>,
+  id: Diagnostics.OperationId,
+  at: MonotonicInstant.MonotonicInstant
+): Effect.Effect<Option.Option<Target.NavigableId>, SendFailure> =>
+  routing(runtime, page, steps, false, id, at, (route) =>
+    Effect.succeed(Option.some(
+      route._tag === "Entered"
+        ? Option.fromUndefinedOr(route.routed.hops.at(-1)?.frame)
+        : Option.none<Target.NavigableId>()
+    )))
+
 /** What the engine answered, and where. */
 export interface Answer {
   readonly response: Engine.Response

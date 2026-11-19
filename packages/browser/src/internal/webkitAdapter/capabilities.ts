@@ -107,6 +107,9 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
       entry("navigation.referrer", "unsupported", [
         "stock WebKit navigates by script, with the document's own referrer"
       ]),
+      entry("navigation.childFrames", "supported", [
+        "stock WebKit navigates a frame by script, as it does a page, so a frame's navigation has no referrer"
+      ]),
       entry("navigation.traverse", "unsupported", [
         "stock WebKit's inspector reports going back or forward under the old document's URL"
       ]),
