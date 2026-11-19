@@ -73,7 +73,7 @@ Each module has the verbs above, and filters on fields of its own:
 | [`Download`](/docs/events/kinds#downloads) | downloads                                                    | `url`                              |
 | [`NetworkRequest`](/docs/events/network) | requests, one per redirect hop                               | `url`, `method`, `resourceType`    |
 | [`NetworkResponse`](/docs/events/network) | responses, with their bodies when asked                      | `url`, `method`, `status`, `body`  |
-| `ConsoleMessage`    | console output                                               | `level`, `text`                    |
+| [`ConsoleMessage`](/docs/events/console) | console output, from the page or the browser                 | `level`, `text`                    |
 | `UncaughtException` | errors nothing caught, and rejections nothing handled        | `message`                          |
 | [`BrowserWorker`](/docs/api/browser/BrowserWorker) | workers the page or context started                          | `url`, `kind`                      |
 | [`NetworkConnection`](/docs/api/browser/NetworkConnection) | WebSockets and event sources, with their frames               | `url`, `kind`                      |

@@ -1823,3 +1823,13 @@ the `dragenter`. So no sequence of drag commands also gives a `dragover` while t
 move: a drag of one held move shows its first `dragover` at the release or the next move. Sending `dragEnter` and
 `dragOver` at the move that starts the drag, which shows the drag over the target while the button is held, was
 rejected: every drop would then end with a second `dragover`, which Playwright's and Puppeteer's drag tests both reject.
+
+## Console messages name their source in one shared set of categories
+
+A `ConsoleMessage` carries a `source`: `Page` for the page's own `console` calls, or `Browser` with a `category` from
+one set every browser shares (`network`, `security`, `deprecation`, `intervention`, `violation`, `rendering`,
+`storage`, `other`). The source follows from the event that delivered the message, not from which domains are enabled.
+Each adapter maps its browser's names onto the set, and what fits none is `other`, so a program can filter for
+`security` the same way on every browser. Rejected: keeping each browser's own name beside the category, which would
+make that name part of the API and tie a program to one browser's wording; and a default `source` on the
+constructor, which would be a hidden default, and wrong for the browser's own messages.

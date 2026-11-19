@@ -257,6 +257,8 @@ export const register = (handlers: Kit.Handlers<Event>) =>
             text: params.text ?? "",
             location,
             origin,
+            // The browser's own messages come as `javascript` entries, which read as uncaught exceptions
+            source: { _tag: "Page" },
             at: Adapter.now()
           })
         })

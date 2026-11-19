@@ -152,6 +152,11 @@ cache shows up as a request.
 
 **Console text is Firefox's own formatting,** which writes `%f` as printf does: `1.250000`.
 
+**The browser's own console messages are uncaught exceptions.** Firefox sends a Content Security Policy violation
+or a CORS failure as a script error, so it arrives as an [`UncaughtException`](/docs/events/events#history), and
+every console message's [`source`](/docs/events/console) is `Page`. The capability
+`console.source` is `unsupported` here.
+
 **Typing is key by key.** [Keyboard layouts](/docs/pages/actions#keys) send no AltGr or dead keys, and the page
 sees a US key's `code`. [`insertText`](/docs/pages/actions#the-keyboard-and-the-mouse) and `fill` send no key
 events to insert text, but the `beforeinput` before the text is Strider's own, since Firefox fires none: its

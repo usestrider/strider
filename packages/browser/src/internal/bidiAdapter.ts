@@ -113,9 +113,11 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       entry("network.challenges", "supported"),
       entry("bodies", "supported", ["only with a body collection declared before the request"]),
       entry("console", "partial", [
-        "a dedicated worker's messages are attributed to its page, and shared and service workers' aren't reported",
+        "a dedicated worker's messages are attributed to its page, and shared and service workers' aren't reported"
+      ]),
+      entry("console.source", "unsupported", [
         "the browser's own messages, such as a CSP violation or a CORS failure, arrive as uncaught exceptions, as " +
-        "Firefox sends them as script errors"
+        "Firefox sends them as script errors, so every console message is the page's"
       ]),
       entry("prompts", "supported"),
       entry("prompts.kind", "supported"),

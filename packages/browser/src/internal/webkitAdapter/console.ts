@@ -33,6 +33,21 @@ const realmOfObject = (state: State, target: TargetEntry, objectId: string | und
   }
 }
 
+/** The categories of the channels that name one. */
+const channelCategories: Readonly<Record<string, ConsoleMessage.Category>> = {
+  network: "network",
+  security: "security",
+  rendering: "rendering",
+  storage: "storage"
+}
+
+/** Who wrote a message: the page with a `console` call, or the browser on one of its own channels. */
+const sourceOf = (channel: Console.ChannelSource): ConsoleMessage.Source =>
+  channel === "console-api" ? { _tag: "Page" } : {
+    _tag: "Browser",
+    category: Object.hasOwn(channelCategories, channel) ? channelCategories[channel]! : "other"
+  }
+
 const consoleMessage = (
   state: State,
   message: Console.ConsoleMessage,
@@ -62,6 +77,7 @@ const consoleMessage = (
       origin: realm.document !== undefined
         ? { _tag: "Page", page: target.page.id }
         : { _tag: "Worker", realm: realm.id },
+      source: sourceOf(message.source),
       at: Adapter.now()
     })
   })
