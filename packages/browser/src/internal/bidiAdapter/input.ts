@@ -10,6 +10,7 @@ import * as Script from "../../bidi-protocol/Script.ts"
 import type * as L1Target from "../../Target.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as Operation from "../operation.ts"
 import { buttons, keyValue } from "./mapping.ts"
 import { documentOf, navigableById, type NavigableEntry, navigableOf, type State } from "./state.ts"
 
@@ -25,16 +26,22 @@ export interface PointerTarget {
 /**
  * The context pointer input that names no frame goes on at a point in the page's coordinates, and its origin.
  * Firefox delivers page coordinates into a frame of the page's origin but not into one of another, so in a context
- * holding a frame whose origin isn't its parent's (`crossesOrigin`) the point is hit-tested in a sandbox, one call a
- * level, through open shadow roots, and where it lands on a frame's element, input goes to that frame's context,
- * from the element's content box. A context holding none costs no call; a point that hits no frame element ends the
- * search where it is.
+ * holding a frame whose origin isn't its parent's (`crossesOrigin`) the boxes of its frame elements are read
+ * (`frameBoxes`), once in an operation, and a point outside all of them stays in that context. A point inside one is
+ * hit-tested in a sandbox, through open shadow roots, so an element drawn over the frame keeps the point, and where
+ * it lands on a frame's element, input goes to that frame's context, from the element's content box. A context
+ * holding none costs no call, a point outside its frames one call in an operation, and a point inside one more for
+ * each level; a point that hits no frame element ends the search where it is.
  */
 const framelessContext = Effect.fnUntraced(function*(state: State, page: NavigableEntry, x: number, y: number) {
   // The frame tree read here holds every event received before the reply the caller acted on: the protocol client
   // hands over a reply only once those are folded, a frame's commit included
   let sent: PointerTarget = { navigable: page, x: 0, y: 0, width: Infinity, height: Infinity }
   while (crossesOrigin(sent.navigable)) {
+    const boxes = yield* frameBoxes(state, page, sent.navigable)
+    const within = (box: Box) =>
+      x - sent.x >= box[0] && x - sent.x <= box[2] && y - sent.y >= box[1] && y - sent.y <= box[3]
+    if (boxes !== undefined && !boxes.some(within)) return sent
     const reply = yield* Kit.protocol(state.send(Script.callFunction({
       functionDeclaration: hitFrame,
       target: { context: sent.navigable.bidi, sandbox: "__strider_utility__" },
@@ -56,6 +63,83 @@ const framelessContext = Effect.fnUntraced(function*(state: State, page: Navigab
     }
   }
   return sent
+})
+
+/** A frame element's bounds in its document's viewport: left, top, right and bottom. */
+type Box = readonly [number, number, number, number]
+
+/**
+ * The boxes of the frame elements each context's document holds, read once in an operation, by page and by
+ * context. A context whose boxes couldn't be read holds `undefined`, and its points are hit-tested. The boxes are
+ * those of the operation's start: a frame that moves, grows or appears while an operation's events are sent, as
+ * one its own input scrolls or a page's handler inserts, is where it was, so a point that has come into the frame
+ * since goes to the context above it, which Firefox doesn't deliver into a frame of another origin.
+ */
+const operationBoxes = new WeakMap<
+  Operation.Record,
+  WeakMap<NavigableEntry, Map<NavigableEntry, ReadonlyArray<Box> | undefined>>
+>()
+
+/**
+ * The number of frame elements in a document that hold a window, then the bounds of each frame element, open
+ * shadow roots included. A nested frame is drawn within its element, so a point outside every box is outside every
+ * frame the document holds, at any depth.
+ */
+const readFrameBoxes = `() => {
+  const boxes = []
+  let windows = 0
+  const walk = (root) => {
+    for (const element of root.querySelectorAll("*")) {
+      if (element.shadowRoot !== null) walk(element.shadowRoot)
+      const name = element.localName
+      if (name !== "iframe" && name !== "frame" && name !== "object" && name !== "embed") continue
+      if (element.contentWindow != null) windows++
+      const rect = element.getBoundingClientRect()
+      boxes.push(rect.left, rect.top, rect.right, rect.bottom)
+    }
+  }
+  walk(document)
+  return [windows, ...boxes]
+}`
+
+/**
+ * The boxes of the frame elements in a context's document, in its viewport, read in Strider's own sandbox and kept
+ * for the operation (`operationBoxes`). Where they can't be trusted, it returns `undefined`: a failed read, or fewer
+ * frame elements with a window than the context has child contexts, as when a closed shadow root hides one from the
+ * page's scripts.
+ */
+const frameBoxes = Effect.fnUntraced(function*(state: State, page: NavigableEntry, navigable: NavigableEntry) {
+  const record = Option.getOrUndefined(yield* Operation.current)
+  let pages = record === undefined ? undefined : operationBoxes.get(record)
+  if (record !== undefined && pages === undefined) operationBoxes.set(record, pages = new WeakMap())
+  let contexts = pages?.get(page)
+  if (pages !== undefined && contexts === undefined) pages.set(page, contexts = new Map())
+  if (contexts?.has(navigable) === true) return contexts.get(navigable)
+  const boxes = yield* Kit.protocol(state.send(Script.callFunction({
+    functionDeclaration: readFrameBoxes,
+    target: { context: navigable.bidi, sandbox: "__strider_utility__" },
+    arguments: [],
+    awaitPromise: false,
+    resultOwnership: "none"
+  }))).pipe(
+    Effect.map((reply): ReadonlyArray<Box> | undefined => {
+      const value = reply.type === "success" && reply.result.type === "array" ? reply.result.value : undefined
+      const numbers = (value ?? []).map((each) =>
+        each.type === "number" && typeof each.value === "number" ? each.value : NaN
+      )
+      const [windows, ...flat] = numbers
+      if (
+        windows === undefined || numbers.some(Number.isNaN) || flat.length % 4 !== 0 ||
+        windows < navigable.children.size
+      ) return undefined
+      const boxes: Array<Box> = []
+      for (let i = 0; i < flat.length; i += 4) boxes.push([flat[i]!, flat[i + 1]!, flat[i + 2]!, flat[i + 3]!])
+      return boxes
+    }),
+    Effect.catch(() => Effect.succeed(undefined))
+  )
+  contexts?.set(navigable, boxes)
+  return boxes
 })
 
 /** The origin of a context's document; one at `about:` has its parent's, as `about:blank` and `srcdoc` do. */
