@@ -223,6 +223,7 @@ export const capabilities = (
       ]),
       entry("capability.axTree", "supported"),
       entry("capability.screencast", "supported"),
+      entry("capability.overlay", "supported", ["drawn in the page, so screenshots show it too"]),
       entry(
         "capability.video",
         videoWriter ? "supported" : "unsupported",

@@ -8,9 +8,11 @@
  * @stability unstable
  * @since 0.1.0
  */
+import type * as Duration from "effect/Duration"
 import type * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
+import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Deadline from "./Deadline.ts"
 import * as Diagnostics from "./Diagnostics.ts"
@@ -231,6 +233,188 @@ export const Screencast: Capability<ScreencastControl> = make("Screencast")
 export const Video: Capability<VideoRecording> = make("Video")
 
 /**
+ * Overlays drawn over a page for recordings: HTML of the caller's, and chapter title cards.
+ *
+ * **Details**
+ *
+ * Overlays are elements in the page, so they appear in screenshots and video alike, on every browser. They sit
+ * above the page, ignore the pointer, and are never matched by locators, included in snapshots or hit by an
+ * action. They stay across the page's navigations, drawn again in each document its main frame commits. WebKit's
+ * video samples the page, so it can miss an overlay shown for less than its interval.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export interface OverlayControl {
+  /**
+   * Shows `html` over the page until the caller's scope closes, or until `duration` passes, whichever is first.
+   *
+   * **Details**
+   *
+   * It returns once the overlay is in the page; the removal at `duration` happens apart from the caller. The HTML
+   * is the caller's and is inserted as it is; its scripts don't run.
+   *
+   * **Example** (Labeling a recording while a step runs)
+   *
+   * ```ts import.meta.vitest
+   * import { Capability, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const labeled = Effect.fn("labeled")(function*(page: Page.Page) {
+   *   const overlay = yield* page.capability(Capability.Overlay)
+   *   yield* overlay.add(`<div style="position:fixed;top:8px;right:8px">Signing in</div>`)
+   *   yield* page.getByRole("button", { name: "Sign in" }).click()
+   * }, Effect.scoped)
+   * ```
+   */
+  add(
+    html: string,
+    options?: OverlayControl.AddOptions | undefined
+  ): Effect.Effect<void, CapabilityError | Target.TargetGone | Deadline.Timeout, Scope.Scope>
+  /**
+   * Shows a centered title card over a blurred page for `duration`, then removes it, returning once it has gone.
+   *
+   * **Details**
+   *
+   * The title and description are shown as text, never as HTML.
+   *
+   * **Example** (Opening a chapter of a recording)
+   *
+   * ```ts import.meta.vitest
+   * import { Capability, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const checkout = Effect.fn("checkout")(function*(page: Page.Page) {
+   *   const overlay = yield* page.capability(Capability.Overlay)
+   *   yield* overlay.chapter("Checkout", { description: "Paying by card" })
+   *   yield* page.getByRole("button", { name: "Pay" }).click()
+   * }, Effect.scoped)
+   * ```
+   */
+  chapter(
+    title: string,
+    options?: OverlayControl.ChapterOptions | undefined
+  ): Effect.Effect<void, CapabilityError | Target.TargetGone | Deadline.Timeout>
+  /**
+   * Hides every overlay without removing any, until `show`.
+   *
+   * **Example** (Taking a screenshot without the overlays)
+   *
+   * ```ts import.meta.vitest
+   * import { Capability, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const plain = Effect.fn("plain")(function*(page: Page.Page) {
+   *   const overlay = yield* page.capability(Capability.Overlay)
+   *   yield* overlay.hide
+   *   const png = yield* page.screenshot()
+   *   yield* overlay.show
+   *   return png
+   * }, Effect.scoped)
+   * ```
+   */
+  readonly hide: Effect.Effect<void, CapabilityError | Target.TargetGone | Deadline.Timeout>
+  /**
+   * Shows the overlays `hide` hid.
+   *
+   * **Example** (Showing the overlays again)
+   *
+   * ```ts import.meta.vitest
+   * import { Capability, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const reveal = Effect.fn("reveal")(function*(page: Page.Page) {
+   *   const overlay = yield* page.capability(Capability.Overlay)
+   *   yield* overlay.hide
+   *   yield* overlay.show
+   * }, Effect.scoped)
+   * ```
+   */
+  readonly show: Effect.Effect<void, CapabilityError | Target.TargetGone | Deadline.Timeout>
+}
+
+/**
+ * Options of `OverlayControl`'s members.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export declare namespace OverlayControl {
+  /**
+   * Options of `add`.
+   *
+   * @stability unstable
+   * @category models
+   * @since 0.1.0
+   */
+  export interface AddOptions {
+    /**
+     * How long the overlay stays, unless the caller's scope closes first.
+     *
+     * @default until the caller's scope closes
+     */
+    readonly duration?: Duration.Input | undefined
+  }
+  /**
+   * Options of `chapter`.
+   *
+   * @stability unstable
+   * @category models
+   * @since 0.1.0
+   */
+  export interface ChapterOptions {
+    /**
+     * A line of text under the title.
+     *
+     * @default no description
+     */
+    readonly description?: string | undefined
+    /**
+     * How long the card is shown.
+     *
+     * @default "2 seconds"
+     */
+    readonly duration?: Duration.Input | undefined
+  }
+}
+
+/**
+ * Overlays drawn over a page for recordings, on every backend.
+ *
+ * **Details**
+ *
+ * Requires control access. Nothing is drawn or watched until it is acquired. Overlays added through it are removed
+ * when their own scope closes, and every one when the capability's scope closes.
+ *
+ * **Example** (Opening a recording with a chapter card)
+ *
+ * ```ts import.meta.vitest
+ * import { Capability, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const recordSignIn = Effect.fn("recordSignIn")(function*(page: Page.Page) {
+ *   const video = yield* page.capability(Capability.Video)
+ *   const overlay = yield* page.capability(Capability.Overlay)
+ *   yield* overlay.chapter("Signing in")
+ *   yield* page.getByRole("button", { name: "Sign in" }).click()
+ *   return video
+ * })
+ * ```
+ *
+ * @see OverlayControl
+ * @stability unstable
+ * @category capabilities
+ * @since 0.1.0
+ */
+export const Overlay: Capability<OverlayControl, "control"> = {
+  [TypeId]: () => undefined as unknown as OverlayControl,
+  name: "Overlay",
+  access: "control"
+}
+
+/**
  * A native Chromium virtual authenticator on this page, removed when the caller's scope closes.
  *
  * **Details**
@@ -273,7 +457,13 @@ export const VirtualAuthenticator: Capability<WebAuthn.VirtualAuthenticator, "co
  * @category schemas
  * @since 0.1.0
  */
-export const CapabilityErrorReason = Schema.Union([Reason.NotPermitted, Reason.Unsupported, Reason.BackendFailure])
+export const CapabilityErrorReason = Schema.Union([
+  Reason.NotPermitted,
+  Reason.Unsupported,
+  Reason.BackendFailure,
+  Reason.InvalidInput,
+  Reason.PromptBlocking
+])
 
 /**
  * The reasons acquiring or using a capability can fail.
