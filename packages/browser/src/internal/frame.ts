@@ -183,21 +183,9 @@ export const make = (owner: Owner): Frame.Frame => {
     error: frameError,
     attributes: { "browser.page.id": entry.id, "browser.frame.id": frame },
     realm,
-    noun: "frame"
+    noun: "frame",
+    check: Access.check(owner.grant)
   }
-
-  const evaluation = <B, R>(
-    operation: string,
-    world: Adapter.World,
-    fn: Function,
-    args: ReadonlyArray<unknown>,
-    result: "value" | "handle",
-    then: (realm: Target.RealmId, value: Adapter.RemoteValue) => Effect.Effect<B, Evaluation.Failure, R>
-  ) =>
-    Effect.flatMap(
-      Access.check(owner.grant),
-      () => PageImpl.evaluateIn(driven, operation, world, fn, args, result, then)
-    )
 
   /**
    * A document that ends before its readiness counts as reached, as for a page; one that ended with its frame
@@ -239,9 +227,8 @@ export const make = (owner: Owner): Frame.Frame => {
     }
     const href = parsed.success.href
     const waitUntil = options?.waitUntil ?? "commit"
-    return Effect.gen(function*() {
-      yield* Access.check(owner.grant)
-      // A child frame's readiness is only waited for where the browser reports it
+    // A child frame's readiness is only waited for where the browser reports it
+    const ready = Effect.gen(function*() {
       if (frame !== entry.id && waitUntil !== "commit") {
         const capabilities = yield* SubscriptionRef.get(model.adapter.capabilities)
         const readiness = capabilities.entries.find((each) => each.name === "frames.readiness")
@@ -259,22 +246,22 @@ export const make = (owner: Owner): Frame.Frame => {
           ))
         }
       }
-      return yield* PageImpl.navigateIn(
-        driven,
-        operation,
-        Option.some(Urls.reported(href)),
-        (id) =>
-          Effect.map(model.adapter.navigate(frame, href, { referrer: Option.none() }), Option.some).pipe(
-            Effect.mapError((error) => {
-              const mapped = Operation.fromAdapter(error, id, runtime.backend)
-              return mapped._tag !== "Reason" ? mapped.error : frameError(operation, mapped.reason, id)
-            })
-          ),
-        waitUntil,
-        options?.accept ?? [],
-        stillAttached
-      ).pipe(Effect.map(Option.getOrThrow))
     })
+    return PageImpl.navigateIn(
+      { ...driven, check: Effect.andThen(driven.check, ready) },
+      operation,
+      Option.some(Urls.reported(href)),
+      (id) =>
+        Effect.map(model.adapter.navigate(frame, href, { referrer: Option.none() }), Option.some).pipe(
+          Effect.mapError((error) => {
+            const mapped = Operation.fromAdapter(error, id, runtime.backend)
+            return mapped._tag !== "Reason" ? mapped.error : frameError(operation, mapped.reason, id)
+          })
+        ),
+      waitUntil,
+      options?.accept ?? [],
+      stillAttached
+    ).pipe(Effect.map(Option.getOrThrow))
   }
 
   return {
@@ -289,7 +276,8 @@ export const make = (owner: Owner): Frame.Frame => {
       operation: "Frame.status.waitFor"
     }),
     evaluate: <Args extends ReadonlyArray<unknown>, A>(fn: (...args: Args) => A | Promise<A>, ...args: Args) =>
-      evaluation(
+      PageImpl.evaluateIn(
+        driven,
         "Frame.evaluate",
         Evaluation.isolatedWorld,
         fn,
@@ -301,7 +289,8 @@ export const make = (owner: Owner): Frame.Frame => {
       fn: (...args: Args) => A | Promise<A>,
       ...args: Args
     ) =>
-      evaluation(
+      PageImpl.evaluateIn(
+        driven,
         "Frame.evaluateInMainWorld",
         { _tag: "Main" },
         fn,
@@ -310,7 +299,8 @@ export const make = (owner: Owner): Frame.Frame => {
         (_realm, value) => Evaluation.fromRemote(value)
       ) as Effect.Effect<JSHandle.Serialized<A>, Frame.FrameError | Target.TargetGone | Deadline.Timeout>,
     evaluateHandle: <Args extends ReadonlyArray<unknown>, A>(fn: (...args: Args) => A | Promise<A>, ...args: Args) =>
-      evaluation(
+      PageImpl.evaluateIn(
+        driven,
         "Frame.evaluateHandle",
         Evaluation.isolatedWorld,
         fn,

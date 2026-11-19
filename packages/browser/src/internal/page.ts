@@ -200,6 +200,8 @@ export interface Driven<E> {
   ) => Effect.Effect<Target.RealmId, Evaluation.Failure>
   /** What a deadline before the call says the navigable had: "page" or "frame". */
   readonly noun: string
+  /** Run first: whether the handle's access still holds. */
+  readonly check: Effect.Effect<void, Target.TargetGone | E>
 }
 
 /** Waits for a navigation the adapter started, then for `waitUntil` on the document it committed. */
@@ -219,6 +221,7 @@ export const navigateIn = <E>(
 ) => {
   const model = target.runtime.model
   return Effect.gen(function*() {
+    yield* target.check
     const record = yield* Operation.record
     const id = record.id
     const budget = record.budget
@@ -283,6 +286,7 @@ export const evaluateIn = <E, B, R>(
 ): Effect.Effect<B, E | Target.TargetGone | Deadline.Timeout, R> =>
   Effect.gen(function*() {
     const runtime = target.runtime
+    yield* target.check
     const record = yield* Operation.record
     const id = record.id
     const budget = record.budget
@@ -358,27 +362,10 @@ export const make = (owner: PageOwner): Page.Page => {
     error: pageError,
     attributes: { "browser.page.id": entry.id },
     realm: (world, id, at) => Evaluation.pageRealm(runtime, entry, world, id, at),
-    noun: "page"
+    noun: "page",
+    check: Effect.void
   }
 
-  const navigate = (
-    operation: string,
-    url: Option.Option<Url.Url>,
-    start: (
-      id: Diagnostics.OperationId
-    ) => Effect.Effect<Option.Option<PageNavigation.Id>, Target.TargetGone | Page.PageError | Deadline.Timeout>,
-    waitUntil: PageNavigation.LoadState,
-    accept: ReadonlyArray<"download" | "noContent"> = []
-  ) => navigateIn(self, operation, url, start, waitUntil, accept)
-
-  const evaluation = <B, R>(
-    operation: string,
-    world: Adapter.World,
-    fn: Function,
-    args: ReadonlyArray<unknown>,
-    result: "value" | "handle",
-    then: (realm: Target.RealmId, value: Adapter.RemoteValue) => Effect.Effect<B, Evaluation.Failure, R>
-  ) => evaluateIn(self, operation, world, fn, args, result, then)
   const page: Page.Page = {
     ...observeMembers(owner),
     ...queries,
@@ -456,7 +443,8 @@ export const make = (owner: PageOwner): Page.Page => {
     localStorage: Storage.originStorage(runtime, entry, "local"),
     sessionStorage: Storage.originStorage(runtime, entry, "session"),
     evaluate: <Args extends ReadonlyArray<unknown>, A>(fn: (...args: Args) => A | Promise<A>, ...args: Args) =>
-      evaluation(
+      evaluateIn(
+        self,
         "Page.evaluate",
         Evaluation.isolatedWorld,
         fn,
@@ -483,7 +471,8 @@ export const make = (owner: PageOwner): Page.Page => {
         ))
       }
       const parsed = result.success
-      return navigate(
+      return navigateIn(
+        self,
         "Page.goto",
         Option.some(Urls.reported(parsed.href)),
         (id) =>
@@ -639,7 +628,8 @@ export const make = (owner: PageOwner): Page.Page => {
         })
       ),
     reload: (options) =>
-      navigate(
+      navigateIn(
+        self,
         "Page.reload",
         Option.none(),
         (id) =>
@@ -649,14 +639,16 @@ export const make = (owner: PageOwner): Page.Page => {
         options?.waitUntil ?? "commit"
       ).pipe(Effect.map(Option.getOrThrow)),
     back: (options) =>
-      navigate(
+      navigateIn(
+        self,
         "Page.back",
         Option.none(),
         (id) => adapter.traverse(entry.id, -1).pipe(Effect.mapError((error) => failure("Page.back", id, error))),
         options?.waitUntil ?? "commit"
       ),
     forward: (options) =>
-      navigate(
+      navigateIn(
+        self,
         "Page.forward",
         Option.none(),
         (id) => adapter.traverse(entry.id, 1).pipe(Effect.mapError((error) => failure("Page.forward", id, error))),
@@ -666,7 +658,8 @@ export const make = (owner: PageOwner): Page.Page => {
       fn: (...args: Args) => A | Promise<A>,
       ...args: Args
     ) =>
-      evaluation(
+      evaluateIn(
+        self,
         "Page.evaluateInMainWorld",
         { _tag: "Main" },
         fn,
@@ -678,7 +671,8 @@ export const make = (owner: PageOwner): Page.Page => {
         Page.PageError | Target.TargetGone | Deadline.Timeout
       >,
     evaluateHandle: <Args extends ReadonlyArray<unknown>, A>(fn: (...args: Args) => A | Promise<A>, ...args: Args) =>
-      evaluation(
+      evaluateIn(
+        self,
         "Page.evaluateHandle",
         Evaluation.isolatedWorld,
         fn,
