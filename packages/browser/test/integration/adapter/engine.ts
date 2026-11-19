@@ -3174,6 +3174,31 @@ document.getElementById("list").attachShadow({ mode: "open" }).innerHTML = '<ul>
             assert.strictEqual(invalid._tag, "InvalidSelector")
           }), timeout)
 
+        it.effect("matches test ids exactly as written, by string or by pattern", () =>
+          Effect.gen(function*() {
+            const { send } = yield* open(
+              backend,
+              `<p data-testid="row-1">a</p><p data-testid="row-2">b</p><p data-testid="Row-3">c</p>` +
+                `<p data-testid="row  4">d</p><p data-testid=" row-5">e</p><p>none</p>`
+            )
+            const testId = (matcher: Engine.TextMatcher) =>
+              send({ op: "count", steps: [{ _tag: "TestId", matcher }] }).pipe(Effect.map(count))
+            const pattern = (source: string, flags = ""): Engine.TextMatcher => ({ _tag: "RegExp", source, flags })
+            // A string is exact, case-sensitive and compared with the raw value.
+            assert.strictEqual(yield* testId(text("row-1", true)), 1)
+            assert.strictEqual(yield* testId(text("row", true)), 0)
+            assert.strictEqual(yield* testId(text("row-3", true)), 0)
+            assert.strictEqual(yield* testId(text("row-5", true)), 0)
+            // A pattern is tested against the raw value, with its own flags.
+            assert.strictEqual(yield* testId(pattern("^row-")), 2)
+            assert.strictEqual(yield* testId(pattern("^row-", "i")), 3)
+            assert.strictEqual(yield* testId(pattern("row  4")), 1)
+            assert.strictEqual(yield* testId(pattern("^row 4$")), 0)
+            assert.strictEqual(yield* testId(pattern("^ row-5$")), 1)
+            // An element without the attribute never matches, even a pattern that matches the empty string.
+            assert.strictEqual(yield* testId(pattern("")), 5)
+          }), timeout)
+
         it.effect("searches a scope's own open shadow root, and a root nested in it, with every kind of step", () =>
           Effect.gen(function*() {
             const { send } = yield* open(
@@ -3200,7 +3225,7 @@ document.getElementById("outer").attachShadow({ mode: "open" }).innerHTML =
             assert.strictEqual(yield* inHost({ _tag: "Placeholder", matcher: text("who") }), 1)
             assert.strictEqual(yield* inHost({ _tag: "AltText", matcher: text("logo") }), 1)
             assert.strictEqual(yield* inHost({ _tag: "Title", matcher: text("tip") }), 1)
-            assert.strictEqual(yield* inHost({ _tag: "TestId", id: "go" }), 1)
+            assert.strictEqual(yield* inHost({ _tag: "TestId", matcher: text("go", true) }), 1)
             const hasDeep: Engine.Step = {
               _tag: "Filter",
               hasText: null,

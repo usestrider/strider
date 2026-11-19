@@ -199,6 +199,7 @@ export const capabilities = (
       entry("emulation.extraHTTPHeaders", "supported"),
       entry("emulation.touch", "supported", ["touch event handlers appear at the next document"]),
       entry("emulation.focus", "supported"),
+      entry("bypassCSP", "supported"),
       entry("screenshot.cssScale", "supported"),
       entry("screenshot.omitBackground", "supported"),
       entry("pdf.headerFooter", "supported"),

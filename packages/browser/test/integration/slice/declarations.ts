@@ -118,6 +118,18 @@ const crossSiteFrame = Effect.fnUntraced(function*(
 const json = (value: unknown) => HttpServerResponse.jsonUnsafe(value)
 
 /**
+ * A page that says whether its inline script ran and whether a script its policy allows could `eval`: under the
+ * site's `/csp`, `blocked` and `refused` unless the policy is bypassed.
+ */
+const cspProbe =
+  `<pre id="inline">blocked</pre><pre id="eval">pending</pre><script>document.getElementById('inline').textContent = 'ran'</script><script src="/eval.js"></script>`
+
+const cspOutcome = (page: Page.Page) =>
+  Effect.all([page.locator("#inline").readText, page.locator("#eval").readText]).pipe(
+    Effect.map((texts) => texts.join(","))
+  )
+
+/**
  * Runs an effect with a logger that also keeps the messages of its warnings and errors, so a case can check that
  * a release logged none.
  */
@@ -172,11 +184,11 @@ export const declarations = (
           } else {
             const context = yield* Browser.newContext(options)
             const page = yield* context.newPage
-            yield* page.goto(origin)
+            yield* page.goto(origin, { waitUntil: "load" })
             assert.strictEqual(yield* page.title, "secure")
             // Browser.newPage must forward the same creation options.
             const shortcut = yield* Browser.newPage(options)
-            yield* shortcut.goto(origin)
+            yield* shortcut.goto(origin, { waitUntil: "load" })
             assert.strictEqual(yield* shortcut.title, "secure")
           }
           const stillRejected = yield* sibling.goto(`${origin}/after`).pipe(Effect.flip)
@@ -480,11 +492,11 @@ export const declarations = (
             yield* Effect.scoped(Effect.gen(function*() {
               const route = yield* page.route(`${origin}/hello*`, () =>
                 Route.fulfill(HttpServerResponse.html("<title>routed</title>")))
-              yield* page.goto(`${origin}/hello?route=${n}`)
+              yield* page.goto(`${origin}/hello?route=${n}`, { waitUntil: "load" })
               assert.strictEqual(yield* page.title, "routed")
               assert.strictEqual(yield* route.hits, 1)
             }))
-            yield* page.goto(`${origin}/hello?released=${n}`)
+            yield* page.goto(`${origin}/hello?released=${n}`, { waitUntil: "load" })
             assert.notStrictEqual(yield* page.title, "routed")
           }
         }), timeout)
@@ -589,7 +601,7 @@ export const declarations = (
               assert.deepStrictEqual(seen, ["current"])
               assert.strictEqual(yield* current.hits, intercepted ? 2 : 1)
               yield* current.remove
-              yield* page.goto(`${origin}/after`)
+              yield* page.goto(`${origin}/after`, { waitUntil: "load" })
               assert.strictEqual(yield* page.title, "network")
               assert.deepStrictEqual(seen, ["current"])
             }),
@@ -737,7 +749,7 @@ export const declarations = (
             const page = yield* Browser.newPage()
             const route = yield* page.route(origin, () =>
               Route.fulfill(HttpServerResponse.html("<title>routed</title>")))
-            yield* page.goto(`${origin}/`)
+            yield* page.goto(`${origin}/`, { waitUntil: "load" })
             assert.strictEqual(yield* page.title, "routed")
             assert.strictEqual(yield* route.hits, 1)
           }))
@@ -1124,7 +1136,7 @@ export const declarations = (
           const page = yield* Browser.newPage({
             httpCredentials: { username: "strider", password: Redacted.make("secret") }
           })
-          yield* page.goto(`${origin}/first`).pipe(Deadline.within("5 seconds"))
+          yield* page.goto(`${origin}/first`, { waitUntil: "load" }).pipe(Deadline.within("5 seconds"))
           assert.strictEqual(yield* page.title, "denied")
           assert.strictEqual(first, 1)
           assert.strictEqual(second, 0)
@@ -1733,6 +1745,51 @@ export const declarations = (
           }))
         }), timeout)
 
+      // ── Content Security Policy ──
+
+      it.effect(
+        "runs inline scripts and eval under a forbidding policy in a context that bypasses it, where the backend can",
+        () =>
+          Effect.gen(function*() {
+            const { crossSite, origin } = yield* site
+            if (!(yield* supports("bypassCSP"))) {
+              const error = yield* Browser.newContext({ bypassCSP: true }).pipe(
+                Deadline.within("1 second"),
+                Effect.flip,
+                Effect.scoped
+              )
+              assert(UserContext.isUserContextError(error) && error.reason._tag === "Unsupported", String(error))
+              return
+            }
+            yield* Effect.scoped(Effect.gen(function*() {
+              const bypassing = yield* Browser.newContext({ bypassCSP: true })
+              const page = yield* bypassing.newPage
+              yield* page.goto(`${origin}/csp?html=${encodeURIComponent(cspProbe)}`)
+              assert.strictEqual(yield* cspOutcome(page), "ran,ran")
+              // A cross-site navigation, and a cross-site iframe, each in a renderer of its own on Chromium
+              yield* page.goto(`${crossSite}/csp?html=${encodeURIComponent(cspProbe)}`)
+              assert.strictEqual(yield* cspOutcome(page), "ran,ran")
+              yield* page.goto(fixtureUrl(
+                origin,
+                `<pre id="out">pending</pre><script>addEventListener('message', (e) => { document.getElementById('out').textContent = e.data })</script><iframe src="${crossSite}/csp?html=${
+                  encodeURIComponent(cspProbe)
+                }"></iframe>`
+              ))
+              yield* Expect.that(
+                page.locator("#out").readText,
+                Condition.make("reported", (text: string) =>
+                  text !== "pending")
+              )
+              assert.strictEqual(yield* page.locator("#out").readText, "ran,ran")
+              // A context in the same browser that doesn't ask keeps the policy
+              const other = yield* Browser.newPage()
+              yield* other.goto(`${origin}/csp?html=${encodeURIComponent(cspProbe)}`)
+              assert.strictEqual(yield* cspOutcome(other), "blocked,refused")
+            }))
+          }),
+        timeout
+      )
+
       it.effect("creates a context with permissions and emulated focus, where the backend can", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -1970,7 +2027,7 @@ export const declarations = (
             const page = yield* SharedContext.newPage
             const { origin } = yield* site
             yield* page.clock.install({ mode: "controlled", at: 1000 })
-            yield* page.goto(fixtureUrl(origin, `<p id="later">pending</p>`))
+            yield* page.goto(fixtureUrl(origin, `<p id="later">pending</p>`), { waitUntil: "load" })
             yield* page.evaluateInMainWorld(() => {
               const channel = new MessageChannel()
               channel.port1.onmessage = () => {
@@ -2121,16 +2178,19 @@ export const declarations = (
             const page = yield* SharedContext.newPage
             yield* page.clock.install({ mode: "controlled", at: "2026-01-01T00:00:00Z" })
             // The page's own script: Chromium hides from the page the errors of functions an evaluation made
-            yield* page.goto(fixtureUrl(
-              origin,
-              `<script>
+            yield* page.goto(
+              fixtureUrl(
+                origin,
+                `<script>
                 window.__reported = []
                 addEventListener("error", (event) => window.__reported.push(String(event.error?.message)))
                 setTimeout(() => { throw new Error("first") }, 100)
                 setTimeout(() => { throw new Error("second") }, 200)
                 setTimeout(() => { window.__after = true }, 300)
               </script>`
-            ))
+              ),
+              { waitUntil: "load" }
+            )
             const error = yield* failure(page.clock.adjust("1 second"), "adjust over a throwing timer")
             assert(PageClock.isPageClockError(error), String(error))
             assert(error.reason._tag === "EvaluationThrown", String(error))
