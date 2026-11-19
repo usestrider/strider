@@ -79,7 +79,18 @@ export interface Options extends Pick<Page.ScreenshotOptions, "area" | "scale" |
 export type Update = "none" | "missing" | "all"
 
 /**
- * What names a baseline: the test file, the name given to `toMatch`, the browser engine, and the platform.
+ * Schema for what names a baseline: the test file, the name given to `toMatch`, the browser engine, and the
+ * platform.
+ *
+ * **Details**
+ *
+ * Every part is a valid file name as it is, and nothing is rewritten: the name matches `^[a-z0-9][a-z0-9._-]*$`,
+ * and the browser and platform match `^[a-z0-9_]+$`, so they never contain `-` and
+ * `<name>-<browser>-<platform>` reads one way from the right. Names are lower-case so that two never share a file
+ * on a case-insensitive filesystem. The browser is `"chromium"` for Chrome and Chromium, `"firefox"`,
+ * `"webkit"` for stock WebKit, or `"safari"`; any other product is
+ * `other_<its letters and digits, lower-case>_<the first 8 hex digits of the SHA-256 of its name>`, its name being
+ * the product without the version after `/`. The platform is Node's `process.platform`, such as `"linux"`.
  *
  * **Example** (Keeping baselines per browser)
  *
@@ -94,23 +105,28 @@ export type Update = "none" | "missing" | "all"
  * ```
  *
  * @stability unstable
+ * @category schemas
+ * @since 0.1.0
+ */
+export const Key = Schema.Struct({
+  /** The test file's absolute path. */
+  testFile: Schema.String,
+  /** The name given to `toMatch`. */
+  name: Schema.String.pipe(Schema.check(Schema.isPattern(/^[a-z0-9][a-z0-9._-]*$/))),
+  /** The browser engine, with no version. */
+  browser: Schema.String.pipe(Schema.check(Schema.isPattern(/^[a-z0-9_]+$/))),
+  /** Node's `process.platform`. */
+  platform: Schema.String.pipe(Schema.check(Schema.isPattern(/^[a-z0-9_]+$/)))
+})
+
+/**
+ * What names a baseline; `Key` checks it.
+ *
+ * @stability unstable
  * @category models
  * @since 0.1.0
  */
-export interface Key {
-  /** The test file's absolute path. */
-  readonly testFile: string
-  /** The name given to `toMatch`. */
-  readonly name: string
-  /**
-   * The browser engine, from the product the browser reports, with no version: `"chromium"` for Chrome and
-   * Chromium, `"firefox"`, `"webkit"` for stock WebKit, `"safari"`, or for any other product its name in
-   * lower-case letters and digits, such as `"webdriverbidi"`.
-   */
-  readonly browser: string
-  /** Node's `process.platform`, such as `"linux"` or `"darwin"`. */
-  readonly platform: string
-}
+export type Key = typeof Key.Type
 
 /**
  * Where baselines live, when they are written, and where failures leave their images.
@@ -315,6 +331,40 @@ export class MissingBaseline
   }
 }
 
+const namePattern = /^[a-z0-9][a-z0-9._-]*$/
+
+/**
+ * The name given to `toMatch` isn't a baseline name: lower-case letters, digits, `.`, `_`, and `-`, starting with a
+ * letter or digit. It fails before anything is captured.
+ *
+ * **Example** (Naming a baseline)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { ScreenshotBaseline } from "@usestrider/vitest"
+ * import { Effect } from "effect"
+ *
+ * const checkout = Effect.fn("checkout")(function*(page: Page.ReadonlyPage) {
+ *   // "Checkout page" would fail with InvalidName
+ *   yield* page.pipe(ScreenshotBaseline.toMatch("checkout-page"))
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category reasons
+ * @since 0.1.0
+ */
+export class InvalidName extends Schema.Error<InvalidName>("@usestrider/vitest/ScreenshotBaseline/InvalidName")({
+  _tag: Schema.tag("InvalidName"),
+  name: Schema.String
+}) {
+  override get message(): string {
+    return `${
+      JSON.stringify(this.name)
+    } isn't a baseline name: use lower-case letters, digits, ".", "_", and "-", starting with a letter or digit (${namePattern.source})`
+  }
+}
+
 /**
  * The baseline isn't a PNG Strider reads: 8-bit and not interlaced.
  *
@@ -384,7 +434,7 @@ const ScreenshotBaselineErrorTypeId = "~@usestrider/vitest/ScreenshotBaseline/Sc
 export class ScreenshotBaselineError
   extends Schema.TaggedError<ScreenshotBaselineError>(ScreenshotBaselineErrorTypeId)("ScreenshotBaselineError", {
     name: Schema.String,
-    reason: Schema.Union([Mismatch, SizeMismatch, MissingBaseline, InvalidBaseline])
+    reason: Schema.Union([Mismatch, SizeMismatch, MissingBaseline, InvalidBaseline, InvalidName])
   })
 {
   readonly [ScreenshotBaselineErrorTypeId] = ScreenshotBaselineErrorTypeId
@@ -415,33 +465,21 @@ export const isScreenshotBaselineError = (u: unknown): u is ScreenshotBaselineEr
 /**
  * The engine key of a browser's product, as each backend reports it: Chromium's `HeadlessChrome/<version>` or
  * `Chrome/<version>`, Firefox's `firefox`, stock WebKit's `MiniBrowser (stock WebKit)` or `WebKit (stock)`, and
- * Safari's `Safari`. Any other product is a key of its own, its name in lower-case letters and digits, so it never
- * shares another engine's baselines.
+ * Safari's `Safari`. Any other product keys under `other_`, with its letters and digits and a digest of its exact
+ * name, so it can't take a known engine's key or another product's.
  */
 const engineOf = (product: string): string => {
-  const name = product.split("/")[0]!.trim().toLowerCase()
+  const exact = product.split("/")[0]!
+  const name = exact.trim().toLowerCase()
   if (/^(headless)?chrome$|^chromium$/.test(name)) return "chromium"
   if (name === "firefox") return "firefox"
   if (name === "safari") return "safari"
-  if (name.includes("stock webkit") || name === "webkit (stock)") return "webkit"
-  return name.replace(/[^a-z0-9]+/g, "") || "unknown"
+  if (name.endsWith("(stock webkit)") || name === "webkit (stock)") return "webkit"
+  return `other_${name.replace(/[^a-z0-9]+/g, "")}_${createHash("sha256").update(exact).digest("hex").slice(0, 8)}`
 }
 
-/**
- * A key part as a file name: itself when it has only letters, digits, `.`, `_` and (outside `strict`) `-`;
- * otherwise those characters with the rest as `-`, then the first 8 hex digits of the part's SHA-256, so two
- * parts never share a name.
- */
-const encode = (part: string, strict = false): string => {
-  const unsafe = strict ? /[^a-zA-Z0-9._]+/g : /[^a-zA-Z0-9._-]+/g
-  const readable = part.replace(unsafe, "-")
-  return readable === part && part !== "" && !part.startsWith(".")
-    ? part
-    : `${readable}-${createHash("sha256").update(part).digest("hex").slice(0, 8)}`
-}
-
-/** A key's file name without the extension: name, browser, and platform, which have no `-` of their own. */
-const stem = (key: Key): string => `${encode(key.name)}-${encode(key.browser, true)}-${encode(key.platform, true)}`
+/** A key's file name without the extension, its parts as they are: only the name can contain `-`. */
+const stem = (key: Key): string => `${key.name}-${key.browser}-${key.platform}`
 
 /** `vitest -u` is `all`, a local run `new`, CI `none`: Vitest's public snapshot state. */
 const vitestUpdate = (): Update => {
@@ -455,9 +493,8 @@ const vitestUpdate = (): Update => {
  *
  * **Details**
  *
- * A part with characters other than letters, digits, `.`, `_`, and (in the name) `-` keeps those, writes the rest
- * as `-`, and gains `-` and the first 8 hex digits of its SHA-256, so `cart/total` is `cart-total-0fe4f773` and
- * never shares a file with `cart-total`.
+ * The parts are used as they are, never rewritten, and a key that doesn't satisfy `Key` is refused: `defaultPath`
+ * throws its `Schema` error, as for `browser: "foo-bar"`. So two distinct keys never share a path.
  *
  * **Example** (Moving baselines under one directory)
  *
@@ -475,13 +512,12 @@ const vitestUpdate = (): Update => {
  * @category constructors
  * @since 0.1.0
  */
-export const defaultPath = (key: Key): string =>
-  join(
-    dirname(key.testFile),
-    "__screenshots__",
-    basename(key.testFile),
-    `${stem(key)}.png`
-  )
+export const defaultPath = (key: Key): string => {
+  const valid = decodeKey(key)
+  return join(dirname(valid.testFile), "__screenshots__", basename(valid.testFile), `${stem(valid)}.png`)
+}
+
+const decodeKey = Schema.decodeUnknownSync(Key)
 
 /** A directory name for a test file: its name, then the first 8 hex digits of its absolute path's SHA-256. */
 const fileIdentity = (testFile: string): string =>
@@ -547,12 +583,15 @@ const run = (
     const settings = yield* CurrentSettings
     const test = yield* TestRun.TestRun
     const browser = yield* Browser.Browser
-    const key: Key = {
+    if (!namePattern.test(name)) {
+      return yield* Effect.fail(new ScreenshotBaselineError({ name, reason: new InvalidName({ name }) }))
+    }
+    const key = decodeKey({
       testFile: test.info.file,
       name,
       browser: engineOf(browser.info.product),
       platform: process.platform
-    }
+    })
     const path = resolve((settings.path ?? defaultPath)(key))
     const update = settings.update ?? vitestUpdate()
     const output = join(

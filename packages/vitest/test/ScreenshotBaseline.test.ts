@@ -290,7 +290,8 @@ describe("ScreenshotBaseline.toMatch", () => {
         "MiniBrowser (stock WebKit)": "webkit",
         "WebKit (stock)": "webkit",
         "Safari": "safari",
-        "WebDriver BiDi": "webdriverbidi"
+        "WebDriver BiDi": "other_webdriverbidi_734b4d78",
+        "Fire-fox": "other_firefox_c44961b8"
       }
       for (const [product, engine] of Object.entries(products)) {
         const { provide } = harness({ protocol: "bidi", product })
@@ -334,38 +335,65 @@ describe("ScreenshotBaseline.toMatch", () => {
 
   it("keeps an encoded name separate from its literal spelling", () => {
     const key = { testFile: "/r/a.test.ts", browser: "chromium", platform: "linux" }
-    assert.notStrictEqual(
-      ScreenshotBaseline.defaultPath({ ...key, name: "cart/total" }),
-      ScreenshotBaseline.defaultPath({ ...key, name: "cart-total-0fe4f773" })
+    // Names aren't rewritten: one that isn't a file name as it stands is refused, never mapped onto another
+    assert.throws(() => ScreenshotBaseline.defaultPath({ ...key, name: "cart/total" }))
+    assert.strictEqual(
+      ScreenshotBaseline.defaultPath({ ...key, name: "cart-total-0fe4f773" }),
+      "/r/__screenshots__/a.test.ts/cart-total-0fe4f773-chromium-linux.png"
     )
   })
 
   it("keeps the browser suffix separate from the name", () => {
     const key = { testFile: "/r/a.test.ts", platform: "linux" }
-    // Strict encoding replaces a hyphen with itself and returns it unchanged.
-    assert.notStrictEqual(
-      ScreenshotBaseline.defaultPath({ ...key, name: "cart", browser: "foo-bar" }),
-      ScreenshotBaseline.defaultPath({ ...key, name: "cart-foo", browser: "bar" })
+    // Only the name may contain "-", so the path reads one way from the right
+    assert.throws(() => ScreenshotBaseline.defaultPath({ ...key, name: "cart", browser: "foo-bar" }))
+    assert.throws(() => ScreenshotBaseline.defaultPath({ ...key, name: "cart", browser: "bar", platform: "linux-x" }))
+    assert.strictEqual(
+      ScreenshotBaseline.defaultPath({ ...key, name: "cart-foo", browser: "bar" }),
+      "/r/__screenshots__/a.test.ts/cart-foo-bar-linux.png"
     )
   })
 
   it("keeps distinct baseline names separate", () => {
     const key = { testFile: "/r/a.test.ts", browser: "chromium", platform: "linux" }
+    // A name that would need rewriting, or differs only in case, is refused
+    for (const name of ["cart/total", "Cart", ".cart", ""]) {
+      assert.throws(() => ScreenshotBaseline.defaultPath({ ...key, name }), undefined, undefined, name)
+    }
     assert.notStrictEqual(
-      ScreenshotBaseline.defaultPath({ ...key, name: "cart/total" }),
+      ScreenshotBaseline.defaultPath({ ...key, name: "cart.total" }),
       ScreenshotBaseline.defaultPath({ ...key, name: "cart-total" })
     )
   })
+
+  it.effect("refuses an invalid name before capturing", () =>
+    Effect.gen(function*() {
+      const { provide } = harness()
+      let captures = 0
+      const page = {
+        screenshot: () => Effect.sync(() => (captures++, Png.encode(solid(1, 1, white)))),
+        pipe() {
+          return pipeArguments(this, arguments)
+        }
+      } as unknown as Page.ReadonlyPage
+      const error = yield* page.pipe(ScreenshotBaseline.toMatch("Cart/Total"), provide("all"), Effect.flip)
+      assert.deepInclude((error as ScreenshotBaseline.ScreenshotBaselineError).reason, {
+        _tag: "InvalidName",
+        name: "Cart/Total"
+      })
+      assert.match((error as ScreenshotBaseline.ScreenshotBaselineError).message, /lower-case letters, digits/)
+      assert.strictEqual(captures, 0)
+    }))
 
   it("keys the default path by file, name, browser and platform", () => {
     assert.strictEqual(
       ScreenshotBaseline.defaultPath({
         testFile: "/r/a.test.ts",
-        name: "cart/total",
+        name: "cart-total",
         browser: "firefox",
         platform: "linux"
       }),
-      "/r/__screenshots__/a.test.ts/cart-total-0fe4f773-firefox-linux.png"
+      "/r/__screenshots__/a.test.ts/cart-total-firefox-linux.png"
     )
   })
 
