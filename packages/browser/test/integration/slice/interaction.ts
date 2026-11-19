@@ -29,7 +29,6 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
-import * as Schedule from "effect/Schedule"
 import * as Scope from "effect/Scope"
 import * as Adapter from "../../../src/internal/adapter.ts"
 import * as BoundedAdapter from "../../../src/internal/boundedAdapter.ts"
@@ -1408,37 +1407,6 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               return value._tag === "Covered" && value.by?.includes("#cover")
             }))
             assert.strictEqual(yield* frame.locator("#out").readText, "")
-          }))
-        }), timeout)
-
-      // Coordinate input names no frame: it goes to the frame under its point, which on Chromium is sent on the
-      // frame's own session, since the browser can't target a cross-site frame that hasn't drawn yet from the page's
-      it.effect("clicks by coordinates into a cross-site frame that has not drawn yet", () =>
-        Effect.gen(function*() {
-          const { origin, crossSite } = yield* site
-          // The child says it has loaded, then holds its main thread for a second, so it draws nothing until after
-          // the click below has been sent
-          const inner =
-            `<!doctype html><style>body{margin:0}</style><button id="go" style="width:100px;height:40px" onclick="parent.postMessage('clicked', '*')">Go</button><script>parent.postMessage('loaded', '*'); const end = performance.now() + 1000; while (performance.now() < end) {}</script>`
-          const html =
-            `<style>body{margin:0}iframe{position:absolute;left:20px;top:20px;width:300px;height:150px;border:0}</style><script>window.got = []; addEventListener('message', (e) => got.push(e.data))</script><iframe src="${
-              fixtureUrl(crossSite, inner)
-            }"></iframe>`
-          yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* newPage
-            yield* page.goto(fixtureUrl(origin, html), { waitUntil: "commit" })
-            yield* page.evaluateInMainWorld(() =>
-              new Promise<void>((resolve) => {
-                const got = (window as unknown as { got: Array<unknown> }).got
-                if (got.includes("loaded")) return resolve()
-                addEventListener("message", (e) => e.data === "loaded" && resolve())
-              })
-            )
-            yield* page.mouse.click({ x: 70, y: 40 })
-            const clicked = page.evaluateInMainWorld(() =>
-              (window as unknown as { got: Array<unknown> }).got.includes("clicked")
-            ).pipe(Effect.filterOrFail((ok) => ok, () => "the frame's button was not clicked"))
-            yield* clicked.pipe(Effect.retry({ times: 30, schedule: Schedule.spaced("100 millis") }))
           }))
         }), timeout)
 

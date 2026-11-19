@@ -903,69 +903,80 @@ export const conformance = (backend: Backend) =>
           timeout
         )
 
-        for (const change of ["detaches", "navigates"] as const) {
-          it.effect(`continues frameless input after the pressed frame ${change}`, () =>
-            Effect.gen(function*() {
-              const world = yield* setup(backend)
-              const { page } = yield* newPage(world)
-              const fixture = (origin: string, html: string) =>
-                `${origin}/fixture?html=${encodeURIComponent(html)}`
-              const child =
-                `<body style="margin:0;height:100vh"><script>addEventListener('mousedown',()=>parent.postMessage('down','*'));parent.postMessage('loaded','*')</script></body>`
-              yield* goto(
+        // One page, two cross-site frames: a press in the first, which then detaches, and a press in the
+        // second, which then navigates; after each, the release and the next click go to the page under the point
+        it.effect("continues frameless input after the pressed frame detaches or navigates", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            const { page } = yield* newPage(world)
+            const fixture = (origin: string, html: string) =>
+              `${origin}/fixture?html=${encodeURIComponent(html)}`
+            const child = (name: string) =>
+              `<body style="margin:0;height:100vh"><script>addEventListener('mousedown',()=>parent.postMessage('${name} down','*'));parent.postMessage('${name} loaded','*')</script></body>`
+            const frame = (id: string, top: number) =>
+              `<iframe id="${id}" src="${
+                fixture(world.site.crossSite, child(id))
+              }" style="position:absolute;left:100px;top:${top}px;width:200px;height:100px;border:0"></iframe>`
+            yield* goto(
+              world,
+              page,
+              fixture(
+                world.site.origin,
+                `<body style="margin:0"><script>window.got=[];addEventListener('message',e=>got.push(e.data))</script><button style="position:absolute;left:10px;top:10px;width:50px;height:30px" onclick="window.clicked=true">parent</button>${
+                  frame("gone", 50)
+                }${frame("moved", 200)}</body>`
+              )
+            )
+            const message = (data: string) =>
+              evaluate(
                 world,
                 page,
-                fixture(
-                  world.site.origin,
-                  `<body style="margin:0"><script>window.got=[];addEventListener('message',e=>got.push(e.data))</script><button style="position:absolute;left:10px;top:10px;width:50px;height:30px" onclick="window.clicked=true">parent</button><iframe id="cross" src="${
-                    fixture(world.site.crossSite, child)
-                  }" style="position:absolute;left:100px;top:50px;width:200px;height:100px;border:0"></iframe></body>`
-                )
+                `() => got.includes('${data}') || new Promise(r=>addEventListener('message',e=>{if(e.data==='${data}')r(true)}))`
               )
-              yield* evaluate(
-                world,
-                page,
-                "() => got.includes('loaded') || new Promise(r=>addEventListener('message',e=>{if(e.data==='loaded')r(true)}))"
-              )
-              const none = { alt: false, control: false, meta: false, shift: false }
-              const send = (type: "move" | "down" | "up", x: number, y: number, buttons: number) =>
-                world.adapter.dispatchInput(page, [{
-                  _tag: "Mouse",
-                  type,
-                  x,
-                  y,
-                  button: type === "move" ? "none" : "left",
-                  clickCount: 1,
-                  modifiers: none,
-                  buttons
-                }])
-              yield* send("move", 150, 80, 0)
-              yield* send("down", 150, 80, 1)
-              yield* evaluate(
-                world,
-                page,
-                "() => got.includes('down') || new Promise(r=>addEventListener('message',e=>{if(e.data==='down')r(true)}))"
-              )
-              if (change === "detaches") {
-                yield* evaluate(world, page, "() => { cross.remove(); return true }")
-                yield* world.facts.when("NavigableRemoved", (fact) =>
-                  fact.navigable !== page)
-              } else {
-                const next = fixture(world.site.origin, `<script>parent.postMessage('navigated','*')</script>`)
-                yield* evaluate(world, page, `() => { cross.src = ${JSON.stringify(next)}; return true }`)
-                yield* evaluate(
-                  world,
-                  page,
-                  "() => got.includes('navigated') || new Promise(r=>addEventListener('message',e=>{if(e.data==='navigated')r(true)}))"
-                )
-              }
+            yield* message("gone loaded")
+            yield* message("moved loaded")
+            const none = { alt: false, control: false, meta: false, shift: false }
+            const send = (type: "move" | "down" | "up", x: number, y: number, buttons: number) =>
+              world.adapter.dispatchInput(page, [{
+                _tag: "Mouse",
+                type,
+                x,
+                y,
+                button: type === "move" ? "none" : "left",
+                clickCount: 1,
+                modifiers: none,
+                buttons
+              }])
+            const releaseAndClickParent = Effect.gen(function*() {
               yield* send("move", 20, 20, 1)
               yield* send("up", 20, 20, 0)
               yield* send("down", 20, 20, 1)
               yield* send("up", 20, 20, 0)
-              assert.isTrue(yield* evaluate(world, page, "() => window.clicked === true"))
-            }), timeout)
-        }
+              assert.isTrue(
+                yield* evaluate(
+                  world,
+                  page,
+                  "() => { const ok = window.clicked === true; window.clicked = false; return ok }"
+                )
+              )
+            })
+            // The pressed frame detaches
+            yield* send("move", 150, 80, 0)
+            yield* send("down", 150, 80, 1)
+            yield* message("gone down")
+            yield* evaluate(world, page, "() => { gone.remove(); return true }")
+            yield* world.facts.when("NavigableRemoved", (fact) =>
+              fact.navigable !== page)
+            yield* releaseAndClickParent
+            // The pressed frame navigates
+            yield* send("move", 150, 230, 0)
+            yield* send("down", 150, 230, 1)
+            yield* message("moved down")
+            const next = fixture(world.site.origin, `<script>parent.postMessage('navigated','*')</script>`)
+            yield* evaluate(world, page, `() => { moved.src = ${JSON.stringify(next)}; return true }`)
+            yield* message("navigated")
+            yield* releaseAndClickParent
+          }), timeout)
 
         it.effect(
           "keeps a frameless release with the pressed cross-site frame in a shadow root but routes wheels by their point",
@@ -1076,7 +1087,8 @@ export const conformance = (backend: Backend) =>
             Effect.gen(function*() {
               const world = yield* setup(backend)
               const { page } = yield* newPage(world)
-              const fixture = (origin: string, html: string) => `${origin}/fixture?html=${encodeURIComponent(html)}`
+              const fixture = (origin: string, html: string) =>
+                `${origin}/fixture?html=${encodeURIComponent(html)}`
               // The wrapper paints nothing of its own: a borderless frame that paints, under a transparent element
               // that takes the click. It says it has loaded, then holds its main thread for a second, so the input
               // request below starts before it is drawn
@@ -1145,7 +1157,8 @@ export const conformance = (backend: Backend) =>
               result: "value",
               userActivation: false
             }).pipe(Effect.forkChild)
-            const opened = yield* world.facts.when("ObligationOpened", (fact) => fact.subject._tag === "Prompt")
+            const opened = yield* world.facts.when("ObligationOpened", (fact) =>
+              fact.subject._tag === "Prompt")
             // A backend that can't say a dialog's kind says it's unknown, with no default text
             assert.deepInclude(
               opened.subject,
@@ -1159,7 +1172,8 @@ export const conformance = (backend: Backend) =>
             assert.deepStrictEqual(result.value, { type: "string", value: "Strider" })
             const closed = yield* world.facts.when("PromptClosed")
             assert.isTrue(closed.accepted)
-            yield* world.facts.when("ObligationEnded", (fact) => fact.obligation === opened.obligation)
+            yield* world.facts.when("ObligationEnded", (fact) =>
+              fact.obligation === opened.obligation)
           }), timeout)
 
         it.effect("intercepts requests: fulfill, fail, continue with new headers", () =>
@@ -1175,7 +1189,8 @@ export const conformance = (backend: Backend) =>
             const fulfilled = yield* evaluate(world, page, "() => fetch('/json').then((r) => r.text())").pipe(
               Effect.forkChild
             )
-            const first = yield* world.facts.when("ObligationOpened", (fact) => fact.subject._tag === "PausedRequest")
+            const first = yield* world.facts.when("ObligationOpened", (fact) =>
+              fact.subject._tag === "PausedRequest")
             assert(first.subject._tag === "PausedRequest")
             assert.strictEqual(first.subject.request.url, `${world.site.origin}/json`)
             yield* world.adapter.resolve(first.obligation, {
