@@ -322,7 +322,7 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
               const requested = `${yield* fixture(
                 `<title>${title}</title>`
               )}&token=generic-url-secret#generic-fragment-secret`
-              yield* page.goto(requested)
+              yield* page.goto(requested, { waitUntil: "load" })
               const actual = yield* page[source]
               assert.include(actual, source === "url" ? "generic-url-secret" : title)
               assert.notStrictEqual(page.title, page.title)

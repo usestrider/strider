@@ -167,7 +167,7 @@ describe("Stock WebKit, attached through its remote inspector", () => {
         Effect.gen(function*() {
           const { origin, crossSite, tab } = yield* NavigationFixture
           // Another site's page is another web process: a provisional target the page swaps to
-          const committed = yield* tab.goto(`${crossSite}/child`)
+          const committed = yield* tab.goto(`${crossSite}/child`, { waitUntil: "load" })
           assert.strictEqual(committed._tag, "Committed")
           assert.include(yield* tab.locator("p").readText, "child of localhost")
           const missing = yield* tab.goto(`${origin}/missing`)
@@ -222,7 +222,7 @@ describe("Stock WebKit, attached through its remote inspector", () => {
                   HttpServerResponse.text("<title>made</title><h1>Made</h1>", { status: 201, contentType: "text/html" })
                 )
             )
-            const made = yield* tab.goto(`${origin}/made-up`)
+            const made = yield* tab.goto(`${origin}/made-up`, { waitUntil: "load" })
             assert(made._tag === "Committed" && Option.isSome(made.response))
             assert.strictEqual(made.response.value.status, 201)
             assert.strictEqual(made.response.value.servedBy, "route")
