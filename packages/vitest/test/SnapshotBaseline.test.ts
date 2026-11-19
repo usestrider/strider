@@ -4,9 +4,9 @@ import { TestRun } from "@usestrider/browser/test"
 import { SnapshotBaseline } from "@usestrider/vitest"
 import * as Effect from "effect/Effect"
 import { pipe } from "effect/Function"
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import * as Png from "../src/internal/png.ts"
 
 const solid = (width: number, height: number, rgba: readonly [number, number, number, number]): Png.Image => {
@@ -64,6 +64,27 @@ const reasonOf = <A>(effect: Effect.Effect<A, unknown>) =>
   )
 
 describe("SnapshotBaseline.toMatch", () => {
+  it("keeps a test file ending in .snap apart from another test's Vitest snapshot", () => {
+    const directory = mkdtempSync(join(tmpdir(), "strider-snapshot-paths-"))
+    try {
+      // A suite can include custom test file extensions; Key accepts these paths too.
+      const vitestSnapshot = join(directory, "__snapshots__", "invoice.test.ts.snap")
+      mkdirSync(dirname(vitestSnapshot), { recursive: true })
+      writeFileSync(vitestSnapshot, "// Vitest Snapshot v1\n")
+      const baseline = SnapshotBaseline.defaultPath({
+        testFile: join(directory, "invoice.test.ts.snap"),
+        name: "invoice.pdf",
+        browser: "chromium",
+        platform: "linux"
+      })
+      assert.doesNotThrow(() => mkdirSync(dirname(baseline), { recursive: true }))
+      writeFileSync(baseline, "%PDF-1")
+      assert.strictEqual(readFileSync(vitestSnapshot, "utf8"), "// Vitest Snapshot v1\n")
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
   it.effect("writes a missing baseline with the name's extension, failing under missing and passing under all", () =>
     Effect.gen(function*() {
       const { attached, baselineOf, provide } = harness()
