@@ -3,6 +3,7 @@ import { Browser } from "@usestrider/browser"
 import { TestRun } from "@usestrider/browser/test"
 import { SnapshotBaseline } from "@usestrider/vitest"
 import * as Effect from "effect/Effect"
+import { pipe } from "effect/Function"
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -71,7 +72,7 @@ describe("SnapshotBaseline.toMatch", () => {
       assert.deepInclude(reason, { _tag: "MissingBaseline", baseline, written: true })
       assert.deepStrictEqual(readFileSync(baseline, "utf8"), "%PDF-1")
       assert.deepStrictEqual(attached, [])
-      yield* text("%PDF-1").pipe(SnapshotBaseline.toMatch("invoice.pdf"), provide("none"))
+      yield* pipe(text("%PDF-1"), SnapshotBaseline.toMatch("invoice.pdf"), provide("none"))
       yield* SnapshotBaseline.toMatch(text("%PDF-2"), "receipt.pdf").pipe(provide("all"))
       assert.strictEqual(readFileSync(baselineOf("receipt", "pdf"), "utf8"), "%PDF-2")
     }))
@@ -125,7 +126,7 @@ describe("SnapshotBaseline.toMatch", () => {
       const baseline = baselineOf("chart", "png")
       const base = solid(10, 10, white)
       yield* SnapshotBaseline.toMatch(Png.encode(base), "chart.png").pipe(provide("all"))
-      // Different bytes, same pixels: a fully transparent PNG would encode differently, so re-encode
+      // Different bytes, but no pixel past the threshold
       yield* SnapshotBaseline.toMatch(Png.encode(paint(base, 0, 0, [250, 250, 250, 255])), "chart.png").pipe(
         provide("none")
       )
