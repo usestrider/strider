@@ -11,7 +11,7 @@
       "url": "/docs/api/browser/Browser#Browser"
     }
   ],
-  "notes": "Browser.contexts is a Watchable list: the default context first, created contexts as their own handles, others observed. Attaching lists existing contexts on Chromium and Firefox; a context another client creates later is listed once a page opens in it.",
+  "notes": "Browser.contexts is a Watchable list: the default context first, created contexts as their own handles, others observed. Attaching lists existing contexts on Chromium and Firefox; a context another client creates later is listed once a page opens in it. On Chromium, a context another client removes stays listed until the connection ends.",
   "capabilities": [],
   "audit": {
     "sources": [

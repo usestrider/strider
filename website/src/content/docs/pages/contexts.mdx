@@ -48,7 +48,8 @@ const listed = Effect.fn("listed")(function*() {
 
 A context someone else made, such as one in a browser you attached to, is listed as an observed context, whose
 `control` gives access for a scope, as the default context's does. A context another client makes after you
-connect is listed once a page opens in it.
+connect is listed once a page opens in it. On Chromium, a context another client removes stays listed until you
+disconnect, though its pages close.
 
 ## Settings for a context's life
 
