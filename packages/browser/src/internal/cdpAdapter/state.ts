@@ -222,6 +222,8 @@ export interface NavigationEntry extends Kit.NavigationNode {
   readonly traversal: boolean
   documentHop: NetworkRequest.HopId | undefined
   status: number | undefined
+  /** Whether the document request's latest hop has had its response; a redirect starts a hop with none. */
+  responded: boolean
   failed: string | undefined
 }
 
@@ -339,6 +341,8 @@ export interface HandleEntry {
 export interface DragEntry {
   readonly data: Input.DragData
   entered: boolean
+  /** Where its last drag event went, on the session it went on, in that session's coordinates. */
+  at: { readonly target: TargetEntry; readonly x: number; readonly y: number } | undefined
   /** Announced after the gesture that started it was released (QUIRKS.md, Q88). */
   readonly stale: boolean
 }
@@ -412,6 +416,18 @@ export interface State extends Kit.Ending {
   readonly interceptingDrags: Set<L1Target.NavigableId>
   /** The buttons each page's last mouse event left held, until the page ends. */
   readonly heldButtons: Map<L1Target.NavigableId, number>
+  /**
+   * The session each page's held press went to, with the origin of its viewport in the page's, until every button
+   * is released or that frame detaches: the frame the press reached keeps the mouse, as a real mouse's frame does.
+   */
+  readonly pressedOn: Map<
+    L1Target.NavigableId,
+    { readonly target: TargetEntry; readonly x: number; readonly y: number }
+  >
+  /** Pages whose held Escape canceled an intercepted drag: its release is the drag's too, and isn't sent. */
+  readonly escapeCanceled: Set<L1Target.NavigableId>
+  /** The frames each page's held press landed in, where its gesture named them, until every button is released or the frame detaches. */
+  readonly pressedIn: Map<L1Target.NavigableId, ReadonlyArray<FrameEntry>>
   /** A worker no page owns belongs to the context its target names. */
   readonly workerContexts: Map<TargetEntry, ContextEntry>
   /** Targets attached now existed before the connection: they are adopted. */
@@ -482,6 +498,9 @@ export const make = (options: {
     drags: new Map(),
     interceptingDrags: new Set(),
     heldButtons: new Map(),
+    pressedIn: new Map(),
+    pressedOn: new Map(),
+    escapeCanceled: new Set(),
     workerContexts: new Map(),
     attachedAtConnect: true,
     defaultUserAgent: ""

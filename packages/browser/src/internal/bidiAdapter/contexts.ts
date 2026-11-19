@@ -152,7 +152,14 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
     )
   }
   if (Option.isSome(options.proxy)) {
-    const { server, credentials } = options.proxy.value
+    const { credentials, scheme } = options.proxy.value
+    if (scheme === "https") {
+      return yield* Effect.fail(
+        Kit.unsupported("userContexts.proxy.https", "Firefox's BiDi proxy settings have no TLS connection to the proxy")
+      )
+    }
+    // socks5://h:p and http://h:p are different endpoints, with different credentials
+    const server = Proxy.endpoint(options.proxy.value)
     if (credentials !== undefined && state.options.ownership !== "launched") {
       return yield* Effect.fail(
         Kit.unsupported(
@@ -200,13 +207,21 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
           ...(options.acceptInsecureCerts || certificateProxy !== undefined ? { acceptInsecureCerts: true } : {}),
           ...(Option.isSome(options.proxy)
             ? {
-              proxy: {
-                proxyType: "manual",
-                httpProxy: options.proxy.value.server,
-                sslProxy: options.proxy.value.server,
-                // Launched profiles let proxies carry loopback; it stays direct here
-                noProxy: [...new Set([...Proxy.loopback, ...options.proxy.value.bypass])]
-              }
+              // Launched profiles let proxies carry loopback; it stays direct here
+              proxy: options.proxy.value.scheme === "http"
+                ? {
+                  proxyType: "manual",
+                  httpProxy: options.proxy.value.server,
+                  sslProxy: options.proxy.value.server,
+                  noProxy: [...new Set([...Proxy.loopback, ...options.proxy.value.bypass])]
+                }
+                : {
+                  // Firefox's SOCKS4 sends names for the proxy to resolve (SOCKS4a)
+                  proxyType: "manual",
+                  socksProxy: options.proxy.value.server,
+                  socksVersion: options.proxy.value.scheme === "socks4" ? 4 : 5,
+                  noProxy: [...new Set([...Proxy.loopback, ...options.proxy.value.bypass])]
+                }
             }
             : certificateProxy !== undefined
             ? {

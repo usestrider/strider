@@ -16,6 +16,7 @@ import * as Protocol from "../../protocol/Protocol.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as Declarations from "../declarations.ts"
+import * as Proxy from "../proxy.ts"
 import * as Urls from "../urls.ts"
 import { failReasons, fetchHeaders, postData, resourceTypes } from "./mapping.ts"
 import {
@@ -171,8 +172,9 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       if (params.authChallenge.source === "Proxy" && proxy?.credentials !== undefined) {
         target.proxyAuth ??= new Map()
         const previous = target.proxyAuth.get(params.requestId)
-        const provide = previous?.attempted !== true &&
-          URL.parse(params.authChallenge.origin)?.origin === URL.parse(`http://${proxy.server}`)?.origin
+        // Only an HTTP or HTTPS proxy challenges; a SOCKS endpoint's URL has the opaque origin "null"
+        const provide = previous?.attempted !== true && (proxy.scheme === "http" || proxy.scheme === "https") &&
+          URL.parse(params.authChallenge.origin)?.origin === URL.parse(Proxy.endpoint(proxy))?.origin
         target.proxyAuth.set(params.requestId, { networkId: previous?.networkId, attempted: true })
         state.buffer.later(
           Fetch.continueWithAuth({

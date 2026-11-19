@@ -330,6 +330,7 @@ interface Options {                                      // UserContext.Options;
   readonly storageState?: StorageState.StorageState | undefined   // decoded with StorageState.Json
   readonly dialogs?: "dismiss" | "accept" | "leaveOpen" | undefined   // decision when no handler claims a dialog; default "dismiss"
   readonly focus?: "system" | "emulated" | undefined    // default "system"; "emulated" makes every page report focus, and keeps a page behind a popup rendering on Chromium (owned contexts only)
+  readonly bypassCSP?: boolean | undefined              // default false; true runs what pages' Content Security Policy forbids, in every frame, for the context's life; Chromium only, Firefox and WebKit refuse it
   readonly eventLog?: number | undefined                // retained events per module and page, for history; default 100, 0 keeps none
   readonly downloads?: "temporary" | "deny" | { readonly directory: string } | undefined   // default "temporary": a directory made for the context and removed after it
   readonly emulation?: Emulation.Emulation | undefined  // held for the context's life: emulate(...) without a scope
@@ -360,11 +361,16 @@ interface Emulation {
 - **Extra request headers.** `extraHTTPHeaders` applies to navigation and subresources. Names are case-insensitive; invalid names or non-string/invalid HTTP field values fail with `InvalidInput`. A registration replaces the map within its scope. Page headers merge over context headers, with page values winning. An empty page map retains context headers; removal restores the previous map. Request route overrides take precedence. Order is not guaranteed. Supported on Chromium, Firefox, and launched stock WebKit; attached stock WebKit refuses it. Unset configuration sends no header commands.
 - **One `emulate` call is one registration.** Removing it, or closing its scope, removes every field it set. Each field is a capability named for it: `emulation.viewport`, `emulation.viewport.mobile`, `emulation.userAgent`, `emulation.locale`, `emulation.timezone`, `emulation.geolocation`, `emulation.geolocation.unavailable`, `emulation.media`, `emulation.network.offline`, `emulation.network.throttling`, `emulation.cpuSlowdown`, `emulation.javaScript` (and `emulation.javaScript.disabled` for `"disabled"`), `emulation.touch`, `emulation.extraHTTPHeaders`, and `emulation.focus`. The call fails with `Unsupported` naming the first the backend can't apply, before anything is applied. Chromium applies every field. Firefox can't emulate media, touch, JavaScript, a mobile viewport, throttling, a CPU slowdown, or an unavailable position. WebKit sets the locale and position per context, the locale only before the context's pages exist (which `UserContext.Options.emulation` is), and can't emulate touch, throttling, a CPU slowdown, an unavailable position, or JavaScript disabled: with scripts off, stock WebKit gives the page no script context, so nothing can read or act on it. Most fields reach a loaded page at once; JavaScript, touch handlers, and WebKit's `navigator.userAgent` wait for its next document.
 - **Grants are recomputed.** Removing one leaves the others in force: the browser can only reset a context's grants together, so the library resets them and grants what remains. A name the browser doesn't know fails with `InvalidInput` naming it, and every origin is `permissions.anyOrigin`, which Firefox lacks.
-- **A proxy belongs to a new context.** HTTP proxy endpoints carry HTTP requests and HTTPS CONNECT tunnels;
-  HTTPS-to-proxy and SOCKS endpoints fail `Unsupported{userContexts.proxy.scheme}`. URL userinfo, paths, queries,
+- **A proxy belongs to a new context.** HTTP proxy endpoints carry HTTP requests and HTTPS CONNECT tunnels.
+  `socks5://` endpoints carry every destination on every backend, the proxy resolving names. `socks4://` resolves
+  names at the proxy on Firefox and launched WebKit (SOCKS4a); Chromium refuses it with
+  `Unsupported{userContexts.proxy.socks4}`. `https://` (TLS to the proxy) works on Chromium, with a certificate it
+  trusts; Firefox and WebKit refuse it with `Unsupported{userContexts.proxy.https}`. SOCKS credentials fail
+  `Unsupported{userContexts.proxy.socksCredentials}`, and other schemes `Unsupported{userContexts.proxy.scheme}`. URL userinfo, paths, queries,
   fragments, and non-host bypass entries fail `InvalidInput` without reflecting their text. Bypass entries are
-  hostnames or IP addresses, without URL, port, wildcard, or CIDR syntax, interpreted by the browser's native host
-  rules (which may also exclude subdomains). Localhost, 127.0.0.1, and ::1 stay direct. Omitting the proxy leaves
+  hostnames or IP addresses, without URL, port, wildcard, or CIDR syntax: a hostname matches itself, and
+  `.example.com` matches its subdomains only. Launched WebKit's resolver matches a hostname's subdomains too, so it
+  refuses the leading-dot form with `Unsupported{userContexts.proxy.bypassSuffix}`. Localhost, 127.0.0.1, and ::1 stay direct. Omitting the proxy leaves
   launch/system settings unchanged. The context and its pages release proxy connections with their scope.
 - **Proxy credentials answer proxy challenges only, once per request.** A second challenge is canceled; website
   auth routes retain their decisions. Passwords stay `Redacted` through protocol encoding and are absent from logs
@@ -627,7 +633,28 @@ declare const bytes: (name: FileName | string, mimeType: MimeType | string, data
 // Locator.relative: only valid inside filter({ has })
 declare const relative: Queries<RelativeLocator>
 page.getByRole("row").filter({ has: Locator.relative.getByRole("button", { name: "Delete" }) })
+
+// Locator.xpath: an XPath expression for locator(selector: string | XPath); a string is always CSS
+declare const xpath: (expression: string) => XPath
+page.locator(Locator.xpath("//li[normalize-space()='Two'] | //li[@id='three']"))   // from the document
+page.locator("ul").locator(Locator.xpath("//li"))     // chained: a leading "/" reads as "./", inside each match
+page.locator("ul").locator(Locator.xpath(".//a | .//b"))   // only the start is rewritten: "//a | //b" would search the document for b
+item.locator(Locator.xpath(".."))                     // other axes reach where XPath says
+row.filter({ has: Locator.relative.locator(Locator.xpath("./td[2][.='Paid']")) })
 ```
+
+An XPath locator runs `document.evaluate` as an ordered node snapshot and keeps only its element nodes, in
+document order, so text and attribute nodes are skipped and a union matches both sides. From a page, or after
+`frame()`, the context node is the document; chained, it is each match so far, and an expression that starts with
+`/` is evaluated from it (`//li` as `.//li`). Only the start is rewritten, as Playwright does: in `//a | //b` the
+second branch searches the whole document, so a scoped union is written `.//a | .//b`, and a bare `/` is the root
+of the element's tree. XPath doesn't cross into a shadow root, though chained from an element inside one it
+searches that shadow tree. There is no namespace resolver: unprefixed names match HTML elements and a prefix is
+invalid. A malformed expression, a prefix, or a result that isn't a node set (`count(//li)`) fails with
+`InvalidInput` (`expected: "an XPath expression"`) when the locator is used, without waiting, even under a scope
+that matches nothing: each resolve checks the expression as written from a detached element. It is a query step of the engine already in
+each page, so a page that never uses one does no XPath work. Errors and traces describe it as
+`locator(Locator.xpath("…"))`.
 
 `fill` requires a string (also inside `Redacted`); other runtime values fail with `InvalidInput` before browser dispatch.
 For number inputs, it accepts empty clearing or a finite HTML floating-point string: optional minus, digits with an

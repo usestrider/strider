@@ -102,6 +102,14 @@ const routes: Record<string, Route> = {
       `<title>frames</title><iframe src="/child"></iframe><iframe src="${site.crossSite}/child"></iframe>`
     ),
   "/child": (request, response) => html(response, `<title>child</title><p>child of ${request.headers.host}</p>`),
+  // A script `/csp` allows, which reports whether its page's policy lets it `eval`, and in a frame, posts what
+  // the page's `#inline` and `#eval` say to its parent
+  "/eval.js": (_request, response) => {
+    response.writeHead(200, { "content-type": "text/javascript" })
+    response.end(
+      `{ const result = (() => { try { return eval("'ran'") } catch { return "refused" } })(); document.getElementById("eval").textContent = result; if (parent !== window) parent.postMessage(document.getElementById("inline").textContent + "," + result, "*") }`
+    )
+  },
   "/worker.js": (_request, response) => {
     response.writeHead(200, { "content-type": "text/javascript" })
     response.end(`console.log("from the worker"); postMessage("ready")`)
@@ -485,3 +493,33 @@ export const json = (value: Adapter.RemoteValue): unknown => {
       return value.type
   }
 }
+
+/** A self-signed key pair for `127.0.0.1`, which no browser trusts. */
+export const selfSigned = Effect.acquireRelease(
+  Effect.sync(() => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-proxy-tls-"))
+    const key = path.join(directory, "key.pem")
+    const cert = path.join(directory, "cert.pem")
+    execFileSync(openssl, [
+      "req",
+      "-x509",
+      "-newkey",
+      "ec",
+      "-pkeyopt",
+      "ec_paramgen_curve:prime256v1",
+      "-nodes",
+      "-keyout",
+      key,
+      "-out",
+      cert,
+      "-days",
+      "1",
+      "-subj",
+      "/CN=127.0.0.1",
+      "-addext",
+      "subjectAltName=IP:127.0.0.1"
+    ], { stdio: "ignore" })
+    return { directory, key: fs.readFileSync(key), cert: fs.readFileSync(cert) }
+  }),
+  ({ directory }) => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true }))
+)

@@ -55,7 +55,7 @@ import * as Operation from "./operation.ts"
 import * as Recorders from "./recorders.ts"
 import * as Runtime from "./runtime.ts"
 import * as Snapshots from "./snapshot.ts"
-import { describeSteps, matcher, queries, type Relative, roleStep } from "./steps.ts"
+import { describeSteps, matcher, queries, type Relative, roleStep, selectorStep } from "./steps.ts"
 
 // ── Locators ──────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -265,11 +265,11 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
   getByTitle(text: string | RegExp, options?: Locator.TextOptions) {
     return this.with([...this.steps, { _tag: "Title", matcher: matcher(text, options?.exact) }])
   }
-  getByTestId(id: string) {
-    return this.with([...this.steps, { _tag: "TestId", id }])
+  getByTestId(id: string | RegExp) {
+    return this.with([...this.steps, { _tag: "TestId", matcher: matcher(id, true) }])
   }
-  locator(css: string) {
-    return this.with([...this.steps, { _tag: "Css", selector: css }])
+  locator(selector: string | Locator.XPath) {
+    return this.with([...this.steps, selectorStep(selector)])
   }
 
   // Chainers
@@ -1288,7 +1288,11 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       operation,
       new Reason.InvalidInput({
         input: "selector",
-        expected: response.kind === "role" ? "a role query with supported state filters" : "a CSS selector",
+        expected: response.kind === "role"
+          ? "a role query with supported state filters"
+          : response.kind === "xpath"
+          ? "an XPath expression"
+          : "a CSS selector",
         hint: `${JSON.stringify(response.selector)}: ${response.message}`
       }),
       id
