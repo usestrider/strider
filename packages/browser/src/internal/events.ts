@@ -106,6 +106,15 @@ const offer = <A>(channel: Channel<A>, entry: Entry<A>): void => {
   }
 }
 
+/**
+ * The entries `accepts` takes that are published while the scope lasts, read without waiting: what an operation
+ * reads of the events the browser sent before answering it. It holds up to 64; more fails the read.
+ */
+export const collect = <A>(
+  channel: Channel<A>,
+  accepts: (entry: Entry<A>) => boolean
+) => Effect.map(subscribe(channel, accepts, 64), (subscriber) => Queue.clear(subscriber.queue))
+
 /** Logs an event and offers it to the subscriptions it matches. Never blocks: the fold calls it. */
 export const publish = <A>(channel: Channel<A>, value: A): Entry<A> => {
   const entry: Entry<A> = { value, at: now(), sequence: channel.published++ }

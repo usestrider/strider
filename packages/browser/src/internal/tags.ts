@@ -1,14 +1,26 @@
 /**
- * Elements a caller adds to a document, such as a script tag: one main-world call that appends the element and
- * settles on its own events. Nothing is installed before the call, and nothing is left after it.
+ * Elements a caller adds to a document, such as a script tag, appended from the document's main world and
+ * settled by the element's own events. Nothing is installed before the call, and nothing is left after it.
  *
- * - **A resource from a URL** settles on the element's `load` or `error`. A `securitypolicyviolation` for the same
- *   URL tells a refusal by the page's policy apart from a load failure; every backend dispatches it before the
- *   `error` event.
- * - **Inline JavaScript** has no `load` event, a module's included, so its text ends with a call to a global named
- *   for this call alone, removed as the call settles. The page's `error` event means it ran and threw. A refusal
- *   dispatches `securitypolicyviolation` at the element itself, after the append.
+ * - **A resource from a URL** settles on the element's `load` or `error`. An enforced `securitypolicyviolation`
+ *   whose `blockedURI` is the URL tells a refusal by the page's policy apart from a load failure; every backend
+ *   dispatches it before the `error` event.
+ * - **Inline JavaScript** runs, when the policy allows it, inside the append, and its text is the caller's. The
+ *   policy decides during the append too, but every engine dispatches the element's `securitypolicyviolation`
+ *   later, as a task, so the call needs a signal the engine orders before a second call reads the element's
+ *   violation:
+ *   - Chromium and WebKit write the refusal to the console as they decide it, so it is among the events sent
+ *     before the append's reply, which an operation handles before it returns. Chromium's entry names the
+ *     refused text's SHA-256, which ties it to this element; WebKit's names none, so any inline refusal the
+ *     page's own scripts cause during the call is taken as this element's.
+ *   - Firefox dispatches the event in a runnable on the main thread, queued during the append
+ *     (`nsCSPContext::AsyncReportViolation`), and the next command reaches the content process as a later
+ *     message on the same thread, so the second call runs after the event.
+ * - **A module** is accepted or refused in the append as a classic script is, and the call returns then: without
+ *   changing its text nothing tells when it has run, since it has no `load` event and top-level `await` can hold
+ *   it.
  * - **The outcome** is the element, or a string naming a failure: a primitive, so it leaves no remote object.
+ * - **Report-only policies** dispatch violations too, with the disposition `report`; they refuse nothing.
  */
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
@@ -18,7 +30,9 @@ import type * as JSHandle from "../JSHandle.ts"
 import * as Reason from "../Reason.ts"
 import type * as ScriptTag from "../ScriptTag.ts"
 import type * as Target from "../Target.ts"
+import type * as Adapter from "./adapter.ts"
 import * as Evaluation from "./evaluation.ts"
+import * as Events from "./events.ts"
 import * as FunctionSource from "./functionSource.ts"
 import type * as Model from "./model.ts"
 import type * as Operation from "./operation.ts"
@@ -37,8 +51,6 @@ export interface Spec {
   readonly text: string | null
   /** Whether the browser runs or loads it, so the call waits for that. */
   readonly settles: boolean
-  /** The global the text calls once it has run, or null when there's no inline JavaScript. */
-  readonly marker: string | null
 }
 
 /** The `type`s a script element runs as JavaScript: none, a module, or a JavaScript MIME type. */
@@ -83,7 +95,7 @@ export const readPath = Effect.fnUntraced(function*(runtime: Runtime.Runtime, fi
   return { path, text }
 })
 
-/** A script element's spec: a path is read now, and inline JavaScript is followed by its marker's call. */
+/** A script element's spec: a path is read now and named by a `sourceURL` comment, as other tools name it. */
 export const script = Effect.fnUntraced(function*(
   runtime: Runtime.Runtime,
   source: ScriptTag.Source,
@@ -94,26 +106,15 @@ export const script = Effect.fnUntraced(function*(
   if (type !== undefined) attributes.push(["type", type])
   if (options?.id !== undefined) attributes.push(["id", options.id])
   const settles = javaScriptTypes.has((type ?? "").trim().toLowerCase())
-  if ("url" in source) {
-    return { tag: "script", attributes, url: source.url, text: null, settles, marker: null } satisfies Spec
-  }
-  const [text, sourceUrl] = "source" in source ? [source.source, ""] : yield* Effect.map(
+  if ("url" in source) return { tag: "script", attributes, url: source.url, text: null, settles } satisfies Spec
+  const text = "source" in source ? source.source : yield* Effect.map(
     readPath(runtime, source.path),
-    ({ path, text }) => [text, `\n//# sourceURL=${path.replace(/\n/g, "")}`] as const
+    ({ path, text }) => `${text}\n//# sourceURL=${path.replace(/\n/g, "")}`
   )
-  if (!settles) return { tag: "script", attributes, url: null, text, settles, marker: null } satisfies Spec
-  const marker = `__strider_ran_${globalThis.crypto.randomUUID().replace(/-/g, "")}`
-  return {
-    tag: "script",
-    attributes,
-    url: null,
-    text: `${text}\n;globalThis[${JSON.stringify(marker)}]?.()${sourceUrl}`,
-    settles,
-    marker
-  } satisfies Spec
+  return { tag: "script", attributes, url: null, text, settles } satisfies Spec
 })
 
-/** Runs in the document's main world: appends the element, and settles on its own events. */
+/** Runs in the document's main world: appends an element from a URL, or one the browser doesn't run, and settles. */
 function insertElement(spec: Spec): Promise<Element | string> {
   return new Promise((resolve) => {
     const element = document.createElement(spec.tag)
@@ -121,44 +122,77 @@ function insertElement(spec: Spec): Promise<Element | string> {
     const href = spec.url === null ? null : new URL(spec.url, document.baseURI).href
     const removals: Array<() => void> = []
     let refusal: string | null = null
-    let settled = false
     const settle = (outcome: Element | string) => {
-      if (settled) return
-      settled = true
-      for (const remove of removals) remove()
-      if (spec.marker !== null) Reflect.deleteProperty(globalThis, spec.marker)
+      for (const remove of removals.splice(0)) remove()
       resolve(outcome)
     }
     const listen = (target: EventTarget, type: string, listener: (event: Event) => void) => {
       target.addEventListener(type, listener, true)
       removals.push(() => target.removeEventListener(type, listener, true))
     }
-    listen(document, "securitypolicyviolation", (event) => {
-      const violation = event as SecurityPolicyViolationEvent
-      if (violation.target !== element && (href === null || violation.blockedURI !== href)) return
-      refusal = JSON.stringify({
-        _tag: "Refused",
-        directive: violation.effectiveDirective || violation.violatedDirective,
-        blocked: violation.blockedURI
-      })
-      if (spec.url === null) settle(refusal)
-    })
     if (spec.url !== null && spec.settles) {
+      listen(document, "securitypolicyviolation", (event) => {
+        const violation = event as SecurityPolicyViolationEvent
+        if (violation.disposition === "report" || violation.blockedURI !== href) return
+        refusal = JSON.stringify({
+          _tag: "Refused",
+          directive: violation.effectiveDirective || violation.violatedDirective,
+          blocked: violation.blockedURI
+        })
+      })
       listen(element, "load", () => settle(element))
       listen(element, "error", () => settle(refusal ?? JSON.stringify({ _tag: "Failed", url: href })))
-    }
-    if (spec.marker !== null) {
-      Object.defineProperty(globalThis, spec.marker, { configurable: true, value: () => settle(element) })
-      // It ran and threw, or didn't parse: the page reports that as its own error
-      listen(window, "error", (event) => {
-        if (event instanceof ErrorEvent) settle(element)
-      })
     }
     if (spec.url !== null) element.setAttribute("src", spec.url)
     if (spec.text !== null) element.textContent = spec.text
     ;(document.head ?? document.documentElement ?? document).append(element)
     if (!spec.settles) settle(element)
   })
+}
+
+/** What an inline element's two calls share. */
+interface Inline {
+  readonly element: Element
+  seen: string | null
+  readonly refusal: Promise<string>
+  readonly stop: () => void
+}
+
+/** Runs in the document's main world: appends inline JavaScript, which runs now if the policy allows it. */
+function appendInline(spec: Spec): Inline {
+  const element = document.createElement(spec.tag)
+  for (const [name, value] of spec.attributes) element.setAttribute(name, value)
+  let refuse = (_: string) => {}
+  const state: Inline = {
+    element,
+    seen: null,
+    refusal: new Promise<string>((resolve) => refuse = resolve),
+    stop: () => document.removeEventListener("securitypolicyviolation", listener, true)
+  }
+  const listener = (event: Event) => {
+    const violation = event as SecurityPolicyViolationEvent
+    if (violation.target !== element || violation.disposition === "report") return
+    state.seen = JSON.stringify({
+      _tag: "Refused",
+      directive: violation.effectiveDirective || violation.violatedDirective,
+      blocked: violation.blockedURI
+    })
+    refuse(state.seen)
+  }
+  document.addEventListener("securitypolicyviolation", listener, true)
+  element.textContent = spec.text
+  ;(document.head ?? document.documentElement ?? document).append(element)
+  return state
+}
+
+/** Runs after `appendInline`: the element, or its refusal, waiting for the violation the browser reported. */
+function settleInline(state: Inline, reported: boolean): Element | string | Promise<string> {
+  const done = <A>(outcome: A) => {
+    state.stop()
+    return outcome
+  }
+  if (state.seen !== null) return done(state.seen)
+  return reported ? state.refusal.then(done) : done(state.element)
 }
 
 const outcome = (text: string): Failure => {
@@ -180,6 +214,21 @@ const outcome = (text: string): Failure => {
   }
 }
 
+/** The base64 SHA-256 of a script's text, as CSP hashes it. */
+const sha256 = (text: string) =>
+  Effect.promise(() => globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))).pipe(
+    Effect.map((digest) => btoa(String.fromCharCode(...new Uint8Array(digest))))
+  )
+
+/**
+ * Whether a console entry is the browser's refusal of an inline script, as Chromium and WebKit word it; Chromium's
+ * must name the text's hash. A report-only policy's entries begin `[Report Only]`.
+ */
+const refusalEntry = (protocol: string, hash: string) => (text: string) =>
+  !text.startsWith("[Report Only]") && (protocol === "cdp"
+    ? text.includes("inline script") && text.includes(`'sha256-${hash}'`)
+    : text.startsWith("Refused to execute a script because its hash, its nonce, or 'unsafe-inline'"))
+
 /** Adds the element in a main-world realm, as the operation's dispatch: the element, owned by the scope. */
 export const insert = <A>(
   runtime: Runtime.Runtime,
@@ -189,22 +238,44 @@ export const insert = <A>(
   record: Operation.Record
 ): Effect.Effect<JSHandle.JSHandle<A>, Failure, Scope.Scope> =>
   Effect.gen(function*() {
-    const values = yield* Evaluation.toLocal([spec], realm)
-    const group = yield* Evaluation.groupFor(runtime, realm, "handle")
-    const value = yield* Evaluation.call(runtime, {
-      dispatch: record,
-      realm,
-      functionDeclaration: FunctionSource.declaration(insertElement),
-      arguments: values,
-      result: "handle",
-      group,
-      userActivation: false,
-      page: Option.some(page),
-      at: record.budget.at,
-      id: record.id
+    const call = Effect.fnUntraced(function*(fn: Function, args: ReadonlyArray<unknown>, dispatch: boolean) {
+      const values = yield* Evaluation.toLocal(args, realm)
+      const group = yield* Evaluation.groupFor(runtime, realm, "handle")
+      return yield* Evaluation.call(runtime, {
+        ...(dispatch ? { dispatch: record } : {}),
+        realm,
+        functionDeclaration: FunctionSource.declaration(fn),
+        arguments: values,
+        result: "handle",
+        group,
+        userActivation: false,
+        page: Option.some(page),
+        at: record.budget.at,
+        id: record.id
+      })
     })
-    if (value.type === "string") return yield* Effect.fail(outcome(value.value))
-    return yield* Evaluation.own<A>(runtime, realm, value, Option.some(page))
+    const settled = (value: Adapter.RemoteValue) =>
+      value.type === "string"
+        ? Effect.fail(outcome(value.value))
+        : Evaluation.own<A>(runtime, realm, value, Option.some(page))
+    if (spec.url !== null || !spec.settles) return yield* settled(yield* call(insertElement, [spec], true))
+    const protocol = runtime.model.adapter.info.protocol
+    const matches = protocol === "bidi" ? undefined : refusalEntry(protocol, yield* sha256(spec.text ?? ""))
+    // Taken before the append, so every entry the browser sent before answering it is read
+    const entries = matches === undefined
+      ? undefined
+      : yield* Events.collect(
+        page.events.console,
+        (entry) => entry.value.level === "error" && matches(entry.value.text)
+      )
+    const state = yield* Effect.flatMap(
+      call(appendInline, [spec], true),
+      (value) => Evaluation.own<unknown>(runtime, realm, value, Option.none())
+    )
+    const reported = entries === undefined ? false : (yield* Effect.orElseSucceed(entries, () => [])).length > 0
+    const value = yield* call(settleInline, [state, reported], false)
+    yield* state.release
+    return yield* settled(value)
   })
 
 /** A failure as the operation's error: `Gone` and `Deadline` as every evaluation's, a reason named by `error`. */

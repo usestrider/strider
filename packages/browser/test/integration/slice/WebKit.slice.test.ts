@@ -23,7 +23,6 @@ import { recordings } from "./recordings.ts"
 import { requestBodies } from "./requestBodies.ts"
 import { requestSizes } from "./requestSizes.ts"
 import { requestTiming } from "./requestTiming.ts"
-import { scriptTags } from "./scriptTags.ts"
 import { slice } from "./slice.ts"
 import { storageReplacement } from "./storageReplacement.ts"
 import { tooling } from "./tooling.ts"
@@ -62,4 +61,3 @@ requestTiming("WebKit", backend)
 
 storageReplacement("WebKit", backend)
 requestSizes("WebKit", backend)
-scriptTags("WebKit", backend)

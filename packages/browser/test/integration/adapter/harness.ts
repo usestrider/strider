@@ -58,6 +58,14 @@ const routes: Record<string, Route> = {
     })
     response.end(new URL(request.url ?? "/", "http://site").searchParams.get("html") ?? "")
   },
+  // Any page, as `/fixture`, under a policy that only reports scripts that aren't the site's own
+  "/csp-report-only": (request, response) => {
+    response.writeHead(200, {
+      "content-type": "text/html; charset=utf-8",
+      "content-security-policy-report-only": "script-src 'self'"
+    })
+    response.end(new URL(request.url ?? "/", "http://site").searchParams.get("html") ?? "")
+  },
   // Any script: its source is the `js` parameter
   "/script": (request, response) => {
     response.writeHead(200, { "content-type": "text/javascript; charset=utf-8" })

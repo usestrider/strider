@@ -19,7 +19,6 @@ import { recordings } from "./recordings.ts"
 import { requestBodies } from "./requestBodies.ts"
 import { requestSizes } from "./requestSizes.ts"
 import { requestTiming } from "./requestTiming.ts"
-import { scriptTags } from "./scriptTags.ts"
 import { slice } from "./slice.ts"
 import { stalledReadProbes } from "./stalledReadProbes.ts"
 import { storageReplacement } from "./storageReplacement.ts"
@@ -58,4 +57,3 @@ storageReplacement("Chromium", backend)
 requestSizes("Chromium", backend)
 
 stalledReadProbes("Chromium", backend)
-scriptTags("Chromium", backend)
