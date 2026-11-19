@@ -2516,8 +2516,7 @@ export const contents = (
             yield* page.evaluateInMainWorld(() => {
               document.querySelector<HTMLInputElement>("#all")!.indeterminate = true
             })
-            const anywhere = (pattern: AriaPattern.AriaPattern) =>
-              AriaPattern.anywhere(AriaPattern.including(pattern))
+            const anywhere = (pattern: AriaPattern.AriaPattern) => AriaPattern.anywhere(AriaPattern.including(pattern))
             yield* page.pipe(Expect.toMatchAria(anywhere(
               AriaPattern.node("heading", "Plans", AriaPattern.unchecked, { level: 2 })
             )))
