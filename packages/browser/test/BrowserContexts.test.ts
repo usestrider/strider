@@ -1,11 +1,13 @@
 /**
  * `Browser.contexts` over the fake browser: the default context first, then the others in the order they were
  * added; a context this connection created as the handle `newContext` returned; one someone else created as an
- * observed handle, the same one each time; and a context leaving the list as it is removed.
+ * observed handle, the same one each time; a context leaving the list as it is removed; and a read that never waits
+ * for a context still being created.
  */
 import { assert, describe, it } from "@effect/vitest"
 import { Browser, UserContext } from "@usestrider/browser"
 import * as Clock from "effect/Clock"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Equal from "effect/Equal"
 import * as Fiber from "effect/Fiber"
@@ -15,17 +17,35 @@ import * as BrowserImpl from "../src/internal/browser.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as Fake from "../src/internal/fake.ts"
 
-/** The fake browser, on Effect's clock, with the fact sink kept so a test can report a context someone else made. */
-const withSink = (kept: { sink?: Adapter.Sink }): Layer.Layer<Browser.Browser> =>
+/**
+ * The fake browser, on Effect's clock, with the fact sink kept so a test can report a context someone else made,
+ * and, with a `gate`, each context's creation held after the browser reports it until the gate opens.
+ */
+const withSink = (
+  kept: { sink?: Adapter.Sink; gate?: Deferred.Deferred<void>; reported?: Deferred.Deferred<void> }
+): Layer.Layer<Browser.Browser> =>
   Layer.unwrap(Clock.clockWith((clock) =>
     Effect.sync(() =>
       Layer.provideMerge(
         BrowserImpl.layer((sink) => {
           kept.sink = sink
-          return Fake.connect([], {
-            info: new Browser.Info(Fake.info),
-            capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
-          })(sink)
+          return Effect.map(
+            Fake.connect([], {
+              info: new Browser.Info(Fake.info),
+              capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+            })(sink),
+            (fake) => ({
+              ...fake,
+              createUserContext: (options: Parameters<typeof fake.createUserContext>[0]) =>
+                Effect.tap(
+                  fake.createUserContext(options),
+                  () =>
+                    kept.gate === undefined
+                      ? Effect.void
+                      : Effect.andThen(Deferred.succeed(kept.reported!, undefined), Deferred.await(kept.gate))
+                )
+            })
+          )
         }),
         Layer.succeed(BrowserClock.CurrentClock, BrowserClock.fromClock(clock))
       )
@@ -82,6 +102,25 @@ describe("Browser.contexts", () => {
       assert.strictEqual((yield* browser.contexts)[1], listed[1])
       yield* kept.sink!({ _tag: "UserContextRemoved", context: foreign })
       assert.deepStrictEqual((yield* browser.contexts).map((each) => each.id), [browser.defaultContext.id])
+    }).pipe(Effect.provide(withSink(kept)))
+  })
+
+  it.effect("reads the list at once while a context is being created, and lists it once it has its handle", () => {
+    const kept: { sink?: Adapter.Sink; gate?: Deferred.Deferred<void>; reported?: Deferred.Deferred<void> } = {}
+    return Effect.gen(function*() {
+      const browser = yield* Browser.Browser
+      kept.gate = yield* Deferred.make<void>()
+      kept.reported = yield* Deferred.make<void>()
+      const creating = yield* Browser.newContext().pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Deferred.await(kept.reported)
+      // The browser has reported the context, and its creation is held: the list leaves it out, without waiting
+      const during = yield* browser.contexts
+      assert.deepStrictEqual(during.map((each) => each.id), [browser.defaultContext.id])
+      yield* Deferred.succeed(kept.gate, undefined)
+      const context = yield* Fiber.join(creating)
+      const listed = yield* browser.contexts
+      assert.strictEqual(listed.length, 2)
+      assert.strictEqual(listed[1], context)
     }).pipe(Effect.provide(withSink(kept)))
   })
 })

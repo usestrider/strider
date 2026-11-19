@@ -363,6 +363,8 @@ export interface StorageSourceObserver {
 }
 
 export interface ContextEntry {
+  /** Created by this connection and not yet handed out: `browser.contexts` leaves it out until it has its handle. */
+  awaitingHandle?: boolean | undefined
   storageReplacing?: boolean | undefined
   storageSources?: StorageSourceObserver | undefined
   timings?: Map<NetworkRequest.HopId, NetworkRequest.Timing> | undefined

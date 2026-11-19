@@ -408,7 +408,7 @@ export const make = Effect.fnUntraced(function*(options: {
     }
   })
 
-  const ensureContext = Effect.fnUntraced(function*(id: UserContext.Id, isDefault: boolean) {
+  const ensureContext = Effect.fnUntraced(function*(id: UserContext.Id, isDefault: boolean, created = false) {
     const existing = contexts.get(id)
     if (existing !== undefined) return existing
     const target: Target.Description = { _tag: "UserContext" }
@@ -437,6 +437,7 @@ export const make = Effect.fnUntraced(function*(options: {
         connection: Events.make(target, cap)
       }
     }
+    if (created) entry.awaitingHandle = true
     contexts.set(id, entry)
     yield* update(contextList, (list) => [...list, entry])
     return entry
@@ -503,7 +504,7 @@ export const make = Effect.fnUntraced(function*(options: {
     Effect.gen(function*() {
       switch (fact._tag) {
         case "UserContextAdded": {
-          const entry = yield* ensureContext(fact.context, fact.isDefault)
+          const entry = yield* ensureContext(fact.context, fact.isDefault, fact.created === true)
           if (fact.requestTiming) entry.timings ??= new Map()
           if (fact.requestSizes) entry.sizes ??= new Map()
           return

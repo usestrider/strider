@@ -388,20 +388,6 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
   const denied = new WeakMap<Model.ContextEntry, UserContext.UserContext>()
   // The observed handle of each context the connection lists but didn't create
   const observedContexts = new WeakMap<Model.ContextEntry, UserContext.ObservedUserContext>()
-  // Contexts being created or reclaimed: until each has its handle, `contexts` lists none it doesn't know, so a
-  // context this connection is creating is never listed as observed
-  let settlingContexts = 0
-  const settling = <A, E, R>(self: Effect.Effect<A, E, R>) =>
-    Effect.suspend(() => {
-      settlingContexts++
-      return Effect.ensuring(
-        self,
-        Effect.suspend(() => {
-          settlingContexts--
-          return model.touchContexts
-        })
-      )
-    })
 
   /** Whether the connection controls a page for its whole life: it created the page, or the page's context. */
   const lifelong = (entry: Model.PageEntry) =>
@@ -541,8 +527,10 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       readonly ownership: { committed: boolean }
       readonly adopt?: boolean
     }
-  ): Effect.Effect<UserContext.UserContext, UserContext.UserContextError | Deadline.Timeout, Scope.Scope> =>
-    Effect.gen(function*() {
+  ): Effect.Effect<UserContext.UserContext, UserContext.UserContextError | Deadline.Timeout, Scope.Scope> => {
+    // The context this setup creates: listed once setup ends, as its handle or, if setup failed, as observed
+    const awaiting: { entry?: Model.ContextEntry } = {}
+    return Effect.gen(function*() {
       const operation = mode !== undefined && "context" in mode ? "UserContext.reclaim" : "Browser.newContext"
       const { id } = yield* Operation.record
       const proxy = options?.proxy === undefined ? Option.none<Adapter.ProxyOptions>() : Option.some(
@@ -774,6 +762,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
             }))
           )
       )
+      awaiting.entry = entry
       // A context this scope created is removed with it, which closes the pages it released in it
       if (mode === undefined || !("context" in mode)) {
         model.removedWith(entry, ownerScope, () => committed() && !(reclaimable && Handoff.leavesOpen(ownerScope)))
@@ -909,9 +898,14 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       if (ownership === undefined) Handoff.ownContext(entry, ownerScope)
       return context
     }).pipe(
-      settling,
+      Effect.ensuring(Effect.suspend(() => {
+        if (awaiting.entry?.awaitingHandle !== true) return Effect.void
+        awaiting.entry.awaitingHandle = false
+        return model.touchContexts
+      })),
       Operation.named(mode !== undefined && "context" in mode ? "UserContext.reclaim" : "Browser.newContext")
     )
+  }
 
   // Setup is interruptible; ownership, registrations and delivery share a single commit region.
   const recover = <A>(
@@ -999,7 +993,8 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
             listed.push(known)
             continue
           }
-          if (settlingContexts > 0) return Option.none()
+          // One this connection is creating is listed once `newContext` has its handle
+          if (entry.awaitingHandle === true) continue
           const context = makeObservedContext(runtime, entry, upgradeContext(entry))
           observedContexts.set(entry, context)
           listed.push(context)

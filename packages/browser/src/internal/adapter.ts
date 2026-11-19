@@ -215,6 +215,8 @@ export type Fact =
     readonly _tag: "UserContextAdded"
     readonly context: UserContext.Id
     readonly isDefault: boolean
+    /** Created by this connection's `createUserContext`, rather than found. */
+    readonly created?: boolean | undefined
     readonly requestTiming?: boolean | undefined
     readonly requestSizes?: boolean | undefined
   }

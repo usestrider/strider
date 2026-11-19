@@ -227,6 +227,7 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
           _tag: "UserContextAdded",
           context: entry.id,
           isDefault: false,
+          created: true,
           ...(options.requestTiming ? { requestTiming: true } : {}),
           ...(options.requestSizes ? { requestSizes: true } : {})
         })
