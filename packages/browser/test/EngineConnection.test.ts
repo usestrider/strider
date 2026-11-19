@@ -8,11 +8,13 @@ import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Redacted from "effect/Redacted"
 import { TestClock } from "effect/testing"
 import * as Browser from "../src/Browser.ts"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as Fake from "../src/internal/fake.ts"
 import * as Target from "../src/Target.ts"
+import * as Url from "../src/Url.ts"
 import type * as UserContext from "../src/UserContext.ts"
 import * as Fixture from "./integration/adapter/engineConnection.ts"
 import type { Backend } from "./integration/adapter/harness.ts"
@@ -50,7 +52,7 @@ const backend = (change: (adapter: Adapter.AdapterConnection) => Adapter.Adapter
 
 describe("Raw engine connection fixture", () => {
   layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor))((it) => {
-    it.effect("reuses only the connection and confirms page then context cleanup", () =>
+    it.effect("reuses the connection and the shared context, and confirms each page's cleanup", () =>
       Effect.scoped(Effect.gen(function*() {
         const source = backend()
         const fixture = yield* Fixture.make(source)
@@ -58,18 +60,84 @@ describe("Raw engine connection fixture", () => {
         const first = yield* Effect.scoped(fixture.page)
         assert.strictEqual(first.facts.size(), 0)
         const second = yield* Effect.scoped(fixture.page)
-        assert.notStrictEqual(first.context, second.context)
+        assert.strictEqual(first.context, second.context)
         assert.notStrictEqual(first.page, second.page)
+        const fresh = yield* Effect.scoped(fixture.freshPage)
+        assert.notStrictEqual(fresh.context, first.context)
         assert.strictEqual(source.connects(), 1)
         assert.deepStrictEqual(source.removed, [
           "page:" + first.page,
-          "context:" + first.context,
           "page:" + second.page,
-          "context:" + second.context
+          "page:" + fresh.page,
+          "context:" + fresh.context
         ])
         yield* fixture.reset
         assert.strictEqual(source.disposals(), 1)
       })))
+
+    it.effect("fails a case that leaves a cookie in the shared context, and gives the next case a new one", () =>
+      Effect.scoped(Effect.gen(function*() {
+        const source = backend()
+        const fixture = yield* Fixture.make(source)
+        yield* fixture.prepare
+        let context: UserContext.Id | undefined
+        const exit = yield* Effect.scoped(Effect.gen(function*() {
+          const opened = yield* fixture.page
+          context = opened.context
+          yield* opened.adapter.setCookies(opened.context, [{
+            name: "left",
+            value: Redacted.make("1"),
+            domain: "example.com",
+            path: "/",
+            expires: Option.none(),
+            httpOnly: false,
+            secure: false,
+            sameSite: Option.none(),
+            partitionKey: Option.none(),
+            priority: Option.none()
+          }])
+        })).pipe(Effect.exit)
+        assert.isTrue(Exit.isFailure(exit))
+        assert.include(String(Exit.isFailure(exit) ? exit.cause : ""), "a cookie left for example.com")
+        assert.include(source.removed, "context:" + context)
+        const next = yield* Effect.scoped(fixture.page)
+        assert.notStrictEqual(next.context, context)
+        assert.strictEqual(source.connects(), 1)
+      })))
+
+    for (const resource of ["page", "worker with context", "worker with page"] as const) {
+      it.effect(`rejects a leftover ${resource} and replaces the shared context`, () =>
+        Effect.scoped(Effect.gen(function*() {
+          const source = backend()
+          const fixture = yield* Fixture.make(source)
+          yield* fixture.prepare
+          let context: UserContext.Id | undefined
+          const exit = yield* Effect.scoped(Effect.gen(function*() {
+            const opened = yield* fixture.page
+            context = opened.context
+            if (resource === "page") yield* opened.adapter.createPage(opened.context)
+            else {yield* source.sinks[0]!({
+                _tag: "RealmAdded",
+                realm: "leftover-worker" as Target.RealmId,
+                origin: "https://example.com",
+                kind: {
+                  _tag: "Worker",
+                  worker: { _tag: "Shared" },
+                  url: Url.Url.make("https://example.com/worker.js"),
+                  page: resource === "worker with page" ? Option.some(opened.page) : Option.none(),
+                  context: resource === "worker with context" ? Option.some(opened.context) : Option.none()
+                }
+              })}
+          })).pipe(Effect.exit)
+          assert.isTrue(Exit.isFailure(exit))
+          assert.include(
+            String(Exit.isFailure(exit) ? exit.cause : ""),
+            resource === "page" ? "page(s) open" : "a worker at"
+          )
+          const next = yield* Effect.scoped(fixture.page)
+          assert.notStrictEqual(next.context, context)
+        })))
+    }
 
     it.effect("discards uncertain cleanup and preserves the original case failure without retry", () =>
       Effect.scoped(Effect.gen(function*() {
@@ -106,7 +174,7 @@ describe("Raw engine connection fixture", () => {
         const source = backend((adapter) => ({ ...adapter, createPage: () => Effect.die("create page") }))
         const fixture = yield* Fixture.make(source)
         yield* fixture.prepare
-        const exit = yield* Effect.scoped(fixture.page).pipe(Effect.exit)
+        const exit = yield* Effect.scoped(fixture.freshPage).pipe(Effect.exit)
         assert.isTrue(Exit.isFailure(exit))
         assert.strictEqual(source.removed.length, 1)
         assert(source.removed[0]!.startsWith("context:"))
@@ -126,7 +194,8 @@ describe("Raw engine connection fixture", () => {
         })).pipe(Effect.forkChild)
         yield* Deferred.await(ready)
         yield* Fiber.interrupt(fiber)
-        assert.strictEqual(source.removed.length, 2)
+        // The page; the shared context goes with the discarded connection
+        assert.strictEqual(source.removed.length, 1)
         assert.strictEqual(source.disposals(), 1)
         yield* fixture.prepare
         assert.strictEqual(source.connects(), 2)
