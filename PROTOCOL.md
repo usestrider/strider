@@ -102,22 +102,25 @@ interface ErrorMatcher {
   in frames of one out-of-process session (a locator action names the frame its element is in and any other its
   points land in, such as a drag's destination) on that session, in the coordinates of the session's outermost
   frame, from the viewport origins L1 passes with the frame. Pointer input that names no frame (`page.mouse`, the
-  touchscreen and the wheel) follows the same rule: on a page with an out-of-process frame, the adapter hit-tests
-  each event's point with `DOM.getNodeForLocation` in each session from the page's down, `DOM.describeNode` tells
-  whether the element hit owns a frame of another session, and `DOM.getBoxModel` gives that element's content box,
-  the frame's origin; the event goes on the deepest such session, in its coordinates. That is no call on a page
-  without an out-of-process frame, two at a point outside them, and three for each level of out-of-process frame
-  the point is in. A real mouse stays with the frame its press reached until every button is released, but Chromium
-  routes input on the page's session by its point alone, so held moves and the release after a press that went to
-  an out-of-process frame, whether the press named its frame or the hit test found it, go on that frame's session,
-  in its coordinates, a release outside the frame included, until that session ends or the frame detaches; an
-  intercepted drag's events still go where the gesture's points land. From a touch's start until its end, touch
-  input that names no frame goes on the session the start went on, until that session or context ends; a wheel
-  goes by its point. Firefox
-  doesn't deliver page coordinates into a cross-site frame, so the BiDi adapter does the same with one
-  `script.callFunction` a level, in a sandbox and through open shadow roots, on a context holding a frame of
-  another origin than its parent's (it delivers page coordinates into one of the page's origin), and sends to the
-  frame's context;
+  touchscreen and the wheel) follows the same rule. While every out-of-process frame of the page has drawn (its
+  session's `Page.lifecycleEvent` `firstPaint`), the page's own routing reaches each, so it goes on the page's
+  session with no call. Otherwise each session that owns such a frame has its frame elements' boxes read once in an
+  operation, with one `Runtime.evaluate` in Strider's own world, and a point outside all of them goes on that
+  session with no further call. A point inside one is hit-tested there with `DOM.getNodeForLocation`;
+  `DOM.describeNode` tells whether the element hit owns a frame of another session, and `DOM.getBoxModel` gives
+  that element's content box, the frame's origin; the event goes on the deepest such session, in its coordinates.
+  That is three calls for each level of out-of-process frame the point is in, beside the box reads. A real mouse
+  stays with the frame its press reached until every button is released, but Chromium routes input on the page's
+  session by its point alone, so the adapter keeps one press state for every press: held moves and the release after
+  a press that went to an out-of-process frame, whether the press named its frame or the hit test found it, go on
+  that frame's session, in its coordinates, a release outside the frame included, until that session ends or the
+  frame detaches; an intercepted drag's events still go where the gesture's points land. From a touch's start until
+  its end, touch input that names no frame goes on the session the start went on, until that session or context
+  ends; a wheel goes by its point. Firefox doesn't deliver page coordinates into a cross-site frame, so the BiDi
+  adapter does the same on a context holding a frame of another origin than its parent's (it delivers page
+  coordinates into one of the page's origin): it reads that context's frame boxes once in an operation, in a
+  sandbox, sends a point outside them on the context, and hit-tests a point inside one with one
+  `script.callFunction` a level, through open shadow roots, sending to the frame's context;
   BiDi refuses a point outside that context's viewport, so a move outside the frame while a button is held there is
   left out, and the release is sent at the pointer's last point in the frame. Any other pointer input, such as a
   locator's drag between the page and a frame, goes on the page's session, in its coordinates. Keys and text go on
