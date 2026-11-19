@@ -354,7 +354,8 @@ const run = (
       scale: options?.scale,
       omitBackground: options?.omitBackground
     })
-    const fail = (reason: ScreenshotBaselineError["reason"]) => Effect.fail(new ScreenshotBaselineError({ name, reason }))
+    const fail = (reason: ScreenshotBaselineError["reason"]) =>
+      Effect.fail(new ScreenshotBaselineError({ name, reason }))
     const artifacts = Effect.fnUntraced(function*(images: ReadonlyArray<readonly [string, Uint8Array]>) {
       for (const [suffix, bytes] of images) {
         const file = `${output}-${suffix}.png`
@@ -366,8 +367,7 @@ const run = (
     const stable = (previous: Uint8Array): Effect.Effect<
       Uint8Array,
       Page.PageError | Target.TargetGone | Deadline.Timeout
-    > =>
-      Effect.flatMap(capture, (next) => sameBytes(previous, next) ? Effect.succeed(next) : stable(next))
+    > => Effect.flatMap(capture, (next) => sameBytes(previous, next) ? Effect.succeed(next) : stable(next))
 
     const baseline = yield* readBaseline(path)
     if (baseline._tag !== "Present") {
@@ -452,7 +452,10 @@ const run = (
  *   yield* page.pipe(ScreenshotBaseline.toMatch("checkout"))
  *   const dialog = page.getByRole("dialog")
  *   yield* page.pipe(
- *     ScreenshotBaseline.toMatch("dialog", { area: { element: dialog }, maxDiffPixels: 20 })
+ *     ScreenshotBaseline.toMatch("dialog", {
+ *       area: { element: dialog },
+ *       maxDiffPixels: 20
+ *     })
  *   )
  * })
  * ```

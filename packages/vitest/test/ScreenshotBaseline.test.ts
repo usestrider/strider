@@ -116,7 +116,8 @@ const harness = () => {
     attach: (artifact) => Effect.sync(() => attached.push((artifact as { screenshot: string }).screenshot))
   }
   const browser = { info: { protocol: "cdp" } } as unknown as Browser.Browser
-  const provide = (update: ScreenshotBaseline.Update) => <A, E>(
+  const provide = (update: ScreenshotBaseline.Update) =>
+  <A, E>(
     effect: Effect.Effect<A, E, Browser.Browser | TestRun.TestRun>
   ) =>
     effect.pipe(
@@ -226,7 +227,12 @@ describe("ScreenshotBaseline.toMatch", () => {
 
   it("keys the default path by file, name, browser and platform", () => {
     assert.strictEqual(
-      ScreenshotBaseline.defaultPath({ testFile: "/r/a.test.ts", name: "cart/total", browser: "firefox", platform: "linux" }),
+      ScreenshotBaseline.defaultPath({
+        testFile: "/r/a.test.ts",
+        name: "cart/total",
+        browser: "firefox",
+        platform: "linux"
+      }),
       "/r/__screenshots__/a.test.ts/cart-total-firefox-linux.png"
     )
   })

@@ -162,5 +162,10 @@ export const encode = (image: Image): Uint8Array => {
   const stride = width * 4
   const raw = new Uint8Array((stride + 1) * height)
   for (let y = 0; y < height; y++) raw.set(data.subarray(y * stride, (y + 1) * stride), y * (stride + 1) + 1)
-  return Buffer.concat([signature, chunk("IHDR", header), chunk("IDAT", deflateSync(raw)), chunk("IEND", new Uint8Array())])
+  return Buffer.concat([
+    signature,
+    chunk("IHDR", header),
+    chunk("IDAT", deflateSync(raw)),
+    chunk("IEND", new Uint8Array())
+  ])
 }
