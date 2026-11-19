@@ -104,8 +104,8 @@ const firstAlpha = (png: Uint8Array): number => {
 const todos =
   `<title>Todos</title><header><h1>todos</h1><input placeholder="What needs to be done?"></header><main><p>List</p></main>`
 
-/** A heading with a level, and a checkbox and a toggle button that can be mixed. */
-const controls = `<h2>Plans</h2><input type="checkbox" id="all" aria-label="All">` +
+/** A heading with a level, a heading element whose role takes none, and a checkbox and a toggle button that can be mixed. */
+const controls = `<h2>Plans</h2><h3 role="tab">Billing</h3><input type="checkbox" id="all" aria-label="All">` +
   `<button aria-pressed="mixed">Bold</button><button>Plain</button>`
 
 /** A small page for snapshots: landmarks, controls, an inferred control, hidden content, a list and text. */
@@ -2406,6 +2406,8 @@ export const contents = (
             })
             const snapshot = yield* page.snapshot({ sources: "aria" })
             assert.match(snapshot.text, /- heading "Plans" \[level=2\] \[ref=e\d+\]/)
+            // A level is the role's: a tab has none, even on an h3
+            assert.match(snapshot.text, /- tab "Billing" \[ref=e\d+\]/)
             assert.match(snapshot.text, /- checkbox "All" \[checked=mixed\] \[ref=e\d+\]/)
             assert.match(snapshot.text, /- button "Bold" \[pressed=mixed\] \[ref=e\d+\]/)
             assert.match(snapshot.text, /- button "Plain" \[ref=e\d+\]/)
