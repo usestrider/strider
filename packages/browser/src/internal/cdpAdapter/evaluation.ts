@@ -251,11 +251,14 @@ const logCategories: Readonly<Record<string, ConsoleMessage.Category>> = {
 }
 
 /**
- * What a `Log.entryAdded` entry is about. CORS failures come on the `javascript` source with the `cors` category, and
- * count as `security`, where WebKit puts its own.
+ * What a `Log.entryAdded` entry is about. A CORS failure comes on the `javascript` source with the `cors` category,
+ * and counts as `security`, where WebKit puts its own; the failed load it causes comes on `network`, with the same
+ * category, and stays `network`, as on WebKit.
  */
 const categoryOf = (entry: Log.LogEntry): ConsoleMessage.Category =>
-  entry.category === "cors" ? "security" : Object.hasOwn(logCategories, entry.source)
+  entry.source === "javascript" && entry.category === "cors"
+    ? "security"
+    : Object.hasOwn(logCategories, entry.source)
     ? logCategories[entry.source]!
     : "other"
 

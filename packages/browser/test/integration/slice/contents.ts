@@ -639,12 +639,16 @@ export const contents = (
           const errors = messages.map((entry) =>
             entry.text
           )
-          // Each is the browser's own, about security; where a browser can't tell, it reports none as a message
+          // Each is the browser's own: the CSP and CORS errors about security, and the blocked fetch's failed load
+          // about the network. Where a browser can't tell, it reports none as a message
           assert.deepStrictEqual(
             messages.map((entry) =>
               entry.source
             ),
-            messages.map((): ConsoleMessage.Source => ({ _tag: "Browser", category: "security" })),
+            messages.map((entry): ConsoleMessage.Source => ({
+              _tag: "Browser",
+              category: /Failed to load resource/.test(entry.text) ? "network" : "security"
+            })),
             JSON.stringify(errors)
           )
           if (!(yield* supports("console.source"))) assert.deepStrictEqual(errors, [])
@@ -685,6 +689,7 @@ export const contents = (
           yield* page.goto("https://load.test/")
           yield* failed.pipe(Deadline.within("5 seconds"))
           const messages = (yield* ConsoleMessage.history(page)).entries
+          console.log("FAILED-LOAD", JSON.stringify(messages.map((entry) => [entry.level, entry.text, entry.source])))
           const sources = messages.map((entry) =>
             entry.source
           )

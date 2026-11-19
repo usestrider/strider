@@ -92,7 +92,7 @@ export type SourceLocation = typeof SourceLocation.Type
  * - `security`: a Content Security Policy violation or a request CORS blocked, on Chromium and WebKit.
  * - `deprecation`, `intervention` and `violation`: a deprecated feature, a request the browser changed or refused
  *   to protect the user, and a slow handler or forced layout, on Chromium.
- * - `rendering`: what rendering or CSS reports, on Chromium and WebKit.
+ * - `rendering`: what rendering reports, on Chromium and WebKit.
  * - `storage`: what storage reports, on Chromium and WebKit. Chromium's application cache messages are `storage`.
  * - `other`: everything else, such as Chromium's `xml` and `recommendation` messages and WebKit's `css`, `media`
  *   and `content-blocker` ones.
