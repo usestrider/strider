@@ -161,7 +161,9 @@ Firefox's own.
 **HTML drag and drop needs [`html: "synthetic"`](/docs/pages/actions#dragging):** Firefox starts a native drag but never drops it.
 
 **Input into a cross-site frame goes to the frame's document,** since Firefox doesn't route page coordinates into
-it. A drag between documents goes to the first one alone.
+it. A drag between documents goes to the first one alone: while a button pressed in a cross-site frame is held, a
+[`page.mouse`](/docs/pages/actions#the-keyboard-and-the-mouse) move outside the frame isn't sent, and the release is sent at the
+pointer's last point inside it.
 
 **[Routes](/docs/events/routes) do less.** No sending a request to a new URL, no fulfilling at the response phase
 (changing status and headers works), and no abort reason but `"failed"`: a decision Firefox can't apply fails with
