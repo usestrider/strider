@@ -850,10 +850,11 @@ describe("Firefox launcher", () => {
             const prefs = FirefoxLauncher.prefsFor({ profile })
             assert.strictEqual(prefs["ui.primaryPointerCapabilities"], 6, profile)
             assert.strictEqual(prefs["ui.allPointerCapabilities"], 6, profile)
+            assert.strictEqual(prefs["network.proxy.allow_hijacking_localhost"], true, profile)
           }
           assert.deepStrictEqual(
             FirefoxLauncher.prefsFor({ headless: false }),
-            FirefoxLauncher.profilePrefs.automation
+            { ...FirefoxLauncher.profilePrefs.automation, ...FirefoxLauncher.loopbackProxyPrefs }
           )
           const own = FirefoxLauncher.prefsFor({ profilePrefs: { "ui.primaryPointerCapabilities": 2 } })
           assert.strictEqual(own["ui.primaryPointerCapabilities"], 2)

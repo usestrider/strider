@@ -238,14 +238,6 @@ export const declare = Effect.fnUntraced(
     if (declaration._tag === "Override") {
       // Refused, under its capability, where the table says stock WebKit can't apply it, never ignored
       const override = declaration.override
-      if (override._tag === "BypassCsp") {
-        return yield* Effect.fail(
-          Kit.unsupported(
-            "override.BypassCsp",
-            "stock WebKit's inspector can't set a page's Content Security Policy aside"
-          )
-        )
-      }
       const capability = overrideCapability(override)
       const entry = capability === undefined
         ? undefined

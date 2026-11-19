@@ -796,8 +796,15 @@ export interface Cookie {
   readonly priority: Option.Option<"Low" | "Medium" | "High">
 }
 
-/** A normalized HTTP proxy endpoint; credentials stay redacted until protocol encoding. */
+/** A proxy endpoint's scheme. */
+export type ProxyScheme = "http" | "https" | "socks5" | "socks4"
+
+/**
+ * A normalized proxy endpoint, `server` as `host:port`; credentials stay redacted until protocol encoding. A bypass
+ * entry with a leading dot matches the domain's subdomains, not the domain itself.
+ */
 export interface ProxyOptions {
+  readonly scheme: ProxyScheme
   readonly server: string
   readonly bypass: ReadonlyArray<string>
   readonly credentials?: { readonly username: string; readonly password: Redacted.Redacted<string> } | undefined
@@ -814,6 +821,8 @@ export interface UserContextOptions {
    */
   readonly focusEmulated?: boolean | undefined
   readonly proxy: Option.Option<ProxyOptions>
+  /** The loopback port of the context's client certificate proxy, which its HTTPS traffic must go through. */
+  readonly certificateProxy?: Option.Option<number> | undefined
   readonly acceptInsecureCerts: boolean
 }
 

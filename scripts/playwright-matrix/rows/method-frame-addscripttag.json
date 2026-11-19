@@ -3,13 +3,20 @@
   "upstream": [
     "method:Frame.addScriptTag"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding retained Frame operation. Page.frames exposes the observed tree and page.frame enters by iframe locator; these do not implement this contract.",
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "FrameLocator.addScriptTag",
+      "url": "/docs/api/browser/Locator#FrameLocator.addScriptTag"
+    }
+  ],
+  "notes": "On FrameLocator, in the iframe's current document and main world, cross-site frames included; the iframe must be present when called. Otherwise as Page.addScriptTag.",
   "capabilities": [],
   "audit": {
     "sources": [
-      "packages/browser/src/Page.ts"
+      "packages/browser/src/Locator.ts",
+      "packages/browser/src/ScriptTag.ts"
     ],
     "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
   },

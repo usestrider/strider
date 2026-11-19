@@ -34,6 +34,7 @@ import * as Page from "../Page.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
 import * as Reason from "../Reason.ts"
 import type * as Route from "../Route.ts"
+import type * as ScriptTag from "../ScriptTag.ts"
 import type * as Snapshot from "../Snapshot.ts"
 import * as Target from "../Target.ts"
 import type * as Url from "../Url.ts"
@@ -63,6 +64,7 @@ import * as Routes from "./routes.ts"
 import * as Runtime from "./runtime.ts"
 import * as Snapshots from "./snapshot.ts"
 import * as Storage from "./storage.ts"
+import * as Tags from "./tags.ts"
 import * as Urls from "./urls.ts"
 import * as Watchable from "./watchable.ts"
 
@@ -655,6 +657,22 @@ export const make = (owner: PageOwner): Page.Page => {
       Bindings.expose(runtime, entry.contextEntry, entry, name, schemas, handler),
     addInitScript: (script, options) =>
       InitScripts.add({ runtime, scope: declared, operation: "Page.addInitScript" }, entry.context, script, options),
+    addScriptTag: Effect.fnUntraced(
+      function*(script: ScriptTag.Source, options?: ScriptTag.Options | undefined) {
+        const record = yield* Operation.record
+        return yield* Effect.gen(function*() {
+          const spec = yield* Effect.mapError(
+            Tags.script(runtime, script, options),
+            (reason): Tags.Failure => ({ _tag: "Reason", reason })
+          )
+          const realm = yield* Evaluation.pageRealm(runtime, entry, { _tag: "Main" }, record.id, record.budget.at)
+          return yield* Tags.insert<HTMLScriptElement>(runtime, realm, entry, spec, record)
+        }).pipe(
+          Effect.mapError(Tags.fail(record, (reason) => pageError("Page.addScriptTag", reason, record.id)))
+        )
+      },
+      Operation.named("Page.addScriptTag", { attributes: { "browser.page.id": entry.id } })
+    ),
     emulate: (settings) => Emulation.emulate({ runtime, scope: declared, operation: "Page.emulate" }, settings),
     activate: Effect.gen(function*() {
       const { id } = yield* Operation.record

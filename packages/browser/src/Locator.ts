@@ -22,6 +22,7 @@ import type * as Pipeable from "effect/Pipeable"
 import * as Predicate from "effect/Predicate"
 import type * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
+import type * as Scope from "effect/Scope"
 import type * as AriaRole from "./AriaRole.ts"
 import type * as Deadline from "./Deadline.ts"
 import * as Diagnostics from "./Diagnostics.ts"
@@ -32,6 +33,7 @@ import type * as JSHandle from "./JSHandle.ts"
 import type * as Keyboard from "./Keyboard.ts"
 import type * as Mouse from "./Mouse.ts"
 import * as Reason from "./Reason.ts"
+import type * as ScriptTag from "./ScriptTag.ts"
 import type * as Snapshot from "./Snapshot.ts"
 import type * as Target from "./Target.ts"
 
@@ -392,7 +394,16 @@ export interface Queries<L> {
    */
   getByTitle(text: string | RegExp, options?: TextOptions | undefined): L
   /**
-   * Elements whose `data-testid` attribute is `id`.
+   * Elements whose test-id attribute is `id`, or matches it when `id` is a RegExp. The attribute is `data-testid`,
+   * unless the context sets another with `UserContext.Options.testIdAttribute`.
+   *
+   * **Details**
+   *
+   * A string matches the attribute exactly, case and whitespace included. A RegExp is tested against the attribute
+   * as written, with its own flags; its `g` flag is ignored. An element without the attribute never matches.
+   *
+   * The attribute is the context's when the locator is made. A relative locator takes the attribute of the locator
+   * whose `filter` it's placed in.
    *
    * **Example** (Reading the cart badge)
    *
@@ -404,11 +415,32 @@ export interface Queries<L> {
    *   return yield* page.getByTestId("cart-count").readText
    * })
    * ```
+   *
+   * **Example** (Counting the rows of a table)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const rowCount = Effect.fn("rowCount")(function*(page: Page.ReadonlyPage) {
+   *   return yield* page.getByTestId(/^row-/).count
+   * })
+   * ```
    */
-  getByTestId(id: string): L
+  getByTestId(id: string | RegExp): L
   /**
-   * Elements matching a CSS selector. A malformed selector fails with `InvalidInput` as soon as the locator is
-   * used, without waiting.
+   * Elements matching a CSS selector, or an XPath expression built with `Locator.xpath`. A malformed selector
+   * fails with `InvalidInput` as soon as the locator is used, without waiting.
+   *
+   * **Details**
+   *
+   * A string is always CSS, which searches open shadow roots too. An XPath expression is evaluated from the
+   * document, from a page or after `frame`, or from each element matched so far when chained. Chained, a `/`
+   * that begins the expression's first step, after optional whitespace, is read from the element, so `//li` reads
+   * as `.//li` and searches inside it; a bare `/`, alone or before `|`, is left as written. Only that very start
+   * is rewritten: in `//a | //b` the second branch searches the whole document (`.//a | .//b` keeps both inside),
+   * and `(//a)[1]` stays document-relative. Other axes, such as `..` or `following-sibling::`, reach wherever
+   * they lead. See `Locator.xpath` for the rest of its rules.
    *
    * **Example** (Submitting a form found by CSS)
    *
@@ -420,8 +452,20 @@ export interface Queries<L> {
    *   yield* page.locator("form#checkout button[type=submit]").click()
    * })
    * ```
+   *
+   * **Example** (Reading the row of a list item found by XPath)
+   *
+   * ```ts import.meta.vitest
+   * import { Locator, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const secondItem = Effect.fn("secondItem")(function*(page: Page.ReadonlyPage) {
+   *   const list = page.locator("ul#basket")
+   *   return yield* list.locator(Locator.xpath("//li[normalize-space()='Two']")).readText
+   * })
+   * ```
    */
-  locator(css: string): L
+  locator(selector: string | XPath): L
 }
 
 /**
@@ -1248,8 +1292,8 @@ export interface Locator extends ReadonlyLocator {
   getByPlaceholder(text: string | RegExp, options?: TextOptions | undefined): Locator
   getByAltText(text: string | RegExp, options?: TextOptions | undefined): Locator
   getByTitle(text: string | RegExp, options?: TextOptions | undefined): Locator
-  getByTestId(id: string): Locator
-  locator(css: string): Locator
+  getByTestId(id: string | RegExp): Locator
+  locator(selector: string | XPath): Locator
   frame(iframe: ReadonlyLocator): FrameLocator
   filter(options: FilterOptions): Locator
   and(other: ReadonlyLocator): Locator
@@ -1747,6 +1791,8 @@ export interface Locator extends ReadonlyLocator {
    *   target's, which drives pages that drag with pointer events.
    * - An HTML drag (`draggable="true"` on the element or an ancestor) needs `input.dragAndDrop`, which Chromium
    *   has; elsewhere it fails with `Unsupported` before anything is sent.
+   * - On Chromium, a native HTML drag fires `dragenter` at the target on the first move that reaches it,
+   *   `dragover` on each move after, and `dragover` then `drop` at the release.
    * - With `html: "synthetic"`, the page dispatches the drag's events itself, on every backend: `dragstart` and
    *   `drag` on the element, `dragenter` and `dragover` where the target's point is, then `drop` there if a
    *   `dragover` handler accepted it, or `dragleave`, and `dragend` on the element.
@@ -1789,6 +1835,84 @@ export interface Locator extends ReadonlyLocator {
  * @since 0.1.0
  */
 export const isLocator = (u: unknown): u is ReadonlyLocator => Predicate.hasProperty(u, TypeId)
+
+const XPathTypeId = "~@usestrider/browser/Locator/XPath"
+
+/**
+ * An XPath expression for `locator`, built with `Locator.xpath`, so it is never mistaken for CSS.
+ *
+ * **Example** (Keeping an XPath expression to reuse)
+ *
+ * ```ts import.meta.vitest
+ * import { Locator, Page } from "@usestrider/browser"
+ *
+ * const paidCell: Locator.XPath = Locator.xpath("./td[2][.='Paid']")
+ *
+ * const paidRows = (page: Page.ReadonlyPage) =>
+ *   page.locator("tr").filter({ has: Locator.relative.locator(paidCell) })
+ * ```
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export interface XPath {
+  readonly [XPathTypeId]: typeof XPathTypeId
+  /** The expression, as given. */
+  readonly expression: string
+}
+
+/**
+ * An XPath expression for `locator`: elements it selects, in document order.
+ *
+ * **Details**
+ *
+ * The expression is evaluated with the browser's `document.evaluate`, and only the element nodes it selects are
+ * kept: text and attribute nodes are skipped. A union (`a | b`) matches the elements of both, in document order.
+ * From a page, or after `frame`, the expression starts from the document; chained after another query, it starts
+ * from each element matched so far. There, a `/` that begins the first step, after optional whitespace, is read
+ * from the element, so `//li` reads as `.//li` and searches inside it; a bare `/`, alone or before `|`, is the
+ * root of the element's tree and is left as written. It has no namespace prefixes: an unprefixed name matches an
+ * HTML element.
+ *
+ * An expression that doesn't parse, uses a prefix, or selects something other than nodes, such as `count(//li)`,
+ * fails with `InvalidInput` each time the locator is used, without waiting, even when the query before it matches
+ * nothing.
+ *
+ * **Gotchas**
+ *
+ * Chained, only the very start of the expression is read from the element. In `//a | //b` the second branch
+ * searches the whole document; write `.//a | .//b` to keep both inside. Parentheses aren't looked into either, so
+ * `(//a)[1]` stays document-relative; write `(.//a)[1]` for the first one inside.
+ *
+ * XPath doesn't cross into a shadow root, so from the page it never finds an element inside one. Chained from an
+ * element that is itself inside a shadow root, it searches that shadow tree.
+ *
+ * **Example** (Finding the items that are named Two or have the id three)
+ *
+ * ```ts import.meta.vitest
+ * import { Locator, Page } from "@usestrider/browser"
+ *
+ * const items = (page: Page.ReadonlyPage) =>
+ *   page.locator(Locator.xpath("//li[normalize-space()='Two'] | //li[@id='three']"))
+ * ```
+ *
+ * **Example** (Keeping the rows whose second cell says Paid)
+ *
+ * ```ts import.meta.vitest
+ * import { Locator, Page } from "@usestrider/browser"
+ *
+ * const paidRows = (page: Page.ReadonlyPage) =>
+ *   page.locator("tr").filter({
+ *     has: Locator.relative.locator(Locator.xpath("./td[2][.='Paid']"))
+ *   })
+ * ```
+ *
+ * @stability unstable
+ * @category constructors
+ * @since 0.1.0
+ */
+export const xpath = (expression: string): XPath => ({ [XPathTypeId]: XPathTypeId, expression })
 
 const RelativeLocatorTypeId = "~@usestrider/browser/Locator/RelativeLocator"
 
@@ -1904,9 +2028,40 @@ export interface FrameLocator extends ReadonlyFrameLocator {
   getByPlaceholder(text: string | RegExp, options?: TextOptions | undefined): Locator
   getByAltText(text: string | RegExp, options?: TextOptions | undefined): Locator
   getByTitle(text: string | RegExp, options?: TextOptions | undefined): Locator
-  getByTestId(id: string): Locator
-  locator(css: string): Locator
+  getByTestId(id: string | RegExp): Locator
+  locator(selector: string | XPath): Locator
   frame(iframe: ReadonlyLocator): FrameLocator
+  /**
+   * Adds a `<script>` element to the iframe's current document, returning it once it has loaded, run, or been
+   * accepted: a URL's script loads, a classic inline script runs, and an inline module is accepted without waiting
+   * for it to run.
+   *
+   * **Details**
+   *
+   * As `page.addScriptTag`, in the frame's document and main world: the frame's Content Security Policy applies,
+   * and a cross-site frame works as a same-site one. The iframe must be in the page now; this doesn't wait for it.
+   * See `ScriptTag` for what the call waits for.
+   *
+   * **Example** (A helper inside an embedded editor)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const prepareEditor = Effect.fn("prepareEditor")(function*(page: Page.Page) {
+   *   const editor = page.frame(page.locator("iframe#editor"))
+   *   yield* editor.addScriptTag({ source: "window.editorReady = true" })
+   * })
+   * ```
+   */
+  addScriptTag(
+    script: ScriptTag.Source,
+    options?: ScriptTag.Options | undefined
+  ): Effect.Effect<
+    JSHandle.JSHandle<HTMLScriptElement>,
+    LocatorError | Target.TargetGone | Deadline.Timeout,
+    Scope.Scope
+  >
 }
 
 /**
@@ -2081,7 +2236,9 @@ export const LocatorErrorReason = Schema.Union([
   Reason.Unsupported,
   Reason.BackendFailure,
   Reason.PromptBlocking,
-  Reason.LocatorHandlerFailed
+  Reason.LocatorHandlerFailed,
+  Reason.ResourceFailed,
+  Reason.RefusedByPolicy
 ])
 
 /**

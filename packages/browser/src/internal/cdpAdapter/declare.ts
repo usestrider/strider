@@ -40,6 +40,11 @@ export interface Setup {
     command: Protocol.Command<M, P, A>,
     receive?: (result: A) => void
   ) => Effect.Effect<void, Protocol.ProtocolError>
+  /** Writes a reading whose failed reply leaves it unread, given `undefined`, rather than failing the setup. */
+  readonly read: <M extends string, P, A>(
+    command: Protocol.Command<M, P, A>,
+    receive: (result: A | undefined) => void
+  ) => Effect.Effect<void, Protocol.ProtocolError>
 }
 
 type Send = <M extends string, P, A>(command: Protocol.Command<M, P, A>) => Effect.Effect<void, Protocol.ProtocolError>
@@ -653,11 +658,30 @@ export const configureTarget = Effect.fnUntraced(
           if (baseline !== undefined) {
             target.viewport = baseline
           } else {
-            // The initial blank document has no scrollbars. Queue its dimensions before changing them, without
-            // creating an isolated world whose identifier would require a renderer reply before resume.
-            yield* setup.send(Page.getLayoutMetrics(), ({ cssLayoutViewport }) => {
-              target.viewport = { width: cssLayoutViewport.clientWidth, height: cssLayoutViewport.clientHeight }
-            })
+            // Queued before the override, with nothing awaited before resume: a page whose first request is routed
+            // gets its renderer only once that request runs, after it resumes. It reads what the restore compares,
+            // `innerWidth` and `innerHeight`: the layout viewport's client size leaves out a scrollbar, and at a
+            // fractional device scale rounds 1 px away. It reads the main world, where no page script has run before
+            // the page resumes. A renderer that answers only after the override applies, as the headless shell does,
+            // shows the override in its size or its screen: a desktop override sets the size, and a mobile one lays
+            // the page out at another size but reports the override as the screen. Either can't be told from a page
+            // of that size or screen, so either, and any reading that isn't four sizes, leaves the dimensions unknown.
+            target.viewport = null
+            yield* setup.read(
+              Runtime.evaluate({
+                expression: "[innerWidth, innerHeight, screen.width, screen.height]",
+                returnByValue: true
+              }),
+              (reply) => {
+                const value = reply?.result.value
+                const valid = Array.isArray(value) && value.length === 4 &&
+                  value.every((n) => typeof n === "number" && Number.isFinite(n) && n > 0)
+                const late = valid &&
+                  ((value[0] === override.width && value[1] === override.height) ||
+                    (value[2] === override.width && value[3] === override.height))
+                target.viewport = valid && !late ? { width: value[0], height: value[1] } : null
+              }
+            )
           }
           yield* setup.send(Emulation.setDeviceMetricsOverride({
             width: override.width,

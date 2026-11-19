@@ -3,9 +3,22 @@
   "upstream": [
     "method:LocatorAssertions.toHaveScreenshot#1"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding public Strider capability for this member.",
+  "status": "has",
+  "api": [
+    {
+      "module": "ScreenshotBaseline",
+      "symbol": "toMatch",
+      "url": "/docs/api/vitest/ScreenshotBaseline#toMatch",
+      "package": "vitest"
+    }
+  ],
+  "notes": "page.pipe(ScreenshotBaseline.toMatch(name, { area: { element: locator } })): a locator's element is captured through the page's screenshot.",
   "capabilities": [],
-  "requirements": []
+  "requirements": [],
+  "audit": {
+    "sources": [
+      "packages/vitest/src/ScreenshotBaseline.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  }
 }

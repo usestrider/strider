@@ -12,7 +12,7 @@
       "url": "/docs/api/browser/UserContext#Options"
     }
   ],
-  "notes": "Set acceptInsecureCerts at context creation; Firefox and launched stock WebKit isolate it. Chromium refuses true; existing contexts refuse explicit values on reclaim.",
+  "notes": "Set acceptInsecureCerts at context creation; Chromium, Firefox, and launched stock WebKit isolate it. A reclaimable Chromium context refuses true; existing contexts refuse explicit values on reclaim.",
   "capabilities": [
     "acceptInsecureCerts"
   ],

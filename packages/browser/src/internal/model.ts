@@ -336,6 +336,8 @@ export interface ContextSettings {
   readonly eventLog: number
   /** The layout its pages' keyboards type with (`UserContext.Options.keyboardLayout`). */
   readonly keyboardLayout: Keyboard.Layout
+  /** The attribute its pages' `getByTestId` matches (`UserContext.Options.testIdAttribute`). */
+  readonly testIdAttribute: string
 }
 
 /** Permissions granted to a context, for an origin or every one, until the grant's scope closes. */

@@ -841,6 +841,247 @@ export const conformance = (backend: Backend) =>
           }), timeout)
 
         it.effect(
+          "sends input that names no frame into a cross-site frame that has not drawn its first frame yet",
+          () =>
+            Effect.gen(function*() {
+              const world = yield* setup(backend)
+              const { page } = yield* newPage(world)
+              const fixture = (origin: string, html: string) =>
+                `${origin}/fixture?html=${encodeURIComponent(html)}`
+              // The child says it has loaded, then holds its main thread for a second, so it draws nothing
+              // until after the input below has been sent
+              const child =
+                `<body style="margin:0"><button style="position:absolute;left:10px;top:10px;width:60px;height:30px" onclick="parent.postMessage('clicked', '*')">x</button><script>parent.postMessage('loaded', '*'); const end = performance.now() + 1000; while (performance.now() < end) {}</script></body>`
+              yield* goto(
+                world,
+                page,
+                fixture(
+                  world.site.origin,
+                  `<body style="margin:0"><script>window.got = []; addEventListener('message', (e) => got.push(e.data))</script><iframe id="cross" src="${
+                    fixture(world.site.crossSite, child)
+                  }" style="position:absolute;left:100px;top:50px;width:200px;height:100px;border:5px solid red;padding:3px"></iframe></body>`
+                )
+              )
+              const realm = yield* mainRealm(world, page)
+              const loaded = yield* world.adapter.evaluate(realm, {
+                functionDeclaration:
+                  "() => window.got.includes('loaded') || new Promise((resolve) => addEventListener('message', (e) => { if (e.data === 'loaded') resolve(true) }))",
+                arguments: [],
+                awaitPromise: true,
+                result: "value",
+                userActivation: false
+              })
+              assert(loaded._tag === "Value" && json(loaded.value) === true)
+              // Pointer input that names no frame, one event a call, as page.mouse sends it
+              const none = { alt: false, control: false, meta: false, shift: false }
+              const x = 100 + 5 + 3 + 40
+              const y = 50 + 5 + 3 + 25
+              yield* world.adapter.dispatchInput(page, [
+                { _tag: "Mouse", type: "move", x, y, button: "none", clickCount: 0, modifiers: none, buttons: 0 }
+              ])
+              yield* world.adapter.dispatchInput(page, [
+                { _tag: "Mouse", type: "down", x, y, button: "left", clickCount: 1, modifiers: none, buttons: 1 }
+              ])
+              yield* world.adapter.dispatchInput(page, [
+                { _tag: "Mouse", type: "up", x, y, button: "left", clickCount: 1, modifiers: none, buttons: 0 }
+              ])
+              const clicked = Effect.flatMap(
+                world.adapter.evaluate(realm, {
+                  functionDeclaration: "() => window.got.includes('clicked')",
+                  arguments: [],
+                  awaitPromise: false,
+                  result: "value",
+                  userActivation: false
+                }),
+                (result) =>
+                  result._tag === "Value" && json(result.value) === true
+                    ? Effect.void
+                    : Effect.fail("iframe button clicked message was not received")
+              )
+              yield* clicked.pipe(Effect.retry({ times: 30, schedule: Schedule.spaced("100 millis") }))
+            }),
+          timeout
+        )
+
+        // One page, two cross-site frames: a press in the first, which then detaches, and a press in the
+        // second, which then navigates; after each, the release and the next click go to the page under the point
+        it.effect("continues frameless input after the pressed frame detaches or navigates", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            const { page } = yield* newPage(world)
+            const fixture = (origin: string, html: string) =>
+              `${origin}/fixture?html=${encodeURIComponent(html)}`
+            const child = (name: string) =>
+              `<body style="margin:0;height:100vh"><script>addEventListener('mousedown',()=>parent.postMessage('${name} down','*'));parent.postMessage('${name} loaded','*')</script></body>`
+            const frame = (id: string, top: number) =>
+              `<iframe id="${id}" src="${
+                fixture(world.site.crossSite, child(id))
+              }" style="position:absolute;left:100px;top:${top}px;width:200px;height:100px;border:0"></iframe>`
+            yield* goto(
+              world,
+              page,
+              fixture(
+                world.site.origin,
+                `<body style="margin:0"><script>window.got=[];addEventListener('message',e=>got.push(e.data))</script><button style="position:absolute;left:10px;top:10px;width:50px;height:30px" onclick="window.clicked=true">parent</button>${
+                  frame("gone", 50)
+                }${frame("moved", 200)}</body>`
+              )
+            )
+            const message = (data: string) =>
+              evaluate(
+                world,
+                page,
+                `() => got.includes('${data}') || new Promise(r=>addEventListener('message',e=>{if(e.data==='${data}')r(true)}))`
+              )
+            yield* message("gone loaded")
+            yield* message("moved loaded")
+            const none = { alt: false, control: false, meta: false, shift: false }
+            const send = (type: "move" | "down" | "up", x: number, y: number, buttons: number) =>
+              world.adapter.dispatchInput(page, [{
+                _tag: "Mouse",
+                type,
+                x,
+                y,
+                button: type === "move" ? "none" : "left",
+                clickCount: 1,
+                modifiers: none,
+                buttons
+              }])
+            const releaseAndClickParent = Effect.gen(function*() {
+              yield* send("move", 20, 20, 1)
+              yield* send("up", 20, 20, 0)
+              yield* send("down", 20, 20, 1)
+              yield* send("up", 20, 20, 0)
+              assert.isTrue(
+                yield* evaluate(
+                  world,
+                  page,
+                  "() => { const ok = window.clicked === true; window.clicked = false; return ok }"
+                )
+              )
+            })
+            // The pressed frame detaches
+            yield* send("move", 150, 80, 0)
+            yield* send("down", 150, 80, 1)
+            yield* message("gone down")
+            yield* evaluate(world, page, "() => { gone.remove(); return true }")
+            yield* world.facts.when("NavigableRemoved", (fact) =>
+              fact.navigable !== page)
+            yield* releaseAndClickParent
+            // The pressed frame navigates
+            yield* send("move", 150, 230, 0)
+            yield* send("down", 150, 230, 1)
+            yield* message("moved down")
+            const next = fixture(world.site.origin, `<script>parent.postMessage('navigated','*')</script>`)
+            yield* evaluate(world, page, `() => { moved.src = ${JSON.stringify(next)}; return true }`)
+            yield* message("navigated")
+            yield* releaseAndClickParent
+          }), timeout)
+
+        it.effect(
+          "keeps a frameless release with the pressed cross-site frame in a shadow root but routes wheels by their point",
+          () =>
+            Effect.gen(function*() {
+              const world = yield* setup(backend)
+              const { page } = yield* newPage(world)
+              const fixture = (origin: string, html: string) =>
+                `${origin}/fixture?html=${encodeURIComponent(html)}`
+              const child =
+                `<body style="margin:0;height:100vh"><script>addEventListener('mousedown', () => parent.postMessage('down', '*')); addEventListener('mouseup', () => parent.postMessage('up', '*')); addEventListener('wheel', (e) => { e.preventDefault(); parent.postMessage('child wheel', '*') }, { passive: false }); parent.postMessage('loaded', '*')</script></body>`
+              yield* goto(
+                world,
+                page,
+                fixture(
+                  world.site.origin,
+                  `<body style="margin:0"><div id="host"></div><script>window.got = []; addEventListener('message', (e) => got.push(e.data)); addEventListener('mouseup', () => got.push('parent up')); addEventListener('wheel', (e) => { e.preventDefault(); got.push('parent wheel') }, { passive: false }); document.querySelector('#host').attachShadow({ mode: 'open' }).innerHTML = ${
+                    JSON.stringify(
+                      `<iframe src="${
+                        fixture(world.site.crossSite, child)
+                      }" style="position:absolute;left:100px;top:50px;width:200px;height:100px;border:0"></iframe>`
+                    ).replaceAll("<", "\\x3c")
+                  }</script></body>`
+                )
+              )
+              const realm = yield* mainRealm(world, page)
+              const loaded = yield* world.adapter.evaluate(realm, {
+                functionDeclaration:
+                  "() => window.got.includes('loaded') || new Promise((resolve) => addEventListener('message', (e) => { if (e.data === 'loaded') resolve(true) }))",
+                arguments: [],
+                awaitPromise: true,
+                result: "value",
+                userActivation: false
+              })
+              assert(loaded._tag === "Value" && json(loaded.value) === true)
+              const none = { alt: false, control: false, meta: false, shift: false }
+              const send = (event: Adapter.InputEvent) =>
+                world.adapter.dispatchInput(page, [event])
+              yield* send({
+                _tag: "Mouse",
+                type: "move",
+                x: 150,
+                y: 80,
+                button: "none",
+                clickCount: 0,
+                modifiers: none,
+                buttons: 0
+              })
+              yield* send({
+                _tag: "Mouse",
+                type: "down",
+                x: 150,
+                y: 80,
+                button: "left",
+                clickCount: 1,
+                modifiers: none,
+                buttons: 1
+              })
+              // Wheels follow their point without changing where the held button is released.
+              yield* send({ _tag: "Wheel", x: 150, y: 80, deltaX: 0, deltaY: 10, modifiers: none })
+              yield* send({
+                _tag: "Mouse",
+                type: "move",
+                x: 20,
+                y: 20,
+                button: "none",
+                clickCount: 0,
+                modifiers: none,
+                buttons: 1
+              })
+              yield* send({ _tag: "Wheel", x: 20, y: 20, deltaX: 0, deltaY: 10, modifiers: none })
+              yield* send({
+                _tag: "Mouse",
+                type: "up",
+                x: 20,
+                y: 20,
+                button: "left",
+                clickCount: 1,
+                modifiers: none,
+                buttons: 0
+              })
+              const got = Effect.flatMap(
+                world.adapter.evaluate(realm, {
+                  functionDeclaration:
+                    "() => got.filter(x => !x.endsWith('wheel')).join(',') + '|' + got.filter(x => x.endsWith('wheel')).sort().join(',')",
+                  arguments: [],
+                  awaitPromise: false,
+                  result: "value",
+                  userActivation: false
+                }),
+                (result) =>
+                  result._tag === "Value" && json(result.value) === "loaded,down,up|child wheel,parent wheel"
+                    ? Effect.void
+                    : Effect.fail(
+                      `unexpected release or wheel recipients: ${
+                        result._tag === "Value" ? JSON.stringify(json(result.value)) : result.text
+                      }`
+                    )
+              )
+              yield* got.pipe(Effect.retry({ times: 30, schedule: Schedule.spaced("100 millis") }))
+            }),
+          timeout
+        )
+
+        it.effect(
           "sends input to a transparent element in a cross-site frame that paints nothing but holds a painted frame",
           () =>
             Effect.gen(function*() {
@@ -1589,8 +1830,7 @@ export const conformance = (backend: Backend) =>
             assert.strictEqual(outcome._tag, "Download")
             const started = yield* world.facts.when("DownloadStarted")
             assert.strictEqual(started.suggestedFilename, "hello.txt")
-            const ended = yield* world.facts.when("DownloadEnded", (fact) =>
-              fact.download === started.download)
+            const ended = yield* world.facts.when("DownloadEnded", (fact) => fact.download === started.download)
             assert(ended.outcome._tag === "Completed")
             const path = Option.getOrThrow(ended.outcome.path)
             const fs = yield* Effect.promise(() => import("node:fs/promises"))

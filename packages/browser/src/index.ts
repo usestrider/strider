@@ -255,6 +255,12 @@ export * as Route from "./Route.ts"
  * @stability unstable
  * @since 0.1.0
  */
+export * as ScriptTag from "./ScriptTag.ts"
+
+/**
+ * @stability unstable
+ * @since 0.1.0
+ */
 export * as Snapshot from "./Snapshot.ts"
 
 /**

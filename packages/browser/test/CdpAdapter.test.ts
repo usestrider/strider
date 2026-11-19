@@ -223,7 +223,14 @@ describe("CDP paused page initialization", () => {
           if (bridged) {
             assert.isBelow(sent.indexOf("Runtime.addBinding"), sent.indexOf("Page.addScriptToEvaluateOnNewDocument"))
           }
-          assert.isBelow(sent.indexOf("Page.getLayoutMetrics"), sent.indexOf("Emulation.setDeviceMetricsOverride"))
+          // A page that doesn't attach at about:blank is not measured before resume: its renderer may exist only
+          // once its first request is routed
+          assert.notInclude(sent, "Page.getLayoutMetrics")
+          assert.notInclude(sent, "Page.createIsolatedWorld")
+          assert.isBelow(
+            sent.indexOf("Emulation.setDeviceMetricsOverride"),
+            sent.indexOf("Runtime.runIfWaitingForDebugger")
+          )
           assert.include(facts.map((fact) => fact._tag), rejected ? "PageInitializationFailed" : "PageReady")
           const firstScript = commands.find((command) => command.method === "Page.addScriptToEvaluateOnNewDocument")!
           yield* Scope.close(scripts, Exit.void).pipe(Effect.provideService(Cleanup.Confirm, true))
@@ -383,6 +390,165 @@ describe("CDP paused page initialization", () => {
       assert.includeMembers(removedAfterClose, [...latest.values()].map((command) => `script-${command.id}`))
       yield* browser.lose("test complete")
     }).pipe(Effect.scoped))
+})
+
+describe("CDP paused page viewport baseline", () => {
+  for (
+    const { reading, width, height, mobile, own, name } of [
+      // Readings are [innerWidth, innerHeight, screen.width, screen.height]
+      {
+        reading: [800, 600, 800, 600],
+        width: 400,
+        height: 300,
+        mobile: false,
+        own: true,
+        name: "confirms its restore"
+      },
+      {
+        reading: [400, 300, 800, 600],
+        width: 400,
+        height: 300,
+        mobile: false,
+        own: false,
+        name: "leaves a reading whose size equals the override unknown"
+      },
+      // A late reading on the headless shell, under a 400x700 mobile override without viewport metadata: the
+      // layout is 980x1715, and the screen is the override's.
+      {
+        reading: [980, 1715, 400, 700],
+        width: 400,
+        height: 700,
+        mobile: true,
+        own: false,
+        name: "leaves a mobile-emulated reading whose screen equals the override unknown"
+      },
+      // A late reading on the headless shell, under a 1280x900 desktop override: the size is the override's, and
+      // the screen the page's own.
+      {
+        reading: [1280, 900, 800, 600],
+        width: 1280,
+        height: 900,
+        mobile: false,
+        own: false,
+        name: "leaves a desktop reading whose size equals the override unknown, whatever its screen"
+      }
+    ] as const
+  ) {
+    it.effect(
+      `queues a paused page's size reading without awaiting it, and ${name}`,
+      () =>
+        Effect.gen(function*() {
+          const browser = yield* makeBrowser
+          const ready = yield* Deferred.make<void>()
+          const commands: Array<Sent> = []
+          // The gate's reading, whose reply is held until the test releases it
+          const held = yield* Deferred.make<Sent>()
+          const isReading = (command: Sent) =>
+            command.method === "Runtime.evaluate" &&
+            command.params?.expression === "[innerWidth, innerHeight, screen.width, screen.height]" &&
+            command.params?.contextId === undefined
+          const reply = (command: Sent) =>
+            browser.receive({
+              id: command.id,
+              sessionId: command.sessionId,
+              result: command.method === "Browser.getVersion"
+                ? {
+                  protocolVersion: "1.3",
+                  product: "Chrome/155.0.8059.79",
+                  revision: "test",
+                  userAgent: "HeadlessChrome",
+                  jsVersion: "test"
+                }
+                : command.method === "Target.getBrowserContexts" ?
+                { browserContextIds: [] }
+                : command.method === "Page.getFrameTree" ?
+                {
+                  frameTree: {
+                    frame: {
+                      id: "T1",
+                      loaderId: "initial",
+                      url: "about:blank",
+                      securityOrigin: "://",
+                      mimeType: "text/html"
+                    }
+                  }
+                }
+                : command.method === "Page.createIsolatedWorld" ?
+                { executionContextId: 7 }
+                : isReading(command) ?
+                { result: { type: "object", value: reading } }
+                : command.method === "Runtime.evaluate" ?
+                { result: { type: "object", value: [800, 600] } }
+                : {}
+            })
+          yield* Effect.gen(function*() {
+            while (true) {
+              const command = yield* browser.next
+              commands.push(command)
+              if (isReading(command)) yield* Deferred.succeed(held, command)
+              else yield* reply(command)
+            }
+          }).pipe(Effect.forkScoped)
+          const warnings: Array<unknown> = []
+          const loggers = yield* Logger.CurrentLoggers
+          const logger = Logger.make((entry) => {
+            if (entry.logLevel === "Warn") {
+              warnings.push(Array.isArray(entry.message) ? entry.message[0] : entry.message)
+            }
+            for (const existing of loggers) existing.log(entry)
+          })
+          const adapter = yield* CdpAdapter.connect(browser.transport, {
+            ownership: "launched",
+            sink: Effect.fnUntraced(function*(fact) {
+              if (fact._tag === "PageReady" || fact._tag === "PageInitializationFailed") {
+                yield* Deferred.succeed(ready, undefined)
+              }
+            })
+          })
+          const declared = yield* Scope.make()
+          yield* adapter.declare({ _tag: "UserContext", context: adapter.defaultContext }, {
+            _tag: "Override",
+            override: { _tag: "Viewport", width, height, deviceScaleFactor: 1, mobile }
+          }).pipe(Scope.provide(declared))
+          yield* browser.receive({
+            method: "Target.attachedToTarget",
+            params: {
+              sessionId: "S1",
+              targetInfo: { targetId: "T1", type: "page", title: "", url: "about:blank", attached: true },
+              waitingForDebugger: true
+            }
+          })
+          // The override and the resume are written while the reading's reply is outstanding
+          const measurement = yield* Deferred.await(held)
+          while (!commands.some((command) => command.method === "Runtime.runIfWaitingForDebugger")) {
+            yield* Effect.yieldNow
+          }
+          const methods = commands.filter((command) => command.sessionId === "S1").map((command) => command.method)
+          const at = methods.indexOf("Runtime.evaluate")
+          assert.isBelow(at, methods.indexOf("Emulation.setDeviceMetricsOverride"))
+          assert.notInclude(methods, "Page.getLayoutMetrics")
+          assert.notInclude(methods, "Page.createIsolatedWorld")
+          yield* reply(measurement)
+          yield* Deferred.await(ready)
+          // Releasing the viewport confirms the recorded size, or warns at once that it is unknown
+          const release = Scope.close(declared, Exit.void).pipe(
+            Effect.provideService(Cleanup.Confirm, true),
+            Effect.provideService(Logger.CurrentLoggers, new Set([logger]))
+          )
+          // The failing mobile case must expose its attempted wait without spending the full cleanup budget.
+          yield* mobile ? release.pipe(Deadline.withDefaultBudget("100 millis")) : release
+          assert.include(
+            commands.map((command) => command.method),
+            "Emulation.clearDeviceMetricsOverride"
+          )
+          assert.deepStrictEqual(
+            warnings,
+            own ? [] : ["CDP viewport restoration could not be verified: original dimensions are unknown"]
+          )
+          yield* browser.lose("test complete")
+        }).pipe(Effect.scoped)
+    )
+  }
 })
 
 describe("CDP combined locale and user-agent declarations", () => {
