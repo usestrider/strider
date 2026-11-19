@@ -202,13 +202,36 @@ export type Expectation =
   | { readonly _tag: "Attribute"; readonly name: string; readonly expected: TextMatcher | null }
   | { readonly _tag: "Count"; readonly count: number }
   | { readonly _tag: "Title"; readonly expected: TextMatcher }
-  /** The one match's accessibility tree matches a pattern. */
-  | { readonly _tag: "Aria"; readonly pattern: Pattern }
+  /**
+   * The one match's accessibility tree, or with `document` the page's from its document node, matches a pattern;
+   * with `not`, it doesn't.
+   */
+  | { readonly _tag: "Aria"; readonly pattern: Pattern; readonly document: boolean; readonly not: boolean }
 
 /** A pattern over the accessibility tree, as `AriaPattern` builds it. */
 export type Pattern =
-  | { readonly _tag: "Node"; readonly role: string; readonly name: TextMatcher; readonly children: PatternChildren }
+  | {
+    readonly _tag: "Node"
+    readonly role: string
+    readonly name: TextMatcher
+    readonly children: PatternChildren
+    readonly states: PatternStates
+  }
   | { readonly _tag: "Text"; readonly value: TextMatcher }
+  /** A node, at the subject or at any depth beneath it, whose children match. */
+  | { readonly _tag: "Anywhere"; readonly children: PatternChildren }
+
+/** The level and states a node pattern compares; an omitted one isn't compared. */
+export interface PatternStates {
+  readonly level?: number | undefined
+  readonly checked?: boolean | "mixed" | undefined
+  readonly pressed?: boolean | "mixed" | undefined
+  readonly expanded?: boolean | undefined
+  readonly selected?: boolean | undefined
+  readonly disabled?: boolean | undefined
+  readonly invalid?: boolean | undefined
+  readonly focused?: boolean | undefined
+}
 
 /** How a pattern's children are matched. */
 export type PatternChildren =
@@ -245,6 +268,8 @@ export interface SnapNode {
     }
     | { readonly _tag: "None" }
   readonly states: ReadonlyArray<string>
+  /** A heading's, list item's, row's or tree item's level, when it has one. */
+  readonly level?: number | undefined
   readonly editable?: boolean | undefined
   readonly validationMessage: string | null
   readonly children: ReadonlyArray<SnapNode>
@@ -275,6 +300,7 @@ export const SnapNode: Schema.Codec<SnapNode> = Schema.Struct({
     Schema.TaggedStruct("None", {})
   ]),
   states: Schema.Array(Schema.String),
+  level: Schema.optional(Schema.Number),
   editable: Schema.optional(Schema.Boolean),
   validationMessage: Schema.NullOr(Schema.String),
   children: Schema.Array(Schema.suspend((): Schema.Codec<SnapNode> => SnapNode)),
@@ -504,6 +530,7 @@ export function renderText(root: SnapNode): string {
     }
     let out = `${indent}- ${node.role.role}`
     if (node.name._tag !== "None") out += ` ${JSON.stringify(node.name.value)}`
+    if (node.level !== undefined) out += ` [level=${node.level}]`
     for (const state of node.states) out += ` [${state}]`
     if (node.validationMessage != null) out += ` [validationMessage=${JSON.stringify(node.validationMessage)}]`
     if (node.ref !== null) out += ` [ref=${node.ref}]`
@@ -3287,6 +3314,11 @@ export function engine(render: (root: SnapNode) => string) {
       const title = collapse(dom.title(document))
       return { passed: expected(expectation.expected, title), observed: title }
     }
+    if (expectation._tag === "Aria" && expectation.document) {
+      const root = documentNode({ interactivity: false, depth: null })
+      const matches = matchPattern(expectation.pattern, root)
+      return { passed: expectation.not ? !matches : matches, observed: render(root) }
+    }
     const found = resolve(steps)
     switch (expectation._tag) {
       case "Attached":
@@ -3422,7 +3454,8 @@ export function engine(render: (root: SnapNode) => string) {
       }
       case "Aria": {
         const root = rootNode(element, { interactivity: false, depth: null })
-        return { passed: matchPattern(expectation.pattern, root), observed: render(root) }
+        const matches = matchPattern(expectation.pattern, root)
+        return { passed: expectation.not ? !matches : matches, observed: render(root) }
       }
       case "Attribute": {
         const value = dom.getAttribute(element, expectation.name)
@@ -3631,12 +3664,16 @@ export function engine(render: (root: SnapNode) => string) {
 
   const statesOf = (element: Element, role: string | null): Array<string> => {
     const states: Array<string> = []
-    if (checkedOf(element) === true) states.push("checked")
+    const checked = checkedState(element).state
+    if (checked === "mixed") states.push("checked=mixed")
+    else if (checked === true) states.push("checked")
     if (expandedOf(element) === true) states.push("expanded")
     if (selectedOf(element) === true) states.push("selected")
     if ((INTERACTIVE.has(role ?? "") || dom.matches(element, ":disabled")) && !enabled(element)) states.push("disabled")
     if (deepActive() === element) states.push("focused")
-    if (pressedOf(element) === true) states.push("pressed")
+    const pressed = pressedOf(element)
+    if (pressed === "mixed") states.push("pressed=mixed")
+    else if (pressed === true) states.push("pressed")
     if (validationMessageOf(element) !== null) states.push("invalid")
     return states
   }
@@ -3904,6 +3941,8 @@ export function engine(render: (root: SnapNode) => string) {
         ...(field && namesFromContent.has(element) ? { from: "text" as const } : {}),
         ...(namesFromFields.has(element) ? { fieldContent: true } : {})
       }
+    // Only a role that takes a level has one, so an h2 with role="tab" has none
+    const level_ = role._tag === "Aria" && LEVEL_ROLES.has(role.role) ? levelOf(element) : 0
     let children = frame || (walk.depth !== null && level >= walk.depth) ? [] : childrenOf(element, level + 1, walk)
     // Text that only repeats the node's name isn't a node of its own
     if (
@@ -3916,6 +3955,7 @@ export function engine(render: (root: SnapNode) => string) {
       role,
       name,
       states: statesOf(element, role._tag === "Aria" ? role.role : null),
+      ...(level_ > 0 ? { level: level_ } : {}),
       ...(field ? { editable: true } : {}),
       validationMessage: validationMessageOf(element),
       children,
@@ -3964,10 +4004,34 @@ export function engine(render: (root: SnapNode) => string) {
     if (pattern._tag === "Text") {
       return node.role._tag === "Aria" && node.role.role === "text" && nameMatches(pattern.value, node.name)
     }
+    if (pattern._tag === "Anywhere") return matchAnywhere(pattern.children, node)
     if (node.role._tag !== "Aria" || node.role.role !== pattern.role || !nameMatches(pattern.name, node.name)) {
       return false
     }
-    const children = pattern.children
+    return statesMatch(pattern.states, node) && matchChildren(pattern.children, node)
+  }
+
+  /** Whether a node has the level and states a pattern states. */
+  const statesMatch = (states: PatternStates, node: SnapNode): boolean => {
+    if (states.level !== undefined && node.level !== states.level) return false
+    const has = (state: string) => node.states.includes(state)
+    const checked = has("checked") ? true : has("checked=mixed") ? "mixed" : false
+    const pressed = has("pressed") ? true : has("pressed=mixed") ? "mixed" : false
+    if (states.checked !== undefined && states.checked !== checked) return false
+    if (states.pressed !== undefined && states.pressed !== pressed) return false
+    for (const state of ["expanded", "selected", "disabled", "invalid", "focused"] as const) {
+      const expected = states[state]
+      if (expected !== undefined && has(state) !== expected) return false
+    }
+    return true
+  }
+
+  /** Whether the node, or any node beneath it, has children that match. */
+  const matchAnywhere = (children: PatternChildren, node: SnapNode): boolean =>
+    matchChildren(children, node) || node.children.some((child) => matchAnywhere(children, child))
+
+  /** Whether a node's children match as a pattern states. */
+  const matchChildren = (children: PatternChildren, node: SnapNode): boolean => {
     switch (children._tag) {
       case "Unchecked":
         return true
