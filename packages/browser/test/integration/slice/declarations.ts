@@ -30,13 +30,13 @@ import type * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
-import type * as Scope from "effect/Scope"
+import * as Scope from "effect/Scope"
 import * as fs from "node:fs"
 import * as http from "node:http"
 import type * as net from "node:net"
 import * as os from "node:os"
 import * as path from "node:path"
-import { type Site, site, tlsSite } from "../adapter/harness.ts"
+import { site, tlsSite } from "../adapter/harness.ts"
 import { cachesFetches, responseRouteInFlight, status, supports, workerFetchesBypassCache } from "./capabilities.ts"
 import * as SharedContext from "./sharedContext.ts"
 
@@ -93,21 +93,17 @@ const tagged = (tag: string) =>
  * declarations first, then the context's.
  */
 const crossSiteFrame = Effect.fnUntraced(function*(
-  declare: (
-    target: Page.Page | UserContext.UserContext,
-    served: Site
-  ) => Effect.Effect<unknown, unknown, Scope.Scope>,
+  declare: (target: Page.Page | UserContext.UserContext) => Effect.Effect<unknown, unknown, Scope.Scope>,
   expected: Condition.Condition<string>,
   frameSource = fixtureUrl
 ) {
-  const served = yield* site
-  const { crossSite, origin } = served
+  const { crossSite, origin } = yield* site
   yield* Effect.scoped(Effect.gen(function*() {
     const context = yield* Browser.newContext()
-    yield* declare(context, served)
+    yield* declare(context)
     const page = yield* context.newPage
     yield* Effect.scoped(Effect.gen(function*() {
-      yield* declare(page, served)
+      yield* declare(page)
       yield* page.goto(fixtureUrl(
         origin,
         `<title>parent</title><pre id="out">pending</pre><script>addEventListener('message', (e) => { document.getElementById('out').textContent = e.data })</script><iframe style="width:300px;height:200px;border:0" src="${
@@ -1308,21 +1304,50 @@ export const declarations = (
           )
         }), timeout)
 
-      // On Chromium the frame's document pauses on its parent's session, before the frame's own target attaches, and
-      // the frame's fetch on the frame's own session: the tag needs the route to reach both
+      // Each step loads the parent afresh and needs the frame's document and the frame's own fetch from the same
+      // scope's route: on Chromium the document pauses on its parent's session, before the frame's target attaches, and
+      // the fetch on the frame's own session. The context's route comes first alone, so it alone must reach the frame
+      // of a new page; then the page's takes precedence, and each closed scope must stop answering.
       it.effect("routes a page with a cross-site iframe and releases the routes", () =>
-        crossSiteFrame(
-          (target, { crossSite }) =>
-            target.route(`${crossSite}/routed-frame*`, ({ request }) =>
-              request.url.endsWith("/routed-frame-tag")
-                ? Route.fulfill(HttpServerResponse.text("routed"))
-                : Route.fulfill(HttpServerResponse.html(
-                  `${frameBody}<script>fetch('/routed-frame-tag').then((response) => response.text()).then((tag) => { window.__tag = tag; report() })</script>`
-                ))),
-          tagged("routed"),
-          (crossSite: string) =>
-            `${crossSite}/routed-frame`
-        ), timeout)
+        Effect.scoped(Effect.gen(function*() {
+          const { crossSite, origin } = yield* site
+          const fetched = "/fixture?html=server"
+          // The frame's document, which names its scope and then the scope its fetch's answer came from
+          const frameDocument = (scope: string) =>
+            `${frameBody}<script>fetch('${fetched}', { cache: 'no-store' }).then((response) => response.text()).then((tag) => { window.__tag = '${scope}/' + tag; report() })</script>`
+          const noStore = { "cache-control": "no-store" }
+          const route = (target: Page.Page | UserContext.UserContext, scope: string) =>
+            target.route(`${crossSite}/fixture*`, ({ request }) =>
+              Route.fulfill(
+                request.url === `${crossSite}${fetched}`
+                  ? HttpServerResponse.text(scope, { headers: noStore })
+                  : HttpServerResponse.text(frameDocument(scope), { contentType: "text/html", headers: noStore })
+              ))
+          // The server's own frame, at a URL the routes match
+          const parent = fixtureUrl(
+            origin,
+            `<title>parent</title><pre id="out">pending</pre><script>addEventListener('message', (e) => { document.getElementById('out').textContent = e.data })</script><iframe style="width:300px;height:200px;border:0" src="${
+              fixtureUrl(crossSite, frameDocument("server"))
+            }"></iframe>`
+          )
+          const loads = Effect.fnUntraced(function*(page: Page.Page, tag: string) {
+            yield* page.goto(parent)
+            yield* Expect.that(page.locator("#out").readText, tagged(tag))
+          })
+          const context = yield* Browser.newContext()
+          const contextRoute = yield* Effect.acquireRelease(Scope.make(), (scope, exit) =>
+            Scope.close(scope, exit))
+          yield* route(context, "context").pipe(Scope.provide(contextRoute))
+          const page = yield* context.newPage
+          yield* loads(page, "context/context")
+          yield* Effect.scoped(Effect.gen(function*() {
+            yield* route(page, "page")
+            yield* loads(page, "page/page")
+          }))
+          yield* loads(page, "context/context")
+          yield* Scope.close(contextRoute, Exit.void)
+          yield* loads(page, "server/server")
+        })), timeout)
 
       it.effect("runs init scripts in a page with a cross-site iframe and releases them", () =>
         crossSiteFrame(
