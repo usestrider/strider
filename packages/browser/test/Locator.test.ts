@@ -1525,6 +1525,7 @@ describe("an action whose engine call is unanswered at the deadline", () => {
 })
 
 describe("UserContext.Options.testIdAttribute", () => {
+  const x = { _tag: "String", value: "x", exact: true }
   const testIds = (locator: Locator.ReadonlyLocator): ReadonlyArray<unknown> => {
     const found: Array<unknown> = []
     const visit = (steps: ReadonlyArray<Engine.Step>) => {
@@ -1571,18 +1572,30 @@ describe("UserContext.Options.testIdAttribute", () => {
       const before = page.getByTestId("x")
       const hooks = ClaimHooks.get(browser)
       yield* hooks.context({ testIdAttribute: "data-test" }, { context: context.id })
-      assert.deepStrictEqual(testIds(page.getByTestId("x")), [{ _tag: "TestId", id: "x", attribute: "data-test" }])
-      assert.deepStrictEqual(testIds(before), [{ _tag: "TestId", id: "x", attribute: "data-qa" }])
+      assert.deepStrictEqual(testIds(page.getByTestId("x")), [{ _tag: "TestId", matcher: x, attribute: "data-test" }])
+      assert.deepStrictEqual(testIds(before), [{ _tag: "TestId", matcher: x, attribute: "data-qa" }])
       yield* hooks.context({}, { context: context.id })
-      assert.deepStrictEqual(testIds(page.getByTestId("x")), [{ _tag: "TestId", id: "x", attribute: "data-test" }])
+      assert.deepStrictEqual(testIds(page.getByTestId("x")), [{ _tag: "TestId", matcher: x, attribute: "data-test" }])
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+
+  it.effect("carries the context's attribute in RegExp getByTestId steps, page-level and relative", () =>
+    Effect.gen(function*() {
+      const configured = yield* (yield* Browser.newContext({ testIdAttribute: "data-qa" })).newPage
+      const pattern = { _tag: "RegExp", source: "^row-", flags: "i" }
+      const qa = { _tag: "TestId", matcher: pattern, attribute: "data-qa" }
+      assert.deepStrictEqual(testIds(configured.getByTestId(/^row-/i)), [qa])
+      assert.deepStrictEqual(
+        testIds(configured.locator("li").filter({ has: Locator.relative.getByTestId(/^row-/i) })),
+        [qa]
+      )
     }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
 
   it.effect("fixes the context's attribute in every getByTestId step, relative ones where they're placed", () =>
     Effect.gen(function*() {
       const configured = yield* (yield* Browser.newContext({ testIdAttribute: "data-qa" })).newPage
       const sibling = yield* (yield* Browser.newContext()).newPage
-      const qa = { _tag: "TestId", id: "x", attribute: "data-qa" }
-      const standard = { _tag: "TestId", id: "x", attribute: "data-testid" }
+      const qa = { _tag: "TestId", matcher: x, attribute: "data-qa" }
+      const standard = { _tag: "TestId", matcher: x, attribute: "data-testid" }
       assert.deepStrictEqual(testIds(configured.getByTestId("x")), [qa])
       assert.deepStrictEqual(testIds(configured.locator("main").getByTestId("x")), [qa])
       assert.deepStrictEqual(testIds(configured.frame(configured.locator("iframe")).getByTestId("x")), [qa])

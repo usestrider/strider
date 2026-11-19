@@ -696,6 +696,19 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
           id
         ))
       }
+      // Refused before the context exists, so a backend that can't bypass a policy creates nothing
+      if (options?.bypassCSP === true && !reports("bypassCSP")) {
+        return yield* Effect.fail(contextError(
+          operation,
+          new Reason.Unsupported({
+            capability: "bypassCSP",
+            backend: runtime.backend,
+            hint: capabilities.find((entry) => entry.name === "bypassCSP")?.limitations.join("; ") ||
+              "This backend can't set a page's Content Security Policy aside"
+          }),
+          id
+        ))
+      }
       const reportsDownloads = reports("downloads")
       const asked = options?.downloads ?? (!adopt && reportsDownloads ? "temporary" : "none")
       if (typeof asked === "object" && !/^(\/|[A-Za-z]:[\\/])/.test(asked.directory)) {
@@ -838,16 +851,22 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         yield* Effect.annotateCurrentSpan("browser.context.downloads", downloads.value)
       }
       // The options that are declarations, held for the context's life, before its first page
-      if (options?.emulation !== undefined || options?.focus === "emulated") {
+      if (options?.emulation !== undefined || options?.focus === "emulated" || options?.bypassCSP === true) {
         const fields = Emulation.fields(options.emulation ?? {})
         if (!Array.isArray(fields)) {
           return yield* Effect.fail(contextError(operation, fields as Reason.InvalidInput, id))
         }
         yield* Emulation.declare(
           { runtime, scope, operation, retiring: () => retiring },
-          options.focus === "emulated"
-            ? [...fields, { capability: "emulation.focus", override: { _tag: "FocusEmulation", enabled: true } }]
-            : fields,
+          [
+            ...fields,
+            ...(options.focus === "emulated"
+              ? [{ capability: "emulation.focus", override: { _tag: "FocusEmulation", enabled: true } } as const]
+              : []),
+            ...(options.bypassCSP === true
+              ? [{ capability: "bypassCSP", override: { _tag: "BypassCsp", enabled: true } } as const]
+              : [])
+          ],
           id
         ).pipe(Effect.mapError((error) =>
           Deadline.isTimeout(error)

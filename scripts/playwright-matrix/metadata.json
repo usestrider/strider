@@ -757,18 +757,6 @@
       ]
     },
     {
-      "id": "test-id-regexp",
-      "value": "RegExp test IDs",
-      "disposition": "planned",
-      "note": "Add a RegExp getByTestId form; it is not implemented yet.",
-      "rows": [
-        "method-frame-getbytestid-value-regexp-test-id",
-        "method-framelocator-getbytestid-value-regexp-test-id",
-        "method-locator-getbytestid-value-regexp-test-id",
-        "method-page-getbytestid-value-regexp-test-id"
-      ]
-    },
-    {
       "id": "selector-dsl",
       "value": "text=, >> and custom selector engines",
       "disposition": "excluded",

@@ -320,16 +320,78 @@ const play = Effect.fnUntraced(function*(order: ReadonlyArray<readonly [string, 
 })
 
 describe("CdpAdapter state", () => {
+  it.effect("keeps mouse capture when an unrelated frame in the same session detaches", () =>
+    Effect.gen(function*() {
+      const { page, state, target } = yield* withPage()
+      const parent = state.frames.get("T1")!
+      const owner = { ...target, targetId: "outer" }
+      const outer = Tree.addFrame(state, "outer", parent, owner)
+      owner.frame = outer
+      const inner = Tree.addFrame(state, "inner", outer, owner)
+      const captured = { target: owner, x: 30, y: 30 }
+      state.heldButtons.set(page.id, 1)
+      state.pressedIn.set(page.id, [outer])
+      state.pressedOn.set(page.id, captured)
+      Tree.removeFrame(state, inner, new Target.FrameDetached({}), "cdp:Page.frameDetached")
+      assert.strictEqual(state.pressedOn.get(page.id), captured)
+      assert.deepStrictEqual(state.pressedIn.get(page.id), [outer])
+    }))
+
+  it.effect("keeps mouse capture when the drag destination in the same session detaches", () =>
+    Effect.gen(function*() {
+      const { page, state, target } = yield* withPage()
+      const parent = state.frames.get("T1")!
+      const owner = { ...target, targetId: "outer" }
+      const outer = Tree.addFrame(state, "outer", parent, owner)
+      owner.frame = outer
+      const inner = Tree.addFrame(state, "inner", outer, owner)
+      const captured = { target: owner, x: 30, y: 30 }
+      state.heldButtons.set(page.id, 1)
+      // A drag gesture names both its source and destination documents.
+      state.pressedIn.set(page.id, [outer, inner])
+      state.pressedOn.set(page.id, captured)
+      Tree.removeFrame(state, inner, new Target.FrameDetached({}), "cdp:Page.frameDetached")
+      assert.strictEqual(state.pressedOn.get(page.id), captured)
+      assert.deepStrictEqual(state.pressedIn.get(page.id), [outer])
+    }))
+
+  it.effect("forgets the captured mouse session when its frame detaches", () =>
+    Effect.gen(function*() {
+      const { page, state, target } = yield* withPage()
+      const parent = state.frames.get("T1")!
+      const owner = { ...target, targetId: "child" }
+      const child = Tree.newFrame({ frameId: "child", id: state.ids.navigable(), page, parent, owner })
+      state.frames.set("child", child)
+      state.navigables.set(child.id, child)
+      parent.children.add(child)
+      state.pressedIn.set(page.id, [child])
+      state.pressedOn.set(page.id, { target: owner, x: 30, y: 30 })
+      Tree.removeFrame(state, child, new Target.FrameDetached({}), "cdp:Page.frameDetached")
+      assert.isFalse(state.pressedOn.has(page.id), "the detached target must receive no later mouse input")
+      assert.isFalse(state.pressedIn.get(page.id)?.includes(child) ?? false)
+    }))
+
   it.effect("forgets a page's held buttons, drag and drag interception when the page ends", () =>
     Effect.gen(function*() {
       const { page, state } = yield* withPage()
       state.heldButtons.set(page.id, 1)
-      state.drags.set(page.id, { data: { items: [], dragOperationsMask: 1 }, entered: true, stale: false })
+      state.drags.set(page.id, {
+        data: { items: [], dragOperationsMask: 1 },
+        entered: true,
+        at: undefined,
+        stale: false
+      })
       state.interceptingDrags.add(page.id)
+      state.pressedIn.set(page.id, [state.frames.get("T1")!])
+      state.pressedOn.set(page.id, { target: page.target, x: 0, y: 0 })
+      state.escapeCanceled.add(page.id)
       Tree.endPage(state, page, new Target.PageClosed({ by: "command" }), "test")
       assert.isFalse(state.heldButtons.has(page.id))
       assert.isFalse(state.drags.has(page.id))
       assert.isFalse(state.interceptingDrags.has(page.id))
+      assert.isFalse(state.pressedIn.has(page.id))
+      assert.isFalse(state.pressedOn.has(page.id))
+      assert.isFalse(state.escapeCanceled.has(page.id))
     }))
 
   it.effect("fails an operation on a page that ended as Gone, with why it ended", () =>
