@@ -479,6 +479,21 @@ endpoint per user context; launched stock WebKit sets HTTP/HTTPS proxy environme
 process, overriding inherited proxy variables without changing the parent environment. Localhost, 127.0.0.1, and
 ::1 remain direct, including control connections; bypass hosts otherwise follow the backend's native host rules.
 Unsupported endpoint schemes, WebKit credentials, and settings for an existing WebKit process are explicit refusals.
+Launched Firefox profiles let a context's proxy carry loopback, so the BiDi adapter adds the three loopback hosts
+to every user proxy's bypass.
+
+Client certificates are a context-owned TLS proxy. A context created with `clientCertificates` starts a proxy on
+127.0.0.1 in the context's scope, before the context, so it closes after the context is removed, with every socket
+it opened; a context without them starts nothing. Chromium sends the context's HTTPS and WebSocket-over-TLS
+traffic there, loopback included; Firefox, whose user contexts take no PAC proxy, sends all of it, and the proxy
+forwards plain HTTP and its upgrades unchanged. The proxy is the trust boundary: it ends each tunnel whose first
+bytes are a ClientHello with a self-signed certificate that only this context accepts (Chromium's per-page
+`Security.setIgnoreCertificateErrors`, Firefox's context `acceptInsecureCerts`), opens its own TLS connection to
+the site, presents the certificate whose origin matches by scheme, hostname, and effective port, and verifies the
+site against Node's trusted certificates and hostname unless the context accepts insecure certificates. Other
+tunnels pass through unchanged. A site it can't reach or verify closes the browser's connection. Keys and
+passphrases stay Redacted until the proxy loads them, at creation. Stock WebKit, a connected Firefox, a
+reclaimable context, and a context with `proxy` refuse the option.
 
 Context HTTP credentials install a context-owned auth route before user routes and an auth-phase intercept only
 when configured, following [Pay for what you use](docs/decisions.md#pay-for-what-you-use). Page routes and later

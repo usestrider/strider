@@ -135,6 +135,10 @@ Node's trusted certificates, unless `acceptInsecureCerts` is set. Chromium and a
 it; stock WebKit, a Firefox Strider connected to, a reclaimable context, and a context with `proxy` refuse it with
 `Unsupported`.
 
+Pages in such a context connect to sites over HTTP/1.1, since the proxy doesn't offer HTTP/2. On Chromium, the
+context's service workers don't accept the proxy's certificate, so their own HTTPS requests may fail; the same
+holds for a service worker's requests to an untrusted site under `acceptInsecureCerts`.
+
 ## Settings for a while
 
 `emulate` and `grant` apply settings for a state only some steps should see, such as the network dropping or a

@@ -545,6 +545,8 @@ export interface Options {
    * Chromium and a Firefox Strider launched support this. A Firefox Strider connected to, stock WebKit, a
    * reclaimable context, and a context that also sets `proxy` refuse it with `Unsupported`. Pages connect to
    * the site over HTTP/1.1.
+   * On Chromium the proxy's certificate is accepted by the context's pages, not its service workers, so a
+   * service worker's own HTTPS requests in the context may fail.
    *
    * **Example** (A site that requires a client certificate)
    *
