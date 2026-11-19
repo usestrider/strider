@@ -12,6 +12,7 @@ import * as Effect from "effect/Effect"
 import * as Equal from "effect/Equal"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
+import * as TestClock from "effect/testing/TestClock"
 import * as Adapter from "../src/internal/adapter.ts"
 import * as BrowserImpl from "../src/internal/browser.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
@@ -44,6 +45,44 @@ const withSink = (
                       ? Effect.void
                       : Effect.andThen(Deferred.succeed(kept.reported!, undefined), Deferred.await(kept.gate))
                 )
+            })
+          )
+        }),
+        Layer.succeed(BrowserClock.CurrentClock, BrowserClock.fromClock(clock))
+      )
+    )
+  ))
+
+/** Deliver creation's reply first, and hold setup at its first declaration until the test releases it. */
+const replyFirst = (kept: {
+  fact?: Extract<Adapter.Fact, { readonly _tag: "UserContextAdded" }>
+  sink?: Adapter.Sink
+  gate?: Deferred.Deferred<void>
+  configuring?: Deferred.Deferred<void>
+}): Layer.Layer<Browser.Browser> =>
+  Layer.unwrap(Clock.clockWith((clock) =>
+    Effect.sync(() =>
+      Layer.provideMerge(
+        BrowserImpl.layer((sink) => {
+          kept.sink = sink
+          return Effect.map(
+            Fake.connect([], {
+              info: new Browser.Info(Fake.info),
+              capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+            })((fact) => {
+              if (fact._tag === "UserContextAdded" && fact.created) {
+                kept.fact = fact
+                return Effect.void
+              }
+              return sink(fact)
+            }),
+            (fake) => ({
+              ...fake,
+              declare: Effect.fnUntraced(function*(...args: Parameters<typeof fake.declare>) {
+                yield* Deferred.succeed(kept.configuring!, undefined)
+                yield* Deferred.await(kept.gate!)
+                return yield* fake.declare(...args)
+              })
             })
           )
         }),
@@ -123,4 +162,30 @@ describe("Browser.contexts", () => {
       assert.strictEqual(listed[1], context)
     }).pipe(Effect.provide(withSink(kept)))
   })
+  for (const check of ["read", "notification"] as const) {
+    it.effect(`preserves owned context publication with reply before fact: ${check}`, () => {
+      const kept: Parameters<typeof replyFirst>[0] = {}
+      return Effect.gen(function*() {
+        const browser = yield* Browser.Browser
+        kept.gate = yield* Deferred.make<void>()
+        kept.configuring = yield* Deferred.make<void>()
+        const creating = yield* Browser.newContext({ downloads: "deny" }).pipe(
+          Effect.forkChild({ startImmediately: true })
+        )
+        yield* Deferred.await(kept.configuring)
+        yield* kept.sink!(kept.fact!)
+        if (check === "read") {
+          assert.deepStrictEqual((yield* browser.contexts).map((each) => each.id), [browser.defaultContext.id])
+        }
+        const waiting = yield* browser.contexts.waitFor((list) =>
+          list.some((context) => context.id === kept.fact!.context && "newPage" in context)
+        ).pipe(Effect.forkChild({ startImmediately: true }))
+        yield* Deferred.succeed(kept.gate, undefined)
+        const context = yield* Fiber.join(creating)
+        yield* TestClock.adjust("1 second")
+        assert.isDefined(waiting.pollUnsafe(), "owned handle must notify list watchers")
+        assert.strictEqual((yield* Fiber.join(waiting))[1], context)
+      }).pipe(Effect.provide(replyFirst(kept)))
+    })
+  }
 })
