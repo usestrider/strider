@@ -1881,7 +1881,11 @@ export const contents = (
             const data = yield* page.evaluateHandleInMainWorld(() => {
               let reads = 0
               const value = { a: 1, b: "two", nested: { c: 3 } }
-              Object.defineProperty(value, "counted", { enumerable: true, get: () => ++reads })
+              Object.defineProperty(value, "counted", {
+                enumerable: true,
+                get: () =>
+                  ++reads
+              })
               Object.defineProperty(value, "hidden", { enumerable: false, value: 4 })
               Reflect.set(window, "__reads", () => reads)
               return value
@@ -1957,8 +1961,15 @@ export const contents = (
               Reflect.get(window, "secret") as { answer: number }
             )
             assert.strictEqual(yield* secret.evaluate((value) => value.answer), 42)
-            assert.strictEqual(yield* page.evaluateInMainWorld((value) => value.answer, secret), 42)
-            const crossed = reasonOf(yield* Effect.exit(page.evaluate((value) => value.answer, secret)))
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld((value: { answer: number }) =>
+                value.answer, secret as unknown as { answer: number }),
+              42
+            )
+            const crossed = reasonOf(
+              yield* Effect.exit(page.evaluate((value: { answer: number }) =>
+                value.answer, secret as unknown as { answer: number }))
+            )
             assert.strictEqual(
               crossed?.reason?._tag,
               (yield* supports("isolatedWorlds")) ? "NotSerializable" : "Unsupported"
@@ -1998,9 +2009,12 @@ export const contents = (
                   element.id
                 )
               )
-            ) return
+            ) {
+              return
+            }
             assert.strictEqual(
-              yield* page.locator("#x").evaluate((element, suffix: string) => element.textContent + suffix, "!"),
+              yield* page.locator("#x").evaluate((element, suffix: string) =>
+                element.textContent + suffix, "!"),
               "hello!"
             )
             assert.strictEqual(
@@ -2680,7 +2694,8 @@ export const contents = (
             yield* page.evaluateInMainWorld(() => {
               document.querySelector<HTMLInputElement>("#all")!.indeterminate = true
             })
-            const anywhere = (pattern: AriaPattern.AriaPattern) => AriaPattern.anywhere(AriaPattern.including(pattern))
+            const anywhere = (pattern: AriaPattern.AriaPattern) =>
+              AriaPattern.anywhere(AriaPattern.including(pattern))
             yield* page.pipe(Expect.toMatchAria(anywhere(
               AriaPattern.node("heading", "Plans", AriaPattern.unchecked, { level: 2 })
             )))
