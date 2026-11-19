@@ -78,10 +78,10 @@ const contextError = (operation: string, reason: UserContext.UserContextErrorRea
 
 /**
  * Whether `name` is an HTML attribute name: one or more characters, none of them whitespace, a control, a
- * noncharacter, `"`, `'`, `>`, `/`, or `=`.
+ * noncharacter (U+FDD0 to U+FDEF, and the last two code points of each of the 17 planes), `"`, `'`, `>`, `/`, or `=`.
  */
 const isAttributeName = (name: unknown): name is string =>
-  typeof name === "string" && /^[^\s"'>/=\p{Cc}\uFDD0-\uFDEF\uFFFE\uFFFF]+$/u.test(name)
+  typeof name === "string" && /^[^\s"'>/=\p{Cc}\p{Noncharacter_Code_Point}]+$/u.test(name)
 
 /** A declaration's failure, as a context's: the reasons a context has, else a backend failure. */
 // A context's own setup failing: a target that went is the setup's failure too, as BackendFailure
