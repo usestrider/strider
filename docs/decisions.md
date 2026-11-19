@@ -1491,7 +1491,13 @@ owns a share; confirmed pre-creation rejection or confirmed unused rollback rele
 permanently pinning credentials on a definite unused failure and clearing another creation's pending or retained binding. Reject silently reusing another context's credentials, clearing a shared cache,
 preemptively sending secrets, modifying the parent environment, and inserting an HTTP relay or browser-process
 shim to disguise unsupported isolation. Bypass host matching stays native and is stated in the API; do not accept
-unverified wildcard, CIDR, SOCKS, or HTTPS-to-proxy configurations.
+unverified wildcard or CIDR configurations. Accept a SOCKS or HTTPS-to-proxy endpoint only where a backend's native
+setting was verified to carry it, with one meaning everywhere: SOCKS4 resolves names at the proxy, so Chromium,
+whose SOCKS4 resolves them locally, refuses it; HTTPS-to-proxy stays Chromium's, since Firefox's BiDi settings
+can't express it and WebKit's context certificate settings don't reach the proxy; a leading-dot bypass matches
+subdomains only, which WebKit's GLib resolver can't express. Each refusal names its capability. Rejected: emulating
+SOCKS4a or a suffix rule with a relay, and passing SOCKS credentials through WebKit's process environment. Like
+the rest of the proxy support, these are native settings of the context that asks, per [Pay for what you use](#pay-for-what-you-use).
 
 ## Native passkey testing
 

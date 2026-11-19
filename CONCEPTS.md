@@ -473,12 +473,18 @@ no request, response, or route pause for one, on any backend, though Chromium an
 reports `data:` ones; a navigation to one commits with no response, as one to `about:blank` does.
 [No requests for URLs the browser answers](docs/decisions.md#no-requests-for-urls-the-browser-answers) says why.
 
-A new context may carry a normalized HTTP proxy endpoint, a bypass host list (default empty), and optional
-credentials with a Redacted password. An omitted proxy leaves browser settings untouched. CDP and BiDi set the
-endpoint per user context; launched stock WebKit sets HTTP/HTTPS proxy environment variables on that context's
-process, overriding inherited proxy variables without changing the parent environment. Localhost, 127.0.0.1, and
-::1 remain direct, including control connections; bypass hosts otherwise follow the backend's native host rules.
-Unsupported endpoint schemes, WebKit credentials, and settings for an existing WebKit process are explicit refusals.
+A new context may carry a normalized proxy endpoint (an `http`, `https`, `socks5`, or `socks4` scheme with a host and
+port), a bypass host list (default empty), and optional credentials with a Redacted password. An omitted proxy
+leaves browser settings untouched. A SOCKS proxy resolves destination names itself; SOCKS4 means SOCKS4a, so
+Chromium, whose SOCKS4 resolves names locally, refuses it. CDP and BiDi set the endpoint per user context; BiDi has no
+TLS connection to a proxy, so only CDP takes `https`. Launched stock WebKit sets proxy environment variables on that
+context's process, overriding inherited ones without changing the parent environment: `http_proxy` and
+`https_proxy` for every scheme, and `all_proxy` for SOCKS (cleared for HTTP), with `socks4` written as `socks4a`;
+it refuses `https`, whose certificate its context settings don't reach. Localhost, 127.0.0.1, and ::1 remain direct,
+including control connections. A bypass hostname matches that host and `.example.com` the domain's subdomains, not
+the domain; stock WebKit's resolver matches a hostname's subdomains too and can't express the suffix form, so it
+refuses it. Unknown schemes, SOCKS credentials, WebKit credentials, and settings for an existing WebKit process are
+explicit refusals, each naming its capability.
 
 Context HTTP credentials install a context-owned auth route before user routes and an auth-phase intercept only
 when configured, following [Pay for what you use](docs/decisions.md#pay-for-what-you-use). Page routes and later

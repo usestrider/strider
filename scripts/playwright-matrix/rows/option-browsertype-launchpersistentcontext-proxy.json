@@ -18,14 +18,12 @@
   ],
   "requirements": [],
   "gaps": [
-    "option-browsertype-launchpersistentcontext-proxy-value-socks-or-https-proxy-endpoint",
     "option-browsertype-launchpersistentcontext-proxy-value-proxy-credentials"
   ],
   "valueCoverage": [
     {
       "value": "SOCKS or HTTPS proxy endpoint",
-      "status": "missing",
-      "gap": "option-browsertype-launchpersistentcontext-proxy-value-socks-or-https-proxy-endpoint"
+      "status": "has"
     },
     {
       "value": "proxy credentials",
