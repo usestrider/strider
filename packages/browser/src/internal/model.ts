@@ -29,6 +29,7 @@ import type * as NetworkConnection from "../NetworkConnection.ts"
 import type * as NetworkRequest from "../NetworkRequest.ts"
 import type * as NetworkResponse from "../NetworkResponse.ts"
 import type * as Page from "../Page.ts"
+import type * as PageLifecycle from "../PageLifecycle.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
 import * as Target from "../Target.ts"
 import type * as UncaughtException from "../UncaughtException.ts"
@@ -249,6 +250,7 @@ export interface PageEvents {
   readonly fileChooser: Events.Channel<FileChooserEvent>
   readonly autoResolution: Events.Channel<AutoResolutionEvent>
   readonly navigation: Events.Channel<NavigationEvent>
+  readonly lifecycle: Events.Channel<PageLifecycle.PageLifecycle>
   readonly request: Events.Channel<NetworkRequest.NetworkRequest>
   readonly response: Events.Channel<ResponseEvent>
   readonly console: Events.Channel<ConsoleMessage.ConsoleMessage>
@@ -262,6 +264,7 @@ export interface PageEvents {
 export interface ContextEvents {
   readonly autoResolution: Events.Channel<AutoResolutionEvent>
   readonly navigation: Events.Channel<NavigationEvent>
+  readonly lifecycle: Events.Channel<PageLifecycle.PageLifecycle>
   readonly request: Events.Channel<NetworkRequest.NetworkRequest>
   readonly response: Events.Channel<ResponseEvent>
   readonly console: Events.Channel<ConsoleMessage.ConsoleMessage>

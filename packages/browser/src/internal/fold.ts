@@ -25,6 +25,7 @@ import type * as Download from "../Download.ts"
 import type * as NetworkConnection from "../NetworkConnection.ts"
 import type * as NetworkRequest from "../NetworkRequest.ts"
 import type * as NetworkResponse from "../NetworkResponse.ts"
+import type * as PageLifecycle from "../PageLifecycle.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
 import * as Target from "../Target.ts"
 import type * as Url from "../Url.ts"
@@ -264,6 +265,9 @@ export const make = Effect.fnUntraced(function*(options: {
     if (Option.isSome(owner.context)) Events.publish(contextChannel(owner.context.value.events), value)
   }
 
+  const publishLifecycle = (page: Model.PageEntry, event: PageLifecycle.PageLifecycle) =>
+    publish(ownerOfPage(Option.some(page)), event, (events) => events.lifecycle, (events) => events.lifecycle)
+
   const updateOpen = (
     page: Model.PageEntry,
     change: (open: Extract<Model.PageStatus, { _tag: "Open" }>) => Model.PageStatus
@@ -311,6 +315,9 @@ export const make = Effect.fnUntraced(function*(options: {
     for (const frame of gone) {
       frames.delete(frame)
       page.contextEntry.storageSources?.origins.delete(frame)
+    }
+    for (const frame of list) {
+      if (gone.has(frame.id)) publishLifecycle(page, { _tag: "FrameRemoved", page: page.id, frame: frame.id })
     }
     yield* update(page.state, (state) => ({ ...state, frames: state.frames.filter((frame) => !gone.has(frame.id)) }))
     for (const document of Array.from(documents.values())) {
@@ -374,6 +381,8 @@ export const make = Effect.fnUntraced(function*(options: {
       frames.delete(frame)
       page.contextEntry.storageSources?.origins.delete(frame)
     }
+    // Its close is an event before its channels end, so a page's stream and its context's both see it
+    publishLifecycle(page, { _tag: "Closed", page: page.id, frame: page.id, reason })
     const how = endOf(reason)
     for (const channel of Object.values(page.events)) Events.end(channel as Events.Channel<unknown>, how)
     yield* update(page.state, (state): Model.PageState => ({
@@ -425,6 +434,7 @@ export const make = Effect.fnUntraced(function*(options: {
       events: {
         autoResolution: Events.make(target, cap),
         navigation: Events.make(target, cap),
+        lifecycle: Events.make(target, cap),
         request: Events.make(target, cap),
         response: Events.make(target, cap),
         console: Events.make(target, cap),
@@ -549,6 +559,7 @@ export const make = Effect.fnUntraced(function*(options: {
               fileChooser: Events.make(target, cap),
               autoResolution: Events.make(target, cap),
               navigation: Events.make(target, cap),
+              lifecycle: Events.make(target, cap),
               request: Events.make(target, cap),
               response: Events.make(target, cap),
               console: Events.make(target, cap),
@@ -592,6 +603,12 @@ export const make = Effect.fnUntraced(function*(options: {
             ...state,
             frames: [...state.frames.filter((each) => each.id !== fact.frame), frame]
           }))
+          publishLifecycle(page.value, {
+            _tag: "FrameAdded",
+            page: page.value.id,
+            frame: fact.frame,
+            parent: fact.parent
+          })
           return
         }
         case "NavigationStarted": {
@@ -706,6 +723,16 @@ export const make = Effect.fnUntraced(function*(options: {
                 : open)
           }
           yield* update(document.state, (state) => ({ ...state, readiness: fact.readiness }))
+          const owner = page ?? frames.get(document.navigable)
+          if (owner !== undefined && pages.has(owner.id)) {
+            publishLifecycle(owner, {
+              _tag: fact.readiness === "interactive" ? "DomContentLoaded" : "Loaded",
+              page: owner.id,
+              frame: document.navigable,
+              document: document.id,
+              url: (yield* document.state.get).url
+            })
+          }
           return
         }
         case "RealmAdded": {

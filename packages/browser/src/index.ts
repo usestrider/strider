@@ -219,6 +219,12 @@ export * as PageClock from "./PageClock.ts"
  * @stability unstable
  * @since 0.1.0
  */
+export * as PageLifecycle from "./PageLifecycle.ts"
+
+/**
+ * @stability unstable
+ * @since 0.1.0
+ */
 export * as PageNavigation from "./PageNavigation.ts"
 
 /**

@@ -43,7 +43,7 @@ const setup = Effect.fnUntraced(function*() {
     fold.sink({
       _tag: "NavigableRemoved",
       navigable: navigable as Target.NavigableId,
-      reason: new Target.PageClosed({}),
+      reason: new Target.PageClosed({ by: "command" }),
       evidence: "test"
     } as never)
   yield* addPage("first", "context")
@@ -93,7 +93,7 @@ describe("PageLifecycle", () => {
       ])
     }))
 
-  it.scoped("streams from when it subscribes, with a page's close before the context's stream ends", () =>
+  it.effect("streams from when it subscribes, with a page's close before the context's stream ends", () =>
     Effect.gen(function*() {
       const { addPage, commit, context, remove } = yield* setup()
       yield* commit("first", "before")
