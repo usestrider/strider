@@ -880,6 +880,567 @@ describe("Chromium adapter, CDP only", () => {
         timeout
       )
 
+      // Records the order of input commands sent and drag interceptions received, to show where each falls
+      const recordingDrags = (order: Array<string>) =>
+        BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
+          const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
+          return yield* CdpAdapter.connect({
+            ...transport,
+            send: (message) =>
+              Effect.suspend(() => {
+                const wire = JSON.parse(message)
+                if (wire.method === "Input.dispatchMouseEvent") order.push(`mouse ${wire.params.type}`)
+                else if (wire.method === "Input.dispatchDragEvent") order.push(`drag ${wire.params.type}`)
+                else if (wire.method === "Input.setInterceptDrags") {
+                  order.push(`setInterceptDrags ${wire.params.enabled}`)
+                }
+                return transport.send(message)
+              }),
+            messages: transport.messages.pipe(Stream.map((message) => {
+              if (message.includes("\"Input.dragIntercepted\"")) order.push("dragIntercepted")
+              return message
+            }))
+          }, { sink, ownership: "launched" })
+        }))
+      const dragFixture =
+        `<script>window.log=''</script><div id="source" draggable="true" ondragstart="log+='1'" style="position:absolute;left:10px;top:10px;width:60px;height:60px;background:red">Source</div><div id="target" ondragenter="log+='2'" ondragover="event.preventDefault();log+='3'" ondrop="event.preventDefault();log+='4'" style="position:absolute;left:300px;top:10px;width:60px;height:60px;background:gray">Target</div>`
+
+      it.effect(
+        "returns the drag deadline while its source object cleanup reply is outstanding",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            let sourceObject: string | undefined
+            let releaseId: number | undefined
+            const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
+              const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
+              return yield* CdpAdapter.connect({
+                ...transport,
+                send: Effect.fnUntraced(function*(message: string) {
+                  const wire = JSON.parse(message)
+                  if (wire.method === "DOM.describeNode" && wire.params.pierce === true) {
+                    sourceObject = wire.params.objectId
+                  }
+                  if (
+                    wire.method === "Runtime.releaseObject" && sourceObject !== undefined &&
+                    wire.params.objectId === sourceObject
+                  ) releaseId = wire.id
+                  yield* transport.send(message)
+                }),
+                messages: transport.messages.pipe(Stream.filter((message) => {
+                  const wire = JSON.parse(message)
+                  return releaseId === undefined || wire.id !== releaseId
+                }))
+              }, { sink, ownership: "launched" })
+            }))
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(dragFixture)}`)
+              const started = Date.now()
+              const result = yield* page.locator("#source").dragTo(page.locator("#target")).pipe(
+                Deadline.within("1 second"),
+                Protocol.withCommandTimeout("3 seconds"),
+                Effect.result
+              )
+              const elapsed = Date.now() - started
+              assert.isBelow(elapsed, 2000, "the drag deadline must not wait for the source object release timeout")
+              if (result._tag === "Failure") assert.isTrue(Deadline.isTimeout(result.failure))
+            }).pipe(Effect.provide(backend))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "drops an HTML drag made by hovering, pressing, hovering the target and releasing",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const order: Array<string> = []
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(dragFixture)}`)
+              yield* page.locator("#source").hover()
+              yield* Effect.scoped(Effect.gen(function*() {
+                const held = yield* page.mouse.hold("left")
+                yield* page.locator("#target").hover()
+                yield* held.release
+              }))
+              const log = yield* page.evaluateInMainWorld(() => (window as any).log)
+              assert.strictEqual(log, "1234", order.join(", "))
+            }).pipe(Effect.provide(recordingDrags(order)))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "watches documents added while the mouse button is held",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const order: Array<string> = []
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(dragFixture)}`)
+              yield* page.locator("#source").hover()
+              yield* Effect.scoped(Effect.gen(function*() {
+                const held = yield* page.mouse.hold("left")
+                yield* page.evaluateInMainWorld(() =>
+                  new Promise<void>((resolve) => {
+                    const iframe = document.createElement("iframe")
+                    iframe.style.cssText = "position:absolute;top:200px"
+                    iframe.onload = () => resolve()
+                    iframe.srcdoc = "<p>New document</p>"
+                    document.body.appendChild(iframe)
+                  })
+                )
+                yield* page.mouse.move({ x: 330, y: 40 })
+                yield* held.release
+              }))
+              const log = yield* page.evaluateInMainWorld(() => (window as any).log)
+              assert.strictEqual(log, "1234", order.join(", "))
+            }).pipe(Effect.provide(recordingDrags(order)))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "enters the target on a new HTML drag after Escape canceled the previous drag",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const order: Array<string> = []
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(dragFixture)}`)
+              yield* page.locator("#source").hover()
+              yield* Effect.scoped(Effect.gen(function*() {
+                const held = yield* page.mouse.hold("left")
+                yield* page.locator("#target").hover()
+                yield* page.keyboard.press("Escape")
+                yield* held.release
+              }))
+              yield* page.evaluateInMainWorld(() => {
+                ;(window as any).log = ""
+              })
+              yield* page.locator("#source").dragTo(page.locator("#target"))
+              const log = yield* page.evaluateInMainWorld(() => (window as any).log)
+              assert.strictEqual(log, "1234", order.join(", "))
+            }).pipe(Effect.provide(recordingDrags(order)))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "fires a dragover for each hover of the same target, as Chromium's own drag does",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const order: Array<string> = []
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(dragFixture)}`)
+              yield* page.locator("#source").hover()
+              yield* Effect.scoped(Effect.gen(function*() {
+                const held = yield* page.mouse.hold("left")
+                yield* page.locator("#target").hover()
+                yield* page.locator("#target").hover()
+                yield* held.release
+              }))
+              const log = yield* page.evaluateInMainWorld(() => (window as any).log)
+              // Chromium's own drag fires a dragover for every move, even one to the same point
+              assert.strictEqual(log, "12334", order.join(", "))
+            }).pipe(Effect.provide(recordingDrags(order)))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "enters the target while the button is held, leaving its dragover to the drop",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const order: Array<string> = []
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(dragFixture)}`)
+              yield* page.locator("#source").hover()
+              yield* Effect.scoped(Effect.gen(function*() {
+                const held = yield* page.mouse.hold("left")
+                yield* page.locator("#target").hover()
+                const log = yield* page.evaluateInMainWorld(() => (window as any).log)
+                // Chromium's drop command fires a dragover before the drop, so the move that starts the drag only
+                // enters it, and the whole drag fires dragenter, dragover and drop once each
+                assert.strictEqual(log, "12", order.join(", "))
+                yield* held.release
+              }))
+            }).pipe(Effect.provide(recordingDrags(order)))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "cancels an HTML drag on Escape, and releases the button with a mouse release",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const order: Array<string> = []
+            const fixture =
+              `<script>window.log=[];for(const t of ['dragstart','dragenter','drop','dragend','keydown','keyup','mouseup'])addEventListener(t,(e)=>log.push(t),true)</script><div id="source" draggable="true" style="position:absolute;left:10px;top:10px;width:60px;height:60px;background:red">Source</div><div id="target" ondragover="event.preventDefault()" style="position:absolute;left:300px;top:10px;width:60px;height:60px;background:gray">Target</div>`
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(fixture)}`)
+              yield* page.locator("#source").hover()
+              yield* Effect.scoped(Effect.gen(function*() {
+                const held = yield* page.mouse.hold("left")
+                yield* page.locator("#target").hover()
+                yield* page.keyboard.press("Escape")
+                yield* held.release
+              }))
+              const log = yield* page.evaluateInMainWorld(() => (window as any).log.join(" "))
+              assert.strictEqual(log, "dragstart dragenter dragend mouseup", order.join(", "))
+            }).pipe(Effect.provide(recordingDrags(order)))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "drops the data an HTML drag's dragstart set",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const order: Array<string> = []
+            const fixture =
+              `<script>window.log=''</script><div id="source" draggable="true" ondragstart="event.dataTransfer.setData('text/x-strider','payload')" style="position:absolute;left:10px;top:10px;width:60px;height:60px;background:red">Source</div><div id="target" ondragover="event.preventDefault()" ondrop="event.preventDefault();log=event.dataTransfer.getData('text/x-strider')" style="position:absolute;left:300px;top:10px;width:60px;height:60px;background:gray">Target</div>`
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(fixture)}`)
+              yield* page.locator("#source").dragTo(page.locator("#target"))
+              const log = yield* page.evaluateInMainWorld(() => (window as any).log)
+              assert.strictEqual(log, "payload", order.join(", "))
+            }).pipe(Effect.provide(recordingDrags(order)))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "drops an HTML drag made by dragTo",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const order: Array<string> = []
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(dragFixture)}`)
+              yield* page.locator("#source").dragTo(page.locator("#target"))
+              const log = yield* page.evaluateInMainWorld(() => (window as any).log)
+              assert.strictEqual(log, "1234", order.join(", "))
+            }).pipe(Effect.provide(recordingDrags(order)))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "enters an HTML drag when dragstart turns off draggability",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const order: Array<string> = []
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              yield* page.goto(
+                `${served.origin}/fixture?html=${
+                  encodeURIComponent(dragFixture.replace("log+='1'", "log+='1';this.draggable=false"))
+                }`
+              )
+              yield* page.locator("#source").hover()
+              yield* Effect.scoped(Effect.gen(function*() {
+                const held = yield* page.mouse.hold("left")
+                yield* page.locator("#target").hover()
+                assert.strictEqual(yield* page.evaluateInMainWorld(() => (window as any).log), "12", order.join(", "))
+                yield* held.release
+              }))
+              const log = yield* page.evaluateInMainWorld(() => (window as any).log)
+              assert.strictEqual(log, "1234", order.join(", "))
+            }).pipe(Effect.provide(recordingDrags(order)))
+          }),
+        timeout
+      )
+
+      it.effect("keeps Escape cancellation separate from the next gesture", () =>
+        Effect.gen(function*() {
+          const served = yield* site
+          const order: Array<string> = []
+          yield* Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(dragFixture)}`)
+            yield* page.evaluateInMainWorld(() => {
+              ;(window as any).keys = []
+              for (const type of ["keydown", "keyup"]) addEventListener(type, () => (window as any).keys.push(type))
+            })
+            yield* page.keyboard.press("Escape")
+            assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => (window as any).keys), ["keydown", "keyup"])
+            yield* page.locator("#source").hover()
+            yield* Effect.scoped(Effect.gen(function*() {
+              const mouse = yield* page.mouse.hold("left")
+              yield* page.locator("#target").hover()
+              const escape = yield* page.keyboard.hold("Escape")
+              yield* mouse.release
+              yield* page.locator("#source").dragTo(page.locator("#target"))
+              yield* escape.release
+            }))
+            assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => (window as any).keys), ["keydown", "keyup"])
+            yield* page.keyboard.press("Escape")
+            assert.deepStrictEqual(yield* page.evaluateInMainWorld(() => (window as any).keys), [
+              "keydown",
+              "keyup",
+              "keydown",
+              "keyup"
+            ])
+          }).pipe(Effect.provide(recordingDrags(order)))
+        }), timeout)
+
+      it.effect("finishes a held move when dragstart removes a shadow-tree source", () =>
+        Effect.gen(function*() {
+          const served = yield* site
+          const order: Array<string> = []
+          yield* Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const fixture =
+              `<script>window.log='';addEventListener('dragstart',e=>console.log('drag source',e.target.id,e.composedPath()[0].id),true)</script><div id="host"></div><script>host.attachShadow({mode:'open'}).innerHTML=\`<div id="source" draggable="true" ondragend="console.log('source dragend')" ondragstart="window.log+='1';this.remove()" style="position:absolute;left:10px;top:10px;width:60px;height:60px;background:red">Source</div>\`</script><div id="target" style="position:absolute;left:300px;top:10px;width:60px;height:60px">Target</div>`
+            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(fixture)}`)
+            yield* page.locator("#source").hover()
+            yield* Effect.scoped(Effect.gen(function*() {
+              const held = yield* page.mouse.hold("left")
+              yield* page.locator("#target").hover().pipe(Deadline.within("3 seconds"))
+              yield* held.release
+            }))
+            assert.strictEqual(yield* page.evaluateInMainWorld(() => (window as any).log), "1", order.join(", "))
+          }).pipe(Effect.provide(recordingDrags(order)))
+        }), timeout)
+
+      it.effect(
+        "finishes a held move when dragstart removes a closed-shadow-tree source",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const order: Array<string> = []
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const fixture =
+                `<script>window.log='';addEventListener('dragstart',e=>console.log('drag source',e.target.id,e.composedPath()[0].id),true)</script><div id="host"></div><script>host.attachShadow({mode:'closed'}).innerHTML=\`<div id="source" draggable="true" ondragend="console.log('source dragend')" ondragstart="window.log+='1';this.remove()" style="position:absolute;left:10px;top:10px;width:60px;height:60px;background:red">Source</div>\`</script><div id="target" style="position:absolute;left:300px;top:10px;width:60px;height:60px">Target</div>`
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(fixture)}`)
+              yield* page.mouse.move({ x: 40, y: 40 })
+              yield* Effect.scoped(Effect.gen(function*() {
+                const held = yield* page.mouse.hold("left")
+                yield* page.locator("#target").hover().pipe(Deadline.within("3 seconds"))
+                yield* held.release
+              }))
+              assert.strictEqual(yield* page.evaluateInMainWorld(() => (window as any).log), "1", order.join(", "))
+            }).pipe(Effect.provide(recordingDrags(order)))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "finishes a held move when dragstart removes a closed-shadow-tree source inside a draggable host",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const order: Array<string> = []
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const fixture =
+                `<script>window.log='';addEventListener('dragstart',e=>console.log('drag source',e.target.id,e.composedPath()[0].id),true)</script><div id="host" draggable="true"></div><script>host.attachShadow({mode:'closed'}).innerHTML=\`<div id="source" draggable="true" ondragend="console.log('source dragend')" ondragstart="window.log+='1';this.remove()" style="position:absolute;left:10px;top:10px;width:60px;height:60px;background:red">Source</div>\`</script><div id="target" style="position:absolute;left:300px;top:10px;width:60px;height:60px">Target</div>`
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(fixture)}`)
+              yield* page.mouse.move({ x: 40, y: 40 })
+              yield* Effect.scoped(Effect.gen(function*() {
+                const held = yield* page.mouse.hold("left")
+                yield* page.locator("#target").hover().pipe(Deadline.within("3 seconds"))
+                yield* held.release
+              }))
+              assert.strictEqual(yield* page.evaluateInMainWorld(() => (window as any).log), "1", order.join(", "))
+            }).pipe(Effect.provide(recordingDrags(order)))
+          }),
+        timeout
+      )
+
+      it.effect("leaves a cross-site frame's drag target on Escape", () =>
+        Effect.gen(function*() {
+          const served = yield* site
+          const order: Array<string> = []
+          yield* Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const child =
+              `<body data-log=""><script>for(const t of ['dragenter','dragleave','dragend'])addEventListener(t,e=>document.body.dataset.log+=t+'@'+e.target.id+' ',true)</script><div id="source" draggable="true" style="position:absolute;left:10px;top:10px;width:60px;height:60px;background:red">Source</div><div id="target" ondragover="event.preventDefault()" style="position:absolute;left:200px;top:10px;width:60px;height:60px;background:gray">Target</div></body>`
+            const childUrl = `${served.crossSite}/fixture?html=${encodeURIComponent(child)}`
+            const fixture =
+              `<script>window.parentEnters=0;addEventListener('dragenter',()=>parentEnters++)</script><div style="position:absolute;left:0;top:0;width:100px;height:100px">Edge</div><iframe style="position:absolute;left:100px;top:100px;width:400px;height:200px;border:0" src="${childUrl}"></iframe>`
+            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(fixture)}`)
+            const frame = page.frame(page.locator("iframe"))
+            yield* frame.locator("#source").hover()
+            yield* Effect.scoped(Effect.gen(function*() {
+              const held = yield* page.mouse.hold("left")
+              yield* frame.locator("#target").hover()
+              yield* page.keyboard.press("Escape")
+              yield* held.release
+            }))
+            const log = yield* frame.locator("body").evaluate((el) => el.getAttribute("data-log"))
+            assert.include(log!, "dragleave@target", order.join(", "))
+            assert.strictEqual(yield* page.evaluateInMainWorld(() => (window as any).parentEnters), 0)
+          }).pipe(Effect.provide(recordingDrags(order)))
+        }), timeout)
+
+      it.effect("finishes a held move when dragstart removes the source", () =>
+        Effect.gen(function*() {
+          const served = yield* site
+          const order: Array<string> = []
+          yield* Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const fixture = dragFixture.replace("log+='1'", "log+='1';this.remove()")
+            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(fixture)}`)
+            yield* page.locator("#source").hover()
+            yield* Effect.scoped(Effect.gen(function*() {
+              const held = yield* page.mouse.hold("left")
+              yield* page.locator("#target").hover().pipe(Deadline.within("3 seconds"))
+              yield* held.release
+            }))
+            assert.strictEqual(yield* page.evaluateInMainWorld(() => (window as any).log), "1", order.join(", "))
+          }).pipe(Effect.provide(recordingDrags(order)))
+        }), timeout)
+
+      it.effect("finishes a held move when dragstart replaces the document", () =>
+        Effect.gen(function*() {
+          const served = yield* site
+          const order: Array<string> = []
+          yield* Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const fixture = dragFixture.replace(
+              "log+='1'",
+              "log+='1';document.open();document.write('Replaced');document.close()"
+            )
+            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(fixture)}`)
+            yield* page.locator("#source").hover()
+            yield* Effect.scoped(Effect.gen(function*() {
+              const held = yield* page.mouse.hold("left")
+              yield* page.locator("#target").hover().pipe(Deadline.within("3 seconds"))
+              yield* held.release
+            }))
+            assert.strictEqual(yield* page.evaluateInMainWorld(() => (window as any).log), "1", order.join(", "))
+          }).pipe(Effect.provide(recordingDrags(order)))
+        }), timeout)
+
+      for (const replacement of ["navigation", "setContent"] as const) {
+        it.effect(`watches dragstart after ${replacement}`, () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const order: Array<string> = []
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const url = `${served.origin}/fixture?html=${encodeURIComponent(dragFixture)}`
+              yield* page.goto(url)
+              yield* page.locator("#source").dragTo(page.locator("#target"))
+              if (replacement === "navigation") yield* page.goto(url + "&again=1")
+              else yield* page.setContent(dragFixture)
+              yield* page.locator("#source").hover()
+              yield* Effect.scoped(Effect.gen(function*() {
+                const held = yield* page.mouse.hold("left")
+                yield* page.locator("#target").hover()
+                assert.strictEqual(yield* page.evaluateInMainWorld(() => (window as any).log), "12", order.join(", "))
+                yield* held.release
+              }))
+            }).pipe(Effect.provide(recordingDrags(order)))
+          }), timeout)
+      }
+
+      for (
+        const [kind, source] of [
+          ["cleared data", `<div draggable="true" ondragstart="event.dataTransfer.clearData()">Source</div>`],
+          ["default link", `<a href="/destination">Source</a>`],
+          [
+            "default image",
+            `<img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='60'%3E%3Crect width='60' height='60' fill='red'/%3E%3C/svg%3E">`
+          ]
+        ]
+      ) {
+        it.effect(`drops an HTML drag with ${kind}`, () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const order: Array<string> = []
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const fixture =
+                `<style>#source>*{display:block;width:60px;height:60px}#source{position:absolute;left:10px;top:10px}</style><script>window.log=''</script><div id="source">${source}</div><div id="target" ondragover="event.preventDefault()" ondrop="event.preventDefault();log='drop'" style="position:absolute;left:300px;top:10px;width:60px;height:60px">Target</div>`
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(fixture)}`)
+              yield* page.locator("#source > *").dragTo(page.locator("#target")).pipe(Deadline.within("3 seconds"))
+              assert.strictEqual(yield* page.evaluateInMainWorld(() => (window as any).log), "drop", order.join(", "))
+            }).pipe(Effect.provide(recordingDrags(order)))
+          }), timeout)
+      }
+
+      it.effect(
+        "drops an HTML drag from a cross-site frame onto its parent",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const order: Array<string> = []
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const fixture = (origin: string, html: string) => `${origin}/fixture?html=${encodeURIComponent(html)}`
+              const child = fixture(
+                served.crossSite,
+                `<div id="source" draggable="true" style="position:absolute;left:10px;top:10px;width:40px;height:40px;background:red">Source</div>`
+              )
+              yield* page.goto(
+                fixture(
+                  served.origin,
+                  `<script>window.log=''</script><iframe style="margin:30px;width:300px;height:200px" src="${child}"></iframe><div id="target" ondragenter="log+='2'" ondragover="event.preventDefault();log+='3'" ondrop="event.preventDefault();log+='4'" style="position:absolute;left:500px;top:50px;width:80px;height:80px;background:gray">Target</div>`
+                )
+              )
+              const frame = page.frame(page.locator("iframe"))
+              yield* frame.locator("#source").dragTo(page.locator("#target")).pipe(Deadline.within("10 seconds"))
+              const log = yield* page.evaluateInMainWorld(() => (window as any).log)
+              assert.strictEqual(log, "234", order.join(", "))
+            }).pipe(Effect.provide(recordingDrags(order)))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "releases cross-site mouse capture after an HTML drop",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const order: Array<string> = []
+            yield* Effect.gen(function*() {
+              const page = yield* Browser.newPage()
+              const fixture = (origin: string, html: string) => `${origin}/fixture?html=${encodeURIComponent(html)}`
+              const child = fixture(
+                served.crossSite,
+                `<div id="source" draggable="true" style="position:absolute;left:10px;top:10px;width:40px;height:40px;background:red">Source</div>`
+              )
+              yield* page.goto(
+                fixture(
+                  served.origin,
+                  `<script>window.log=''</script><iframe style="margin:30px;width:300px;height:200px" src="${child}"></iframe><div id="target" ondragenter="log+='2'" ondragover="event.preventDefault();log+='3'" ondrop="event.preventDefault();log+='4'" style="position:absolute;left:500px;top:50px;width:80px;height:80px;background:gray">Target</div>`
+                )
+              )
+              const frame = page.frame(page.locator("iframe"))
+              yield* frame.locator("#source").dragTo(page.locator("#target")).pipe(Deadline.within("10 seconds"))
+              const log = yield* page.evaluateInMainWorld(() => (window as any).log)
+              assert.strictEqual(log, "234", order.join(", "))
+              yield* page.evaluateInMainWorld(() => {
+                ;(window as any).moved = false
+                document.querySelector("#target")!.addEventListener("mousemove", () => {
+                  ;(window as any).moved = true
+                })
+              })
+              yield* page.locator("#target").hover()
+              assert.strictEqual(yield* page.evaluateInMainWorld(() => (window as any).moved), true, order.join(", "))
+            }).pipe(Effect.provide(recordingDrags(order)))
+          }),
+        timeout
+      )
+
       it.effect(
         "clicks a cross-site child nested inside another cross-site frame",
         () =>

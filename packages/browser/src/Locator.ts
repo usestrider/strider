@@ -1763,6 +1763,8 @@ export interface Locator extends ReadonlyLocator {
    *   target's, which drives pages that drag with pointer events.
    * - An HTML drag (`draggable="true"` on the element or an ancestor) needs `input.dragAndDrop`, which Chromium
    *   has; elsewhere it fails with `Unsupported` before anything is sent.
+   * - On Chromium, a native HTML drag fires `dragenter` at the target on the first move that reaches it,
+   *   `dragover` on each move after, and `dragover` then `drop` at the release.
    * - With `html: "synthetic"`, the page dispatches the drag's events itself, on every backend: `dragstart` and
    *   `drag` on the element, `dragenter` and `dragover` where the target's point is, then `drop` there if a
    *   `dragover` handler accepted it, or `dragleave`, and `dragend` on the element.
