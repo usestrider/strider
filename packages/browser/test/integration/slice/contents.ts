@@ -7,6 +7,7 @@ import { assert, describe, layer } from "@effect/vitest"
 import {
   AriaPattern,
   Browser,
+  Condition,
   ConsoleMessage,
   CookieJar,
   Deadline,
@@ -663,10 +664,15 @@ export const contents = (
             fixtureUrl(origin, "<title>Old</title><script defer src=\"/pending-script\"></script>"),
             { waitUntil: "commit" }
           )
-          assert.strictEqual(
-            yield* page.evaluateInMainWorld(() =>
+          // Commit comes before parsing: wait for the parser to finish, while the deferred script still holds load
+          yield* Expect.that(
+            page.evaluateInMainWorld(() =>
               document.readyState
             ),
+            Condition.make("parsed", (state: DocumentReadyState) => state !== "loading")
+          )
+          assert.strictEqual(
+            yield* page.evaluateInMainWorld(() => document.readyState),
             "interactive"
           )
           yield* page.setContent("<title>Replacement</title>", { waitUntil: "domContentLoaded" }).pipe(
@@ -799,7 +805,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           const page = yield* SharedContext.newPage
-          yield* page.goto(fixtureUrl(origin, "<ul><li>One</li><li>Two</li><li>Three</li></ul>"))
+          yield* page.goto(fixtureUrl(origin, "<ul><li>One</li><li>Two</li><li>Three</li></ul>"), { waitUntil: "load" })
           const items = page.getByRole("listitem")
           assert.strictEqual(yield* items.nth(0).readText, "One")
           assert.strictEqual(yield* items.nth(1).readText, "Two")
@@ -1557,7 +1563,7 @@ export const contents = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(origin, `<p>hi</p>`))
+            yield* page.goto(fixtureUrl(origin, `<p>hi</p>`), { waitUntil: "load" })
             const evaluate = yield* evaluator(page)
             const thrown = reasonOf(
               yield* Effect.exit(evaluate(() => {
@@ -1640,7 +1646,7 @@ export const contents = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(origin, `<p id="x">hello</p>`))
+            yield* page.goto(fixtureUrl(origin, `<p id="x">hello</p>`), { waitUntil: "load" })
             const methods = {
               sum(a: number, b: number) {
                 return a + b
@@ -1700,7 +1706,7 @@ export const contents = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(origin, `<p id="x">hello</p>`))
+            yield* page.goto(fixtureUrl(origin, `<p id="x">hello</p>`), { waitUntil: "load" })
             if (
               yield* isolatedRefused(page.evaluateHandle(() =>
                 document.body
@@ -1759,7 +1765,7 @@ export const contents = (
           const worlds = yield* supports("isolatedWorlds")
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(origin, `<p>a</p><p>b</p><p>c</p>`))
+            yield* page.goto(fixtureUrl(origin, `<p>a</p><p>b</p><p>c</p>`), { waitUntil: "load" })
             if (
               yield* isolatedRefused(page.evaluateHandle(() =>
                 document.body
@@ -1788,12 +1794,32 @@ export const contents = (
           )
         }), timeout)
 
+      it.effect("finds test ids by pattern, and names the pattern when it matches several", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(
+              fixtureUrl(origin, `<p data-testid="row-1">a</p><p data-testid="row-2">b</p><p data-testid="total">c</p>`)
+            )
+            assert.strictEqual(yield* page.getByTestId(/^row-/).count, 2)
+            assert.strictEqual(yield* page.getByTestId(/^ROW-1$/i).readText, "a")
+            const error = reasonOf(
+              yield* Effect.exit(page.getByTestId(/^row-/i).readText)
+            ) as unknown as Locator.LocatorError
+            assert.strictEqual(error.reason._tag, "StrictViolation")
+            assert.strictEqual(error.locator, "page.getByTestId(/^row-/i)")
+          }))
+        }), timeout)
+
       it.effect("evaluates with the locator's one match first, in the isolated world", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(origin, `<p id="x" data-n="3">hello</p><p>a</p><p>b</p>`))
+            yield* page.goto(fixtureUrl(origin, `<p id="x" data-n="3">hello</p><p>a</p><p>b</p>`), {
+              waitUntil: "load"
+            })
             if (
               yield* isolatedRefused(
                 page.locator("#x").evaluate((element) =>
@@ -1821,7 +1847,7 @@ export const contents = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(origin, `<section><p>a</p><p>b</p></section>`))
+            yield* page.goto(fixtureUrl(origin, `<section><p>a</p><p>b</p></section>`), { waitUntil: "load" })
             if (yield* isolatedRefused(page.locator("p").evaluateAll((elements) => elements.length))) return
             assert.deepStrictEqual(
               yield* page.locator("section").locator("p").evaluateAll(
@@ -1879,7 +1905,7 @@ export const contents = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(origin, `<p>a</p><p>b</p>`))
+            yield* page.goto(fixtureUrl(origin, `<p>a</p><p>b</p>`), { waitUntil: "load" })
             if (yield* isolatedRefused(page.locator("p").evaluateAll((elements) => elements.length))) return
             const original = Runtime.elements
             let queries = 0
@@ -1920,7 +1946,7 @@ export const contents = (
             const { origin } = yield* site
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* SharedContext.newPage
-              yield* page.goto(fixtureUrl(origin, `<p>a</p><p>b</p>`))
+              yield* page.goto(fixtureUrl(origin, `<p>a</p><p>b</p>`), { waitUntil: "load" })
               if (
                 yield* isolatedRefused(
                   page.locator("p").evaluateAll((elements) => elements.length)
@@ -2192,7 +2218,7 @@ export const contents = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(origin, shop))
+            yield* page.goto(fixtureUrl(origin, shop), { waitUntil: "load" })
             const snapshot = yield* page.snapshot()
             assert.isTrue(Snapshot.isSnapshot(snapshot))
             assert.deepStrictEqual(snapshot.root.role, { _tag: "Aria", role: "document" })
@@ -2285,7 +2311,7 @@ export const contents = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(origin, shop))
+            yield* page.goto(fixtureUrl(origin, shop), { waitUntil: "load" })
             const before = yield* page.snapshot()
             yield* page.getByRole("checkbox", { name: "Agree" }).uncheck()
             yield* page.evaluateInMainWorld(() => {
@@ -2308,7 +2334,7 @@ export const contents = (
             assert.match(diff.text, /\+ button "Later" \[ref=e\d+\]/)
             assert.match(diff.text, /~ checkbox "Agree" (\[focused\] )?\[ref=e\d+\]/)
             assert.match(diff.text, /- link "Gone" \[ref=e\d+\]/)
-            yield* page.goto(fixtureUrl(origin, shop))
+            yield* page.goto(fixtureUrl(origin, shop), { waitUntil: "load" })
             const other = yield* page.snapshot()
             const differs = reasonOf(yield* Effect.exit(other.diff(before)))
             assert.strictEqual(differs?._tag, "SnapshotError")
@@ -2595,7 +2621,9 @@ export const contents = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(origin, `<!DOCTYPE html><title>Doc</title><h1>Printed</h1>`))
+            yield* page.goto(fixtureUrl(origin, `<!DOCTYPE html><title>Doc</title><h1>Printed</h1>`), {
+              waitUntil: "load"
+            })
             const html = yield* page.readHtml
             assert.match(
               html,

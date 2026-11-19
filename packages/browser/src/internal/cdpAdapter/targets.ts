@@ -326,6 +326,15 @@ const snapshot = Effect.fnUntraced(function*(
         send: Effect.fnUntraced(function*(command, receive) {
           const reply = yield* target.session.start(command, scope)
           declarations.push(reply.pipe(Effect.tap(({ result }) => Effect.sync(() => receive?.(result))), Effect.asVoid))
+        }),
+        read: Effect.fnUntraced(function*(command, receive) {
+          const reply = yield* target.session.start(command, scope)
+          replies.push(reply.pipe(
+            Effect.match({
+              onFailure: () => receive(undefined),
+              onSuccess: ({ result }) => receive(result)
+            })
+          ))
         })
       }
       const enable: Setup["send"] = Effect.fnUntraced(function*(command) {

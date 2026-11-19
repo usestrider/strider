@@ -798,7 +798,7 @@ export interface Page extends ReadonlyPage {
   getByPlaceholder(text: string | RegExp, options?: Locator.TextOptions | undefined): Locator.Locator
   getByAltText(text: string | RegExp, options?: Locator.TextOptions | undefined): Locator.Locator
   getByTitle(text: string | RegExp, options?: Locator.TextOptions | undefined): Locator.Locator
-  getByTestId(id: string): Locator.Locator
+  getByTestId(id: string | RegExp): Locator.Locator
   locator(selector: string | Locator.XPath): Locator.Locator
   frame(iframe: Locator.ReadonlyLocator): Locator.FrameLocator
   snapshot(

@@ -54,7 +54,7 @@ const describePlain = (steps: ReadonlyArray<Engine.Step>): string =>
       case "Title":
         return `getByTitle(${quote(step.matcher)}${exactly(step.matcher)})`
       case "TestId":
-        return `getByTestId(${JSON.stringify(step.id)})`
+        return `getByTestId(${quote(step.matcher)})`
       case "Css":
         return `locator(${JSON.stringify(step.selector)})`
       case "XPath":
@@ -118,7 +118,7 @@ export const queries = <L>(
     make([...steps, { _tag: "Placeholder", matcher: matcher(text, options?.exact) }]),
   getByAltText: (text, options) => make([...steps, { _tag: "AltText", matcher: matcher(text, options?.exact) }]),
   getByTitle: (text, options) => make([...steps, { _tag: "Title", matcher: matcher(text, options?.exact) }]),
-  getByTestId: (id) => make([...steps, { _tag: "TestId", id }]),
+  getByTestId: (id) => make([...steps, { _tag: "TestId", matcher: matcher(id, true) }]),
   locator: (selector) => make([...steps, selectorStep(selector)])
 })
 

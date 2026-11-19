@@ -39,7 +39,7 @@ that replaces the built-ins it uses can change what queries find.
 | `getByPlaceholder(text)`             | inputs whose placeholder matches                               |
 | `getByAltText(text)`                 | images and areas whose alt text matches                        |
 | `getByTitle(text)`                   | elements whose `title` matches                                 |
-| `getByTestId(id)`                    | elements whose `data-testid` is `id`                           |
+| `getByTestId(id)`                    | elements whose `data-testid` is `id`, or matches it            |
 | `locator(css)`                       | elements matching a CSS selector                               |
 | `locator(Locator.xpath(expression))` | elements an XPath expression selects                           |
 
@@ -90,8 +90,9 @@ prefix, or doesn't select nodes, such as `count(//li)`, fails with `InvalidInput
 ## Matching text
 
 A string matches as a case-insensitive substring, so `name: "Save"` also finds "Save draft". `exact: true` matches
-the whole text, case-sensitively, and a `RegExp` is tested as given. A role's hidden elements match only with
-`includeHidden: true`:
+the whole text, case-sensitively, and a `RegExp` is tested as given. A test id isn't text: a string matches
+`data-testid` exactly, and a `RegExp` is tested against the attribute as written. A role's hidden elements match only
+with `includeHidden: true`:
 
 ```ts
 import { Expect, Page } from "@usestrider/browser"
@@ -106,6 +107,8 @@ const saveCart = Effect.fn("saveCart")(function*(page: Page.Page) {
   yield* save.click()
   const items = page.getByText(/^\d+ items?$/) // "1 item", "12 items"
   yield* items.pipe(Expect.toBeVisible)
+  const rows = page.getByTestId(/^row-/) // "row-1", "row-2"
+  yield* rows.pipe(Expect.toHaveCount(2))
   const cookies = page.getByRole("dialog", {
     name: "Cookie settings",
     includeHidden: true // even while hidden

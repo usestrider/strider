@@ -58,7 +58,7 @@ export type Step =
   | { readonly _tag: "Placeholder"; readonly matcher: TextMatcher }
   | { readonly _tag: "AltText"; readonly matcher: TextMatcher }
   | { readonly _tag: "Title"; readonly matcher: TextMatcher }
-  | { readonly _tag: "TestId"; readonly id: string }
+  | { readonly _tag: "TestId"; readonly matcher: TextMatcher }
   | { readonly _tag: "Css"; readonly selector: string }
   /** An XPath expression's element nodes, from the document or, chained, from each element so far. */
   | { readonly _tag: "XPath"; readonly expression: string }
@@ -1937,7 +1937,11 @@ export function engine(render: (root: SnapNode) => string) {
       case "Title":
         return under.filter((element) => attributeMatches(element, "title", step.matcher))
       case "TestId":
-        return under.filter((element) => dom.getAttribute(element, "data-testid") === step.id)
+        return under.filter((element) => {
+          // The value as written: a test id isn't text, so its whitespace isn't collapsed.
+          const value = dom.getAttribute(element, "data-testid")
+          return value !== null && rawMatches(step.matcher, value)
+        })
       default:
         return []
     }
@@ -3271,7 +3275,8 @@ export function engine(render: (root: SnapNode) => string) {
   const expected = (matcher: TextMatcher, text: string): boolean =>
     matcher._tag === "RegExp" ? new RegExp(matcher.source, matcher.flags).test(text) : text === collapse(matcher.value)
 
-  const classMatches = (matcher: TextMatcher, value: string): boolean =>
+  /** A value as written, such as a class or an attribute, matched without collapsing its whitespace. */
+  const rawMatches = (matcher: TextMatcher, value: string): boolean =>
     matcher._tag === "RegExp" ? new RegExp(matcher.source, matcher.flags).test(value) : value === matcher.value
 
   /** Checks an expectation once: whether it holds, and what was seen. */
@@ -3317,12 +3322,12 @@ export function engine(render: (root: SnapNode) => string) {
         if (expectation.list) {
           return {
             passed: texts.length === expectation.expected.length &&
-              texts.every((text, index) => classMatches(expectation.expected[index]!, text)),
+              texts.every((text, index) => rawMatches(expectation.expected[index]!, text)),
             observed: texts
           }
         }
         if (found.length !== 1) return { passed: false, observed: { matches: found.length } }
-        return { passed: classMatches(expectation.expected[0]!, texts[0]!), observed: texts[0] }
+        return { passed: rawMatches(expectation.expected[0]!, texts[0]!), observed: texts[0] }
       }
       default:
         break
@@ -3390,7 +3395,7 @@ export function engine(render: (root: SnapNode) => string) {
         const values = Array.from(control.selectedOptions, (option) => option.value)
         return {
           passed: values.length === expectation.expected.length &&
-            values.every((value, index) => classMatches(expectation.expected[index]!, value)),
+            values.every((value, index) => rawMatches(expectation.expected[index]!, value)),
           observed: values
         }
       }
@@ -4285,7 +4290,7 @@ export function engine(render: (root: SnapNode) => string) {
     actionFrameTimeout,
     evaluate,
     sampleViewport,
-    matchesValue: classMatches,
+    matchesValue: rawMatches,
     clearTreeCaches,
     failureResponse,
     now,
