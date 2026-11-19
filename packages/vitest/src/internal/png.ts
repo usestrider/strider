@@ -44,7 +44,12 @@ export const decode = (bytes: Uint8Array): Image => {
     const length = view.getUint32(offset)
     const type = String.fromCharCode(...bytes.subarray(offset + 4, offset + 8))
     const body = bytes.subarray(offset + 8, offset + 8 + length)
-    if (body.length !== length) throw new PngError(`the ${type} chunk is truncated`)
+    if (body.length !== length || offset + 12 + length > bytes.length) {
+      throw new PngError(`the ${type} chunk is truncated`)
+    }
+    if (crc32(bytes.subarray(offset + 4, offset + 8 + length)) !== view.getUint32(offset + 8 + length)) {
+      throw new PngError(`the ${type} chunk's checksum doesn't match its contents`)
+    }
     offset += 12 + length
     if (type === "IHDR") {
       header = {

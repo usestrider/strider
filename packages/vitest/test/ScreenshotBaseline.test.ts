@@ -72,7 +72,8 @@ describe("png", () => {
   it("refuses what it doesn't read", () => {
     assert.throws(() => Png.decode(Uint8Array.of(1, 2, 3)), /signature/)
     const sixteen = Buffer.from(Png.encode(solid(1, 1, white)))
-    sixteen[24] = 16 // IHDR's bit depth
+    sixteen[24] = 16 // IHDR's bit depth, with its checksum recomputed
+    sixteen.writeUInt32BE(crc32(sixteen.subarray(12, 29)), 29)
     assert.throws(() => Png.decode(sixteen), /bit depth 16/)
   })
 })
@@ -273,6 +274,36 @@ describe("ScreenshotBaseline.toMatch", () => {
       assert.strictEqual(new Set(paths).size, 6)
     }))
 
+  it("keys each backend's product as its engine, and an unknown product as its own", () =>
+    Effect.gen(function*() {
+      const products = {
+        "HeadlessChrome/155.0.8059.79": "chromium",
+        "Chrome/155.0.8059.79": "chromium",
+        "firefox": "firefox",
+        "MiniBrowser (stock WebKit)": "webkit",
+        "WebKit (stock)": "webkit",
+        "Safari": "safari",
+        "WebDriver BiDi": "webdriverbidi"
+      }
+      for (const [product, engine] of Object.entries(products)) {
+        const { provide } = harness({ protocol: "bidi", product })
+        let seen = ""
+        yield* fakePage([solid(1, 1, white)]).pipe(
+          ScreenshotBaseline.toMatch("cart"),
+          Effect.provideService(ScreenshotBaseline.CurrentSettings, {
+            update: "none",
+            path: (key) => {
+              seen = key.browser
+              return ScreenshotBaseline.defaultPath(key)
+            }
+          }),
+          provide("none"),
+          Effect.exit
+        )
+        assert.strictEqual(seen, engine, product)
+      }
+    }).pipe(Effect.runPromise))
+
   it("keeps distinct baseline names separate", () => {
     const key = { testFile: "/r/a.test.ts", browser: "chromium", platform: "linux" }
     assert.notStrictEqual(
@@ -289,7 +320,7 @@ describe("ScreenshotBaseline.toMatch", () => {
         browser: "firefox",
         platform: "linux"
       }),
-      "/r/__screenshots__/a.test.ts/cart-total-firefox-linux.png"
+      "/r/__screenshots__/a.test.ts/cart-total-0fe4f773-firefox-linux.png"
     )
   })
 

@@ -16,6 +16,7 @@ import * as Effect from "effect/Effect"
 import { dual } from "effect/Function"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
+import { createHash } from "node:crypto"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { basename, dirname, join, resolve } from "node:path"
 import { expect } from "vitest"
@@ -246,14 +247,36 @@ export class ScreenshotBaselineError
 export const isScreenshotBaselineError = (u: unknown): u is ScreenshotBaselineError =>
   Predicate.hasProperty(u, ScreenshotBaselineErrorTypeId)
 
-const engines: Readonly<Record<Browser.Info["protocol"], string>> = {
-  cdp: "chromium",
-  bidi: "firefox",
-  webkit: "webkit",
-  fake: "fake"
+/**
+ * The engine key of a browser's product, as each backend reports it: Chromium's `HeadlessChrome/<version>` or
+ * `Chrome/<version>`, Firefox's `firefox`, stock WebKit's `MiniBrowser (stock WebKit)` or `WebKit (stock)`, and
+ * Safari's `Safari`. Any other product is a key of its own, its name in lower-case letters and digits, so it never
+ * shares another engine's baselines.
+ */
+const engineOf = (product: string): string => {
+  const name = product.split("/")[0]!.trim().toLowerCase()
+  if (/^(headless)?chrome$|^chromium$/.test(name)) return "chromium"
+  if (name === "firefox") return "firefox"
+  if (name === "safari") return "safari"
+  if (name.includes("stock webkit") || name === "webkit (stock)") return "webkit"
+  return name.replace(/[^a-z0-9]+/g, "") || "unknown"
 }
 
-const safe = (part: string): string => part.replace(/[^a-zA-Z0-9._-]+/g, "-")
+/**
+ * A key part as a file name: itself when it has only letters, digits, `.`, `_` and (outside `strict`) `-`;
+ * otherwise those characters with the rest as `-`, then the first 8 hex digits of the part's SHA-256, so two
+ * parts never share a name.
+ */
+const encode = (part: string, strict = false): string => {
+  const unsafe = strict ? /[^a-zA-Z0-9._]+/g : /[^a-zA-Z0-9._-]+/g
+  const readable = part.replace(unsafe, "-")
+  return readable === part && part !== "" && !part.startsWith(".")
+    ? part
+    : `${readable}-${createHash("sha256").update(part).digest("hex").slice(0, 8)}`
+}
+
+/** A key's file name without the extension: name, browser, and platform, which have no `-` of their own. */
+const stem = (key: Key): string => `${encode(key.name)}-${encode(key.browser, true)}-${encode(key.platform, true)}`
 
 /** `vitest -u` is `all`, a local run `new`, CI `none`: Vitest's public snapshot state. */
 const vitestUpdate = (): Update => {
@@ -273,8 +296,12 @@ export const defaultPath = (key: Key): string =>
     dirname(key.testFile),
     "__screenshots__",
     basename(key.testFile),
-    `${safe(key.name)}-${safe(key.browser)}-${safe(key.platform)}.png`
+    `${stem(key)}.png`
   )
+
+/** A directory name for a test file: its name, then the first 8 hex digits of its absolute path's SHA-256. */
+const fileIdentity = (testFile: string): string =>
+  `${basename(testFile)}-${createHash("sha256").update(resolve(testFile)).digest("hex").slice(0, 8)}`
 
 const sameBytes = (a: Uint8Array, b: Uint8Array): boolean =>
   a.length === b.length && a.every((byte, index) => byte === b[index])
@@ -339,15 +366,15 @@ const run = (
     const key: Key = {
       testFile: test.info.file,
       name,
-      browser: engines[browser.info.protocol],
+      browser: engineOf(browser.info.product),
       platform: process.platform
     }
     const path = resolve((settings.path ?? defaultPath)(key))
     const update = settings.update ?? vitestUpdate()
     const output = join(
       resolve(settings.outputDirectory ?? ".vitest-screenshots"),
-      basename(key.testFile),
-      `${safe(name)}-${safe(key.browser)}-${safe(key.platform)}`
+      fileIdentity(key.testFile),
+      stem(key)
     )
     const capture = page.screenshot({
       area: options?.area,
