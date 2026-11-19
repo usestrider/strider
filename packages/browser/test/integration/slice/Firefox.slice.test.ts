@@ -22,6 +22,7 @@ import { recycling } from "./recycledBrowser.ts"
 import { requestBodies } from "./requestBodies.ts"
 import { requestSizes } from "./requestSizes.ts"
 import { requestTiming } from "./requestTiming.ts"
+import { screenshotBaselines } from "./screenshotBaselines.ts"
 import { slice } from "./slice.ts"
 import { stalledReadProbes } from "./stalledReadProbes.ts"
 import { storageReplacement } from "./storageReplacement.ts"
@@ -71,3 +72,4 @@ requestSizes("Firefox", backend)
 
 stalledReadProbes("Firefox", backend)
 clientCertificates("Firefox", backend)
+screenshotBaselines("Firefox", backend)

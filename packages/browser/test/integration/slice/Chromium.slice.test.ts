@@ -20,6 +20,7 @@ import { recordings } from "./recordings.ts"
 import { requestBodies } from "./requestBodies.ts"
 import { requestSizes } from "./requestSizes.ts"
 import { requestTiming } from "./requestTiming.ts"
+import { screenshotBaselines } from "./screenshotBaselines.ts"
 import { slice } from "./slice.ts"
 import { stalledReadProbes } from "./stalledReadProbes.ts"
 import { storageReplacement } from "./storageReplacement.ts"
@@ -59,3 +60,4 @@ requestSizes("Chromium", backend)
 
 stalledReadProbes("Chromium", backend)
 clientCertificates("Chromium", backend)
+screenshotBaselines("Chromium", backend)

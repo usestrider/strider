@@ -3,9 +3,22 @@
   "upstream": [
     "method:PageAssertions.toHaveScreenshot#1"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding public Strider capability for this member.",
+  "status": "has",
+  "api": [
+    {
+      "module": "ScreenshotBaseline",
+      "symbol": "toMatch",
+      "url": "/docs/api/vitest/ScreenshotBaseline#toMatch",
+      "package": "vitest"
+    }
+  ],
+  "notes": "page.pipe(ScreenshotBaseline.toMatch(name)) compares with a PNG baseline keyed by test file, name, browser and platform; vitest -u updates it.",
   "capabilities": [],
-  "requirements": []
+  "requirements": [],
+  "audit": {
+    "sources": [
+      "packages/vitest/src/ScreenshotBaseline.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  }
 }

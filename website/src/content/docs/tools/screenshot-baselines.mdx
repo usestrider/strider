@@ -1,0 +1,86 @@
+---
+title: Screenshot baselines
+description: Comparing a page with a stored image.
+order: 1.7
+---
+
+`ScreenshotBaseline.toMatch` compares a page's screenshot with a PNG baseline stored beside the test file, and fails
+when more pixels differ than you allow. It comes with `@usestrider/vitest`, and needs the browser and `TestRun` that
+`VitestBrowser.layer` provides.
+
+```ts title="checkout.test.ts"
+import { NodeServices } from "@effect/platform-node"
+import { layer } from "@effect/vitest"
+import { Browser } from "@usestrider/browser"
+import { Chromium } from "@usestrider/browser/chromium"
+import { ScreenshotBaseline, VitestBrowser } from "@usestrider/vitest"
+import { Effect, Layer } from "effect"
+
+const BrowserLive = VitestBrowser.layer(
+  Chromium.layer({ executablePath: "/usr/bin/chromium" }).pipe(
+    Layer.provide(NodeServices.layer)
+  )
+)
+
+layer(BrowserLive)("checkout", (it) => {
+  it.effect("looks the same", (context) =>
+    Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      yield* page.goto("https://shop.example.com/checkout")
+      yield* page.pipe(ScreenshotBaseline.toMatch("checkout"))
+      const dialog = page.getByRole("dialog")
+      yield* page.pipe(
+        ScreenshotBaseline.toMatch("dialog", {
+          area: { element: dialog },
+          maxDiffPixels: 20
+        })
+      )
+    }).pipe(Effect.scoped, VitestBrowser.withTest(context)))
+})
+```
+
+Each call names its baseline. The file is
+`__screenshots__/checkout.test.ts/checkout-chromium-linux.png`: the test file, the name, the browser engine, and the
+platform, since fonts and rendering differ between them. The engine comes from the browser's product, so Chrome and
+Chromium are `chromium`, Firefox is `firefox`, stock WebKit is `webkit`, and Safari is `safari`; any other browser
+gets an `other_` key of its own. The name is used as the file name exactly as you write it, so it must be lower-case
+letters, digits, `.`, `_`, and `-`, starting with a letter or digit: `checkout-page`, not `Checkout page` or
+`checkout/page`. Any other name fails with `InvalidName` before anything is captured.
+
+## Writing and updating baselines
+
+The first run has no baseline: it writes one from the page once two captures in a row agree, and the test still
+fails, so you look at the image before it counts. The next run compares with it. `vitest -u` rewrites every baseline
+that differs, and passes. On CI, where Vitest writes no snapshots, a missing baseline fails and nothing is written.
+Set `update` to choose yourself:
+
+```ts
+import { ScreenshotBaseline } from "@usestrider/vitest"
+import { Effect } from "effect"
+
+const neverWrite = Effect.provideService(ScreenshotBaseline.CurrentSettings, {
+  update: "none"
+})
+```
+
+## When it fails
+
+The comparison captures until one capture matches, or until two in a row are the same image and still differ. Then
+it fails with `ScreenshotBaselineError`, whose `reason` says how, and writes images under `.vitest-screenshots/`,
+in a directory for the test file, attaching each to the test:
+
+| Reason            | Images written                                                      |
+| ----------------- | ------------------------------------------------------------------- |
+| `Mismatch`        | actual, expected, and a diff: changed pixels red, anti-aliasing yellow |
+| `SizeMismatch`    | actual and expected                                                 |
+| `MissingBaseline` | none (the baseline itself, when the update mode writes one)         |
+| `InvalidBaseline` | none                                                                |
+| `InvalidName`     | none                                                                |
+
+Two identical captures mean only that two screenshots agreed, not that the page has stopped rendering. A page whose
+captures keep changing fails at the operation's deadline. A baseline that isn't a PNG, or whose chunks' checksums
+don't match, is invalid.
+
+A pixel differs when its colour moves further than `threshold`, 0.2 by default. `maxDiffPixels` and
+`maxDiffPixelRatio` say how many pixels may differ; with neither, none may. `area`, `scale`, and `omitBackground`
+are those of `page.screenshot`, and a browser that refuses one fails the same way here.
