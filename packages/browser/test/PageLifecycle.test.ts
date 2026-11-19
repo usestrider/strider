@@ -61,7 +61,7 @@ const setup = Effect.fnUntraced(function*() {
     entry: Option.getOrThrow(fold.page("first" as Target.NavigableId)),
     grant: Option.none()
   })
-  return { addFrame, addPage, commit, context, page, remove }
+  return { addFrame, addPage, commit, context, page, remove, fold }
 })
 
 const summary = (event: PageLifecycle.PageLifecycle) => `${event._tag} ${event.page} ${event.frame}`
@@ -110,5 +110,29 @@ describe("PageLifecycle", () => {
         "Closed later later",
         "Closed first first"
       ])
+    }))
+
+  it.effect("delivers a page's Closed event to next before ending the page channel", () =>
+    Effect.gen(function*() {
+      const { page, remove } = yield* setup()
+      const closed = yield* PageLifecycle.next(page, { events: "Closed" })
+      yield* remove("first")
+      assert.strictEqual((yield* closed)._tag, "Closed")
+    }))
+
+  it.effect("delivers a context's last Closed event to next when the context is removed", () =>
+    Effect.gen(function*() {
+      const { context, fold } = yield* setup()
+      const closed = yield* PageLifecycle.next(context, { events: "Closed" })
+      yield* fold.sink({ _tag: "UserContextRemoved", context: "context" as UserContext.Id })
+      assert.strictEqual((yield* closed)._tag, "Closed")
+    }))
+
+  it.effect("drains a page's Closed event before its stream ends normally", () =>
+    Effect.gen(function*() {
+      const { page, remove } = yield* setup()
+      const events = yield* PageLifecycle.stream(page)
+      yield* remove("first")
+      assert.deepStrictEqual(Array.from(yield* Stream.runCollect(events)).map(summary), ["Closed first first"])
     }))
 })
