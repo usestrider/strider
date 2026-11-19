@@ -1909,6 +1909,21 @@ export const contents = (
           }))
         }), timeout)
 
+      it.effect("preserves a promise property's identity when listing handle properties", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<p>a</p>`), { waitUntil: "load" })
+            const data = yield* page.evaluateHandleInMainWorld(() => ({ pending: Promise.resolve(42) }))
+            const properties = yield* data.properties
+            assert.strictEqual(
+              yield* properties.get("pending")!.evaluate((value) => value instanceof Promise),
+              true
+            )
+          }))
+        }), timeout)
+
       it.effect("previews a handle's value in its string, from the call that made it", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
