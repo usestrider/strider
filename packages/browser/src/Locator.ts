@@ -392,12 +392,16 @@ export interface Queries<L> {
    */
   getByTitle(text: string | RegExp, options?: TextOptions | undefined): L
   /**
-   * Elements whose `data-testid` attribute is `id`, or matches it when `id` is a RegExp.
+   * Elements whose test-id attribute is `id`, or matches it when `id` is a RegExp. The attribute is `data-testid`,
+   * unless the context sets another with `UserContext.Options.testIdAttribute`.
    *
    * **Details**
    *
    * A string matches the attribute exactly, case and whitespace included. A RegExp is tested against the attribute
    * as written, with its own flags; its `g` flag is ignored. An element without the attribute never matches.
+   *
+   * The attribute is the context's when the locator is made. A relative locator takes the attribute of the locator
+   * whose `filter` it's placed in.
    *
    * **Example** (Reading the cart badge)
    *

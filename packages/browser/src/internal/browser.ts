@@ -46,6 +46,7 @@ import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
 import * as BrowserService from "./browserService.ts"
 import * as ClaimHooks from "./claimHooks.ts"
+import * as ClientCertificates from "./clientCertificates.ts"
 import * as Clock from "./clock.ts"
 import * as ConnectionImpl from "./connection.ts"
 import * as Cleanup from "./declarationCleanup.ts"
@@ -75,6 +76,13 @@ const UserContextTypeId = "~@usestrider/browser/UserContext"
 
 const contextError = (operation: string, reason: UserContext.UserContextErrorReason, id: Diagnostics.OperationId) =>
   new UserContext.UserContextError({ operation, reason, diagnostics: Operation.diagnostics(id) })
+
+/**
+ * Whether `name` is an HTML attribute name: one or more characters, none of them whitespace, a control, a
+ * noncharacter (U+FDD0 to U+FDEF, and the last two code points of each of the 17 planes), `"`, `'`, `>`, `/`, or `=`.
+ */
+const isAttributeName = (name: unknown): name is string =>
+  typeof name === "string" && /^[^\s"'>/=\p{Cc}\p{Noncharacter_Code_Point}]+$/u.test(name)
 
 /** A declaration's failure, as a context's: the reasons a context has, else a backend failure. */
 // A context's own setup failing: a target that went is the setup's failure too, as BackendFailure
@@ -580,6 +588,18 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
           id
         ))
       }
+      const testIdAttribute = options?.testIdAttribute
+      if (testIdAttribute !== undefined && !isAttributeName(testIdAttribute)) {
+        return yield* Effect.fail(contextError(
+          operation,
+          new Reason.InvalidInput({
+            input: "testIdAttribute",
+            expected: "an HTML attribute name, such as \"data-qa\"",
+            hint: "Use a non-empty name without whitespace, quotes, \">\", \"/\", \"=\", or control characters"
+          }),
+          id
+        ))
+      }
       const credentials = options?.httpCredentials
       if (
         credentials !== undefined && (typeof credentials.username !== "string" ||
@@ -613,6 +633,31 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
           ))
         }
         credentialOrigin = url.origin
+      }
+      const certificates = options?.clientCertificates
+      let preparedCertificates: ClientCertificates.Prepared | undefined
+      if (certificates !== undefined) {
+        const refusal = mode !== undefined
+          ? "Client certificates need a context Strider creates and owns, which a reclaimable context isn't"
+          : options?.proxy !== undefined
+          ? "Client certificates can't be combined with proxy yet"
+          : undefined
+        if (refusal !== undefined) {
+          return yield* Effect.fail(contextError(
+            operation,
+            new Reason.Unsupported({ capability: "clientCertificates", backend: adapter.info.product, hint: refusal }),
+            id
+          ))
+        }
+        const prepared = ClientCertificates.prepare(certificates)
+        if (prepared instanceof ClientCertificates.Invalid) {
+          return yield* Effect.fail(contextError(
+            operation,
+            new Reason.InvalidInput({ input: "clientCertificates", expected: prepared.expected, hint: prepared.hint }),
+            id
+          ))
+        }
+        preparedCertificates = prepared
       }
       if (mode !== undefined && "context" in mode && options?.storageStateTracking === true) {
         return yield* Effect.fail(
@@ -734,12 +779,31 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         made = downloads.value
         yield* ledger.add({ _tag: "Directory", path: downloads.value })
       }
+      // A context's client certificate proxy outlives the context, which this scope removes first
+      const certificateProxy = preparedCertificates === undefined
+        ? Option.none<number>()
+        : Option.some(
+          (yield* ClientCertificates.serve(preparedCertificates, {
+            acceptInsecureCerts: options?.acceptInsecureCerts ?? false
+          }).pipe(Effect.mapError((error) =>
+            contextError(
+              operation,
+              new Reason.BackendFailure({
+                kind: "Rejected",
+                method: "ClientCertificates.serve",
+                hint: `Couldn't start the context's client certificate proxy: ${error.message}`
+              }),
+              id
+            )
+          ))).port
+        )
       // Removed when the scope closes, waiting for its end under a budget of its own (`Model.remove`)
       const entry = yield* Effect.acquireRelease(
         (mode !== undefined && "context" in mode
           ? Effect.succeed(mode.context)
           : adapter.createUserContext({
             proxy,
+            certificateProxy,
             acceptInsecureCerts: options?.acceptInsecureCerts ?? false,
             reclaimable,
             focusEmulated: options?.focus === "emulated",
@@ -775,7 +839,8 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         reclaimable,
         policy: adopt ? Option.none() : Option.some(options?.dialogs ?? "dismiss"),
         eventLog: options?.eventLog ?? settings.eventLog,
-        keyboardLayout: options?.keyboardLayout ?? settings.keyboardLayout
+        keyboardLayout: options?.keyboardLayout ?? settings.keyboardLayout,
+        testIdAttribute: options?.testIdAttribute ?? settings.testIdAttribute
       })
       const scope: Adapter.DeclarationScope = { _tag: "UserContext", context: created }
       // Set by the first of this scope's finalizers to run, below the declarations, ahead of their releases: the

@@ -1535,6 +1535,16 @@ never request a feature gain no interception, injected instrumentation, per-acti
 state for it. Additions must include paired default-path benchmarks so review can assess their cost. Reject
 always-on preparation for optional features: unused capabilities must not slow existing automation.
 
+## Client certificates through a per-context proxy
+
+No browser protocol Strider speaks sets a TLS client certificate for one context, so a context with
+`clientCertificates` routes its TLS traffic through a loopback proxy of its own, which ends each tunnel with a
+self-signed certificate only that context accepts, and opens its own connection to the site, presenting the
+matching certificate and checking the site's. Following [Pay for what you use](#pay-for-what-you-use), the proxy
+exists only for that context and closes with it. Rejected: launch-wide certificate stores or browser policies,
+which reach every context; and refusing plain HTTP on Firefox, whose user contexts take no PAC proxy, which would
+break `http://` pages there.
+
 ## Cooperative readiness checks
 
 Opted-in checks use a separate document- and operation-bound execution protocol, sharing the ordinary readiness
@@ -1638,6 +1648,18 @@ submission is bounded to one attempt across a native request and its whole redir
 so rejection cannot create an unbounded challenge loop.
 The alternative of an ordered credential array is left to auth routes, which already express that selection.
 Optional interception follows [Pay for what you use](#pay-for-what-you-use).
+
+## Context test-id attribute
+
+The attribute `getByTestId` matches is a context's setting, chosen by the program that creates or reclaims the
+context, so sibling contexts never share it. The attribute lives in Strider, not in the browser, so a program that
+reclaims a context has no record of its creator's choice and names its own; omitting it keeps the current setting.
+A locator copies its context's attribute into its query when it is made, and a relative locator,
+which has no context, takes the attribute of the locator whose filter it is placed in. The page's engine reads the
+attribute from the query, so a context that keeps the default does no added work, following
+[Pay for what you use](#pay-for-what-you-use). Rejected: a global setting that can change at any time, as
+Playwright's `selectors.setTestIdAttribute` is, which leaks between tests that share a process and makes a locator's
+meaning depend on when it runs.
 
 ## Generated reference outputs and curated comparisons
 

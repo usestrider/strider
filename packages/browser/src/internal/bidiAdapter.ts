@@ -79,6 +79,9 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       ]),
       entry("userContexts", "supported"),
       entry("acceptInsecureCerts", "supported", ["native browser.createUserContext setting"]),
+      entry("clientCertificates", ownership === "launched" ? "partial" : "unsupported", [
+        "a loopback proxy per context, which forwards plain HTTP unchanged; needs a launched Firefox; not with proxy"
+      ]),
       entry("userContexts.proxy", "supported", [
         "http, socks5 and socks4 endpoints for HTTP, HTTPS and WebSocket destinations; .domain bypass matches subdomains only; loopback stays direct"
       ]),

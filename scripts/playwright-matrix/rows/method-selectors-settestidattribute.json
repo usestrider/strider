@@ -3,9 +3,29 @@
   "upstream": [
     "method:Selectors.setTestIdAttribute"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No custom selector-engine registry or global test-id-attribute setting.",
+  "status": "different",
+  "api": [
+    {
+      "module": "UserContext",
+      "symbol": "Options.testIdAttribute",
+      "url": "/docs/api/browser/UserContext#Options.testIdAttribute"
+    }
+  ],
+  "notes": "Set newContext({ testIdAttribute }) per context instead of one global, mutable setting; the program that creates or reclaims a context chooses it, and omitting it on a reclaim keeps the current one. Locators keep the attribute they were made with; relative locators take the one of the locator they filter. Default data-testid; an invalid attribute name fails with InvalidInput.",
   "capabilities": [],
-  "requirements": []
+  "audit": {
+    "sources": [
+      "packages/browser/src/UserContext.ts",
+      "packages/browser/src/internal/locator.ts",
+      "packages/browser/src/internal/steps.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "requirements": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "context-test-id-attribute",
+    "quote": "The attribute `getByTestId` matches is a context's setting, chosen by the program that creates or reclaims the context, so sibling contexts never share it.",
+    "revision": "8e9c8fdd3e16a769d30e0bee2986114002947243"
+  }
 }
