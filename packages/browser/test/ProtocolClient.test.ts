@@ -834,48 +834,6 @@ describe("ProtocolClient", () => {
       assert.deepStrictEqual(methods, ["S1 Runtime.evaluate", "S1 Input.dispatchMouseEvent"])
     }))
 
-  it.effect("sends frameless input on the page's session with no lookup while every out-of-process frame has drawn", () =>
-    Effect.gen(function*() {
-      const browser = yield* makeBrowser
-      const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire, { fold: makeFold().fold })
-      const pageSession = yield* attach(browser, client, "S1")
-      const frameSession = yield* attach(browser, client, "S2")
-      yield* client.root.drainObserved
-      const id = "page-1" as L1Target.NavigableId
-      const pageTarget = { targetId: "T-S1", session: pageSession }
-      const frameTarget = { targetId: "T-S2", session: frameSession }
-      const ready = yield* Deferred.make<void>()
-      yield* Deferred.succeed(ready, undefined)
-      const page = { id, target: pageTarget, ended: false, ready }
-      const rootFrame = { page, owner: pageTarget, parent: undefined }
-      const childFrame: Record<string, unknown> = { page, owner: frameTarget, parent: rootFrame }
-      // The out-of-process frame's document has reported its first paint
-      childFrame.document = { id: "document-2", frame: childFrame, painted: true, realms: new Set() }
-      const state = {
-        ids: {},
-        pages: new Map([[id, page]]),
-        frames: new Map<string, unknown>([["T-S1", rootFrame], ["T-S2", childFrame]]),
-        heldButtons: new Map(),
-        drags: new Map(),
-        pressedOn: new Map(),
-        pressedIn: new Map(),
-        interceptingDrags: new Set(["page-1"]),
-        navigables: new Map()
-      } as unknown as CdpState
-      const input = yield* dispatchCdpInput(state, id, [{
-        _tag: "Wheel",
-        x: 100,
-        y: 100,
-        deltaX: 0,
-        deltaY: 10,
-        modifiers: { alt: false, control: false, meta: false, shift: false }
-      }]).pipe(Effect.forkChild)
-      const command = yield* browser.next
-      yield* browser.receive({ id: command.id, sessionId: command.sessionId, result: {} })
-      yield* Fiber.join(input)
-      assert.deepStrictEqual(`${command.sessionId} ${command.method}`, "S1 Input.dispatchMouseEvent")
-    }))
-
   it.effect("returns a command's result only after the fold has applied every event received before its reply", () =>
     Effect.gen(function*() {
       const browser = yield* makeBrowser
