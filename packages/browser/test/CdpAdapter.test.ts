@@ -393,11 +393,21 @@ describe("CDP paused page initialization", () => {
 })
 
 describe("CDP paused page viewport baseline", () => {
-  for (const reading of [[800, 600], [400, 300]] as const) {
-    const own = reading[0] !== 400
+  for (
+    const { reading, mobile, own } of [
+      { reading: [800, 600], mobile: false, own: true },
+      { reading: [400, 300], mobile: false, own: false },
+      // A 400x700 mobile override without viewport metadata reports 980x1715 on the headless shell.
+      { reading: [980, 1715], mobile: true, own: false }
+    ] as const
+  ) {
     it.effect(
       `queues a paused page's size reading without awaiting it, ${
-        own ? "and confirms its restore" : "and leaves a reading equal to the override unknown"
+        own
+          ? "and confirms its restore"
+          : mobile
+          ? "and leaves a mobile-emulated reading unknown"
+          : "and leaves a reading equal to the override unknown"
       }`,
       () =>
         Effect.gen(function*() {
@@ -470,7 +480,7 @@ describe("CDP paused page viewport baseline", () => {
           const declared = yield* Scope.make()
           yield* adapter.declare({ _tag: "UserContext", context: adapter.defaultContext }, {
             _tag: "Override",
-            override: { _tag: "Viewport", width: 400, height: 300, deviceScaleFactor: 1, mobile: false }
+            override: { _tag: "Viewport", width: 400, height: mobile ? 700 : 300, deviceScaleFactor: 1, mobile }
           }).pipe(Scope.provide(declared))
           yield* browser.receive({
             method: "Target.attachedToTarget",
@@ -493,10 +503,12 @@ describe("CDP paused page viewport baseline", () => {
           yield* reply(measurement)
           yield* Deferred.await(ready)
           // Releasing the viewport confirms the recorded size, or warns at once that it is unknown
-          yield* Scope.close(declared, Exit.void).pipe(
+          const release = Scope.close(declared, Exit.void).pipe(
             Effect.provideService(Cleanup.Confirm, true),
             Effect.provideService(Logger.CurrentLoggers, new Set([logger]))
           )
+          // The failing mobile case must expose its attempted wait without spending the full cleanup budget.
+          yield* mobile ? release.pipe(Deadline.withDefaultBudget("100 millis")) : release
           assert.include(
             commands.map((command) => command.method),
             "Emulation.clearDeviceMetricsOverride"
