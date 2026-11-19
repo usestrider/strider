@@ -77,6 +77,13 @@ const UserContextTypeId = "~@usestrider/browser/UserContext"
 const contextError = (operation: string, reason: UserContext.UserContextErrorReason, id: Diagnostics.OperationId) =>
   new UserContext.UserContextError({ operation, reason, diagnostics: Operation.diagnostics(id) })
 
+/**
+ * Whether `name` is an HTML attribute name: one or more characters, none of them whitespace, a control, a
+ * noncharacter (U+FDD0 to U+FDEF, and the last two code points of each of the 17 planes), `"`, `'`, `>`, `/`, or `=`.
+ */
+const isAttributeName = (name: unknown): name is string =>
+  typeof name === "string" && /^[^\s"'>/=\p{Cc}\p{Noncharacter_Code_Point}]+$/u.test(name)
+
 /** A declaration's failure, as a context's: the reasons a context has, else a backend failure. */
 // A context's own setup failing: a target that went is the setup's failure too, as BackendFailure
 const asContextReason = (
@@ -581,6 +588,18 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
           id
         ))
       }
+      const testIdAttribute = options?.testIdAttribute
+      if (testIdAttribute !== undefined && !isAttributeName(testIdAttribute)) {
+        return yield* Effect.fail(contextError(
+          operation,
+          new Reason.InvalidInput({
+            input: "testIdAttribute",
+            expected: "an HTML attribute name, such as \"data-qa\"",
+            hint: "Use a non-empty name without whitespace, quotes, \">\", \"/\", \"=\", or control characters"
+          }),
+          id
+        ))
+      }
       const credentials = options?.httpCredentials
       if (
         credentials !== undefined && (typeof credentials.username !== "string" ||
@@ -820,7 +839,8 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         reclaimable,
         policy: adopt ? Option.none() : Option.some(options?.dialogs ?? "dismiss"),
         eventLog: options?.eventLog ?? settings.eventLog,
-        keyboardLayout: options?.keyboardLayout ?? settings.keyboardLayout
+        keyboardLayout: options?.keyboardLayout ?? settings.keyboardLayout,
+        testIdAttribute: options?.testIdAttribute ?? settings.testIdAttribute
       })
       const scope: Adapter.DeclarationScope = { _tag: "UserContext", context: created }
       // Set by the first of this scope's finalizers to run, below the declarations, ahead of their releases: the

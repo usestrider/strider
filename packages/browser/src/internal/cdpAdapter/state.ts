@@ -133,6 +133,13 @@ export interface TargetEntry {
   scriptLock?: Semaphore.Semaphore | undefined
 }
 
+/** A session pointer input goes on, and the origin of its viewport in the page's coordinates. */
+export interface PointerTarget {
+  readonly target: TargetEntry
+  readonly x: number
+  readonly y: number
+}
+
 export interface PageEntry {
   readonly id: L1Target.NavigableId
   readonly targetId: string
@@ -417,12 +424,17 @@ export interface State extends Kit.Ending {
   /** The buttons each page's last mouse event left held, until the page ends. */
   readonly heldButtons: Map<L1Target.NavigableId, number>
   /**
+   * The session, and its origin in the page's coordinates, that a page's touch input naming no frame went on when
+   * the touch started, until it ends or is canceled; the touch input between goes there too, while it lasts.
+   */
+  readonly touchCapture: Map<L1Target.NavigableId, PointerTarget>
+  /**
    * The session each page's held press went to, with the origin of its viewport in the page's, until every button
    * is released or that frame detaches: the frame the press reached keeps the mouse, as a real mouse's frame does.
    */
   readonly pressedOn: Map<
     L1Target.NavigableId,
-    { readonly target: TargetEntry; readonly x: number; readonly y: number }
+    PointerTarget
   >
   /** Pages whose held Escape canceled an intercepted drag: its release is the drag's too, and isn't sent. */
   readonly escapeCanceled: Set<L1Target.NavigableId>
@@ -498,6 +510,7 @@ export const make = (options: {
     drags: new Map(),
     interceptingDrags: new Set(),
     heldButtons: new Map(),
+    touchCapture: new Map(),
     pressedIn: new Map(),
     pressedOn: new Map(),
     escapeCanceled: new Set(),

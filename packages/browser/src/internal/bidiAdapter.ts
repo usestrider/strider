@@ -420,7 +420,7 @@ export const connect: (
       evaluate: (realm, call) => Evaluation.evaluate(state, realm, call),
       releaseHandles: (list) => Evaluation.releaseHandles(state, list),
       textInsertion: "beforeInputAndEditingCommand",
-      dispatchInput: (page, events, frame) => Input.dispatchInput(state, page, events, frame),
+      dispatchInput: (page, events, frame, lands) => Input.dispatchInput(state, page, events, frame, lands),
       contentFrame: (node) => Input.contentFrame(state, node),
       releaseNodes: () => Effect.void,
       geometry: (node, kind) => Geometry.read(state, node, kind),
