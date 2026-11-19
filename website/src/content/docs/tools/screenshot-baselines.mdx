@@ -1,0 +1,70 @@
+---
+title: Screenshot baselines
+description: Comparing a page with a stored image.
+order: 1.7
+---
+
+`ScreenshotBaseline.toMatch` compares a page's screenshot with a PNG baseline stored beside the test file, and fails
+when more pixels differ than you allow. It comes with `@usestrider/vitest`, and needs the browser and `TestRun` that
+`VitestBrowser.layer` provides.
+
+```ts title="checkout.test.ts"
+import { NodeServices } from "@effect/platform-node"
+import { layer } from "@effect/vitest"
+import { Browser } from "@usestrider/browser"
+import { Chromium } from "@usestrider/browser/chromium"
+import { ScreenshotBaseline, VitestBrowser } from "@usestrider/vitest"
+import { Effect, Layer } from "effect"
+
+const BrowserLive = VitestBrowser.layer(
+  Chromium.layer({ executablePath: "/usr/bin/chromium" }).pipe(
+    Layer.provide(NodeServices.layer)
+  )
+)
+
+layer(BrowserLive)("checkout", (it) => {
+  it.effect("looks the same", (context) =>
+    Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      yield* page.goto("https://shop.example.com/checkout")
+      yield* page.pipe(ScreenshotBaseline.toMatch("checkout"))
+      const dialog = page.getByRole("dialog")
+      yield* page.pipe(
+        ScreenshotBaseline.toMatch("dialog", {
+          area: { element: dialog },
+          maxDiffPixels: 20
+        })
+      )
+    }).pipe(Effect.scoped, VitestBrowser.withTest(context)))
+})
+```
+
+Each call names its baseline. The file is
+`__screenshots__/checkout.test.ts/checkout-chromium-linux.png`: the test file, the name, the browser engine, and the
+platform, since fonts and rendering differ between them.
+
+## Writing and updating baselines
+
+The first run has no baseline: it writes one from the page once two captures in a row agree, and the test still
+fails, so you look at the image before it counts. The next run compares with it. `vitest -u` rewrites every baseline
+that differs, and passes. On CI, where Vitest writes no snapshots, a missing baseline fails and nothing is written.
+Set `update` to choose yourself:
+
+```ts
+import { ScreenshotBaseline } from "@usestrider/vitest"
+import { Effect } from "effect"
+
+const neverWrite = Effect.provideService(ScreenshotBaseline.CurrentSettings, {
+  update: "none"
+})
+```
+
+## When it fails
+
+The comparison captures until one capture matches, or until two in a row are the same and still differ. Then it
+fails with `ScreenshotBaselineError`, writes the actual, expected, and diff images under `.vitest-screenshots/`, and
+attaches them to the test. The diff shows changed pixels red and anti-aliasing, which never counts, yellow.
+
+A pixel differs when its colour moves further than `threshold`, 0.2 by default. `maxDiffPixels` and
+`maxDiffPixelRatio` say how many pixels may differ; with neither, none may. `area`, `scale`, and `omitBackground`
+are those of `page.screenshot`, and a browser that refuses one fails the same way here.
