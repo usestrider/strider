@@ -1,0 +1,86 @@
+/**
+ * `Browser.contexts` over the fake browser: the default context first, then the others in the order they were
+ * added; a context this connection created as the handle `newContext` returned; one someone else created as an
+ * observed handle, the same one each time; and a context leaving the list as it is removed.
+ */
+import { assert, describe, it } from "@effect/vitest"
+import { Browser, UserContext } from "@usestrider/browser"
+import * as Clock from "effect/Clock"
+import * as Effect from "effect/Effect"
+import * as Equal from "effect/Equal"
+import * as Layer from "effect/Layer"
+import * as Adapter from "../src/internal/adapter.ts"
+import * as BrowserImpl from "../src/internal/browser.ts"
+import * as BrowserClock from "../src/internal/browserClock.ts"
+import * as Fake from "../src/internal/fake.ts"
+
+/** The fake browser, on Effect's clock, with the fact sink kept so a test can report a context someone else made. */
+const withSink = (kept: { sink?: Adapter.Sink }): Layer.Layer<Browser.Browser> =>
+  Layer.unwrap(Clock.clockWith((clock) =>
+    Effect.sync(() =>
+      Layer.provideMerge(
+        BrowserImpl.layer((sink) => {
+          kept.sink = sink
+          return Fake.connect([], {
+            info: new Browser.Info(Fake.info),
+            capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+          })(sink)
+        }),
+        Layer.succeed(BrowserClock.CurrentClock, BrowserClock.fromClock(clock))
+      )
+    )
+  ))
+
+describe("Browser.contexts", () => {
+  it.effect("lists the default context first, then the contexts this connection creates, as they open and close", () =>
+    Effect.gen(function*() {
+      const browser = yield* Browser.Browser
+      const initial = yield* browser.contexts
+      assert.strictEqual(initial.length, 1)
+      assert.strictEqual(initial[0], browser.defaultContext)
+      yield* Effect.scoped(Effect.gen(function*() {
+        const first = yield* Browser.newContext()
+        const second = yield* Effect.scoped(Effect.gen(function*() {
+          const second = yield* Browser.newContext()
+          const listed = yield* browser.contexts
+          assert.strictEqual(listed.length, 3)
+          assert.strictEqual(listed[0], browser.defaultContext)
+          // The handles `newContext` returned, not copies
+          assert.strictEqual(listed[1], first)
+          assert.strictEqual(listed[2], second)
+          return second
+        }))
+        const listed = yield* browser.contexts
+        assert.deepStrictEqual(listed.map((each) => each.id), [browser.defaultContext.id, first.id])
+        assert.isFalse(listed.some((each) => Equal.equals(each, second)))
+      }))
+      assert.deepStrictEqual((yield* browser.contexts).map((each) => each.id), [browser.defaultContext.id])
+    }).pipe(Effect.provide(Browser.layerTest(""))))
+
+  it.effect("waits for a context to open", () =>
+    Effect.gen(function*() {
+      const browser = yield* Browser.Browser
+      yield* Effect.scoped(Effect.gen(function*() {
+        const waiting = yield* browser.contexts.waitFor((list) => list.length >= 2).pipe(Effect.forkChild)
+        const context = yield* Browser.newContext()
+        const listed = yield* waiting.await.pipe(Effect.flatten)
+        assert.strictEqual(listed[1], context)
+      }))
+    }).pipe(Effect.provide(Browser.layerTest(""))))
+
+  it.effect("lists a context someone else created as observed, the same handle each time, until it is removed", () => {
+    const kept: { sink?: Adapter.Sink } = {}
+    return Effect.gen(function*() {
+      const browser = yield* Browser.Browser
+      const foreign = UserContext.Id.make("foreign")
+      yield* kept.sink!({ _tag: "UserContextAdded", context: foreign, isDefault: false })
+      const listed = yield* browser.contexts
+      assert.deepStrictEqual(listed.map((each) => each.id), [browser.defaultContext.id, foreign])
+      // Observed: it has no `newPage` until it is controlled
+      assert.isFalse("newPage" in listed[1]!)
+      assert.strictEqual((yield* browser.contexts)[1], listed[1])
+      yield* kept.sink!({ _tag: "UserContextRemoved", context: foreign })
+      assert.deepStrictEqual((yield* browser.contexts).map((each) => each.id), [browser.defaultContext.id])
+    }).pipe(Effect.provide(withSink(kept)))
+  })
+})

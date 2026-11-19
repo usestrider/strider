@@ -496,6 +496,27 @@ export const attaching = (
             }).pipe(Effect.provide(attached))
           }), timeout)
 
+        if (name === "Chromium") {
+          it.effect("lists an empty context another client created as observed when attaching", () =>
+            Effect.gen(function*() {
+              const { origin } = yield* site
+              const { layer: attached } = yield* start(tabUrl(origin, "First"), tabUrl(origin, "Second"))
+              yield* Effect.scoped(Effect.gen(function*() {
+                const created = yield* Browser.newContext()
+                const seen = yield* Effect.gen(function*() {
+                  const browser = yield* Browser.Browser
+                  const listed = yield* browser.contexts
+                  assert.strictEqual(listed[0], browser.defaultContext)
+                  return listed.find((each) => each.id !== browser.defaultContext.id)
+                }).pipe(Effect.provide(attached))
+                // Found from the browser's own list of contexts, though no page is open in it
+                assert.isDefined(seen)
+                assert.isFalse("newPage" in seen!)
+                assert.notStrictEqual(seen, created)
+              })).pipe(Effect.provide(attached))
+            }), timeout)
+        }
+
         if (name === "Firefox") {
           it.effect("refuses a second client while one holds Firefox's one session", () =>
             Effect.gen(function*() {
