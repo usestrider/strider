@@ -3,9 +3,28 @@
   "upstream": [
     "method:LocatorAssertions.toHaveScreenshot#2"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding public Strider capability for this member.",
+  "status": "different",
+  "api": [
+    {
+      "module": "ScreenshotBaseline",
+      "symbol": "toMatch",
+      "url": "/docs/api/vitest/ScreenshotBaseline#toMatch",
+      "package": "vitest"
+    }
+  ],
+  "notes": "Every baseline is named: there is no name derived from the test title and a counter.",
   "capabilities": [],
-  "requirements": []
+  "requirements": [],
+  "audit": {
+    "sources": [
+      "packages/vitest/src/ScreenshotBaseline.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
+  },
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "visual-comparison-lives-in-the-test-adapter",
+    "quote": "Every baseline is named by the caller, because a name derived from the test title and a call counter is hidden state",
+    "revision": "5da4654f6e92648c58f91515e69c3280b49d79fc"
+  }
 }
