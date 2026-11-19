@@ -3258,14 +3258,16 @@ document.getElementById("form").addEventListener("submit", (event) => {
               document.getElementById("child")!.remove()
             )
             const failed = reasonOf(yield* Fiber.await(pending))
-            assert.strictEqual(failed?.reason?._tag, "TargetGone")
+            assert.strictEqual(failed?._tag, "TargetGone")
+            assert.strictEqual(failed?.reason?._tag, "FrameDetached")
             assert.strictEqual((yield* frame.status)._tag, "Detached")
             const after = reasonOf(
               yield* Effect.exit(frame.evaluateInMainWorld(() =>
                 1
               ))
             )
-            assert.strictEqual(after?.reason?._tag, "TargetGone")
+            assert.strictEqual(after?._tag, "TargetGone")
+            assert.strictEqual(after?.reason?._tag, "FrameDetached")
           }))
         }), timeout)
 
@@ -3274,7 +3276,7 @@ document.getElementById("form").addEventListener("submit", (event) => {
           const { crossSite, origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            const inner = fixtureUrl(crossSite, "<p>inner</p><script>window.innerGlobal = 'inner'</script>")
+            const inner = fixtureUrl(crossSite, "<p>inner</p><script>window.innerGlobal = \"inner\"</script>")
             // The iframe sits in a closed shadow root, where no locator reaches it
             yield* page.goto(fixtureUrl(
               origin,
@@ -3286,7 +3288,11 @@ document.getElementById("form").addEventListener("submit", (event) => {
             const frame = yield* page.frameById(tree.children[0]!.id)
             assert.strictEqual(frame.id, tree.children[0]!.id)
             assert.strictEqual(frame.page.id, page.id)
-            yield* frame.locator("p").pipe(Expect.toHaveText("inner"))
+            // A frame handle has no locators of its own yet: its document is read by evaluation
+            yield* frame.status.waitFor((status) =>
+              status._tag === "Attached" && Option.isSome(status.document) &&
+              status.document.value.readiness === "complete"
+            )
             // The main world sees the frame's own globals, not its parent's
             assert.deepStrictEqual(
               yield* frame.evaluateInMainWorld(() => [
