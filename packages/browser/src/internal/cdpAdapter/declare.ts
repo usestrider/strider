@@ -663,22 +663,23 @@ export const configureTarget = Effect.fnUntraced(
             // `innerWidth` and `innerHeight`: the layout viewport's client size leaves out a scrollbar, and at a
             // fractional device scale rounds 1 px away. It reads the main world, where no page script has run before
             // the page resumes. A renderer that answers only after the override applies, as the headless shell does,
-            // reports the override's own size, which can't be told from a page of that size, so that size, and any
-            // reading that isn't one, leaves the dimensions unknown.
+            // shows the override in its size or its screen: a desktop override sets the size, and a mobile one lays
+            // the page out at another size but reports the override as the screen. Either can't be told from a page
+            // of that size or screen, so either, and any reading that isn't four sizes, leaves the dimensions unknown.
             target.viewport = null
             yield* setup.read(
-              Runtime.evaluate({ expression: "[innerWidth, innerHeight]", returnByValue: true }),
+              Runtime.evaluate({
+                expression: "[innerWidth, innerHeight, screen.width, screen.height]",
+                returnByValue: true
+              }),
               (reply) => {
                 const value = reply?.result.value
-                const measured = Array.isArray(value) && typeof value[0] === "number" &&
-                    typeof value[1] === "number" && Number.isFinite(value[0]) && Number.isFinite(value[1]) &&
-                    value[0] > 0 && value[1] > 0
-                  ? { width: value[0], height: value[1] }
-                  : null
-                target.viewport = measured === null ||
-                    (measured.width === override.width && measured.height === override.height)
-                  ? null
-                  : measured
+                const valid = Array.isArray(value) && value.length === 4 &&
+                  value.every((n) => typeof n === "number" && Number.isFinite(n) && n > 0)
+                const late = valid &&
+                  ((value[0] === override.width && value[1] === override.height) ||
+                    (value[2] === override.width && value[3] === override.height))
+                target.viewport = valid && !late ? { width: value[0], height: value[1] } : null
               }
             )
           }
