@@ -744,9 +744,7 @@ export const contents = (
           )
           // Commit comes before parsing: wait for the parser to finish, while the deferred script still holds load
           yield* Expect.that(
-            page.evaluateInMainWorld(() =>
-              document.readyState
-            ),
+            page.evaluateInMainWorld(() => document.readyState),
             Condition.make("parsed", (state: DocumentReadyState) => state !== "loading")
           )
           assert.strictEqual(
