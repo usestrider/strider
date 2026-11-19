@@ -6,6 +6,7 @@
  * adapter opts in only the targets the declaration covers, so a context without a binding gets none of it.
  */
 import * as Cause from "effect/Cause"
+import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -41,7 +42,7 @@ export const install = (name: string, bridge: string, token: string, transport: 
   // A call's arguments wait here until the host reads them by value, as an evaluation's result.
   const pending = new Map<
     number,
-    { args: unknown; resolve: (value: unknown) => void; reject: (error: unknown) => void }
+    { args: unknown; taken: boolean; resolve: (value: unknown) => void; reject: (error: unknown) => void }
   >()
   let next = 0
   let live = true
@@ -52,19 +53,23 @@ export const install = (name: string, bridge: string, token: string, transport: 
         return reject(new E(`Binding "${name}" has 4096 calls waiting for their answer; await some first`))
       }
       const id = ++next
-      pending.set(id, { args, resolve, reject })
+      pending.set(id, { args, taken: false, resolve, reject })
       send(stringify({ id }))
     })
   global.Object.defineProperty(global, name, { value: call, configurable: true, writable: true })
   global.Object.defineProperty(global, key, {
     configurable: true,
     value: {
-      take: (id: number) => {
-        const waiting = pending.get(id)
-        if (waiting === undefined) return undefined
-        const args = waiting.args
-        waiting.args = undefined
-        return args
+      // Every call not yet read, as [id, arguments] pairs: one read answers a burst of calls.
+      drain: () => {
+        const calls: Array<[number, unknown]> = []
+        for (const [id, waiting] of pending) {
+          if (waiting.taken) continue
+          waiting.taken = true
+          calls.push([id, waiting.args])
+          waiting.args = undefined
+        }
+        return calls
       },
       settle: (id: number, ok: boolean, value: unknown) => {
         const waiting = pending.get(id)
@@ -183,17 +188,86 @@ export const expose = <A extends ReadonlyArray<unknown>, B, E, R>(
       new Reason.NotSerializable({ path: error.path, hint: error.hint }).message
     // Every exit of a call it has an id for settles the page's promise: a rejection carries a failure's message, and
     // anything else, a defect or an interruption, the fixed one, after it is logged.
+    // The arguments of a document's calls, read by value in batches: a call whose notice arrives while a read is
+    // under way waits for that read, and one more read follows if it didn't carry the call.
+    interface Drain {
+      readonly waiting: Map<number, Deferred.Deferred<Adapter.RemoteValue, Adapter.AdapterError | Deadline.Timeout>>
+      readonly read: Set<number>
+      draining: boolean
+      again: boolean
+    }
+    const drains = new Map<Target.RealmId, Drain>()
+    const slot = (realm: Target.RealmId, id: number) => {
+      let drain = drains.get(realm)
+      if (drain === undefined) {
+        drains.set(realm, drain = { waiting: new Map(), read: new Set(), draining: false, again: false })
+      }
+      let waiting = drain.waiting.get(id)
+      if (waiting === undefined) drain.waiting.set(id, waiting = Deferred.makeUnsafe())
+      return { drain, waiting }
+    }
+    const drainOnce = (
+      realm: Target.RealmId,
+      drain: Drain
+    ): Effect.Effect<void, Adapter.AdapterError | Deadline.Timeout> =>
+      Effect.gen(function*() {
+        do {
+          drain.again = false
+          const read = yield* adapter.evaluate(realm, {
+            functionDeclaration: `() => ${keyOf(token)}?.drain() ?? []`,
+            arguments: [],
+            awaitPromise: false,
+            result: "value",
+            releaseResult: true,
+            userActivation: false
+          })
+          if (read._tag === "Exception") return yield* Effect.die(new Error(read.text))
+          for (const entry of read.value.type === "array" ? read.value.value ?? [] : []) {
+            const pair = entry.type === "array" ? entry.value ?? [] : []
+            const first = pair[0]
+            const args = pair[1]
+            if (first?.type !== "number" || args === undefined) continue
+            const id = Number(first.value)
+            drain.read.add(id)
+            Deferred.doneUnsafe(slot(realm, id).waiting, Exit.succeed(args))
+          }
+        } while (drain.again)
+      }).pipe(
+        Effect.onExit((exit) =>
+          Effect.sync(() => {
+            drain.draining = false
+            if (Exit.isSuccess(exit)) return
+            for (const [id, waiting] of drain.waiting) {
+              if (!drain.read.has(id)) Deferred.doneUnsafe(waiting, Exit.failCause(exit.cause))
+            }
+          })
+        )
+      )
+    const argumentsOf = (realm: Target.RealmId, id: number) =>
+      Effect.suspend(() => {
+        const { drain, waiting } = slot(realm, id)
+        const start = drain.read.has(id)
+          ? Effect.void
+          : drain.draining
+          ? Effect.sync(() => {
+            drain.again = true
+          })
+          : Effect.suspend(() => {
+            drain.draining = true
+            return drainOnce(realm, drain).pipe(Effect.ignore, Effect.forkIn(scope), Effect.asVoid)
+          })
+        return start.pipe(
+          Effect.andThen(Deferred.await(waiting)),
+          Effect.ensuring(Effect.sync(() => {
+            drain.waiting.delete(id)
+            drain.read.delete(id)
+            if (drain.waiting.size === 0 && !drain.draining) drains.delete(realm)
+          }))
+        )
+      })
     const answer = (realm: Target.RealmId, id: number, source: Binding.Source) =>
       Effect.gen(function*() {
-        const read = yield* adapter.evaluate(realm, {
-          functionDeclaration: `(id) => ${keyOf(token)}?.take(id)`,
-          arguments: [{ _tag: "Value", value: { type: "number", value: id } }],
-          awaitPromise: false,
-          result: "value",
-          releaseResult: true,
-          userActivation: false
-        })
-        if (read._tag === "Exception") return yield* Effect.die(new Error(read.text))
+        const read = { value: yield* argumentsOf(realm, id) }
         // As in an evaluation's arguments, a function or symbol is refused where it is an argument itself
         const items = read.value.type === "array" ? read.value.value ?? [] : []
         const refused = items.findIndex((item) => item.type === "function" || item.type === "symbol")
