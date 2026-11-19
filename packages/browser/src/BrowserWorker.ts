@@ -120,6 +120,44 @@ export interface BrowserWorker extends ObservedBrowserWorker {
     fn: (...args: Args) => B | Promise<B>,
     ...args: Args
   ): Effect.Effect<JSHandle.Serialized<B>, BrowserWorkerError | Target.TargetGone | Deadline.Timeout>
+  /**
+   * Calls `fn` in the worker and returns its result as a handle in the worker's realm, released when the caller's
+   * scope closes, for values that can't come back by value, such as the worker's global.
+   *
+   * **Details**
+   *
+   * Arguments cross as they do for `evaluate`, and a handle from the worker's realm crosses as itself. The handle
+   * ends with the worker: using it after the worker ends fails with `TargetGone`. On Chromium, a call in a
+   * dedicated worker that has just started waits for the worker's script to load, as `evaluate` does, and fails
+   * with `TargetGone` if the worker ends before it loads.
+   *
+   * **Gotchas**
+   *
+   * Fails with `Unsupported` on Firefox, which can't evaluate in a worker (`workers.evaluate`).
+   *
+   * **Example** (Holding a worker's global)
+   *
+   * ```ts import.meta.vitest
+   * import { BrowserWorker, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const workerOrigin = Effect.fn("workerOrigin")(function*(page: Page.Page) {
+   *   const started = yield* BrowserWorker.next(page)
+   *   yield* page.getByRole("button", { name: "Start" }).click()
+   *   const worker = yield* started
+   *   const global = yield* worker.evaluateHandle(() => self)
+   *   return yield* global.evaluate((scope) => scope.location.origin)
+   * })
+   * ```
+   */
+  evaluateHandle<Args extends ReadonlyArray<unknown>, B>(
+    fn: (...args: Args) => B | Promise<B>,
+    ...args: Args
+  ): Effect.Effect<
+    JSHandle.JSHandle<Awaited<B>>,
+    BrowserWorkerError | Target.TargetGone | Deadline.Timeout,
+    Scope.Scope
+  >
 }
 
 /**
