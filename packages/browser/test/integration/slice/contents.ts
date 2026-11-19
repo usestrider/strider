@@ -141,7 +141,7 @@ export const contents = (
   describe(`${name} contents`, () => {
     layer(SharedContext.layer(backend), { excludeTestServices: true, timeout })((suite) => {
       const it = SharedContext.guard(suite)
-      scriptTags(it)
+      scriptTags(name, it)
 
       it.effect("preserves viewport assertions while a locator handler is registered", () =>
         Effect.gen(function*() {

@@ -10,9 +10,11 @@
  *   later, as a task, so the call needs a signal the engine orders before a second call reads the element's
  *   violation:
  *   - Chromium and WebKit write the refusal to the console as they decide it, so it is among the events sent
- *     before the append's reply, which an operation handles before it returns. Chromium's entry names the
- *     refused text's SHA-256, which ties it to this element; WebKit's names none, so any inline refusal the
- *     page's own scripts cause during the call is taken as this element's.
+ *     before the append's reply, which an operation handles before it returns. The entries are collected only
+ *     for the call. Chromium's entry suggests the refused text's SHA-256, which ties it to this element (not the
+ *     hashes its quoted policy allows); WebKit's names no script and carries no stack, only the document's URL at
+ *     line 0, so an inline refusal that something else causes during the call, such as a script this one adds,
+ *     is taken as this element's, and the call waits for this element's violation until its deadline.
  *   - Firefox dispatches the event in a runnable on the main thread, queued during the append
  *     (`nsCSPContext::AsyncReportViolation`), and the next command reaches the content process as a later
  *     message on the same thread, so the second call runs after the event.
@@ -23,8 +25,9 @@
  * - **Report-only policies** dispatch violations too, with the disposition `report`; they refuse nothing.
  */
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
-import type * as Scope from "effect/Scope"
+import * as Scope from "effect/Scope"
 import type * as Deadline from "../Deadline.ts"
 import type * as JSHandle from "../JSHandle.ts"
 import * as Reason from "../Reason.ts"
@@ -35,7 +38,7 @@ import * as Evaluation from "./evaluation.ts"
 import * as Events from "./events.ts"
 import * as FunctionSource from "./functionSource.ts"
 import type * as Model from "./model.ts"
-import type * as Operation from "./operation.ts"
+import * as Operation from "./operation.ts"
 import type * as Runtime from "./runtime.ts"
 
 /** Why adding an element failed, before a module names the operation in its own error. */
@@ -185,6 +188,11 @@ function appendInline(spec: Spec): Inline {
   return state
 }
 
+/** Runs in the document's main world: removes the listener of a wait that ended without settling. */
+function stopInline(this: void, state: Inline) {
+  state.stop()
+}
+
 /** Runs after `appendInline`: the element, or its refusal, waiting for the violation the browser reported. */
 function settleInline(state: Inline, reported: boolean): Element | string | Promise<string> {
   const done = <A>(outcome: A) => {
@@ -221,13 +229,23 @@ const sha256 = (text: string) =>
   )
 
 /**
- * Whether a console entry is the browser's refusal of an inline script, as Chromium and WebKit word it; Chromium's
- * must name the text's hash. A report-only policy's entries begin `[Report Only]`.
+ * The SHA-256 Chromium names for the inline script it refused, from its console entry: the hash it suggests in
+ * "Either the 'unsafe-inline' keyword, a hash ('sha256-…'), or a nonce", not one the quoted policy allows. A
+ * report-only policy's entries begin `[Report Only]` and refuse nothing.
  */
-const refusalEntry = (protocol: string, hash: string) => (text: string) =>
-  !text.startsWith("[Report Only]") && (protocol === "cdp"
-    ? text.includes("inline script") && text.includes(`'sha256-${hash}'`)
-    : text.startsWith("Refused to execute a script because its hash, its nonce, or 'unsafe-inline'"))
+export const chromiumRefusal = (text: string): string | undefined =>
+  text.startsWith("[Report Only]") || !text.startsWith("Executing inline script violates")
+    ? undefined
+    : /Either the 'unsafe-inline' keyword, a hash \('sha256-([A-Za-z0-9+/]+=*)'\)/.exec(text)?.[1]
+
+/**
+ * Whether a console entry is WebKit's refusal of an inline script. It names no script, and its location is the
+ * document's start, so it can't say which inline script was refused.
+ */
+export const webKitRefusal = (text: string): boolean =>
+  text.startsWith(
+    "Refused to execute a script because its hash, its nonce, or 'unsafe-inline' does not appear in the script-src directive"
+  )
 
 /** Adds the element in a main-world realm, as the operation's dispatch: the element, owned by the scope. */
 export const insert = <A>(
@@ -260,23 +278,52 @@ export const insert = <A>(
         : Evaluation.own<A>(runtime, realm, value, Option.some(page))
     if (spec.url !== null || !spec.settles) return yield* settled(yield* call(insertElement, [spec], true))
     const protocol = runtime.model.adapter.info.protocol
-    const matches = protocol === "bidi" ? undefined : refusalEntry(protocol, yield* sha256(spec.text ?? ""))
-    // Taken before the append, so every entry the browser sent before answering it is read
-    const entries = matches === undefined
+    const matches = protocol === "bidi"
       ? undefined
-      : yield* Events.collect(
-        page.events.console,
-        (entry) => entry.value.level === "error" && matches(entry.value.text)
+      : protocol === "cdp"
+      ? Effect.map(sha256(spec.text ?? ""), (hash) => (text: string) => chromiumRefusal(text) === hash)
+      : Effect.succeed(webKitRefusal)
+    const caller = yield* Effect.scope
+    // The console collection and the shared state live for the call; the element belongs to the caller's scope
+    return yield* Effect.scoped(Effect.gen(function*() {
+      const refused = matches === undefined ? undefined : yield* matches
+      // Taken before the append, so every entry the browser sent before answering it is read
+      const entries = refused === undefined
+        ? undefined
+        : yield* Events.collect(
+          page.events.console,
+          (entry) => entry.value.level === "error" && refused(entry.value.text)
+        )
+      const state = yield* Effect.flatMap(
+        call(appendInline, [spec], true),
+        (value) => Evaluation.own<unknown>(runtime, realm, value, Option.none())
       )
-    const state = yield* Effect.flatMap(
-      call(appendInline, [spec], true),
-      (value) => Evaluation.own<unknown>(runtime, realm, value, Option.none())
-    )
-    const reported = entries === undefined ? false : (yield* Effect.orElseSucceed(entries, () => [])).length > 0
-    const value = yield* call(settleInline, [state, reported], false)
-    yield* state.release
-    return yield* settled(value)
+      // The first read returns what the collection holds, overflow or not: only a page that ended fails it
+      const reported = entries === undefined ? false : (yield* entries.pipe(
+        Effect.catch((error) =>
+          error._tag === "TargetGone" ? Effect.fail<Failure>({ _tag: "Gone", error }) : Effect.die(error)
+        )
+      )).length > 0
+      const value = yield* call(settleInline, [state, reported], false).pipe(
+        Scope.provide(caller),
+        Effect.onExit((exit) => Exit.isSuccess(exit) ? Effect.void : stop(runtime, realm, state))
+      )
+      return yield* settled(value).pipe(Scope.provide(caller))
+    }))
   })
+
+/** Removes an inline element's listener when its wait ended without settling, as by a deadline. */
+const stop = (runtime: Runtime.Runtime, realm: Target.RealmId, state: JSHandle.JSHandle<unknown>) =>
+  Operation.detached(
+    Effect.flatMap(Evaluation.toLocal([state], realm), (values) =>
+      runtime.model.adapter.evaluate(realm, {
+        functionDeclaration: FunctionSource.declaration(stopInline),
+        arguments: values,
+        awaitPromise: false,
+        result: "value",
+        userActivation: false
+      }))
+  ).pipe(Effect.ignore)
 
 /** A failure as the operation's error: `Gone` and `Deadline` as every evaluation's, a reason named by `error`. */
 export const fail = <E>(

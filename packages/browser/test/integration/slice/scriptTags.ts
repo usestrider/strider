@@ -1,12 +1,15 @@
 /** Script injection, `addScriptTag`, into a page's or a frame's document, on every backend. */
 import { assert } from "@effect/vitest"
-import { Deadline, Locator, Page } from "@usestrider/browser"
+import { ConsoleMessage, Deadline, Locator, Page } from "@usestrider/browser"
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import { createHash } from "node:crypto"
 import * as fs from "node:fs/promises"
 import * as os from "node:os"
 import * as nodePath from "node:path"
 import * as Handles from "../../../src/internal/handles.ts"
+import * as Tags from "../../../src/internal/tags.ts"
 import { site } from "../adapter/harness.ts"
 import * as SharedContext from "./sharedContext.ts"
 import { newPage } from "./sharedContext.ts"
@@ -22,7 +25,10 @@ const global = (page: Page.Page, key: string) =>
   page.evaluateInMainWorld((key: string) => Reflect.get(window, key) as unknown, key)
 
 /** The script tag cases, registered in a suite whose shared context they leave as they found it. */
-export const scriptTags = <R>(it: ReturnType<typeof SharedContext.guard<R>>) => {
+export const scriptTags = <R>(
+  name: "Chromium" | "Firefox" | "WebKit",
+  it: ReturnType<typeof SharedContext.guard<R>>
+) => {
   it.effect("returns after a script from a URL has loaded and run, with its element", () =>
     Effect.gen(function*() {
       const served = yield* site
@@ -51,6 +57,26 @@ export const scriptTags = <R>(it: ReturnType<typeof SharedContext.guard<R>>) => 
       assert.strictEqual(yield* global(page, "inline"), "SCRIPT")
     }).pipe(Effect.scoped))
 
+  it.effect("finds the browser's refusal entry in the console when the append returns", () =>
+    Effect.gen(function*() {
+      if (name === "Firefox") return
+      const served = yield* site
+      const page = yield* newPage
+      yield* page.goto(`${served.origin}/csp?html=x`)
+      const source = "window.refusedHere = true"
+      yield* page.evaluateInMainWorld((source: string) => {
+        const element = document.createElement("script")
+        element.textContent = source
+        document.head.append(element)
+      }, source)
+      const hash = createHash("sha256").update(source).digest("base64")
+      const texts = (yield* ConsoleMessage.history(page, { level: "error" })).entries.map((entry) => entry.text)
+      assert.isTrue(
+        texts.some((text) => name === "Chromium" ? Tags.chromiumRefusal(text) === hash : Tags.webKitRefusal(text)),
+        JSON.stringify(texts)
+      )
+    }).pipe(Effect.scoped))
+
   it.effect("releases its refusal subscription when script injection returns", () =>
     Effect.gen(function*() {
       const served = yield* site
@@ -71,8 +97,13 @@ export const scriptTags = <R>(it: ReturnType<typeof SharedContext.guard<R>>) => 
       const hash = createHash("sha256").update(source).digest("base64")
       const html = `<meta http-equiv="Content-Security-Policy" content="script-src 'sha256-${hash}'">`
       yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`, { waitUntil: "load" })
-      yield* page.addScriptTag({ source }).pipe(Deadline.within("1 second"))
+      const added = yield* page.addScriptTag({ source }).pipe(Deadline.within("1 second"), Effect.exit)
       assert.strictEqual(yield* global(page, "parentRan"), true)
+      if (name === "WebKit") {
+        // WebKit's refusal entry names no script, so the child's refusal is taken as this one's, and the call
+        // waits for a violation of this element that never comes, until its deadline
+        assert.isTrue(Exit.isFailure(added) && Deadline.isTimeout(Cause.squash(added.cause)))
+      } else assert.isTrue(Exit.isSuccess(added))
       assert.strictEqual(yield* global(page, "childRan"), undefined)
     }).pipe(Effect.scoped))
 

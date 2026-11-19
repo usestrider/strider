@@ -108,7 +108,8 @@ const offer = <A>(channel: Channel<A>, entry: Entry<A>): void => {
 
 /**
  * The entries `accepts` takes that are published while the scope lasts, read without waiting: what an operation
- * reads of the events the browser sent before answering it. It holds up to 64; more fails the read.
+ * reads of the events the browser sent before answering it. The subscription ends with the scope. It holds the
+ * first 64; a read returns them, and only a later read fails with the overflow.
  */
 export const collect = <A>(
   channel: Channel<A>,
