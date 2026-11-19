@@ -420,6 +420,19 @@ export type OverlayItem =
     readonly description: string | null
     readonly leaving: boolean
   }
+  | {
+    readonly _tag: "Action"
+    readonly id: string
+    readonly title: string
+    readonly position: string
+    readonly titleStyle: string
+    readonly point: { readonly x: number; readonly y: number } | null
+    readonly pointStyle: string | null
+    readonly box: { readonly x: number; readonly y: number; readonly width: number; readonly height: number } | null
+    readonly highlightStyle: string | null
+  }
+  /** The cursor, at the last annotated action's point: moved in place, so it glides there from where it was. */
+  | { readonly _tag: "Cursor"; readonly id: string; readonly x: number; readonly y: number }
 
 /** A candidate of an ambiguous match. */
 export const Candidate = Schema.Struct({ description: Schema.String, visible: Schema.Boolean })
@@ -702,7 +715,47 @@ export function engine(render: (root: SnapNode) => string) {
     `.chapter{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;` +
     `background:rgba(0,0,0,.4);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);color:#fff;` +
     `font:600 40px system-ui,sans-serif;text-align:center;opacity:1;transition:opacity .2s}` +
-    `.chapter.leaving{opacity:0}.description{font-size:20px;font-weight:400;opacity:.85}`
+    `.chapter.leaving{opacity:0}.description{font-size:20px;font-weight:400;opacity:.85}` +
+    `.action-title{position:absolute;max-width:60%;padding:6px 10px;border-radius:4px;background:rgba(0,0,0,.75);` +
+    `color:#fff;font:14px system-ui,sans-serif}` +
+    `.cursor{position:absolute;left:0;top:0;width:20px;height:20px;background:rgb(20,20,20);` +
+    `clip-path:polygon(0 0,0 100%,70% 70%);transition:transform .2s}`
+  const TITLE_AT: Record<string, string> = {
+    "top-left": "top:12px;left:12px",
+    "top": "top:12px;left:50%;transform:translateX(-50%)",
+    "top-right": "top:12px;right:12px",
+    "bottom-left": "bottom:12px;left:12px",
+    "bottom": "bottom:12px;left:50%;transform:translateX(-50%)",
+    "bottom-right": "bottom:12px;right:12px"
+  }
+  const cursorStyle = (x: number, y: number) => `transform:translate(${x}px,${y}px)`
+  const actionElement = (each: Extract<OverlayItem, { _tag: "Action" }>): Element => {
+    const element = overlayElement("item")
+    if (each.box !== null && each.highlightStyle !== null) {
+      const highlight = overlayElement("highlight")
+      setAttribute(
+        highlight,
+        "style",
+        `position:absolute;left:${each.box.x}px;top:${each.box.y}px;width:${each.box.width}px;` +
+          `height:${each.box.height}px;${each.highlightStyle}`
+      )
+      appendChild(element, highlight)
+    }
+    if (each.point !== null && each.pointStyle !== null) {
+      const point = overlayElement("point")
+      setAttribute(
+        point,
+        "style",
+        `position:absolute;left:${each.point.x}px;top:${each.point.y}px;transform:translate(-50%,-50%);` +
+          each.pointStyle
+      )
+      appendChild(element, point)
+    }
+    const title = overlayElement("action-title", each.title)
+    setAttribute(title, "style", `${TITLE_AT[each.position] ?? TITLE_AT["top-right"]};${each.titleStyle}`)
+    appendChild(element, title)
+    return element
+  }
   const innerHTMLSetter = Object.getOwnPropertyDescriptor(Element.prototype, "innerHTML")!.set!
   const textContentSetter = Object.getOwnPropertyDescriptor(Node.prototype, "textContent")!.set!
   const appendChild = method(Node.prototype, "appendChild")
@@ -750,6 +803,10 @@ export function engine(render: (root: SnapNode) => string) {
         if (each._tag === "Html") {
           element = overlayElement("item")
           call(innerHTMLSetter, element, [each.html])
+        } else if (each._tag === "Action") {
+          element = actionElement(each)
+        } else if (each._tag === "Cursor") {
+          element = overlayElement("cursor")
         } else {
           element = overlayElement("item chapter")
           appendChild(element, overlayElement("title", each.title))
@@ -758,6 +815,7 @@ export function engine(render: (root: SnapNode) => string) {
         appendChild(overlayRoot, element)
         overlayItems.set(each.id, element)
       }
+      if (each._tag === "Cursor") setAttribute(element, "style", cursorStyle(each.x, each.y))
       if (each._tag === "Chapter") {
         setAttribute(element, "class", each.leaving ? "item chapter leaving" : "item chapter")
       }

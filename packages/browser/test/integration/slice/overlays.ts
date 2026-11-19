@@ -157,7 +157,7 @@ export const overlays = <R>(it: ReturnType<typeof SharedContext.guard<R>>) => {
       yield* Effect.scoped(Effect.gen(function*() {
         yield* overlay.actions({ duration: "0 millis" })
         yield* page.getByRole("button", { name: "Go" }).click()
-        assert.isTrue(yield* pixelsAt(page, 32, 35, isDark))
+        assert.isTrue(yield* pixelsAt(page, 31, 40, isDark))
       }))
       yield* page.evaluateInMainWorld(() => {
         document.querySelector("button")!.style.background = "white"
@@ -165,7 +165,7 @@ export const overlays = <R>(it: ReturnType<typeof SharedContext.guard<R>>) => {
       })
       yield* overlay.actions({ duration: "0 millis", cursor: "none" })
       yield* page.getByRole("button", { name: "Go" }).click()
-      assert.isTrue(yield* pixelsAt(page, 32, 35, isWhite))
+      assert.isTrue(yield* pixelsAt(page, 31, 40, isWhite))
     }))
 
   it.effect("annotates an action in an iframe at its point in the top-level page", () =>

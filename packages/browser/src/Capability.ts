@@ -332,6 +332,39 @@ export interface OverlayControl {
    * ```
    */
   readonly show: Effect.Effect<void, CapabilityError | Target.TargetGone | Deadline.Timeout>
+  /**
+   * Annotates the page's input actions until the caller's scope closes: a title naming each action and its
+   * locator, and a cursor at its point, then a wait of `duration` before the action's input.
+   *
+   * **Details**
+   *
+   * It covers the locator actions that send input: `click`, `dblclick`, `hover`, `tap`, `check`, `uncheck`,
+   * `dragTo`, `fill`, `press`, `pressSequentially`, `selectOption` and `clear`. Input sent through `page.mouse`
+   * or `page.keyboard` isn't annotated. The wait counts toward the action's deadline, and the action checks its
+   * target again after it, so the input goes where the target is then. Points are in the top-level page, also for
+   * a target in a frame. A point marker and a highlight over the target are drawn only when `style` gives them.
+   * While another call's scope is open, the latest call's options apply.
+   *
+   * **Example** (Recording a sign-in with each action shown)
+   *
+   * ```ts import.meta.vitest
+   * import { Capability, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const signIn = Effect.fn("signIn")(function*(page: Page.Page) {
+   *   const overlay = yield* page.capability(Capability.Overlay)
+   *   yield* overlay.actions({
+   *     position: "bottom",
+   *     style: { highlight: "outline: 2px solid orange" }
+   *   })
+   *   yield* page.getByLabel("Email").fill("ada@example.com")
+   *   yield* page.getByRole("button", { name: "Sign in" }).click()
+   * }, Effect.scoped)
+   * ```
+   */
+  actions(
+    options?: OverlayControl.ActionsOptions | undefined
+  ): Effect.Effect<void, CapabilityError, Scope.Scope>
 }
 
 /**
@@ -377,6 +410,54 @@ export declare namespace OverlayControl {
      * @default "2 seconds"
      */
     readonly duration?: Duration.Input | undefined
+  }
+  /**
+   * Where an action's title is drawn.
+   *
+   * @stability unstable
+   * @category models
+   * @since 0.1.0
+   */
+  export type Position = "top-left" | "top" | "top-right" | "bottom-left" | "bottom" | "bottom-right"
+  /**
+   * Options of `actions`.
+   *
+   * @stability unstable
+   * @category models
+   * @since 0.1.0
+   */
+  export interface ActionsOptions {
+    /**
+     * How long each action waits, with its annotation shown, before its input.
+     *
+     * @default "500 millis"
+     */
+    readonly duration?: Duration.Input | undefined
+    /**
+     * Where the action's title is drawn.
+     *
+     * @default "top-right"
+     */
+    readonly position?: Position | undefined
+    /**
+     * Whether a cursor is drawn at the last action's point.
+     *
+     * @default "pointer"
+     */
+    readonly cursor?: "pointer" | "none" | undefined
+    /**
+     * CSS declarations for what is drawn: `point` marks the action's point and `highlight` covers the target's
+     * box, each drawn only when given; `title` is added to the title's own style.
+     *
+     * @default no point marker or highlight, and the title's own style
+     */
+    readonly style?:
+      | {
+        readonly point?: string | undefined
+        readonly highlight?: string | undefined
+        readonly title?: string | undefined
+      }
+      | undefined
   }
 }
 
