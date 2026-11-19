@@ -1550,7 +1550,8 @@ describe("UserContext.Options.testIdAttribute", () => {
       "data/qa",
       "data=qa",
       "data\u0007qa",
-      "data\u{1FFFE}qa"
+      "data\u{1FFFE}qa",
+      "data\u{10FFFF}qa"
     ]
   ) {
     it.effect(`refuses ${JSON.stringify(name)} with InvalidInput before creating a context`, () =>
@@ -1562,14 +1563,18 @@ describe("UserContext.Options.testIdAttribute", () => {
       }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
   }
 
-  it.effect("refuses to change the creation-time test-id attribute when recovering a context", () =>
+  it.effect("takes the test-id attribute of the program that recovers a context, and keeps it when omitted", () =>
     Effect.gen(function*() {
       const browser = yield* Browser.Browser
       const context = yield* Browser.newContext({ testIdAttribute: "data-qa" })
+      const page = yield* context.newPage
+      const before = page.getByTestId("x")
       const hooks = ClaimHooks.get(browser)
-      const error = yield* hooks.context({ testIdAttribute: "data-test" }, { context: context.id }).pipe(Effect.flip)
-      assert(UserContext.isUserContextError(error))
-      assert.strictEqual(error.reason._tag, "InvalidInput")
+      yield* hooks.context({ testIdAttribute: "data-test" }, { context: context.id })
+      assert.deepStrictEqual(testIds(page.getByTestId("x")), [{ _tag: "TestId", id: "x", attribute: "data-test" }])
+      assert.deepStrictEqual(testIds(before), [{ _tag: "TestId", id: "x", attribute: "data-qa" }])
+      yield* hooks.context({}, { context: context.id })
+      assert.deepStrictEqual(testIds(page.getByTestId("x")), [{ _tag: "TestId", id: "x", attribute: "data-test" }])
     }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
 
   it.effect("fixes the context's attribute in every getByTestId step, relative ones where they're placed", () =>
