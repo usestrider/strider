@@ -1504,6 +1504,29 @@ export const conformance = (backend: Backend) =>
             assert.strictEqual(raw.exception.name, "Error")
           }), timeout)
 
+        it.effect("renders a console message's objects as previews of their values", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            const { page } = yield* newPage(world)
+            yield* goto(world, page, `${world.site.origin}/console-previews`)
+            const texts = (yield* world.facts.when("ConsoleMessage", (fact) => fact.message.text.startsWith("worker")))
+              .message.text
+            const all = world.facts.all("ConsoleMessage").map((fact) => fact.message.text)
+            assert.deepStrictEqual(all.slice(0, 2), ["[1, 2, 3] {a: 1} Window", "{toString: Function, valueOf: Function}"])
+            // BiDi serializes an array's holes as `undefined`, so Firefox can't tell one from the other
+            assert.strictEqual(
+              all[2],
+              world.adapter.info.protocol === "bidi"
+                ? "[undefined, 1, undefined, undefined, 2]"
+                : "[empty, 1, empty x 2, 2]"
+            )
+            assert.strictEqual(all[3], "[Array(2), Object] Map(1) {'k' => 1} Set(1) {1} null undefined -0 1n str")
+            assert.strictEqual(all[4], "div#d #document")
+            // An Error reads as its browser describes it, which may include its stack
+            assert.match(all[5]!, /^an error Error: boom/)
+            assert.strictEqual(texts, "worker {a: 1}")
+          }), timeout)
+
         it.effect("captures overridden viewports and full pages beyond the native view", () =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
