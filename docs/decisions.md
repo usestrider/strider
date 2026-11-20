@@ -1868,7 +1868,6 @@ stays with Vitest's own `toMatchFileSnapshot`, which already diffs a string agai
 rejected as a duplicate of it, and comparing JPEG by pixels was rejected because it needs a decoder the package
 doesn't have.
 
-
 ## Each event kind is its own module
 
 Each kind of event is a module with its own `next`, `stream`, and `history` (principle 16): `PageNavigation`,
