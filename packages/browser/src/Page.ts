@@ -47,6 +47,7 @@ import * as Reason from "./Reason.ts"
 import type * as Route from "./Route.ts"
 import type * as ScriptTag from "./ScriptTag.ts"
 import type * as Snapshot from "./Snapshot.ts"
+import type * as StyleTag from "./StyleTag.ts"
 import * as Target from "./Target.ts"
 import * as Url from "./Url.ts"
 import type * as UserContext from "./UserContext.ts"
@@ -1250,6 +1251,36 @@ export interface Page extends ReadonlyPage {
     options?: ScriptTag.Options | undefined
   ): Effect.Effect<
     JSHandle.JSHandle<HTMLScriptElement>,
+    PageError | Target.TargetGone | Deadline.Timeout,
+    Scope.Scope
+  >
+  /**
+   * Adds a stylesheet to the page's current document, from CSS source, a URL, or a file, returning its element
+   * once the stylesheet has loaded and its rules apply.
+   *
+   * **Details**
+   *
+   * The element is added from the page's main world, so the page's Content Security Policy applies: a stylesheet
+   * it refuses fails with `RefusedByPolicy`, and a URL that doesn't load with `ResourceFailed`. See `StyleTag` for
+   * the forms and what the call waits for. The handle is the element, released with the scope; the element stays in
+   * the document.
+   *
+   * **Example** (Hiding a cookie banner before a screenshot)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const hideBanner = Effect.fn("hideBanner")(function*(page: Page.Page) {
+   *   yield* page.addStyleTag({ source: "#cookie-banner { display: none }" })
+   *   return yield* page.screenshot()
+   * })
+   * ```
+   */
+  addStyleTag(
+    style: StyleTag.Source
+  ): Effect.Effect<
+    JSHandle.JSHandle<HTMLStyleElement | HTMLLinkElement>,
     PageError | Target.TargetGone | Deadline.Timeout,
     Scope.Scope
   >

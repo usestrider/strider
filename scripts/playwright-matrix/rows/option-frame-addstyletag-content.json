@@ -1,7 +1,13 @@
 {
-  "status": "missing",
-  "api": [],
-  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "status": "has",
+  "api": [
+    {
+      "module": "StyleTag",
+      "symbol": "Source",
+      "url": "/docs/api/browser/StyleTag#Source"
+    }
+  ],
+  "notes": "{ source } is the CSS text; path and url are the other members of the same union.",
   "capabilities": [],
   "id": "option-frame-addstyletag-content",
   "upstream": [

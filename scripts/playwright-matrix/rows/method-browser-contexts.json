@@ -3,9 +3,15 @@
   "upstream": [
     "method:Browser.contexts"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "The Browser service has pages and a defaultContext, but no Watchable collection of all contexts or context-added stream. Retaining contexts created by the caller does not discover other contexts.",
+  "status": "has",
+  "api": [
+    {
+      "module": "Browser",
+      "symbol": "Browser",
+      "url": "/docs/api/browser/Browser#Browser"
+    }
+  ],
+  "notes": "Browser.contexts is a Watchable list: the default context first, created contexts as their own handles, others observed. Attaching lists existing contexts on Chromium and Firefox; a context another client creates later is listed once a page opens in it. On Chromium, a context another client removes stays listed until the connection ends.",
   "capabilities": [],
   "audit": {
     "sources": [

@@ -26,6 +26,7 @@ import { sharedContextChecks } from "./sharedContextChecks.ts"
 import { slice } from "./slice.ts"
 import { stalledReadProbes } from "./stalledReadProbes.ts"
 import { storageReplacement } from "./storageReplacement.ts"
+import { styleTags } from "./styleTags.ts"
 import { tooling } from "./tooling.ts"
 import { toolkit } from "./toolkit.ts"
 import { webauthn } from "./webauthn.ts"
@@ -62,6 +63,7 @@ requestSizes("Chromium", backend)
 sharedContextChecks("Chromium", backend)
 
 stalledReadProbes("Chromium", backend)
+styleTags("Chromium", backend)
 
 bindings("Chromium", backend)
 clientCertificates("Chromium", backend)

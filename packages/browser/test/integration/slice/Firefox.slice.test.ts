@@ -28,6 +28,7 @@ import { sharedContextChecks } from "./sharedContextChecks.ts"
 import { slice } from "./slice.ts"
 import { stalledReadProbes } from "./stalledReadProbes.ts"
 import { storageReplacement } from "./storageReplacement.ts"
+import { styleTags } from "./styleTags.ts"
 import { tooling } from "./tooling.ts"
 import { toolkit } from "./toolkit.ts"
 import { webauthn } from "./webauthn.ts"
@@ -74,6 +75,7 @@ requestSizes("Firefox", backend)
 sharedContextChecks("Firefox", backend)
 
 stalledReadProbes("Firefox", backend)
+styleTags("Firefox", backend)
 
 bindings("Firefox", backend)
 clientCertificates("Firefox", backend)

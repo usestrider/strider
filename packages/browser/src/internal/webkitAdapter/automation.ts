@@ -289,6 +289,7 @@ export const createUserContextLaunched = Effect.fnUntraced(
         _tag: "UserContextAdded",
         context: entry.id,
         isDefault: false,
+        created: true,
         ...(options.requestTiming ? { requestTiming: true } : {}),
         ...(options.requestSizes ? { requestSizes: true } : {})
       })

@@ -3,10 +3,22 @@
   "upstream": [
     "method:BrowserContext.browser"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding UserContext operation/event. Its public API provides pages/workers, cookies, clock, storage export, routes, scripts, scoped emulation and grants; it does not implement this contract.",
+  "status": "different",
+  "api": [
+    {
+      "module": "Browser",
+      "symbol": "Browser",
+      "url": "/docs/api/browser/Browser#Browser"
+    }
+  ],
+  "notes": "Code reaches its browser through the Browser service, which a context handle doesn't lead back to.",
   "capabilities": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "handles-dont-lead-back-to-their-browser",
+    "quote": "Code reaches its browser through the `Browser` service (`yield* Browser.Browser`), and `browser.info` names the product",
+    "revision": "1cfff25ae81875021127281bc4ec70cb4942216e"
+  },
   "audit": {
     "sources": [
       "packages/browser/src/UserContext.ts"

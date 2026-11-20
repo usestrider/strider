@@ -215,10 +215,17 @@ export type Fact =
     readonly _tag: "UserContextAdded"
     readonly context: UserContext.Id
     readonly isDefault: boolean
+    /** Created by this connection's `createUserContext`, rather than found. */
+    readonly created?: boolean | undefined
     readonly requestTiming?: boolean | undefined
     readonly requestSizes?: boolean | undefined
   }
   | { readonly _tag: "UserContextRemoved"; readonly context: UserContext.Id }
+  /**
+   * The connection no longer creates the context, which stays open: a failed creation whose removal couldn't be
+   * confirmed. It is listed as a context the connection observes.
+   */
+  | { readonly _tag: "UserContextReleased"; readonly context: UserContext.Id }
   | {
     readonly _tag: "PageAdded"
     readonly page: Target.NavigableId

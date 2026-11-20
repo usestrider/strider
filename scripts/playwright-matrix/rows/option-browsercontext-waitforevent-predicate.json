@@ -1,7 +1,13 @@
 {
-  "status": "missing",
-  "api": [],
-  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "status": "has",
+  "api": [
+    {
+      "module": "Subscription",
+      "symbol": "Where",
+      "url": "/docs/api/browser/Subscription#Where"
+    }
+  ],
+  "notes": "Each event module's `next(context, filter, where)` takes a `where` predicate, an effect run on each event its filter matched.",
   "capabilities": [],
   "id": "option-browsercontext-waitforevent-predicate",
   "upstream": [
