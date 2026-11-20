@@ -876,7 +876,14 @@ export const make = Effect.fnUntraced(function*(options: {
             Option.getOrElse(() => origin._tag === "Page" ? ownerOfPage(pageOf(origin.page)) : nobody)
           )
           if (fact.args !== undefined && Option.isSome(fact.realm)) {
-            ConsoleArguments.keep(fact.message, fact.realm.value, fact.args)
+            const channels = [
+              ...Option.toArray(owner.page).map((page) => page.events.console),
+              ...Option.toArray(owner.context).map((context) => context.events.console)
+            ]
+            // Arguments no subscription claims are released at once, apart from the fold
+            yield* ConsoleArguments.keep(fact.message, fact.realm.value, fact.args, channels).pipe(
+              Effect.forkIn(modelScope)
+            )
           }
           publish(owner, fact.message, (events) => events.console, (events) => events.console)
           return
