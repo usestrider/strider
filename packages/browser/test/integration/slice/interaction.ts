@@ -6448,6 +6448,80 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
       )
 
       it.effect(
+        "keeps an empty native accessible description ahead of the title",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              "<table aria-label=\"Sales\" title=\"Tooltip\"><caption></caption><tr><td>42</td></tr></table>"
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              yield* page.getByRole("table", { name: "Sales" }).pipe(Expect.toHaveAccessibleDescription(""))
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "uses the same summary content for accessible names and descriptions",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              "<style>summary::before { content: \"Prefix \" }</style><details open><summary role=\"button\" aria-owns=\"owned\">Details</summary></details><div id=\"owned\">Owned</div>"
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              const summary = page.locator("summary")
+              yield* summary.pipe(Expect.toHaveAccessibleName("Prefix Details Owned"))
+              yield* page.evaluateInMainWorld(() => {
+                document.querySelector("summary")!.setAttribute("aria-label", "Toggle")
+              })
+              yield* summary.pipe(Expect.toHaveAccessibleDescription("Prefix Details Owned"))
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "tracks a native name source reached through a self reference",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              "<input id=\"send\" type=\"submit\" aria-labelledby=\"send\" value=\"Send\" title=\"Tooltip\">"
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              yield* page.getByRole("button", { name: "Send" }).pipe(Expect.toHaveAccessibleDescription("Tooltip"))
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "tracks native and content name sources before computing descriptions",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              "<table title=\"Table hint\"><caption>Sales</caption><tr><td>42</td></tr></table><input type=\"submit\" title=\"Submit hint\"><details open><summary role=\"button\" title=\"Summary hint\">Details</summary></details>"
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              yield* page.getByRole("table", { name: "Sales" }).pipe(Expect.toHaveAccessibleDescription("Table hint"))
+              yield* page.getByRole("button", { name: "Submit" }).pipe(
+                Expect.toHaveAccessibleDescription("Submit hint")
+              )
+              yield* page.locator("summary").pipe(Expect.toHaveAccessibleName("Details"))
+              yield* page.locator("summary").pipe(Expect.toHaveAccessibleDescription("Summary hint"))
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
         "keeps accessible reference traversal and cached title provenance separate",
         () =>
           Effect.gen(function*() {
