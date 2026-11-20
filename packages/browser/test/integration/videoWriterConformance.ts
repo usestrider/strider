@@ -88,6 +88,46 @@ export const writerConformance = (
 ) => {
   layer(writer.pipe(Layer.provide(NodeServices.layer)), { excludeTestServices: true })((it) => {
     it.effect(
+      `${name} constant-rate output lasts through the stop timestamp`,
+      () =>
+        Effect.gen(function*() {
+          const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-writer-cfr-stop-"))
+          yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
+          const encoder = yield* VideoWriter.VideoWriter
+          const data = png(2, 2, [255, 0, 0])
+          const file = yield* encoder.write(
+            Stream.fromIterable([0, 237, 4127]).pipe(Stream.map((at) => ({
+              at: at * 1e6,
+              format: "png" as const,
+              width: 2,
+              height: 2,
+              data
+            }))),
+            { path: path.join(directory, "constant.webm"), width: 2, height: 2, fps: 10 }
+          )
+          const probe = JSON.parse(execFileSync(process.env["STRIDER_FFPROBE"]!, [
+            "-v",
+            "error",
+            "-show_frames",
+            "-show_format",
+            "-of",
+            "json",
+            file
+          ], { encoding: "utf8" }))
+          const times = probe.frames.map((frame: { best_effort_timestamp_time: string }) =>
+            Number(frame.best_effort_timestamp_time)
+          )
+          assert.strictEqual(times[0], 0)
+          for (let index = 1; index < times.length; index++) {
+            assert.closeTo(times[index] - times[index - 1], 0.1, 0.001)
+          }
+          assert.isAtLeast(Number(probe.format.duration), 4.127, "the final picture lasts until stop")
+          assert.isBelow(Number(probe.format.duration), 4.227, "at most one output frame extends past stop")
+        }),
+      60_000
+    )
+
+    it.effect(
       `${name} validates the final picture after a delayed first frame`,
       () =>
         Effect.gen(function*() {

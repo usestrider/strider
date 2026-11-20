@@ -2453,6 +2453,32 @@ describe("Chromium video writer lifetime", () => {
       }
     })
 
+  it.effect("refuses invalid video options before starting a screencast or writer", () =>
+    Effect.gen(function*() {
+      let writes = 0
+      const h = yield* sentHeaders().pipe(Effect.provideService(VideoWriter.VideoWriter, {
+        write: (_frames, target) =>
+          Effect.sync(() => {
+            writes++
+            return target.path
+          })
+      }))
+      const page = yield* h.page.control
+      for (
+        const options of [
+          { size: { width: 0, height: 100 } },
+          { fps: Number.NaN },
+          { path: "relative.webm" }
+        ]
+      ) {
+        const failure = yield* page.capability(Capability.Video, options).pipe(Effect.flip)
+        assert(Capability.isCapabilityError(failure))
+        assert.strictEqual(failure.reason._tag, "InvalidInput")
+      }
+      assert.strictEqual(writes, 0)
+      assert.isFalse(h.commands.some((command) => command.method === "Page.startScreencast"))
+    }).pipe(onTestClock))
+
   it.effect("does not retain the acquisition protocol deadline in recording work", () =>
     Effect.gen(function*() {
       const deadline = yield* Deferred.make<Option.Option<number>>()

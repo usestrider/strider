@@ -196,6 +196,46 @@ describe("Chromium video writer", () => {
       60_000
     )
 
+    it.effect("refuses a directory as the video file path before recording", () =>
+      Effect.gen(function*() {
+        const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-video-directory-"))
+        yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
+        const target = path.join(directory, "existing-directory")
+        fs.mkdirSync(target)
+        const page = yield* Browser.newPage()
+        yield* page.goto("data:text/html,<p>invalid path</p>")
+        const result = yield* Effect.scoped(page.capability(Capability.Video, { path: target })).pipe(Effect.result)
+        assert.strictEqual(result._tag, "Failure", "a directory is not a file destination")
+        if (result._tag === "Failure") {
+          assert(Capability.isCapabilityError(result.failure))
+          assert.deepInclude(result.failure.reason, { _tag: "InvalidInput", input: "path" })
+        }
+        assert.deepStrictEqual(fs.readdirSync(directory), ["existing-directory"])
+      }), 60_000)
+
+    it.effect("keeps a destination file that appears during recording", () =>
+      Effect.gen(function*() {
+        const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-video-race-"))
+        yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
+        const target = path.join(directory, "run.webm")
+        const page = yield* Browser.newPage()
+        yield* page.goto("data:text/html,<p>race</p>")
+        const recording = yield* Effect.scoped(Effect.gen(function*() {
+          const recording = yield* page.capability(Capability.Video, { path: target, overwrite: false })
+          fs.writeFileSync(target, "created during recording")
+          yield* Effect.sleep("300 millis")
+          return recording
+        }))
+        const failure = yield* recording.file.pipe(Effect.flip)
+        assert(Capability.isCapabilityError(failure))
+        assert.strictEqual(failure.reason._tag, "BackendFailure")
+        assert.strictEqual(fs.readFileSync(target, "utf8"), "created during recording")
+        const saved = fs.readdirSync(directory).filter((name) => name !== "run.webm")
+        assert.strictEqual(saved.length, 1)
+        assert.include(failure.message, saved[0]!)
+        assert.strictEqual(probe(path.join(directory, saved[0]!)).streams[0].codec_name, "vp8")
+      }), 60_000)
+
     it.effect("backpressures native acknowledgements without stopping page timers", () =>
       Effect.gen(function*() {
         const blocked = yield* Deferred.make<void>()
