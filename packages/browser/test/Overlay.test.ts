@@ -1,12 +1,22 @@
 /** Recording overlays cost nothing on a page that never acquires them. */
 import { assert, it } from "@effect/vitest"
-import { Browser, Capability } from "@usestrider/browser"
+import { Browser, Capability, Deadline } from "@usestrider/browser"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
+import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
+import * as TestClock from "effect/testing/TestClock"
+import { vi } from "vitest"
+import * as BrowserClock from "../src/internal/browserClock.ts"
+import type * as Engine from "../src/internal/engine.ts"
 import * as Execution from "../src/internal/execution.ts"
 import type { LocatorImpl } from "../src/internal/locator.ts"
+import * as Operation from "../src/internal/operation.ts"
 import * as Overlays from "../src/internal/overlays.ts"
+import * as Runtime from "../src/internal/runtime.ts"
+import type * as MonotonicInstant from "../src/MonotonicInstant.ts"
 
 it.effect("leaves a page without overlays on the ordinary dispatch, with no navigation listener", () =>
   Effect.gen(function*() {
@@ -47,4 +57,142 @@ it.effect("composes an annotation with a locator handler's dispatch, and goes ba
       }
       assert.strictEqual(entry.execution, Execution.ordinary)
     }
+  }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+
+it.effect("does not let an in-flight draw from a released acquisition overwrite its successor", () =>
+  Effect.gen(function*() {
+    const page = yield* Browser.newPage()
+    const owner = (page.locator("body") as LocatorImpl).owner
+    const entered = yield* Deferred.make<void>()
+    const resume = yield* Deferred.make<void>()
+    let rendered: ReadonlyArray<Engine.OverlayItem> = []
+    const send = vi.spyOn(Runtime, "send").mockImplementation((_runtime, _page, request) =>
+      Effect.gen(function*() {
+        if (request.op === "overlay") {
+          if (request.overlays.some((item) => item._tag === "Html" && item.html === "old")) {
+            yield* Deferred.succeed(entered, undefined)
+            yield* Deferred.await(resume)
+          }
+          rendered = request.overlays
+        }
+        return { _tag: "Overlaid" } as const
+      })
+    )
+    yield* Effect.addFinalizer(() => Effect.sync(() => send.mockRestore()))
+    const held = yield* Scope.make()
+    const acquire = Overlays.acquire(owner.runtime, owner.page, owner.grant).pipe(Operation.named("test.acquire"))
+    const old = yield* acquire.pipe(Scope.provide(held))
+    const pending = yield* old.add("old").pipe(Effect.forkChild)
+    yield* Deferred.await(entered)
+    const release = yield* Scope.close(held, Exit.void).pipe(Effect.forkChild)
+    yield* TestClock.adjust(0)
+    const replacement = yield* Effect.gen(function*() {
+      const current = yield* acquire
+      yield* current.add("current")
+    }).pipe(Effect.forkChild)
+    yield* TestClock.adjust(0)
+    yield* Deferred.succeed(resume, undefined)
+    yield* Fiber.await(pending)
+    yield* Fiber.join(release)
+    yield* Fiber.join(replacement)
+    assert.deepStrictEqual(rendered.map((item) => item._tag === "Html" ? item.html : item._tag), ["current"])
+  }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+
+it.effect("restores ordinary dispatch when actions registration is interrupted during its draw", () =>
+  Effect.gen(function*() {
+    const page = yield* Browser.newPage()
+    const owner = (page.locator("body") as LocatorImpl).owner
+    const entered = yield* Deferred.make<void>()
+    const send = vi.spyOn(Runtime, "send").mockImplementation(() =>
+      Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never))
+    )
+    yield* Effect.addFinalizer(() => Effect.sync(() => send.mockRestore()))
+    const overlay = yield* Overlays.acquire(owner.runtime, owner.page, owner.grant).pipe(
+      Operation.named("test.acquire")
+    )
+    const pending = yield* overlay.actions().pipe(Effect.scoped, Effect.forkChild)
+    yield* Deferred.await(entered)
+    yield* Fiber.interrupt(pending)
+    assert.strictEqual(owner.page.execution, Execution.ordinary)
+  }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+
+it.effect("a delayed release clear cannot erase a newly acquired overlay", () =>
+  Effect.gen(function*() {
+    const page = yield* Browser.newPage()
+    const owner = (page.locator("body") as LocatorImpl).owner
+    const clearing = yield* Deferred.make<void>()
+    const resume = yield* Deferred.make<void>()
+    let rendered: ReadonlyArray<Engine.OverlayItem> = []
+    let pauseClear = true
+    const send = vi.spyOn(Runtime, "send").mockImplementation((_runtime, _page, request) =>
+      Effect.gen(function*() {
+        if (request.op === "overlay") {
+          if (pauseClear && request.overlays.length === 0) {
+            pauseClear = false
+            yield* Deferred.succeed(clearing, undefined)
+            yield* Deferred.await(resume)
+          }
+          rendered = request.overlays
+        }
+        return { _tag: "Overlaid" } as const
+      })
+    )
+    yield* Effect.addFinalizer(() => Effect.sync(() => send.mockRestore()))
+    const held = yield* Scope.make()
+    const acquire = Overlays.acquire(owner.runtime, owner.page, owner.grant).pipe(Operation.named("test.acquire"))
+    const old = yield* acquire.pipe(Scope.provide(held))
+    yield* old.add("old")
+    const release = yield* Scope.close(held, Exit.void).pipe(Effect.forkChild)
+    yield* Deferred.await(clearing)
+    const replacement = yield* Effect.gen(function*() {
+      const current = yield* acquire
+      yield* current.add("current")
+    }).pipe(Effect.forkChild)
+    yield* TestClock.adjust(0)
+    yield* Deferred.succeed(resume, undefined)
+    yield* Fiber.join(release)
+    yield* Fiber.join(replacement)
+    assert.deepStrictEqual(rendered.map((item) => item._tag === "Html" ? item.html : item._tag), ["current"])
+  }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+
+it.effect("reads the annotation budget after its box lookup and draw", () =>
+  Effect.gen(function*() {
+    const page = yield* Browser.newPage()
+    const owner = (page.locator("body") as LocatorImpl).owner
+    let now = 0
+    const sleeps: Array<number> = []
+    const clock: BrowserClock.BrowserClock = {
+      now: () => now as MonotonicInstant.MonotonicInstant,
+      sleep: (millis) =>
+        Effect.sync(() => {
+          sleeps.push(millis)
+          now += millis * 1e6
+        })
+    }
+    let drawingAction = false
+    const send = vi.spyOn(Runtime, "send").mockImplementation(() =>
+      Effect.sync(() => {
+        if (drawingAction) now += 100e6
+        return { _tag: "Overlaid" } as const
+      })
+    )
+    yield* Effect.addFinalizer(() => Effect.sync(() => send.mockRestore()))
+    const overlay = yield* Overlays.acquire(owner.runtime, owner.page, owner.grant).pipe(
+      Operation.named("test.acquire")
+    )
+    yield* overlay.actions({ duration: "1 second", style: { highlight: "outline:1px solid red" } })
+    drawingAction = true
+    yield* owner.page.execution.annotate!({
+      title: "click button",
+      point: null,
+      box: Effect.sync(() => {
+        now += 800e6
+        return Option.none()
+      })
+    }).pipe(
+      Operation.named("test.action"),
+      Deadline.within("1 second"),
+      Effect.provideService(BrowserClock.CurrentClock, clock)
+    )
+    assert.deepStrictEqual(sleeps, [100])
   }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
