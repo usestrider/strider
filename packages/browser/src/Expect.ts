@@ -635,6 +635,64 @@ export const toHaveCSS: DualMatcher<
 )
 
 /**
+ * Expects a JavaScript property of the one match to deeply equal a value, read where the page's own scripts set it.
+ *
+ * **When to use**
+ *
+ * Use to check state a page keeps on an element rather than in its markup: a DOM property such as `checked`, or
+ * a value a script assigned, such as `element.model = { … }`.
+ *
+ * **Details**
+ *
+ * `path` is a property name or a dotted path into nested objects (`"model.user.name"`). A step through a value that
+ * isn't an object, or that lacks the key, reads `undefined`. Each check reads the path in the page's own JavaScript
+ * world and returns the value by value, then compares it with `expected`: Dates by time, regular expressions by
+ * source and flags, arrays, Maps and Sets by their entries, plain objects by their own enumerable keys, and `NaN`
+ * equals `NaN`. Missing and multiple matches, a value that can't be returned by value, and a mismatch are checked
+ * again until the deadline, and exactly one element must match, including with `not: true`. Failure history records
+ * the value read, or the match count when there is no single element.
+ *
+ * **Gotchas**
+ *
+ * - The read runs among the page's own scripts, so a getter the page defined runs and can see it; that is why it
+ *   needs a `Locator` and refuses a `ReadonlyLocator`.
+ * - A key that contains a dot can't be named in `path`.
+ *
+ * **Example** (Checking state a script set)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const subscribed = Effect.fn("subscribed")(function*(page: Page.Page) {
+ *   yield* page.getByRole("checkbox", { name: "Subscribe" }).pipe(
+ *     Expect.toHaveJSProperty("checked", true)
+ *   )
+ *   yield* page.locator("#profile").pipe(Expect.toHaveJSProperty("model.plan", "pro"))
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category matchers
+ * @since 0.1.0
+ */
+export const toHaveJSProperty: DualMatcher<
+  Locator.Locator,
+  [
+    path: string,
+    expected: unknown,
+    options?: {
+      /** Negates the value comparison; still requires exactly one match. @default false */
+      readonly not?: boolean | undefined
+    } | undefined
+  ]
+> = dual(
+  (args) => Locator.isLocator(args[0]),
+  (locator: Locator.Locator, path: string, expected: unknown, options?: { readonly not?: boolean | undefined }) =>
+    ExpectImpl.toHaveJSProperty(locator, path, expected, options)
+)
+
+/**
  * Expects exactly `count` matches.
  *
  * **Example** (Checking how many results a search gave)

@@ -21,6 +21,7 @@ import { now } from "./adapter.ts"
 import * as AriaPatterns from "./ariaPattern.ts"
 import * as BrowserClock from "./browserClock.ts"
 import * as ConditionImpl from "./condition.ts"
+import { deepEqual } from "./deepEqual.ts"
 import type * as Engine from "./engine.ts"
 import type * as Execution from "./execution.ts"
 import * as Sources from "./expectSource.ts"
@@ -33,6 +34,18 @@ import { describeSteps } from "./steps.ts"
 
 export const show = (expected: string | RegExp) =>
   typeof expected === "string" ? JSON.stringify(expected) : String(expected)
+
+/** An expected value as a failure's condition names it. */
+const showValue = (value: unknown): string => {
+  if (typeof value === "string" || value instanceof RegExp) return show(value)
+  if (value instanceof Date) return `Date(${Number.isNaN(value.getTime()) ? "Invalid" : value.toISOString()})`
+  if (value === undefined || typeof value === "bigint" || typeof value === "number") return String(value)
+  try {
+    return JSON.stringify(value) ?? String(value)
+  } catch {
+    return String(value)
+  }
+}
 
 /** A string compared whole (`exact`) or contained, or a `RegExp` tested as given. */
 export const matcher = (expected: string | RegExp, exact: boolean): Engine.TextMatcher =>
@@ -621,3 +634,75 @@ export const toHaveCSS = (
       show(expected)
     }`
   )
+
+/**
+ * A JavaScript property of the one match, read in its document's main world at each check and compared here by
+ * deep equality, until it holds or the deadline ends. No match, several, and a value that can't come back by value
+ * are observations, checked again at `CheckInterval`.
+ */
+export const toHaveJSProperty = (
+  locator: Locator.Locator,
+  path: string,
+  expected: unknown,
+  options?: { readonly not?: boolean | undefined }
+) =>
+  Effect.suspend(() => {
+    if (!Locator.isLocator(locator)) return Effect.die(new Error("Expect: not a locator of this library"))
+    const subject = locator as unknown as LocatorImpl
+    const not = options?.not ?? false
+    const keys = path.split(".")
+    const condition = `${not ? "not " : ""}to have the JavaScript property ${path} ${showValue(expected)}`
+    return Effect.gen(function*() {
+      yield* Access.check(subject.owner.grant)
+      const record = yield* Operation.record
+      const id = record.id
+      const interval = Duration.toMillis(yield* Effect.service(Expect.CheckInterval))
+      const started = now()
+      const history: Array<Diagnostics.ObservedValue> = []
+      const triggers = new Set<"initial" | "change" | "interval">(["initial"])
+      let checks = 0
+      const failed = () =>
+        failure(id, subject.description, condition, started, history, checks, triggers, undefined, "toHaveJSProperty")
+      while (true) {
+        checks++
+        const checked = yield* subject.readJSProperty(keys).pipe(
+          Effect.map((read) =>
+            Option.some(
+              read._tag === "Unmatched" ? { observed: { matches: read.matches }, passed: false } : {
+                observed: read.value,
+                passed: deepEqual(read.value, expected) !== not
+              }
+            )
+          ),
+          Effect.catchTag("LocatorError", (error) =>
+            Effect.succeed(Option.some({ observed: { error: error.reason.message }, passed: false }))),
+          // A check the deadline cut off didn't finish: the observations are what the others saw
+          Effect.catchIf(
+            (error) =>
+              Deadline.isTimeout(error) && record.left() <= 0,
+            () => Effect.succeedNone
+          )
+        )
+        if (Option.isNone(checked)) {
+          if (history.length === 0) {
+            Operation.appendObservation(history, { error: "a check was still running at the deadline" })
+          }
+          return yield* Effect.fail(failed())
+        }
+        Operation.appendObservation(history, checked.value.observed)
+        if (checked.value.passed) return
+        const left = record.left()
+        if (left <= 0) return yield* Effect.fail(failed())
+        triggers.add("interval")
+        // On the browser's clock: Effect's would stop under TestClock (QUIRKS.md, Q235)
+        yield* record.clock.sleep(Math.min(interval, left))
+        if (record.left() <= 0) return yield* Effect.fail(failed())
+      }
+    }).pipe(Operation.named("Expect.toHaveJSProperty", {
+      attributes: {
+        "browser.page.id": subject.owner.page.id,
+        "browser.subject": subject.description,
+        "browser.property": path
+      }
+    }))
+  })

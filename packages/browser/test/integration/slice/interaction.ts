@@ -6475,30 +6475,34 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
-      it.effect("expects JavaScript properties in the page's own world with deep equality", () =>
-        Effect.gen(function*() {
-          const { url } = yield* fixture(() => `<div id="js">JS</div><input type="checkbox" checked>`)
-          yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* newPage
-            yield* page.goto(url)
-            yield* page.evaluateInMainWorld(() => {
-              Object.assign(document.getElementById("js")!, {
-                foo: { a: 1, when: new Date(0), list: [1, "two", null] },
-                empty: null
+      it.effect(
+        "expects JavaScript properties in the page's own world with deep equality",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() => `<div id="js">JS</div><input type="checkbox" checked>`)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              yield* page.evaluateInMainWorld(() => {
+                Object.assign(document.getElementById("js")!, {
+                  foo: { a: 1, when: new Date(0), list: [1, "two", null] },
+                  empty: null
+                })
               })
-            })
-            const target = page.locator("#js")
-            yield* target.pipe(
-              Expect.toHaveJSProperty("foo", { a: 1, when: new Date(0), list: [1, "two", null] })
-            )
-            yield* Expect.toHaveJSProperty(target, "foo.when", new Date(0))
-            yield* target.pipe(Expect.toHaveJSProperty("empty", null))
-            yield* target.pipe(Expect.toHaveJSProperty("missing", undefined))
-            yield* target.pipe(Expect.toHaveJSProperty("foo.a.deeper", undefined))
-            yield* target.pipe(Expect.toHaveJSProperty("foo", { a: 1 }, { not: true }))
-            yield* page.getByRole("checkbox").pipe(Expect.toHaveJSProperty("checked", true))
-          }))
-        }), timeout)
+              const target = page.locator("#js")
+              yield* target.pipe(
+                Expect.toHaveJSProperty("foo", { a: 1, when: new Date(0), list: [1, "two", null] })
+              )
+              yield* Expect.toHaveJSProperty(target, "foo.when", new Date(0))
+              yield* target.pipe(Expect.toHaveJSProperty("empty", null))
+              yield* target.pipe(Expect.toHaveJSProperty("missing", undefined))
+              yield* target.pipe(Expect.toHaveJSProperty("foo.a.deeper", undefined))
+              yield* target.pipe(Expect.toHaveJSProperty("foo", { a: 1 }, { not: true }))
+              yield* page.getByRole("checkbox").pipe(Expect.toHaveJSProperty("checked", true))
+            }))
+          }),
+        timeout
+      )
 
       it.effect("retries a JavaScript property until a page timer sets it", () =>
         Effect.gen(function*() {
