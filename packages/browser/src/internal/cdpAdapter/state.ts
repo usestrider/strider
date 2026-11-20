@@ -382,7 +382,10 @@ export interface State extends Kit.Ending {
    * Page ids given out before their page is known: an attached browser can list a popup before its opener, so the
    * popup names the opener by the id its opener then takes.
    */
-  readonly reservedIds: Map<string, L1Target.NavigableId>
+  readonly reservedIds: Map<
+    string,
+    { readonly id: L1Target.NavigableId; readonly popups: Set<L1Target.NavigableId> }
+  >
   readonly pages: Map<L1Target.NavigableId, PageEntry>
   /** Why each page that ended did, for an operation that names it after. */
   readonly endedPages: Map<L1Target.NavigableId, L1Target.CloseReason>

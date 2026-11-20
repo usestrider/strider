@@ -79,13 +79,28 @@ const newTarget = (
   return target
 }
 
-/** The id a page not yet attached will take, so a popup listed before its opener can name it. */
-const reserveId = (state: State, targetId: string): L1Target.NavigableId => {
+/**
+ * The id a page not yet attached will take, so a popup listed before its opener can name it, held for as long as a
+ * popup that names it is open. Chromium names a popup's opener by its page's target, even when a frame in another
+ * process opened it.
+ */
+const reserveId = (state: State, targetId: string, popup: L1Target.NavigableId): L1Target.NavigableId => {
   const known = state.reservedIds.get(targetId)
-  if (known !== undefined) return known
+  if (known !== undefined) {
+    known.popups.add(popup)
+    return known.id
+  }
   const id = state.ids.navigable()
-  state.reservedIds.set(targetId, id)
+  state.reservedIds.set(targetId, { id, popups: new Set([popup]) })
   return id
+}
+
+/** Releases the ids a removed popup held for an opener that never attached. */
+const releaseReserved = (state: State, popup: L1Target.NavigableId) => {
+  for (const [targetId, reserved] of state.reservedIds) {
+    reserved.popups.delete(popup)
+    if (reserved.popups.size === 0) state.reservedIds.delete(targetId)
+  }
 }
 
 const attached = (state: State, parent: TargetEntry | undefined, params: Target.AttachedToTargetParams) => {
@@ -97,14 +112,15 @@ const attached = (state: State, parent: TargetEntry | undefined, params: Target.
   switch (kind) {
     case "page": {
       const context = contextFor(state, info.browserContextId)
-      const openerId = info.openerId === undefined
-        ? Option.none<L1Target.NavigableId>()
-        : Option.some(state.targetsById.get(info.openerId)?.page?.id ?? reserveId(state, info.openerId))
       const target = newTarget(state, kind, info, session, undefined, undefined)
       const reserved = state.reservedIds.get(info.targetId)
       state.reservedIds.delete(info.targetId)
+      const id = reserved?.id ?? state.ids.navigable()
+      const openerId = info.openerId === undefined
+        ? Option.none<L1Target.NavigableId>()
+        : Option.some(state.targetsById.get(info.openerId)?.page?.id ?? reserveId(state, info.openerId, id))
       const page: PageEntry = {
-        id: reserved ?? state.ids.navigable(),
+        id,
         targetId: info.targetId,
         context,
         target,
@@ -230,6 +246,7 @@ export const ended = (state: State, session: ProtocolClient.Session, reason: Pro
   }
   switch (target.kind) {
     case "page": {
+      if (page !== undefined) releaseReserved(state, page.id)
       if (page !== undefined && why !== undefined) {
         endPage(state, page, why, `cdp: the page's session ended (${reason.why})`)
       }
