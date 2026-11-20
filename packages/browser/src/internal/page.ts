@@ -203,6 +203,13 @@ export interface Driven<E> {
   readonly noun: string
   /** Run first: whether the handle's access still holds. */
   readonly check: Effect.Effect<void, Target.TargetGone | E>
+  /**
+   * What a realm's end means for this navigable, when an evaluation fails because its realm went away: a frame's
+   * removal, rather than its document's. Absent for a page, whose realm errors stand as they are.
+   */
+  readonly gone?:
+    | ((error: Target.TargetGone, at: MonotonicInstant.MonotonicInstant) => Effect.Effect<Target.TargetGone>)
+    | undefined
 }
 
 /** Waits for a navigation the adapter started, then for `waitUntil` on the document it committed. */
@@ -322,6 +329,14 @@ export const evaluateIn = <E, B, R>(
           ))
           : target.error(operation, failure.reason, id)
       ),
+      (self) => {
+        const gone = target.gone
+        return gone === undefined ? self : Effect.catchIf(
+          self,
+          (error): error is Target.TargetGone => Target.isTargetGone(error),
+          (error) => Effect.flatMap(gone(error, budget.at), Effect.fail)
+        )
+      },
       Effect.annotateSpans({ "browser.evaluation.user_gesture": gesture })
     )
   }).pipe(

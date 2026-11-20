@@ -147,7 +147,7 @@ export interface ReadonlyFrame extends ObservedFrame {
 export interface Frame extends ReadonlyFrame {
   /**
    * Navigates the frame to `url`, and returns the navigation once the frame's new document reaches `waitUntil`.
-   * The page's own document stays where it is. A frame removed before then fails the navigation with `TargetGone`.
+   * For a child frame, the page's own document stays where it is; the page's top frame, from `page.frameById(page.id)`, navigates the page. A frame removed before then fails the navigation with `TargetGone`.
    * On WebKit the frame navigates by script, and a child frame's `waitUntil` other than `"commit"` fails with
    * `Unsupported`, since WebKit doesn't report its readiness.
    */

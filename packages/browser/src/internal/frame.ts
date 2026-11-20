@@ -171,9 +171,43 @@ export const make = (owner: Owner): Frame.Frame => {
             failure._tag === "Gone" ? Effect.succeed(Option.none<Target.RealmId>()) : Effect.fail(failure)
           )
         )
-        if (Option.isSome(found)) return found.value
+        if (Option.isSome(found)) {
+          documents.set(found.value, document.value)
+          return found.value
+        }
       }
     })
+
+  /**
+   * An evaluation whose realm went away: the frame's removal when the realm's document ended with its frame, and
+   * the realm's own end otherwise, as when a navigation replaced the document. A browser can report the realm's end
+   * before the document's or the frame's, so the first of the document's recorded end and the frame leaving the
+   * page decides.
+   */
+  const gone = Effect.fnUntraced(
+    function*(error: Target.TargetGone, at: MonotonicInstant.MonotonicInstant) {
+      if (error.target._tag !== "Realm") return error
+      const detached = new Target.TargetGone({
+        target,
+        reason: new Target.FrameDetached({}),
+        diagnostics: error.diagnostics
+      })
+      if (Option.isNone((yield* state.get).frame)) return detached
+      const used = documents.get(error.target.id)
+      documents.delete(error.target.id)
+      const document = Option.flatMap(Option.fromUndefinedOr(used), model.document)
+      if (Option.isNone(document)) return error
+      const removed = yield* Deferred.await(document.value.ended).pipe(
+        Effect.map((why) => why._tag === "FrameDetached"),
+        Effect.raceFirst(Effect.as(Effect.flip(ended), true)),
+        BrowserClock.until(at)
+      )
+      return Option.getOrElse(removed, () => false) ? detached : error
+    }
+  )
+
+  /** The document each realm a frame evaluation used belongs to, for what its end means. */
+  const documents = new Map<Target.RealmId, Target.DocumentId>()
 
   const driven: PageImpl.Driven<Frame.FrameError> = {
     runtime,
@@ -184,7 +218,8 @@ export const make = (owner: Owner): Frame.Frame => {
     attributes: { "browser.page.id": entry.id, "browser.frame.id": frame },
     realm,
     noun: "frame",
-    check: Access.check(owner.grant)
+    check: Access.check(owner.grant),
+    gone
   }
 
   /**
