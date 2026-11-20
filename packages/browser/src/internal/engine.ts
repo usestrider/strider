@@ -708,120 +708,128 @@ export function engine(render: (root: SnapNode) => string) {
    */
   let overlayHost: Element | null = null
   let overlayRoot: ShadowRoot | null = null
-  const overlayItems = new Map<string, Element>()
-  const OVERLAY_HOST = "all:initial;position:fixed;inset:0;z-index:2147483647;pointer-events:none;display:block"
-  const OVERLAY_STYLE = `*{pointer-events:none!important}` +
-    `.item{position:absolute;inset:0}` +
-    `.chapter{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;` +
-    `background:rgba(0,0,0,.4);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);color:#fff;` +
-    `font:600 40px system-ui,sans-serif;text-align:center;opacity:1;transition:opacity .2s}` +
-    `.chapter.leaving{opacity:0}.description{font-size:20px;font-weight:400;opacity:.85}` +
-    `.action-title{position:absolute;max-width:60%;padding:6px 10px;border-radius:4px;background:rgba(0,0,0,.75);` +
-    `color:#fff;font:14px system-ui,sans-serif}` +
-    `.cursor{position:absolute;left:0;top:0;width:20px;height:20px;background:rgb(20,20,20);` +
-    `clip-path:polygon(0 0,0 100%,70% 70%);transition:transform .2s}`
-  const TITLE_AT: Record<string, string> = {
-    "top-left": "top:12px;left:12px",
-    "top": "top:12px;left:50%;transform:translateX(-50%)",
-    "top-right": "top:12px;right:12px",
-    "bottom-left": "bottom:12px;left:12px",
-    "bottom": "bottom:12px;left:50%;transform:translateX(-50%)",
-    "bottom-right": "bottom:12px;right:12px"
-  }
-  const cursorStyle = (x: number, y: number) => `transform:translate(${x}px,${y}px)`
-  const actionElement = (each: Extract<OverlayItem, { _tag: "Action" }>): Element => {
-    const element = overlayElement("item")
-    if (each.box !== null && each.highlightStyle !== null) {
-      const highlight = overlayElement("highlight")
-      setAttribute(
-        highlight,
-        "style",
-        `position:absolute;left:${each.box.x}px;top:${each.box.y}px;width:${each.box.width}px;` +
-          `height:${each.box.height}px;${each.highlightStyle}`
-      )
-      appendChild(element, highlight)
+  /**
+   * What drawing overlays needs, built on a document's first `overlay` request: a page that never shows one
+   * builds none of it.
+   */
+  const makeOverlays = () => {
+    const overlayItems = new Map<string, Element>()
+    const OVERLAY_HOST = "all:initial;position:fixed;inset:0;z-index:2147483647;pointer-events:none;display:block"
+    const OVERLAY_STYLE = `*{pointer-events:none!important}` +
+      `.item{position:absolute;inset:0}` +
+      `.chapter{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;` +
+      `background:rgba(0,0,0,.4);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);color:#fff;` +
+      `font:600 40px system-ui,sans-serif;text-align:center;opacity:1;transition:opacity .2s}` +
+      `.chapter.leaving{opacity:0}.description{font-size:20px;font-weight:400;opacity:.85}` +
+      `.action-title{position:absolute;max-width:60%;padding:6px 10px;border-radius:4px;background:rgba(0,0,0,.75);` +
+      `color:#fff;font:14px system-ui,sans-serif}` +
+      `.cursor{position:absolute;left:0;top:0;width:20px;height:20px;background:rgb(20,20,20);` +
+      `clip-path:polygon(0 0,0 100%,70% 70%);transition:transform .2s}`
+    const TITLE_AT: Record<string, string> = {
+      "top-left": "top:12px;left:12px",
+      "top": "top:12px;left:50%;transform:translateX(-50%)",
+      "top-right": "top:12px;right:12px",
+      "bottom-left": "bottom:12px;left:12px",
+      "bottom": "bottom:12px;left:50%;transform:translateX(-50%)",
+      "bottom-right": "bottom:12px;right:12px"
     }
-    if (each.point !== null && each.pointStyle !== null) {
-      const point = overlayElement("point")
-      setAttribute(
-        point,
-        "style",
-        `position:absolute;left:${each.point.x}px;top:${each.point.y}px;transform:translate(-50%,-50%);` +
-          each.pointStyle
-      )
-      appendChild(element, point)
+    const cursorStyle = (x: number, y: number) => `transform:translate(${x}px,${y}px)`
+    const actionElement = (each: Extract<OverlayItem, { _tag: "Action" }>): Element => {
+      const element = overlayElement("item")
+      if (each.box !== null && each.highlightStyle !== null) {
+        const highlight = overlayElement("highlight")
+        setAttribute(
+          highlight,
+          "style",
+          `position:absolute;left:${each.box.x}px;top:${each.box.y}px;width:${each.box.width}px;` +
+            `height:${each.box.height}px;${each.highlightStyle}`
+        )
+        appendChild(element, highlight)
+      }
+      if (each.point !== null && each.pointStyle !== null) {
+        const point = overlayElement("point")
+        setAttribute(
+          point,
+          "style",
+          `position:absolute;left:${each.point.x}px;top:${each.point.y}px;transform:translate(-50%,-50%);` +
+            each.pointStyle
+        )
+        appendChild(element, point)
+      }
+      const title = overlayElement("action-title", each.title)
+      setAttribute(title, "style", `${TITLE_AT[each.position] ?? TITLE_AT["top-right"]};${each.titleStyle}`)
+      appendChild(element, title)
+      return element
     }
-    const title = overlayElement("action-title", each.title)
-    setAttribute(title, "style", `${TITLE_AT[each.position] ?? TITLE_AT["top-right"]};${each.titleStyle}`)
-    appendChild(element, title)
-    return element
-  }
-  const innerHTMLSetter = Object.getOwnPropertyDescriptor(Element.prototype, "innerHTML")!.set!
-  const textContentSetter = Object.getOwnPropertyDescriptor(Node.prototype, "textContent")!.set!
-  const appendChild = method(Node.prototype, "appendChild")
-  const removeElement = method(Element.prototype, "remove")
-  const setAttribute = method(Element.prototype, "setAttribute")
-  const attachShadow = method(Element.prototype, "attachShadow")
-  const overlayElement = (className: string, text?: string): Element => {
-    const element = dom.createElement(document, "div")
-    setAttribute(element, "class", className)
-    if (text !== undefined) call(textContentSetter, element, [text])
-    return element
-  }
+    const innerHTMLSetter = Object.getOwnPropertyDescriptor(Element.prototype, "innerHTML")!.set!
+    const textContentSetter = Object.getOwnPropertyDescriptor(Node.prototype, "textContent")!.set!
+    const appendChild = method(Node.prototype, "appendChild")
+    const removeElement = method(Element.prototype, "remove")
+    const setAttribute = method(Element.prototype, "setAttribute")
+    const attachShadow = method(Element.prototype, "attachShadow")
+    const overlayElement = (className: string, text?: string): Element => {
+      const element = dom.createElement(document, "div")
+      setAttribute(element, "class", className)
+      if (text !== undefined) call(textContentSetter, element, [text])
+      return element
+    }
 
-  const overlay = (request: Extract<Request, { op: "overlay" }>): Response => {
-    if (request.overlays.length === 0) {
-      if (overlayHost !== null) removeElement(overlayHost)
-      overlayHost = overlayRoot = null
-      overlayItems.clear()
+    const overlay = (request: Extract<Request, { op: "overlay" }>): Response => {
+      if (request.overlays.length === 0) {
+        if (overlayHost !== null) removeElement(overlayHost)
+        overlayHost = overlayRoot = null
+        overlayItems.clear()
+        return { _tag: "Overlaid" }
+      }
+      const root = dom.documentElement(document)
+      if (root === null) return { _tag: "Overlaid" }
+      if (overlayHost === null || overlayRoot === null) {
+        overlayHost = dom.createElement(document, "strider-overlay")
+        overlayRoot = attachShadow(overlayHost, { mode: "closed" })
+        const style = dom.createElement(document, "style")
+        call(textContentSetter, style, [OVERLAY_STYLE])
+        appendChild(overlayRoot, style)
+      }
+      // Drawn again where the page removed it, last in the document so it stacks over what came before
+      if (dom.parentNode(overlayHost) !== root || dom.nextElementSibling(overlayHost) !== null) {
+        appendChild(root, overlayHost)
+      }
+      setAttribute(overlayHost, "style", request.hidden ? `${OVERLAY_HOST};display:none` : OVERLAY_HOST)
+      const wanted = new Set(request.overlays.map((each) => each.id))
+      for (const [id, element] of overlayItems) {
+        if (!wanted.has(id)) {
+          removeElement(element)
+          overlayItems.delete(id)
+        }
+      }
+      for (const each of request.overlays) {
+        let element = overlayItems.get(each.id)
+        if (element === undefined) {
+          if (each._tag === "Html") {
+            element = overlayElement("item")
+            call(innerHTMLSetter, element, [each.html])
+          } else if (each._tag === "Action") {
+            element = actionElement(each)
+          } else if (each._tag === "Cursor") {
+            element = overlayElement("cursor")
+          } else {
+            element = overlayElement("item chapter")
+            appendChild(element, overlayElement("title", each.title))
+            if (each.description !== null) appendChild(element, overlayElement("description", each.description))
+          }
+          appendChild(overlayRoot, element)
+          overlayItems.set(each.id, element)
+        }
+        if (each._tag === "Cursor") setAttribute(element, "style", cursorStyle(each.x, each.y))
+        if (each._tag === "Chapter") {
+          setAttribute(element, "class", each.leaving ? "item chapter leaving" : "item chapter")
+        }
+      }
       return { _tag: "Overlaid" }
     }
-    const root = dom.documentElement(document)
-    if (root === null) return { _tag: "Overlaid" }
-    if (overlayHost === null || overlayRoot === null) {
-      overlayHost = dom.createElement(document, "strider-overlay")
-      overlayRoot = attachShadow(overlayHost, { mode: "closed" })
-      const style = dom.createElement(document, "style")
-      call(textContentSetter, style, [OVERLAY_STYLE])
-      appendChild(overlayRoot, style)
-    }
-    // Drawn again where the page removed it, last in the document so it stacks over what came before
-    if (dom.parentNode(overlayHost) !== root || dom.nextElementSibling(overlayHost) !== null) {
-      appendChild(root, overlayHost)
-    }
-    setAttribute(overlayHost, "style", request.hidden ? `${OVERLAY_HOST};display:none` : OVERLAY_HOST)
-    const wanted = new Set(request.overlays.map((each) => each.id))
-    for (const [id, element] of overlayItems) {
-      if (!wanted.has(id)) {
-        removeElement(element)
-        overlayItems.delete(id)
-      }
-    }
-    for (const each of request.overlays) {
-      let element = overlayItems.get(each.id)
-      if (element === undefined) {
-        if (each._tag === "Html") {
-          element = overlayElement("item")
-          call(innerHTMLSetter, element, [each.html])
-        } else if (each._tag === "Action") {
-          element = actionElement(each)
-        } else if (each._tag === "Cursor") {
-          element = overlayElement("cursor")
-        } else {
-          element = overlayElement("item chapter")
-          appendChild(element, overlayElement("title", each.title))
-          if (each.description !== null) appendChild(element, overlayElement("description", each.description))
-        }
-        appendChild(overlayRoot, element)
-        overlayItems.set(each.id, element)
-      }
-      if (each._tag === "Cursor") setAttribute(element, "style", cursorStyle(each.x, each.y))
-      if (each._tag === "Chapter") {
-        setAttribute(element, "class", each.leaving ? "item chapter leaving" : "item chapter")
-      }
-    }
-    return { _tag: "Overlaid" }
+    return overlay
   }
+  let drawOverlays: ((request: Extract<Request, { op: "overlay" }>) => Response) | undefined
 
   /**
    * Every element under `root`, in tree order, with each open shadow root's elements after its host. An element
@@ -4265,11 +4273,25 @@ export function engine(render: (root: SnapNode) => string) {
     const type = dom.doctype(document)
     const doctype = type === null ? "" : new XMLSerializer().serializeToString(type)
     const root = dom.documentElement(document)
-    const all = root === null ? "" : dom.outerHTML(root)
-    // The overlays' host serializes as an empty element, its shadow tree left out: the page's HTML has no trace of it
-    const own = overlayHost === null || dom.parentNode(overlayHost) !== root ? "" : dom.outerHTML(overlayHost)
-    const at = own === "" ? -1 : all.lastIndexOf(own)
-    return { _tag: "Read", value: doctype + (at < 0 ? all : all.slice(0, at) + all.slice(at + own.length)) }
+    if (root === null) return { _tag: "Read", value: doctype }
+    if (overlayHost === null || !dom.contains(root, overlayHost)) {
+      return { _tag: "Read", value: doctype + dom.outerHTML(root) }
+    }
+    // The overlays' host leaves the page's HTML by node, wherever the page moved it: the document element is
+    // copied into a document with no browsing context, where nothing upgrades, loads or observes, and the host's
+    // copy, found by its path of child indices, is removed before serializing. The page's tree is never touched
+    const path: Array<number> = []
+    for (let node: Node = overlayHost; node !== root;) {
+      const parent = dom.parentNode(node)!
+      path.unshift(Array.prototype.indexOf.call(dom.childNodes(parent), node))
+      node = parent
+    }
+    const inert = document.implementation.createHTMLDocument("")
+    const copy = inert.importNode(root, true)
+    let twin: Node = copy
+    for (const index of path) twin = twin.childNodes[index]!
+    twin.parentNode!.removeChild(twin)
+    return { _tag: "Read", value: doctype + (copy as Element).outerHTML }
   }
 
   const strict = (found: ReadonlyArray<Element>): Response => ({
@@ -4476,7 +4498,7 @@ export function engine(render: (root: SnapNode) => string) {
         case "html":
           return JSON.stringify(html())
         case "overlay":
-          return JSON.stringify(overlay(request))
+          return JSON.stringify((drawOverlays ??= makeOverlays())(request))
         case "role":
           return JSON.stringify(
             {
