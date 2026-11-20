@@ -1,6 +1,6 @@
 /** Recording overlays, `Capability.Overlay`: shown, removed, hidden, kept across navigation, and out of queries. */
 import { assert } from "@effect/vitest"
-import { Capability } from "@usestrider/browser"
+import { Capability, Deadline } from "@usestrider/browser"
 import type { Page } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -51,6 +51,90 @@ const point = "background:rgb(255,0,0);width:40px;height:40px"
 
 /** The overlay cases, registered in a suite whose shared context they leave as they found it. */
 export const overlays = <R>(it: ReturnType<typeof SharedContext.guard<R>>) => {
+  it.effect("excludes a moved overlay host from readHtml", () =>
+    Effect.gen(function*() {
+      const page = yield* opened("<p>page</p><strider-overlay id='page-owned'>Own</strider-overlay>")
+      const before = yield* page.readHtml
+      const overlay = yield* page.capability(Capability.Overlay)
+      yield* overlay.add(square)
+      yield* page.evaluateInMainWorld(() => {
+        document.body.appendChild(document.documentElement.lastElementChild!)
+      })
+      assert.strictEqual(yield* page.locator("strider-overlay").count, 1)
+      assert.strictEqual(yield* page.readHtml, before)
+    }))
+
+  it.effect("readHtml preserves page markup identical to the overlay host", () =>
+    Effect.gen(function*() {
+      const page = yield* opened("<p>page</p>")
+      const overlay = yield* page.capability(Capability.Overlay)
+      yield* overlay.add(square)
+      const expected = yield* page.evaluateInMainWorld(() => {
+        const host = document.documentElement.lastElementChild!
+        const copy = host.cloneNode(true)
+        const section = document.createElement("section")
+        section.appendChild(copy)
+        document.documentElement.appendChild(section)
+        const expected = document.documentElement.cloneNode(true) as Element
+        expected.children[2]!.remove()
+        return document.doctype === null ?
+          expected.outerHTML :
+          new XMLSerializer().serializeToString(document.doctype) + expected.outerHTML
+      })
+      assert.strictEqual(yield* page.readHtml, expected)
+    }))
+
+  it.effect("a released overlay chapter cannot erase a later acquisition", () =>
+    Effect.gen(function*() {
+      const page = yield* opened("<p>page</p>")
+      const held = yield* Scope.make()
+      const old = yield* page.capability(Capability.Overlay).pipe(Scope.provide(held))
+      const chapter = yield* old.chapter("Old chapter", { duration: "1 second" }).pipe(Effect.forkChild)
+      let drawn = false
+      const started = performance.now()
+      while (!drawn && performance.now() - started < 900) {
+        drawn = yield* page.evaluateInMainWorld(() => document.querySelector("strider-overlay") !== null)
+      }
+      assert.isTrue(drawn)
+      yield* Scope.close(held, Exit.void)
+      const current = yield* page.capability(Capability.Overlay)
+      yield* current.add(square)
+      assert.isTrue(yield* red(page))
+      yield* Fiber.join(chapter)
+      assert.isTrue(yield* red(page))
+    }))
+
+  it.effect("bounds a chapter wait by its operation deadline", () =>
+    Effect.gen(function*() {
+      const page = yield* opened("<p>page</p>")
+      const overlay = yield* page.capability(Capability.Overlay)
+      const started = performance.now()
+      const error = yield* overlay.chapter("Long chapter", { duration: "2 seconds" }).pipe(
+        Deadline.within("200 millis"),
+        Effect.flip
+      )
+      assert.strictEqual(error._tag, "Timeout")
+      assert.isBelow(performance.now() - started, 1_500)
+    }))
+
+  it.effect("removes the existing cursor when the latest actions scope selects none", () =>
+    Effect.gen(function*() {
+      const page = yield* opened(button)
+      const overlay = yield* page.capability(Capability.Overlay)
+      yield* page.evaluateInMainWorld(() => {
+        document.querySelector("button")!.style.background = "white"
+        document.querySelector("button")!.style.border = "0"
+      })
+      yield* overlay.actions({ duration: "0 millis" })
+      yield* page.getByRole("button", { name: "Go" }).click()
+      assert.isTrue(yield* pixelsAt(page, 31, 40, isDark))
+      yield* Effect.scoped(Effect.gen(function*() {
+        yield* overlay.actions({ duration: "0 millis", cursor: "none" })
+        yield* page.getByRole("button", { name: "Go" }).click()
+        assert.isTrue(yield* pixelsAt(page, 31, 40, isWhite))
+      }))
+    }))
+
   it.effect("shows an overlay until the scope that added it closes", () =>
     Effect.gen(function*() {
       const page = yield* opened("<p>page</p>")
