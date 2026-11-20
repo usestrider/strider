@@ -3283,31 +3283,53 @@ document.getElementById("form").addEventListener("submit", (event) => {
           }))
         }), timeout)
 
-      it.effect("fails a running frame evaluation with FrameDetached when its iframe is removed", () =>
-        Effect.gen(function*() {
-          const { origin } = yield* site
-          yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* SharedContext.newPage
-            yield* page.goto(
-              fixtureUrl(origin, `<iframe id="child" src="${fixtureUrl(origin, "<p>ready</p>")}"></iframe>`)
-            )
-            const locator = page.frame(page.locator("#child"))
-            yield* locator.locator("p").pipe(Expect.toHaveText("ready"))
-            const frame = yield* locator.resolve
-            const pending = yield* frame.evaluateInMainWorld(() => {
-              document.querySelector("p")!.textContent = "running"
-              return new Promise<void>(() => {})
-            }).pipe(Effect.forkScoped)
-            yield* locator.locator("p").pipe(Expect.toHaveText("running"))
-            yield* page.evaluateInMainWorld(() =>
-              document.getElementById("child")!.remove()
-            )
-            const failed = reasonOf(yield* Fiber.await(pending))
-            assert.strictEqual(failed?._tag, "TargetGone")
-            assert.strictEqual(failed?.reason?._tag, "FrameDetached")
-            assert.deepInclude(failed as object, { target: { _tag: "Frame", id: frame.id } })
-          }))
-        }), timeout)
+      it.effect(
+        "fails a running frame evaluation with its realm's end when the frame navigates, and FrameDetached when it is removed",
+        () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* SharedContext.newPage
+              yield* page.goto(
+                fixtureUrl(origin, `<iframe id="child" src="${fixtureUrl(origin, "<p>ready</p>")}"></iframe>`)
+              )
+              const locator = page.frame(page.locator("#child"))
+              yield* locator.locator("p").pipe(Expect.toHaveText("ready"))
+              const frame = yield* locator.resolve
+              // A navigation replaces the frame's document: the evaluation ends with its realm, the frame lives on
+              const replaced = yield* frame.evaluateInMainWorld(() => {
+                document.querySelector("p")!.textContent = "waiting"
+                return new Promise<void>(() => {})
+              }).pipe(Effect.forkScoped)
+              yield* locator.locator("p").pipe(Expect.toHaveText("waiting"))
+              yield* page.evaluateInMainWorld((url: string) => {
+                ;(document.getElementById("child") as HTMLIFrameElement).src = url
+              }, fixtureUrl(origin, "<p>ready</p>"))
+              const ended = reasonOf(yield* Fiber.await(replaced))
+              assert.strictEqual(ended?._tag, "TargetGone")
+              assert.notStrictEqual(ended?.reason?._tag, "FrameDetached")
+              assert.strictEqual(
+                (ended as unknown as { readonly target: { readonly _tag: string } }).target._tag,
+                "Realm"
+              )
+              assert.strictEqual((yield* frame.status)._tag, "Attached")
+              yield* locator.locator("p").pipe(Expect.toHaveText("ready"))
+              const pending = yield* frame.evaluateInMainWorld(() => {
+                document.querySelector("p")!.textContent = "running"
+                return new Promise<void>(() => {})
+              }).pipe(Effect.forkScoped)
+              yield* locator.locator("p").pipe(Expect.toHaveText("running"))
+              yield* page.evaluateInMainWorld(() =>
+                document.getElementById("child")!.remove()
+              )
+              const failed = reasonOf(yield* Fiber.await(pending))
+              assert.strictEqual(failed?._tag, "TargetGone")
+              assert.strictEqual(failed?.reason?._tag, "FrameDetached")
+              assert.deepInclude(failed as object, { target: { _tag: "Frame", id: frame.id } })
+            }))
+          }),
+        timeout
+      )
 
       it.effect("evaluates in a frame's own realms, holds a handle there, and finds its frames by id", () =>
         Effect.gen(function*() {
@@ -3346,15 +3368,11 @@ document.getElementById("form").addEventListener("submit", (event) => {
             )
             if (yield* supports("isolatedWorlds")) {
               assert.strictEqual(
-                yield* frame.evaluate(() =>
-                  Reflect.get(window, "innerGlobal") ?? null
-                ),
+                yield* frame.evaluate(() => Reflect.get(window, "innerGlobal") ?? null),
                 null
               )
               assert.strictEqual(
-                yield* frame.evaluate(() =>
-                  document.querySelector("p")!.textContent
-                ),
+                yield* frame.evaluate(() => document.querySelector("p")!.textContent),
                 "inner"
               )
             }
