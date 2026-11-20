@@ -27,9 +27,17 @@ export const styleTags = (name: string, backend: Layer.Layer<Browser.Browser, un
           const served = yield* site
           const page = yield* newPage
           yield* page.goto(`${served.origin}/fixture?html=x`)
-          const element = yield* page.addStyleTag({ source: "body { color: rgb(1, 2, 3) }" })
+          // The handle is released with its scope, and the stylesheet stays in the document
+          const element = yield* Effect.gen(function*() {
+            const element = yield* page.addStyleTag({ source: "body { color: rgb(1, 2, 3) }" })
+            assert.strictEqual(yield* page.evaluateInMainWorld(bodyColor), "rgb(1, 2, 3)")
+            assert.strictEqual(yield* element.evaluate((style) => style.tagName), "STYLE")
+            return element
+          }).pipe(Effect.scoped)
+          const exit = yield* element.evaluate((style) => style.tagName).pipe(Effect.exit)
+          assert(Exit.isFailure(exit))
+          assert.include(String(Cause.squash(exit.cause)), "the handle was released")
           assert.strictEqual(yield* page.evaluateInMainWorld(bodyColor), "rgb(1, 2, 3)")
-          assert.strictEqual(yield* element.evaluate((style) => style.tagName), "STYLE")
         }).pipe(Effect.scoped))
 
       it.effect("applies a stylesheet from a URL once it has loaded", () =>
@@ -77,21 +85,22 @@ export const styleTags = (name: string, backend: Layer.Layer<Browser.Browser, un
           assert.strictEqual(error.reason._tag === "ResourceFailed" && error.reason.url, url)
         }).pipe(Effect.scoped))
 
-      it.effect("fails with RefusedByPolicy when the page's CSP refuses inline source or a URL", () =>
+      it.effect("fails with RefusedByPolicy, each time, when the page's CSP refuses inline source or a URL", () =>
         Effect.gen(function*() {
           const served = yield* site
           const page = yield* newPage
           yield* page.goto(`${served.origin}/style-csp?html=x`)
           const before = yield* page.evaluateInMainWorld(bodyColor)
-          const inline = yield* page.addStyleTag({ source: "body { color: rgb(1, 2, 3) }" }).pipe(Effect.flip)
-          assert(inline._tag === "PageError")
-          assert.strictEqual(inline.reason._tag, "RefusedByPolicy")
-          assert.strictEqual(inline.reason._tag === "RefusedByPolicy" && inline.reason.directive, "style-src-elem")
-          const remote = yield* page.addStyleTag({ url: stylesheet(served.crossSite, "body { color: rgb(4, 5, 6) }") })
-            .pipe(Effect.flip)
-          assert(remote._tag === "PageError")
-          assert.strictEqual(remote.reason._tag, "RefusedByPolicy")
-          assert.strictEqual(remote.reason._tag === "RefusedByPolicy" && remote.reason.directive, "style-src-elem")
+          // The same refusal twice in one document, and a URL whose fragment the reported URL omits
+          const url = `${stylesheet(served.crossSite, "body { color: rgb(4, 5, 6) }")}#theme`
+          for (const tag of [{ source: "body { color: rgb(1, 2, 3) }" }, { url }]) {
+            for (let attempt = 1; attempt <= 2; attempt++) {
+              const error = yield* page.addStyleTag(tag).pipe(Effect.flip)
+              assert(error._tag === "PageError", `${JSON.stringify(tag)}, attempt ${attempt}: ${error._tag}`)
+              assert.strictEqual(error.reason._tag, "RefusedByPolicy", `${JSON.stringify(tag)}, attempt ${attempt}`)
+              assert.strictEqual(error.reason._tag === "RefusedByPolicy" && error.reason.directive, "style-src-elem")
+            }
+          }
           assert.strictEqual(yield* page.evaluateInMainWorld(bodyColor), before)
         }).pipe(Effect.scoped))
 
@@ -130,22 +139,6 @@ export const styleTags = (name: string, backend: Layer.Layer<Browser.Browser, un
           assert.strictEqual(yield* page.evaluateInMainWorld(bodyColor), "rgb(41, 42, 43)")
         }).pipe(Effect.scoped))
 
-      for (const kind of ["URL", "inline source"] as const) {
-        it.effect(`refuses the same ${kind} twice in one document`, () =>
-          Effect.gen(function*() {
-            const served = yield* site
-            const page = yield* newPage
-            yield* page.goto(`${served.origin}/style-csp?html=x`)
-            const source = "body { color: rgb(21, 22, 23) }"
-            const tag = kind === "URL" ? { url: stylesheet(served.crossSite, source) } : { source }
-            for (let attempt = 1; attempt <= 2; attempt++) {
-              const error = yield* page.addStyleTag(tag).pipe(Effect.flip)
-              assert(error._tag === "PageError", `attempt ${attempt}: ${error._tag}`)
-              assert.strictEqual(error.reason._tag, "RefusedByPolicy", `attempt ${attempt}`)
-            }
-          }).pipe(Effect.scoped))
-      }
-
       it.effect("keeps an allowed inline style independent of other inline refusals", () =>
         Effect.gen(function*() {
           const served = yield* site
@@ -179,29 +172,6 @@ export const styleTags = (name: string, backend: Layer.Layer<Browser.Browser, un
             ]),
             [2, 1, true]
           )
-        }).pipe(Effect.scoped))
-
-      it.effect("reports a policy refusal for a stylesheet URL with a fragment", () =>
-        Effect.gen(function*() {
-          const served = yield* site
-          const page = yield* newPage
-          yield* page.goto(`${served.origin}/style-csp?html=x`)
-          const url = `${stylesheet(served.crossSite, "body { color: red }")}#theme`
-          const error = yield* page.addStyleTag({ url }).pipe(Effect.flip)
-          assert(error._tag === "PageError")
-          assert.strictEqual(error.reason._tag, "RefusedByPolicy")
-        }).pipe(Effect.scoped))
-
-      it.effect("releases the handle without removing its stylesheet", () =>
-        Effect.gen(function*() {
-          const served = yield* site
-          const page = yield* newPage
-          yield* page.goto(`${served.origin}/fixture?html=x`)
-          const element = yield* page.addStyleTag({ source: "body { color: rgb(61, 62, 63) }" }).pipe(Effect.scoped)
-          const exit = yield* element.evaluate((style) => style.tagName).pipe(Effect.exit)
-          assert(Exit.isFailure(exit))
-          assert.include(String(Cause.squash(exit.cause)), "the handle was released")
-          assert.strictEqual(yield* page.evaluateInMainWorld(bodyColor), "rgb(61, 62, 63)")
         }).pipe(Effect.scoped))
 
       it.effect("injects into a cross-site iframe's document through its frame locator", () =>

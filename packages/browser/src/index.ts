@@ -27,6 +27,12 @@ export * as AutoResolution from "./AutoResolution.ts"
  * @stability unstable
  * @since 0.1.0
  */
+export * as Binding from "./Binding.ts"
+
+/**
+ * @stability unstable
+ * @since 0.1.0
+ */
 export * as Browser from "./Browser.ts"
 
 /**

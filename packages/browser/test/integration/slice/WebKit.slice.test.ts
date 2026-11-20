@@ -1,3 +1,4 @@
+import { bindings } from "./bindings.ts"
 import { locatorHandlers } from "./locatorHandlers.ts"
 /**
  * The slices against stock WebKit, through the public layer: WebKitGTK's MiniBrowser (`browsers.ts`)
@@ -25,6 +26,7 @@ import { requestBodies } from "./requestBodies.ts"
 import { requestSizes } from "./requestSizes.ts"
 import { requestTiming } from "./requestTiming.ts"
 import { screenshotBaselines } from "./screenshotBaselines.ts"
+import { sharedContextChecks } from "./sharedContextChecks.ts"
 import { slice } from "./slice.ts"
 import { storageReplacement } from "./storageReplacement.ts"
 import { styleTags } from "./styleTags.ts"
@@ -65,5 +67,8 @@ requestTiming("WebKit", backend)
 storageReplacement("WebKit", backend)
 requestSizes("WebKit", backend)
 styleTags("WebKit", backend)
+
+bindings("WebKit", backend)
 clientCertificates("WebKit", backend)
 screenshotBaselines("WebKit", backend)
+sharedContextChecks("WebKit", backend)

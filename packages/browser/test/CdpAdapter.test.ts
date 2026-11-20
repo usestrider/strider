@@ -160,7 +160,7 @@ describe("CDP paused page initialization", () => {
             // A context's script WebSocket route: its bridge's binding and capture script go out before the resume too.
             yield* adapter.declare(context, {
               _tag: "InitScript",
-              webSocket: {
+              hostBridge: {
                 name: "__striderWebSocket",
                 token: "token",
                 scope: scripts,
@@ -325,7 +325,7 @@ describe("CDP paused page initialization", () => {
       // The bridge's binding and capture script are queued under the same permit
       yield* adapter.declare(context, {
         _tag: "InitScript",
-        webSocket: {
+        hostBridge: {
           name: "__striderWebSocket",
           token: "token",
           scope: scripts,
@@ -3944,7 +3944,7 @@ describe("CDP WebSocket bridge", () => {
       const received = yield* Deferred.make<string>()
       const bridgeScope = yield* Scope.make()
       yield* Effect.addFinalizer(() => Scope.close(bridgeScope, Exit.void))
-      const bridge: Adapter.WebSocketBridge = {
+      const bridge: Adapter.HostBridge = {
         name: "__striderWebSocketTest",
         token: "token",
         scope: bridgeScope,
@@ -4022,7 +4022,7 @@ describe("CDP WebSocket bridge", () => {
       })
       yield* adapter.declare({ _tag: "UserContext", context: adapter.defaultContext }, {
         _tag: "InitScript",
-        webSocket: bridge,
+        hostBridge: bridge,
         source: "",
         world: { _tag: "Main" },
         phase: "user",
