@@ -131,7 +131,9 @@ export const consoleCalls = (
         const image = new Image()
         image.src = "/missing-image.png"
         document.body.append(image)
-        return new Promise((resolve) => image.onerror = resolve)
+        return new Promise<void>((resolve) => {
+          image.onerror = () => resolve()
+        })
       })
       yield* page.evaluateInMainWorld(() => console.log("late", { b: 2 }))
       yield* page.evaluateInMainWorld(() => console.log("last"))
