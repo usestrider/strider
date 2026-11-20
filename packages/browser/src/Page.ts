@@ -24,6 +24,7 @@ import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as AriaRole from "./AriaRole.ts"
+import type * as Binding from "./Binding.ts"
 import type * as BrowserWorker from "./BrowserWorker.ts"
 import type * as Capability from "./Capability.ts"
 import type * as Deadline from "./Deadline.ts"
@@ -1000,6 +1001,40 @@ export interface Page extends ReadonlyPage {
     ...args: Args
   ): Effect.Effect<JSHandle.JSHandle<Awaited<A>>, PageError | Target.TargetGone | Deadline.Timeout, Scope.Scope>
   /**
+   * Calls `fn` in the page's own world and returns its result as a handle, for what only the page's scripts can
+   * reach, such as an object a global holds.
+   *
+   * **Details**
+   *
+   * Arguments cross as they do for `evaluateInMainWorld`. The handle lives in the page's own world, so it crosses
+   * only into calls there: passing it to `evaluate`, which runs in the isolated world, fails with
+   * `NotSerializable`, except on WebKit, where `evaluate` itself fails with `Unsupported` first, since WebKit has no
+   * isolated worlds. Unlike `evaluateHandle`, it works on WebKit too.
+   *
+   * **Gotchas**
+   *
+   * Page scripts can see and tamper with what runs here. Prefer `evaluateHandle` unless you need the page's
+   * globals.
+   *
+   * **Example** (Holding the page's store)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const cartSize = Effect.fn("cartSize")(function*(page: Page.Page) {
+   *   const store = yield* page.evaluateHandleInMainWorld(() =>
+   *     Reflect.get(window, "store") as { readonly cart: ReadonlyArray<string> }
+   *   )
+   *   return yield* store.evaluate((value) => value.cart.length)
+   * })
+   * ```
+   */
+  evaluateHandleInMainWorld<Args extends ReadonlyArray<unknown>, A>(
+    fn: (...args: Args) => A | Promise<A>,
+    ...args: Args
+  ): Effect.Effect<JSHandle.JSHandle<Awaited<A>>, PageError | Target.TargetGone | Deadline.Timeout, Scope.Scope>
+  /**
    * The page's keyboard.
    */
   readonly keyboard: Keyboard.Keyboard
@@ -1117,6 +1152,40 @@ export interface Page extends ReadonlyPage {
       readonly noWaitAfter?: boolean | undefined
     } | undefined
   ): Effect.Effect<Declaration.Registration, PageError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
+  /**
+   * Exposes a host function that this page's frames call as `window[name](...)`, while the registration lives.
+   *
+   * **Details**
+   *
+   * In the page, the function returns a promise. Its arguments cross by value, as `evaluateInMainWorld`'s do, and are decoded
+   * by `arguments`; the handler's value is encoded by `result` and resolves the promise. A decoding failure or a failed handler rejects
+   * it with an `Error` carrying the message; a defect or an interruption rejects it with a fixed message and is
+   * logged. The function is in the main world of documents already open and of every document after, before their
+   * own scripts, and not in workers. Removing it deletes it from open documents and rejects the calls still
+   * waiting. A name the page or its context already exposes fails with `NameTaken`.
+   * A document holds at most 4096 waiting calls per binding; the next one rejects. The name must be ASCII letters, digits, `_` or `$`, not starting with a digit (`/^[A-Za-z_$][\w$]*$/`), or the call fails with `InvalidInput`.
+   *
+   * **Example** (Reading a value the test holds)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect, Schema } from "effect"
+   *
+   * const exposeAnswer = Effect.fn("exposeAnswer")(function*(page: Page.Page) {
+   *   yield* page.exposeBinding(
+   *     "answer",
+   *     { arguments: Schema.Tuple([Schema.String]), result: Schema.Number },
+   *     ([question]) => Effect.succeed(question.length)
+   *   )
+   *   yield* page.evaluateInMainWorld(() => (window as any).answer("why?"))
+   * })
+   * ```
+   */
+  exposeBinding<A extends ReadonlyArray<unknown>, B, E, R>(
+    name: string,
+    schemas: Binding.Schemas<A, B>,
+    handler: Binding.Handler<NoInfer<A>, NoInfer<B>, E, R>
+  ): Effect.Effect<Binding.Registration, Binding.BindingError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
   /**
    * Runs a script in every new document of this page, before its own scripts, while the registration lives.
    *

@@ -304,6 +304,7 @@ interface UserContext extends ObservedUserContext {     // two levels only: read
   route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, NoInfer<P> | "request">, options?: Route.Options<P> | undefined): Effect<Route.Registration, Route.RouteError | TargetGone | Timeout, Scope | R>   // asked after the page's own
   // Script routing: shared 16 MiB; effective capacity 14 mocks or 7 proxies (mocks + 2 * proxies <= 14).
   routeWebSocket<E, R>(pattern: Url.Pattern | string, handler: (connection: WebSocketRoute.Connection) => Effect<void, E, R>, options: WebSocketRoute.Options): Effect<WebSocketRoute.Registration, WebSocketRoute.WebSocketRouteError | TargetGone | Timeout, Scope | R>
+  exposeBinding<A extends ReadonlyArray<unknown>, B, E, R>(name: string, schemas: Binding.Schemas<A, B>, handler: Binding.Handler<A, B, E, R>): Effect<Binding.Registration, Binding.BindingError | TargetGone | Timeout, Scope | R> // window[name](...) in every page and frame of the context
   addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect<InitScript.InitScript, DeclarationError | TargetGone | Timeout, Scope>
   emulate(settings: Emulation.Emulation): Effect<Registration, DeclarationError | TargetGone | Timeout, Scope>
   grant(permissions: ReadonlyArray<Permission>, options?: GrantOptions | undefined): Effect<Registration, DeclarationError | TargetGone | Timeout, Scope>   // default every origin (not on Firefox); ANDed with Permissions Policy
@@ -429,6 +430,9 @@ interface Page extends ReadonlyPage {
   evaluateHandle<Args extends ReadonlyArray<unknown>, A>(   // the isolated world, like evaluate
     fn: (...args: Args) => A | Promise<A>, ...args: Args
   ): Effect<JSHandle.JSHandle<Awaited<A>>, PageError, Scope>
+  evaluateHandleInMainWorld<Args extends ReadonlyArray<unknown>, A>(   // the page's own world, on every backend
+    fn: (...args: Args) => A | Promise<A>, ...args: Args
+  ): Effect<JSHandle.JSHandle<Awaited<A>>, PageError, Scope>
   readonly keyboard: Keyboard.Keyboard
   readonly mouse: Mouse.Mouse
   readonly clock: PageClock.PageClock
@@ -436,6 +440,7 @@ interface Page extends ReadonlyPage {
   route<E, R>(pattern: Url.Pattern | string, handler: Route.Handler<E, R>, options?: Route.Options | undefined): Effect<Route.Registration, Route.RouteError | TargetGone | Timeout, Scope | R>
   route<E, R, P extends Route.Phase = "request">(pattern: Url.Pattern | string, handler: Route.Handler<E, R, NoInfer<P> | "request">, options?: Route.Options<P> | undefined): Effect<Route.Registration, Route.RouteError | TargetGone | Timeout, Scope | R>
   addLocatorHandler<E, R>(locator: Locator.Locator, handler: (locator: Locator.Locator) => Effect<void, E, R>, options?: { readonly times?: number; readonly noWaitAfter?: boolean }): Effect<Registration, PageError | TargetGone | Timeout, Scope | R> // page-local, serial, nonrecursive; default unlimited and wait for disappearance
+  exposeBinding<A extends ReadonlyArray<unknown>, B, E, R>(name: string, schemas: Binding.Schemas<A, B>, handler: Binding.Handler<A, B, E, R>): Effect<Binding.Registration, Binding.BindingError | TargetGone | Timeout, Scope | R> // window[name](...) in this page's frames
   addInitScript(script: InitScript.Source, options?: InitScript.Options | undefined): Effect<InitScript.InitScript, Declaration.DeclarationError | TargetGone | Timeout, Scope>
   addScriptTag(script: ScriptTag.Source, options?: ScriptTag.Options | undefined): Effect<JSHandle.JSHandle<HTMLScriptElement>, PageError | TargetGone | Timeout, Scope>
     // once, in the current document, from its main world: a URL's load, a classic inline script having run,
@@ -531,6 +536,7 @@ Notes:
 - **Navigation resolves at commit.** That is when a navigation has succeeded. Waiting for `domContentLoaded` or `load` is an extra wait you ask for with `waitUntil`, and the span records which state was waited for.
 - **Page failures are `Page.PageError`.** It covers navigation (`NavigationFailed{netError}`, `NavigationCanceled{why}`, `NavigationSuperseded{by}`, `BecameDownload`, `NoContent`, all declared in `PageNavigation`), evaluation (`EvaluationThrown`, `NotSerializable`), reads and captures (`CaptureInvalidated{document, replacement}` on Chromium `page.screenshot`; a capture's element: `Locator.NoMatch` or `StrictViolation`), setup (`InitializationFailed{step}`), a refused close (`CloseCanceled`), and the shared `InvalidInput`, `NotPermitted`, `Unsupported`, and `BackendFailure`. `operation` names the call.
 - **Declarations are scoped registrations.** `route`, `addInitScript`, `emulate`, `grant`, `Dialog.handle`, `FileChooser.handle`, and `clock.install` are removed when the caller's scope closes, and fail with `Declaration.DeclarationError` (`TimingUnsupported`, `Conflict{with}`, `DependencyReleased`, and the shared reasons). In `@effect/vitest`'s `it.effect` that scope is already present; elsewhere, use `Effect.scoped`.
+- **Bindings are declarations too.** `exposeBinding` puts `window[name](...)` in the main world of a page's documents, or of every page in a context, open ones included and before each later document's own scripts. A call's arguments and its answer cross by value as `evaluateInMainWorld`'s do, decoded and encoded by the binding's `arguments` and `result` schemas, and the handler gets the calling page and frame (`Binding.Source`). A handler failure rejects the page's promise with its message; a defect rejects it with a fixed one. A document holds at most 4096 waiting calls per binding, and the name must be ASCII letters, digits, `_` or `$`, not starting with a digit (`/^[A-Za-z_$][\w$]*$/`). On WebKit, a context binding reaches a new popup as soon as it can rather than before its first script. Removal deletes the function and rejects the calls still waiting. A name the page or its context already exposes (two pages may each expose the same name) fails with `Binding.BindingError` (`NameTaken`). As with WebSocket routing, nothing is installed in a context that exposes nothing (`docs/decisions.md`, "Pay for what you use").
 - **Init scripts in workers.** `workers: true` also runs a main-world script in the scope's dedicated workers started from then on, before their own script, and it may come `after` only scripts that do too. `clock.install(mode, { workers: true })` does the same for the clock, whose operations then reach the current workers as they reach documents. Firefox can't: WebDriver BiDi's preload scripts run in documents only (`initScripts.workers`). On Chromium a worker that gets them pauses before its first script, where its global is whole (QUIRKS.md, Q187).
 - **Init scripts keep one order everywhere:** the context's before the page's, then the order they were added in. `after` states a dependency, in force and of equal or broader scope, and a script runs only if each one it comes after ran in that document without throwing; a dependency removed stops its dependents. A script runs as its document starts, before `document.documentElement` exists, in every frame, cross-site ones included; added to a loaded page, it runs from the next document. One that throws is the page's `UncaughtException`. `world: "isolated"` is one isolated world of the caller's, apart from the engine's and the page's, where `page.evaluate` will run; WebKit has none for init scripts. On Firefox a `{ source }` or `{ path }` script runs inside a function, so its top-level declarations aren't globals; a function's are its own on every backend, since it runs as a call.
 
@@ -588,6 +594,9 @@ operation deadline apply as for `evaluate`; a timeout after dispatch cannot canc
 
 
 interface Locator extends ReadonlyLocator {             // queries, chainers and first/last return Locator
+  evaluateHandle<Args extends ReadonlyArray<unknown>, B>(   // evaluate's resolution, the result as a scoped handle
+    fn: (element: Element, ...args: Args) => B | Promise<B>, ...args: Args
+  ): Effect<JSHandle.JSHandle<Awaited<B>>, LocatorError, Scope>
   click(options?: ClickOptions | undefined): Effect<void, LocatorError>
   dblclick(options?: ClickOptions | undefined): Effect<void, LocatorError>
   tap(options?: PointerOptions | undefined): Effect<void, LocatorError>              // touch
@@ -747,8 +756,10 @@ interface JSHandle<A = unknown> extends Pipeable, Inspectable {   // a value in 
     Effect<Serialized<B>, JSHandleError>
   evaluateHandle<Args extends ReadonlyArray<unknown>, B>(fn: (value: A, ...args: Args) => B | Promise<B>, ...args: Args):
     Effect<JSHandle<Awaited<B>>, JSHandleError, Scope>
+  readonly properties: Effect<ReadonlyMap<string, JSHandle>, JSHandleError, Scope>   // own enumerable, each getter once
   readonly read: Effect<Serialized<A>, JSHandleError>    // the value itself, by value
   readonly release: Effect<void>                         // early release; idempotent
+  toString(): string                                     // realm and a preview from the call that made it
 }
 ```
 
@@ -878,7 +889,7 @@ declare const History: <S extends Schema.Top>(entry: S) => Schema.Struct<…>   
 | `FileChooser` | `FileChooser`: data (`Single` or `Multiple`); `FileChooser.handle` gets it as `Pending` | `multiple` | `Page` |
 | `Download` | `Download` | `url` | `Page` or `UserContext` |
 | `AutoResolution` | `AutoResolution`: an obligation decided by a default policy | `subject` | `Page` or `UserContext` |
-| `BrowserWorker` | `BrowserWorker` from a `Page` or `UserContext` (it can `evaluate`, which needs control: workers have no isolated world), otherwise `ObservedBrowserWorker` | `url`, `kind`: a page's are dedicated; `shared` and `service` need `workers.shared` and `workers.service` (CDP) | any page or context |
+| `BrowserWorker` | `BrowserWorker` from a `Page` or `UserContext` (it can `evaluate` and `evaluateHandle`, which need control: workers have no isolated world), otherwise `ObservedBrowserWorker` | `url`, `kind`: a page's are dedicated; `shared` and `service` need `workers.shared` and `workers.service` (CDP) | any page or context |
 | `NetworkConnection` | `NetworkConnection`: a WebSocket or EventSource, whose `frames` subscribe from now on (`networkConnections`: CDP; stock WebKit without EventSource; Unsupported on BiDi) | `url`, `kind` | any page or context |
 
 Each module has the most specific accurate name, with a prefix only where a bare name would clash with the fetch `Request`/`Response` or DOM `Navigation` globals. `ConsoleMessage` avoids Effect's `Console`, and `UncaughtException` avoids `Page.PageError` and the `*Error` suffix our failures use.

@@ -333,7 +333,8 @@ export const attaching = (
               const browser = yield* Browser.Browser
               const pages = yield* browser.pages
               assert.isAbove(pages.length, 0, "the attached browser lists its open tabs")
-              const tab = yield* pages[0]!.control
+              // A tab whose startup navigation hasn't committed would supersede the goto
+              const tab = yield* (yield* byHeading(browser, "First")).control
               yield* tab.goto(`data:text/html,${encodeURIComponent("<h1>Adopted</h1>")}`, { waitUntil: "load" })
               assert.strictEqual(yield* tab.getByRole("heading").readText, "Adopted")
             })).pipe(Effect.provide(attached))

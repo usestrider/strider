@@ -29,6 +29,7 @@ import * as Kit from "../adapterKit.ts"
 import type * as ProtocolClient from "../protocolClient.ts"
 import * as Urls from "../urls.ts"
 import { configureTarget, type Setup, workerCache } from "./declare.ts"
+import * as HostBridge from "./hostBridge.ts"
 import { frameUrl, targetKind } from "./mapping.ts"
 import {
   closingReason,
@@ -43,7 +44,6 @@ import {
   type TargetEntry
 } from "./state.ts"
 import { addFrame, commit, contextFor, endNavigation, endPage, newFrame, removeRealm } from "./tree.ts"
-import * as WebSocketBridge from "./webSocketBridge.ts"
 
 // ── Attaching and ending ──────────────────────────────────────────────────────────────────────────────────
 
@@ -482,7 +482,7 @@ export const webSocketGate: import("./state.ts").ContextGate = Effect.fnUntraced
     return {
       through: synced.through,
       apply: synced.apply.pipe(Effect.andThen(Effect.suspend(() => {
-        WebSocketBridge.flush(state, target)
+        HostBridge.flush(state, target)
         return state.buffer.flush
       })))
     }
@@ -491,7 +491,7 @@ export const webSocketGate: import("./state.ts").ContextGate = Effect.fnUntraced
 
 export const webSocketWorkerGate: import("./state.ts").WorkerGate = Effect.fnUntraced(
   function*(state, target, waiting) {
-    const bindings = yield* WebSocketBridge.prepare(state, target, undefined, false)
+    const bindings = yield* HostBridge.prepare(state, target, undefined, false)
     const results = yield* Effect.all([
       Effect.forEach(bindings, (binding) => binding.pipe(Protocol.on(target.session)), { discard: true }),
       workerGate(state, target, waiting)
@@ -501,7 +501,7 @@ export const webSocketWorkerGate: import("./state.ts").WorkerGate = Effect.fnUnt
 )
 
 let gateUsers: WeakMap<ContextEntry, { total: number; workers: number }> | undefined
-export const installWebSocketGates = Effect.fnUntraced(
+export const installHostBridgeGates = Effect.fnUntraced(
   function*(context: ContextEntry, scope: Scope.Scope, workers: boolean) {
     gateUsers ??= new WeakMap()
     let users = gateUsers.get(context)

@@ -3,9 +3,29 @@
   "upstream": [
     "method:SnapshotAssertions.toMatchSnapshot#1"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No snapshot-file or pixel-diff baseline comparison API.",
+  "status": "different",
+  "api": [
+    {
+      "module": "SnapshotBaseline",
+      "symbol": "toMatch",
+      "url": "/docs/api/vitest/SnapshotBaseline#toMatch",
+      "package": "vitest"
+    }
+  ],
+  "notes": "SnapshotBaseline.toMatch(bytes, name): a .png name is compared by pixels and any other extension, JPEG included, byte for byte. A string is compared with Vitest's own expect(text).toMatchFileSnapshot(path).",
   "capabilities": [],
-  "requirements": []
+  "requirements": [],
+  "audit": {
+    "sources": [
+      "packages/vitest/src/SnapshotBaseline.ts",
+      "packages/vitest/src/internal/baseline.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; comparison by extension, keying, update modes and failure files checked against the upstream contract."
+  },
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "visual-comparison-lives-in-the-test-adapter",
+    "quote": "Text stays with Vitest's own `toMatchFileSnapshot`, which already diffs a string against a file",
+    "revision": "29793f3b910ce686d15cce8b097f0b92a58b93a8"
+  }
 }

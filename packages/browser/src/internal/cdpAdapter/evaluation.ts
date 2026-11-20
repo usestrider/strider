@@ -27,9 +27,9 @@ import * as Groups from "../objectGroups.ts"
 import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
 import * as Urls from "../urls.ts"
+import * as HostBridge from "./hostBridge.ts"
 import { closingOf, contextKey, documentOf, type Event, frameOf, realmEnd, realmOf, type State } from "./state.ts"
 import { addRealm, removeRealm } from "./tree.ts"
-import * as WebSocketBridge from "./webSocketBridge.ts"
 
 // ── Remote values ─────────────────────────────────────────────────────────────────────────────────────────
 
@@ -211,7 +211,7 @@ export const contextCreated = (params: Runtime.ExecutionContextCreatedParams, { 
         context: Option.fromUndefinedOr((target.page?.context ?? state.workerContexts.get(target))?.id)
       }
     })
-    WebSocketBridge.flush(state, target)
+    HostBridge.flush(state, target)
     return
   }
   const frame = frameOf(state, auxData.frameId)
@@ -235,7 +235,7 @@ export const contextCreated = (params: Runtime.ExecutionContextCreatedParams, { 
     origin: context.origin,
     kind: { _tag: "Window", navigable: frame.id, document: document.id, world: realm.world }
   })
-  WebSocketBridge.flush(state, target)
+  HostBridge.flush(state, target)
 }
 
 /** The categories of the `Log.entryAdded` sources that name one; the application cache's count as `storage`. */
@@ -571,7 +571,14 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
           const handle = state.ids.handle()
           state.handles.set(handle, { target: realm.target, realm, objectId: object.objectId, group: call.group })
           if (call.group !== undefined) Groups.join(state.groups, call.group, handle)
-          return withHandle(toRemoteValue(object.deepSerializedValue ?? { type: object.type }, documentOf), handle)
+          const held = withHandle(
+            toRemoteValue(object.deepSerializedValue ?? { type: heldType(object) }, documentOf),
+            handle
+          )
+          // `idOnly` serializes no node: its description names it, for the handle's preview
+          return held.type === "node" && held.value === undefined
+            ? { ...held, value: Adapter.describedNode(object.description) }
+            : held
         }
         return toRemoteValue(serialized, documentOf)
       }
@@ -596,6 +603,35 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
     )
   )
 })
+
+/**
+ * The kind of an object an `idOnly` call holds, which CDP gives as a type and a subtype (`object`, `array`), as a
+ * deep-serialized value's type (`array`).
+ */
+const heldType = (object: Runtime.RemoteObject): string => {
+  if (object.type !== "object") return object.type
+  switch (object.subtype) {
+    case "array":
+    case "node":
+    case "regexp":
+    case "date":
+    case "map":
+    case "set":
+    case "weakmap":
+    case "weakset":
+    case "error":
+    case "proxy":
+    case "promise":
+    case "typedarray":
+    case "arraybuffer":
+    case "generator":
+      return object.subtype
+    case "null":
+      return "null"
+    default:
+      return "object"
+  }
+}
 
 /** A value with the handle the caller holds on it; a primitive, which has no object id, has none to hold. */
 const withHandle = (value: Adapter.RemoteValue, handle: Adapter.HandleId): Adapter.RemoteValue => {

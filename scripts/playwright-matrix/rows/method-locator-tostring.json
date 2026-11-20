@@ -3,9 +3,15 @@
   "upstream": [
     "method:Locator.toString"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "ReadonlyLocator",
+      "url": "/docs/api/browser/Locator#ReadonlyLocator"
+    }
+  ],
+  "notes": "A locator's string is its chain as written, such as Locator(page.getByRole(\"button\", { name: \"Save\" })), as Playwright's is.",
   "capabilities": [],
   "audit": {
     "sources": [

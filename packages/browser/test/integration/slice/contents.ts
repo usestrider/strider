@@ -1529,7 +1529,7 @@ export const contents = (
       it.effect("preserves Map arguments in the evaluated callback", () =>
         Effect.gen(function*() {
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const evaluate = yield* evaluator(page)
             assert.strictEqual(
               yield* evaluate((value) =>
@@ -1542,7 +1542,7 @@ export const contents = (
       it.effect("preserves tagged arguments recursively in the evaluated callback", () =>
         Effect.gen(function*() {
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const evaluate = yield* evaluator(page)
             assert.strictEqual(
               yield* evaluate(
@@ -1575,7 +1575,7 @@ export const contents = (
       it.effect("leaves the callback's free identifiers to its realm", () =>
         Effect.gen(function*() {
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const evaluate = yield* evaluator(page)
             // Names the argument wrapper might bind must resolve as they would in the callback's own realm
             assert.deepStrictEqual(
@@ -1596,7 +1596,7 @@ export const contents = (
       it.effect("resolves callback globals and arrow arguments in the page realm", () =>
         Effect.gen(function*() {
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             assert.strictEqual(
               yield* page.evaluateInMainWorld(() => {
                 // The arrow must not inherit adapter arguments
@@ -1872,6 +1872,134 @@ export const contents = (
           )
         }), timeout)
 
+      it.effect("lists a handle's own enumerable properties as handles, each read once and held as it is", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<p>a</p>`), { waitUntil: "load" })
+            const data = yield* page.evaluateHandleInMainWorld(() => {
+              let reads = 0
+              let thens = 0
+              const value = {
+                a: 1,
+                b: "two",
+                nested: { c: 3 },
+                resolved: Promise.resolve(42),
+                pending: new Promise(() => {}),
+                thenable: {
+                  then: () =>
+                    void thens++
+                }
+              }
+              Object.defineProperty(value, "counted", {
+                enumerable: true,
+                get: () =>
+                  ++reads
+              })
+              Object.defineProperty(value, "hidden", { enumerable: false, value: 4 })
+              Reflect.set(window, "__counts", () => [reads, thens])
+              return value
+            })
+            const properties = yield* data.properties
+            assert.deepStrictEqual(
+              [...properties.keys()],
+              ["a", "b", "nested", "resolved", "pending", "thenable", "counted"]
+            )
+            assert.strictEqual(yield* properties.get("a")!.read, 1)
+            assert.strictEqual(yield* properties.get("b")!.read, "two")
+            assert.strictEqual(properties.get("nested")!.realm, data.realm)
+            assert.strictEqual(
+              yield* properties.get("nested")!.evaluate((nested) =>
+                (nested as { c: number }).c
+              ),
+              3
+            )
+            assert.strictEqual(yield* properties.get("counted")!.read, 1)
+            // A promise is held as itself, never waited for, and a thenable's `then` never runs
+            for (const key of ["resolved", "pending"]) {
+              assert.strictEqual(
+                yield* properties.get(key)!.evaluate((value) => value instanceof Promise),
+                true
+              )
+            }
+            assert.strictEqual(
+              yield* properties.get("thenable")!.evaluate((value) => typeof (value as { then: unknown }).then),
+              "function"
+            )
+            assert.deepStrictEqual(
+              yield* page.evaluateInMainWorld(() => (Reflect.get(window, "__counts") as () => [number, number])()),
+              [1, 0]
+            )
+            const primitive = yield* page.evaluateHandleInMainWorld(() => 7)
+            assert.strictEqual((yield* primitive.properties).size, 0)
+            yield* data.release
+            const released = yield* Effect.exit(Effect.scoped(data.properties))
+            assert.isTrue(Exit.isFailure(released) && Option.isNone(Exit.findErrorOption(released)))
+          }))
+        }), timeout)
+
+      it.effect("hands out handles in the page's own world and a locator's match, each previewing its value", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(
+              fixtureUrl(origin, `<script>window.secret = { answer: 42 }</script><p id="x">hello</p><p>a</p>`),
+              { waitUntil: "load" }
+            )
+            const secret = yield* page.evaluateHandleInMainWorld(() =>
+              Reflect.get(window, "secret") as { answer: number }
+            )
+            assert.strictEqual(
+              yield* secret.evaluate((value) =>
+                value.answer
+              ),
+              42
+            )
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(
+                (value: { answer: number }) =>
+                  value.answer,
+                secret as unknown as { answer: number }
+              ),
+              42
+            )
+            const worlds = yield* supports("isolatedWorlds")
+            const crossed = reasonOf(
+              yield* Effect.exit(page.evaluate(
+                (value: { answer: number }) => value.answer,
+                secret as unknown as {
+                  answer: number
+                }
+              ))
+            )
+            // Without isolated worlds the call itself is refused before its arguments are
+            assert.strictEqual(crossed?.reason?._tag, worlds ? "NotSerializable" : "Unsupported")
+            // The preview comes from the call that made the handle
+            const number = yield* page.evaluateHandleInMainWorld(() => 42)
+            assert.strictEqual(String(number), `JSHandle(${number.realm} 42)`)
+            const text = yield* page.evaluateHandleInMainWorld(() => "hi")
+            assert.strictEqual(String(text), `JSHandle(${text.realm} "hi")`)
+            const array = yield* page.evaluateHandleInMainWorld(() => [1, 2, 3])
+            assert.strictEqual(String(array), `JSHandle(${array.realm} array)`)
+            const node = yield* page.evaluateHandleInMainWorld(() => document.querySelector("p"))
+            assert.strictEqual(String(node), `JSHandle(${node.realm} node <p>)`)
+            assert.strictEqual(String(secret), `JSHandle(${secret.realm} object)`)
+            if (yield* isolatedRefused(page.locator("#x").evaluateHandle((element) => element))) return
+            const handle = yield* page.locator("#x").evaluateHandle(
+              (element, suffix: string) => ({ id: element.id + suffix, element }),
+              "!"
+            )
+            assert.strictEqual(yield* handle.evaluate((value) => value.id), "x!")
+            assert.strictEqual(yield* handle.evaluate((value) => value.element.textContent), "hello")
+            const several = reasonOf(
+              yield* Effect.exit(page.locator("p").evaluateHandle((element) => element))
+            ) as unknown as Locator.LocatorError
+            assert.strictEqual(several.reason._tag, "StrictViolation")
+          }))
+        }), timeout)
+
       it.effect("finds test ids by pattern, and names the pattern when it matches several", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -1904,7 +2032,9 @@ export const contents = (
                   element.id
                 )
               )
-            ) return
+            ) {
+              return
+            }
             assert.strictEqual(
               yield* page.locator("#x").evaluate((element, suffix: string) => element.textContent + suffix, "!"),
               "hello!"
@@ -2586,7 +2716,8 @@ export const contents = (
             yield* page.evaluateInMainWorld(() => {
               document.querySelector<HTMLInputElement>("#all")!.indeterminate = true
             })
-            const anywhere = (pattern: AriaPattern.AriaPattern) => AriaPattern.anywhere(AriaPattern.including(pattern))
+            const anywhere = (pattern: AriaPattern.AriaPattern) =>
+              AriaPattern.anywhere(AriaPattern.including(pattern))
             yield* page.pipe(Expect.toMatchAria(anywhere(
               AriaPattern.node("heading", "Plans", AriaPattern.unchecked, { level: 2 })
             )))
@@ -2721,7 +2852,7 @@ export const contents = (
             )
             yield* page.goto(url("rgb(50,80,220)"), { waitUntil: "load" })
             assert.deepStrictEqual(yield* pixel(yield* page.screenshot()), [50, 80, 220, 255])
-            const other = yield* Browser.newPage()
+            const other = yield* SharedContext.newPage
             yield* other.goto(url("black"), { waitUntil: "load" })
             assert.deepStrictEqual(yield* pixel(yield* page.screenshot()), [50, 80, 220, 255])
           }))
