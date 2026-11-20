@@ -661,10 +661,42 @@ export const toHaveJSProperty = (
       const history: Array<Diagnostics.ObservedValue> = []
       const triggers = new Set<"initial" | "change" | "interval">(["initial"])
       let checks = 0
-      const failed = () =>
-        failure(id, subject.description, condition, started, history, checks, triggers, undefined, "toHaveJSProperty")
+      const failed = (handlerFailure?: Reason.LocatorHandlerFailed) =>
+        failure(
+          id,
+          subject.description,
+          condition,
+          started,
+          history,
+          checks,
+          triggers,
+          undefined,
+          "toHaveJSProperty",
+          undefined,
+          handlerFailure
+        )
       while (true) {
         checks++
+        // The page's locator handlers run before each check, as the engine's expectations run them
+        const serviced = yield* subject.owner.page.execution.beforeCheck.pipe(
+          Effect.as(undefined),
+          Effect.catch((failure) =>
+            failure._tag === "Timeout" || failure._tag === "TargetGone"
+              ? Effect.fail(failure)
+              : failure._tag === "Gone"
+              ? Effect.fail(failure.error)
+              : Effect.succeed(failure)
+          )
+        )
+        if (serviced !== undefined) {
+          if (serviced._tag === "Reason" && serviced.reason._tag === "LocatorHandlerFailed") {
+            return yield* Effect.fail(failed(serviced.reason))
+          }
+          if (serviced._tag === "Deadline") return yield* Effect.fail(failed())
+          Operation.appendObservation(history, { error: serviced.reason.message })
+          // A dialog nothing will decide holds the page until someone else decides it
+          if (serviced.reason._tag === "PromptBlocking") return yield* Effect.fail(failed())
+        }
         const checked = yield* subject.readJSProperty(keys).pipe(
           Effect.map((read) =>
             Option.some(
