@@ -591,12 +591,17 @@ export const makeScreencastClock = () => {
 
 /** Video is another session consumer; timing and its lifetime are independent of the caller's acquisition deadline. */
 export const video = Effect.fnUntraced(
-  function*(state: State, id: L1Target.NavigableId, writer: Option.Option<VideoWriter.VideoWriter>) {
+  function*(
+    state: State,
+    id: L1Target.NavigableId,
+    options: Adapter.VideoOptions,
+    writer: Option.Option<VideoWriter.VideoWriter>
+  ) {
     if (Option.isNone(writer)) {
       return yield* Effect.fail(Kit.unsupported("capability.video", "Chromium video requires a VideoWriter service"))
     }
     const page = yield* pageOf(state, id)
-    const directory = downloadDirectory(state, page.context.id)
+    const directory = Option.orElse(options.directory, () => downloadDirectory(state, page.context.id))
     if (Option.isNone(directory)) {
       return yield* Effect.fail(Kit.unsupported("capability.video", "The context must allow downloads to a directory"))
     }
@@ -622,7 +627,8 @@ export const video = Effect.fnUntraced(
         }
       }),
       writer.value,
-      directory.value
+      directory.value,
+      options
     )
   }
 )

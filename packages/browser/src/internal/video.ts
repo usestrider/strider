@@ -31,7 +31,9 @@ export interface Source {
 export const record = Effect.fnUntraced(function*(
   source: Effect.Effect<Source, Adapter.AdapterError, Scope.Scope>,
   writer: VideoWriter.VideoWriter,
-  directory: string
+  directory: string,
+  /** The file's size and frame rate; the first image's size, variable-rate, when not given. */
+  output?: { readonly width: number; readonly height: number; readonly fps: Option.Option<number> } | undefined
 ) {
   const clock = yield* BrowserClock.CurrentClock
   // The writer's finish is bounded so a hung writer can't hang scope close; how long it may take is the caller's.
@@ -136,7 +138,12 @@ export const record = Effect.fnUntraced(function*(
               : original
           })
         ),
-        { path, width: initial.width, height: initial.height }
+        {
+          path,
+          width: output?.width ?? initial.width,
+          height: output?.height ?? initial.height,
+          ...(output !== undefined && Option.isSome(output.fps) ? { fps: output.fps.value } : {})
+        }
       ).pipe(
         Effect.mapError((error) => backendFailure(error.message)),
         Effect.raceFirst(

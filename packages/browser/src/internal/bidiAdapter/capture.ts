@@ -89,25 +89,43 @@ export const pdf = Effect.fnUntraced(function*(state: State, id: L1Target.Naviga
 })
 
 /** A WebM file Firefox writes where the context downloads to, which a launched browser shares with the program. */
-export const video = Effect.fnUntraced(function*(state: State, id: L1Target.NavigableId) {
+export const video = Effect.fnUntraced(function*(
+  state: State,
+  id: L1Target.NavigableId,
+  options: Adapter.VideoOptions
+) {
   const navigable = yield* navigableById(state, id)
   if (state.options.ownership !== "launched") {
     return yield* Effect.fail(
       Kit.unsupported("capability.video", "Firefox writes the file on its own host, out of the program's reach")
     )
   }
-  const behavior = state.registry.downloads(navigable.context.id)
-  if (Option.isNone(behavior) || behavior.value._tag === "Deny") {
-    return yield* Effect.fail(Kit.unsupported(
-      "capability.video",
-      Option.isNone(behavior)
-        ? "The page's context declares no downloads directory, where the file would go"
-        : "The page's context denies downloads, and the file would go where they do"
-    ))
+  if (Option.isSome(options.fps) && !Number.isInteger(options.fps.value)) {
+    return yield* Effect.fail(Kit.unsupported("capability.video", "Firefox takes a whole frame rate"))
+  }
+  let directory: string
+  if (Option.isSome(options.directory)) {
+    directory = options.directory.value
+  } else {
+    const behavior = state.registry.downloads(navigable.context.id)
+    if (Option.isNone(behavior) || behavior.value._tag === "Deny") {
+      return yield* Effect.fail(Kit.unsupported(
+        "capability.video",
+        Option.isNone(behavior)
+          ? "The page's context declares no downloads directory, where the file would go"
+          : "The page's context denies downloads, and the file would go where they do"
+      ))
+    }
+    directory = behavior.value.directory
   }
   const started = yield* Kit.protocol(state.send(BrowsingContext.startScreencast({
     context: navigable.bidi,
-    destinationFolder: behavior.value.directory
+    destinationFolder: directory,
+    video: {
+      width: options.width,
+      height: options.height,
+      ...(Option.isSome(options.fps) ? { frameRate: options.fps.value } : {})
+    }
   })))
   const written = Deferred.makeUnsafe<string, Adapter.AdapterError>()
   yield* Effect.addFinalizer(() =>

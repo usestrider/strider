@@ -52,19 +52,25 @@ export const Frame = Schema.Struct({
 export type Frame = typeof Frame.Type
 
 /**
- * The destination and fixed output size. Writers must output every frame at exactly these dimensions,
- * scaling to fit, centring, and padding with black. Writers must preserve frame timestamps: the last
- * picture lasts until the final frame's timestamp, which marks the recording end.
+ * The destination, fixed output size, and optional frame rate. Writers must output every frame at exactly these
+ * dimensions, scaling to fit, centring, and padding with black. Without `fps`, writers must preserve frame
+ * timestamps: the last picture lasts until the final frame's timestamp, which marks the recording end. With `fps`,
+ * the file is constant-rate at that many frames a second, each showing the image in force at its time.
  *
  * @stability unstable
  * @category schemas
  * @since 0.1.0
  */
-export const Destination = Schema.Struct({ path: Schema.String, width: Schema.Number, height: Schema.Number })
+export const Destination = Schema.Struct({
+  path: Schema.String,
+  width: Schema.Number,
+  height: Schema.Number,
+  fps: Schema.optional(Schema.Number)
+})
 
 /**
- * A file and its fixed output dimensions in device pixels. Writers fit images to this size and preserve
- * their timestamps through the final recording-end frame.
+ * A file, its fixed output dimensions in pixels, and an optional constant frame rate. Writers fit images to this
+ * size and, without a frame rate, preserve their timestamps through the final recording-end frame.
  *
  * @stability unstable
  * @category models
@@ -96,7 +102,8 @@ export class VideoWriterError extends Schema.TaggedError<VideoWriterError>()("Vi
  */
 export interface VideoWriter {
   /**
-   * Consumes timestamped images without adding a fixed frame rate, then completes with the finished file's path.
+   * Consumes timestamped images, at the destination's frame rate if it has one and otherwise at their own times,
+   * then completes with the finished file's path.
    * A slow write backpressures the source.
    *
    * **Example** (Writing frames with a provided writer)
@@ -135,8 +142,10 @@ const failure = (hint: string) =>
  *
  * **Details**
  *
- * Requires `ChildProcessSpawner`. The output has no audio and preserves variable frame times to millisecond
- * precision; images are scaled proportionally and padded with black to the recording's original dimensions. Closing the input finishes the file.
+ * Requires `ChildProcessSpawner`. The output has no audio. Without a destination `fps` it preserves variable frame
+ * times to millisecond precision; with one it is constant-rate, repeating or dropping images to keep that rate.
+ * Images are scaled proportionally and padded with black to the destination's dimensions. Closing the input
+ * finishes the file.
  *
  * Quality is fixed: libvpx encodes in real-time mode with `-cpu-used 8`, at constrained quality (CRF 8, quantizer 0 to
  * 50) and a target of 4 Mbit/s, so small text stays legible at desktop size. The target is an average, not a cap: a
@@ -170,7 +179,11 @@ export const layerFfmpeg = (
           if (!/^(\/|[A-Za-z]:[\\/])/.test(options.path)) {
             return yield* Effect.fail(failure("ffmpeg path must be absolute"))
           }
-          const { height, path, width } = destination
+          const { fps, height, path, width } = destination
+          // Without a frame rate each image keeps its own time; with one, ffmpeg repeats or drops images to keep it
+          const timing = fps === undefined
+            ? ["-fps_mode", "passthrough", "-enc_time_base", "1:1000"]
+            : ["-fps_mode", "cfr", "-r", String(fps)]
           const process = yield* spawner.spawn(ChildProcess.make(options.path, [
             "-nostdin",
             "-loglevel",
@@ -181,7 +194,9 @@ export const layerFfmpeg = (
             "-i",
             "pipe:0",
             "-vf",
-            `scale=${width}:${height}:force_original_aspect_ratio=decrease,format=yuv444p,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,format=yuv420p,setsar=1`,
+            `${
+              fps === undefined ? "" : `fps=${fps},`
+            }scale=${width}:${height}:force_original_aspect_ratio=decrease,format=yuv444p,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,format=yuv420p,setsar=1`,
             "-c:v",
             "libvpx",
             "-deadline",
@@ -198,10 +213,7 @@ export const layerFfmpeg = (
             "50",
             "-pix_fmt",
             "yuv420p",
-            "-fps_mode",
-            "passthrough",
-            "-enc_time_base",
-            "1:1000",
+            ...timing,
             "-an",
             "-y",
             "-f",

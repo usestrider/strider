@@ -778,41 +778,68 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           }))
         }), timeout)
 
-      it.effect("records to a path at a size and frame rate where the browser writes one", () =>
-        Effect.gen(function*() {
-          if (!(yield* supports("capability.video"))) return
-          const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-video-path-"))
-          yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
-          const target = path.join(directory, "run.webm")
-          const url = yield* fixture(`<p id="t"></p><script>setInterval(() => t.textContent = Date.now(), 50)</script>`)
-          const file = yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* SharedContext.newPage
-            yield* page.goto(url)
-            const recording = yield* Effect.scoped(Effect.gen(function*() {
-              const recording = yield* page.capability(Capability.Video, {
-                path: target,
-                size: { width: 320, height: 200 },
-                fps: 10
-              })
-              yield* Effect.sleep("800 millis")
-              return recording
+      it.effect(
+        "records to a path at a size and frame rate where the browser writes one",
+        () =>
+          Effect.gen(function*() {
+            if (!(yield* supports("capability.video"))) return
+            const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-video-path-"))
+            yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
+            const target = path.join(directory, "run.webm")
+            const url = yield* fixture(
+              `<p id="t"></p><script>setInterval(() => t.textContent = Date.now(), 50)</script>`
+            )
+            const [file, viewport] = yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* SharedContext.newPage
+              yield* page.goto(url)
+              const recording = yield* Effect.scoped(Effect.gen(function*() {
+                const recording = yield* page.capability(Capability.Video, {
+                  path: target,
+                  size: { width: 320, height: 200 },
+                  fps: 10
+                })
+                yield* Effect.sleep("800 millis")
+                return recording
+              }))
+              return [yield* recording.file, yield* page.evaluate(() => [innerWidth, innerHeight])] as const
             }))
-            return yield* recording.file
-          }))
-          assert.strictEqual(file, target)
-          const probe = JSON.parse(execFileSync(process.env["STRIDER_FFPROBE"]!, [
-            "-v",
-            "error",
-            "-show_streams",
-            "-of",
-            "json",
-            target
-          ], { encoding: "utf8" }))
-          console.log("Video at a size and frame rate", JSON.stringify(probe.streams[0]))
-          assert.deepStrictEqual([probe.streams[0].width, probe.streams[0].height], [320, 200])
-          assert.strictEqual(probe.streams[0].r_frame_rate, "10/1")
-          assert.deepStrictEqual(fs.readdirSync(directory), ["run.webm"])
-        }), timeout)
+            assert.strictEqual(file, target)
+            const probe = JSON.parse(execFileSync(process.env["STRIDER_FFPROBE"]!, [
+              "-v",
+              "error",
+              "-count_frames",
+              "-show_streams",
+              "-show_format",
+              "-of",
+              "json",
+              target
+            ], { encoding: "utf8" }))
+            const video = probe.streams[0]
+            console.log(
+              "Video at a size and frame rate",
+              JSON.stringify({
+                viewport,
+                width: video.width,
+                height: video.height,
+                r_frame_rate: video.r_frame_rate,
+                avg_frame_rate: video.avg_frame_rate,
+                frames: video.nb_read_frames,
+                duration: probe.format.duration
+              })
+            )
+            // Firefox 158 fits the page into the size keeping its aspect ratio, without padding: the file touches
+            // the size on one side and is within it on the other
+            assert.isAtMost(video.width, 320)
+            assert.isAtMost(video.height, 200)
+            assert.isTrue(video.width === 320 || video.height === 200)
+            // Its WebM has no duration; 800 milliseconds at 10 frames a second is about 8 frames, where Firefox's
+            // own rate would give several times that
+            assert.isAtLeast(Number(video.nb_read_frames), 4)
+            assert.isAtMost(Number(video.nb_read_frames), 12)
+            assert.deepStrictEqual(fs.readdirSync(directory), ["run.webm"])
+          }),
+        timeout
+      )
 
       it.effect("opens a span per protocol command, under its operation's, when asked", () =>
         Effect.gen(function*() {

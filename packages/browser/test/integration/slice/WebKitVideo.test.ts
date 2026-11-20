@@ -112,23 +112,31 @@ describe("WebKit polled video", () => {
       )
     })), 15_000)
 
-  it.live("writes to a path at a size and frame rate in place of the layer's directory", () =>
-    run(launched(Effect.gen(function*() {
-      const fs = yield* FileSystem.FileSystem
-      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "strider-webkit-video-path-" })
-      const target = `${directory}/run.webm`
-      const page = yield* Browser.newPage({ emulation: { viewport: { width: 640, height: 480 } } })
-      const recording = yield* Effect.scoped(Effect.gen(function*() {
-        const video = yield* page.capability(Capability.Video, { path: target, size: { width: 320, height: 200 }, fps: 10 })
-        yield* Effect.sleep("500 millis")
-        return video
-      }))
-      assert.strictEqual(yield* recording.file, target)
-      const video = probe(target).streams[0]
-      assert.deepStrictEqual([video.width, video.height], [320, 200])
-      assert.strictEqual(video.r_frame_rate, "10/1")
-      assert.deepStrictEqual(yield* fs.readDirectory(directory), ["run.webm"])
-    }))), 30_000)
+  it.live(
+    "writes to a path at a size and frame rate in place of the layer's directory",
+    () =>
+      run(launched(Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const directory = yield* fs.makeTempDirectoryScoped({ prefix: "strider-webkit-video-path-" })
+        const target = `${directory}/run.webm`
+        const page = yield* Browser.newPage({ emulation: { viewport: { width: 640, height: 480 } } })
+        const recording = yield* Effect.scoped(Effect.gen(function*() {
+          const video = yield* page.capability(Capability.Video, {
+            path: target,
+            size: { width: 320, height: 200 },
+            fps: 10
+          })
+          yield* Effect.sleep("500 millis")
+          return video
+        }))
+        assert.strictEqual(yield* recording.file, target)
+        const video = probe(target).streams[0]
+        assert.deepStrictEqual([video.width, video.height], [320, 200])
+        assert.strictEqual(video.r_frame_rate, "10/1")
+        assert.deepStrictEqual(yield* fs.readDirectory(directory), ["run.webm"])
+      }))),
+    30_000
+  )
 
   it.live(
     "records timestamped samples, survives navigation and fits resized PNGs",

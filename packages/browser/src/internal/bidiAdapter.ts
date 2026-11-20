@@ -453,7 +453,7 @@ export const connect: (
             "Firefox's browsingContext.startScreencast records a WebM file on the browser's host, and streams no frames"
           )
         ),
-      video: (page) => Capture.video(state, page),
+      video: (page, options) => Capture.video(state, page, options),
       createAuthenticator: () =>
         Effect.fail(
           Kit.unsupported("capability.virtualAuthenticator", "Native virtual authenticators require Chromium CDP")

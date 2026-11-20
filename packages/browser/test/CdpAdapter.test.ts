@@ -2467,7 +2467,9 @@ describe("Chromium video writer lifetime", () => {
         behavior: { _tag: "Allow", directory: "/tmp" }
       })
       const page = yield* h.page.control
-      const video = yield* page.capability(Capability.Video).pipe(Deadline.within("1 second"))
+      const video = yield* page.capability(Capability.Video, { size: { width: 800, height: 600 } }).pipe(
+        Deadline.within("1 second")
+      )
       yield* frame(h, 70)
       const recordedDeadline = yield* Deferred.await(deadline)
       yield* video.file
@@ -2496,7 +2498,9 @@ describe("Chromium video writer lifetime", () => {
       })
       const page = yield* h.page.control
       const scope = yield* Scope.make()
-      const video = yield* page.capability(Capability.Video).pipe(Scope.provide(scope))
+      const video = yield* page.capability(Capability.Video, { size: { width: 800, height: 600 } }).pipe(
+        Scope.provide(scope)
+      )
       yield* frame(h, 51, 1000)
       assert.match((yield* Deferred.await(destination)).path, /^\/tmp\/strider-.*\.webm$/)
       const first = yield* Queue.take(written)
@@ -2531,7 +2535,9 @@ describe("Chromium video writer lifetime", () => {
       })
       const page = yield* h.page.control
       const scope = yield* Scope.make()
-      const video = yield* page.capability(Capability.Video).pipe(Scope.provide(scope))
+      const video = yield* page.capability(Capability.Video, { size: { width: 800, height: 600 } }).pipe(
+        Scope.provide(scope)
+      )
       yield* frame(h, 81, 1000)
       assert.strictEqual((yield* Queue.take(written)).at, 0)
       yield* TestClock.adjust("40 millis")
@@ -2565,7 +2571,9 @@ describe("Chromium video writer lifetime", () => {
           // Reusing the page after a complete stop must establish a new clock mapping.
           for (const shift of [0, 3600]) {
             const scope = yield* Scope.make()
-            const video = yield* page.capability(Capability.Video).pipe(Scope.provide(scope))
+            const video = yield* page.capability(Capability.Video, { size: { width: 800, height: 600 } }).pipe(
+              Scope.provide(scope)
+            )
             const clock = yield* BrowserClock.CurrentClock
             const base = typeof epoch === "number"
               ? epoch + shift
@@ -2610,7 +2618,7 @@ describe("Chromium video writer lifetime", () => {
         behavior: { _tag: "Allow", directory: "/tmp" }
       })
       const page = yield* h.page.control
-      const video = yield* page.capability(Capability.Video)
+      const video = yield* page.capability(Capability.Video, { size: { width: 800, height: 600 } })
       yield* frame(h, 52)
       const error = yield* Effect.flip(video.file)
       assert(Capability.isCapabilityError(error))
@@ -2641,7 +2649,9 @@ describe("Chromium video writer lifetime", () => {
         const cast = yield* page.capability(Capability.Screencast).pipe(Scope.provide(castScope))
         yield* cast.frames.pipe(Stream.runDrain, Effect.forkIn(castScope))
         const videoScope = yield* Scope.make()
-        const video = yield* page.capability(Capability.Video).pipe(Scope.provide(videoScope))
+        const video = yield* page.capability(Capability.Video, { size: { width: 800, height: 600 } }).pipe(
+          Scope.provide(videoScope)
+        )
         yield* frame(h, 61)
         yield* Deferred.await(started)
         yield* drain
@@ -2679,7 +2689,9 @@ describe("Chromium video writer lifetime", () => {
         })
         const page = yield* h.page.control
         const scope = yield* Scope.make()
-        const video = yield* page.capability(Capability.Video).pipe(Scope.provide(scope))
+        const video = yield* page.capability(Capability.Video, { size: { width: 800, height: 600 } }).pipe(
+          Scope.provide(scope)
+        )
         yield* drain
         // No Page.screencastFrame arrives before the scope closes, as when the page never paints.
         const closing = yield* Effect.forkScoped(Scope.close(scope, Exit.void))
@@ -2724,7 +2736,9 @@ describe("Chromium video writer lifetime", () => {
           })
           const page = yield* h.page.control
           const recordingScope = yield* Scope.make()
-          const video = yield* page.capability(Capability.Video).pipe(Scope.provide(recordingScope))
+          const video = yield* page.capability(Capability.Video, { size: { width: 800, height: 600 } }).pipe(
+            Scope.provide(recordingScope)
+          )
           const file = yield* Effect.forkScoped(Effect.exit(video.file))
           if (mode !== "empty") {
             yield* frame(h, 71)
@@ -2812,7 +2826,7 @@ describe("Chromium video writer lifetime", () => {
         })
         const page = yield* h.page.control
         const scope = yield* Scope.make()
-        const video = yield* page.capability(Capability.Video).pipe(
+        const video = yield* page.capability(Capability.Video, { size: { width: 800, height: 600 } }).pipe(
           Scope.provide(scope),
           Deadline.withDefaultBudget("2 seconds")
         )

@@ -29,18 +29,19 @@ const TypeId = "~@usestrider/browser/Capability"
  *
  * **Details**
  *
- * The access parameter defaults to `"inspect"`. A `"control"` capability needs a page you control.
+ * The access parameter defaults to `"inspect"`. A `"control"` capability needs a page you control. `Options` is
+ * what acquisition takes after the capability, as `Video`'s `VideoOptions`; `never` for one that takes none.
  *
  * @stability unstable
  * @category models
  * @since 0.1.0
  */
-export interface Capability<out H, out Access extends "inspect" | "control" = "inspect"> {
+export interface Capability<out H, out Access extends "inspect" | "control" = "inspect", in Options = never> {
   /**
    * The access needed to acquire this capability.
    */
   readonly access: Access
-  readonly [TypeId]: () => H
+  readonly [TypeId]: (options: Options) => H
   readonly name: string
 }
 
@@ -51,10 +52,16 @@ export interface Capability<out H, out Access extends "inspect" | "control" = "i
  * @category guards
  * @since 0.1.0
  */
-export const isCapability = (u: unknown): u is Capability<unknown> | Capability<unknown, "control"> =>
+export const isCapability = (
+  u: unknown
+): u is Capability<unknown, "inspect", never> | Capability<unknown, "control", never> =>
   Predicate.hasProperty(u, TypeId)
 
-const make = <H>(name: string): Capability<H> => ({ [TypeId]: () => undefined as H, name, access: "inspect" })
+const make = <H, Options = never>(name: string): Capability<H, "inspect", Options> => ({
+  [TypeId]: () => undefined as H,
+  name,
+  access: "inspect"
+})
 
 /**
  * One node of the browser's own accessibility tree, unprocessed.
@@ -142,6 +149,45 @@ export interface ScreencastControl {
 }
 
 /**
+ * How `Video` records: the file's size and frame rate, and where it goes.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export interface VideoOptions {
+  /**
+   * The file's width and height in pixels, each a positive integer. Every image is scaled to fit, centred, and
+   * padded black.
+   *
+   * @default the page's viewport in CSS pixels when the capability is acquired, scaled down (never up) to fit 800 by
+   * 800: a 1280 by 720 viewport gives 800 by 450
+   */
+  readonly size?: { readonly width: number; readonly height: number } | undefined
+  /**
+   * The file's constant frame rate, finite and positive. Without it, the file is variable-rate, and each image
+   * lasts until the next.
+   *
+   * @default none: variable-rate
+   */
+  readonly fps?: number | undefined
+  /**
+   * The absolute path of the file, in a directory that exists. With a path, video doesn't need the context's
+   * downloads directory.
+   *
+   * @default none: a new file in the context's downloads directory, or on WebKit the layer's video directory
+   */
+  readonly path?: string | undefined
+  /**
+   * Whether the recording may replace a file already at `path`. With `false`, an existing file fails acquisition
+   * with `InvalidInput`, and a file that appears there while recording fails `file`, leaving that file in place.
+   *
+   * @default true
+   */
+  readonly overwrite?: boolean | undefined
+}
+
+/**
  * A page recorded to a video file while the capability's scope lives.
  *
  * @stability unstable
@@ -189,24 +235,29 @@ export const Screencast: Capability<ScreencastControl> = make("Screencast")
  *
  * **Details**
  *
- * Firefox writes the file itself; Chromium uses a `VideoWriter` provided to its browser layer. Both write into
- * the context's downloads directory until recording ends. Temporary downloads are removed with
- * the context; set `UserContext.Options.downloads` to keep the file in a directory of yours.
- * WebKit requires explicit layer video options and a writer, and writes into the directory those options name.
- * Its initial PNG is immediate; subsequent captures wait the configured interval after completion. PNG polling
- * can miss short states and adds work to the page. Video does not enable WebKit downloads or native screencasts.
- * Chromium and opted-in WebKit keep each source frame's time, showing it until the next frame or recording end.
- * Viewport changes are scaled and padded to the initial size. Closing its scope or ending its page/session closes input and waits for a started
- * writer to finish, for up to `Deadline.DefaultBudget` (30 seconds unless set) on the browser clock, as read when
- * the capability is acquired: wrap the acquisition in `Deadline.withDefaultBudget` to give a slow encoder longer.
- * A recording that receives no image fails promptly with `BackendFailure`.
+ * `page.capability(Capability.Video, options)` takes `VideoOptions`: the file's size, a constant frame rate, and
+ * a path. The file is the page's viewport scaled down to fit 800 by 800 unless `size` says otherwise, and every
+ * image is scaled to fit it, centred, and padded black, as when the viewport changes while recording.
+ * Firefox writes the file itself, and is given the size and frame rate; Chromium uses a `VideoWriter` provided to
+ * its browser layer. Without a `path`, both write into the context's downloads directory until recording ends.
+ * Temporary downloads are removed with the context; set `UserContext.Options.downloads`, or `path`, to keep the
+ * file. WebKit requires explicit layer video options and a writer, and writes into the directory those options
+ * name, or to `path`. Its initial PNG is immediate; subsequent captures wait the configured interval after
+ * completion. PNG polling can miss short states and adds work to the page. Video does not enable WebKit downloads
+ * or native screencasts. Without `fps`, Chromium and opted-in WebKit keep each source frame's time, showing it
+ * until the next frame or recording end. Closing its scope or ending its page/session closes input and waits
+ * for a started writer to finish, for up to `Deadline.DefaultBudget` (30 seconds unless set) on the browser
+ * clock, as read when the capability is acquired: wrap the acquisition in `Deadline.withDefaultBudget` to give a
+ * slow encoder longer. A recording that receives no image fails promptly with `BackendFailure`.
  *
  * **Gotchas**
  *
  * It fails with `Unsupported` on Chromium without a `VideoWriter`, or WebKit without both a writer and explicit
- * polled-video options. It fails on
- * Firefox too when Strider didn't launch it, or when the page's context denies downloads, because the file would
- * be out of reach.
+ * polled-video options. It fails on Firefox too when Strider didn't launch it, because the file would be out of
+ * reach, or, without a `path`, when the page's context denies downloads. Without a `path`, Chromium fails the
+ * same way when the context has no downloads directory. A `size` that isn't positive integers, an `fps` that isn't
+ * finite and positive, a relative `path`, a `path` in a directory that doesn't exist, and with `overwrite: false`
+ * an existing file, fail with `InvalidInput` before recording starts. Firefox takes a whole frame rate only.
  *
  * **Example** (Recording a checkout)
  *
@@ -216,7 +267,10 @@ export const Screencast: Capability<ScreencastControl> = make("Screencast")
  *
  * const recorded = Effect.fn("recorded")(function*(page: Page.Page) {
  *   const video = yield* Effect.scoped(Effect.gen(function*() {
- *     const recording = yield* page.capability(Capability.Video)
+ *     const recording = yield* page.capability(Capability.Video, {
+ *       size: { width: 800, height: 450 },
+ *       fps: 25
+ *     })
  *     yield* page.getByRole("button", { name: "Pay" }).click()
  *     return recording
  *   }))
@@ -228,7 +282,7 @@ export const Screencast: Capability<ScreencastControl> = make("Screencast")
  * @category constants
  * @since 0.1.0
  */
-export const Video: Capability<VideoRecording> = make("Video")
+export const Video: Capability<VideoRecording, "inspect", VideoOptions> = make("Video")
 
 /**
  * A native Chromium virtual authenticator on this page, removed when the caller's scope closes.
@@ -273,7 +327,12 @@ export const VirtualAuthenticator: Capability<WebAuthn.VirtualAuthenticator, "co
  * @category schemas
  * @since 0.1.0
  */
-export const CapabilityErrorReason = Schema.Union([Reason.NotPermitted, Reason.Unsupported, Reason.BackendFailure])
+export const CapabilityErrorReason = Schema.Union([
+  Reason.NotPermitted,
+  Reason.Unsupported,
+  Reason.BackendFailure,
+  Reason.InvalidInput
+])
 
 /**
  * The reasons acquiring or using a capability can fail.

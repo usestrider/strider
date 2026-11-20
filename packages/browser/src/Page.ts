@@ -758,8 +758,9 @@ export interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.Read
    * })
    * ```
    */
-  capability<H>(
-    capability: Capability.Capability<H>
+  capability<H, Options = never>(
+    capability: Capability.Capability<H, "inspect", Options>,
+    options?: Options | undefined
   ): Effect.Effect<H, Capability.CapabilityError | Target.TargetGone | Deadline.Timeout, Scope.Scope>
 }
 
@@ -789,7 +790,10 @@ export interface Page extends ReadonlyPage {
   /**
    * Acquires a specialized feature for the caller's scope, including features that change native page behavior.
    */
-  capability<H>(capability: Capability.Capability<H, "inspect" | "control">): Effect.Effect<
+  capability<H, Options = never>(
+    capability: Capability.Capability<H, "inspect" | "control", Options>,
+    options?: Options | undefined
+  ): Effect.Effect<
     H,
     Capability.CapabilityError | Target.TargetGone | Deadline.Timeout,
     Scope.Scope

@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
-import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Effect from "effect/Effect"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Sink from "effect/Sink"
 import * as Stream from "effect/Stream"
 import * as VideoOptions from "../src/internal/videoOptions.ts"
