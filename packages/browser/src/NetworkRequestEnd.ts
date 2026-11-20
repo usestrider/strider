@@ -1,6 +1,6 @@
 /**
  * The ends of the requests a page or a context makes: each request hop either finishes, with whatever HTTP
- * status it had, or fails, with the browser's error text.
+ * status it had, or fails, with the browser's error text. Each end is a `NetworkRequest.End`.
  *
  * An end is reported to the request's page and its context, as the request itself is. Only an end the browser
  * reports is an event: a request still in flight when its page, context or browser connection closes reports none.
@@ -9,13 +9,11 @@
  * @since 0.1.0
  */
 import type * as Effect from "effect/Effect"
-import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Deadline from "./Deadline.ts"
 import * as NetworkRequestEndImpl from "./internal/networkRequestEnd.ts"
-import * as MonotonicInstant from "./MonotonicInstant.ts"
-import * as NetworkRequest from "./NetworkRequest.ts"
+import type * as NetworkRequest from "./NetworkRequest.ts"
 import type * as Page from "./Page.ts"
 import type * as Subscription from "./Subscription.ts"
 import type * as Target from "./Target.ts"
@@ -23,64 +21,19 @@ import type * as Url from "./Url.ts"
 import type * as UserContext from "./UserContext.ts"
 
 /**
- * A request hop the browser finished loading, whatever its HTTP status: a 404 finishes too.
- *
- * **Details**
- *
- * `request` is the request as it was delivered, so `NetworkRequest.failure`, `timing`, `sizes` and `response`
- * accept it. Each redirect hop finishes on its own.
- *
- * @stability unstable
- * @category models
- * @since 0.1.0
- */
-export class Finished extends Schema.TaggedClass<Finished>("@usestrider/browser/NetworkRequestEnd/Finished")(
-  "Finished",
-  {
-    request: NetworkRequest.NetworkRequest,
-    at: MonotonicInstant.MonotonicInstant
-  }
-) {}
-
-/**
- * A request hop that failed before it finished: refused, aborted by a route, or canceled.
- *
- * **Details**
- *
- * `failure` is what `NetworkRequest.failure` reads: the browser's error text, and on Chromium and WebKit whether
- * the page or a navigation canceled it. A page, context or browser connection that closes while a request is in
- * flight doesn't make it fail.
- *
- * @stability unstable
- * @category models
- * @since 0.1.0
- */
-export class Failed extends Schema.TaggedClass<Failed>("@usestrider/browser/NetworkRequestEnd/Failed")("Failed", {
-  request: NetworkRequest.NetworkRequest,
-  failure: NetworkRequest.Failure,
-  at: MonotonicInstant.MonotonicInstant
-}) {}
-
-/**
- * How a request hop ended: `Finished` or `Failed`.
- *
- * @stability unstable
- * @category models
- * @since 0.1.0
- */
-export const NetworkRequestEnd = Schema.Union([Finished, Failed])
-
-/**
- * How a request hop ended: `Finished` or `Failed`.
- *
- * @stability unstable
- * @category models
- * @since 0.1.0
- */
-export type NetworkRequestEnd = Finished | Failed
-
-/**
  * Which request ends to match: the request's own fields, as `NetworkRequest.Filter` takes them, and how it ended.
+ *
+ * **Example** (Matching failed API calls)
+ *
+ * ```ts import.meta.vitest
+ * import { NetworkRequestEnd } from "@usestrider/browser"
+ *
+ * const failedApiCalls: NetworkRequestEnd.Filter = {
+ *   url: "https://shop.example.com/api/**",
+ *   resourceType: "fetch",
+ *   end: "failed"
+ * }
+ * ```
  *
  * @stability unstable
  * @category models
@@ -126,9 +79,9 @@ export interface Filter extends NetworkRequest.Filter {
 export const next = <PE = never, PR = never>(
   target: Page.ObservedPage | UserContext.ObservedUserContext,
   filter: Filter & { readonly url: Url.Pattern | string },
-  where?: Subscription.Where<NetworkRequestEnd, PE, PR> | undefined
+  where?: Subscription.Where<NetworkRequest.End, PE, PR> | undefined
 ): Effect.Effect<
-  Effect.Effect<NetworkRequestEnd, PE | Target.TargetGone | Deadline.Timeout>,
+  Effect.Effect<NetworkRequest.End, PE | Target.TargetGone | Deadline.Timeout>,
   Subscription.SubscriptionError,
   Scope.Scope | PR
 > => NetworkRequestEndImpl.next(target, filter, where)
@@ -160,9 +113,9 @@ export const next = <PE = never, PR = never>(
 export const stream = <PE = never, PR = never>(
   target: Page.ObservedPage | UserContext.ObservedUserContext,
   filter?: Filter | undefined,
-  where?: Subscription.Where<NetworkRequestEnd, PE, PR> | undefined
+  where?: Subscription.Where<NetworkRequest.End, PE, PR> | undefined
 ): Effect.Effect<
-  Stream.Stream<NetworkRequestEnd, PE | Subscription.EventOverflow | Target.TargetGone>,
+  Stream.Stream<NetworkRequest.End, PE | Subscription.EventOverflow | Target.TargetGone>,
   Subscription.SubscriptionError,
   Scope.Scope | PR
 > => NetworkRequestEndImpl.stream(target, filter, where)
@@ -189,47 +142,5 @@ export const stream = <PE = never, PR = never>(
 export const history = (
   target: Page.ObservedPage | UserContext.ObservedUserContext,
   filter?: Filter | undefined
-): Effect.Effect<Subscription.History<NetworkRequestEnd>, Subscription.SubscriptionError> =>
+): Effect.Effect<Subscription.History<NetworkRequest.End>, Subscription.SubscriptionError> =>
   NetworkRequestEndImpl.history(target, filter)
-
-/**
- * Retains one request hop in the caller's scope and returns a wait for its end.
- *
- * **Details**
- *
- * Acquire on the page or context that observed the request, while it is still among the last 1000 retained hops.
- * The returned effect gives the end at once if the hop has already ended, or waits under the deadline in force
- * when it runs. It fails with `ResponseUnavailable`: `evicted` when the hop is forgotten first, `released` once
- * the scope closes, `targetClosed` when the target or the browser connection closes first, and `foreignTarget`
- * when another page or context observed the request. Only this acquisition retains the hop; it enables no
- * browser instrumentation.
- *
- * **Example** (Waiting for a response's body to finish loading)
- *
- * ```ts import.meta.vitest
- * import { NetworkRequest, NetworkRequestEnd, Page } from "@usestrider/browser"
- * import { Effect } from "effect"
- *
- * const loaded = Effect.fn("loaded")(function*(page: Page.Page) {
- *   const sent = yield* NetworkRequest.next(page, {
- *     url: "https://example.com/report.pdf"
- *   })
- *   yield* page.goto("https://example.com/reports")
- *   const ended = yield* NetworkRequestEnd.of(page, yield* sent)
- *   const end = yield* ended
- *   return end._tag === "Finished"
- * })
- * ```
- *
- * @stability unstable
- * @category subscriptions
- * @since 0.1.0
- */
-export const of = (
-  target: Page.ObservedPage | UserContext.ObservedUserContext,
-  request: NetworkRequest.NetworkRequest
-): Effect.Effect<
-  Effect.Effect<NetworkRequestEnd, NetworkRequest.RequestError | Deadline.Timeout>,
-  NetworkRequest.RequestError,
-  Scope.Scope
-> => NetworkRequestEndImpl.of(target, request)

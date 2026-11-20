@@ -359,7 +359,7 @@ export const stream = (target: Target, filter?: BodyFilter, where?: Subscription
   ).pipe(Operation.named("NetworkRequest.stream"))
 }
 /** Whether a retained hop belongs to this exact page or context entry. */
-export const ownsHop = (target: ReturnType<typeof Handles.target>, hop: Model.HopEntry): boolean =>
+const ownsHop = (target: ReturnType<typeof Handles.target>, hop: Model.HopEntry): boolean =>
   (target._tag === "Page" ? Option.getOrUndefined(hop.page) : Option.getOrUndefined(hop.context)) ===
     target.behind.entry
 
@@ -502,6 +502,82 @@ export const response = (
     }).pipe(Operation.named("NetworkRequest.response", { attributes: { "browser.hop.id": request.hop } }))
   }).pipe(Operation.named("NetworkRequest.response.acquire", { attributes: { "browser.hop.id": request.hop } }))
 
+/** Opt-in retention of one existing hop until the caller's scope closes; installs no model or adapter work. */
+export const end = (
+  target: Target,
+  request: NetworkRequest.NetworkRequest
+): Effect.Effect<
+  Effect.Effect<NetworkRequest.End, NetworkRequest.RequestError | Deadline.Timeout>,
+  NetworkRequest.RequestError,
+  Scope.Scope
+> =>
+  Effect.gen(function*() {
+    const found = Handles.target(target)
+    const { model } = found.behind.runtime
+    const deliver = endOf(model.adapter.info.protocol)
+    const unavailable = (why: NetworkRequest.ResponseUnavailable["why"]) =>
+      new NetworkRequest.RequestError({
+        hop: request.hop,
+        reason: new NetworkRequest.ResponseUnavailable({ why }),
+        diagnostics: Operation.diagnosticsNow()
+      })
+    const retained = model.hop(request.hop)
+    if (Option.isNone(retained)) return yield* Effect.fail(unavailable("evicted"))
+    if (!ownsHop(found, retained.value)) return yield* Effect.fail(unavailable("foreignTarget"))
+    const targetClosed = found.behind.entry.closed
+    let held: Model.HopEntry | undefined = retained.value
+    const released = Deferred.makeUnsafe<void>()
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        held = undefined
+        Deferred.doneUnsafe(released, Effect.void)
+      })
+    )
+    return Effect.gen(function*() {
+      const hop = held
+      if (hop === undefined) return yield* Effect.fail(unavailable("released"))
+      const ended = Effect.flatMap(Deferred.await(hop.end), (end) =>
+        end._tag === "Forgotten" ?
+          Effect.fail(unavailable("evicted"))
+          : end._tag === "Failed" && end.connectionLost === true ?
+          Effect.fail(unavailable("targetClosed"))
+          : Effect.succeed(deliver({ hop, end })))
+      if (Deferred.isDoneUnsafe(hop.end)) return yield* ended
+      const record = yield* Operation.record
+      const closed = Deferred.await(targetClosed).pipe(
+        Effect.andThen(
+          Effect.suspend(() => Deferred.isDoneUnsafe(hop.end) ? ended : Effect.fail(unavailable("targetClosed")))
+        )
+      )
+      const release = Deferred.await(released).pipe(Effect.andThen(Effect.fail(unavailable("released"))))
+      return yield* record.bound(
+        Effect.raceFirst(ended, Effect.raceFirst(closed, release)),
+        () => Option.some("The request had not ended by the deadline"),
+        "waitingForEvent"
+      )
+    }).pipe(Operation.named("NetworkRequest.end", { attributes: { "browser.hop.id": request.hop } }))
+  }).pipe(Operation.named("NetworkRequest.end.acquire", { attributes: { "browser.hop.id": request.hop } }))
+
+/** A failed hop's `Failure`: whether it was a cancellation is known only where the protocol reports it. */
+export const failureOf = (
+  protocol: string,
+  end: Extract<Model.HopEnd, { readonly _tag: "Failed" }>
+): NetworkRequest.Failure =>
+  new NetworkRequest.Failure({
+    errorText: end.error,
+    canceled: protocol === "cdp" || protocol === "webkit" ? Option.some(end.canceled) : Option.none()
+  })
+
+/** The `End` a hop's reported end makes, with the hop's original request. */
+export const endOf = (protocol: string) => (value: Model.RequestEndEvent): NetworkRequest.End =>
+  value.end._tag === "Finished"
+    ? new NetworkRequest.Finished({ request: value.hop.request, at: value.end.at })
+    : new NetworkRequest.Failed({
+      request: value.hop.request,
+      failure: failureOf(protocol, value.end),
+      at: value.end.at
+    })
+
 /** An immediate read of existing terminal facts, valid only while the original owner remains observable. */
 export const failure = (
   target: Page.ObservedPage | UserContext.ObservedUserContext,
@@ -553,16 +629,7 @@ export const failure = (
       return Effect.flatMap(polled.value, (end) => {
         if (end._tag === "Forgotten") return unavailable("notRetained")
         return Effect.succeed(
-          end._tag === "Failed"
-            ? Option.some(
-              new NetworkRequest.Failure({
-                errorText: end.error,
-                canceled: model.adapter.info.protocol === "cdp" || model.adapter.info.protocol === "webkit"
-                  ? Option.some(end.canceled)
-                  : Option.none()
-              })
-            )
-            : Option.none()
+          end._tag === "Failed" ? Option.some(failureOf(model.adapter.info.protocol, end)) : Option.none()
         )
       })
     })

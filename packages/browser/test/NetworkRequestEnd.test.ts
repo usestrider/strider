@@ -149,14 +149,14 @@ describe("NetworkRequestEnd", () => {
     }))
 })
 
-describe("NetworkRequestEnd.of", () => {
+describe("NetworkRequest.end", () => {
   it.effect("gives an ended hop's end at once", () =>
     Effect.gen(function*() {
       const { page, send, respond, finish } = yield* setup()
       const request = yield* send("a")
       yield* respond(request, 200)
       yield* finish(request)
-      const end = yield* yield* NetworkRequestEnd.of(page, request)
+      const end = yield* yield* NetworkRequest.end(page, request)
       assert.strictEqual(end._tag, "Finished")
       assert.strictEqual(end.request, request)
     }).pipe(Effect.scoped))
@@ -166,8 +166,8 @@ describe("NetworkRequestEnd.of", () => {
       const { context, send, finish, fail } = yield* setup()
       const finished = yield* send("finished")
       const failed = yield* send("failed")
-      const finishing = yield* Effect.forkChild(yield* NetworkRequestEnd.of(context, finished))
-      const failing = yield* Effect.forkChild(yield* NetworkRequestEnd.of(context, failed))
+      const finishing = yield* Effect.forkChild(yield* NetworkRequest.end(context, finished))
+      const failing = yield* Effect.forkChild(yield* NetworkRequest.end(context, failed))
       yield* Effect.yieldNow
       yield* finish(finished)
       yield* fail(failed, "net::ERR_CONNECTION_REFUSED")
@@ -185,18 +185,18 @@ describe("NetworkRequestEnd.of", () => {
       }
 
       const scope = yield* Scope.make()
-      const released = yield* NetworkRequestEnd.of(page, yield* send("released")).pipe(Scope.provide(scope))
+      const released = yield* NetworkRequest.end(page, yield* send("released")).pipe(Scope.provide(scope))
       yield* Scope.close(scope, Exit.void)
       assert.strictEqual(reason(yield* Effect.exit(released)).why, "released")
 
-      const evicted = yield* NetworkRequestEnd.of(page, yield* send("evicted"))
+      const evicted = yield* NetworkRequest.end(page, yield* send("evicted"))
       for (let i = 0; i < Fold.maxHops; i++) yield* send(`evict-${i}`)
       assert.strictEqual(reason(yield* Effect.exit(evicted)).why, "evicted")
 
       const foreign = yield* send("foreign", "other-page" as Target.NavigableId)
-      assert.strictEqual(reason(yield* Effect.exit(NetworkRequestEnd.of(context, foreign))).why, "foreignTarget")
+      assert.strictEqual(reason(yield* Effect.exit(NetworkRequest.end(context, foreign))).why, "foreignTarget")
 
-      const torn = yield* NetworkRequestEnd.of(page, yield* send("torn"))
+      const torn = yield* NetworkRequest.end(page, yield* send("torn"))
       yield* fold.loseConnection(new Target.ConnectionLost({}))
       assert.strictEqual(reason(yield* Effect.exit(torn)).why, "targetClosed")
     }).pipe(Effect.scoped))

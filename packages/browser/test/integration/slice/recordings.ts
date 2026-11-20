@@ -220,7 +220,7 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
             return true
           })
           const request = yield* next
-          const ended = yield* NetworkRequestEnd.of(page, request)
+          const ended = yield* NetworkRequest.end(page, request)
           const waiting = yield* ended.pipe(Effect.forkScoped)
           yield* Effect.yieldNow
           assert.isUndefined(waiting.pollUnsafe())
