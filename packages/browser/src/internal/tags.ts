@@ -3,8 +3,9 @@
  * settled by the element's own events. Nothing is installed before the call, and nothing is left after it.
  *
  * - **A resource from a URL** settles on the element's `load` or `error`. An enforced `securitypolicyviolation`
- *   whose `blockedURI` is the URL tells a refusal by the page's policy apart from a load failure; every backend
- *   dispatches it before the `error` event.
+ *   whose `blockedURI` is exactly the resolved URL, stripped as CSP strips a URL it reports (no fragment, username,
+ *   or password), tells a refusal by the page's policy apart from a load failure; every backend dispatches it
+ *   before the `error` event.
  * - **Inline JavaScript** runs, when the policy allows it, inside the append, and its text is the caller's. The
  *   policy decides during the append too, but every engine dispatches the element's `securitypolicyviolation`
  *   later, as a task, so the call needs a signal the engine orders before a second call reads the element's
@@ -156,6 +157,15 @@ function insertElement(spec: Spec): Promise<Element | string> {
     const element = document.createElement(spec.tag)
     for (const [name, value] of spec.attributes) element.setAttribute(name, value)
     const href = spec.url === null ? null : new URL(spec.url, document.baseURI).href
+    // The URL as a violation reports it: CSP strips the fragment, the username, and the password
+    let reported: string | null = null
+    if (href !== null) {
+      const stripped = new URL(href)
+      stripped.hash = ""
+      stripped.username = ""
+      stripped.password = ""
+      reported = stripped.href
+    }
     const removals: Array<() => void> = []
     let refusal: string | null = null
     const settle = (outcome: Element | string) => {
@@ -171,7 +181,7 @@ function insertElement(spec: Spec): Promise<Element | string> {
         const violation = event as SecurityPolicyViolationEvent
         if (violation.disposition === "report") return
         // A URL's violation is dispatched at the document and names it; an inline element's is dispatched at it
-        if (href === null ? violation.target !== element : violation.blockedURI !== href) return
+        if (href === null ? violation.target !== element : violation.blockedURI !== reported) return
         refusal = JSON.stringify({
           _tag: "Refused",
           directive: violation.effectiveDirective || violation.violatedDirective,
