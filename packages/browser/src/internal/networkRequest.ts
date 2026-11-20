@@ -359,7 +359,7 @@ export const stream = (target: Target, filter?: BodyFilter, where?: Subscription
   ).pipe(Operation.named("NetworkRequest.stream"))
 }
 /** Whether a retained hop belongs to this exact page or context entry. */
-const ownsHop = (target: ReturnType<typeof Handles.target>, hop: Model.HopEntry): boolean =>
+export const ownsHop = (target: ReturnType<typeof Handles.target>, hop: Model.HopEntry): boolean =>
   (target._tag === "Page" ? Option.getOrUndefined(hop.page) : Option.getOrUndefined(hop.context)) ===
     target.behind.entry
 

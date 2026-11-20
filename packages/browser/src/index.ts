@@ -195,6 +195,12 @@ export * as NetworkRequest from "./NetworkRequest.ts"
  * @stability unstable
  * @since 0.1.0
  */
+export * as NetworkRequestEnd from "./NetworkRequestEnd.ts"
+
+/**
+ * @stability unstable
+ * @since 0.1.0
+ */
 export * as NetworkResponse from "./NetworkResponse.ts"
 
 /**

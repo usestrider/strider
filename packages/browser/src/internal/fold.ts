@@ -426,6 +426,7 @@ export const make = Effect.fnUntraced(function*(options: {
         autoResolution: Events.make(target, cap),
         request: Events.make(target, cap),
         response: Events.make(target, cap),
+        requestEnd: Events.make(target, cap),
         console: Events.make(target, cap),
         exception: Events.make(target, cap),
         download: Events.make(target, cap),
@@ -459,11 +460,14 @@ export const make = Effect.fnUntraced(function*(options: {
     yield* Deferred.succeed(entry.closed, reason)
   })
 
-  const endHop = (id: NetworkRequest.HopId, end: Model.HopEnd) => {
+  /** Ends a hop the browser reported ending, and publishes the end once, to the hop's owner. */
+  const endHop = (id: NetworkRequest.HopId, end: Model.RequestEndEvent["end"]) => {
     const hop = hops.get(id)
     if (Option.isNone(hop)) return
-    Deferred.doneUnsafe(hop.value.end, Effect.succeed(end))
     Deferred.doneUnsafe(hop.value.sentKnown, Effect.void)
+    if (Deferred.isDoneUnsafe(hop.value.end)) return
+    Deferred.doneUnsafe(hop.value.end, Effect.succeed(end))
+    publish(hop.value, { hop: hop.value, end }, (events) => events.requestEnd, (events) => events.requestEnd)
   }
 
   /** The URL a navigation ended at, by its outcome's document; else where it was going. */
@@ -550,6 +554,7 @@ export const make = Effect.fnUntraced(function*(options: {
               navigation: Events.make(target, cap),
               request: Events.make(target, cap),
               response: Events.make(target, cap),
+              requestEnd: Events.make(target, cap),
               console: Events.make(target, cap),
               exception: Events.make(target, cap),
               download: Events.make(target, cap),
