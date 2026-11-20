@@ -11,7 +11,7 @@ import { contextKey, type Event, placement, type State, type TargetEntry, type W
 type Installation = { readonly view: State; readonly registered: Set<string> }
 let installed: WeakMap<TargetEntry, Installation> | undefined
 let originals: WeakMap<State, State> | undefined
-let retired: WeakSet<Adapter.WebSocketBridge> | undefined
+let retired: WeakSet<Adapter.HostBridge> | undefined
 
 const restore = (state: State, target: TargetEntry, installation: Installation) => {
   const events = [
@@ -29,9 +29,9 @@ const restore = (state: State, target: TargetEntry, installation: Installation) 
 export const prepare: (
   state: State,
   target: TargetEntry,
-  bridges: ReadonlyArray<Adapter.WebSocketBridge>
+  bridges: ReadonlyArray<Adapter.HostBridge>
 ) => Effect.Effect<void> = Effect.fnUntraced(
-  function*(state: State, target: TargetEntry, bridges: ReadonlyArray<Adapter.WebSocketBridge>) {
+  function*(state: State, target: TargetEntry, bridges: ReadonlyArray<Adapter.HostBridge>) {
     const closed = retired
     if (closed !== undefined) bridges = bridges.filter((bridge) => !closed.has(bridge))
     const base = originals?.get(state) ?? state
@@ -164,7 +164,7 @@ export const prepare: (
           retired ??= new WeakSet()
           retired.add(bridge)
           registered.delete(bridge.token)
-          const current = base.registry.bundles(placement(target.page)).get("")?.webSockets ?? []
+          const current = base.registry.bundles(placement(target.page)).get("")?.hostBridges ?? []
           return prepare(base, target, current)
         })
       )

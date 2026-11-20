@@ -14,7 +14,7 @@ import * as Fake from "../src/internal/fake.ts"
 
 it.effect("allocates a bridge declaration only in the requesting context and removes it early", () =>
   Effect.gen(function*() {
-    const active = new Map<Adapter.WebSocketBridge, Adapter.DeclarationScope>()
+    const active = new Map<Adapter.HostBridge, Adapter.DeclarationScope>()
     let installations = 0
     let evaluations = 0
     const clock = yield* Clock.clockWith(Effect.succeed)
@@ -31,8 +31,8 @@ it.effect("allocates a bridge declaration only in the requesting context and rem
         },
         declare: (scope, declaration) =>
           fake.declare(scope, declaration).pipe(Effect.tap(() => {
-            if (declaration._tag !== "InitScript" || declaration.webSocket === undefined) return Effect.void
-            const bridge = declaration.webSocket
+            if (declaration._tag !== "InitScript" || declaration.hostBridge === undefined) return Effect.void
+            const bridge = declaration.hostBridge
             return Effect.acquireRelease(
               Effect.sync(() => {
                 installations++
@@ -69,7 +69,7 @@ it.effect("keeps proxy endpoints connecting until the native opening event", () 
     const captured = yield* Deferred.make<WebSocketRoute.Connection>()
     const started = yield* Deferred.make<void>()
     const release = yield* Deferred.make<void>()
-    let bridge!: Adapter.WebSocketBridge
+    let bridge!: Adapter.HostBridge
     const clock = yield* Clock.clockWith(Effect.succeed)
     const backend = BrowserImpl.layer((sink) =>
       Fake.connect([], {
@@ -81,8 +81,8 @@ it.effect("keeps proxy endpoints connecting until the native opening event", () 
         declare: (scope, declaration) =>
           fake.declare(scope, declaration).pipe(Effect.tap(() =>
             Effect.sync(() => {
-              if (declaration._tag === "InitScript" && declaration.webSocket !== undefined) {
-                bridge = declaration.webSocket
+              if (declaration._tag === "InitScript" && declaration.hostBridge !== undefined) {
+                bridge = declaration.hostBridge
               }
             })
           )),
@@ -147,7 +147,7 @@ it.effect("keeps proxy endpoints connecting until the native opening event", () 
 it.effect("drains rejected constructor lookups before processing another admission", () =>
   Effect.gen(function*() {
     const rejectedTwice = yield* Deferred.make<void>()
-    let bridge!: Adapter.WebSocketBridge
+    let bridge!: Adapter.HostBridge
     let rejected = 0, drained = 0
     const clock = yield* Clock.clockWith(Effect.succeed)
     const backend = BrowserImpl.layer((sink) =>
@@ -160,8 +160,8 @@ it.effect("drains rejected constructor lookups before processing another admissi
         declare: (scope, declaration) =>
           fake.declare(scope, declaration).pipe(Effect.tap(() =>
             Effect.sync(() => {
-              if (declaration._tag === "InitScript" && declaration.webSocket !== undefined) {
-                bridge = declaration.webSocket
+              if (declaration._tag === "InitScript" && declaration.hostBridge !== undefined) {
+                bridge = declaration.hostBridge
               }
             })
           )),
@@ -204,7 +204,7 @@ it.effect("rejects new sends as soon as close is observed while retaining reserv
     const captured = yield* Deferred.make<WebSocketRoute.Connection>()
     const draining = yield* Deferred.make<void>()
     const release = yield* Deferred.make<void>()
-    let bridge!: Adapter.WebSocketBridge
+    let bridge!: Adapter.HostBridge
     const clock = yield* Clock.clockWith(Effect.succeed)
     const backend = BrowserImpl.layer((sink) =>
       Fake.connect([], {
@@ -216,8 +216,8 @@ it.effect("rejects new sends as soon as close is observed while retaining reserv
         declare: (scope, declaration) =>
           fake.declare(scope, declaration).pipe(Effect.tap(() =>
             Effect.sync(() => {
-              if (declaration._tag === "InitScript" && declaration.webSocket !== undefined) {
-                bridge = declaration.webSocket
+              if (declaration._tag === "InitScript" && declaration.hostBridge !== undefined) {
+                bridge = declaration.hostBridge
               }
             })
           )),
@@ -280,7 +280,7 @@ it.effect("rejects new sends as soon as close is observed while retaining reserv
 it.effect("ends owned connections even when the browser cannot acknowledge removal", () =>
   Effect.gen(function*() {
     const captured = yield* Deferred.make<WebSocketRoute.Connection>()
-    let bridge!: Adapter.WebSocketBridge
+    let bridge!: Adapter.HostBridge
     const clock = yield* Clock.clockWith(Effect.succeed)
     const backend = BrowserImpl.layer((sink) =>
       Fake.connect([], {
@@ -292,8 +292,8 @@ it.effect("ends owned connections even when the browser cannot acknowledge remov
         declare: (scope, declaration) =>
           fake.declare(scope, declaration).pipe(Effect.tap(() =>
             Effect.sync(() => {
-              if (declaration._tag === "InitScript" && declaration.webSocket !== undefined) {
-                bridge = declaration.webSocket
+              if (declaration._tag === "InitScript" && declaration.hostBridge !== undefined) {
+                bridge = declaration.hostBridge
               }
             })
           )),
