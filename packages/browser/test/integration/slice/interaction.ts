@@ -6475,6 +6475,84 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
+      it.effect("expects JavaScript properties in the page's own world with deep equality", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() => `<div id="js">JS</div><input type="checkbox" checked>`)
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.evaluateInMainWorld(() => {
+              Object.assign(document.getElementById("js")!, {
+                foo: { a: 1, when: new Date(0), list: [1, "two", null] },
+                empty: null
+              })
+            })
+            const target = page.locator("#js")
+            yield* target.pipe(
+              Expect.toHaveJSProperty("foo", { a: 1, when: new Date(0), list: [1, "two", null] })
+            )
+            yield* Expect.toHaveJSProperty(target, "foo.when", new Date(0))
+            yield* target.pipe(Expect.toHaveJSProperty("empty", null))
+            yield* target.pipe(Expect.toHaveJSProperty("missing", undefined))
+            yield* target.pipe(Expect.toHaveJSProperty("foo.a.deeper", undefined))
+            yield* target.pipe(Expect.toHaveJSProperty("foo", { a: 1 }, { not: true }))
+            yield* page.getByRole("checkbox").pipe(Expect.toHaveJSProperty("checked", true))
+          }))
+        }), timeout)
+
+      it.effect("retries a JavaScript property until a page timer sets it", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<div id="js">JS</div><script>setTimeout(() => { document.getElementById("js").ready = { at: new Date(5) } }, 300)</script>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.locator("#js").pipe(Expect.toHaveJSProperty("ready", { at: new Date(5) }))
+          }))
+        }), timeout)
+
+      it.effect(
+        "fails a JavaScript property mismatch at the deadline with the received value or match count",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() => `<p id="one">One</p><p>Two</p>`)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              yield* page.evaluateInMainWorld(() => {
+                Object.assign(document.getElementById("one")!, { foo: { a: 1 } })
+              })
+              const mismatch = yield* page.locator("#one").pipe(
+                Expect.toHaveJSProperty("foo", { a: 2 }),
+                Deadline.within("1 second"),
+                Effect.flip
+              )
+              assert(Expect.isExpectationFailed(mismatch), String(mismatch))
+              assert(mismatch.history.length > 0)
+              for (const entry of mismatch.history) assert.deepStrictEqual(entry.value, { a: 1 })
+              const negated = yield* page.locator("#one").pipe(
+                Expect.toHaveJSProperty("foo", { a: 1 }, { not: true }),
+                Deadline.within("1 second"),
+                Effect.flip
+              )
+              assert(Expect.isExpectationFailed(negated), String(negated))
+              assert.deepStrictEqual(negated.last.pipe(Option.map((entry) => entry.value)), Option.some({ a: 1 }))
+              for (const [selector, matches] of [["#missing", 0], ["p", 2]] as const) {
+                const error = yield* page.locator(selector).pipe(
+                  Expect.toHaveJSProperty("foo", undefined, { not: true }),
+                  Deadline.within("1 second"),
+                  Effect.flip
+                )
+                assert(Expect.isExpectationFailed(error), String(error))
+                assert(error.history.length > 0)
+                for (const entry of error.history) assert.deepStrictEqual(entry.value, { matches })
+              }
+            }))
+          }),
+        timeout
+      )
+
       it.effect("retries computed CSS after an initial mismatch, including negation", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
