@@ -333,6 +333,8 @@ export type Request =
   | { readonly op: "validationStart"; readonly token: string; readonly full: boolean }
   | { readonly op: "validationStop"; readonly token: string }
   | { readonly op: "count"; readonly steps: ReadonlyArray<Step> }
+  /** Every match's count, and the first ten described, as a strictness failure gives them, whatever their count. */
+  | { readonly op: "candidates"; readonly steps: ReadonlyArray<Step> }
   | { readonly op: "visible"; readonly steps: ReadonlyArray<Step> }
   | {
     readonly op: "act"
@@ -4289,6 +4291,8 @@ export function engine(render: (root: SnapNode) => string) {
           )
         case "count":
           return JSON.stringify({ _tag: "Count", count: resolve(request.steps).length } satisfies Response)
+        case "candidates":
+          return JSON.stringify(strict(resolve(request.steps)))
         case "visible": {
           const found = resolve(request.steps)
           if (found.length > 1) return JSON.stringify(strict(found))

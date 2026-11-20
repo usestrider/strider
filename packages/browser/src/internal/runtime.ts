@@ -42,7 +42,6 @@ import type * as Clock from "./clock.ts"
 import * as Engine from "./engine.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
-import * as Steps from "./steps.ts"
 
 /** The utility world the engine runs in. */
 export const utilityWorld: Adapter.World = { _tag: "Isolated", name: "__strider_utility__" }
@@ -473,6 +472,42 @@ const askIn = (
 /** Every iframe or frame element of a document's, in tree order, as the engine finds them. */
 const frameElements: ReadonlyArray<Engine.Step> = [{ _tag: "Css", selector: "iframe, frame" }]
 
+/** Whether `steps` find, in `document`, the element that holds `frame` now: `None` when the document has gone. */
+const holds = (
+  runtime: Runtime,
+  document: Target.DocumentId,
+  steps: ReadonlyArray<Engine.Step>,
+  frame: Target.NavigableId,
+  id: Diagnostics.OperationId
+): Effect.Effect<boolean, SendFailure> =>
+  Effect.gen(function*() {
+    const element = yield* elementIn(runtime, document, steps, { scroll: false }, id)
+    if (Option.isNone(element) || element.value._tag !== "Found") return false
+    const held = yield* runtime.model.adapter.contentFrame(element.value.node).pipe(
+      Effect.catch((error) =>
+        isMoved(error) ? Effect.succeedNone : Effect.fail(fromAdapter(error, id, runtime.backend))
+      )
+    )
+    return Option.isSome(held) && held.value === frame
+  })
+
+/**
+ * Whether each hop's steps still find the iframe that holds the hop's frame. A hop names its iframe by steps, which
+ * may find another iframe once the document changes, as when a sibling before it is removed; a round whose hops no
+ * longer hold their frames goes again rather than act through another frame's geometry.
+ */
+export const holdsFrames = (
+  runtime: Runtime,
+  hops: ReadonlyArray<Hop>,
+  id: Diagnostics.OperationId
+): Effect.Effect<boolean, SendFailure> =>
+  Effect.gen(function*() {
+    for (const hop of hops) {
+      if (!(yield* holds(runtime, hop.document, hop.steps, hop.frame, id))) return false
+    }
+    return true
+  })
+
 /**
  * The documents of the frames under `document`, at any depth, each with the iframes entered on the way to it. A
  * frame with no document yet, or one that goes while it's listed, has none, and isn't waited for.
@@ -512,8 +547,8 @@ type Search =
   | { readonly _tag: "Answer"; readonly response: Engine.Response }
 
 /**
- * Tests `steps` in `document` and in each document under it: they go on in the one with matches, and more than
- * one is a strictness failure, whichever loaded first.
+ * Tests `steps` in `document` and in the document of each frame under it: they go on in the one with matches, and
+ * more than one is a strictness failure, whichever loaded first. A frame with no document yet is skipped. Steps that begin with a snapshot's ref go to the ref's own document, when it is one of these.
  */
 const search = (
   runtime: Runtime,
@@ -523,30 +558,31 @@ const search = (
 ): Effect.Effect<Search, SendFailure> =>
   Effect.gen(function*() {
     const documents = [{ document, hops: [] as ReadonlyArray<Hop> }, ...yield* descendants(runtime, document, id)]
-    const matched: Array<{ readonly document: Target.DocumentId; readonly hops: ReadonlyArray<Hop>; count: number }> =
-      []
+    const enter = (each: (typeof documents)[number]): Search => ({ _tag: "One", ...each })
+    const first = steps[0]
+    if (first !== undefined && first._tag === "Ref") {
+      const owner = documents.find((each) => each.document === first.document)
+      return owner === undefined
+        ? { _tag: "Answer", response: { _tag: "StaleRef", why: "Replaced" } }
+        : enter(owner)
+    }
+    const matched: Array<{ readonly each: (typeof documents)[number]; readonly response: Engine.Response }> = []
     for (const each of documents) {
-      const counted = yield* askIn(runtime, each.document, { op: "count", steps }, id)
-      if (Option.isNone(counted)) continue
-      if (counted.value._tag !== "Count") return { _tag: "Answer", response: counted.value }
-      if (counted.value.count > 0) matched.push({ ...each, count: counted.value.count })
+      const found = yield* askIn(runtime, each.document, { op: "candidates", steps }, id)
+      if (Option.isNone(found)) continue
+      if (found.value._tag !== "Strict") return { _tag: "Answer", response: found.value }
+      if (found.value.count > 0) matched.push({ each, response: found.value })
     }
     if (matched.length === 0) return { _tag: "None" }
-    if (matched.length === 1) return { _tag: "One", document: matched[0]!.document, hops: matched[0]!.hops }
+    if (matched.length === 1) return enter(matched[0]!.each)
+    const answers = matched.map((match) => match.response as Extract<Engine.Response, { _tag: "Strict" }>)
     return {
       _tag: "Answer",
       response: {
         _tag: "Strict",
-        count: matched.reduce((total, each) => total + each.count, 0),
-        frames: matched.length,
-        candidates: matched.map((each) => ({
-          description: `${each.count} in ${
-            each.hops.length === 0
-              ? "the top document"
-              : each.hops.map((hop) => `frame(page.${Steps.describeSteps(hop.steps)})`).join(".")
-          }`,
-          visible: false
-        }))
+        count: answers.reduce((total, each) => total + each.count, 0),
+        frames: answers.length,
+        candidates: answers.flatMap((each) => each.candidates)
       }
     }
   })
@@ -722,6 +758,7 @@ const prepareRound = Effect.fnUntraced(function*(
       }
       clip = answer.value.viewport
     }
+    if (!(yield* holdsFrames(runtime, routed.hops, id))) return { _tag: "Moved" } as const
   }
   return { _tag: "Prepared", clip } as const
 })

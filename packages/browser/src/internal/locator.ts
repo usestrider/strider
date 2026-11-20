@@ -1201,26 +1201,17 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
   }
 
   strict(operation: string, response: Extract<Engine.Response, { _tag: "Strict" }>, id: Diagnostics.OperationId) {
-    if (response.frames !== undefined) {
-      return this.error(
-        operation,
-        new Locator.StrictViolation({
-          candidates: response.candidates,
-          suggestions: [],
-          hint:
-            `${response.count} elements match in ${response.frames} frames, and a search across frames needs one; narrow the locator, or enter its frame with frame()`
-        }),
-        id
-      )
-    }
     const visible = response.candidates.filter((candidate) => candidate.visible).length
+    const where = response.frames === undefined ? "" : ` in ${response.frames} frames`
     return this.error(
       operation,
       new Locator.StrictViolation({
         candidates: response.candidates,
         suggestions: visible === 1 ? [`${this.description}.filter({ visible: true })`] : [],
-        hint: visible === 1
-          ? `${response.count} elements match and 1 of them is visible; add .filter({ visible: true })`
+        hint: response.frames !== undefined && visible !== 1
+          ? `${response.count} elements match${where}, and a search across frames needs one frame; narrow the locator, or enter its frame with frame()`
+          : visible === 1
+          ? `${response.count} elements match${where} and 1 of them is visible; add .filter({ visible: true })`
           : `${response.count} elements match, and an action needs exactly one; narrow the locator, or pick one with nth()`
       }),
       id
@@ -1651,10 +1642,18 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         Effect.gen({ self: this }, function*() {
           const guards = yield* Effect.forEach(targets, (target) =>
             call(target.document, { op: "fillGuard", steps: target.steps, ancestor: target.ancestor }))
-          if (
-            guards.every((guard) =>
-              guard.blocked === null
+          // Guards armed on iframes that no longer hold the hops' frames guard another frame: insert nothing
+          const held = yield* Runtime.holdsFrames(this.owner.runtime, routed.hops, record.id).pipe(
+            Effect.mapError((failure) =>
+              this.sendFailure(operation, failure, record)
             )
+          )
+          if (!held) {
+            yield* disarm
+            return { retry: { _tag: "NoMatch" } as Engine.NotReady }
+          }
+          if (
+            guards.every((guard) => guard.blocked === null)
           ) yield* insert
           const outcomes = yield* disarm
           const blocked = outcomes.find((guard) => guard.blocked !== null)?.blocked ?? null
@@ -1766,6 +1765,10 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         if (frame.covered !== null) return { _tag: "NotReady", reason: frame.covered } as const
         at = { x: at.x + frame.origin.x, y: at.y + frame.origin.y }
         origins[index] = frame.origin
+      }
+      // The geometry read above is the hops' iframes' only while they still hold their frames
+      if (!(yield* Runtime.holdsFrames(runtime, routed.hops, id))) {
+        return { _tag: "NotReady", reason: { _tag: "NoMatch" } } as const
       }
       const path: Array<Adapter.InputFrame["path"][number]> = []
       for (const [index, hop] of routed.hops.entries()) {
