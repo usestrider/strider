@@ -24,6 +24,7 @@ import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as Tracer from "effect/Tracer"
+import { execFileSync } from "node:child_process"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
@@ -775,6 +776,42 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             // WebM is EBML
             assert.deepStrictEqual(Array.from(bytes.subarray(0, 4)), [0x1a, 0x45, 0xdf, 0xa3])
           }))
+        }), timeout)
+
+      it.effect("records to a path at a size and frame rate where the browser writes one", () =>
+        Effect.gen(function*() {
+          if (!(yield* supports("capability.video"))) return
+          const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-video-path-"))
+          yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
+          const target = path.join(directory, "run.webm")
+          const url = yield* fixture(`<p id="t"></p><script>setInterval(() => t.textContent = Date.now(), 50)</script>`)
+          const file = yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(url)
+            const recording = yield* Effect.scoped(Effect.gen(function*() {
+              const recording = yield* page.capability(Capability.Video, {
+                path: target,
+                size: { width: 320, height: 200 },
+                fps: 10
+              })
+              yield* Effect.sleep("800 millis")
+              return recording
+            }))
+            return yield* recording.file
+          }))
+          assert.strictEqual(file, target)
+          const probe = JSON.parse(execFileSync(process.env["STRIDER_FFPROBE"]!, [
+            "-v",
+            "error",
+            "-show_streams",
+            "-of",
+            "json",
+            target
+          ], { encoding: "utf8" }))
+          console.log("Video at a size and frame rate", JSON.stringify(probe.streams[0]))
+          assert.deepStrictEqual([probe.streams[0].width, probe.streams[0].height], [320, 200])
+          assert.strictEqual(probe.streams[0].r_frame_rate, "10/1")
+          assert.deepStrictEqual(fs.readdirSync(directory), ["run.webm"])
         }), timeout)
 
       it.effect("opens a span per protocol command, under its operation's, when asked", () =>
