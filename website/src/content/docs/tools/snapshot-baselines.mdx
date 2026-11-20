@@ -35,16 +35,28 @@ layer(BrowserLive)("invoice", (it) => {
 ```
 
 The name carries the file's extension, and the baseline keeps it: this one is
-`__snapshots__/invoice.test.ts/invoice-chromium-linux.pdf`, keyed by the test file, the name, the browser engine,
-and the platform, as [screenshot baselines](/docs/tools/screenshot-baselines) are. Vitest's own snapshot file,
-`__snapshots__/invoice.test.ts.snap`, sits beside that directory, so the two never mix. The name follows the
+`__baselines__/invoice.test.ts/invoice-chromium-linux.pdf`, keyed by the test file, the name, the browser engine,
+and the platform, as [screenshot baselines](/docs/tools/screenshot-baselines) are. Vitest writes nothing under
+`__baselines__`, and screenshots keep `__screenshots__`, so neither shares a file with these. The name follows the
 screenshot rule and must end in an extension of letters and digits: `invoice.pdf`, not `invoice` or `Invoice.pdf`.
 Any other name fails with `InvalidName`.
 
 The value is compared once, as given: unlike a screenshot, there is nothing to capture again. Baselines are written
 and updated as screenshots are: a first run writes the file and still fails, `vitest -u` rewrites what differs and
-passes, and CI writes nothing. `SnapshotBaseline.CurrentSettings` sets the update mode, the path, and the output
-directory, apart from `ScreenshotBaseline`'s.
+passes, and CI writes no baseline, though a mismatch still writes its failure files. `SnapshotBaseline.CurrentSettings`
+sets the update mode, the path, and the output directory, apart from `ScreenshotBaseline`'s:
+
+```ts
+import { SnapshotBaseline } from "@usestrider/vitest"
+import { Effect } from "effect"
+
+const withSnapshots = Effect.provideService(SnapshotBaseline.CurrentSettings, {
+  update: "none",
+  path: (key) =>
+    SnapshotBaseline.defaultPath(key).replace("__baselines__", "baselines"),
+  outputDirectory: ".data/snapshots"
+})
+```
 
 ## Images
 
