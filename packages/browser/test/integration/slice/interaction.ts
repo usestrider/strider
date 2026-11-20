@@ -6402,6 +6402,83 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
+      for (
+        const [source, html] of [
+          [
+            "empty describedby target",
+            "<span id=\"hint\"></span><button aria-describedby=\"hint\" aria-description=\"Fallback\">Save</button>"
+          ],
+          ["empty description attribute", "<button aria-description=\"\" title=\"Fallback\">Save</button>"]
+        ] as const
+      ) {
+        it.effect(
+          `keeps accessible description precedence for an ${source}`,
+          () =>
+            Effect.gen(function*() {
+              const { url } = yield* fixture(() => html)
+              yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* newPage
+                yield* page.goto(url)
+                yield* page.locator("button").pipe(Expect.toHaveAccessibleDescription(""))
+              }))
+            }),
+          timeout
+        )
+      }
+
+      it.effect(
+        "uses an unused native caption as the accessible description before the title",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              "<table aria-label=\"Sales\" title=\"Tooltip\"><caption>Quarterly totals</caption><tr><td>42</td></tr></table>"
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              yield* page.getByRole("table", { name: "Sales" }).pipe(
+                Expect.toHaveAccessibleDescription("Quarterly totals")
+              )
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "keeps accessible reference traversal and cached title provenance separate",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              "<span id=\"other\">Wrong</span><span id=\"hint\" aria-labelledby=\"other\" aria-describedby=\"other\">Hint</span><button id=\"reference\" aria-describedby=\"hint\">Save</button><button id=\"title\" title=\"Only title\"></button><p id=\"prohibited\" title=\"Paragraph hint\">Text</p><input id=\"native-false\" required aria-invalid=\"false\" aria-errormessage=\"hint\">"
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              yield* page.locator("#reference").pipe(Expect.toHaveAccessibleDescription("Hint"))
+              yield* page.getByRole("button", { name: "Only title" }).pipe(Expect.toHaveAccessibleDescription(""))
+              yield* page.locator("#prohibited").pipe(Expect.toHaveAccessibleDescription("Paragraph hint"))
+              yield* page.locator("#native-false").pipe(Expect.toHaveAccessibleErrorMessage("Hint"))
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "reads accessible error messages for an unrecognized padded invalid token",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              "<input aria-invalid=\" false \" aria-errormessage=\"error\"><span id=\"error\">Invalid value</span>"
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              yield* page.locator("input").pipe(Expect.toHaveAccessibleErrorMessage("Invalid value"))
+            }))
+          }),
+        timeout
+      )
+
       it.effect(
         "expects accessible error messages only while the element is invalid",
         () =>
