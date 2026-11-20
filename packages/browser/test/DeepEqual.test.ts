@@ -41,4 +41,10 @@ describe("deepEqual", () => {
     assert.isFalse(deepEqual({ a: 1 }, { a: 2 }))
     assert.isFalse(deepEqual({}, null))
   })
+
+  it("compares Map keys structurally after they cross by value", () => {
+    assert.isTrue(deepEqual(new Map([[{ id: 1 }, "ready"]]), new Map([[{ id: 1 }, "ready"]])))
+    assert.isFalse(deepEqual(new Map([[{ id: 1 }, "ready"]]), new Map([[{ id: 2 }, "ready"]])))
+    assert.isFalse(deepEqual(new Map([[{ id: 1 }, "ready"]]), new Map([[{ id: 1 }, "waiting"]])))
+  })
 })

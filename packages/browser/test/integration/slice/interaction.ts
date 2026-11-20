@@ -6486,7 +6486,8 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               yield* page.evaluateInMainWorld(() => {
                 Object.assign(document.getElementById("js")!, {
                   foo: { a: 1, when: new Date(0), list: [1, "two", null] },
-                  empty: null
+                  empty: null,
+                  keyed: new Map([[{ id: 1 }, "ready"]])
                 })
               })
               const target = page.locator("#js")
@@ -6499,6 +6500,10 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               yield* target.pipe(Expect.toHaveJSProperty("foo.a.deeper", undefined))
               yield* target.pipe(Expect.toHaveJSProperty("foo", { a: 1 }, { not: true }))
               yield* page.getByRole("checkbox").pipe(Expect.toHaveJSProperty("checked", true))
+              yield* target.pipe(
+                Expect.toHaveJSProperty("keyed", new Map([[{ id: 1 }, "ready"]])),
+                Deadline.within("1 second")
+              )
             }))
           }),
         timeout
