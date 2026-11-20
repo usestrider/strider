@@ -148,6 +148,48 @@ export const anyFrame = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer
       )
 
       it.effect(
+        "acts through no other iframe when the one page.frame named by position changes before input",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { origin } = yield* site
+            const page = yield* newPage
+            yield* page.goto(
+              fixtureUrl(
+                origin,
+                `<style>iframe { display: block; width: 300px; height: 100px; }</style>${
+                  frame(origin, "<p>Before</p>")
+                }${frame(origin, button("Pay"))}${frame(origin, button("Decoy"))}`
+              )
+            )
+            const execution = Handles.page(page).entry.execution
+            const original = execution.action
+            let removed = false
+            const hook = vi.spyOn(execution, "action").mockImplementation((...args) =>
+              original(...args).pipe(Effect.tap((answer) => {
+                if (!removed && args[2].apply && !("_tag" in answer) && answer.response._tag === "Ready") {
+                  removed = true
+                  // Remove the sibling after the final target check and before parent-frame translation.
+                  return page.evaluateInMainWorld(() => document.querySelector("iframe")!.remove()).pipe(Effect.orDie)
+                }
+                return Effect.void
+              }))
+            )
+            yield* Effect.addFinalizer(() => Effect.sync(() => hook.mockRestore()))
+            // nth(1) holds the Pay frame until the sibling before it goes; then it holds the decoy, which has no Pay
+            const error = yield* page.frame(page.locator("iframe").nth(1)).getByRole("button", { name: "Pay" }).click()
+              .pipe(Deadline.within("1 second"), Effect.flip)
+            assert(Deadline.isTimeout(error), String(error))
+            hook.mockRestore()
+            assert.isTrue(removed)
+            assert.deepEqual({
+              pay: yield* page.frame(page.locator("iframe").nth(0)).locator("#out").readText,
+              decoy: yield* page.frame(page.locator("iframe").nth(1)).locator("#out").readText
+            }, { pay: "", decoy: "" })
+          })),
+        timeout
+      )
+
+      it.effect(
         "uses snapshot refs from the document selected by an any-frame search",
         () =>
           Effect.scoped(Effect.gen(function*() {
