@@ -1601,9 +1601,47 @@ export function engine(render: (root: SnapNode) => string) {
     return value
   }
 
-  /** Records which of the sources HTML-AAM also reads for a description gave an element its own name. */
+  /** The element whose own name `accessibleName` is computing, or `null` outside that computation. */
+  let nameRoot: Element | null = null
+
+  /**
+   * Records which of the sources HTML-AAM also reads for a description gave the root its own name, however the
+   * computation reached it, as through an `aria-labelledby` that names the root itself. Another element's
+   * sources only contribute, and aren't recorded.
+   */
   const nameSource = (context: NameContext, element: Element, source: NameSource): void => {
-    if (context.embedded === "self") (context.includeHidden ? hiddenNameSources : nameSources).set(element, source)
+    if (element === nameRoot) (context.includeHidden ? hiddenNameSources : nameSources).set(element, source)
+  }
+
+  /**
+   * An element's content as name from content reads it: its `::before`, then its own CSS content, which replaces
+   * its children, or its children and the elements it owns through `aria-owns`, then its `::after`. `child` is
+   * the context its children are read in.
+   */
+  const contentOf = (element: Element, child: NameContext): string => {
+    let content = cssContent(element, "::before") ?? ""
+    const own = cssContent(element)
+    if (own !== undefined) {
+      // Content on the element itself replaces its children.
+      content += own
+    } else {
+      for (const node of flatChildNodes(element)) {
+        if (node instanceof Element && SKIPPED.has(dom.localName(node))) continue
+        const name = nameOfNode(node, child)
+        // Only an inline child runs into its neighbours; <br> always separates.
+        const inline = !(node instanceof Element) ||
+          (getComputedStyle(node).display === "inline" && dom.localName(node) !== "br")
+        content += inline ? name : ` ${name} `
+      }
+      // Elements it owns through aria-owns follow its children
+      for (const owned of (dom.getAttribute(element, "aria-owns") ?? "").split(ID_SEPARATOR)) {
+        const target = owned === "" ? null : byId(element, owned)
+        if (target === null) continue
+        const name = nameOfElement(target, child)
+        content += getComputedStyle(target).display === "inline" ? name : ` ${name} `
+      }
+    }
+    return content + (cssContent(element, "::after") ?? "")
   }
 
   const nameOfElementValue = (element: Element, context: NameContext): string => {
@@ -1659,29 +1697,7 @@ export function engine(render: (root: SnapNode) => string) {
       (context.embedded === "descendant" && (role === null || NAME_FROM_CONTENT_DESCENDANT.has(role)))
     if (fromContent) {
       const child: NameContext = context.embedded === "self" ? { ...context, embedded: "descendant" } : context
-      let content = cssContent(element, "::before") ?? ""
-      const own = cssContent(element)
-      if (own !== undefined) {
-        // Content on the element itself replaces its children.
-        content += own
-      } else {
-        for (const node of flatChildNodes(element)) {
-          if (node instanceof Element && SKIPPED.has(dom.localName(node))) continue
-          const name = nameOfNode(node, child)
-          // Only an inline child runs into its neighbours; <br> always separates.
-          const inline = !(node instanceof Element) ||
-            (getComputedStyle(node).display === "inline" && dom.localName(node) !== "br")
-          content += inline ? name : ` ${name} `
-        }
-        // Elements it owns through aria-owns follow its children
-        for (const owned of (dom.getAttribute(element, "aria-owns") ?? "").split(ID_SEPARATOR)) {
-          const target = owned === "" ? null : byId(element, owned)
-          if (target === null) continue
-          const name = nameOfElement(target, child)
-          content += getComputedStyle(target).display === "inline" ? name : ` ${name} `
-        }
-      }
-      content += cssContent(element, "::after") ?? ""
+      const content = contentOf(element, child)
       // Only the target's own name is trimmed: a descendant's whitespace separates its neighbours.
       if (context.embedded === "self" ? content.trim() !== "" : content !== "") {
         if (provenance && context.embedded === "self") namesFromContent.add(element)
@@ -1774,17 +1790,24 @@ export function engine(render: (root: SnapNode) => string) {
     if (cached !== undefined) return cached
     const contribution = { fieldContent: false }
     const role = roleOf(element)
-    // This restriction is on the root, not on descendants or references contributing to another element's name.
-    const name = role !== null && NAME_PROHIBITED.has(role) ? "" : flatString(
-      nameOfElement(element, {
-        visited: new Set(),
-        labelledBy: false,
-        hiddenReference: false,
-        embedded: "self",
-        includeHidden,
-        contribution
-      })
-    )
+    const outer = nameRoot
+    nameRoot = element
+    let name: string
+    try {
+      // This restriction is on the root, not on descendants or references contributing to another element's name.
+      name = role !== null && NAME_PROHIBITED.has(role) ? "" : flatString(
+        nameOfElement(element, {
+          visited: new Set(),
+          labelledBy: false,
+          hiddenReference: false,
+          embedded: "self",
+          includeHidden,
+          contribution
+        })
+      )
+    } finally {
+      nameRoot = outer
+    }
     if (provenance && contribution.fieldContent) namesFromFields.add(element)
     cache.set(element, name)
     return name
@@ -1814,21 +1837,6 @@ export function engine(render: (root: SnapNode) => string) {
       : targets.map((target) => nameOfElement(target, referenceContext(target, includeHidden))).join(" ")
   }
 
-  /** An element's content as a reference traversal reads it, without its own label: its subtree's text. */
-  const subtreeText = (element: Element, includeHidden: boolean): string => {
-    const context = referenceContext(element, includeHidden)
-    context.visited.add(element)
-    let content = ""
-    for (const node of flatChildNodes(element)) {
-      if (node instanceof Element && SKIPPED.has(dom.localName(node))) continue
-      const name = nameOfNode(node, context)
-      const inline = !(node instanceof Element) ||
-        (getComputedStyle(node).display === "inline" && dom.localName(node) !== "br")
-      content += inline ? name : ` ${name} `
-    }
-    return content
-  }
-
   /**
    * An element's accessible description, as a flat string (HTML-AAM): empty when it's hidden; else the elements
    * `aria-describedby` names, when any exists, even if their text is empty; else `aria-description`, when
@@ -1847,21 +1855,22 @@ export function engine(render: (root: SnapNode) => string) {
       if (attribute !== null) return attribute
       accessibleName(element, includeHidden)
       const source = (includeHidden ? hiddenNameSources : nameSources).get(element)
+      // The host language's source, when the element has one and it didn't give the name, wins even when empty.
       if (source !== "native" && source !== "content") {
-        let native = ""
         if (element instanceof HTMLTableElement) {
           const caption = Array.from(dom.children(element)).find((child) => dom.localName(child) === "caption")
-          if (caption !== undefined) native = nameOfElement(caption, referenceContext(caption, includeHidden))
+          if (caption !== undefined) return nameOfElement(caption, referenceContext(caption, includeHidden))
         } else if (dom.localName(element) === "summary") {
-          native = subtreeText(element, includeHidden)
+          const context = referenceContext(element, includeHidden)
+          context.visited.add(element)
+          return contentOf(element, context)
         } else if (
           element instanceof HTMLInputElement &&
           (element.type === "button" || element.type === "submit" || element.type === "reset") &&
           dom.hasAttribute(element, "value")
         ) {
-          native = element.value
+          return element.value
         }
-        if (native.trim() !== "") return native
       }
       return source === "title" ? "" : dom.getAttribute(element, "title") ?? ""
     }
