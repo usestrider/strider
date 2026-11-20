@@ -174,4 +174,48 @@ export const consoleCalls = (
       const { methods: baseline } = yield* commandsOf(quiet(page))
       assert.deepStrictEqual(logging, baseline)
     }).pipe(Effect.scoped))
+
+  it.effect("frees a message's arguments a live subscription's filter rejects", () =>
+    Effect.gen(function*() {
+      const page = yield* opened()
+      const wanted = yield* ConsoleMessage.streamCalls(page, { text: "wanted" })
+      void wanted
+      const { methods } = yield* commandsOf(page.evaluateInMainWorld(() => {
+        console.log("unwanted", { a: 1 })
+      }))
+      const { methods: after } = yield* commandsOf(page.evaluateInMainWorld(() => 1))
+      if (!(yield* fullySupports("console.arguments"))) return
+      // The object is freed as the message arrives, while the subscription lives on
+      assert.strictEqual(releases([...methods, ...after]).length, 1)
+    }).pipe(Effect.scoped))
+
+  it.effect("frees a page's untaken arguments when its own subscription ends, while another page's lives on", () =>
+    Effect.gen(function*() {
+      const other = yield* opened()
+      yield* ConsoleMessage.streamCalls(other)
+      const page = yield* opened()
+      const scope = yield* Scope.make()
+      yield* ConsoleMessage.streamCalls(page).pipe(Scope.provide(scope))
+      yield* page.evaluateInMainWorld(() => {
+        console.log("untaken", { a: 1 })
+      })
+      const { methods } = yield* commandsOf(Scope.close(scope, Exit.void))
+      if (!(yield* fullySupports("console.arguments"))) return
+      assert.strictEqual(releases(methods).length, 1)
+    }).pipe(Effect.scoped))
+
+  it.effect("keeps a message for a second stream after the first takes and releases it", () =>
+    Effect.gen(function*() {
+      const page = yield* opened()
+      const first = yield* ConsoleMessage.streamCalls(page)
+      const second = yield* ConsoleMessage.streamCalls(page)
+      const taking = yield* first.pipe(Stream.runHead, Effect.forkScoped)
+      yield* page.evaluateInMainWorld(() => {
+        console.log({ a: 1 })
+      })
+      const taken = Option.getOrThrow(yield* Fiber.join(taking))
+      yield* taken.args[0]!.release
+      const late = Option.getOrThrow(yield* second.pipe(Stream.runHead))
+      assert.deepStrictEqual(yield* late.args[0]!.read, { a: 1 })
+    }).pipe(Effect.scoped))
 }
