@@ -20,6 +20,7 @@ import * as Handles from "../../../src/internal/handles.ts"
 import * as Runtime from "../../../src/internal/runtime.ts"
 import { site } from "../adapter/harness.ts"
 import { supports } from "./capabilities.ts"
+import * as SharedContext from "./sharedContext.ts"
 
 const timeout = 60_000
 
@@ -61,13 +62,14 @@ const call = (tools: Tools, name: BrowserToolkit.ToolName, params: Record<string
 
 export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} toolkit`, () => {
-    layer(backend, { excludeTestServices: true, timeout })((it) => {
+    layer(SharedContext.layer(backend), { excludeTestServices: true, timeout })((suite) => {
+      const it = SharedContext.guard(suite)
       it.effect(
         "fills password refs and diffs password designation changes",
         () =>
           Effect.scoped(Effect.gen(function*() {
             const served = yield* site
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(
               `${served.origin}/fixture?html=${
                 encodeURIComponent(
@@ -112,7 +114,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
         () =>
           Effect.scoped(Effect.gen(function*() {
             const served = yield* site
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(
               `${served.origin}/fixture?html=${
                 encodeURIComponent(
@@ -145,7 +147,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           () =>
             Effect.scoped(Effect.gen(function*() {
               const served = yield* site
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               yield* page.goto(
                 `${served.origin}/fixture?html=${
                   encodeURIComponent(
@@ -220,7 +222,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           () =>
             Effect.scoped(Effect.gen(function*() {
               const served = yield* site
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(fixture)}`, { waitUntil: "load" })
               const snapshot = yield* page.snapshot()
               const fields = [...snapshot.refs.values()].filter((node) =>
@@ -258,7 +260,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           () =>
             Effect.scoped(Effect.gen(function*() {
               const served = yield* site
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               yield* page.goto(
                 `${served.origin}/fixture?html=${
                   encodeURIComponent(
@@ -302,7 +304,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           () =>
             Effect.scoped(Effect.gen(function*() {
               const served = yield* site
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               const field = "<label>Shared secret<input type=password></label>"
               const frame = `<iframe srcdoc='${field}'></iframe>`
               const html = layout === "two sibling frames" ? frame + frame : field + frame
@@ -345,7 +347,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           () =>
             Effect.scoped(Effect.gen(function*() {
               const served = yield* site
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               const fields = "<label>Shared secret<input data-target=secret type=password></label>".repeat(count)
               yield* page.goto(
                 `${served.origin}/fixture?html=${encodeURIComponent(`<iframe srcdoc='${fields}'></iframe>`)}`
@@ -380,7 +382,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           () =>
             Effect.scoped(Effect.gen(function*() {
               const served = yield* site
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               const fields = "<input data-target=secret type=password>".repeat(count)
               yield* page.goto(`${served.origin}/fixture?html=${
                 encodeURIComponent(
@@ -418,7 +420,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
         () =>
           Effect.scoped(Effect.gen(function*() {
             const served = yield* site
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const frames = (first: string, second: string) =>
               `${served.origin}/fixture?html=${
                 encodeURIComponent(`<iframe srcdoc='${first}'></iframe><iframe srcdoc='${second}'></iframe>`)
@@ -450,7 +452,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
         () =>
           Effect.scoped(Effect.gen(function*() {
             const served = yield* site
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const frame = (index: number) => `<iframe srcdoc='<input data-frame=${index} type=password>'></iframe>`
             yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(frame(0) + frame(1))}`)
             for (const index of [0, 1]) {
@@ -476,7 +478,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
         () =>
           Effect.scoped(Effect.gen(function*() {
             const served = yield* site
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const inner = "<input data-frame=nested type=password>"
             const outer = `<input data-frame=outer type=password><iframe srcdoc="${inner}"></iframe>`
             const html = `<iframe srcdoc='${outer}'></iframe>`
@@ -503,7 +505,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
         () =>
           Effect.scoped(Effect.gen(function*() {
             const served = yield* site
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const html = "<iframe srcdoc='<input type=password>'></iframe>"
             yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
             yield* Expect.toHaveCount(page.frame(page.locator("iframe")).locator("input"), 1)
@@ -546,7 +548,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
         () =>
           Effect.scoped(Effect.gen(function*() {
             const served = yield* site
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const field = "<label>Late secret<input type=\"password\"></label>"
             yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(field)}`, { waitUntil: "load" })
             const snapshot = yield* page.snapshot()
@@ -592,7 +594,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
         () =>
           Effect.scoped(Effect.gen(function*() {
             const served = yield* site
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(
               `${served.origin}/fixture?html=${
                 encodeURIComponent("<iframe srcdoc='<label>Framed secret<input type=password></label>'></iframe>")
@@ -615,7 +617,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
         () =>
           Effect.scoped(Effect.gen(function*() {
             const served = yield* site
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const html =
               "<div id=\"app\" inert><textarea>private-field-value</textarea><button id=\"go\">Pay</button></div>"
             yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
@@ -643,7 +645,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               `<div style="position:relative"><label for="ack">I understand</label><button type="button" role="checkbox" aria-checked="false" id="ack" onclick="this.setAttribute('aria-checked', String(this.getAttribute('aria-checked') !== 'true'))"></button><input type="checkbox" aria-hidden="true" tabindex="-1" style="position:absolute;pointer-events:none;opacity:0;margin:0;transform:translateX(-100%)"></div>`
             const url = `${served.origin}/fixture?html=${encodeURIComponent(html)}`
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               const tools = yield* BrowserToolkit.make({
                 context: page.context,
                 secrets: {},
@@ -676,7 +678,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               `<div id="app" inert><button>Pay</button></div><div role="dialog" aria-modal="true" aria-label="Choose a hospital"><p>Pick one</p></div>`
             const url = `${served.origin}/fixture?html=${encodeURIComponent(html)}`
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               const tools = yield* BrowserToolkit.make({
                 context: page.context,
                 secrets: {},
@@ -703,7 +705,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             const served = yield* site
             const url = `${served.origin}/fixture?html=${encodeURIComponent(app)}`
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               const tools = yield* BrowserToolkit.make({
                 context: page.context,
                 secrets: { password: Redacted.make("hunter2") },
@@ -825,7 +827,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             const url = `${served.origin}/fixture?html=${encodeURIComponent(app)}`
             const browser = yield* Browser.Browser
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               const tools = yield* BrowserToolkit.make({
                 context: page.context,
                 secrets: {},
@@ -906,7 +908,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           Effect.gen(function*() {
             const served = yield* site
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               const html = `<form onsubmit="event.preventDefault(); document.body.dataset.submitted='yes'">
 <label>Choice <select required><option value="">Choose</option><option>Ready</option></select></label>
 <button>Send</button></form>`
@@ -947,7 +949,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           Effect.gen(function*() {
             const served = yield* site
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               const html = `<input id="field" aria-label="private-label" value="private-value">
 <button onclick="field.checkValidity();field.reportValidity()">Check</button><button>Quiet</button>`
               yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`, { waitUntil: "load" })
@@ -987,7 +989,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           Effect.gen(function*() {
             const served = yield* site
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               const html =
                 `<div id="open"></div><div id="closed"></div><iframe srcdoc='<input required aria-label="Frame">'></iframe>
 <button onclick="openField.checkValidity();closedField.checkValidity();document.querySelector('iframe').contentDocument.querySelector('input').checkValidity()">Check</button>
@@ -1027,7 +1029,7 @@ for (const mode of ["open", "closed"]) {
           Effect.gen(function*() {
             const served = yield* site
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent("<button>Quiet</button>")}`)
               const { runtime, entry } = Handles.page(page)
               const document = yield* runtime.model.documentOf(entry.id)
@@ -1087,7 +1089,7 @@ for (const mode of ["open", "closed"]) {
             const served = yield* site
             yield* Effect.scoped(Effect.gen(function*() {
               const own = yield* Effect.scope
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               yield* page.goto(
                 `${served.origin}/fixture?html=${
                   encodeURIComponent("<input id=\"field\" required><button>Quiet</button>")
@@ -1205,7 +1207,7 @@ for (const mode of ["open", "closed"]) {
         () =>
           Effect.scoped(Effect.gen(function*() {
             const served = yield* site
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const html = `<input id="field"><script>
               window.keys = []
               document.addEventListener("keydown", (event) => {
@@ -1241,7 +1243,7 @@ for (const mode of ["open", "closed"]) {
           Effect.gen(function*() {
             const served = yield* site
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               const html = `<button onclick="alert('Stop')">Ask</button>`
               yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
               const { runtime, entry } = Handles.page(page)
@@ -1294,7 +1296,7 @@ for (const mode of ["open", "closed"]) {
           Effect.gen(function*() {
             const served = yield* site
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               const html = "<label>Mail <input id=\"mail\" type=\"email\"></label>"
               yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
               const message = "private \"quoted\" ] [ref=fake] \\ trailing\nprivate tail"
@@ -1345,7 +1347,7 @@ for (const mode of ["open", "closed"]) {
         () =>
           Effect.scoped(Effect.gen(function*() {
             const served = yield* site
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(
               `${served.origin}/fixture?html=${
                 encodeURIComponent(
@@ -1388,7 +1390,7 @@ for (const mode of ["open", "closed"]) {
           const served = yield* site
           const url = `${served.origin}/fixture?html=${encodeURIComponent(app)}`
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url, { waitUntil: "load" })
             yield* page.getByRole("button", { name: "Sign in" }).click()
             const strict = yield* BrowserToolkit.make({

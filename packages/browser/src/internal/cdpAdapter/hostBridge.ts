@@ -1,4 +1,4 @@
-/** Bindings are created only for targets covered by a WebSocket declaration. */
+/** Bindings are created only for targets covered by a declaration that carries a host bridge. */
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -40,7 +40,7 @@ let pending:
     Map<
       string,
       {
-        readonly bridge: Adapter.WebSocketBridge
+        readonly bridge: Adapter.HostBridge
         readonly events: Array<Runtime.BindingCalledParams>
         readonly captures: Array<Runtime.ConsoleAPICalledParams>
         readonly known: Map<string, import("../../Target.ts").RealmId>
@@ -89,15 +89,15 @@ export const flush = (state: State, target: TargetEntry): void => {
   }
 }
 export const prepare = Effect.fnUntraced(
-  function*(state: State, target: TargetEntry, given?: ReadonlyArray<Adapter.WebSocketBridge>, send = true) {
+  function*(state: State, target: TargetEntry, given?: ReadonlyArray<Adapter.HostBridge>, send = true) {
     const commands: Array<ReturnType<typeof Runtime.addBinding>> = []
     if (target.page === undefined) return commands
     const placementOfTarget = placement(target.page)
     const bridges = given ?? state.registry.all().flatMap((entry) =>
       entry.declaration._tag === "InitScript" &&
-        entry.declaration.webSocket !== undefined && Declarations.covers(entry.scope, placementOfTarget) &&
+        entry.declaration.hostBridge !== undefined && Declarations.covers(entry.scope, placementOfTarget) &&
         (target.kind !== "worker" || entry.declaration.workers) ?
-        [entry.declaration.webSocket] :
+        [entry.declaration.hostBridge] :
         []
     )
     for (const bridge of bridges) {

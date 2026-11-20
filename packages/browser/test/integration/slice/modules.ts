@@ -48,6 +48,7 @@ import * as Handles from "../../../src/internal/handles.ts"
 import { site } from "../adapter/harness.ts"
 import { supports } from "./capabilities.ts"
 import { navigationFailure } from "./navigationFailure.ts"
+import * as SharedContext from "./sharedContext.ts"
 
 const timeout = 60_000
 
@@ -142,7 +143,8 @@ const closesCleanly = Effect.fnUntraced(function*(scope: Scope.Closeable) {
 
 export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} event modules`, () => {
-    layer(backend, { excludeTestServices: true, timeout })((it) => {
+    layer(SharedContext.layer(backend), { excludeTestServices: true, timeout })((suite) => {
+      const it = SharedContext.guard(suite)
       // ── Download ──
 
       it.effect("runs call site 5: a download, saved to a path", () =>
@@ -151,7 +153,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
           const { url } = yield* fixture(() => `<a href="/download" download>Export CSV</a>`)
           const saved = path.join(temporary(), "export.csv")
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const download = yield* Download.next(page)
             yield* page.getByText("Export CSV").click()
@@ -194,7 +196,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             if (yield* refused("downloads", (page) => Download.next(page))) return
             const { url } = yield* fixture(() => `<a href="/slow-download" download>Slow</a>`)
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               yield* page.goto(url)
               const download = yield* Download.next(page)
               yield* page.getByText("Slow").click()
@@ -229,12 +231,13 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
 
       // Chromium answers a context's disposal before the downloads in it end, and finishes or cancels them after:
       // the closer to its completion a download is as its context closes, the likelier its file lands in the
-      // directory while it is being removed, so the case closes several in turn
+      // directory while it is being removed, so the case closes ten in turn: without waiting for them, five already
+      // fail
       it.effect("closes a context whose download has received its whole body", () =>
         Effect.gen(function*() {
           if (yield* refused("downloads", (page) => Download.next(page))) return
           const { origin } = yield* downloadSite(false)
-          yield* Effect.forEach(Array.from({ length: name === "Chromium" ? 20 : 1 }), () =>
+          yield* Effect.forEach(Array.from({ length: name === "Chromium" ? 10 : 1 }), () =>
             Effect.gen(function*() {
               const scope = yield* Scope.make()
               yield* Effect.gen(function*() {
@@ -284,7 +287,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
           }
           const { url } = yield* fixture(() => chooser)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const choosers = yield* FileChooser.next(page)
             const handler = yield* FileChooser.handle(page, FileChooser.choose(FileInput.local(import.meta.filename)))
@@ -301,7 +304,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
           if (yield* refused("fileChooser", (page) => FileChooser.next(page))) return
           const { url } = yield* fixture(() => chooser)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const decisions = yield* AutoResolution.next(page, { subject: "FileChooser" })
             yield* page.getByRole("button", { name: "Upload" }).click()
@@ -318,7 +321,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
           if (yield* refused("fileChooser", (page) => FileChooser.next(page))) return
           const { url } = yield* fixture(() => chooser)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const both = [FileInput.local(import.meta.filename), FileInput.local(import.meta.filename)]
             const handler = yield* FileChooser.handle(page, FileChooser.choose(both))
@@ -341,7 +344,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
               }`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               yield* page.goto(url)
               const errors = yield* ConsoleMessage.next(page, { level: "error", text: /bad/ })
               const fromWorker = yield* ConsoleMessage.next(page.context, { text: "from the worker" })
@@ -373,7 +376,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
           Effect.gen(function*() {
             const { url, origin } = yield* fixture(() => `<p>Old document</p>`)
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               yield* page.goto(url)
               const closed = yield* Effect.scoped(Effect.gen(function*() {
                 const pending = yield* ConsoleMessage.next(page, { text: "never" }).pipe(
@@ -419,7 +422,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             )
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const formatted = yield* ConsoleMessage.next(page, { text: /cart/ })
             const styled = yield* ConsoleMessage.next(page, { text: /styled/ })
@@ -444,7 +447,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
               button("Raw", "setTimeout(() => { throw 'a string' })")
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               yield* page.goto(url)
               const thrown = yield* UncaughtException.next(page, { message: "thrown here" })
               const rejected = yield* UncaughtException.next(page, { message: /rejected/ })
@@ -474,7 +477,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
           const { origin } = yield* site
           const requested = `${origin}/json?token=url-test#details`
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(requested)
             const href = yield* page.evaluateInMainWorld(() => location.href)
             assert.strictEqual(href, requested)
@@ -489,7 +492,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             const { origin } = yield* site
             const requested = fixtureUrl(origin, button("Next", "history.pushState({}, '', '/second')"))
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               yield* page.goto(requested)
               const base = yield* page.url
               yield* page.getByRole("button", { name: "Next" }).click()
@@ -540,7 +543,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
           const { origin } = yield* site
           const base = `${origin}/json?token=url-test`
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(`${base}#initial`)
             for (const requested of [`${base}#changed`, base]) {
               const next = yield* PageNavigation.next(page)
@@ -563,7 +566,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
         Effect.gen(function*() {
           const { origin, url } = yield* fixture(() => `<a href="/orders">Orders</a>`)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const orders = yield* PageNavigation.next(page, { url: `${origin}/orders` })
             yield* page.getByRole("link", { name: "Orders" }).click()
@@ -582,7 +585,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             if (!(yield* supports("navigation.sameDocument"))) return
             const { url } = yield* fixture(() => `<a href="#details">Details</a><p id="details">Details here</p>`)
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               yield* page.goto(url)
               const fragment = yield* PageNavigation.next(page, { url: `${url}#details` })
               yield* page.getByRole("link", { name: "Details" }).click()
@@ -606,7 +609,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
           const { origin } = yield* navigationFailure
           const { url } = yield* fixture(() => `<a href="${origin}/nowhere">Broken</a>`)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const broken = yield* PageNavigation.next(page, { url: `${origin}/*` })
             yield* page.getByRole("link", { name: "Broken" }).click()
@@ -621,7 +624,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
         Effect.gen(function*() {
           const { origin, url } = yield* fixture(() => `<iframe id="inner" src="/child"></iframe>`)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             yield* page.frame(page.locator("#inner")).getByText("child of").pipe(Expect.toBeVisible)
             const inFrame = yield* PageNavigation.next(page, { url: `${origin}/child?moved`, frames: "all" })
@@ -647,7 +650,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             `<a href="${fixtureUrl(origin, `<img src="/slow-image"><p>Loaded</p>`)}">Slow</a>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const loaded = yield* PageNavigation.next(page, { url: `${origin}/fixture*`, waitUntil: "load" })
             yield* page.getByRole("link", { name: "Slow" }).click()
@@ -668,7 +671,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             }`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url, { waitUntil: "load" })
             const requests = yield* NetworkRequest.stream(page, { resourceType: "fetch" })
             const collected = yield* requests.pipe(Stream.take(2), Stream.runCollect, Effect.forkChild)
@@ -692,7 +695,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
           const { origin, url } = yield* fixture(() => button("Add to cart", "fetch('/cart', { method: 'POST' })"))
           const Cart = Schema.Struct({ items: Schema.Array(Schema.Struct({ id: Schema.String })) })
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const added = yield* NetworkResponse.next(
               page,
@@ -717,7 +720,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
         () =>
           Effect.scoped(Effect.gen(function*() {
             const { origin, url } = yield* fixture(() => "<p>body cancellation</p>")
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const decoding = yield* Deferred.make<void>()
             const interrupted = yield* Deferred.make<void>()
@@ -806,7 +809,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
         () =>
           Effect.scoped(Effect.gen(function*() {
             const { origin } = yield* fixture(() => "")
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const links = yield* NetworkRequest.redirects(page)
             const sent = yield* NetworkRequest.next(page, { url: `${origin}/redirect-unfollowed` })
             yield* page.goto(`${origin}/redirect-unfollowed`, { waitUntil: "load" })
@@ -829,7 +832,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
         () =>
           Effect.scoped(Effect.gen(function*() {
             const { origin } = yield* fixture(() => "")
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const response = yield* NetworkResponse.next(page, {
               url: `${origin}/redirect-unfollowed`,
               status: 302,
@@ -862,7 +865,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
         () =>
           Effect.scoped(Effect.gen(function*() {
             const { origin } = yield* fixture(() => "")
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const response = yield* NetworkResponse.next(page, {
               url: `${origin}/multiple-choices`,
               status: 300,
@@ -879,7 +882,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
         () =>
           Effect.scoped(Effect.gen(function*() {
             const { origin, url } = yield* fixture(() => "<title>fetch redirects</title>")
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const links = yield* NetworkRequest.redirects(page)
             yield* page.goto(url)
             const followed = yield* NetworkRequest.next(page, { url: `${origin}/redirect` })
@@ -926,7 +929,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
         Effect.gen(function*() {
           const { origin, url } = yield* fixture(() => button("Go", "fetch('/redirect')"))
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const hop = yield* NetworkResponse.next(page, {
               url: `${origin}/redirect`,
@@ -946,7 +949,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
         Effect.gen(function*() {
           const { origin, url } = yield* fixture(() => button("Listen", "window.source = new EventSource('/events')"))
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const stream = yield* NetworkResponse.next(page, {
               url: `${origin}/events`,
@@ -965,7 +968,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
         Effect.gen(function*() {
           const { url } = yield* fixture(() => "<p>nothing</p>")
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const reads: ReadonlyArray<Effect.Effect<unknown, Subscription.SubscriptionError>> = [
               NetworkRequest.history(page, { url: "https://example.com/:id(" }),
@@ -989,7 +992,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
               button("Start", "window.worker = new Worker('/worker.js')") + button("Stop", "window.worker.terminate()")
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               yield* page.goto(url)
               const started = yield* BrowserWorker.next(page)
               yield* page.getByText("Start").click()
@@ -1064,7 +1067,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             `<p id="state">waiting</p>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             if (name === "Firefox") {
               const reads: ReadonlyArray<Effect.Effect<unknown, Subscription.SubscriptionError, Scope.Scope>> = [
@@ -1102,7 +1105,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
         Effect.gen(function*() {
           const { url } = yield* fixture(() => button("Listen", "window.source = new EventSource('/events')"))
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             if (name !== "Chromium") {
               const error = yield* NetworkConnection.next(page, { kind: "eventSource" }).pipe(

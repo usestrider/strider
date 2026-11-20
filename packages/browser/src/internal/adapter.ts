@@ -566,8 +566,8 @@ export type Override =
   | { readonly _tag: "FocusEmulation"; readonly enabled: boolean }
   | { readonly _tag: "CacheDisabled"; readonly disabled: boolean }
 
-/** Internal host transport belonging only to a WebSocket routing declaration. */
-export interface WebSocketBridge {
+/** A host transport that belongs to one declaration: a WebSocket routing or a binding. */
+export interface HostBridge {
   readonly name: string
   readonly token: string
   readonly scope: Scope.Scope
@@ -590,7 +590,7 @@ export interface WebSocketBridge {
 export type Declaration =
   | {
     readonly _tag: "InitScript"
-    readonly webSocket?: WebSocketBridge | undefined
+    readonly hostBridge?: HostBridge | undefined
     readonly source: string
     readonly world: World
     /** `environment` scripts (library shims such as the page clock) run before `user` scripts. */

@@ -9,12 +9,12 @@ import * as Fake from "../../src/internal/fake.ts"
 export const harness = Effect.fnUntraced(
   function*(
     test: (
-      bridge: () => Adapter.WebSocketBridge
+      bridge: () => Adapter.HostBridge
     ) => Effect.Effect<void, unknown, Browser.Browser | import("effect/Scope").Scope>,
     evaluate?: Adapter.AdapterConnection["evaluate"],
     options?: { readonly capture?: boolean; readonly releaseHandles?: Adapter.AdapterConnection["releaseHandles"] }
   ) {
-    let bridge!: Adapter.WebSocketBridge
+    let bridge!: Adapter.HostBridge
     const clock = yield* Clock.clockWith(Effect.succeed)
     const backend = BrowserImpl.layer((sink) =>
       Fake.connect([], {
@@ -28,8 +28,8 @@ export const harness = Effect.fnUntraced(
         declare: (scope, declaration) =>
           fake.declare(scope, declaration).pipe(Effect.tap(() =>
             Effect.sync(() => {
-              if (declaration._tag === "InitScript" && declaration.webSocket !== undefined) {
-                const current = declaration.webSocket
+              if (declaration._tag === "InitScript" && declaration.hostBridge !== undefined) {
+                const current = declaration.hostBridge
                 bridge = {
                   ...current,
                   receive: (realm, ...args) => {

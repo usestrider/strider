@@ -1236,7 +1236,7 @@ describe("Chromium adapter, CDP only", () => {
               const page = yield* Browser.newPage()
               const fixture =
                 `<script>window.log='';addEventListener('dragstart',e=>console.log('drag source',e.target.id,e.composedPath()[0].id),true)</script><div id="host"></div><script>host.attachShadow({mode:'closed'}).innerHTML=\`<div id="source" draggable="true" ondragend="console.log('source dragend')" ondragstart="window.log+='1';this.remove()" style="position:absolute;left:10px;top:10px;width:60px;height:60px;background:red">Source</div>\`</script><div id="target" style="position:absolute;left:300px;top:10px;width:60px;height:60px">Target</div>`
-              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(fixture)}`)
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(fixture)}`, { waitUntil: "load" })
               yield* page.mouse.move({ x: 40, y: 40 })
               yield* Effect.scoped(Effect.gen(function*() {
                 const held = yield* page.mouse.hold("left")
@@ -1259,7 +1259,7 @@ describe("Chromium adapter, CDP only", () => {
               const page = yield* Browser.newPage()
               const fixture =
                 `<script>window.log='';addEventListener('dragstart',e=>console.log('drag source',e.target.id,e.composedPath()[0].id),true)</script><div id="host" draggable="true"></div><script>host.attachShadow({mode:'closed'}).innerHTML=\`<div id="source" draggable="true" ondragend="console.log('source dragend')" ondragstart="window.log+='1';this.remove()" style="position:absolute;left:10px;top:10px;width:60px;height:60px;background:red">Source</div>\`</script><div id="target" style="position:absolute;left:300px;top:10px;width:60px;height:60px">Target</div>`
-              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(fixture)}`)
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(fixture)}`, { waitUntil: "load" })
               yield* page.mouse.move({ x: 40, y: 40 })
               yield* Effect.scoped(Effect.gen(function*() {
                 const held = yield* page.mouse.hold("left")
