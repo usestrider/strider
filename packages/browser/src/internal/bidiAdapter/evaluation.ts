@@ -17,7 +17,16 @@ import * as ConsolePreview from "../consolePreview.ts"
 import * as Operation from "../operation.ts"
 import * as Urls from "../urls.ts"
 import { confirmFrameRemoval } from "./contexts.ts"
-import { closingOf, documentOf, type Event, navigableOf, type RealmEntry, realmOf, type State } from "./state.ts"
+import {
+  closingOf,
+  documentOf,
+  type Event,
+  navigableOf,
+  placement,
+  type RealmEntry,
+  realmOf,
+  type State
+} from "./state.ts"
 import { addWindowRealm, removeRealm } from "./tree.ts"
 
 // ── Remote values ─────────────────────────────────────────────────────────────────────────────────────────
@@ -261,9 +270,18 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         : { _tag: "Page", page: "" as L1Target.NavigableId }
       if (params.type === "console") {
         if (realm === undefined) return
+        // Only where a subscriber asked for them does a message keep its arguments: BiDi gives them by value, with no
+        // handle to own, and a node by its shared id
+        const args = navigable !== undefined && state.registry.consoleArguments(placement(navigable))
+          ? {
+            values: ("args" in params ? params.args : []).map((value) => toRemote(state, value, realm, false)),
+            release: () => Effect.void
+          }
+          : undefined
         state.buffer.emitFrom(realm, {
           _tag: "ConsoleMessage",
           realm: Option.some(realm.id),
+          args,
           message: new ConsoleMessage.ConsoleMessage({
             // The console method says what the page wrote; BiDi's level is coarser (`console.log` is `info`)
             level: Kit.consoleLevel("method" in params ? params.method : "log"),
