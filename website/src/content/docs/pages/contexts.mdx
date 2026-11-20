@@ -33,9 +33,10 @@ A context and its pages close with the scope that made them, popups included.
 
 ## Events across a context
 
-The event modules that take a page also take a context, for the events of every page in it, including pages opened
-after you subscribe. Each event names its page. This waits for whichever page of the context loads the receipt, and
-then for that page to close:
+`PageNavigation` and `PageLifecycle` take a context as well as a page, for the events of every page in it, including
+pages opened after you subscribe, and each of their events names its page. This makes two independent waits before
+the click: one for whichever page of the context loads the receipt, and one for the first page of the context to
+close, which need not be the same page:
 
 ```ts
 import { Page, PageLifecycle, PageNavigation, UserContext } from "@usestrider/browser"
@@ -57,9 +58,10 @@ const printReceipt = Effect.fn("printReceipt")(
 ```
 
 [`PageLifecycle`](/docs/events/kinds#frames-loads-and-closes) reports frames added and removed, loads, and closes;
-console messages, requests, responses, dialogs, downloads, and workers have
-[modules of their own](/docs/events/events#event-modules). A context's subscription and a page's each get an event
-once.
+console messages, requests, responses, uncaught exceptions, downloads, workers, and connections take a context too,
+with [modules of their own](/docs/events/events#event-modules), while `Popup`, `Dialog`, and `FileChooser` take only a
+page. A
+context's subscription and a page's each get an event once.
 
 ## Settings for a context's life
 

@@ -1054,8 +1054,10 @@ its delivery worker is still using caller resources. Prompt terminal notificatio
 release has finished. The caller can keep the latched result. Streams retain their existing ordered
 buffer-draining contract on normal target end.
 
-Rejected: making target failure depend on worker progress, which can return success after the target has ended
-and contradicts the target-lifetime contract; treating publication as a match, which bypasses effectful delivery
+Rejected: making target failure wait on a delivery or predicate already running when the target ends, which can
+hold the wait on work blocked by the ended target and return success after it ended (entries still queued, with
+none running, are the accepted exception above: they were published before the end, and are delivered and checked
+first); treating publication as a match, which bypasses effectful delivery
 and predicates; draining or evaluating queued work during scope closure, which delays cancellation and starts user
 work after ownership ended; retaining completed subscriptions until their acquiring scope closes, which keeps
 unusable entries and callbacks alive. This is a correctness rule, not an observation optimization.
