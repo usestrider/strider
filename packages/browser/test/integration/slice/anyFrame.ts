@@ -4,6 +4,7 @@
 import { assert, describe, layer } from "@effect/vitest"
 import { type Browser, Deadline, Locator } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import type * as Layer from "effect/Layer"
 import { site } from "../adapter/harness.ts"
 import * as SharedContext from "./sharedContext.ts"
@@ -69,21 +70,19 @@ export const anyFrame = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer
           Effect.scoped(Effect.gen(function*() {
             const { origin } = yield* site
             const page = yield* newPage
-            const later = frame(origin, button("Pay")).replaceAll("\"", "'")
-            yield* page.goto(
-              fixtureUrl(
-                origin,
-                `<p id="out"></p><button id="add" onclick="document.body.insertAdjacentHTML('beforeend', &quot;${later}&quot;)">Add</button>`
-              )
-            )
+            const later = frame(origin, button("Pay"))
+            yield* page.goto(fixtureUrl(origin, `<p id="out"></p>`))
             const pay = page.anyFrame.getByRole("button", { name: "Pay" })
             assert.strictEqual(yield* pay.count, 0)
             const missing = yield* pay.readText.pipe(Effect.flip)
             assert(Locator.isLocatorError(missing), String(missing))
             assert.strictEqual(missing.reason._tag, "NoMatch")
             const clicked = yield* pay.click().pipe(Deadline.within("5 seconds"), Effect.forkScoped)
-            yield* page.locator("#add").click()
-            yield* clicked.await
+            yield* page.evaluateInMainWorld(
+              (html: string) => document.body.insertAdjacentHTML("beforeend", html),
+              later
+            )
+            yield* Fiber.join(clicked)
             assert.strictEqual(yield* page.frame(page.locator("iframe")).locator("#out").readText, "clicked")
           })),
         timeout
