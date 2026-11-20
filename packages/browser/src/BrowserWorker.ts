@@ -97,6 +97,11 @@ export interface BrowserWorker extends ObservedBrowserWorker {
    *
    * Workers have no isolated world, so evaluating in one needs control of its owner.
    *
+   * Arguments cross by value, as `Page.evaluate`'s do: primitives, `Date`, `RegExp`, `Map`, `Set`, arrays, and
+   * plain objects, recursively. A `JSHandle` from the worker's realm, such as one `evaluateHandle` returned,
+   * crosses as the value it refers to; one from another realm, or a value that can't cross, fails with
+   * `NotSerializable`, naming the argument's path.
+   *
    * On Chromium, an evaluation in a dedicated worker that has just started waits until the worker's script has
    * loaded and any init scripts for it have run, then goes ahead; if the worker ends first, it fails with the
    * worker's end. The wait counts against the evaluation's deadline.
@@ -120,6 +125,45 @@ export interface BrowserWorker extends ObservedBrowserWorker {
     fn: (...args: Args) => B | Promise<B>,
     ...args: Args
   ): Effect.Effect<JSHandle.Serialized<B>, BrowserWorkerError | Target.TargetGone | Deadline.Timeout>
+  /**
+   * Calls `fn` in the worker and returns its result as a handle in the worker's realm, released when the caller's
+   * scope closes, for values that can't come back by value, such as the worker's global.
+   *
+   * **Details**
+   *
+   * Arguments cross as they do for `evaluate`: by value, a handle from the worker's realm as itself, and one
+   * from another realm refused with `NotSerializable`. The handle
+   * ends with the worker: using it after the worker ends fails with `TargetGone`. On Chromium, a call in a
+   * dedicated worker that has just started waits for the worker's script to load, as `evaluate` does, and fails
+   * with `TargetGone` if the worker ends before it loads.
+   *
+   * **Gotchas**
+   *
+   * Fails with `Unsupported` on Firefox, which can't evaluate in a worker (`workers.evaluate`).
+   *
+   * **Example** (Holding a worker's global)
+   *
+   * ```ts import.meta.vitest
+   * import { BrowserWorker, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const workerOrigin = Effect.fn("workerOrigin")(function*(page: Page.Page) {
+   *   const started = yield* BrowserWorker.next(page)
+   *   yield* page.getByRole("button", { name: "Start" }).click()
+   *   const worker = yield* started
+   *   const global = yield* worker.evaluateHandle(() => self)
+   *   return yield* global.evaluate((scope) => scope.location.origin)
+   * })
+   * ```
+   */
+  evaluateHandle<Args extends ReadonlyArray<unknown>, B>(
+    fn: (...args: Args) => B | Promise<B>,
+    ...args: Args
+  ): Effect.Effect<
+    JSHandle.JSHandle<Awaited<B>>,
+    BrowserWorkerError | Target.TargetGone | Deadline.Timeout,
+    Scope.Scope
+  >
 }
 
 /**

@@ -624,6 +624,18 @@ export const make = (owner: PageOwner): Page.Page => {
         "handle",
         (realm, value) => Evaluation.own<Awaited<A>>(runtime, realm, value, Option.some(entry))
       ),
+    evaluateHandleInMainWorld: <Args extends ReadonlyArray<unknown>, A>(
+      fn: (...args: Args) => A | Promise<A>,
+      ...args: Args
+    ) =>
+      evaluation(
+        "Page.evaluateHandleInMainWorld",
+        { _tag: "Main" },
+        fn,
+        args,
+        "handle",
+        (realm, value) => Evaluation.own<Awaited<A>>(runtime, realm, value, Option.some(entry))
+      ),
     keyboard: Devices.keyboard({ runtime, page: entry }),
     mouse: Devices.mouse({ runtime, page: entry }),
     clock: Clock.make({

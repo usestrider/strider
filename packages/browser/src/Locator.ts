@@ -1308,6 +1308,39 @@ export interface Locator extends ReadonlyLocator {
     options?: Snapshot.Options | undefined
   ): Effect.Effect<Snapshot.Snapshot<Locator>, LocatorError | Target.TargetGone | Deadline.Timeout>
   /**
+   * Calls `fn` in the isolated world with the one match as its first argument, and returns its result as a
+   * handle in the caller's scope, for values that can't come back by value.
+   *
+   * **Details**
+   *
+   * The match is resolved now, as `evaluate` resolves it, and never waited for: no match fails with `NoMatch`,
+   * and several with `StrictViolation`. Arguments cross as they do for `evaluate`.
+   *
+   * **Gotchas**
+   *
+   * Fails with `Unsupported` on WebKit, which has no isolated worlds (`isolatedWorlds`).
+   *
+   * **Example** (Holding a canvas's drawing context)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const chartPixel = Effect.fn("chartPixel")(function*(page: Page.Page) {
+   *   const context = yield* page.locator("canvas#chart").evaluateHandle((canvas) =>
+   *     (canvas as HTMLCanvasElement).getContext("2d")!
+   *   )
+   *   return yield* context.evaluate((
+   *     drawing
+   *   ) => [...drawing.getImageData(0, 0, 1, 1).data])
+   * })
+   * ```
+   */
+  evaluateHandle<Args extends ReadonlyArray<unknown>, B>(
+    fn: (element: Element, ...args: Args) => B | Promise<B>,
+    ...args: Args
+  ): Effect.Effect<JSHandle.JSHandle<Awaited<B>>, LocatorError | Target.TargetGone | Deadline.Timeout, Scope.Scope>
+  /**
    * Clicks the one match. Checks: visible, stable, enabled, notInert, inViewport (scrolling it into view),
    * receivesPointer.
    *

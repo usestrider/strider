@@ -253,6 +253,7 @@ interface Browser {
   newPage(options?: UserContext.Options | undefined): Effect<Page.Page, Page.PageError | TargetGone | Timeout, Scope>   // a fresh context + page, released together
   readonly pages: Watchable.Watchable<ReadonlyArray<Page.ObservedPage>>   // attach mode: what exists, and changes
   readonly defaultContext: UserContext.ObservedUserContext   // fixed: exists for the whole connection
+  readonly contexts: Watchable.Watchable<ReadonlyArray<UserContext.ObservedUserContext>>   // default first, then in the order added
 }
 declare const Browser: Context.Service<Browser, Browser>  // provided by a backend layer (Chromium.layer(options), …)
 declare const newPage: (options?: UserContext.Options | undefined) => Effect<Page.Page, Page.PageError, Browser | Scope>
@@ -356,7 +357,7 @@ interface Emulation {
 ```
 
 - **A program's own operations are kept as the library's are.** `Operation.fn("checkout")` makes each call one operation: it reads the deadline in force once, opens a span named `checkout` (through `Browser.SpanNameGenerator` and `TracerDisabledWhen`, as every library span), and keeps a record. Every library operation inside it, and every operation of the program's, is a step of it: when the step ends, it joins the record's steps, and the record's dispatch moves as far as the step's went, a step that sent and succeeded counting as acknowledged. An event wait awaited inside it is a step too. A `Timeout` that leaves it is its own (Errors as users see them). `markSent`, `observe`, and `bound` write the record, and compile only where `Operation.Current` is provided: inside `fn` or `named`, or in a helper that says so in its requirements. A handler's decision runs as an operation of its own, under its budget, never as a step of the operation that registered it. `Browser.Operation` is something else: what `SpanNameGenerator` is given, naming a span's operation.
-- **What a connection controls.** A page it created, or a page in a context it created, is controlled for its life. Any other page is observed: a launched browser's own first tab, an attached browser's tabs, and their popups. `browser.pages` lists every page, as `Page`s or observed pages, and `browser.defaultContext` has `pages`, `workers`, and `control`. `inspect` and `control` gain access for the caller's scope; when it closes, what they gave fails with `TargetGone{AccessReleased}`, every member alike (QUIRKS.md, Q143), the declarations made through them are removed, and the page stays open. Controlling a context controls its pages for the same scope; a page's `context`, when its context isn't controlled, refuses with `NotPermitted`. A context the connection didn't create has no dialog policy, so its dialogs wait for a handler or the user.
+- **What a connection controls.** A page it created, or a page in a context it created, is controlled for its life. Any other page is observed: a launched browser's own first tab, an attached browser's tabs, and their popups. `browser.pages` lists every page, as `Page`s or observed pages, and `browser.defaultContext` has `pages`, `workers`, and `control`. `browser.contexts` lists every context, the default first: a context the connection created as its `UserContext`, any other observed, with `control`. `inspect` and `control` gain access for the caller's scope; when it closes, what they gave fails with `TargetGone{AccessReleased}`, every member alike (QUIRKS.md, Q143), the declarations made through them are removed, and the page stays open. Controlling a context controls its pages for the same scope; a page's `context`, when its context isn't controlled, refuses with `NotPermitted`. A context the connection didn't create has no dialog policy, so its dialogs wait for a handler or the user.
 - **One concept, two lifetimes.** Creation options are declarations held for the context's whole life, made before its first page; `emulate` and `grant` are the same declarations, scoped. So viewport, locale, and timezone live in `Emulation`, not as separate options. `focus: "emulated"` is the focus override, which Firefox lacks.
 - **Overrides restore only what they know.** Removing one restores the previous value when it is known and access permits; precedence is page over context (CONCEPTS.md §7). A field the backend can't apply fails with `Unsupported` naming it.
 - **Stock WebKit viewport confirmation.** A launched window is resized, then its CSS dimensions are checked immediately and on resize events for up to five seconds by default, capped by the operation deadline. One final measurement at the confirmation limit can still succeed; otherwise `Reason.ViewportMismatch` carries numeric `requested` and `actual` sizes. This is an observed match within a limit, not permanent support or a guarantee against later user/window-manager changes. Page creation checks inherited defaults and closes failed pages. Failed overrides restore and confirm the prior size under a detached five-second cleanup budget; a failed-change rollback failure remains visible as a defect alongside the original error. Ordinary scope release is non-failing: a confirmed gone page needs no restoration, and other release failures are logged without claiming success. Callback disposal preserves the primary result, ignores confirmed vanished windows, and logs other failures. Cleanup reserves its final second for measurement inside the shared five-second budget; genuine operation deadlines remain timeouts. Genuine operation deadlines, navigation, and protocol failures retain their own errors. Popup defaults are attempted, but no creating operation exists to report their failure: explicitly emulate the popup for confirmation.
@@ -427,6 +428,9 @@ interface Page extends ReadonlyPage {
     fn: (...args: Args) => A | Promise<A>, ...args: Args
   ): Effect<JSHandle.Serialized<A>, PageError>
   evaluateHandle<Args extends ReadonlyArray<unknown>, A>(   // the isolated world, like evaluate
+    fn: (...args: Args) => A | Promise<A>, ...args: Args
+  ): Effect<JSHandle.JSHandle<Awaited<A>>, PageError, Scope>
+  evaluateHandleInMainWorld<Args extends ReadonlyArray<unknown>, A>(   // the page's own world, on every backend
     fn: (...args: Args) => A | Promise<A>, ...args: Args
   ): Effect<JSHandle.JSHandle<Awaited<A>>, PageError, Scope>
   readonly keyboard: Keyboard.Keyboard
@@ -593,6 +597,9 @@ operation deadline apply as for `evaluate`; a timeout after dispatch cannot canc
 
 
 interface Locator extends ReadonlyLocator {             // queries, chainers and first/last return Locator
+  evaluateHandle<Args extends ReadonlyArray<unknown>, B>(   // evaluate's resolution, the result as a scoped handle
+    fn: (element: Element, ...args: Args) => B | Promise<B>, ...args: Args
+  ): Effect<JSHandle.JSHandle<Awaited<B>>, LocatorError, Scope>
   click(options?: ClickOptions | undefined): Effect<void, LocatorError>
   dblclick(options?: ClickOptions | undefined): Effect<void, LocatorError>
   tap(options?: PointerOptions | undefined): Effect<void, LocatorError>              // touch
@@ -753,8 +760,10 @@ interface JSHandle<A = unknown> extends Pipeable, Inspectable {   // a value in 
     Effect<Serialized<B>, JSHandleError>
   evaluateHandle<Args extends ReadonlyArray<unknown>, B>(fn: (value: A, ...args: Args) => B | Promise<B>, ...args: Args):
     Effect<JSHandle<Awaited<B>>, JSHandleError, Scope>
+  readonly properties: Effect<ReadonlyMap<string, JSHandle>, JSHandleError, Scope>   // own enumerable, each getter once
   readonly read: Effect<Serialized<A>, JSHandleError>    // the value itself, by value
   readonly release: Effect<void>                         // early release; idempotent
+  toString(): string                                     // realm and a preview from the call that made it
 }
 ```
 
@@ -884,7 +893,7 @@ declare const History: <S extends Schema.Top>(entry: S) => Schema.Struct<…>   
 | `FileChooser` | `FileChooser`: data (`Single` or `Multiple`); `FileChooser.handle` gets it as `Pending` | `multiple` | `Page` |
 | `Download` | `Download` | `url` | `Page` or `UserContext` |
 | `AutoResolution` | `AutoResolution`: an obligation decided by a default policy | `subject` | `Page` or `UserContext` |
-| `BrowserWorker` | `BrowserWorker` from a `Page` or `UserContext` (it can `evaluate`, which needs control: workers have no isolated world), otherwise `ObservedBrowserWorker` | `url`, `kind`: a page's are dedicated; `shared` and `service` need `workers.shared` and `workers.service` (CDP) | any page or context |
+| `BrowserWorker` | `BrowserWorker` from a `Page` or `UserContext` (it can `evaluate` and `evaluateHandle`, which need control: workers have no isolated world), otherwise `ObservedBrowserWorker` | `url`, `kind`: a page's are dedicated; `shared` and `service` need `workers.shared` and `workers.service` (CDP) | any page or context |
 | `NetworkConnection` | `NetworkConnection`: a WebSocket or EventSource, whose `frames` subscribe from now on (`networkConnections`: CDP; stock WebKit without EventSource; Unsupported on BiDi) | `url`, `kind` | any page or context |
 
 Each module has the most specific accurate name, with a prefix only where a bare name would clash with the fetch `Request`/`Response` or DOM `Navigation` globals. `ConsoleMessage` avoids Effect's `Console`, and `UncaughtException` avoids `Page.PageError` and the `*Error` suffix our failures use.

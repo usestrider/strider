@@ -524,13 +524,15 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
   /**
    * Calls `fn` in the caller's isolated world of the one match's document, with the match first:
    * resolved now, as a read is, and passed by its node binding, since the engine's world isn't the
-   * caller's.
+   * caller's. Its result comes back by value, or as a handle in the caller's scope.
    */
-  evaluate<Args extends ReadonlyArray<unknown>, B>(
-    fn: (element: Element, ...args: Args) => B | Promise<B>,
-    ...args: Args
-  ): Effect.Effect<JSHandle.Serialized<B>, Locator.LocatorError | Target.TargetGone | Deadline.Timeout> {
-    const operation = "Locator.evaluate"
+  private evaluation<B, R>(
+    operation: string,
+    fn: Function,
+    args: ReadonlyArray<unknown>,
+    result: "value" | "handle",
+    then: (realm: Target.RealmId, value: Adapter.RemoteValue) => Effect.Effect<B, Evaluation.Failure, R>
+  ): Effect.Effect<B, Locator.LocatorError | Target.TargetGone | Deadline.Timeout, R> {
     const owner = this.owner
     return Effect.gen({ self: this }, function*() {
       yield* Access.check(owner.grant)
@@ -555,7 +557,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
             return yield* this.unmatched(operation, response, id)
         }
       }
-      const value = yield* Effect.gen(function*() {
+      return yield* Effect.gen(function*() {
         const realm = yield* Evaluation.documentRealm(
           owner.runtime,
           found.routed.document,
@@ -563,19 +565,21 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
           id
         )
         const rest = yield* Evaluation.toLocal(args, realm, 1)
+        const group = yield* Evaluation.groupFor(owner.runtime, realm, result)
         // The call is on its way: a deadline after it can't say the function didn't run
-        const result = yield* Evaluation.call(owner.runtime, {
+        const value = yield* Evaluation.call(owner.runtime, {
           dispatch: record,
           realm,
           functionDeclaration: FunctionSource.declaration(fn),
           arguments: [{ _tag: "Node", node: found.node }, ...rest],
-          result: "value",
+          result,
+          group,
           userActivation: false,
           page: Option.some(owner.page),
           at: budget.at,
           id
         })
-        return yield* Evaluation.fromRemote(result)
+        return yield* then(realm, value)
       }).pipe(Effect.mapError((failure) =>
         failure._tag === "Gone"
           ? failure.error
@@ -587,10 +591,43 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
           )
           : this.error(operation, failure.reason, id)
       ))
-      return value as JSHandle.Serialized<B>
     }).pipe(Operation.named(operation, {
       attributes: { "browser.page.id": this.owner.page.id, "browser.locator": this.description }
     }))
+  }
+
+  evaluate<Args extends ReadonlyArray<unknown>, B>(
+    fn: (element: Element, ...args: Args) => B | Promise<B>,
+    ...args: Args
+  ): Effect.Effect<JSHandle.Serialized<B>, Locator.LocatorError | Target.TargetGone | Deadline.Timeout> {
+    return this.evaluation(
+      "Locator.evaluate",
+      fn,
+      args,
+      "value",
+      (_realm, value) => Evaluation.fromRemote(value)
+    ) as Effect.Effect<
+      JSHandle.Serialized<B>,
+      Locator.LocatorError | Target.TargetGone | Deadline.Timeout
+    >
+  }
+
+  evaluateHandle<Args extends ReadonlyArray<unknown>, B>(
+    fn: (element: Element, ...args: Args) => B | Promise<B>,
+    ...args: Args
+  ): Effect.Effect<
+    JSHandle.JSHandle<Awaited<B>>,
+    Locator.LocatorError | Target.TargetGone | Deadline.Timeout,
+    Scope.Scope
+  > {
+    const owner = this.owner
+    return this.evaluation(
+      "Locator.evaluateHandle",
+      fn,
+      args,
+      "handle",
+      (realm, value) => Evaluation.own<Awaited<B>>(owner.runtime, realm, value, Option.some(owner.page))
+    )
   }
 
   /**

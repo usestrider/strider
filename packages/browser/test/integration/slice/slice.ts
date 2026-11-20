@@ -437,6 +437,21 @@ root.querySelector("#inner").attachShadow({mode:"open"}).innerHTML = "<button>Ne
           assert.strictEqual((yield* page.status)._tag, "Closed")
         }), timeout)
 
+      it.effect("lists the default context first and a created context until it is removed", () =>
+        Effect.gen(function*() {
+          const browser = yield* Browser.Browser
+          const scope = yield* Scope.make()
+          const context = yield* Browser.newContext().pipe(Scope.provide(scope))
+          const listed = yield* browser.contexts
+          assert.strictEqual(listed[0], browser.defaultContext)
+          assert.isTrue(listed.includes(context))
+          yield* Scope.close(scope, Exit.void)
+          yield* context.closed
+          assert.isFalse((yield* browser.contexts).some((each) =>
+            each.id === context.id
+          ))
+        }), timeout)
+
       it.effect("opens pages in a context one after another, each closed before the next", () =>
         Effect.scoped(
           Effect.gen(function*() {
