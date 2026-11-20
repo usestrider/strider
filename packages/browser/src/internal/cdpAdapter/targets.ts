@@ -79,6 +79,15 @@ const newTarget = (
   return target
 }
 
+/** The id a page not yet attached will take, so a popup listed before its opener can name it. */
+const reserveId = (state: State, targetId: string): L1Target.NavigableId => {
+  const known = state.reservedIds.get(targetId)
+  if (known !== undefined) return known
+  const id = state.ids.navigable()
+  state.reservedIds.set(targetId, id)
+  return id
+}
+
 const attached = (state: State, parent: TargetEntry | undefined, params: Target.AttachedToTargetParams) => {
   const session = state.control.session(params.sessionId as string as Protocol.SessionKey)
   if (session === undefined) return
@@ -88,10 +97,14 @@ const attached = (state: State, parent: TargetEntry | undefined, params: Target.
   switch (kind) {
     case "page": {
       const context = contextFor(state, info.browserContextId)
-      const opener = info.openerId === undefined ? undefined : state.targetsById.get(info.openerId)?.page
+      const openerId = info.openerId === undefined
+        ? Option.none<L1Target.NavigableId>()
+        : Option.some(state.targetsById.get(info.openerId)?.page?.id ?? reserveId(state, info.openerId))
       const target = newTarget(state, kind, info, session, undefined, undefined)
+      const reserved = state.reservedIds.get(info.targetId)
+      state.reservedIds.delete(info.targetId)
       const page: PageEntry = {
-        id: state.ids.navigable(),
+        id: reserved ?? state.ids.navigable(),
         targetId: info.targetId,
         context,
         target,
@@ -111,7 +124,6 @@ const attached = (state: State, parent: TargetEntry | undefined, params: Target.
       const main = newFrame({ frameId: info.targetId, id: page.id, page, parent: undefined, owner: entry })
       state.frames.set(info.targetId, main)
       state.navigables.set(page.id, main)
-      const openerId = Option.fromUndefinedOr(opener?.id)
       state.buffer.emit({
         _tag: "PageAdded",
         page: page.id,

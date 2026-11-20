@@ -18,6 +18,15 @@ import type { ContextEntry, DocumentEntry, NavigableEntry, NavigationEntry, Real
  * Cancels the pending restoration: releases only the reservation it owns, and marks the navigable ambiguous, since
  * the cancelled traversal may still produce a realm that a later traversal could not tell from its own.
  */
+/** The id a page not yet known will take, so a popup listed before its opener can name it. */
+const reserveId = (state: State, context: string): L1Target.NavigableId => {
+  const known = state.reservedIds.get(context)
+  if (known !== undefined) return known
+  const id = state.ids.navigable()
+  state.reservedIds.set(context, id)
+  return id
+}
+
 export const cancelRestoration = (navigable: NavigableEntry) => {
   if (navigable.restoring === undefined) return
   navigable.restorationAmbiguous = true
@@ -287,9 +296,11 @@ export const addNavigable = (state: State, info: {
   if (info.parent !== null && info.parent !== undefined && parent === undefined) return undefined
   const context = contextFor(state, info.userContext)
   context.proxyUsed = true
+  const reserved = state.reservedIds.get(info.context)
+  state.reservedIds.delete(info.context)
   const navigable: NavigableEntry = {
     bidi: info.context,
-    id: state.ids.navigable(),
+    id: reserved ?? state.ids.navigable(),
     parent,
     children: new Set(),
     context,
@@ -316,8 +327,9 @@ export const addNavigable = (state: State, info: {
   state.navigables.set(info.context, navigable)
   state.navigablesById.set(navigable.id, navigable)
   if (parent === undefined) {
-    const opener = info.originalOpener === null ? undefined : state.navigables.get(info.originalOpener)
-    const openerId = Option.fromUndefinedOr(opener?.page.id)
+    const openerId = info.originalOpener === null
+      ? Option.none<L1Target.NavigableId>()
+      : Option.some(state.navigables.get(info.originalOpener)?.page.id ?? reserveId(state, info.originalOpener))
     state.buffer.emit({
       _tag: "PageAdded",
       page: navigable.id,
