@@ -429,6 +429,9 @@ interface Page extends ReadonlyPage {
   evaluateHandle<Args extends ReadonlyArray<unknown>, A>(   // the isolated world, like evaluate
     fn: (...args: Args) => A | Promise<A>, ...args: Args
   ): Effect<JSHandle.JSHandle<Awaited<A>>, PageError, Scope>
+  evaluateHandleInMainWorld<Args extends ReadonlyArray<unknown>, A>(   // the page's own world, on every backend
+    fn: (...args: Args) => A | Promise<A>, ...args: Args
+  ): Effect<JSHandle.JSHandle<Awaited<A>>, PageError, Scope>
   readonly keyboard: Keyboard.Keyboard
   readonly mouse: Mouse.Mouse
   readonly clock: PageClock.PageClock
@@ -590,6 +593,9 @@ operation deadline apply as for `evaluate`; a timeout after dispatch cannot canc
 
 
 interface Locator extends ReadonlyLocator {             // queries, chainers and first/last return Locator
+  evaluateHandle<Args extends ReadonlyArray<unknown>, B>(   // evaluate's resolution, the result as a scoped handle
+    fn: (element: Element, ...args: Args) => B | Promise<B>, ...args: Args
+  ): Effect<JSHandle.JSHandle<Awaited<B>>, LocatorError, Scope>
   click(options?: ClickOptions | undefined): Effect<void, LocatorError>
   dblclick(options?: ClickOptions | undefined): Effect<void, LocatorError>
   tap(options?: PointerOptions | undefined): Effect<void, LocatorError>              // touch
@@ -749,8 +755,10 @@ interface JSHandle<A = unknown> extends Pipeable, Inspectable {   // a value in 
     Effect<Serialized<B>, JSHandleError>
   evaluateHandle<Args extends ReadonlyArray<unknown>, B>(fn: (value: A, ...args: Args) => B | Promise<B>, ...args: Args):
     Effect<JSHandle<Awaited<B>>, JSHandleError, Scope>
+  readonly properties: Effect<ReadonlyMap<string, JSHandle>, JSHandleError, Scope>   // own enumerable, each getter once
   readonly read: Effect<Serialized<A>, JSHandleError>    // the value itself, by value
   readonly release: Effect<void>                         // early release; idempotent
+  toString(): string                                     // realm and a preview from the call that made it
 }
 ```
 
@@ -880,7 +888,7 @@ declare const History: <S extends Schema.Top>(entry: S) => Schema.Struct<…>   
 | `FileChooser` | `FileChooser`: data (`Single` or `Multiple`); `FileChooser.handle` gets it as `Pending` | `multiple` | `Page` |
 | `Download` | `Download` | `url` | `Page` or `UserContext` |
 | `AutoResolution` | `AutoResolution`: an obligation decided by a default policy | `subject` | `Page` or `UserContext` |
-| `BrowserWorker` | `BrowserWorker` from a `Page` or `UserContext` (it can `evaluate`, which needs control: workers have no isolated world), otherwise `ObservedBrowserWorker` | `url`, `kind`: a page's are dedicated; `shared` and `service` need `workers.shared` and `workers.service` (CDP) | any page or context |
+| `BrowserWorker` | `BrowserWorker` from a `Page` or `UserContext` (it can `evaluate` and `evaluateHandle`, which need control: workers have no isolated world), otherwise `ObservedBrowserWorker` | `url`, `kind`: a page's are dedicated; `shared` and `service` need `workers.shared` and `workers.service` (CDP) | any page or context |
 | `NetworkConnection` | `NetworkConnection`: a WebSocket or EventSource, whose `frames` subscribe from now on (`networkConnections`: CDP; stock WebKit without EventSource; Unsupported on BiDi) | `url`, `kind` | any page or context |
 
 Each module has the most specific accurate name, with a prefix only where a bare name would clash with the fetch `Request`/`Response` or DOM `Navigation` globals. `ConsoleMessage` avoids Effect's `Console`, and `UncaughtException` avoids `Page.PageError` and the `*Error` suffix our failures use.
