@@ -245,8 +245,9 @@ export interface State extends Kit.Ending {
   readonly touchCapture: Map<L1Target.NavigableId, import("./input.ts").PointerTarget>
   readonly navigablesById: Map<L1Target.NavigableId, NavigableEntry>
   /**
-   * Page ids given out before their page is known: an attached browser can list a popup before its opener, so the
-   * popup names the opener by the id its opener then takes.
+   * Navigable ids given out before their navigable is known: an attached browser can list a popup before the page
+   * or frame that opened it, so the popup names its opener by the id that page or frame then takes, held while a
+   * popup that names it is open.
    */
   readonly reservedIds: Map<
     string,

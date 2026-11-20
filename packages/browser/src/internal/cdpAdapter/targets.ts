@@ -95,14 +95,6 @@ const reserveId = (state: State, targetId: string, popup: L1Target.NavigableId):
   return id
 }
 
-/** Releases the ids a removed popup held for an opener that never attached. */
-const releaseReserved = (state: State, popup: L1Target.NavigableId) => {
-  for (const [targetId, reserved] of state.reservedIds) {
-    reserved.popups.delete(popup)
-    if (reserved.popups.size === 0) state.reservedIds.delete(targetId)
-  }
-}
-
 const attached = (state: State, parent: TargetEntry | undefined, params: Target.AttachedToTargetParams) => {
   const session = state.control.session(params.sessionId as string as Protocol.SessionKey)
   if (session === undefined) return
@@ -246,7 +238,6 @@ export const ended = (state: State, session: ProtocolClient.Session, reason: Pro
   }
   switch (target.kind) {
     case "page": {
-      if (page !== undefined) releaseReserved(state, page.id)
       if (page !== undefined && why !== undefined) {
         endPage(state, page, why, `cdp: the page's session ended (${reason.why})`)
       }
