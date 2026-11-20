@@ -2233,8 +2233,9 @@ export interface FrameLocator extends ReadonlyFrameLocator {
  *
  * **Details**
  *
- * `candidates` describes each match. When exactly one of them is visible, `suggestions` holds the locator with
- * `.filter({ visible: true })` added, which matches it; otherwise it's empty.
+ * `count` is how many elements match, and `candidates` describes the first ten of them. When exactly one of all
+ * the matches is visible, `suggestions` holds the locator with `.filter({ visible: true })` added, which matches
+ * it; otherwise it's empty.
  *
  * @stability unstable
  * @category reasons
@@ -2242,12 +2243,14 @@ export interface FrameLocator extends ReadonlyFrameLocator {
  */
 export class StrictViolation extends Schema.Error<StrictViolation>("@usestrider/browser/Locator/StrictViolation")({
   _tag: Schema.tag("StrictViolation"),
+  /** How many elements match, which may be more than `candidates` describes. */
+  count: Schema.Number,
   candidates: Schema.Array(Schema.Struct({ description: Schema.String, visible: Schema.Boolean })),
   suggestions: Schema.Array(Schema.String),
   hint: Schema.String
 }) {
   override get message(): string {
-    return `${this.candidates.length} matches (${this.hint})`
+    return `${this.count} matches (${this.hint})`
   }
 }
 

@@ -484,6 +484,8 @@ export const Response = Schema.Union([
   Schema.TaggedStruct("Strict", {
     candidates: Schema.Array(Candidate),
     count: Schema.Number,
+    /** How many of all the matches are visible, the ones past the ten described included. */
+    visible: Schema.Number,
     /** How many frames matched, for a search across frames that matched in more than one. */
     frames: Schema.optionalKey(Schema.Number)
   }),
@@ -4128,9 +4130,11 @@ export function engine(render: (root: SnapNode) => string) {
     return { _tag: "Read", value: doctype + (root === null ? "" : dom.outerHTML(root)) }
   }
 
+  // Every match's count and how many are visible, and the first ten described
   const strict = (found: ReadonlyArray<Element>): Response => ({
     _tag: "Strict",
     count: found.length,
+    visible: found.filter((element) => visible(element)).length,
     candidates: found.slice(0, 10).map((element) => ({ description: describe(element), visible: visible(element) }))
   })
 

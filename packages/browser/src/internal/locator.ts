@@ -1201,11 +1201,12 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
   }
 
   strict(operation: string, response: Extract<Engine.Response, { _tag: "Strict" }>, id: Diagnostics.OperationId) {
-    const visible = response.candidates.filter((candidate) => candidate.visible).length
+    const visible = response.visible
     const where = response.frames === undefined ? "" : ` in ${response.frames} frames`
     return this.error(
       operation,
       new Locator.StrictViolation({
+        count: response.count,
         candidates: response.candidates,
         suggestions: visible === 1 ? [`${this.description}.filter({ visible: true })`] : [],
         hint: response.frames !== undefined && visible !== 1

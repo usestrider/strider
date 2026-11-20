@@ -581,8 +581,10 @@ const search = (
       response: {
         _tag: "Strict",
         count: answers.reduce((total, each) => total + each.count, 0),
+        visible: answers.reduce((total, each) => total + each.visible, 0),
         frames: answers.length,
-        candidates: answers.flatMap((each) => each.candidates)
+        // A sample, as in one document: the first ten, in frame order
+        candidates: answers.flatMap((each) => each.candidates).slice(0, 10)
       }
     }
   })
