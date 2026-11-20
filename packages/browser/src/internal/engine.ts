@@ -374,6 +374,12 @@ export type Request =
     readonly provisional?: boolean | undefined
   }
   | { readonly op: "expectStop"; readonly token: string }
+  /**
+   * A wait for the next change the page makes (a mutation, an `input`, `change` or focus event, an animation
+   * frame), or `cap` milliseconds: what a check made outside the engine waits on before it checks again. Its steps
+   * only route it to the document their match is in.
+   */
+  | { readonly op: "change"; readonly steps: ReadonlyArray<Step>; readonly cap: number }
   | { readonly op: "title" }
   | { readonly op: "role"; readonly steps: ReadonlyArray<Step> }
   /**
@@ -3636,6 +3642,28 @@ export function engine(render: (root: SnapNode) => string) {
     })
   }
 
+  /** The next change the page makes, as `expect` rechecks on, or the cap: whether it changed. */
+  const change = (request: Extract<Request, { op: "change" }>): Promise<Response> =>
+    new Promise((resume) => {
+      let done = false
+      const finish = (changed: boolean) => {
+        if (done) return
+        done = true
+        observer.disconnect()
+        for (const type of EVENTS) removeEventListener(type, noticed, true)
+        cancelFrame(frame)
+        clearTimer(timer)
+        resume({ _tag: "Expected", passed: changed, observed: null, changed })
+      }
+      const noticed = () => finish(true)
+      const EVENTS = ["input", "change", "focusin", "focusout"]
+      const observer = new MutationObserver(noticed)
+      observer.observe(document, { subtree: true, childList: true, attributes: true, characterData: true })
+      for (const type of EVENTS) addEventListener(type, noticed, true)
+      const frame = onFrame(noticed)
+      const timer = setTimer(() => finish(false), Math.max(0, request.cap))
+    })
+
   // Snapshots
   const INTERACTIVE = new Set([
     "button",
@@ -4306,6 +4334,8 @@ export function engine(render: (root: SnapNode) => string) {
           return JSON.stringify({ _tag: "Expected", passed: false, observed: null, changed: false } satisfies Response)
         case "expect":
           return JSON.stringify(await expect(request))
+        case "change":
+          return JSON.stringify(await change(request))
         case "title":
           return JSON.stringify({ _tag: "Title", title: dom.title(document) } satisfies Response)
         case "frame":

@@ -302,6 +302,7 @@ const retarget = <R extends Engine.Request | Engine.CooperativeRequest>(
   switch (request.op) {
     case "act":
     case "expect":
+    case "change":
       return { ...request, steps: at, cap: missing ? Math.min(request.cap, missingCap) : request.cap }
     default:
       return { ...request, steps: at }

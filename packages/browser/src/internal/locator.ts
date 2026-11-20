@@ -557,43 +557,90 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
             return yield* this.unmatched(operation, response, id)
         }
       }
-      return yield* Effect.gen(function*() {
-        const realm = yield* Evaluation.documentRealm(
-          owner.runtime,
-          found.routed.document,
-          Evaluation.isolatedWorld,
-          id
-        )
-        const rest = yield* Evaluation.toLocal(args, realm, 1)
-        const group = yield* Evaluation.groupFor(owner.runtime, realm, result)
-        // The call is on its way: a deadline after it can't say the function didn't run
-        const value = yield* Evaluation.call(owner.runtime, {
-          dispatch: record,
-          realm,
-          functionDeclaration: FunctionSource.declaration(fn),
-          arguments: [{ _tag: "Node", node: found.node }, ...rest],
-          result,
-          group,
-          userActivation: false,
-          page: Option.some(owner.page),
-          at: budget.at,
-          id
-        })
-        return yield* then(realm, value)
-      }).pipe(Effect.mapError((failure) =>
-        failure._tag === "Gone"
-          ? failure.error
-          : failure._tag === "Deadline"
-          ? record.timeout(
-            record.dispatch._tag === "MayHaveBeenSent"
-              ? Option.some("The page didn't answer before the deadline; the function may still be running")
-              : Option.none()
-          )
-          : this.error(operation, failure.reason, id)
-      ))
+      return yield* this.callOnMatch(operation, found, fn, args, result, record, then)
     }).pipe(Operation.named(operation, {
       attributes: { "browser.page.id": this.owner.page.id, "browser.locator": this.description }
     }))
+  }
+
+  /** Calls `fn` on a resolved match in the caller's isolated world of its document, as `evaluate` does. */
+  private callOnMatch<B, R>(
+    operation: string,
+    found: Extract<Runtime.Found, { readonly _tag: "Found" }>,
+    fn: Function,
+    args: ReadonlyArray<unknown>,
+    result: "value" | "handle",
+    record: Operation.Record,
+    then: (realm: Target.RealmId, value: Adapter.RemoteValue) => Effect.Effect<B, Evaluation.Failure, R>
+  ): Effect.Effect<B, Locator.LocatorError | Target.TargetGone | Deadline.Timeout, R> {
+    const owner = this.owner
+    const id = record.id
+    const budget = record.budget
+    return Effect.gen(function*() {
+      const realm = yield* Evaluation.documentRealm(
+        owner.runtime,
+        found.routed.document,
+        Evaluation.isolatedWorld,
+        id
+      )
+      const rest = yield* Evaluation.toLocal(args, realm, 1)
+      const group = yield* Evaluation.groupFor(owner.runtime, realm, result)
+      // The call is on its way: a deadline after it can't say the function didn't run
+      const value = yield* Evaluation.call(owner.runtime, {
+        dispatch: record,
+        realm,
+        functionDeclaration: FunctionSource.declaration(fn),
+        arguments: [{ _tag: "Node", node: found.node }, ...rest],
+        result,
+        group,
+        userActivation: false,
+        page: Option.some(owner.page),
+        at: budget.at,
+        id
+      })
+      return yield* then(realm, value)
+    }).pipe(Effect.mapError((failure) =>
+      failure._tag === "Gone"
+        ? failure.error
+        : failure._tag === "Deadline"
+        ? record.timeout(
+          record.dispatch._tag === "MayHaveBeenSent"
+            ? Option.some("The page didn't answer before the deadline; the function may still be running")
+            : Option.none()
+        )
+        : this.error(operation, failure.reason, id)
+    ))
+  }
+
+  /**
+   * One check of `Expect.toSatisfy`: `fn`'s value on the one match now, called as `evaluate` calls it, or the
+   * engine's answer when there isn't one match, which waiting may change.
+   */
+  satisfying(
+    operation: string,
+    fn: Function,
+    args: ReadonlyArray<unknown>
+  ): Effect.Effect<
+    | { readonly _tag: "Value"; readonly value: unknown }
+    | { readonly _tag: "Response"; readonly response: Engine.Response },
+    Locator.LocatorError | Target.TargetGone | Deadline.Timeout
+  > {
+    return Effect.gen({ self: this }, function*() {
+      const record = yield* Operation.record
+      const found = yield* Runtime.element(this.owner.runtime, this.owner.page, this.steps, record.id, record.budget.at)
+        .pipe(Effect.mapError((failure) => this.sendFailure(operation, failure, record)))
+      if (found._tag === "Response") return { _tag: "Response" as const, response: found.response }
+      const value = yield* this.callOnMatch(
+        operation,
+        found,
+        fn,
+        args,
+        "value",
+        record,
+        (_realm, value) => Evaluation.fromRemote(value)
+      )
+      return { _tag: "Value" as const, value }
+    })
   }
 
   evaluate<Args extends ReadonlyArray<unknown>, B>(
@@ -1316,7 +1363,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
   }
 
   /** Fails with `Unsupported` when the backend reports a capability as unsupported. */
-  private requires(operation: string, capability: string, id: Diagnostics.OperationId, instead?: string) {
+  requires(operation: string, capability: string, id: Diagnostics.OperationId, instead?: string) {
     return Effect.flatMap(SubscriptionRef.get(this.owner.runtime.model.adapter.capabilities), (capabilities) => {
       const entry = capabilities.entries.find((each) => each.name === capability)
       return entry === undefined || entry.status !== "unsupported" ? Effect.void : Effect.fail(this.error(

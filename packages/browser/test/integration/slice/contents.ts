@@ -2121,10 +2121,18 @@ export const contents = (
               ),
               { waitUntil: "load" }
             )
-            const ready = (element: Element) => (element as HTMLElement).dataset["ready"] === "yes"
-            if (yield* isolatedRefused(page.locator("#x").pipe(Expect.toSatisfy(ready)))) return
+            const ready = (element: Element) =>
+              (element as HTMLElement).dataset["ready"] === "yes"
+            if (yield* isolatedRefused(page.locator("#x").pipe(Expect.toSatisfy(ready)))) {
+              return
+            }
             yield* page.locator("#x").pipe(Expect.toSatisfy(ready), Deadline.within("5 seconds"))
-            assert.strictEqual(yield* page.locator("#x").evaluate((element) => element.getAttribute("data-ready")), "yes")
+            assert.strictEqual(
+              yield* page.locator("#x").evaluate((element) =>
+                element.getAttribute("data-ready")
+              ),
+              "yes"
+            )
           }))
         }), timeout)
 
@@ -2134,12 +2142,17 @@ export const contents = (
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, `<p id="x" data-n="3">hello</p>`), { waitUntil: "load" })
-            if (yield* isolatedRefused(Expect.toSatisfy(page.locator("#x"), () => true))) return
+            if (
+              yield* isolatedRefused(Expect.toSatisfy(page.locator("#x"), () =>
+                true))
+            ) return
             const expected = yield* page.evaluateHandle(() => ({ text: "hello" }))
             yield* Expect.toSatisfy(
               page.locator("#x"),
-              (element, wanted: { readonly text: string }, n: number) =>
-                element.textContent === wanted.text && (element as HTMLElement).dataset["n"] === String(n),
+              // The handle arrives as the object it holds
+              (element, wanted: unknown, n: number) =>
+                element.textContent === (wanted as { readonly text: string }).text &&
+                (element as HTMLElement).dataset["n"] === String(n),
               expected,
               3
             ).pipe(Deadline.within("1 second"))
@@ -2180,7 +2193,9 @@ export const contents = (
             const throws = (): boolean => {
               throw new Error("not yet")
             }
-            if (yield* isolatedRefused(page.locator("#x").pipe(Expect.toSatisfy(throws)))) return
+            if (yield* isolatedRefused(page.locator("#x").pipe(Expect.toSatisfy(throws)))) {
+              return
+            }
             const started = Date.now()
             const failed = reasonOf(
               yield* Effect.exit(page.locator("#x").pipe(Expect.toSatisfy(throws), Deadline.within("5 seconds")))
@@ -2191,7 +2206,9 @@ export const contents = (
             const rejected = reasonOf(
               yield* Effect.exit(
                 page.locator("#x").pipe(
-                  Expect.toSatisfy(() => Promise.reject(new Error("rejected"))),
+                  Expect.toSatisfy(() =>
+                    Promise.reject(new Error("rejected"))
+                  ),
                   Deadline.within("5 seconds")
                 )
               )
@@ -2206,9 +2223,24 @@ export const contents = (
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, `<p>a</p><p>b</p><button>Save</button>`), { waitUntil: "load" })
-            if (yield* isolatedRefused(page.locator("p").pipe(Expect.toSatisfy(() => true)))) return
+            if (
+              yield* isolatedRefused(
+                page.locator("p").pipe(Expect.toSatisfy(() =>
+                  true
+                ))
+              )
+            ) {
+              return
+            }
             const several = reasonOf(
-              yield* Effect.exit(page.locator("p").pipe(Expect.toSatisfy(() => true), Deadline.within("300 millis")))
+              yield* Effect.exit(
+                page.locator("p").pipe(
+                  Expect.toSatisfy(() =>
+                    true
+                  ),
+                  Deadline.within("300 millis")
+                )
+              )
             ) as unknown as Expect.ExpectationFailed
             assert.strictEqual(several._tag, "ExpectationFailed")
             assert.deepStrictEqual(Option.getOrThrow(several.last).value, { matches: 2 })
@@ -2233,7 +2265,13 @@ export const contents = (
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, `<p>a</p><p>b</p>`), { waitUntil: "load" })
-            if (yield* isolatedRefused(page.locator("p").evaluateAll((elements) => elements.length))) return
+            if (
+              yield* isolatedRefused(
+                page.locator("p").evaluateAll((elements) =>
+                  elements.length
+                )
+              )
+            ) return
             const original = Runtime.elements
             let queries = 0
             const hook = vi.spyOn(Runtime, "elements").mockImplementation((...args) =>

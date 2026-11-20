@@ -621,3 +621,102 @@ export const toHaveCSS = (
       show(expected)
     }`
   )
+
+/**
+ * A page function is expected to return `true` on a locator's one match: called in the caller's isolated world on
+ * each check, as `evaluate` calls it, and checked again after each change the page makes. No match and several are
+ * observations; a function that throws fails the expectation at once.
+ */
+export const toSatisfy = (locator: Locator.ReadonlyLocator, fn: Function, args: ReadonlyArray<unknown>) =>
+  Effect.suspend(() => {
+    if (!Locator.isLocator(locator)) return Effect.die(new Error("Expect: not a locator of this library"))
+    const impl = locator as LocatorImpl
+    const { description, owner, steps } = impl
+    const subject: InPage = { runtime: owner.runtime, page: owner.page, grant: owner.grant, steps, description }
+    const operation = "Expect.toSatisfy"
+    const condition = "to satisfy the page function"
+    return Effect.gen(function*() {
+      yield* Access.check(subject.grant)
+      const record = yield* Operation.record
+      const id = record.id
+      const started = now()
+      const history: Array<Diagnostics.ObservedValue> = []
+      const triggers = new Set<"initial" | "change" | "interval">(["initial"])
+      // Where no world of Strider's own can run the function, no check could pass
+      yield* impl.requires(operation, "isolatedWorlds", id)
+      let checks = 0
+      const failed = () =>
+        Effect.flatMap(explain(subject, id), (explained) =>
+          Effect.fail(
+            failure(id, description, condition, started, history, checks, triggers, explained, "toSatisfy")
+          ))
+      while (true) {
+        checks++
+        const checked = yield* impl.satisfying(operation, fn, args).pipe(
+          Effect.map(Option.some),
+          // A check the expectation's deadline cut off is one that didn't finish
+          Effect.catchIf(
+            (error): error is Deadline.Timeout => Deadline.isTimeout(error) && record.left() <= 0,
+            () => Effect.succeedNone
+          )
+        )
+        if (Option.isNone(checked)) {
+          if (history.length === 0) {
+            Operation.appendObservation(history, { error: "a check was still running at the deadline" })
+          }
+          return yield* failed()
+        }
+        const outcome = checked.value
+        if (outcome._tag === "Value") {
+          Operation.appendObservation(history, outcome.value)
+          if (outcome.value === true) return
+        } else {
+          const response = outcome.response
+          switch (response._tag) {
+            case "NoMatch":
+              Operation.appendObservation(history, { matches: 0 })
+              break
+            case "Strict":
+              Operation.appendObservation(history, { matches: response.count })
+              break
+            // What no waiting mends ends it, as it ends the other locator expectations
+            case "InvalidSelector":
+              Operation.appendObservation(history, {
+                error: `invalid selector ${JSON.stringify(response.selector)}: ${response.message}`
+              })
+              return yield* failed()
+            case "StaleRef":
+              Operation.appendObservation(history, { error: `stale ref (${response.why})` })
+              return yield* failed()
+            case "Final":
+              Operation.appendObservation(history, { error: `${response.final.element} on the way isn't an iframe` })
+              return yield* failed()
+            default:
+              Operation.appendObservation(history, { error: `unexpected answer ${response._tag}` })
+          }
+        }
+        const left = record.left()
+        if (left <= 0) return yield* failed()
+        // The function ran outside the engine, so the page is watched again from now: a change since the check is
+        // in the state the next check reads, and the wait ends at the next one, or the next animation frame
+        const changed = yield* Runtime.send(
+          subject.runtime,
+          subject.page,
+          { op: "change", steps, cap: Runtime.roundCap(left) },
+          id,
+          record.budget.at
+        ).pipe(
+          Effect.map((response) => response._tag === "Expected" && response.changed),
+          Effect.catch((failure) =>
+            failure._tag === "Deadline"
+              ? Effect.succeed(false)
+              : Effect.fail(impl.sendFailure(operation, failure, record))
+          )
+        )
+        if (changed) triggers.add("change")
+        if (record.left() <= 0) return yield* failed()
+      }
+    }).pipe(Operation.named(operation, {
+      attributes: { "browser.page.id": subject.page.id, "browser.subject": description }
+    }))
+  })
