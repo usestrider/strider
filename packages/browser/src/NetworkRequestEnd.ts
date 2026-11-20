@@ -3,7 +3,7 @@
  * status it had, or fails, with the browser's error text. Each end is a `NetworkRequest.End`.
  *
  * An end is reported to the request's page and its context, as the request itself is. Only an end the browser
- * reports is an event: a request still in flight when its page, context or browser connection closes reports none.
+ * reports is an event: a request still in flight when its page, context, or browser connection closes reports none.
  *
  * @stability unstable
  * @since 0.1.0

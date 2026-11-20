@@ -11,7 +11,7 @@
       "url": "/docs/api/browser/NetworkRequest#end"
     }
   ],
-  "notes": "Takes the observed request rather than the response. Scoped opt-in retention of one request hop, acquired on its owning page or context while the bounded hop index still holds it. Returns a bounded wait for the hop's end, at once if it has ended: `NetworkRequest.Finished`, or `NetworkRequest.Failed` with the browser's error text, rather than resolving with null or an error. Eviction before the hop ends, foreign targets, release and target closure fail with typed unavailable errors.",
+  "notes": "Takes the observed request rather than the response. Scoped opt-in retention of one request hop, acquired on its owning page or context while the bounded hop index still holds it. Returns a bounded wait for the hop's end, at once if it has ended: `NetworkRequest.Finished`, or `NetworkRequest.Failed` with the browser's error text, rather than resolving with null or an error. Eviction before the hop ends, foreign targets, release, and target closure fail with typed unavailable errors.",
   "capabilities": [],
   "audit": {
     "sources": [

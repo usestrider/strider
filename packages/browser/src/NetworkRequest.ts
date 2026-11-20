@@ -608,7 +608,7 @@ export class Failure extends Schema.Class<Failure>("@usestrider/browser/NetworkR
  *
  * **Details**
  *
- * `request` is the request as it was delivered, so `failure`, `timing`, `sizes` and `response` accept it. Each
+ * `request` is the request as it was delivered, so `failure`, `timing`, `sizes`, and `response` accept it. Each
  * redirect hop finishes on its own.
  *
  * **Example** (Reading where a finished request went)
@@ -638,7 +638,7 @@ export class Finished extends Schema.TaggedClass<Finished>("@usestrider/browser/
  * **Details**
  *
  * `failure` is what `failure` reads: the browser's error text, and on Chromium and WebKit whether the page or a
- * navigation canceled it. A page, context or browser connection that closes while a request is in flight doesn't
+ * navigation canceled it. A page, context, or browser connection that closes while a request is in flight doesn't
  * make it fail.
  *
  * **Example** (Reading why a request failed)
