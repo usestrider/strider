@@ -1535,6 +1535,16 @@ never request a feature gain no interception, injected instrumentation, per-acti
 state for it. Additions must include paired default-path benchmarks so review can assess their cost. Reject
 always-on preparation for optional features: unused capabilities must not slow existing automation.
 
+## Console arguments on a scoped subscription
+
+A console message stays a value, kept in the event log, and its arguments come only through a subscription to
+calls (`ConsoleMessage.nextCall`, `streamCalls`), which declares them for its page or context, per
+[Pay for what you use](#pay-for-what-you-use). As a message arrives, each subscription that could deliver it claims
+its arguments; delivering turns the claim into ownership in the subscription's scope, and the browser's object is
+freed once no claim or owner remains. Rejected: handles on the message itself, which the log would keep alive and
+every context would pay for; and counting owners only as subscribers take a message, which can't tell when all of
+them have passed on it.
+
 ## Client certificates through a per-context proxy
 
 No browser protocol Strider speaks sets a TLS client certificate for one context, so a context with

@@ -30,3 +30,33 @@ The categories are one set for every browser, listed in
 `other`. Firefox sends the browser's own messages as script errors, so they arrive as
 [uncaught exceptions](/docs/api/browser/UncaughtException) and every console message there is `Page`. WebKit
 does the same with "Fetch API cannot load … due to access control checks".
+
+## Text
+
+A message's `text` is the call's arguments with their format specifiers applied, each object as a preview of its
+value, as the browser's developer tools print it: `console.log([1, 2, 3], {a: 1}, window)` reads
+`[1, 2, 3] {a: 1} Window` on every browser. An `Error` reads as its browser describes it, and the `console`
+capability lists where a browser's previews differ.
+
+## Arguments
+
+`nextCall` and `streamCalls` subscribe to calls: each message with handles to the values the page passed, which
+[`read`](/docs/api/browser/JSHandle#JSHandle.read) gives by value and `evaluate` runs a function on. A page or context
+keeps console arguments only while it has a subscription to calls, and the handles end with the subscription's
+scope:
+
+```ts
+import { ConsoleMessage, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const loggedOrder = Effect.fn("loggedOrder")(function*(page: Page.Page) {
+  const logged = yield* ConsoleMessage.nextCall(page, { text: "order" })
+  yield* page.getByRole("button", { name: "Place order" }).click()
+  const call = yield* logged
+  return yield* call.args[1]!.read
+})
+```
+
+Each subscriber owns its own handles, so releasing one leaves another's working. On Firefox an argument holds its
+value as the browser serialized it at the call, and a node is the page's own; the `console.arguments` capability says
+so, and where a backend keeps no arguments, subscribing fails with `Unsupported`.

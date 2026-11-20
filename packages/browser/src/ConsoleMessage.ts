@@ -341,6 +341,20 @@ export const history = (
  * handle's `release`. Two subscriptions that receive the same call each get their own handles, and one releasing its
  * handles leaves the other's working. `args` is empty for a message the browser wrote itself.
  *
+ * **Example** (Counting the arguments of a page's warnings)
+ *
+ * ```ts import.meta.vitest
+ * import { ConsoleMessage, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const argumentCount = (call: ConsoleMessage.Call) => call.args.length
+ *
+ * const nextWarning = Effect.fn("nextWarning")(function*(page: Page.Page) {
+ *   const warned = yield* ConsoleMessage.nextCall(page, { level: "warning" })
+ *   return argumentCount(yield* warned)
+ * })
+ * ```
+ *
  * @stability unstable
  * @category models
  * @since 0.1.0
