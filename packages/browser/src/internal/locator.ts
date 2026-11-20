@@ -2026,8 +2026,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
               box: this.boundingBox.pipe(
                 Effect.map(Option.map((box) => ({ x: box.x, y: box.y, width: box.width, height: box.height }))),
                 Effect.catch(() => Effect.succeedNone)
-              ),
-              left: record.left()
+              )
             })
           }
           // Input to a page is serialized; acquiring the permit takes from the deadline, and the checks run again

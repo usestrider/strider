@@ -38,6 +38,8 @@ interface State {
   readonly scope: Scope.Closeable
   /** The settings of each open `actions` call, oldest first: the latest applies. */
   readonly actions: Array<Actions>
+  /** The last annotated action's point, where the cursor is while a scope that draws it is in effect. */
+  cursor: { readonly x: number; readonly y: number } | null
 }
 
 /** How a page shows its actions. */
@@ -85,8 +87,16 @@ const millisOf = (
     onSome: Effect.succeed
   })
 
-/** Sends the page's overlays as they now are to its main frame's current document. */
+/**
+ * Sends the page's overlays as they now are to its main frame's current document, while `state` is the page's:
+ * a released state's work still running, such as a chapter's wait or a timed removal, never draws over a later
+ * acquisition's overlays.
+ */
 const draw = (runtime: Runtime.Runtime, page: Model.PageEntry, state: State): Effect.Effect<void, Failure> =>
+  Effect.suspend(() => states.get(page) === state ? send(runtime, page, state) : Effect.void)
+
+/** Sends `state`'s overlays, whether or not it is still the page's: only its release's last draw, clearing them. */
+const send = (runtime: Runtime.Runtime, page: Model.PageEntry, state: State): Effect.Effect<void, Failure> =>
   Effect.gen(function*() {
     const record = yield* Operation.record
     const request: Engine.Request = { op: "overlay", overlays: [...state.items], hidden: state.hidden }
@@ -100,6 +110,32 @@ const draw = (runtime: Runtime.Runtime, page: Model.PageEntry, state: State): Ef
       )
     )
   })
+
+/**
+ * Waits `millis` on the browser clock within the operation's deadline: when the time left is shorter, it waits
+ * until the deadline and fails with the operation's `Timeout` there.
+ */
+const sleepWithin = (millis: number): Effect.Effect<void, Deadline.Timeout> =>
+  Effect.gen(function*() {
+    const record = yield* Operation.record
+    const left = record.left()
+    if (millis <= left) return yield* BrowserClock.sleep(millis)
+    yield* BrowserClock.sleep(Math.max(0, left))
+    return yield* Effect.fail(record.timeout(Option.none()))
+  })
+
+/** Whether the cursor is drawn: the effective `actions` scope draws one, and an action has given it a point. */
+const reconcileCursor = (state: State): void => {
+  const at = state.items.findIndex((each) => each.id === cursorId)
+  const wanted = state.actions.at(-1)?.cursor === "pointer" && state.cursor !== null
+  if (wanted && state.cursor !== null) {
+    const cursor: Engine.OverlayItem = { _tag: "Cursor", id: cursorId, x: state.cursor.x, y: state.cursor.y }
+    if (at < 0) state.items.unshift(cursor)
+    else state.items[at] = cursor
+  } else if (at >= 0) {
+    state.items.splice(at, 1)
+  }
+}
 
 /** Removes the overlay `id` and draws what is left, apart from any caller's deadline; a closed page has none. */
 const remove = (runtime: Runtime.Runtime, page: Model.PageEntry, state: State, id: string) =>
@@ -125,10 +161,8 @@ export const moveCursor = (
   Effect.suspend(() => {
     const state = states.get(page)
     if (state === undefined) return Effect.void
-    const cursor: Engine.OverlayItem = { _tag: "Cursor", id: cursorId, x: point.x, y: point.y }
-    const at = state.items.findIndex((each) => each.id === cursorId)
-    if (at < 0) state.items.unshift(cursor)
-    else state.items[at] = cursor
+    state.cursor = point
+    reconcileCursor(state)
     return draw(runtime, page, state)
   })
 
@@ -155,8 +189,10 @@ const annotation = (runtime: Runtime.Runtime, page: Model.PageEntry, state: Stat
         ? moveCursor(runtime, page, action.point)
         : draw(runtime, page, state)
     )
-    // The wait is the action's: it ends by the action's deadline, which the action's next check then reports
-    yield* BrowserClock.sleep(Math.min(settings.millis, Math.max(0, action.left)))
+    // The wait is the action's, read as it starts: it ends by the action's deadline, which the action's next
+    // check then reports as its own timeout
+    const left = (yield* Operation.record).left()
+    yield* BrowserClock.sleep(Math.min(settings.millis, Math.max(0, left)))
     yield* remove(runtime, page, state, id).pipe(Operation.detached, Effect.forkIn(state.scope))
   })
 
@@ -173,7 +209,15 @@ export const acquire = Effect.fnUntraced(
     yield* Access.check(grant)
     let state = states.get(page)
     if (state === undefined) {
-      const created: State = { items: [], hidden: false, holders: 0, next: 0, scope: yield* Scope.make(), actions: [] }
+      const created: State = {
+        items: [],
+        hidden: false,
+        holders: 0,
+        next: 0,
+        scope: yield* Scope.make(),
+        actions: [],
+        cursor: null
+      }
       state = created
       states.set(page, created)
       // A committed main-frame document starts without the overlays: it gets them again once it is current
@@ -209,7 +253,7 @@ export const acquire = Effect.fnUntraced(
         return Scope.close(shared.scope, Exit.void).pipe(
           Effect.andThen(
             drawn
-              ? draw(runtime, page, shared).pipe(Operation.apart("Capability.Overlay.release", Duration.seconds(5)))
+              ? send(runtime, page, shared).pipe(Operation.apart("Capability.Overlay.release", Duration.seconds(5)))
               : Effect.void
           ),
           Effect.ignore
@@ -253,11 +297,13 @@ export const acquire = Effect.fnUntraced(
           shared.items.push(item)
           yield* Effect.gen(function*() {
             yield* draw(runtime, page, shared)
-            yield* BrowserClock.sleep(millis)
+            yield* sleepWithin(millis)
+            // Released during the wait: its card went with the rest, and nothing is left to fade
+            if (states.get(page) !== shared) return
             const at = shared.items.indexOf(item)
             if (at >= 0) shared.items[at] = { ...item, leaving: true }
             yield* draw(runtime, page, shared)
-            yield* BrowserClock.sleep(fadeMillis)
+            yield* sleepWithin(fadeMillis)
           }).pipe(Effect.ensuring(remove(runtime, page, shared, chapter)))
         },
         Operation.named("Capability.Overlay.chapter", { attributes })
@@ -288,13 +334,19 @@ export const acquire = Effect.fnUntraced(
           }
           shared.actions.push(settings)
           Execution.annotateWith(page, annotation(runtime, page, shared))
+          reconcileCursor(shared)
+          yield* Effect.ignore(draw(runtime, page, shared))
           yield* Effect.addFinalizer(() =>
             Effect.suspend(() => {
               const at = shared.actions.indexOf(settings)
               if (at >= 0) shared.actions.splice(at, 1)
-              if (shared.actions.length > 0 || states.get(page) !== shared) return Effect.void
-              Execution.annotateWith(page, undefined)
-              return remove(runtime, page, shared, cursorId)
+              if (states.get(page) !== shared) return Effect.void
+              if (shared.actions.length === 0) Execution.annotateWith(page, undefined)
+              reconcileCursor(shared)
+              return draw(runtime, page, shared).pipe(
+                Operation.apart("Capability.Overlay.actions.release", Duration.seconds(5)),
+                Effect.ignore
+              )
             })
           )
         },

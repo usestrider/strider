@@ -52,8 +52,6 @@ export interface Annotation {
   readonly box: Effect.Effect<
     Option.Option<{ readonly x: number; readonly y: number; readonly width: number; readonly height: number }>
   >
-  /** How long the action has left before its deadline, in milliseconds. */
-  readonly left: number
 }
 export type Annotate = (annotation: Annotation) => Effect.Effect<void>
 
