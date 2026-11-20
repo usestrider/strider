@@ -15,8 +15,16 @@ export const deepEqual = (a: unknown, b: unknown): boolean => {
   if (a instanceof Map) {
     const other = b as Map<unknown, unknown>
     if (a.size !== other.size) return false
+    // Object keys come back from the page as new objects, so they match by structure, each entry once
+    const unmatched = [...other].filter(([key]) => typeof key === "object" && key !== null)
     for (const [key, value] of a) {
-      if (!other.has(key) || !deepEqual(value, other.get(key))) return false
+      if (typeof key !== "object" || key === null) {
+        if (!other.has(key) || !deepEqual(value, other.get(key))) return false
+        continue
+      }
+      const index = unmatched.findIndex(([candidate, entry]) => deepEqual(key, candidate) && deepEqual(value, entry))
+      if (index === -1) return false
+      unmatched.splice(index, 1)
     }
     return true
   }
