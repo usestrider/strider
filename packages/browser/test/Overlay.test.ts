@@ -278,3 +278,83 @@ it.effect("orders a release clear before successor draws while the navigation wa
     yield* Fiber.join(replacement)
     assert.deepStrictEqual(rendered.map((item) => item._tag === "Html" ? item.html : item._tag), ["current"])
   }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+
+it.effect("a draw that gives up at its deadline never sends and doesn't hold up the next", () =>
+  Effect.gen(function*() {
+    const page = yield* Browser.newPage()
+    const owner = (page.locator("body") as LocatorImpl).owner
+    const entered = yield* Deferred.make<void>()
+    const resume = yield* Deferred.make<void>()
+    const applied: Array<boolean> = []
+    let hold = false
+    const send = vi.spyOn(Runtime, "send").mockImplementation((_runtime, _page, request) =>
+      Effect.gen(function*() {
+        if (request.op === "overlay") {
+          if (hold) {
+            hold = false
+            yield* Deferred.succeed(entered, undefined)
+            yield* Deferred.await(resume)
+          }
+          applied.push(request.hidden)
+        }
+        return { _tag: "Overlaid" } as const
+      })
+    )
+    yield* Effect.addFinalizer(() => Effect.sync(() => send.mockRestore()))
+    const overlay = yield* Overlays.acquire(owner.runtime, owner.page, owner.grant).pipe(
+      Operation.named("test.acquire")
+    )
+    hold = true
+    const first = yield* overlay.add("held").pipe(Effect.forkChild)
+    yield* Deferred.await(entered)
+    const gaveUp = yield* overlay.hide.pipe(Deadline.within("100 millis"), Effect.flip, Effect.forkChild)
+    yield* TestClock.adjust(200)
+    assert.strictEqual((yield* Fiber.join(gaveUp))._tag, "Timeout")
+    const next = yield* overlay.show.pipe(Effect.forkChild)
+    yield* Deferred.succeed(resume, undefined)
+    yield* Fiber.join(first)
+    yield* Fiber.join(next)
+    // The held draw, then the show; the hide that gave up never reached the page
+    assert.deepStrictEqual(applied, [false, false])
+  }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+
+it.effect("a release completes while its navigation watch has a redraw queued", () =>
+  Effect.gen(function*() {
+    const page = yield* Browser.newPage()
+    const owner = (page.locator("body") as LocatorImpl).owner
+    const entered = yield* Deferred.make<void>()
+    const resume = yield* Deferred.make<void>()
+    let rendered: ReadonlyArray<Engine.OverlayItem> = []
+    let hold = false
+    const send = vi.spyOn(Runtime, "send").mockImplementation((_runtime, _page, request) =>
+      Effect.gen(function*() {
+        if (request.op === "overlay") {
+          if (hold) {
+            hold = false
+            yield* Deferred.succeed(entered, undefined)
+            yield* Deferred.await(resume)
+          }
+          rendered = request.overlays
+        }
+        return { _tag: "Overlaid" } as const
+      })
+    )
+    yield* Effect.addFinalizer(() => Effect.sync(() => send.mockRestore()))
+    const held = yield* Scope.make()
+    const overlay = yield* Overlays.acquire(owner.runtime, owner.page, owner.grant).pipe(
+      Operation.named("test.acquire"),
+      Scope.provide(held)
+    )
+    yield* overlay.add("kept").pipe(Scope.provide(held))
+    hold = true
+    const drawing = yield* overlay.show.pipe(Effect.forkChild)
+    yield* Deferred.await(entered)
+    // The navigation's redraw queues behind the held draw, and the release's clear behind it
+    yield* page.goto("about:blank")
+    const release = yield* Scope.close(held, Exit.void).pipe(Effect.forkChild)
+    yield* TestClock.adjust(0)
+    yield* Deferred.succeed(resume, undefined)
+    yield* Fiber.join(drawing)
+    yield* Fiber.join(release)
+    assert.deepStrictEqual(rendered, [])
+  }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))

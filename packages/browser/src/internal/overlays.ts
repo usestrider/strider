@@ -4,13 +4,13 @@
  * document after each change, and again to each document the main frame commits. Nothing is installed or watched
  * on a page until the capability is acquired, and the watch ends when the last acquisition's scope closes.
  */
+import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Filter from "effect/Filter"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
-import * as Semaphore from "effect/Semaphore"
 import * as Stream from "effect/Stream"
 import * as Capability from "../Capability.ts"
 import * as Deadline from "../Deadline.ts"
@@ -66,19 +66,58 @@ const cursorId = "cursor"
 const states = new WeakMap<Model.PageEntry, State>()
 
 /**
- * Each page's draw sequencer, for as long as the page has used overlays: every send that reconciles the page's
- * host holds it, with its ownership check, so sends apply in the order ownership changed. A release's clear holds
- * it too, so a later acquisition's first draw lands after it, and a draw already under way lands before both.
+ * Each page's draw order, for as long as the page has used overlays: a chain of turns, one per send that
+ * reconciles the page's host. It holds four rules by construction:
+ *
+ * 1. Order is fixed when ownership changes. A turn is appended synchronously, as its request is made; a release
+ *    retires its state and appends its clear in one synchronous step, so a successor's draws come after it, and
+ *    the release closes its watch only after its place is taken.
+ * 2. Every wait is bounded by the waiter's own deadline: the wait for its turn and its send run under
+ *    `record.bound`, interruptibly, on the browser clock, failing with the waiter's own `Timeout`.
+ * 3. A waiter that gives up never sends and never holds up those behind it: its turn is marked cancelled and
+ *    completed at once, and a turn waiting on a cancelled one waits on the turn before it instead.
+ * 4. Nothing waits on a fiber that waits on it: a turn waits only on turns appended before it, and a release
+ *    takes its own turn before closing its watch, whose queued redraws are interrupted, not awaited.
  */
-const sequencers = new WeakMap<Model.PageEntry, Semaphore.Semaphore>()
-const sequencer = (page: Model.PageEntry): Semaphore.Semaphore => {
-  let each = sequencers.get(page)
-  if (each === undefined) {
-    each = Semaphore.makeUnsafe(1)
-    sequencers.set(page, each)
-  }
-  return each
+interface Turn {
+  prev: Turn | undefined
+  readonly done: Deferred.Deferred<void>
+  cancelled: boolean
+  applied: boolean
 }
+const tails = new WeakMap<Model.PageEntry, Turn>()
+
+/** Appends a turn to the page's draw order; synchronous, so nothing can come between the request and its place. */
+const enqueue = (page: Model.PageEntry): Turn => {
+  const turn: Turn = { prev: tails.get(page), done: Deferred.makeUnsafe<void>(), cancelled: false, applied: false }
+  tails.set(page, turn)
+  return turn
+}
+
+/** Waits until every turn before `turn` has been applied or given up. */
+const waitTurn = (turn: Turn | undefined): Effect.Effect<void> =>
+  turn === undefined ? Effect.void : Deferred.await(turn.done).pipe(
+    Effect.andThen(Effect.suspend(() => turn.cancelled ? waitTurn(turn.prev) : Effect.void))
+  )
+
+/** Applies `apply` at `turn`, within the running operation's deadline; a turn given up is skipped. */
+const take = <E>(turn: Turn, apply: Effect.Effect<void, E>): Effect.Effect<void, E | Deadline.Timeout> =>
+  Effect.flatMap(
+    Operation.record,
+    (record) =>
+      record.bound(Effect.interruptible(
+        waitTurn(turn.prev).pipe(Effect.andThen(Effect.suspend(() => {
+          turn.applied = true
+          return apply
+        })))
+      ))
+  ).pipe(
+    Effect.ensuring(Effect.sync(() => {
+      if (turn.applied) turn.prev = undefined
+      else turn.cancelled = true
+      Deferred.doneUnsafe(turn.done, Exit.void)
+    }))
+  )
 
 /** Whether the page has an acquired overlay capability, and so a watch on its main frame's navigations. */
 export const listening = (page: Model.PageEntry): boolean => states.has(page)
@@ -110,9 +149,7 @@ const millisOf = (
  */
 const draw = (runtime: Runtime.Runtime, page: Model.PageEntry, state: State): Effect.Effect<void, Failure> =>
   Effect.suspend(() =>
-    sequencer(page).withPermit(
-      Effect.suspend(() => states.get(page) === state ? send(runtime, page, state) : Effect.void)
-    )
+    take(enqueue(page), Effect.suspend(() => states.get(page) === state ? send(runtime, page, state) : Effect.void))
   )
 
 /** Sends `state`'s overlays, whether or not it is still the page's: only its release's last draw, clearing them. */
@@ -275,15 +312,13 @@ export const acquire = Effect.fnUntraced(
           Execution.annotateWith(page, undefined)
           const drawn = shared.items.length > 0 || shared.hidden
           shared.items.length = 0
-          return Scope.close(shared.scope, Exit.void).pipe(
-            Effect.andThen(
-              drawn
-                ? sequencer(page).withPermit(send(runtime, page, shared)).pipe(
-                  Operation.apart("Capability.Overlay.release", Duration.seconds(5))
-                )
-                : Effect.void
-            ),
-            Effect.ignore
+          // The clear's place is taken here, in the same synchronous step that retired the state
+          const clear = drawn ? enqueue(page) : undefined
+          return (clear === undefined ? Effect.void : take(clear, send(runtime, page, shared)).pipe(
+            Operation.apart("Capability.Overlay.release", Duration.seconds(5))
+          )).pipe(
+            Effect.ignore,
+            Effect.andThen(Scope.close(shared.scope, Exit.void))
           )
         })
     )
