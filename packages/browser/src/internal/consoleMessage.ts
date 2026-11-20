@@ -113,7 +113,18 @@ const claiming = <PE, PR>(
   Effect.flatMap(where === undefined ? Effect.succeed(true) : where(message), (taken) =>
     taken
       ? Effect.as(matched ? ConsoleArguments.matched(claimant, message) : Effect.void, true)
-      : Effect.as(ConsoleArguments.pass(claimant, message), false))
+      : Effect.as(ConsoleArguments.pass(claimant, message), false)).pipe(
+      // A failed `where` ends the subscription
+      Effect.onError(() => ConsoleArguments.abandoned(claimant))
+    )
+
+/**
+ * Drops a subscription's claims once its subscriber has ended, apart from its scope, which drops them anyway. The
+ * subscriber tells it synchronously, so the release of what it frees runs apart.
+ */
+const settled = (claimant: ConsoleArguments.Claimant) => () => {
+  Effect.runFork(ConsoleArguments.abandoned(claimant))
+}
 
 export const nextCall = Effect.fnUntraced(function*<PE, PR>(
   target: Page.ObservedPage | UserContext.ObservedUserContext,
@@ -122,7 +133,10 @@ export const nextCall = Effect.fnUntraced(function*<PE, PR>(
 ) {
   const scope = yield* Effect.scope
   const claimant = yield* subscribe("ConsoleMessage.nextCall", target, filter)
-  const wait = yield* next(target, filter, claiming(claimant, where, true))
+  // A wait that failed, timed out or saw its target end takes nothing; one that matched keeps its message's claim
+  const wait = yield* next(target, filter, claiming(claimant, where, true), (failed) => {
+    if (failed) settled(claimant)()
+  })
   return yield* Effect.cached(Effect.flatMap(wait, (message) => callOf(target, claimant, scope, message)))
 })
 
@@ -133,6 +147,6 @@ export const streamCalls = Effect.fnUntraced(function*<PE, PR>(
 ) {
   const scope = yield* Effect.scope
   const claimant = yield* subscribe("ConsoleMessage.streamCalls", target, filter)
-  const messages = yield* stream(target, filter, claiming(claimant, where, false))
+  const messages = yield* stream(target, filter, claiming(claimant, where, false), settled(claimant))
   return Stream.mapEffect(messages, (message) => callOf(target, claimant, scope, message))
 })

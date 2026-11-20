@@ -1,6 +1,6 @@
 /** Console calls with their arguments as handles (`ConsoleMessage.nextCall`, `streamCalls`), on every backend. */
 import { assert } from "@effect/vitest"
-import { Browser, ConsoleMessage, type Page } from "@usestrider/browser"
+import { Browser, ConsoleMessage, type Page, Subscription } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
@@ -243,5 +243,22 @@ export const consoleCalls = (
       yield* taken.args[0]!.release
       const late = Option.getOrThrow(yield* second.pipe(Stream.runHead))
       assert.deepStrictEqual(yield* late.args[0]!.read, { a: 1 })
+    }).pipe(Effect.scoped))
+
+  it.effect("stops claiming console arguments once a calls stream overflows", () =>
+    Effect.gen(function*() {
+      const page = yield* opened()
+      const table = Handles.page(page).runtime.model.consoleArguments
+      const before = ConsoleArguments.held(table)
+      const calls = yield* ConsoleMessage.streamCalls(page).pipe(Effect.provideService(Subscription.Capacity, 1))
+      assert.isDefined(calls)
+      // Nothing pulls the stream, so the second message overflows it, and the subscription ends
+      yield* page.evaluateInMainWorld(() => {
+        console.log({ a: 1 })
+        console.log({ b: 2 })
+        console.log({ c: 3 })
+      })
+      yield* page.evaluateInMainWorld(() => 1)
+      assert.strictEqual(ConsoleArguments.held(table), before)
     }).pipe(Effect.scoped))
 }

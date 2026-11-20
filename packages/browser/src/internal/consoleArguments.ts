@@ -145,6 +145,20 @@ export const matched = (claimant: Claimant, message: ConsoleMessage.ConsoleMessa
     return Effect.forEach(others, (each) => pass(claimant, each), { discard: true })
   })
 
+/**
+ * A subscription that ended before its scope did, as when its `where` failed, its wait timed out, its target ended or
+ * it overflowed: it takes no more, and drops every claim it holds, apart from `keeping`, the message it was promised.
+ */
+export const abandoned = (
+  claimant: Claimant,
+  keeping?: ConsoleMessage.ConsoleMessage | undefined
+): Effect.Effect<void> =>
+  Effect.suspend(() => {
+    claimant.done = true
+    const held = Array.from(claimant.claims.keys()).filter((each) => each !== keeping)
+    return Effect.forEach(held, (each) => pass(claimant, each), { discard: true })
+  })
+
 /** One owner's release of an argument, which frees it once no owner and no claim remains. */
 export const disown = (entry: Kept, arg: Argument): Effect.Effect<void> =>
   Effect.suspend(() => {
