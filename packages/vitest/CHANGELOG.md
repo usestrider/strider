@@ -1,5 +1,15 @@
 # @usestrider/vitest
 
+## 0.2.9
+
+### Added
+
+- **`SnapshotBaseline.toMatch`** (#407) compares bytes a test already has, such as `page.pdf()`'s output, with a baseline file named with its own extension (`"invoice.pdf"`). A `.png` name is compared by pixels, with `ScreenshotBaseline.toMatch`'s `threshold`, `maxDiffPixels`, and `maxDiffPixelRatio`; any other extension, JPEG included, is compared byte for byte. Baselines live at `__baselines__/<test file>/` beside the test file, apart from Vitest's own snapshots, and follow the same update modes as screenshots: a local run writes a missing baseline and still fails, `vitest -u` rewrites differing ones, and CI writes none. Text keeps Vitest's `toMatchFileSnapshot`.
+
+### Patch Changes
+
+- Uses `@usestrider/browser` 0.14.1.
+
 ## 0.2.8
 
 ### Added

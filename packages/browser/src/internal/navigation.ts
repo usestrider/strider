@@ -28,6 +28,7 @@ export const settle = (
   model: Model.Model,
   operation: string,
   navigation: PageNavigation.Id,
+  page: Target.NavigableId,
   frame: Target.NavigableId,
   url: Option.Option<Url.Url>,
   at: Url.Url,
@@ -40,11 +41,11 @@ export const settle = (
     case "SameDocument":
     case "Restored":
     case "Activated":
-      return Effect.succeed(Option.getOrThrow(Navigated.succeeded(model, navigation, frame, at, outcome)))
+      return Effect.succeed(Option.getOrThrow(Navigated.succeeded(model, navigation, page, frame, at, outcome)))
     case "Download":
       // `goto({ accept })`: the outcomes the caller asked for are navigations
       if (accept.includes("download")) {
-        return Effect.succeed({ _tag: "BecameDownload", id: navigation, frame, url: at })
+        return Effect.succeed({ _tag: "BecameDownload", id: navigation, page, frame, url: at })
       }
       return Effect.fail(pageError(
         operation,
@@ -59,6 +60,7 @@ export const settle = (
         return Effect.succeed({
           _tag: "NoContent",
           id: navigation,
+          page,
           frame,
           url: at,
           response: Option.flatMap(outcome.response, model.response)
