@@ -16,10 +16,8 @@
       "url": "/docs/api/browser/Page#Page.evaluateHandleInMainWorld"
     }
   ],
-  "notes": "Page.evaluateHandle returns an isolated-world handle; Page.evaluateHandleInMainWorld returns one in the page's own world, on every backend. A handle crosses only into calls in its own realm.",
-  "capabilities": [
-    "isolatedWorlds"
-  ],
+  "notes": "Page.evaluateHandle returns an isolated-world handle, and fails with Unsupported where a backend has no isolated worlds (isolatedWorlds: stock WebKit). Page.evaluateHandleInMainWorld returns one in the page's own world on every backend, so a page handle is available on all of them. A handle crosses only into calls in its own realm.",
+  "capabilities": [],
   "audit": {
     "sources": [
       "packages/browser/src/Page.ts"

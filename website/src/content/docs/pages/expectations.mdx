@@ -479,7 +479,7 @@ const cartItems = Effect.fn("cartItems")(function*(page: Page.Page) {
 ```
 
 - A handle passes into calls in its own realm only: a main-world handle given to `page.evaluate` fails with
-  `NotSerializable`.
+  `NotSerializable`. On WebKit, `page.evaluate` fails with `Unsupported` before it looks at its arguments.
 - Its string previews the value it held when it was made, such as `JSHandle(R3 node <p>)`.
 
 To read every locator match together, use `evaluateAll`. It passes an empty array when nothing matches:

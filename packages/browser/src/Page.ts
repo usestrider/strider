@@ -1007,7 +1007,8 @@ export interface Page extends ReadonlyPage {
    *
    * Arguments cross as they do for `evaluateInMainWorld`. The handle lives in the page's own world, so it crosses
    * only into calls there: passing it to `evaluate`, which runs in the isolated world, fails with
-   * `NotSerializable`. Unlike `evaluateHandle`, it works on WebKit too.
+   * `NotSerializable`, except on WebKit, where `evaluate` itself fails with `Unsupported` first, since WebKit has no
+   * isolated worlds. Unlike `evaluateHandle`, it works on WebKit too.
    *
    * **Gotchas**
    *
