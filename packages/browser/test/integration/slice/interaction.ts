@@ -6351,6 +6351,107 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
       )
 
       it.effect(
+        "expects accessible descriptions from references, the description attribute and the title",
+        () =>
+          Effect.gen(function*() {
+            // aria-describedby beats aria-description beats a title that isn't the name; a hidden reference counts.
+            const { url } = yield* fixture(() =>
+              `<span id="hint" hidden>Hidden  hint</span><span id="second">Second</span><button id="referenced" aria-describedby="hint second" aria-description="Ignored" title="Ignored">Save</button><button id="attribute" aria-description="From attribute" title="Ignored">Go</button><button id="titled" title="Tooltip">Act</button><button id="title-name" title="Only title"></button><button id="hidden" hidden aria-description="Secret"></button><div id="region" role="region" aria-label="Panel" aria-describedby="second"></div><button id="unresolved" aria-describedby="missing" aria-description="Fallback">X</button><button class="many" title="One">A</button><button class="many" title="Two">B</button>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              const referenced = page.locator("#referenced")
+              yield* referenced.pipe(Expect.toHaveAccessibleDescription("Hidden hint Second"))
+              yield* Expect.toHaveAccessibleDescription(referenced, "hidden HINT second", { ignoreCase: true })
+              yield* referenced.pipe(Expect.toHaveAccessibleDescription(/^hidden hint/, { ignoreCase: true }))
+              yield* page.locator("#attribute").pipe(Expect.toHaveAccessibleDescription("From attribute"))
+              yield* page.locator("#titled").pipe(Expect.toHaveAccessibleDescription("Tooltip"))
+              yield* page.locator("#title-name").pipe(Expect.toHaveAccessibleName("Only title"))
+              yield* page.locator("#title-name").pipe(Expect.toHaveAccessibleDescription(""))
+              yield* page.locator("#hidden").pipe(Expect.toHaveAccessibleDescription(""))
+              yield* page.locator("#region").pipe(Expect.toHaveAccessibleDescription("Second"))
+              yield* page.locator("#unresolved").pipe(Expect.toHaveAccessibleDescription("Fallback"))
+              yield* page.locator("#titled").pipe(Expect.toHaveAccessibleDescription("Other", { not: true }))
+              yield* page.evaluateInMainWorld(() => {
+                document.querySelector("#second")!.textContent = "Updated"
+              })
+              yield* referenced.pipe(Expect.toHaveAccessibleDescription("Hidden hint Updated"))
+              for (
+                const [locator, expected, options, observed] of [
+                  [page.locator("#titled"), "Other", undefined, "Tooltip"],
+                  [page.locator("#titled"), /tooltip/i, { ignoreCase: false }, "Tooltip"],
+                  [page.locator("#titled"), "Tooltip", { not: true }, "Tooltip"],
+                  [page.locator("#missing"), "", { not: true }, { matches: 0 }],
+                  [page.locator(".many"), "Three", { not: true }, { matches: 2 }]
+                ] as const
+              ) {
+                const error = yield* locator.pipe(
+                  Expect.toHaveAccessibleDescription(expected, options),
+                  Deadline.within("300 millis"),
+                  Effect.flip
+                )
+                assert(Expect.isExpectationFailed(error), String(error))
+                assert.deepStrictEqual(
+                  error.history.map((entry) => entry.value),
+                  error.history.length === 0 ? [] : [observed]
+                )
+              }
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "expects accessible error messages only while the element is invalid",
+        () =>
+          Effect.gen(function*() {
+            // aria-invalid other than absent, empty or false (any case), or failed native validation, reads
+            // aria-errormessage's references, hidden ones included.
+            const { url } = yield* fixture(() =>
+              `<span id="required" hidden>Required</span><span id="field">field</span><input id="invalid" aria-invalid="true" aria-errormessage="required field"><input id="upper" aria-invalid="FALSE" aria-errormessage="required"><input id="blank" aria-invalid=" " aria-errormessage="required"><input id="spelling" aria-invalid="spelling" aria-errormessage="required"><input id="other" aria-invalid="yes" aria-errormessage="required"><input id="valid" aria-errormessage="required"><input id="native" type="email" aria-errormessage="field"><div id="group" role="radiogroup" aria-invalid="true" aria-errormessage="field"></div>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              const invalid = page.locator("#invalid")
+              yield* invalid.pipe(Expect.toHaveAccessibleErrorMessage("Required field"))
+              yield* Expect.toHaveAccessibleErrorMessage(invalid, "required FIELD", { ignoreCase: true })
+              yield* invalid.pipe(Expect.toHaveAccessibleErrorMessage(/^Required/))
+              for (const id of ["#upper", "#blank", "#valid", "#native"]) {
+                yield* page.locator(id).pipe(Expect.toHaveAccessibleErrorMessage(""))
+              }
+              yield* page.locator("#spelling").pipe(Expect.toHaveAccessibleErrorMessage("Required"))
+              yield* page.locator("#other").pipe(Expect.toHaveAccessibleErrorMessage("Required"))
+              yield* page.locator("#group").pipe(Expect.toHaveAccessibleErrorMessage("field"))
+              yield* page.locator("#valid").pipe(Expect.toHaveAccessibleErrorMessage("Required", { not: true }))
+              yield* page.locator("#native").fill("not an address")
+              yield* page.locator("#native").pipe(Expect.toHaveAccessibleErrorMessage("field"))
+              for (
+                const [locator, expected, options, observed] of [
+                  [page.locator("#upper"), "Required", undefined, ""],
+                  [invalid, /required/, { ignoreCase: false }, "Required field"],
+                  [invalid, "Required field", { not: true }, "Required field"],
+                  [page.locator("input"), "", { not: true }, { matches: 7 }]
+                ] as const
+              ) {
+                const error = yield* locator.pipe(
+                  Expect.toHaveAccessibleErrorMessage(expected, options),
+                  Deadline.within("300 millis"),
+                  Effect.flip
+                )
+                assert(Expect.isExpectationFailed(error), String(error))
+                assert.deepStrictEqual(
+                  error.history.map((entry) => entry.value),
+                  error.history.length === 0 ? [] : [observed]
+                )
+              }
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
         "expects no accessible name where the element's role prohibits naming",
         () =>
           Effect.gen(function*() {
