@@ -799,6 +799,7 @@ declare const toHaveValue: DualMatcher<Locator.ReadonlyLocator, [expected: strin
 declare const toHaveValues: DualMatcher<Locator.ReadonlyLocator, [expected: ReadonlyArray<string | RegExp>]>
 declare const toHaveRole: DualMatcher<Locator.ReadonlyLocator, [expected: string]>
 declare const toHaveCSS: DualMatcher<Locator.ReadonlyLocator, [name: string, expected: string | RegExp, options?: { readonly not?: boolean | undefined; readonly pseudo?: "before" | "after" | undefined } | undefined]>
+declare const toHaveJSProperty: DualMatcher<Locator.Locator, [path: string, expected: unknown, options?: { readonly not?: boolean | undefined } | undefined]>   // reads a dotted path in the page's main world, compared by deep equality; a full Locator, since the page's getters run
 declare const toHaveAttribute: DualMatcher<Locator.ReadonlyLocator, [name: string, expected?: string | RegExp | undefined]>
 declare const toHaveCount: DualMatcher<Locator.ReadonlyLocator, [count: number]>
 declare const toMatchAria: DualMatcher<Locator.ReadonlyLocator | Page.ReadonlyPage, [pattern: AriaPattern.AriaPattern, options?: { readonly not?: boolean | undefined } | undefined]>   // a page is matched from its document node; not waits for no match

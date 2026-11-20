@@ -44,6 +44,7 @@ Each matcher takes a locator, except `toHaveURL` and `toHaveTitle`, which take t
 | `toHaveAttribute(name, expected?)`             | it has the attribute, with that value if given                   |
 | `toHaveRole(expected)`                         | its computed ARIA role equals the string exactly                 |
 | `toHaveCSS(name, expected, options?)`          | its computed CSS property matches an exact string or regular expression |
+| `toHaveJSProperty(path, expected, options?)` | a JavaScript property, read in the page's own world, deeply equals `expected` |
 | `toHaveCount(n)`                               | exactly `n` elements match                                       |
 | `toMatchAria(pattern, options?)`               | its accessibility tree matches a pattern; `not` waits for it not to |
 | `toHaveURL(expected)`, `toHaveTitle(expected)` | the page's URL or title matches                                  |
@@ -194,6 +195,28 @@ const styled = Effect.fn("styled")(function*(page: Page.ReadonlyPage) {
 CSS expectations require exactly one match even with `not: true`. Missing or multiple matches retry until
 the deadline and report the match count; Playwright rejects multiple matches immediately.
 Use `Deadline.within` to bound the expectation. Without options, it compares the element's own computed style.
+
+A JavaScript property is read where the page's own scripts set it, so a value a script assigned to an element is
+seen, and the property can be a dotted path into nested objects. The value is compared by deep equality: Dates by
+time, arrays, Maps and Sets by their entries, and plain objects by their own keys. Because a getter of the page's can
+run during the read, it takes a `Locator` rather than a `ReadonlyLocator`:
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const loaded = Effect.fn("loaded")(function*(page: Page.Page) {
+  const profile = page.locator("#profile")
+  yield* profile.pipe(
+    Expect.toHaveJSProperty("model", { plan: "pro", since: new Date("2026-01-01") })
+  )
+  yield* profile.pipe(Expect.toHaveJSProperty("model.plan", "free", { not: true }))
+  yield* page.getByRole("checkbox").pipe(Expect.toHaveJSProperty("checked", true))
+})
+```
+
+Like CSS expectations, it requires exactly one match even with `not: true`, retries until the deadline, and reports
+the value read or the match count.
 
 A matcher without arguments is the function itself; one with arguments is dual:
 
