@@ -19,7 +19,7 @@ import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as TestClock from "effect/testing/TestClock"
-import type * as BrowsingContext from "../src/bidi-protocol/BrowsingContext.ts"
+import * as BrowsingContext from "../src/bidi-protocol/BrowsingContext.ts"
 import * as Script from "../src/bidi-protocol/Script.ts"
 import * as Deadline from "../src/Deadline.ts"
 import type * as Adapter from "../src/internal/adapter.ts"
@@ -5149,3 +5149,52 @@ it.effect("keeps proxy credential bindings separate by scheme at the same host a
       "socks4://proxy.test:8080"
     ])
   }))
+
+describe("BiDi adopted popup openers", () => {
+  it.effect("resolves an iframe opener to its page when the popup is listed first", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { state, page, facts } = yield* withPage()
+      const info = (context: string, originalOpener: string | null, children: Array<unknown> = []) => ({
+        context,
+        originalOpener,
+        children,
+        parent: null,
+        userContext: "default",
+        clientWindow: "W1",
+        url: "about:blank"
+      })
+      // A getTree result may list the popup before the tree containing its original opener.
+      const frame = { ...info("F1", null), parent: "C1" }
+      Tree.reconcile(
+        state,
+        Schema.decodeUnknownSync(BrowsingContext.GetTreeResult)({
+          contexts: [info("P1", "F1"), info("C1", null, [frame])]
+        })
+      )
+      yield* state.buffer.flush
+      const popup = state.navigables.get("P1")!
+      const added = facts.find((fact) => fact._tag === "PageAdded" && fact.page === popup.id)
+      assert(added?._tag === "PageAdded")
+      assert.strictEqual(added.origin._tag, "Adopted")
+      assert(added.origin._tag === "Adopted")
+      assert.deepStrictEqual(added.origin.opener, Option.some(page.id))
+    })))
+
+  it.effect("releases an unresolved opener reservation when its last popup is removed", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { state } = yield* withPage()
+      const popup = Tree.addNavigable(state, {
+        context: "P1" as BrowsingContext.BrowsingContext,
+        originalOpener: "already-closed",
+        userContext: "default",
+        url: "about:blank"
+      }, true)!
+      Tree.removeNavigable(
+        state,
+        popup,
+        new Target.PageClosed({ by: "command" }),
+        "bidi:browsingContext.contextDestroyed"
+      )
+      assert.strictEqual(state.reservedIds.size, 0)
+    })))
+})

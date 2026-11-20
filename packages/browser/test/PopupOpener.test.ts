@@ -5,7 +5,9 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Browser, Popup } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
+import * as Scope from "effect/Scope"
 import { TestClock } from "effect/testing"
 
 const openPopup = Effect.fnUntraced(function*() {
@@ -16,6 +18,18 @@ const openPopup = Effect.fnUntraced(function*() {
 })
 
 describe("Popup.opener", () => {
+  it.effect("gives None after a crashed opener's context is removed", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const scope = yield* Scope.make()
+      const { page, popup } = yield* openPopup().pipe(Scope.provide(scope))
+      yield* TestClock.adjust("10 millis")
+      assert.strictEqual((yield* page.closed)._tag, "PageCrashed")
+      assert(Option.isSome(yield* Popup.opener(popup)))
+      yield* Scope.close(scope, Exit.void)
+      assert.strictEqual((yield* page.context.closed)._tag, "UserContextRemoved")
+      assert(Option.isNone(yield* Popup.opener(popup)))
+    })).pipe(Effect.provide(Browser.layerTest("-popup-crash"))))
+
   it.effect("gives the page that opened a popup", () =>
     Effect.scoped(Effect.gen(function*() {
       const { page, popup } = yield* openPopup()
