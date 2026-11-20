@@ -8,6 +8,7 @@ import * as Fiber from "effect/Fiber"
 import type * as Layer from "effect/Layer"
 import { vi } from "vitest"
 import * as Handles from "../../../src/internal/handles.ts"
+import * as Runtime from "../../../src/internal/runtime.ts"
 import { site } from "../adapter/harness.ts"
 import * as SharedContext from "./sharedContext.ts"
 import { newPage } from "./sharedContext.ts"
@@ -185,6 +186,121 @@ export const anyFrame = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer
               pay: yield* page.frame(page.locator("iframe").nth(0)).locator("#out").readText,
               decoy: yield* page.frame(page.locator("iframe").nth(1)).locator("#out").readText
             }, { pay: "", decoy: "" })
+          })),
+        timeout
+      )
+
+      it.effect("keeps frame input safe after the last identity check", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* newPage
+          yield* page.goto(
+            fixtureUrl(
+              origin,
+              `<style>iframe { display: block; width: 300px; height: 100px; }</style>${frame(origin, "<p>Before</p>")}${
+                frame(origin, button("Pay"))
+              }${frame(origin, button("Decoy"))}`
+            )
+          )
+          const execution = Handles.page(page).entry.execution
+          const originalAction = execution.action
+          const originalHolds = Runtime.holdsFrames
+          let applying = false
+          let removed = false
+          const actionHook = vi.spyOn(execution, "action").mockImplementation((...args) =>
+            originalAction(...args).pipe(Effect.tap((answer) =>
+              Effect.sync(() => {
+                applying = args[2].apply && !("_tag" in answer) && answer.response._tag === "Ready"
+              })
+            ))
+          )
+          const holdsHook = vi.spyOn(Runtime, "holdsFrames").mockImplementation((...args) =>
+            originalHolds(...args).pipe(Effect.tap((held) => {
+              if (!applying || !held || removed) return Effect.void
+              removed = true
+              // Geometry and identity were both read; the page changes before native input is sent.
+              return page.evaluateInMainWorld(() => document.querySelector("iframe")!.remove()).pipe(Effect.orDie)
+            }))
+          )
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              holdsHook.mockRestore()
+              actionHook.mockRestore()
+            })
+          )
+          yield* page.anyFrame.getByRole("button", { name: "Pay" }).click()
+          assert.isTrue(removed)
+          assert.deepEqual({
+            pay: yield* page.frame(page.locator("iframe").nth(0)).locator("#out").readText,
+            decoy: yield* page.frame(page.locator("iframe").nth(1)).locator("#out").readText
+          }, { pay: "clicked", decoy: "" })
+        })), timeout)
+
+      it.effect(
+        "caps cross-frame candidate descriptions at ten while retaining the total",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { origin } = yield* site
+            const page = yield* newPage
+            yield* page.goto(fixtureUrl(origin, `${button("Pay").repeat(6)}${frame(origin, button("Pay").repeat(6))}`))
+            const error = yield* page.anyFrame.getByRole("button", { name: "Pay" }).count.pipe(Effect.flip)
+            assert(Locator.isLocatorError(error), String(error))
+            assert.strictEqual(error.reason._tag, "StrictViolation")
+            if (error.reason._tag === "StrictViolation") {
+              assert.include(error.reason.hint, "12 elements match in 2 frames")
+              assert.lengthOf(error.reason.candidates, 10)
+            }
+          })),
+        timeout
+      )
+
+      it.effect(
+        "does not infer a unique visible match from truncated candidates",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { origin } = yield* site
+            const page = yield* newPage
+            const hidden = `<button hidden>Pay</button>`.repeat(10)
+            yield* page.goto(fixtureUrl(origin, `${button("Pay")}${frame(origin, hidden + button("Pay"))}`))
+            const pay = page.anyFrame.locator("button")
+            const error = yield* pay.count.pipe(Effect.flip)
+            assert(Locator.isLocatorError(error), String(error))
+            assert.strictEqual(error.reason._tag, "StrictViolation")
+            if (error.reason._tag === "StrictViolation") {
+              assert.include(error.reason.hint, "12 elements match in 2 frames")
+              strict(yield* pay.filter({ visible: true }).count.pipe(Effect.flip), 2)
+              assert.deepEqual(error.reason.suggestions, [])
+            }
+          })),
+        timeout
+      )
+
+      it.effect(
+        "refuses a ref whose live document is outside the current search",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { origin } = yield* site
+            const page = yield* newPage
+            yield* page.goto(
+              fixtureUrl(
+                origin,
+                `<iframe id="scope" src="${fixtureUrl(origin, button("Pay"))}"></iframe>${
+                  frame(origin, button("Other"))
+                }`
+              )
+            )
+            const snapshot = yield* page.frame(page.locator("#scope")).anyFrame.getByRole("button", { name: "Pay" })
+              .snapshot()
+            const match = [...snapshot.refs].find(([, node]) => node.role.role === "button")!
+            yield* page.evaluateInMainWorld(() => {
+              document.querySelector("#scope")!.removeAttribute("id")
+              document.querySelectorAll("iframe")[1]!.id = "scope"
+            })
+            const error = yield* snapshot.ref(match[0]).click().pipe(Effect.flip)
+            assert(Locator.isLocatorError(error), String(error))
+            assert.strictEqual(error.reason._tag, "StaleRef")
+            if (error.reason._tag === "StaleRef") assert.strictEqual(error.reason.why, "Replaced")
+            assert.strictEqual(yield* page.frame(page.locator("iframe").nth(0)).locator("#out").readText, "")
           })),
         timeout
       )
