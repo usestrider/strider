@@ -1836,3 +1836,12 @@ Each adapter maps its browser's names onto the set, and what fits none is `other
 `security` the same way on every browser. Rejected: keeping each browser's own name beside the category, which would
 make that name part of the API and tie a program to one browser's wording; and a default `source` on the
 constructor, which would be a hidden default, and wrong for the browser's own messages.
+
+## Each event kind is its own module
+
+Each kind of event is a module with its own `next`, `stream`, and `history` (principle 16): `PageNavigation`,
+`PageLifecycle`, `ConsoleMessage`, `Dialog`, and the rest, each on a page or a context as it allows. There is no wait
+that takes an event name. Each module gives its own typed payload and its own filter, compiled before buffering, so a
+wait names what it matches in the event's terms and its result needs no cast. Rejected: a `waitForEvent(name)` or
+`on(name)` dispatch over event names, as Playwright and Node's emitters have, whose payload and filter types follow
+from a string, and which would put every kind's lifetime and delivery rules behind one untyped entry point.
