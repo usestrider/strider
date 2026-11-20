@@ -6,6 +6,7 @@
  */
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import * as BrowsingContext from "../../bidi-protocol/BrowsingContext.ts"
 import * as Log from "../../bidi-protocol/Log.ts"
 import * as Script from "../../bidi-protocol/Script.ts"
 import * as ConsoleMessage from "../../ConsoleMessage.ts"
@@ -16,7 +17,16 @@ import * as Kit from "../adapterKit.ts"
 import * as Operation from "../operation.ts"
 import * as Urls from "../urls.ts"
 import { confirmFrameRemoval } from "./contexts.ts"
-import { closingOf, documentOf, type Event, navigableOf, type RealmEntry, realmOf, type State } from "./state.ts"
+import {
+  closingOf,
+  documentOf,
+  type Event,
+  navigableById,
+  navigableOf,
+  type RealmEntry,
+  realmOf,
+  type State
+} from "./state.ts"
 import { addWindowRealm, removeRealm } from "./tree.ts"
 
 // ── Remote values ─────────────────────────────────────────────────────────────────────────────────────────
@@ -413,3 +423,15 @@ export const releaseHandles = (state: State, list: ReadonlyArray<Adapter.HandleI
       { concurrency: "unbounded", discard: true }
     )
   })
+
+/**
+ * A round trip on the connection: `browsingContext.getTree` of the navigable alone changes nothing, and once its
+ * reply is in, the worker folds every event received before it.
+ */
+export const settled = Effect.fnUntraced(function*(state: State, id: L1Target.NavigableId) {
+  const navigable = yield* Effect.option(navigableById(state, id))
+  if (Option.isSome(navigable)) {
+    yield* Effect.ignore(state.send(BrowsingContext.getTree({ root: navigable.value.bidi, maxDepth: 0 })))
+  }
+  yield* state.buffer.run(() => {})
+})
