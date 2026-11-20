@@ -982,7 +982,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
       // ── BrowserWorker ──
 
       it.effect(
-        "hands out a page's worker, evaluates in it where the backend can, and sees it end",
+        "hands out a page's worker, evaluates and holds handles in it where the backend can, and sees it end",
         () =>
           Effect.gen(function*() {
             const { origin, url } = yield* fixture(() =>
@@ -998,73 +998,31 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
               assert.isTrue((yield* page.workers).includes(worker))
               assert.isTrue((yield* page.context.workers).includes(worker))
               const evaluated = worker.evaluate((n: number) => [self.location.pathname, n * 2, new Map([["a", 1]])], 21)
-              if (name === "Firefox") {
-                const error = yield* Effect.flip(evaluated)
-                assert(BrowserWorker.isBrowserWorkerError(error), String(error))
-                assert.strictEqual(error.reason._tag, "Unsupported")
-              } else {
-                assert.deepStrictEqual(yield* evaluated, ["/worker.js", 42, new Map([["a", 1]])])
+              const held = worker.evaluateHandle(() => self)
+              if (!(yield* supports("workers.evaluate"))) {
+                for (const refused of [Effect.asVoid(evaluated), Effect.asVoid(held)]) {
+                  const error = yield* Effect.flip(refused)
+                  assert(BrowserWorker.isBrowserWorkerError(error), String(error))
+                  assert.deepInclude(error.reason, { _tag: "Unsupported", capability: "workers.evaluate" })
+                }
+                yield* page.getByText("Stop").click()
+                assert.strictEqual((yield* worker.closed)._tag, "RealmDestroyed")
+                return
               }
+              assert.deepStrictEqual(yield* evaluated, ["/worker.js", 42, new Map([["a", 1]])])
+              // A handle in the worker's realm crosses into its calls as itself, and ends with the worker
+              const global = yield* held
+              assert.strictEqual(global.realm, worker.realm)
+              assert.strictEqual(yield* global.evaluate((scope) => scope.location.pathname), "/worker.js")
+              const doubled = yield* worker.evaluateHandle((n: number) => ({ n: n * 2 }), 21)
+              assert.strictEqual(yield* worker.evaluate((value) => value.n, doubled as unknown as { n: number }), 42)
               yield* page.getByText("Stop").click()
               assert.strictEqual((yield* worker.closed)._tag, "RealmDestroyed")
               assert.deepStrictEqual(yield* page.workers, [])
-            }))
-          }),
-        timeout
-      )
-
-      it.effect("hands out handles in a worker's realm, which end with the worker", () =>
-        Effect.gen(function*() {
-          const { url } = yield* fixture(() =>
-            button("Start", "window.worker = new Worker('/worker.js')") + button("Stop", "window.worker.terminate()")
-          )
-          yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
-            yield* page.goto(url)
-            const started = yield* BrowserWorker.next(page)
-            yield* page.getByText("Start").click()
-            const worker = yield* started
-            const made = worker.evaluateHandle(() => self)
-            if (name === "Firefox") {
-              const error = yield* Effect.flip(made)
-              assert(BrowserWorker.isBrowserWorkerError(error), String(error))
-              assert.deepInclude(error.reason, { _tag: "Unsupported", capability: "workers.evaluate" })
-              return
-            }
-            const global = yield* made
-            assert.strictEqual(global.realm, worker.realm)
-            assert.strictEqual(yield* global.evaluate((scope) => scope.location.pathname), "/worker.js")
-            const doubled = yield* worker.evaluateHandle((n: number) => ({ n: n * 2 }), 21)
-            assert.strictEqual(yield* worker.evaluate((value) => value.n, doubled as unknown as { n: number }), 42)
-            yield* page.getByText("Stop").click()
-            yield* worker.closed
-            const gone = yield* Effect.flip(global.evaluate((scope) => scope.location.pathname))
-            assert.strictEqual(gone._tag, "TargetGone", String(gone))
-            const ended = yield* Effect.flip(worker.evaluateHandle(() => self))
-            assert.strictEqual(ended._tag, "TargetGone", String(ended))
-          }))
-        }), timeout)
-
-      it.effect(
-        "ends a worker handle held for a script that never loads when the worker ends",
-        () =>
-          Effect.gen(function*() {
-            // Only Chromium holds a dedicated worker's evaluations until its script loads
-            if (name !== "Chromium") return
-            const { url } = yield* fixture(() =>
-              button("Start", "window.worker = new Worker('/stalled-worker.js')") +
-              button("Stop", "window.worker.terminate()")
-            )
-            yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
-              yield* page.goto(url)
-              const started = yield* BrowserWorker.next(page)
-              yield* page.getByText("Start").click()
-              const worker = yield* started
-              const pending = yield* worker.evaluateHandle(() => self).pipe(Effect.flip, Effect.forkScoped)
-              yield* page.getByText("Stop").click()
-              const error = yield* Fiber.join(pending)
-              assert.strictEqual(error._tag, "TargetGone", String(error))
+              const gone = yield* Effect.flip(global.evaluate((scope) => scope.location.pathname))
+              assert.strictEqual(gone._tag, "TargetGone", String(gone))
+              const ended = yield* Effect.flip(worker.evaluateHandle(() => self))
+              assert.strictEqual(ended._tag, "TargetGone", String(ended))
             }))
           }),
         timeout

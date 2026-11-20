@@ -1872,7 +1872,7 @@ export const contents = (
           )
         }), timeout)
 
-      it.effect("lists a handle's own enumerable properties as handles, reading each once", () =>
+      it.effect("lists a handle's own enumerable properties as handles, each read once and held as it is", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
@@ -1880,26 +1880,56 @@ export const contents = (
             yield* page.goto(fixtureUrl(origin, `<p>a</p>`), { waitUntil: "load" })
             const data = yield* page.evaluateHandleInMainWorld(() => {
               let reads = 0
-              const value = { a: 1, b: "two", nested: { c: 3 } }
+              let thens = 0
+              const value = {
+                a: 1,
+                b: "two",
+                nested: { c: 3 },
+                resolved: Promise.resolve(42),
+                pending: new Promise(() => {}),
+                thenable: {
+                  then: () =>
+                    void thens++
+                }
+              }
               Object.defineProperty(value, "counted", {
                 enumerable: true,
                 get: () =>
                   ++reads
               })
               Object.defineProperty(value, "hidden", { enumerable: false, value: 4 })
-              Reflect.set(window, "__reads", () => reads)
+              Reflect.set(window, "__counts", () => [reads, thens])
               return value
             })
             const properties = yield* data.properties
-            assert.deepStrictEqual([...properties.keys()], ["a", "b", "nested", "counted"])
+            assert.deepStrictEqual(
+              [...properties.keys()],
+              ["a", "b", "nested", "resolved", "pending", "thenable", "counted"]
+            )
             assert.strictEqual(yield* properties.get("a")!.read, 1)
             assert.strictEqual(yield* properties.get("b")!.read, "two")
             assert.strictEqual(properties.get("nested")!.realm, data.realm)
-            assert.strictEqual(yield* properties.get("nested")!.evaluate((nested) => (nested as { c: number }).c), 3)
-            assert.strictEqual(yield* properties.get("counted")!.read, 1)
             assert.strictEqual(
-              yield* page.evaluateInMainWorld(() => (Reflect.get(window, "__reads") as () => number)()),
-              1
+              yield* properties.get("nested")!.evaluate((nested) =>
+                (nested as { c: number }).c
+              ),
+              3
+            )
+            assert.strictEqual(yield* properties.get("counted")!.read, 1)
+            // A promise is held as itself, never waited for, and a thenable's `then` never runs
+            for (const key of ["resolved", "pending"]) {
+              assert.strictEqual(
+                yield* properties.get(key)!.evaluate((value) => value instanceof Promise),
+                true
+              )
+            }
+            assert.strictEqual(
+              yield* properties.get("thenable")!.evaluate((value) => typeof (value as { then: unknown }).then),
+              "function"
+            )
+            assert.deepStrictEqual(
+              yield* page.evaluateInMainWorld(() => (Reflect.get(window, "__counts") as () => [number, number])()),
+              [1, 0]
             )
             const primitive = yield* page.evaluateHandleInMainWorld(() => 7)
             assert.strictEqual((yield* primitive.properties).size, 0)
@@ -1909,27 +1939,44 @@ export const contents = (
           }))
         }), timeout)
 
-      it.effect("preserves a promise property's identity when listing handle properties", () =>
+      it.effect("hands out handles in the page's own world and a locator's match, each previewing its value", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(origin, `<p>a</p>`), { waitUntil: "load" })
-            const data = yield* page.evaluateHandleInMainWorld(() => ({ pending: Promise.resolve(42) }))
-            const properties = yield* data.properties
-            assert.strictEqual(
-              yield* properties.get("pending")!.evaluate((value) => value instanceof Promise),
-              true
+            yield* page.goto(
+              fixtureUrl(origin, `<script>window.secret = { answer: 42 }</script><p id="x">hello</p><p>a</p>`),
+              { waitUntil: "load" }
             )
-          }))
-        }), timeout)
-
-      it.effect("previews a handle's value in its string, from the call that made it", () =>
-        Effect.gen(function*() {
-          const { origin } = yield* site
-          yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(origin, `<p id="x">a</p>`), { waitUntil: "load" })
+            const secret = yield* page.evaluateHandleInMainWorld(() =>
+              Reflect.get(window, "secret") as { answer: number }
+            )
+            assert.strictEqual(
+              yield* secret.evaluate((value) =>
+                value.answer
+              ),
+              42
+            )
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(
+                (value: { answer: number }) =>
+                  value.answer,
+                secret as unknown as { answer: number }
+              ),
+              42
+            )
+            const worlds = yield* supports("isolatedWorlds")
+            const crossed = reasonOf(
+              yield* Effect.exit(page.evaluate(
+                (value: { answer: number }) => value.answer,
+                secret as unknown as {
+                  answer: number
+                }
+              ))
+            )
+            // Without isolated worlds the call itself is refused before its arguments are
+            assert.strictEqual(crossed?.reason?._tag, worlds ? "NotSerializable" : "Unsupported")
+            // The preview comes from the call that made the handle
             const number = yield* page.evaluateHandleInMainWorld(() => 42)
             assert.strictEqual(String(number), `JSHandle(${number.realm} 42)`)
             const text = yield* page.evaluateHandleInMainWorld(() => "hi")
@@ -1938,17 +1985,7 @@ export const contents = (
             assert.strictEqual(String(array), `JSHandle(${array.realm} array)`)
             const node = yield* page.evaluateHandleInMainWorld(() => document.querySelector("p"))
             assert.strictEqual(String(node), `JSHandle(${node.realm} node <p>)`)
-            const object = yield* page.evaluateHandleInMainWorld(() => ({ a: 1 }))
-            assert.strictEqual(String(object), `JSHandle(${object.realm} object)`)
-          }))
-        }), timeout)
-
-      it.effect("hands out a locator's one match as a handle, and refuses several", () =>
-        Effect.gen(function*() {
-          const { origin } = yield* site
-          yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(origin, `<p id="x">hello</p><p>a</p>`), { waitUntil: "load" })
+            assert.strictEqual(String(secret), `JSHandle(${secret.realm} object)`)
             if (yield* isolatedRefused(page.locator("#x").evaluateHandle((element) => element))) return
             const handle = yield* page.locator("#x").evaluateHandle(
               (element, suffix: string) => ({ id: element.id + suffix, element }),
@@ -1960,35 +1997,6 @@ export const contents = (
               yield* Effect.exit(page.locator("p").evaluateHandle((element) => element))
             ) as unknown as Locator.LocatorError
             assert.strictEqual(several.reason._tag, "StrictViolation")
-          }))
-        }), timeout)
-
-      it.effect("hands out handles in the page's own world, which cross only into it", () =>
-        Effect.gen(function*() {
-          const { origin } = yield* site
-          yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* SharedContext.newPage
-            yield* page.goto(
-              fixtureUrl(origin, `<script>window.secret = { answer: 42 }</script><p>a</p>`),
-              { waitUntil: "load" }
-            )
-            const secret = yield* page.evaluateHandleInMainWorld(() =>
-              Reflect.get(window, "secret") as { answer: number }
-            )
-            assert.strictEqual(yield* secret.evaluate((value) => value.answer), 42)
-            assert.strictEqual(
-              yield* page.evaluateInMainWorld((value: { answer: number }) =>
-                value.answer, secret as unknown as { answer: number }),
-              42
-            )
-            const crossed = reasonOf(
-              yield* Effect.exit(page.evaluate((value: { answer: number }) =>
-                value.answer, secret as unknown as { answer: number }))
-            )
-            assert.strictEqual(
-              crossed?.reason?._tag,
-              (yield* supports("isolatedWorlds")) ? "NotSerializable" : "Unsupported"
-            )
           }))
         }), timeout)
 
@@ -2028,8 +2036,7 @@ export const contents = (
               return
             }
             assert.strictEqual(
-              yield* page.locator("#x").evaluate((element, suffix: string) =>
-                element.textContent + suffix, "!"),
+              yield* page.locator("#x").evaluate((element, suffix: string) => element.textContent + suffix, "!"),
               "hello!"
             )
             assert.strictEqual(
