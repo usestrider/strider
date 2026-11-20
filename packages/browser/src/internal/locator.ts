@@ -2015,9 +2015,10 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
             Effect.flatMap(settle)
           )
           if (Option.isNone(first)) continue
-          // A page that shows its actions draws this one, and waits, once, before the last check and the input
+          // A page that shows its actions draws this one, and waits, once, before the last check and the input; a trial
+          // sends no input, so it has nothing to show
           const annotate = owner.page.execution.annotate
-          if (annotate !== undefined && !annotated && annotatedActions.has(operation)) {
+          if (annotate !== undefined && !annotated && options?.trial !== true && annotatedActions.has(operation)) {
             annotated = true
             yield* annotate({
               title: `${operation.slice("Locator.".length)} ${this.description}`,
