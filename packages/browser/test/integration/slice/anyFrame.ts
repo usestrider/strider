@@ -6,6 +6,8 @@ import { type Browser, Deadline, Locator } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import type * as Layer from "effect/Layer"
+import { vi } from "vitest"
+import * as Handles from "../../../src/internal/handles.ts"
 import { site } from "../adapter/harness.ts"
 import * as SharedContext from "./sharedContext.ts"
 import { newPage } from "./sharedContext.ts"
@@ -83,6 +85,78 @@ export const anyFrame = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer
               later
             )
             yield* Fiber.join(clicked)
+            assert.strictEqual(yield* page.frame(page.locator("iframe")).locator("#out").readText, "clicked")
+          })),
+        timeout
+      )
+
+      it.effect(
+        "describes each actual match in a cross-frame strictness error",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { origin } = yield* site
+            const page = yield* newPage
+            yield* page.goto(fixtureUrl(origin, `${button("Pay")}${frame(origin, button("Pay") + button("Pay"))}`))
+            const error = yield* page.anyFrame.getByRole("button", { name: "Pay" }).count.pipe(Effect.flip)
+            assert(Locator.isLocatorError(error), String(error))
+            assert.strictEqual(error.reason._tag, "StrictViolation")
+            if (error.reason._tag === "StrictViolation") {
+              assert.deepEqual(error.reason.candidates.map((candidate) => candidate.visible), [true, true, true])
+              for (const candidate of error.reason.candidates) assert.include(candidate.description, "Pay")
+            }
+          })),
+        timeout
+      )
+
+      it.effect(
+        "keeps the selected frame when a preceding sibling disappears before input",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { origin } = yield* site
+            const page = yield* newPage
+            yield* page.goto(
+              fixtureUrl(
+                origin,
+                `<style>iframe { display: block; width: 300px; height: 100px; }</style>${
+                  frame(origin, "<p>Before</p>")
+                }${frame(origin, button("Pay"))}${frame(origin, button("Decoy"))}`
+              )
+            )
+            const execution = Handles.page(page).entry.execution
+            const original = execution.action
+            let removed = false
+            const hook = vi.spyOn(execution, "action").mockImplementation((...args) =>
+              original(...args).pipe(Effect.tap((answer) => {
+                if (!removed && args[2].apply && !("_tag" in answer) && answer.response._tag === "Ready") {
+                  removed = true
+                  // Remove the sibling after the final target check and before parent-frame translation.
+                  return page.evaluateInMainWorld(() => document.querySelector("iframe")!.remove()).pipe(Effect.orDie)
+                }
+                return Effect.void
+              }))
+            )
+            yield* Effect.addFinalizer(() => Effect.sync(() => hook.mockRestore()))
+            yield* page.anyFrame.getByRole("button", { name: "Pay" }).click()
+            hook.mockRestore()
+            assert.isTrue(removed)
+            assert.deepEqual({
+              pay: yield* page.frame(page.locator("iframe").nth(0)).locator("#out").readText,
+              decoy: yield* page.frame(page.locator("iframe").nth(1)).locator("#out").readText
+            }, { pay: "clicked", decoy: "" })
+          })),
+        timeout
+      )
+
+      it.effect(
+        "uses snapshot refs from the document selected by an any-frame search",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { origin } = yield* site
+            const page = yield* newPage
+            yield* page.goto(fixtureUrl(origin, frame(origin, button("Pay"))))
+            const snapshot = yield* page.anyFrame.getByRole("button", { name: "Pay" }).snapshot()
+            const match = [...snapshot.refs].find(([, node]) => node.role.role === "button")!
+            yield* snapshot.ref(match[0]).click()
             assert.strictEqual(yield* page.frame(page.locator("iframe")).locator("#out").readText, "clicked")
           })),
         timeout
