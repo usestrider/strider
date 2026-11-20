@@ -3319,13 +3319,21 @@ document.getElementById("form").addEventListener("submit", (event) => {
                 return new Promise<void>(() => {})
               }).pipe(Effect.forkScoped)
               yield* locator.locator("p").pipe(Expect.toHaveText("running"))
+              // Both evaluations share a realm; neither consumes the other's detach evidence.
+              const concurrent = yield* frame.evaluateInMainWorld(() => {
+                document.querySelector("p")!.setAttribute("data-second", "running")
+                return new Promise<void>(() => {})
+              }).pipe(Effect.forkScoped)
+              yield* locator.locator("p").pipe(Expect.toHaveAttribute("data-second", "running"))
               yield* page.evaluateInMainWorld(() =>
                 document.getElementById("child")!.remove()
               )
-              const failed = reasonOf(yield* Fiber.await(pending))
-              assert.strictEqual(failed?._tag, "TargetGone")
-              assert.strictEqual(failed?.reason?._tag, "FrameDetached")
-              assert.deepInclude(failed as object, { target: { _tag: "Frame", id: frame.id } })
+              for (const evaluation of [pending, concurrent]) {
+                const failed = reasonOf(yield* Fiber.await(evaluation))
+                assert.strictEqual(failed?._tag, "TargetGone")
+                assert.strictEqual(failed?.reason?._tag, "FrameDetached")
+                assert.deepInclude(failed as object, { target: { _tag: "Frame", id: frame.id } })
+              }
             }))
           }),
         timeout
