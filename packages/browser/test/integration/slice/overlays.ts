@@ -189,7 +189,13 @@ export const overlays = <R>(it: ReturnType<typeof SharedContext.guard<R>>) => {
     Effect.gen(function*() {
       const page = yield* opened(button)
       const overlay = yield* page.capability(Capability.Overlay)
-      yield* Effect.scoped(overlay.actions({ duration: "1 second" }))
+      // A trial sends no input, so it isn't annotated or delayed while actions are shown
+      yield* Effect.scoped(Effect.gen(function*() {
+        yield* overlay.actions({ duration: "1 second" })
+        const trial = performance.now()
+        yield* page.getByRole("button", { name: "Go" }).click({ trial: true })
+        assert.isBelow(performance.now() - trial, 900)
+      }))
       const started = performance.now()
       yield* page.getByRole("button", { name: "Go" }).click()
       assert.isBelow(performance.now() - started, 900)
