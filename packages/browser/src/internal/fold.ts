@@ -535,6 +535,7 @@ export const make = Effect.fnUntraced(function*(options: {
           const opener = fact.kind === "popup" && fact.origin._tag === "Opened"
             ? Option.flatMap(fact.origin.opener, (id) => Option.fromNullishOr(pages.get(id)))
             : Option.none()
+          const openerId = fact.origin._tag === "Created" ? Option.none<Target.NavigableId>() : fact.origin.opener
           // Owned with its opener, released by the scope that acquired it (CONCEPTS.md §3)
           const owner = Option.flatMap(opener, (page) => page.state.getUnsafe().owner)
           const entry: Model.PageEntry = {
@@ -570,9 +571,15 @@ export const make = Effect.fnUntraced(function*(options: {
               download: Events.make(target, cap),
               worker: Events.make(target, cap),
               connection: Events.make(target, cap)
-            }
+            },
+            openerId,
+            opener: Option.getOrUndefined(Option.flatMap(openerId, (id) => Option.fromNullishOr(pages.get(id))))
           }
           pages.set(fact.page, entry)
+          // An attached browser can list a popup before the page that opened it
+          for (const page of pages.values()) {
+            if (page.opener === undefined && Option.contains(page.openerId, fact.page)) page.opener = entry
+          }
           // A popup is reported to its opener, when the backend names one; before the
           // context's pages change, so a caller woken by that change subscribes after it, as with every event
           if (Option.isSome(opener)) {
