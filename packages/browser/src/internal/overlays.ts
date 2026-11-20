@@ -10,6 +10,7 @@ import * as Exit from "effect/Exit"
 import * as Filter from "effect/Filter"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
+import * as Semaphore from "effect/Semaphore"
 import * as Stream from "effect/Stream"
 import * as Capability from "../Capability.ts"
 import * as Deadline from "../Deadline.ts"
@@ -64,6 +65,21 @@ const cursorId = "cursor"
 
 const states = new WeakMap<Model.PageEntry, State>()
 
+/**
+ * Each page's draw sequencer, for as long as the page has used overlays: every send that reconciles the page's
+ * host holds it, with its ownership check, so sends apply in the order ownership changed. A release's clear holds
+ * it too, so a later acquisition's first draw lands after it, and a draw already under way lands before both.
+ */
+const sequencers = new WeakMap<Model.PageEntry, Semaphore.Semaphore>()
+const sequencer = (page: Model.PageEntry): Semaphore.Semaphore => {
+  let each = sequencers.get(page)
+  if (each === undefined) {
+    each = Semaphore.makeUnsafe(1)
+    sequencers.set(page, each)
+  }
+  return each
+}
+
 /** Whether the page has an acquired overlay capability, and so a watch on its main frame's navigations. */
 export const listening = (page: Model.PageEntry): boolean => states.has(page)
 
@@ -93,7 +109,11 @@ const millisOf = (
  * acquisition's overlays.
  */
 const draw = (runtime: Runtime.Runtime, page: Model.PageEntry, state: State): Effect.Effect<void, Failure> =>
-  Effect.suspend(() => states.get(page) === state ? send(runtime, page, state) : Effect.void)
+  Effect.suspend(() =>
+    sequencer(page).withPermit(
+      Effect.suspend(() => states.get(page) === state ? send(runtime, page, state) : Effect.void)
+    )
+  )
 
 /** Sends `state`'s overlays, whether or not it is still the page's: only its release's last draw, clearing them. */
 const send = (runtime: Runtime.Runtime, page: Model.PageEntry, state: State): Effect.Effect<void, Failure> =>
@@ -207,58 +227,65 @@ export const acquire = Effect.fnUntraced(
       ))
     }
     yield* Access.check(grant)
-    let state = states.get(page)
-    if (state === undefined) {
-      const created: State = {
-        items: [],
-        hidden: false,
-        holders: 0,
-        next: 0,
-        scope: yield* Scope.make(),
-        actions: [],
-        cursor: null
-      }
-      state = created
-      states.set(page, created)
-      // A committed main-frame document starts without the overlays: it gets them again once it is current
-      yield* page.state.changes.pipe(
-        Stream.filterMap(
-          Filter.fromPredicateOption((each: Model.PageState) =>
-            each.status._tag === "Open" ? Option.some(each.status.document.id) : Option.none()
+    // Installed with its release as one uninterruptible step, so an interruption never leaves one without the other
+    const shared = yield* Effect.acquireRelease(
+      Effect.gen(function*() {
+        let state = states.get(page)
+        if (state === undefined) {
+          const created: State = {
+            items: [],
+            hidden: false,
+            holders: 0,
+            next: 0,
+            scope: yield* Scope.make(),
+            actions: [],
+            cursor: null
+          }
+          state = created
+          states.set(page, created)
+          // A committed main-frame document starts without the overlays: it gets them again once it is current
+          yield* page.state.changes.pipe(
+            Stream.filterMap(
+              Filter.fromPredicateOption((each: Model.PageState) =>
+                each.status._tag === "Open" ? Option.some(each.status.document.id) : Option.none()
+              )
+            ),
+            Stream.changes,
+            Stream.drop(1),
+            Stream.runForEach(() =>
+              created.items.length === 0 ? Effect.void : draw(runtime, page, created).pipe(
+                Operation.apart("Capability.Overlay.redraw", Duration.seconds(5)),
+                Effect.ignore
+              )
+            ),
+            Effect.interruptible,
+            Operation.detached,
+            Effect.forkIn(created.scope)
           )
-        ),
-        Stream.changes,
-        Stream.drop(1),
-        Stream.runForEach(() =>
-          created.items.length === 0 ? Effect.void : draw(runtime, page, created).pipe(
-            Operation.apart("Capability.Overlay.redraw", Duration.seconds(5)),
+        }
+        state.holders++
+        return state
+      }),
+      // The last holder's scope removes every overlay and ends the watch
+      (shared) =>
+        Effect.suspend(() => {
+          if (--shared.holders > 0) return Effect.void
+          states.delete(page)
+          shared.actions.length = 0
+          Execution.annotateWith(page, undefined)
+          const drawn = shared.items.length > 0 || shared.hidden
+          shared.items.length = 0
+          return Scope.close(shared.scope, Exit.void).pipe(
+            Effect.andThen(
+              drawn
+                ? sequencer(page).withPermit(send(runtime, page, shared)).pipe(
+                  Operation.apart("Capability.Overlay.release", Duration.seconds(5))
+                )
+                : Effect.void
+            ),
             Effect.ignore
           )
-        ),
-        Operation.detached,
-        Effect.forkIn(created.scope)
-      )
-    }
-    const shared = state
-    shared.holders++
-    // The last holder's scope removes every overlay and ends the watch
-    yield* Effect.addFinalizer(() =>
-      Effect.suspend(() => {
-        if (--shared.holders > 0) return Effect.void
-        states.delete(page)
-        shared.actions.length = 0
-        Execution.annotateWith(page, undefined)
-        const drawn = shared.items.length > 0 || shared.hidden
-        shared.items.length = 0
-        return Scope.close(shared.scope, Exit.void).pipe(
-          Effect.andThen(
-            drawn
-              ? send(runtime, page, shared).pipe(Operation.apart("Capability.Overlay.release", Duration.seconds(5)))
-              : Effect.void
-          ),
-          Effect.ignore
-        )
-      })
+        })
     )
     const attributes = { "browser.page.id": page.id, "browser.capability": "Overlay" }
     const control: Capability.OverlayControl = {
@@ -269,8 +296,12 @@ export const acquire = Effect.fnUntraced(
             ? Option.none<number>()
             : Option.some(yield* millisOf(options.duration, "duration", id))
           const overlay = `overlay-${shared.next++}`
-          shared.items.push({ _tag: "Html", id: overlay, html })
-          yield* Effect.addFinalizer(() => remove(runtime, page, shared, overlay))
+          yield* Effect.acquireRelease(
+            Effect.sync(() => {
+              shared.items.push({ _tag: "Html", id: overlay, html })
+            }),
+            () => remove(runtime, page, shared, overlay)
+          )
           yield* draw(runtime, page, shared).pipe(Effect.onError(() => remove(runtime, page, shared, overlay)))
           if (Option.isSome(millis)) {
             yield* BrowserClock.sleep(millis.value).pipe(
@@ -294,17 +325,23 @@ export const acquire = Effect.fnUntraced(
             description: options?.description ?? null,
             leaving: false
           }
-          shared.items.push(item)
-          yield* Effect.gen(function*() {
-            yield* draw(runtime, page, shared)
-            yield* sleepWithin(millis)
-            // Released during the wait: its card went with the rest, and nothing is left to fade
-            if (states.get(page) !== shared) return
-            const at = shared.items.indexOf(item)
-            if (at >= 0) shared.items[at] = { ...item, leaving: true }
-            yield* draw(runtime, page, shared)
-            yield* sleepWithin(fadeMillis)
-          }).pipe(Effect.ensuring(remove(runtime, page, shared, chapter)))
+          yield* Effect.acquireUseRelease(
+            Effect.sync(() => {
+              shared.items.push(item)
+            }),
+            () =>
+              Effect.gen(function*() {
+                yield* draw(runtime, page, shared)
+                yield* sleepWithin(millis)
+                // Released during the wait: its card went with the rest, and nothing is left to fade
+                if (states.get(page) !== shared) return
+                const at = shared.items.indexOf(item)
+                if (at >= 0) shared.items[at] = { ...item, leaving: true }
+                yield* draw(runtime, page, shared)
+                yield* sleepWithin(fadeMillis)
+              }),
+            () => remove(runtime, page, shared, chapter)
+          )
         },
         Operation.named("Capability.Overlay.chapter", { attributes })
       ),
@@ -332,23 +369,30 @@ export const acquire = Effect.fnUntraced(
             highlight: options?.style?.highlight ?? null,
             title: options?.style?.title ?? ""
           }
-          shared.actions.push(settings)
-          Execution.annotateWith(page, annotation(runtime, page, shared))
-          reconcileCursor(shared)
-          yield* Effect.ignore(draw(runtime, page, shared))
-          yield* Effect.addFinalizer(() =>
-            Effect.suspend(() => {
-              const at = shared.actions.indexOf(settings)
-              if (at >= 0) shared.actions.splice(at, 1)
-              if (states.get(page) !== shared) return Effect.void
-              if (shared.actions.length === 0) Execution.annotateWith(page, undefined)
+          yield* Effect.acquireRelease(
+            Effect.sync(() => {
+              shared.actions.push(settings)
+              Execution.annotateWith(page, annotation(runtime, page, shared))
               reconcileCursor(shared)
-              return draw(runtime, page, shared).pipe(
-                Operation.apart("Capability.Overlay.actions.release", Duration.seconds(5)),
-                Effect.ignore
-              )
-            })
+            }),
+            () =>
+              Effect.suspend(() => {
+                const at = shared.actions.indexOf(settings)
+                if (at >= 0) shared.actions.splice(at, 1)
+                if (states.get(page) !== shared) return Effect.void
+                if (shared.actions.length === 0) Execution.annotateWith(page, undefined)
+                reconcileCursor(shared)
+                // The redraw runs apart, behind any draw under way, so a release never waits on the page
+                return draw(runtime, page, shared).pipe(
+                  Operation.apart("Capability.Overlay.actions.release", Duration.seconds(5)),
+                  Effect.ignore,
+                  Effect.interruptible,
+                  Effect.forkIn(shared.scope),
+                  Effect.asVoid
+                )
+              })
           )
+          yield* Effect.ignore(draw(runtime, page, shared))
         },
         Operation.named("Capability.Overlay.actions", { attributes })
       ),
