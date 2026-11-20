@@ -574,7 +574,14 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
           const handle = state.ids.handle()
           state.handles.set(handle, { target: realm.target, realm, objectId: object.objectId, group: call.group })
           if (call.group !== undefined) Groups.join(state.groups, call.group, handle)
-          return withHandle(toRemoteValue(object.deepSerializedValue ?? { type: object.type }, documentOf), handle)
+          const held = withHandle(
+            toRemoteValue(object.deepSerializedValue ?? { type: heldType(object) }, documentOf),
+            handle
+          )
+          // `idOnly` serializes no node: its description names it, for the handle's preview
+          return held.type === "node" && held.value === undefined
+            ? { ...held, value: Adapter.describedNode(object.description) }
+            : held
         }
         return toRemoteValue(serialized, documentOf)
       }
@@ -599,6 +606,35 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
     )
   )
 })
+
+/**
+ * The kind of an object an `idOnly` call holds, which CDP gives as a type and a subtype (`object`, `array`), as a
+ * deep-serialized value's type (`array`).
+ */
+const heldType = (object: Runtime.RemoteObject): string => {
+  if (object.type !== "object") return object.type
+  switch (object.subtype) {
+    case "array":
+    case "node":
+    case "regexp":
+    case "date":
+    case "map":
+    case "set":
+    case "weakmap":
+    case "weakset":
+    case "error":
+    case "proxy":
+    case "promise":
+    case "typedarray":
+    case "arraybuffer":
+    case "generator":
+      return object.subtype
+    case "null":
+      return "null"
+    default:
+      return "object"
+  }
+}
 
 /** A value with the handle the caller holds on it; a primitive, which has no object id, has none to hold. */
 const withHandle = (value: Adapter.RemoteValue, handle: Adapter.HandleId): Adapter.RemoteValue => {

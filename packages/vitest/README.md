@@ -46,6 +46,13 @@ Vitest's `-u`; [Screenshot baselines](https://usestrider.dev/docs/tools/screensh
 yield * page.pipe(ScreenshotBaseline.toMatch("checkout", { maxDiffPixels: 20 }))
 ```
 
+`SnapshotBaseline.toMatch` compares bytes, such as a PDF, with a baseline file the same way: a `.png` name by its
+pixels, any other byte for byte; [Snapshot baselines](https://usestrider.dev/docs/tools/snapshot-baselines) covers it.
+
+```ts
+yield * SnapshotBaseline.toMatch(yield * page.pdf(), "invoice.pdf")
+```
+
 [Tests with Vitest](https://usestrider.dev/docs/tools/testing) covers concurrent pages, attaching files to a test, and a
 fake browser for events. The source is at https://github.com/usestrider/strider.
 

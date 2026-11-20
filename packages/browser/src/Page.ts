@@ -1001,6 +1001,40 @@ export interface Page extends ReadonlyPage {
     ...args: Args
   ): Effect.Effect<JSHandle.JSHandle<Awaited<A>>, PageError | Target.TargetGone | Deadline.Timeout, Scope.Scope>
   /**
+   * Calls `fn` in the page's own world and returns its result as a handle, for what only the page's scripts can
+   * reach, such as an object a global holds.
+   *
+   * **Details**
+   *
+   * Arguments cross as they do for `evaluateInMainWorld`. The handle lives in the page's own world, so it crosses
+   * only into calls there: passing it to `evaluate`, which runs in the isolated world, fails with
+   * `NotSerializable`, except on WebKit, where `evaluate` itself fails with `Unsupported` first, since WebKit has no
+   * isolated worlds. Unlike `evaluateHandle`, it works on WebKit too.
+   *
+   * **Gotchas**
+   *
+   * Page scripts can see and tamper with what runs here. Prefer `evaluateHandle` unless you need the page's
+   * globals.
+   *
+   * **Example** (Holding the page's store)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const cartSize = Effect.fn("cartSize")(function*(page: Page.Page) {
+   *   const store = yield* page.evaluateHandleInMainWorld(() =>
+   *     Reflect.get(window, "store") as { readonly cart: ReadonlyArray<string> }
+   *   )
+   *   return yield* store.evaluate((value) => value.cart.length)
+   * })
+   * ```
+   */
+  evaluateHandleInMainWorld<Args extends ReadonlyArray<unknown>, A>(
+    fn: (...args: Args) => A | Promise<A>,
+    ...args: Args
+  ): Effect.Effect<JSHandle.JSHandle<Awaited<A>>, PageError | Target.TargetGone | Deadline.Timeout, Scope.Scope>
+  /**
    * The page's keyboard.
    */
   readonly keyboard: Keyboard.Keyboard
