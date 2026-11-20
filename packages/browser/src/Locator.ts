@@ -2067,7 +2067,8 @@ export interface ReadonlyFrameLocator extends Queries<ReadonlyLocator> {
  *
  * - When more than one document has matches, every operation fails with `Locator.StrictViolation`, `count` and
  *   `all` included, rather than picking one: which frame loaded first doesn't decide.
- * - `and`, `or`, and `filter({ has })` take operands built from the same search.
+ * - `and` and `or` take operands built from the same search; `filter({ has })` takes a relative locator, as
+ *   anywhere.
  *
  * **Example** (Reading a label in whichever frame holds it)
  *

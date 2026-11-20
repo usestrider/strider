@@ -295,7 +295,8 @@ element. Cross-site frames work the same, and frames nest: `payment.frame(paymen
 
 When you don't know which iframe holds an element, `page.anyFrame` searches the page's document and every frame
 under it, and acts in the one frame where the chain matches. A chain that matches in more than one frame fails
-with `StrictViolation`, `count` included; a frame locator's `anyFrame` searches only below that frame:
+with `StrictViolation`, `count` included. A frame locator's `anyFrame` searches that frame's own document and the
+frames under it, but not its parents, as in `payment.anyFrame.getByRole("button")`:
 
 ```ts
 import { Page } from "@usestrider/browser"
@@ -303,6 +304,9 @@ import { Effect } from "effect"
 
 const pay = Effect.fn("pay")(function*(page: Page.Page) {
   yield* page.anyFrame.getByRole("button", { name: "Pay" }).click()
+  // Only the checkout frame and the frames inside it
+  const checkout = page.frame(page.locator("iframe#checkout"))
+  yield* checkout.anyFrame.getByRole("button", { name: "Confirm" }).click()
 })
 ```
 
