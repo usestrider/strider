@@ -139,7 +139,10 @@ interface Input {
 export const make = Effect.fnUntraced(function*(options: {
   /** Releases a popup its opener's owner releases (`ownership.ts`). */
   readonly release: (page: Model.PageEntry, by: Scope.Scope) => Effect.Effect<void>
+  /** The browser's console arguments kept for subscriptions to calls (`consoleArguments.ts`); a fresh table if absent. */
+  readonly consoleArguments?: ConsoleArguments.Table | undefined
 }) {
+  const consoleArguments = options.consoleArguments ?? ConsoleArguments.make()
   const modelScope = yield* Effect.scope
 
   // ── The stream ──
@@ -881,9 +884,10 @@ export const make = Effect.fnUntraced(function*(options: {
               ...Option.toArray(owner.context).map((context) => context.events.console)
             ]
             // Arguments no subscription claims are released at once, apart from the fold
-            yield* ConsoleArguments.keep(fact.message, fact.realm.value, fact.args, channels).pipe(
-              Effect.forkIn(modelScope)
-            )
+            yield* ConsoleArguments.keep(consoleArguments, fact.message, fact.realm.value, fact.args, channels)
+              .pipe(
+                Effect.forkIn(modelScope)
+              )
           }
           publish(owner, fact.message, (events) => events.console, (events) => events.console)
           return

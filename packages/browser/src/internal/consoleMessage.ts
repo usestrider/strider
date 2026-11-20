@@ -96,7 +96,11 @@ const subscribe = Effect.fnUntraced(function*(
       })
     )
   )
-  return yield* ConsoleArguments.claimant(behind.behind.entry.events.console, accepts(filter))
+  return yield* ConsoleArguments.claimant(
+    runtime.model.consoleArguments,
+    behind.behind.entry.events.console,
+    accepts(filter)
+  )
 })
 
 /** The user's `where`, after which a message it rejects is passed on. */

@@ -23,6 +23,7 @@ export interface Argument {
 
 /** A message's arguments, in its realm, with the adapter's release of their handles and the claims on them. */
 export interface Kept {
+  readonly table: Table
   readonly realm: Target.RealmId
   readonly args: ReadonlyArray<Argument>
   readonly release: (handles: ReadonlyArray<Adapter.HandleId>) => Effect.Effect<void>
@@ -38,11 +39,17 @@ export interface Claimant {
   readonly claims: Map<ConsoleMessage.ConsoleMessage, Kept>
 }
 
-const claimants = new Set<Claimant>()
-let unfreed = 0
+/** One browser's subscriptions to calls, and how many of its kept arguments are not yet freed. */
+export interface Table {
+  readonly claimants: Set<Claimant>
+  unfreed: number
+}
 
-/** How many kept arguments are not yet freed, across every connection. */
-export const held = (): number => unfreed
+/** A browser's empty table, which its model holds. */
+export const make = (): Table => ({ claimants: new Set(), unfreed: 0 })
+
+/** How many of a browser's kept arguments are not yet freed. */
+export const held = (table: Table): number => table.unfreed
 
 const handleOf = (value: Adapter.RemoteValue): ReadonlyArray<Adapter.HandleId> =>
   "handle" in value && value.handle !== undefined ? [value.handle] : []
@@ -53,7 +60,7 @@ const free = (entry: Kept): Effect.Effect<void> => {
   const handles = entry.args.flatMap((arg) => {
     if (arg.owners > 0 || arg.freed) return []
     arg.freed = true
-    unfreed--
+    entry.table.unfreed--
     return handleOf(arg.value)
   })
   return handles.length === 0 ? Effect.void : entry.release(handles)
@@ -67,19 +74,21 @@ const settle = (entry: Kept): Effect.Effect<void> => Effect.suspend(() => free(e
  * channels it is published to; gives the release of those no subscription claims.
  */
 export const keep = (
+  table: Table,
   message: ConsoleMessage.ConsoleMessage,
   realm: Target.RealmId,
   args: NonNullable<Extract<Adapter.Fact, { readonly _tag: "ConsoleMessage" }>["args"]>,
   channels: ReadonlyArray<unknown>
 ): Effect.Effect<void> => {
   const entry: Kept = {
+    table,
     realm,
     args: args.values.map((value) => ({ value, owners: 0, freed: false })),
     release: args.release,
     claims: 0
   }
-  unfreed += entry.args.length
-  for (const claimant of claimants) {
+  table.unfreed += entry.args.length
+  for (const claimant of table.claimants) {
     if (claimant.done || !channels.includes(claimant.channel) || !claimant.accepts(message)) continue
     claimant.claims.set(message, entry)
     entry.claims++
@@ -89,19 +98,20 @@ export const keep = (
 
 /** A subscription to calls, for its scope; it drops its claims as it ends. */
 export const claimant = (
+  table: Table,
   channel: unknown,
   accepts: (message: ConsoleMessage.ConsoleMessage) => boolean
 ): Effect.Effect<Claimant, never, Scope.Scope> =>
   Effect.acquireRelease(
     Effect.sync(() => {
       const made: Claimant = { channel, accepts, done: false, claims: new Map() }
-      claimants.add(made)
+      table.claimants.add(made)
       return made
     }),
     (made) =>
       Effect.suspend(() => {
         made.done = true
-        claimants.delete(made)
+        table.claimants.delete(made)
         const held = Array.from(made.claims.keys())
         return Effect.forEach(held, (message) => pass(made, message), { discard: true })
       })

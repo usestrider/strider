@@ -9,6 +9,7 @@ import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as Tracer from "effect/Tracer"
 import * as ConsoleArguments from "../../../src/internal/consoleArguments.ts"
+import * as Handles from "../../../src/internal/handles.ts"
 import { site } from "../adapter/harness.ts"
 import { fullySupports, status } from "./capabilities.ts"
 import * as SharedContext from "./sharedContext.ts"
@@ -181,13 +182,13 @@ export const consoleCalls = (
       const page = yield* opened()
       const wanted = yield* ConsoleMessage.streamCalls(page, { text: "wanted" })
       assert.isDefined(wanted)
-      const before = ConsoleArguments.held()
+      const before = ConsoleArguments.held(Handles.page(page).runtime.model.consoleArguments)
       yield* page.evaluateInMainWorld(() => {
         console.log("ignored", { a: 1 })
       })
       // The arguments are freed as the message arrives, while the subscription lives on. The release runs apart
       // from this fiber, so its command isn't among this case's spans: the kept arguments are counted instead
-      assert.strictEqual(ConsoleArguments.held(), before)
+      assert.strictEqual(ConsoleArguments.held(Handles.page(page).runtime.model.consoleArguments), before)
     }).pipe(Effect.scoped))
 
   it.effect("frees a page's untaken arguments when its own subscription ends, while another page's lives on", () =>
