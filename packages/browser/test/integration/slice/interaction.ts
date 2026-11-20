@@ -6356,7 +6356,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           Effect.gen(function*() {
             // aria-describedby beats aria-description beats a title that isn't the name; a hidden reference counts.
             const { url } = yield* fixture(() =>
-              `<span id="hint" hidden>Hidden  hint</span><span id="second">Second</span><button id="referenced" aria-describedby="hint second" aria-description="Ignored" title="Ignored">Save</button><button id="attribute" aria-description="From attribute" title="Ignored">Go</button><button id="titled" title="Tooltip">Act</button><button id="title-name" title="Only title"></button><button id="hidden" hidden aria-description="Secret"></button><div id="region" role="region" aria-label="Panel" aria-describedby="second"></div><button id="unresolved" aria-describedby="missing" aria-description="Fallback">X</button><button class="many" title="One">A</button><button class="many" title="Two">B</button>`
+              `<span id="hint" hidden>Hidden  hint</span><span id="second">Second</span><button id="referenced" aria-describedby="hint second" aria-description="Ignored" title="Ignored">Save</button><button id="attribute" aria-description="From attribute" title="Ignored">Go</button><button id="titled" title="Tooltip">Act</button><button id="title-name" title="Only title"></button><button id="hidden" hidden aria-description="Secret"></button><div id="region" role="region" aria-label="Panel" aria-describedby="second"></div><button id="unresolved" aria-describedby="missing" aria-description="Fallback">X</button><input id="value-name" type="submit" value="Send" title="Tooltip"><input id="value-description" type="submit" aria-label="Send form" value="Send" title="Ignored"><button class="many" title="One">A</button><button class="many" title="Two">B</button>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* newPage
@@ -6372,6 +6372,9 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               yield* page.locator("#hidden").pipe(Expect.toHaveAccessibleDescription(""))
               yield* page.locator("#region").pipe(Expect.toHaveAccessibleDescription("Second"))
               yield* page.locator("#unresolved").pipe(Expect.toHaveAccessibleDescription("Fallback"))
+              // A button input's value is its description only when it isn't its name.
+              yield* page.locator("#value-name").pipe(Expect.toHaveAccessibleDescription("Tooltip"))
+              yield* page.locator("#value-description").pipe(Expect.toHaveAccessibleDescription("Send"))
               yield* page.locator("#titled").pipe(Expect.toHaveAccessibleDescription("Other", { not: true }))
               yield* page.evaluateInMainWorld(() => {
                 document.querySelector("#second")!.textContent = "Updated"

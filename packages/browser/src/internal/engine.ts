@@ -1405,6 +1405,11 @@ export function engine(render: (root: SnapNode) => string) {
   const visible = (element: Element): boolean => rendered(element, true)
 
   // Accessible names (accname 1.2)
+  /** Where an element's own name came from, of the sources its description could otherwise come from. */
+  type NameSource = "native" | "content" | "title"
+  const nameSources = new Map<Element, NameSource>()
+  const hiddenNameSources = new Map<Element, NameSource>()
+
   interface NameContext {
     readonly visited: Set<Element>
     /** Inside an `aria-labelledby` traversal, so `aria-labelledby` isn't followed again. */
@@ -1596,6 +1601,11 @@ export function engine(render: (root: SnapNode) => string) {
     return value
   }
 
+  /** Records which of the sources HTML-AAM also reads for a description gave an element its own name. */
+  const nameSource = (context: NameContext, element: Element, source: NameSource): void => {
+    if (context.embedded === "self") (context.includeHidden ? hiddenNameSources : nameSources).set(element, source)
+  }
+
   const nameOfElementValue = (element: Element, context: NameContext): string => {
     if (context.visited.has(element)) return ""
     // 2A: hidden, unless asked for or in a traversal from a hidden reference
@@ -1638,7 +1648,10 @@ export function engine(render: (root: SnapNode) => string) {
     // 2D: the host language's label
     if (role !== "none" && role !== "presentation") {
       const native = nativeName(element, context)
-      if (native.trim() !== "") return native
+      if (native.trim() !== "") {
+        nameSource(context, element, "native")
+        return native
+      }
     }
     // 2F: name from content. In the target's own content, only a descendant whose role allows it.
     const fromContent = context.embedded === "reference" ||
@@ -1672,6 +1685,7 @@ export function engine(render: (root: SnapNode) => string) {
       // Only the target's own name is trimmed: a descendant's whitespace separates its neighbours.
       if (context.embedded === "self" ? content.trim() !== "" : content !== "") {
         if (provenance && context.embedded === "self") namesFromContent.add(element)
+        nameSource(context, element, "content")
         if (inField(element) && content.trim() !== "") context.contribution.fieldContent = true
         return content
       }
@@ -1679,7 +1693,7 @@ export function engine(render: (root: SnapNode) => string) {
     // 2I: the tooltip, except on a presentational element, then a placeholder (HTML-AAM)
     const title = role === "none" || role === "presentation" ? "" : dom.getAttribute(element, "title") ?? ""
     if (title.trim() !== "") {
-      if (context.embedded === "self") (context.includeHidden ? hiddenNamesFromTitle : namesFromTitle).add(element)
+      nameSource(context, element, "title")
       return title
     }
     const placeholder = dom.getAttribute(element, "placeholder") ?? ""
@@ -1751,9 +1765,6 @@ export function engine(render: (root: SnapNode) => string) {
   const namesFromContent = new Set<Element>()
   const nameCache = new Map<Element, string>()
   const hiddenNameCache = new Map<Element, string>()
-  /** Elements whose own name, as last computed, came from their title. */
-  const namesFromTitle = new Set<Element>()
-  const hiddenNamesFromTitle = new Set<Element>()
   const descriptionCache = new Map<Element, string>()
   const hiddenDescriptionCache = new Map<Element, string>()
   /** An element's accessible name, as a flat string. With `includeHidden`, hidden descendants count too. */
@@ -1779,58 +1790,100 @@ export function engine(render: (root: SnapNode) => string) {
     return name
   }
 
-  /**
-   * The text of an ID reference list's elements, each computed as a reference traversal, so a hidden element
-   * named there counts with its hidden content, joined by a space.
-   */
-  const referencedText = (element: Element, attribute: string, includeHidden: boolean): string =>
-    (dom.getAttribute(element, attribute) ?? "").split(ID_SEPARATOR).flatMap((id) => {
-      const target = id === "" ? null : byId(element, id)
-      return target === null ? [] : [
-        nameOfElement(target, {
-          visited: new Set(),
-          labelledBy: true,
-          hiddenReference: hiddenFromAccessibility(target),
-          embedded: "reference",
-          includeHidden,
-          contribution: { fieldContent: false }
-        })
-      ]
-    }).join(" ")
+  const referenceContext = (target: Element, includeHidden: boolean): NameContext => ({
+    visited: new Set(),
+    labelledBy: true,
+    hiddenReference: hiddenFromAccessibility(target),
+    embedded: "reference",
+    includeHidden,
+    contribution: { fieldContent: false }
+  })
 
   /**
-   * An element's accessible description, as a flat string: empty when it's hidden, else its `aria-describedby`
-   * references, else `aria-description`, else its title when the title isn't its name.
+   * The text of an ID reference list's elements, each computed as a reference traversal, so a hidden element
+   * named there counts with its hidden content, joined by a space; `null` when no ID names an element, so the
+   * relation counts as absent.
+   */
+  const referencedText = (element: Element, attribute: string, includeHidden: boolean): string | null => {
+    const targets = (dom.getAttribute(element, attribute) ?? "").split(ID_SEPARATOR).flatMap((id) => {
+      const target = id === "" ? null : byId(element, id)
+      return target === null ? [] : [target]
+    })
+    return targets.length === 0
+      ? null
+      : targets.map((target) => nameOfElement(target, referenceContext(target, includeHidden))).join(" ")
+  }
+
+  /** An element's content as a reference traversal reads it, without its own label: its subtree's text. */
+  const subtreeText = (element: Element, includeHidden: boolean): string => {
+    const context = referenceContext(element, includeHidden)
+    context.visited.add(element)
+    let content = ""
+    for (const node of flatChildNodes(element)) {
+      if (node instanceof Element && SKIPPED.has(dom.localName(node))) continue
+      const name = nameOfNode(node, context)
+      const inline = !(node instanceof Element) ||
+        (getComputedStyle(node).display === "inline" && dom.localName(node) !== "br")
+      content += inline ? name : ` ${name} `
+    }
+    return content
+  }
+
+  /**
+   * An element's accessible description, as a flat string (HTML-AAM): empty when it's hidden; else the elements
+   * `aria-describedby` names, when any exists, even if their text is empty; else `aria-description`, when
+   * present; else, when it didn't give the name, a table's caption, a summary element's content or a button,
+   * submit or reset input's value; else the title, when it isn't the name.
    */
   const accessibleDescription = (element: Element, includeHidden: boolean): string => {
     const cache = includeHidden ? hiddenDescriptionCache : descriptionCache
     const cached = cache.get(element)
     if (cached !== undefined) return cached
-    let description = ""
-    if (includeHidden || !hiddenFromAccessibility(element)) {
-      description = flatString(referencedText(element, "aria-describedby", includeHidden))
+    const compute = (): string => {
+      if (!includeHidden && hiddenFromAccessibility(element)) return ""
+      const referenced = referencedText(element, "aria-describedby", includeHidden)
+      if (referenced !== null) return referenced
       const attribute = dom.getAttribute(element, "aria-description")
-      if (description === "" && attribute !== null) description = flatString(attribute)
-      if (description === "") {
-        accessibleName(element, includeHidden)
-        const title = dom.getAttribute(element, "title") ?? ""
-        if (!(includeHidden ? hiddenNamesFromTitle : namesFromTitle).has(element)) description = flatString(title)
+      if (attribute !== null) return attribute
+      accessibleName(element, includeHidden)
+      const source = (includeHidden ? hiddenNameSources : nameSources).get(element)
+      if (source !== "native" && source !== "content") {
+        let native = ""
+        if (element instanceof HTMLTableElement) {
+          const caption = Array.from(dom.children(element)).find((child) => dom.localName(child) === "caption")
+          if (caption !== undefined) native = nameOfElement(caption, referenceContext(caption, includeHidden))
+        } else if (dom.localName(element) === "summary") {
+          native = subtreeText(element, includeHidden)
+        } else if (
+          element instanceof HTMLInputElement &&
+          (element.type === "button" || element.type === "submit" || element.type === "reset") &&
+          dom.hasAttribute(element, "value")
+        ) {
+          native = element.value
+        }
+        if (native.trim() !== "") return native
       }
+      return source === "title" ? "" : dom.getAttribute(element, "title") ?? ""
     }
+    const description = flatString(compute())
     cache.set(element, description)
     return description
   }
 
+  /** An ASCII-case-insensitive token: ASCII letters lowercased, nothing trimmed. */
+  const asciiLowercase = (token: string): string => token.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+
   /**
    * An element's accessible error message: its `aria-errormessage` references while it's invalid, through an
-   * `aria-invalid` other than empty or `false` in any case, or its own failed constraint validation; else empty.
+   * `aria-invalid` other than blank or exactly `false` in any ASCII case, or its own failed constraint validation;
+   * else empty.
    */
   const accessibleErrorMessage = (element: Element): string => {
-    const invalid = (dom.getAttribute(element, "aria-invalid") ?? "").trim()
-    const ariaInvalid = invalid !== "" && invalid.toLowerCase() !== "false"
+    const invalid = dom.getAttribute(element, "aria-invalid")
+    const ariaInvalid = invalid !== null && invalid.trim() !== "" && asciiLowercase(invalid) !== "false"
     const validity = "validity" in element ? (element as { readonly validity?: ValidityState }).validity : undefined
     if (!ariaInvalid && validity?.valid !== false) return ""
-    return flatString(referencedText(element, "aria-errormessage", false)).trim()
+    return flatString(referencedText(element, "aria-errormessage", false) ?? "").trim()
   }
 
   /**
@@ -2272,7 +2325,8 @@ export function engine(render: (root: SnapNode) => string) {
     }
     const role = roleOf(element)
     if (role === null || !CHECKABLE_ROLES.has(role)) return { state: null, checked: null }
-    const token = dom.getAttribute(element, "aria-checked")?.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+    const attribute = dom.getAttribute(element, "aria-checked")
+    const token = attribute === null ? undefined : asciiLowercase(attribute)
     if (token === "true") return { state: true, checked: true }
     if (token === "false") return { state: false, checked: false }
     if (token === "mixed") {
@@ -3858,8 +3912,8 @@ export function engine(render: (root: SnapNode) => string) {
     roleCache.clear()
     nameCache.clear()
     hiddenNameCache.clear()
-    namesFromTitle.clear()
-    hiddenNamesFromTitle.clear()
+    nameSources.clear()
+    hiddenNameSources.clear()
     descriptionCache.clear()
     hiddenDescriptionCache.clear()
     inertness = undefined
@@ -4325,8 +4379,8 @@ export function engine(render: (root: SnapNode) => string) {
       roleCache.clear()
       nameCache.clear()
       hiddenNameCache.clear()
-      namesFromTitle.clear()
-      hiddenNamesFromTitle.clear()
+      nameSources.clear()
+      hiddenNameSources.clear()
       descriptionCache.clear()
       hiddenDescriptionCache.clear()
       inertness = undefined
