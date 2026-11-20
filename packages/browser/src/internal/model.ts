@@ -204,6 +204,12 @@ export interface ResponseEvent {
   readonly hop: HopEntry
 }
 
+/** A hop's end as the browser reported it: never `Forgotten`, nor a failure connection teardown made up. */
+export interface RequestEndEvent {
+  readonly hop: HopEntry
+  readonly end: Exclude<HopEnd, { readonly _tag: "Forgotten" }>
+}
+
 /** A download's progress, and where the browser wrote it once it completed. */
 export interface DownloadState {
   readonly status: Download.Status
@@ -253,6 +259,7 @@ export interface PageEvents {
   readonly lifecycle: Events.Channel<PageLifecycle.PageLifecycle>
   readonly request: Events.Channel<NetworkRequest.NetworkRequest>
   readonly response: Events.Channel<ResponseEvent>
+  readonly requestEnd: Events.Channel<RequestEndEvent>
   readonly console: Events.Channel<ConsoleMessage.ConsoleMessage>
   readonly exception: Events.Channel<UncaughtException.UncaughtException>
   readonly download: Events.Channel<DownloadEntry>
@@ -267,6 +274,7 @@ export interface ContextEvents {
   readonly lifecycle: Events.Channel<PageLifecycle.PageLifecycle>
   readonly request: Events.Channel<NetworkRequest.NetworkRequest>
   readonly response: Events.Channel<ResponseEvent>
+  readonly requestEnd: Events.Channel<RequestEndEvent>
   readonly console: Events.Channel<ConsoleMessage.ConsoleMessage>
   readonly exception: Events.Channel<UncaughtException.UncaughtException>
   readonly download: Events.Channel<DownloadEntry>
