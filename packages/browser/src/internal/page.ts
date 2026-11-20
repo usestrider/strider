@@ -41,6 +41,7 @@ import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
+import * as Bindings from "./bindings.ts"
 import * as BrowserClock from "./browserClock.ts"
 import * as Capabilities from "./capabilities.ts"
 import * as Captures from "./captures.ts"
@@ -653,6 +654,8 @@ export const make = (owner: PageOwner): Page.Page => {
       )) as Page.Page["route"],
     addLocatorHandler: (locator, handler, options) =>
       LocatorHandlers.add({ runtime, page: entry, grant: owner.grant }, locator, handler, options),
+    exposeBinding: (name, schemas, handler) =>
+      Bindings.expose(runtime, entry.contextEntry, entry, name, schemas, handler),
     addInitScript: (script, options) =>
       InitScripts.add({ runtime, scope: declared, operation: "Page.addInitScript" }, entry.context, script, options),
     addScriptTag: Effect.fnUntraced(

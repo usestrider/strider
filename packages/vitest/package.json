@@ -1,6 +1,6 @@
 {
   "name": "@usestrider/vitest",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "type": "module",
   "license": "MIT",
   "homepage": "https://usestrider.dev",
@@ -32,7 +32,8 @@
     "dist/**/*.js.map",
     "dist/**/*.d.ts",
     "dist/**/*.d.ts.map",
-    "INDEX.md"
+    "INDEX.md",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "publishConfig": {
     "access": "public",

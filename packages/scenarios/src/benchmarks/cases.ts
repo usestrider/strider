@@ -382,11 +382,24 @@ export const cases: ReadonlyArray<Case> = [
     name: "mouse-click-in-cross-site-frame",
     description: "Click a button by its coordinates inside a cross-site frame, then read the frame's counter",
     fixture: "/benchmark-mouse?frame=drawn",
-    // A click into a cross-site frame that hasn't drawn yet can reach the page's iframe element instead, so the
-    // timed click waits until the frame has run two animation frames. The frame reports that itself, with no input,
-    // so the condition is the same whichever way input is routed
-    prepareStrider: (page) => page.locator("#drawn").pipe(Expect.toHaveText("drawn")),
-    preparePlaywright: (page) => page.locator("#drawn").filter({ hasText: "drawn" }).waitFor(),
+    // A click into a cross-site frame on the page's session reaches the page's iframe element until the browser's
+    // hit-test data includes the frame, which two animation frames in it don't guarantee. So the timed click waits
+    // until the frame has drawn and has received the pointer: Playwright's page-session moves reach it only then
+    prepareStrider: Effect.fnUntraced(function*(page) {
+      yield* page.locator("#drawn").pipe(Expect.toHaveText("drawn"))
+      yield* page.mouse.move({ x: 150, y: 100 })
+      yield* page.mouse.move({ x: 260, y: 100 })
+      yield* page.locator("#routed").pipe(Expect.toHaveText("routed"))
+    }),
+    preparePlaywright: async (page) => {
+      await page.locator("#drawn").filter({ hasText: "drawn" }).waitFor()
+      const deadline = Date.now() + 5000
+      while (await page.locator("#routed").textContent() !== "routed") {
+        if (Date.now() > deadline) throw new Error("The cross-site frame never received the pointer")
+        await page.mouse.move(150, 100)
+        await page.mouse.move(260, 100)
+      }
+    },
     strider: Effect.fnUntraced(function*(page) {
       yield* page.mouse.click({ x: 260, y: 25 })
       return yield* page.frame(page.locator("#frame")).locator("#count").readText
