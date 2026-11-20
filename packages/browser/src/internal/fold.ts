@@ -88,6 +88,9 @@ export interface Fold {
 
   // Reads
   readonly pages: Readable.Readable<ReadonlyArray<Model.PageEntry>>
+  readonly contexts: Readable.Readable<ReadonlyArray<Model.ContextEntry>>
+  /** Announces the contexts again, unchanged, for a reader whose view of them has changed. */
+  readonly touchContexts: Effect.Effect<void>
   readonly page: (id: Target.NavigableId) => Option.Option<Model.PageEntry>
   readonly document: (id: Target.DocumentId) => Option.Option<Model.DocumentEntry>
   readonly documentOf: (navigable: Target.NavigableId) => Effect.Effect<Option.Option<Target.DocumentId>>
@@ -96,7 +99,7 @@ export interface Fold {
   readonly lost: Deferred.Deferred<void>
 
   // Commands
-  readonly context: (id: UserContext.Id, isDefault: boolean) => Effect.Effect<Model.ContextEntry>
+  readonly context: (id: UserContext.Id, isDefault: boolean, created?: boolean) => Effect.Effect<Model.ContextEntry>
   readonly configure: (context: Model.ContextEntry, settings: Model.ContextSettings) => Effect.Effect<void>
   readonly observeStorageSources: (
     context: Model.ContextEntry,
@@ -196,6 +199,8 @@ export const make = Effect.fnUntraced(function*(options: {
   const pages = new Map<Target.NavigableId, Model.PageEntry>()
   // Every page of the browser, in the order they were added
   const pageList = yield* cell<ReadonlyArray<Model.PageEntry>>([])
+  // Every context of the browser, in the order they were added
+  const contextList = yield* cell<ReadonlyArray<Model.ContextEntry>>([])
   // Frames, by the page they belong to
   const frames = new Map<Target.NavigableId, Model.PageEntry>()
   const documents = new Map<Target.DocumentId, Model.DocumentEntry>()
@@ -413,7 +418,7 @@ export const make = Effect.fnUntraced(function*(options: {
     }
   })
 
-  const ensureContext = Effect.fnUntraced(function*(id: UserContext.Id, isDefault: boolean) {
+  const ensureContext = Effect.fnUntraced(function*(id: UserContext.Id, isDefault: boolean, created = false) {
     const existing = contexts.get(id)
     if (existing !== undefined) return existing
     const target: Target.Description = { _tag: "UserContext" }
@@ -444,7 +449,9 @@ export const make = Effect.fnUntraced(function*(options: {
         connection: Events.make(target, cap)
       }
     }
+    if (created) entry.awaitingHandle = true
     contexts.set(id, entry)
+    yield* update(contextList, (list) => [...list, entry])
     return entry
   })
 
@@ -452,6 +459,7 @@ export const make = Effect.fnUntraced(function*(options: {
     entry.timings?.clear()
     entry.sizes?.clear()
     contexts.delete(entry.id)
+    yield* update(contextList, (list) => list.filter((each) => each !== entry))
     for (const hop of hops.values()) {
       if (Option.isSome(hop.context) && hop.context.value === entry) Deferred.doneUnsafe(hop.sentKnown, Effect.void)
     }
@@ -508,9 +516,16 @@ export const make = Effect.fnUntraced(function*(options: {
     Effect.gen(function*() {
       switch (fact._tag) {
         case "UserContextAdded": {
-          const entry = yield* ensureContext(fact.context, fact.isDefault)
+          const entry = yield* ensureContext(fact.context, fact.isDefault, fact.created === true)
           if (fact.requestTiming) entry.timings ??= new Map()
           if (fact.requestSizes) entry.sizes ??= new Map()
+          return
+        }
+        case "UserContextReleased": {
+          const context = contexts.get(fact.context)
+          if (context === undefined || context.awaitingHandle !== true) return
+          context.awaitingHandle = false
+          yield* update(contextList, (list) => [...list])
           return
         }
         case "UserContextRemoved": {
@@ -1154,13 +1169,15 @@ export const make = Effect.fnUntraced(function*(options: {
       ),
     obligations,
     pages: pageList,
+    contexts: contextList,
+    touchContexts: apply(Effect.suspend(() => update(contextList, (list) => [...list]))),
     page: (id) => Option.fromNullishOr(pages.get(id)),
     document: (id) => Option.fromNullishOr(documents.get(id)),
     documentOf,
     response: (hop) => responses.get(hop),
     hop: (hop) => hops.get(hop),
     lost,
-    context: (id, isDefault) => apply(ensureContext(id, isDefault)),
+    context: (id, isDefault, created) => apply(ensureContext(id, isDefault, created)),
     configure: (context, settings) => apply(update(context.state, (state) => ({ ...state, settings }))),
     navigation: (id) => apply(Effect.sync(() => navigation(id))),
     forget: (id) => apply(Effect.sync(() => void navigations.delete(id))),

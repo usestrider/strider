@@ -122,30 +122,42 @@ export const recycling = <E, R>(
       current = yield* launch(scope)
       return true
     })
+    const track = (acquire: Effect.Effect<any, unknown, Scope.Scope>) =>
+      acquire.pipe(
+        Effect.tap((handle) =>
+          Effect.flatMap(Effect.scope, (owner) => {
+            live.add(handle)
+            return Scope.addFinalizer(owner, Effect.sync(() => void live.delete(handle)))
+          })
+        )
+      )
+    // One wrapper for each browser's default context, so reading it twice gives the same handle
+    const wrappers = new WeakMap<object, object>()
+    const defaultWrapper = (real: any): object => {
+      const known = wrappers.get(real)
+      if (known !== undefined) return known
+      const wrapper = new Proxy(real, {
+        get: (_t, k) => k === "control" ? track(real.control) : Reflect.get(real, k)
+      })
+      // `Handles` recognises a context by its registered object, so the wrapper is registered as the same context.
+      const behind = Handles.target(real)
+      if (behind._tag === "UserContext") Handles.registerContext(wrapper, behind.behind)
+      wrappers.set(real, wrapper)
+      return wrapper
+    }
     const proxy = new Proxy(current as object, {
       get: (_target, key) => {
-        const track = (acquire: Effect.Effect<any, unknown, Scope.Scope>) =>
-          acquire.pipe(
-            Effect.tap((handle) =>
-              Effect.flatMap(Effect.scope, (owner) => {
-                live.add(handle)
-                return Scope.addFinalizer(owner, Effect.sync(() => void live.delete(handle)))
-              })
-            )
-          )
         // A handle given out is live until the scope it was acquired in closes.
         if (key === "newContext" || key === "newPage") {
           return (...args: Array<unknown>) => track((current as any)[key](...args))
         }
-        if (key === "defaultContext") {
+        if (key === "defaultContext") return defaultWrapper((current as any).defaultContext)
+        // The list gives the default context as the same wrapper, so its `control` is tracked there too.
+        if (key === "contexts") {
           const real = (current as any).defaultContext
-          const wrapper = new Proxy(real, {
-            get: (_t, k) => k === "control" ? track(real.control) : Reflect.get(real, k)
-          })
-          // `Handles` recognises a context by its registered object, so the wrapper is registered as the same context.
-          const behind = Handles.target(real)
-          if (behind._tag === "UserContext") Handles.registerContext(wrapper, behind.behind)
-          return wrapper
+          return (current as any).contexts.map((list: ReadonlyArray<unknown>) =>
+            list.map((each) => each === real ? defaultWrapper(real) : each)
+          )
         }
         return Reflect.get(current as object, key)
       }

@@ -218,6 +218,38 @@ export interface Browser {
    * The browser's default context; fixed, because it exists for the whole connection.
    */
   readonly defaultContext: UserContext.ObservedUserContext
+  /**
+   * Every context of the browser, kept up to date as contexts open and close: the default context first, then the
+   * others in the order they were added. A context this connection created is the `UserContext` that `newContext`
+   * returned. Any other is an observed context, the same one each time, whose `control` gives access for a scope.
+   * The list holds contexts only; each context's `pages` lists its pages.
+   *
+   * **Details**
+   *
+   * Connecting to a running browser lists the contexts it already has, even empty ones, on Chromium and Firefox.
+   * On stock WebKit, a context someone else created is listed once a page opens in it.
+   *
+   * **Gotchas**
+   *
+   * No browser announces a context another client creates after this connection is made: it is listed once a page
+   * opens in it. On Chromium, a context another client removes stays listed until the connection ends, though its
+   * pages close.
+   *
+   * **Example** (Counting the contexts)
+   *
+   * ```ts import.meta.vitest
+   * import { Browser } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const count = Effect.gen(function*() {
+   *   const browser = yield* Browser.Browser
+   *   yield* Browser.newContext()
+   *   const contexts = yield* browser.contexts
+   *   return contexts.length
+   * })
+   * ```
+   */
+  readonly contexts: Watchable.Watchable<ReadonlyArray<UserContext.ObservedUserContext>>
 }
 
 /**

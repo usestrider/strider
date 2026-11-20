@@ -1829,6 +1829,13 @@ move: a drag of one held move shows its first `dragover` at the release or the n
 `dragOver` at the move that starts the drag, which shows the drag over the target while the button is held, was
 rejected: every drop would then end with a second `dragover`, which Playwright's and Puppeteer's drag tests both reject.
 
+## Handles don't lead back to their browser
+
+Code reaches its browser through the `Browser` service (`yield* Browser.Browser`), and `browser.info` names the product
+and protocol; a context has no `browser` member, and a browser has no browser-type object. Requirements stay in the
+type: a function that needs the browser says so, rather than reaching it through a handle it was given. Rejected:
+`context.browser()` and `browser.browserType()`, which would duplicate the service and `info` with a second way in.
+
 ## Console messages name their source in one shared set of categories
 
 A `ConsoleMessage` carries a `source`: `Page` for the page's own `console` calls, or `Browser` with a `category` from
@@ -1852,7 +1859,15 @@ were rejected for those reasons. A name is restricted, not transformed: it must 
 `<name>-<browser>-<platform>` reads one way. Rewriting any text into a readable file name was rejected, because no
 readable rewrite keeps every input distinct: a literal name can equal another's rewritten form. Names are lower-case
 because `Cart` and `cart` would share a file on a case-insensitive filesystem. The PNG codec and comparator are native rather than
-dependencies.
+dependencies. `SnapshotBaseline` compares bytes a test already has on the same key, update modes, and failure files, through
+one internal module, so the two matchers can't drift: a `.png` name is compared by pixels and any other extension
+byte for byte, and the baseline keeps the name's extension under `__baselines__/<test file>/`, a directory Vitest
+never writes to. A directory inside Vitest's `__snapshots__` was rejected, because a test file whose name ends in
+`.snap` would make its directory the path of another test's snapshot file. Text
+stays with Vitest's own `toMatchFileSnapshot`, which already diffs a string against a file; a Strider text matcher was
+rejected as a duplicate of it, and comparing JPEG by pixels was rejected because it needs a decoder the package
+doesn't have.
+
 
 ## Each event kind is its own module
 

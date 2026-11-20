@@ -3,10 +3,18 @@
   "upstream": [
     "method:Locator.evaluateHandle"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
-  "capabilities": [],
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "Locator.evaluateHandle",
+      "url": "/docs/api/browser/Locator#Locator.evaluateHandle"
+    }
+  ],
+  "notes": "On the acting Locator. Resolves the one match now, as evaluate does, without waiting, and returns the result as an isolated-world handle in the caller's scope.",
+  "capabilities": [
+    "isolatedWorlds"
+  ],
   "audit": {
     "sources": [
       "packages/browser/src/Locator.ts"

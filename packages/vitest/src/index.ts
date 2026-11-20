@@ -15,4 +15,10 @@ export * as ScreenshotBaseline from "./ScreenshotBaseline.ts"
  * @stability unstable
  * @since 0.1.0
  */
+export * as SnapshotBaseline from "./SnapshotBaseline.ts"
+
+/**
+ * @stability unstable
+ * @since 0.1.0
+ */
 export * as VitestBrowser from "./VitestBrowser.ts"

@@ -47,6 +47,7 @@ import * as Reason from "./Reason.ts"
 import type * as Route from "./Route.ts"
 import type * as ScriptTag from "./ScriptTag.ts"
 import type * as Snapshot from "./Snapshot.ts"
+import type * as StyleTag from "./StyleTag.ts"
 import * as Target from "./Target.ts"
 import * as Url from "./Url.ts"
 import type * as UserContext from "./UserContext.ts"
@@ -1001,6 +1002,40 @@ export interface Page extends ReadonlyPage {
     ...args: Args
   ): Effect.Effect<JSHandle.JSHandle<Awaited<A>>, PageError | Target.TargetGone | Deadline.Timeout, Scope.Scope>
   /**
+   * Calls `fn` in the page's own world and returns its result as a handle, for what only the page's scripts can
+   * reach, such as an object a global holds.
+   *
+   * **Details**
+   *
+   * Arguments cross as they do for `evaluateInMainWorld`. The handle lives in the page's own world, so it crosses
+   * only into calls there: passing it to `evaluate`, which runs in the isolated world, fails with
+   * `NotSerializable`, except on WebKit, where `evaluate` itself fails with `Unsupported` first, since WebKit has no
+   * isolated worlds. Unlike `evaluateHandle`, it works on WebKit too.
+   *
+   * **Gotchas**
+   *
+   * Page scripts can see and tamper with what runs here. Prefer `evaluateHandle` unless you need the page's
+   * globals.
+   *
+   * **Example** (Holding the page's store)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const cartSize = Effect.fn("cartSize")(function*(page: Page.Page) {
+   *   const store = yield* page.evaluateHandleInMainWorld(() =>
+   *     Reflect.get(window, "store") as { readonly cart: ReadonlyArray<string> }
+   *   )
+   *   return yield* store.evaluate((value) => value.cart.length)
+   * })
+   * ```
+   */
+  evaluateHandleInMainWorld<Args extends ReadonlyArray<unknown>, A>(
+    fn: (...args: Args) => A | Promise<A>,
+    ...args: Args
+  ): Effect.Effect<JSHandle.JSHandle<Awaited<A>>, PageError | Target.TargetGone | Deadline.Timeout, Scope.Scope>
+  /**
    * The page's keyboard.
    */
   readonly keyboard: Keyboard.Keyboard
@@ -1216,6 +1251,36 @@ export interface Page extends ReadonlyPage {
     options?: ScriptTag.Options | undefined
   ): Effect.Effect<
     JSHandle.JSHandle<HTMLScriptElement>,
+    PageError | Target.TargetGone | Deadline.Timeout,
+    Scope.Scope
+  >
+  /**
+   * Adds a stylesheet to the page's current document, from CSS source, a URL, or a file, returning its element
+   * once the stylesheet has loaded and its rules apply.
+   *
+   * **Details**
+   *
+   * The element is added from the page's main world, so the page's Content Security Policy applies: a stylesheet
+   * it refuses fails with `RefusedByPolicy`, and a URL that doesn't load with `ResourceFailed`. See `StyleTag` for
+   * the forms and what the call waits for. The handle is the element, released with the scope; the element stays in
+   * the document.
+   *
+   * **Example** (Hiding a cookie banner before a screenshot)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const hideBanner = Effect.fn("hideBanner")(function*(page: Page.Page) {
+   *   yield* page.addStyleTag({ source: "#cookie-banner { display: none }" })
+   *   return yield* page.screenshot()
+   * })
+   * ```
+   */
+  addStyleTag(
+    style: StyleTag.Source
+  ): Effect.Effect<
+    JSHandle.JSHandle<HTMLStyleElement | HTMLLinkElement>,
     PageError | Target.TargetGone | Deadline.Timeout,
     Scope.Scope
   >

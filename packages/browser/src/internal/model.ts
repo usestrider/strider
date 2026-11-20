@@ -371,6 +371,8 @@ export interface StorageSourceObserver {
 }
 
 export interface ContextEntry {
+  /** Created by this connection and not yet handed out: `browser.contexts` leaves it out until it has its handle. */
+  awaitingHandle?: boolean | undefined
   storageReplacing?: boolean | undefined
   storageSources?: StorageSourceObserver | undefined
   timings?: Map<NetworkRequest.HopId, NetworkRequest.Timing> | undefined
@@ -423,6 +425,10 @@ export interface Model {
 
   /** Every page of the browser, in the order they were added. */
   readonly pages: Readable<ReadonlyArray<PageEntry>>
+  /** Every context of the browser, in the order they were added, until it is removed or the connection is lost. */
+  readonly contexts: Readable<ReadonlyArray<ContextEntry>>
+  /** Announces `contexts` again, unchanged, once a context has its handle. */
+  readonly touchContexts: Effect.Effect<void>
   /** A page the model keeps, by id. */
   readonly page: (id: Target.NavigableId) => Option.Option<PageEntry>
   /** A document the model keeps, by id, until it ends. */
@@ -440,6 +446,11 @@ export interface Model {
 
   /** A context's entry, made now if its fact hasn't arrived yet, as when its creation's reply comes first. */
   readonly context: (id: UserContext.Id) => Effect.Effect<ContextEntry>
+  /**
+   * A context this connection's `createUserContext` just made: when the reply comes before the browser's report, the
+   * entry is made here, marked as awaiting its handle, as the report would have made it.
+   */
+  readonly createdContext: (id: UserContext.Id) => Effect.Effect<ContextEntry>
   /** Sets a context's settings, as the library creates it. */
   readonly configure: (context: ContextEntry, settings: ContextSettings) => Effect.Effect<void>
   /** Observes storage sources only within the requesting context's scope. */
@@ -515,7 +526,15 @@ export const make = Effect.fnUntraced(function*() {
   const attach = (connected: Adapter.AdapterConnection): Effect.Effect<Model, never, Scope.Scope> =>
     Effect.gen(function*() {
       attached = connected
-      const bounded = BoundedAdapter.make(connected)
+      const bounded = BoundedAdapter.make({
+        ...connected,
+        // A removal that fails releases a context still being created, such as one a late cleanup removes after
+        // its creator's deadline: it is listed as observed rather than hidden
+        removeUserContext: (id) =>
+          connected.removeUserContext(id).pipe(
+            Effect.onError(() => fold.sink({ _tag: "UserContextReleased", context: id }))
+          )
+      })
       yield* ownership.attach(connected, bounded.claims)
       yield* connected.closed.pipe(
         Effect.andThen(fold.loseConnection(new Target.ConnectionLost({}))),
@@ -530,6 +549,8 @@ export const make = Effect.fnUntraced(function*() {
         scope: modelScope,
         adapter: bounded,
         pages: fold.pages,
+        contexts: fold.contexts,
+        touchContexts: fold.touchContexts,
         page: fold.page,
         document: fold.document,
         documentOf: fold.documentOf,
@@ -537,6 +558,7 @@ export const make = Effect.fnUntraced(function*() {
         hop: fold.hop,
         lost: fold.lost,
         context: (id) => fold.context(id, false),
+        createdContext: (id) => fold.context(id, false, true),
         configure: fold.configure,
         observeStorageSources: fold.observeStorageSources,
         navigation: fold.navigation,
