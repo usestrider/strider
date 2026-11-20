@@ -3283,6 +3283,32 @@ document.getElementById("form").addEventListener("submit", (event) => {
           }))
         }), timeout)
 
+      it.effect("fails a running frame evaluation with FrameDetached when its iframe is removed", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(
+              fixtureUrl(origin, `<iframe id="child" src="${fixtureUrl(origin, "<p>ready</p>")}"></iframe>`)
+            )
+            const locator = page.frame(page.locator("#child"))
+            yield* locator.locator("p").pipe(Expect.toHaveText("ready"))
+            const frame = yield* locator.resolve
+            const pending = yield* frame.evaluateInMainWorld(() => {
+              document.querySelector("p")!.textContent = "running"
+              return new Promise<void>(() => {})
+            }).pipe(Effect.forkScoped)
+            yield* locator.locator("p").pipe(Expect.toHaveText("running"))
+            yield* page.evaluateInMainWorld(() =>
+              document.getElementById("child")!.remove()
+            )
+            const failed = reasonOf(yield* Fiber.await(pending))
+            assert.strictEqual(failed?._tag, "TargetGone")
+            assert.strictEqual(failed?.reason?._tag, "FrameDetached")
+            assert.deepInclude(failed as object, { target: { _tag: "Frame", id: frame.id } })
+          }))
+        }), timeout)
+
       it.effect("evaluates in a frame's own realms, holds a handle there, and finds its frames by id", () =>
         Effect.gen(function*() {
           const { crossSite, origin } = yield* site
@@ -3326,7 +3352,9 @@ document.getElementById("form").addEventListener("submit", (event) => {
                 null
               )
               assert.strictEqual(
-                yield* frame.evaluate(() => document.querySelector("p")!.textContent),
+                yield* frame.evaluate(() =>
+                  document.querySelector("p")!.textContent
+                ),
                 "inner"
               )
             }
