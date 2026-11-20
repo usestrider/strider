@@ -242,6 +242,19 @@ export const Video: Capability<VideoRecording> = make("Video")
  * action. They stay across the page's navigations, drawn again in each document its main frame commits. WebKit's
  * video samples the page, so it can miss an overlay shown for less than its interval.
  *
+ * **Example** (Labeling a step of a recording)
+ *
+ * ```ts import.meta.vitest
+ * import { Capability, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const labeled = Effect.fn("labeled")(function*(page: Page.Page) {
+ *   const overlay: Capability.OverlayControl = yield* page.capability(Capability.Overlay)
+ *   yield* overlay.add(`<div style="position:fixed;top:8px;left:8px">Searching</div>`)
+ *   yield* page.getByRole("searchbox").fill("strider")
+ * }, Effect.scoped)
+ * ```
+ *
  * @stability unstable
  * @category models
  * @since 0.1.0
@@ -370,6 +383,19 @@ export interface OverlayControl {
 /**
  * Options of `OverlayControl`'s members.
  *
+ * **Example** (Typing options before passing them)
+ *
+ * ```ts import.meta.vitest
+ * import { Capability, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const options: Capability.OverlayControl.ActionsOptions = { duration: "250 millis" }
+ * const quick = Effect.fn("quick")(function*(page: Page.Page) {
+ *   const overlay = yield* page.capability(Capability.Overlay)
+ *   yield* overlay.actions(options)
+ * }, Effect.scoped)
+ * ```
+ *
  * @stability unstable
  * @category models
  * @since 0.1.0
@@ -377,6 +403,19 @@ export interface OverlayControl {
 export declare namespace OverlayControl {
   /**
    * Options of `add`.
+   *
+   * **Example** (Showing a note for three seconds)
+   *
+   * ```ts import.meta.vitest
+   * import { Capability, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const note: Capability.OverlayControl.AddOptions = { duration: "3 seconds" }
+   * const remind = Effect.fn("remind")(function*(page: Page.Page) {
+   *   const overlay = yield* page.capability(Capability.Overlay)
+   *   yield* overlay.add(`<p style="position:fixed;bottom:8px">Saved</p>`, note)
+   * }, Effect.scoped)
+   * ```
    *
    * @stability unstable
    * @category models
@@ -392,6 +431,22 @@ export declare namespace OverlayControl {
   }
   /**
    * Options of `chapter`.
+   *
+   * **Example** (A short chapter with a description)
+   *
+   * ```ts import.meta.vitest
+   * import { Capability, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const card: Capability.OverlayControl.ChapterOptions = {
+   *   description: "Paying by card",
+   *   duration: "1 second"
+   * }
+   * const checkout = Effect.fn("checkout")(function*(page: Page.Page) {
+   *   const overlay = yield* page.capability(Capability.Overlay)
+   *   yield* overlay.chapter("Checkout", card)
+   * }, Effect.scoped)
+   * ```
    *
    * @stability unstable
    * @category models
@@ -414,6 +469,19 @@ export declare namespace OverlayControl {
   /**
    * Where an action's title is drawn.
    *
+   * **Example** (Drawing titles at the bottom)
+   *
+   * ```ts import.meta.vitest
+   * import { Capability, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const position: Capability.OverlayControl.Position = "bottom"
+   * const captioned = Effect.fn("captioned")(function*(page: Page.Page) {
+   *   const overlay = yield* page.capability(Capability.Overlay)
+   *   yield* overlay.actions({ position })
+   * }, Effect.scoped)
+   * ```
+   *
    * @stability unstable
    * @category models
    * @since 0.1.0
@@ -421,6 +489,23 @@ export declare namespace OverlayControl {
   export type Position = "top-left" | "top" | "top-right" | "bottom-left" | "bottom" | "bottom-right"
   /**
    * Options of `actions`.
+   *
+   * **Example** (Marking each action's point without a cursor)
+   *
+   * ```ts import.meta.vitest
+   * import { Capability, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const marked: Capability.OverlayControl.ActionsOptions = {
+   *   cursor: "none",
+   *   style: { point: "width: 12px; height: 12px; border-radius: 50%; background: red" }
+   * }
+   * const showClicks = Effect.fn("showClicks")(function*(page: Page.Page) {
+   *   const overlay = yield* page.capability(Capability.Overlay)
+   *   yield* overlay.actions(marked)
+   *   yield* page.getByRole("button", { name: "Save" }).click()
+   * }, Effect.scoped)
+   * ```
    *
    * @stability unstable
    * @category models
@@ -446,15 +531,29 @@ export declare namespace OverlayControl {
      */
     readonly cursor?: "pointer" | "none" | undefined
     /**
-     * CSS declarations for what is drawn: `point` marks the action's point and `highlight` covers the target's
-     * box, each drawn only when given; `title` is added to the title's own style.
+     * CSS declarations for what is drawn, each a string such as `"outline: 2px solid orange"`.
      *
      * @default no point marker or highlight, and the title's own style
      */
     readonly style?:
       | {
+        /**
+         * CSS declarations for a mark centered on the action's point, such as its size and colour.
+         *
+         * @default no point marker
+         */
         readonly point?: string | undefined
+        /**
+         * CSS declarations for a box over the target, such as an outline.
+         *
+         * @default no highlight
+         */
         readonly highlight?: string | undefined
+        /**
+         * CSS declarations added to the title's own, such as its font.
+         *
+         * @default the title's own style: white 14px text on a dark box
+         */
         readonly title?: string | undefined
       }
       | undefined

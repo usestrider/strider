@@ -29,7 +29,21 @@ const labeled = Effect.fn("labeled")(function*(page: Page.Page) {
 }, Effect.scoped)
 ```
 
-`overlay.hide` and `overlay.show` hide and show every overlay without removing any.
+`overlay.hide` and `overlay.show` hide and show every overlay without removing any, such as for a screenshot
+without them:
+
+```ts
+import { Capability, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const plainScreenshot = Effect.fn("plainScreenshot")(function*(page: Page.Page) {
+  const overlay = yield* page.capability(Capability.Overlay)
+  yield* overlay.hide
+  const png = yield* page.screenshot()
+  yield* overlay.show
+  return png
+}, Effect.scoped)
+```
 
 ## Chapters
 
