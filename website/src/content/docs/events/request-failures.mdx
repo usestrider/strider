@@ -21,7 +21,8 @@ const inspectNavigation = Effect.fn("inspectNavigation")(function*(page: Page.Pa
 
 The result is an `Option`: `None` means the request is still in flight or finished successfully, including an
 HTTP 404 or 503 and a completed redirect hop. `Some` contains the browser's `errorText`, even when response
-headers arrived before the transfer failed. This immediate read does not subscribe to future failure events.
+headers arrived before the transfer failed. This immediate read does not subscribe to future failure events; to wait for a request to fail, use
+[`NetworkRequestEnd`](/docs/events/request-ends).
 
 The failure's `canceled` is also an `Option`. Chromium and WebKit return their reported cancellation flag as
 `Some(true)` or `Some(false)`. BiDi has no cancellation flag and returns `None`; words in its error text do not

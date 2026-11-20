@@ -1,0 +1,50 @@
+---
+title: Request ends
+description: Waiting for a request to finish or fail.
+order: 4
+---
+
+`NetworkRequestEnd` is the event module for how each request ends: `Finished` once the browser has loaded it,
+whatever its HTTP status, or `Failed` with the browser's error text. It has `next`, `stream`, and `history`, on a
+page or a context, and takes `NetworkRequest`'s filter with `end` to choose one kind.
+
+```ts
+import { NetworkRequestEnd, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const saveDraft = Effect.fn("saveDraft")(function*(page: Page.Page) {
+  const saved = yield* NetworkRequestEnd.next(page, { url: "**/api/drafts" })
+  yield* page.getByRole("button", { name: "Save" }).click()
+  const end = yield* saved
+  return end._tag === "Failed" ? end.failure.errorText : "saved"
+})
+```
+
+A 404 or a 503 is `Finished`: it is a response, not a failure. Each redirect hop ends on its own. A `Failed`
+event carries the same [`NetworkRequest.Failure`](/docs/events/request-failures) as `NetworkRequest.failure`, and
+its `request` is the request as it was delivered, so the other request reads accept it.
+
+Only an end the browser reports is an event. A request still in flight when its page, its context, or the browser
+connection closes reports no end, because losing the page isn't a network failure.
+
+## Waiting for one request
+
+`NetworkRequestEnd.of` takes a request you already observed and returns a wait for its end, as
+[`NetworkRequest.response`](/docs/events/request-responses) does for its response. It gives the end at once if the
+request has ended, and otherwise waits under the deadline.
+
+```ts
+import { NetworkRequest, NetworkRequestEnd, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const exportReport = Effect.fn("exportReport")(function*(page: Page.Page) {
+  const sent = yield* NetworkRequest.next(page, { url: "**/api/export" })
+  yield* page.getByRole("button", { name: "Export" }).click()
+  const ended = yield* NetworkRequestEnd.of(page, yield* sent)
+  return yield* ended
+})
+```
+
+The request is kept until the scope closes, and only while it is among the last 1000 requests. A wait fails with
+`ResponseUnavailable` when the request was forgotten first (`evicted`), the scope closed (`released`), the page or
+context closed first (`targetClosed`), or another page or context observed it (`foreignTarget`).
