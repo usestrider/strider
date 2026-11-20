@@ -1,5 +1,15 @@
 # @usestrider/vitest
 
+## 0.2.8
+
+### Added
+
+- **`ScreenshotBaseline.toMatch`** (#399) compares a page's screenshot, or one element's through `area: { element }`, with a PNG baseline kept per test file, name, browser engine, and platform. It captures until a capture matches or two in a row agree, ignores anti-aliasing, and takes `threshold`, `maxDiffPixels`, and `maxDiffPixelRatio`. Baselines follow Vitest's snapshot update state: a local run writes a missing baseline and still fails, `vitest -u` rewrites differing ones, and CI writes none. A mismatch writes and attaches the actual, expected, and diff images. A baseline's name is lower-case letters, digits, `.`, `_`, and `-`, and any other fails with `InvalidName` before a capture. `CurrentSettings` overrides the update mode and the paths.
+
+### Patch Changes
+
+- Uses `@usestrider/browser` 0.14.0.
+
 ## 0.2.7
 
 ### Patch Changes
