@@ -392,6 +392,7 @@ interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.ReadonlyLoc
   // queries: getByRole, getByText, getByLabel, getByPlaceholder, getByAltText, getByTitle, getByTestId, locator
   // a string matches as a case-insensitive substring unless exact: true; a RegExp is used as given
   frame(iframe: Locator.ReadonlyLocator): Locator.ReadonlyFrameLocator   // enters an iframe by its element; lazy, like any locator
+  frameById(id: Target.NavigableId): Effect<Frame.ReadonlyFrame, PageError | TargetGone>   // any id in frames; InvalidInput otherwise
   // one-shot reads
   readonly viewportSize: Effect<Option<ViewportSize>, PageError> // configured CSS width/height, None when unset
   readonly title: Effect<string, PageError>
@@ -736,8 +737,25 @@ interface HeldKey { readonly release: Effect<void> }     // idempotent; the scop
 interface ReadonlyFrameLocator extends Queries<ReadonlyLocator> {   // an iframe's document, entered by its element; lazy like any locator
   readonly owner: ReadonlyLocator                        // the iframe element
   frame(iframe: ReadonlyLocator): ReadonlyFrameLocator
+  readonly resolve: Effect<Frame.ReadonlyFrame, LocatorError | TargetGone | Timeout>   // the frame the iframe holds now
 }                                                        // FrameLocator: the same queries returning Locator, and
-                                                         // addScriptTag, as Page's, in the frame's current document
+                                                         // addScriptTag, as Page's, in the frame's current document,
+                                                         // and resolve giving a Frame
+
+// Frame
+interface ObservedFrame {                                // one frame by its identity: kept through its own navigations,
+  readonly id: Target.NavigableId                        // ended when it detaches; the page's own id for its top frame
+  readonly page: Page.ObservedPage
+  readonly status: Watchable<Status>                     // Attached { url, document: Option<DocumentStatus> } | Detached;
+}                                                        // waiting on it is the frame's load-state wait
+interface ReadonlyFrame extends ObservedFrame {          // no queries: a frame by id may have no iframe a locator reaches
+  evaluate<Args, A>(fn, ...args): Effect<Serialized<A>, FrameError | TargetGone | Timeout>   // isolated world
+}
+interface Frame extends ReadonlyFrame {
+  goto(url: string, options?: Page.GotoOptions): Effect<PageNavigation, FrameError | TargetGone | Timeout>
+  evaluateInMainWorld<Args, A>(fn, ...args): Effect<Serialized<A>, FrameError | TargetGone | Timeout>
+  evaluateHandle<Args, A>(fn, ...args): Effect<JSHandle<Awaited<A>>, FrameError | TargetGone | Timeout, Scope>
+}                                                        // stock WebKit: a child frame's goto waits for "commit" only
 
 // JSHandle
 interface JSHandle<A = unknown> extends Pipeable, Inspectable {   // a value in one realm, owned by the scope that acquired it
