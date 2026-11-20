@@ -358,3 +358,76 @@ it.effect("a release completes while its navigation watch has a redraw queued", 
     yield* Fiber.join(release)
     assert.deepStrictEqual(rendered, [])
   }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+
+it.effect("several cancelled turns still wait for their unfinished predecessor", () =>
+  Effect.gen(function*() {
+    const page = yield* Browser.newPage()
+    const owner = (page.locator("body") as LocatorImpl).owner
+    const entered = yield* Deferred.make<void>()
+    const resume = yield* Deferred.make<void>()
+    const applied: Array<boolean> = []
+    let first = true
+    const send = vi.spyOn(Runtime, "send").mockImplementation((_runtime, _page, request) =>
+      Effect.gen(function*() {
+        if (first) {
+          first = false
+          yield* Deferred.succeed(entered, undefined)
+          yield* Deferred.await(resume)
+        }
+        if (request.op === "overlay") applied.push(request.hidden)
+        return { _tag: "Overlaid" } as const
+      })
+    )
+    yield* Effect.addFinalizer(() => Effect.sync(() => send.mockRestore()))
+    const overlay = yield* Overlays.acquire(owner.runtime, owner.page, owner.grant).pipe(
+      Operation.named("test.acquire")
+    )
+    const held = yield* overlay.show.pipe(Effect.forkChild)
+    yield* Deferred.await(entered)
+    for (let i = 0; i < 3; i++) {
+      const cancelled = yield* overlay.hide.pipe(Deadline.within("100 millis"), Effect.flip, Effect.forkChild)
+      yield* TestClock.adjust(200)
+      assert.strictEqual((yield* Fiber.join(cancelled))._tag, "Timeout")
+    }
+    const last = yield* overlay.show.pipe(Effect.forkChild)
+    yield* TestClock.adjust(0)
+    const beforeResume = [...applied]
+    yield* Deferred.succeed(resume, undefined)
+    yield* Fiber.join(held)
+    yield* Fiber.join(last)
+    assert.deepStrictEqual(beforeResume, [])
+    assert.deepStrictEqual(applied, [false, false])
+  }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+
+it.effect("bounds the clear send inside an uninterruptible capability finalizer", () =>
+  Effect.gen(function*() {
+    const page = yield* Browser.newPage()
+    const owner = (page.locator("body") as LocatorImpl).owner
+    const entered = yield* Deferred.make<void>()
+    const resume = yield* Deferred.make<void>()
+    const send = vi.spyOn(Runtime, "send").mockImplementation((_runtime, _page, request) =>
+      Effect.gen(function*() {
+        if (request.op === "overlay" && request.overlays.length === 0) {
+          yield* Deferred.succeed(entered, undefined)
+          yield* Deferred.await(resume)
+        }
+        return { _tag: "Overlaid" } as const
+      })
+    )
+    yield* Effect.addFinalizer(() => Effect.sync(() => send.mockRestore()))
+    const scope = yield* Scope.make()
+    const overlay = yield* Overlays.acquire(owner.runtime, owner.page, owner.grant).pipe(
+      Operation.named("test.acquire"),
+      Scope.provide(scope)
+    )
+    yield* overlay.add("visible")
+    const closing = yield* Scope.close(scope, Exit.void).pipe(Effect.forkChild)
+    yield* Deferred.await(entered)
+    yield* TestClock.adjust("6 seconds")
+    const bounded = closing.pollUnsafe()
+    yield* Deferred.succeed(resume, undefined)
+    yield* Fiber.join(closing)
+    assert.isDefined(bounded)
+    assert.isTrue(Exit.isSuccess(bounded!))
+    assert.isFalse(Overlays.listening(owner.page))
+  }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
