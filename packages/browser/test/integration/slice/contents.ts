@@ -1529,7 +1529,7 @@ export const contents = (
       it.effect("preserves Map arguments in the evaluated callback", () =>
         Effect.gen(function*() {
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const evaluate = yield* evaluator(page)
             assert.strictEqual(
               yield* evaluate((value) =>
@@ -1542,7 +1542,7 @@ export const contents = (
       it.effect("preserves tagged arguments recursively in the evaluated callback", () =>
         Effect.gen(function*() {
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const evaluate = yield* evaluator(page)
             assert.strictEqual(
               yield* evaluate(
@@ -1575,7 +1575,7 @@ export const contents = (
       it.effect("leaves the callback's free identifiers to its realm", () =>
         Effect.gen(function*() {
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const evaluate = yield* evaluator(page)
             // Names the argument wrapper might bind must resolve as they would in the callback's own realm
             assert.deepStrictEqual(
@@ -1596,7 +1596,7 @@ export const contents = (
       it.effect("resolves callback globals and arrow arguments in the page realm", () =>
         Effect.gen(function*() {
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             assert.strictEqual(
               yield* page.evaluateInMainWorld(() => {
                 // The arrow must not inherit adapter arguments
@@ -2721,7 +2721,7 @@ export const contents = (
             )
             yield* page.goto(url("rgb(50,80,220)"), { waitUntil: "load" })
             assert.deepStrictEqual(yield* pixel(yield* page.screenshot()), [50, 80, 220, 255])
-            const other = yield* Browser.newPage()
+            const other = yield* SharedContext.newPage
             yield* other.goto(url("black"), { waitUntil: "load" })
             assert.deepStrictEqual(yield* pixel(yield* page.screenshot()), [50, 80, 220, 255])
           }))

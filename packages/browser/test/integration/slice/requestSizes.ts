@@ -14,6 +14,7 @@ import * as path from "node:path"
 import { gzipSync } from "node:zlib"
 import * as Handles from "../../../src/internal/handles.ts"
 import { supports } from "./capabilities.ts"
+import * as SharedContext from "./sharedContext.ts"
 
 const text = "x".repeat(4096)
 const compressed = gzipSync(text)
@@ -87,7 +88,8 @@ const ended = (page: Page.ObservedPage, request: NetworkRequest.NetworkRequest) 
 
 export const requestSizes = (name: string, backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} request sizes`, () => {
-    layer(backend, { excludeTestServices: true, timeout: 60_000 })((it) => {
+    layer(SharedContext.layer(backend), { excludeTestServices: true, timeout: 60_000 })((suite) => {
+      const it = SharedContext.guard(suite)
       it.effect(
         "distinguishes compressed entity, transferred and decoded bytes, including known empty bodies",
         () =>
@@ -184,7 +186,7 @@ export const requestSizes = (name: string, backend: Layer.Layer<Browser.Browser,
         () =>
           Effect.gen(function*() {
             const served = yield* site
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(served.origin)
             const read = Effect.fnUntraced(function*(limit: number) {
               const response = yield* NetworkResponse.next(page, {
@@ -302,7 +304,7 @@ export const requestSizes = (name: string, backend: Layer.Layer<Browser.Browser,
         () =>
           Effect.gen(function*() {
             const served = yield* site
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(served.origin)
             yield* page.route("**/fulfilled", () => Route.fulfill(HttpServerResponse.text("hello")))
             const sent = yield* NetworkRequest.next(page, { url: served.origin + "/fulfilled" })
