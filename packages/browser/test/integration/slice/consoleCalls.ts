@@ -8,6 +8,7 @@ import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as Tracer from "effect/Tracer"
+import * as ConsoleArguments from "../../../src/internal/consoleArguments.ts"
 import { site } from "../adapter/harness.ts"
 import { fullySupports, status } from "./capabilities.ts"
 import * as SharedContext from "./sharedContext.ts"
@@ -179,23 +180,25 @@ export const consoleCalls = (
     Effect.gen(function*() {
       const page = yield* opened()
       const wanted = yield* ConsoleMessage.streamCalls(page, { text: "wanted" })
-      void wanted
-      const { methods } = yield* commandsOf(page.evaluateInMainWorld(() => {
-        console.log("unwanted", { a: 1 })
-      }))
-      const { methods: after } = yield* commandsOf(page.evaluateInMainWorld(() => 1))
-      if (!(yield* fullySupports("console.arguments"))) return
-      // The object is freed as the message arrives, while the subscription lives on
-      assert.strictEqual(releases([...methods, ...after]).length, 1)
+      assert.isDefined(wanted)
+      const before = ConsoleArguments.held()
+      yield* page.evaluateInMainWorld(() => {
+        console.log("ignored", { a: 1 })
+      })
+      // The arguments are freed as the message arrives, while the subscription lives on. The release runs apart
+      // from this fiber, so its command isn't among this case's spans: the kept arguments are counted instead
+      assert.strictEqual(ConsoleArguments.held(), before)
     }).pipe(Effect.scoped))
 
   it.effect("frees a page's untaken arguments when its own subscription ends, while another page's lives on", () =>
     Effect.gen(function*() {
       const other = yield* opened()
-      yield* ConsoleMessage.streamCalls(other)
+      const living = yield* ConsoleMessage.streamCalls(other)
+      assert.isDefined(living)
       const page = yield* opened()
       const scope = yield* Scope.make()
-      yield* ConsoleMessage.streamCalls(page).pipe(Scope.provide(scope))
+      const ending = yield* ConsoleMessage.streamCalls(page).pipe(Scope.provide(scope))
+      assert.isDefined(ending)
       yield* page.evaluateInMainWorld(() => {
         console.log("untaken", { a: 1 })
       })
