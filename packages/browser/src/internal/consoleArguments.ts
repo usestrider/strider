@@ -159,6 +159,17 @@ export const abandoned = (
     return Effect.forEach(held, (each) => pass(claimant, each), { discard: true })
   })
 
+/** As `abandoned`, but its bookkeeping done now: gives only the release of what it freed, to run apart. */
+export const abandonedNow = (claimant: Claimant): Effect.Effect<void> => {
+  claimant.done = true
+  const releases = Array.from(claimant.claims.values()).map((entry) => {
+    entry.claims--
+    return free(entry)
+  })
+  claimant.claims.clear()
+  return Effect.all(releases, { discard: true })
+}
+
 /** One owner's release of an argument, which frees it once no owner and no claim remains. */
 export const disown = (entry: Kept, arg: Argument): Effect.Effect<void> =>
   Effect.suspend(() => {

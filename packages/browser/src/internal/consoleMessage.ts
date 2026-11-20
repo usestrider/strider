@@ -120,11 +120,19 @@ const claiming = <PE, PR>(
 
 /**
  * Drops a subscription's claims once its subscriber has ended, apart from its scope, which drops them anyway. The
- * subscriber tells it synchronously, so the release of what it frees runs apart.
+ * subscriber tells it synchronously, so the release of what it frees runs apart, in the browser's model scope with
+ * the subscribing fiber's services, as the fold releases arguments nobody claims.
  */
-const settled = (claimant: ConsoleArguments.Claimant) => () => {
-  Effect.runFork(ConsoleArguments.abandoned(claimant))
-}
+const settling = Effect.fnUntraced(function*(
+  target: Page.ObservedPage | UserContext.ObservedUserContext,
+  claimant: ConsoleArguments.Claimant
+) {
+  const services = yield* Effect.context<never>()
+  const scope = Handles.target(target).behind.runtime.model.scope
+  return () => {
+    Effect.runForkWith(services)(Effect.forkIn(ConsoleArguments.abandonedNow(claimant), scope))
+  }
+})
 
 export const nextCall = Effect.fnUntraced(function*<PE, PR>(
   target: Page.ObservedPage | UserContext.ObservedUserContext,
@@ -134,8 +142,9 @@ export const nextCall = Effect.fnUntraced(function*<PE, PR>(
   const scope = yield* Effect.scope
   const claimant = yield* subscribe("ConsoleMessage.nextCall", target, filter)
   // A wait that failed, timed out or saw its target end takes nothing; one that matched keeps its message's claim
+  const settled = yield* settling(target, claimant)
   const wait = yield* next(target, filter, claiming(claimant, where, true), (failed) => {
-    if (failed) settled(claimant)()
+    if (failed) settled()
   })
   return yield* Effect.cached(Effect.flatMap(wait, (message) => callOf(target, claimant, scope, message)))
 })
@@ -147,6 +156,6 @@ export const streamCalls = Effect.fnUntraced(function*<PE, PR>(
 ) {
   const scope = yield* Effect.scope
   const claimant = yield* subscribe("ConsoleMessage.streamCalls", target, filter)
-  const messages = yield* stream(target, filter, claiming(claimant, where, false), settled(claimant))
+  const messages = yield* stream(target, filter, claiming(claimant, where, false), yield* settling(target, claimant))
   return Stream.mapEffect(messages, (message) => callOf(target, claimant, scope, message))
 })
