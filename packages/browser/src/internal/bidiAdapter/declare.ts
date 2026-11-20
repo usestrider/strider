@@ -22,9 +22,9 @@ import * as Declarations from "../declarations.ts"
 import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
 import * as Cleanup from "./cleanup.ts"
+import * as HostBridge from "./hostBridge.ts"
 import { bidiHeaders, coveringPattern } from "./mapping.ts"
 import { placement, scopeParams, type State } from "./state.ts"
-import * as WebSocketBridge from "./webSocketBridge.ts"
 
 /** Where a document's preload scripts keep which of them ran. */
 const ranKey = "@usestrider/browser/initScripts/ran"
@@ -99,20 +99,20 @@ const reconcileScripts = Effect.fnUntraced(function*(state: State) {
   const installed = yield* Effect.gen(function*() {
     const routingScopes = new Set<string>()
     for (const entry of entries) {
-      if (entry.declaration.webSocket !== undefined) {
+      if (entry.declaration.hostBridge !== undefined) {
         const key = JSON.stringify(entry.scope)
         if (routingScopes.has(key)) continue
         routingScopes.add(key)
         const routes = entries.filter((candidate) =>
-          candidate.declaration.webSocket !== undefined && JSON.stringify(candidate.scope) === key
+          candidate.declaration.hostBridge !== undefined && JSON.stringify(candidate.scope) === key
         )
-        const bridges = routes.map((route) => route.declaration.webSocket!)
+        const bridges = routes.map((route) => route.declaration.hostBridge!)
         const bindings = bridges.map((bridge, index) => `globalThis[${JSON.stringify(bridge.name)}] = sends[${index}];`)
           .join("\n")
         const body = routes.map((route) => route.declaration.source).join("\n")
         const { script } = yield* state.send(Script.addPreloadScript({
           functionDeclaration: `(...sends) => { let __strider_webSocketRouting__; ${bindings} ${body} }`,
-          arguments: bridges.map(WebSocketBridge.channel),
+          arguments: bridges.map(HostBridge.channel),
           ...scopeParams(state, entry.scope)
         }))
         next.push({ script, declaration: entry.id, owners: routes.map((route) => route.id) })
@@ -464,8 +464,8 @@ export const declare = Effect.fnUntraced(
   function*(state: State, scope: Adapter.DeclarationScope, declaration: Adapter.Declaration) {
     const refused = refusal(declaration)
     if (refused !== undefined) return yield* Effect.fail(refused)
-    if (declaration._tag === "InitScript" && declaration.webSocket !== undefined) {
-      yield* WebSocketBridge.prepare(state, scope, declaration.webSocket)
+    if (declaration._tag === "InitScript" && declaration.hostBridge !== undefined) {
+      yield* HostBridge.prepare(state, scope, declaration.hostBridge)
     }
     const id = state.ids.registration()
     state.registry.add(scope, declaration, id)

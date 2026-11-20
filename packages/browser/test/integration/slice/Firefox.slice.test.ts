@@ -1,3 +1,4 @@
+import { bindings } from "./bindings.ts"
 import { locatorHandlers } from "./locatorHandlers.ts"
 /**
  * The slices against Firefox, through the public layer: the pinned Firefox (`browsers.ts`), in the Nix
@@ -71,5 +72,7 @@ storageReplacement("Firefox", backend)
 requestSizes("Firefox", backend)
 
 stalledReadProbes("Firefox", backend)
+
+bindings("Firefox", backend)
 clientCertificates("Firefox", backend)
 screenshotBaselines("Firefox", backend)

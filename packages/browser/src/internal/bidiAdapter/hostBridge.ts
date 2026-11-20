@@ -9,12 +9,12 @@ import * as Adapter from "../adapter.ts"
 import * as Declarations from "../declarations.ts"
 import { closingOf, placement, type RealmEntry, type State } from "./state.ts"
 
-export const channel = (bridge: Adapter.WebSocketBridge): Script.ChannelValue => ({
+export const channel = (bridge: Adapter.HostBridge): Script.ChannelValue => ({
   type: "channel",
   value: { channel: bridge.name as Script.Channel, ownership: "root" }
 })
 export const prepare = Effect.fnUntraced(
-  function*(state: State, scope: Adapter.DeclarationScope, bridge: Adapter.WebSocketBridge) {
+  function*(state: State, scope: Adapter.DeclarationScope, bridge: Adapter.HostBridge) {
     // The realm entries it learned, kept past their removal from the table: an ended one records why it ended
     const known = new Map<string, RealmEntry>()
     const messages = yield* state.root().subscribe(Script.message).pipe(Scope.provide(bridge.scope))

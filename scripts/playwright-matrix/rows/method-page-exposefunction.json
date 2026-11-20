@@ -3,13 +3,25 @@
   "upstream": [
     "method:Page.exposeFunction"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding Page operation/event. Generic main-world evaluation is available, but does not implement this named contract and its waiting/lifetime guarantees.",
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "Page.exposeBinding",
+      "url": "/docs/api/browser/Page#Page.exposeBinding"
+    },
+    {
+      "module": "Binding",
+      "symbol": "Source",
+      "url": "/docs/api/browser/Binding#Source"
+    }
+  ],
+  "notes": "One member covers both: the handler gets the calling page and frame as its second argument. Arguments and result cross by value through Schemas, and the handler returns an Effect; registration is scoped.",
   "capabilities": [],
   "audit": {
     "sources": [
-      "packages/browser/src/Page.ts"
+      "packages/browser/src/Page.ts",
+      "packages/browser/src/Binding.ts"
     ],
     "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
   },
