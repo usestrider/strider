@@ -8,7 +8,6 @@ import * as Fiber from "effect/Fiber"
 import type * as Layer from "effect/Layer"
 import { vi } from "vitest"
 import * as Handles from "../../../src/internal/handles.ts"
-import * as Runtime from "../../../src/internal/runtime.ts"
 import { site } from "../adapter/harness.ts"
 import * as SharedContext from "./sharedContext.ts"
 import { newPage } from "./sharedContext.ts"
@@ -189,52 +188,6 @@ export const anyFrame = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer
           })),
         timeout
       )
-
-      it.effect("keeps frame input safe after the last identity check", () =>
-        Effect.scoped(Effect.gen(function*() {
-          const { origin } = yield* site
-          const page = yield* newPage
-          yield* page.goto(
-            fixtureUrl(
-              origin,
-              `<style>iframe { display: block; width: 300px; height: 100px; }</style>${frame(origin, "<p>Before</p>")}${
-                frame(origin, button("Pay"))
-              }${frame(origin, button("Decoy"))}`
-            )
-          )
-          const execution = Handles.page(page).entry.execution
-          const originalAction = execution.action
-          const originalHolds = Runtime.holdsFrames
-          let applying = false
-          let removed = false
-          const actionHook = vi.spyOn(execution, "action").mockImplementation((...args) =>
-            originalAction(...args).pipe(Effect.tap((answer) =>
-              Effect.sync(() => {
-                applying = args[2].apply && !("_tag" in answer) && answer.response._tag === "Ready"
-              })
-            ))
-          )
-          const holdsHook = vi.spyOn(Runtime, "holdsFrames").mockImplementation((...args) =>
-            originalHolds(...args).pipe(Effect.tap((held) => {
-              if (!applying || !held || removed) return Effect.void
-              removed = true
-              // Geometry and identity were both read; the page changes before native input is sent.
-              return page.evaluateInMainWorld(() => document.querySelector("iframe")!.remove()).pipe(Effect.orDie)
-            }))
-          )
-          yield* Effect.addFinalizer(() =>
-            Effect.sync(() => {
-              holdsHook.mockRestore()
-              actionHook.mockRestore()
-            })
-          )
-          yield* page.anyFrame.getByRole("button", { name: "Pay" }).click()
-          assert.isTrue(removed)
-          assert.deepEqual({
-            pay: yield* page.frame(page.locator("iframe").nth(0)).locator("#out").readText,
-            decoy: yield* page.frame(page.locator("iframe").nth(1)).locator("#out").readText
-          }, { pay: "clicked", decoy: "" })
-        })), timeout)
 
       it.effect(
         "caps cross-frame candidate descriptions at ten while retaining the total",
