@@ -39,6 +39,7 @@ import * as Responses from "./cdpAdapter/responses.ts"
 import * as State from "./cdpAdapter/state.ts"
 import * as Storage from "./cdpAdapter/storage.ts"
 import * as Targets from "./cdpAdapter/targets.ts"
+import * as Tree from "./cdpAdapter/tree.ts"
 import * as WebAuthn from "./cdpAdapter/webauthn.ts"
 import * as CdpWire from "./cdpWire.ts"
 import * as Declarations from "./declarations.ts"
@@ -341,7 +342,15 @@ export const connect: (
     if (defaultEntry.browserContextId !== undefined) {
       state.contextsByCdp.set(defaultEntry.browserContextId, defaultEntry)
     }
-    yield* buffer.run(() => buffer.emit({ _tag: "UserContextAdded", context: state.defaultContext, isDefault: true }))
+    yield* buffer.run(() => {
+      buffer.emit({ _tag: "UserContextAdded", context: state.defaultContext, isDefault: true })
+      // The contexts the browser already has, empty ones too: no event announces them
+      if (Option.isSome(contextIds) && defaultEntry.browserContextId !== undefined) {
+        for (const id of contextIds.value.browserContextIds) {
+          if (id !== defaultEntry.browserContextId) Tree.contextFor(state, id)
+        }
+      }
+    })
     yield* Declare.applyDownloads(state, defaultEntry).pipe(Effect.ignore)
     yield* Target.setAutoAttach({
       autoAttach: true,

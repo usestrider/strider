@@ -3,10 +3,22 @@
   "upstream": [
     "method:Browser.browserType"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No matching Browser service member or browser event stream. The service exposes info, capabilities, pages, creation and its default context, not this contract.",
+  "status": "different",
+  "api": [
+    {
+      "module": "Browser",
+      "symbol": "Info",
+      "url": "/docs/api/browser/Browser#Info"
+    }
+  ],
+  "notes": "Browser.info names the product and protocol; there is no browser-type object.",
   "capabilities": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "handles-dont-lead-back-to-their-browser",
+    "quote": "Code reaches its browser through the `Browser` service (`yield* Browser.Browser`), and `browser.info` names the product",
+    "revision": "1cfff25ae81875021127281bc4ec70cb4942216e"
+  },
   "audit": {
     "sources": [
       "packages/browser/src/Browser.ts"

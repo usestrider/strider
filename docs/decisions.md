@@ -1824,6 +1824,13 @@ move: a drag of one held move shows its first `dragover` at the release or the n
 `dragOver` at the move that starts the drag, which shows the drag over the target while the button is held, was
 rejected: every drop would then end with a second `dragover`, which Playwright's and Puppeteer's drag tests both reject.
 
+## Handles don't lead back to their browser
+
+Code reaches its browser through the `Browser` service (`yield* Browser.Browser`), and `browser.info` names the product
+and protocol; a context has no `browser` member, and a browser has no browser-type object. Requirements stay in the
+type: a function that needs the browser says so, rather than reaching it through a handle it was given. Rejected:
+`context.browser()` and `browser.browserType()`, which would duplicate the service and `info` with a second way in.
+
 ## Console messages name their source in one shared set of categories
 
 A `ConsoleMessage` carries a `source`: `Page` for the page's own `console` calls, or `Browser` with a `category` from
