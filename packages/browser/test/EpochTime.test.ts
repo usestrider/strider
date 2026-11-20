@@ -17,4 +17,12 @@ describe("EpochTime", () => {
     assert.strictEqual(DateTime.toEpochMillis(EpochTime.fromSeconds(1.001)), 1001)
     assert.strictEqual(DateTime.toEpochMillis(EpochTime.fromSeconds(1793065316)), 1793065316000)
   })
+
+  it("does not advance a sub-millisecond timestamp into the next millisecond", () => {
+    // WebKit's wall clock has sub-microsecond precision. This instant is still before the next millisecond.
+    const seconds = 1793065316.0009997
+    const millis = 1793065316000
+    assert.strictEqual(DateTime.toEpochMillis(EpochTime.fromMillis(seconds * 1000)), millis)
+    assert.strictEqual(DateTime.toEpochMillis(EpochTime.fromSeconds(seconds)), millis)
+  })
 })
