@@ -215,6 +215,10 @@ const loaded = Effect.fn("loaded")(function*(page: Page.Page) {
 })
 ```
 
+Assigning a property is no change the page reports, so instead of waiting on page events it reads the property
+again every `Expect.CheckInterval`, 100 ms unless `Expect.withCheckInterval` sets it. The interval is also how
+often a getter of the page's on the path runs.
+
 Like CSS expectations, it requires exactly one match even with `not: true`, retries until the deadline, and reports
 the value read or the match count.
 
@@ -240,7 +244,7 @@ A locator's expectation returns its first observation without waiting for change
 browser measures the element at its next rendering update, so the first observation can be the match count alone;
 the ratio follows as soon as the browser reports it. Later rounds re-check in the
 page on DOM changes, animation frames, and `input`, `change`, or focus events, for up to a second at a time until
-the deadline. A failure keeps the observations received before the deadline; a browser stall before the first
+the deadline; `toHaveJSProperty`, which reads at `Expect.CheckInterval` instead, is the exception. A failure keeps the observations received before the deadline; a browser stall before the first
 reply can leave its history empty. Replies received after the deadline cannot change the returned failure.
 
 The first failed expectation stops the rest. To see every failure, collect them with Effect:
