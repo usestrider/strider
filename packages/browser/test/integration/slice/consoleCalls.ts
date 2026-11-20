@@ -106,6 +106,28 @@ export const consoleCalls = (
       assert.isTrue(Exit.isFailure(yield* Effect.exit(call.args[1]!.read)), "a handle whose subscription ended")
     }).pipe(Effect.scoped))
 
+  it.effect("stops claiming console arguments after a nextCall predicate fails", () =>
+    Effect.gen(function*() {
+      const page = yield* opened()
+      const table = Handles.page(page).runtime.model.consoleArguments
+      const before = ConsoleArguments.held(table)
+      const logged = yield* ConsoleMessage.nextCall(page, undefined, () => Effect.fail("predicate failed"))
+      yield* page.evaluateInMainWorld(() => console.log({ a: 1 }))
+      assert.strictEqual(yield* Effect.flip(logged), "predicate failed")
+      yield* page.evaluateInMainWorld(() => console.log({ b: 2 }))
+      assert.strictEqual(ConsoleArguments.held(table), before)
+    }).pipe(Effect.scoped))
+
+  it.effect("refuses a console argument that cannot cross by value instead of returning undefined", () =>
+    Effect.gen(function*() {
+      const page = yield* opened()
+      const logged = yield* ConsoleMessage.nextCall(page)
+      yield* page.evaluateInMainWorld(() => console.log(() => 1))
+      const call = yield* logged
+      const result = yield* Effect.exit(call.args[0]!.read)
+      assert.isTrue(Exit.isFailure(result), "an unserializable console argument must fail, not become undefined")
+    }).pipe(Effect.scoped))
+
   it.effect("gives a worker's call its arguments", () =>
     Effect.gen(function*() {
       const logged = yield* Effect.gen(function*() {
