@@ -7,6 +7,7 @@ import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
+import * as Stream from "effect/Stream"
 import * as TestClock from "effect/testing/TestClock"
 import { vi } from "vitest"
 import * as BrowserClock from "../src/internal/browserClock.ts"
@@ -195,4 +196,85 @@ it.effect("reads the annotation budget after its box lookup and draw", () =>
       Effect.provideService(BrowserClock.CurrentClock, clock)
     )
     assert.deepStrictEqual(sleeps, [100])
+  }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+
+it.effect("bounds the wait for another overlay draw by the waiting operation deadline", () =>
+  Effect.gen(function*() {
+    const page = yield* Browser.newPage()
+    const owner = (page.locator("body") as LocatorImpl).owner
+    const entered = yield* Deferred.make<void>()
+    const resume = yield* Deferred.make<void>()
+    let first = true
+    const send = vi.spyOn(Runtime, "send").mockImplementation(() =>
+      Effect.gen(function*() {
+        if (first) {
+          first = false
+          yield* Deferred.succeed(entered, undefined)
+          yield* Deferred.await(resume)
+        }
+        return { _tag: "Overlaid" } as const
+      })
+    )
+    yield* Effect.addFinalizer(() => Effect.sync(() => send.mockRestore()))
+    const overlay = yield* Overlays.acquire(owner.runtime, owner.page, owner.grant).pipe(
+      Operation.named("test.acquire")
+    )
+    const occupying = yield* overlay.hide.pipe(Effect.forkChild)
+    yield* Deferred.await(entered)
+    const waiting = yield* overlay.show.pipe(Deadline.within("100 millis"), Effect.forkChild)
+    yield* TestClock.adjust("200 millis")
+    const atDeadline = waiting.pollUnsafe()
+    // Release the first draw before asserting so even the broken implementation can finish its cleanup.
+    yield* Deferred.succeed(resume, undefined)
+    yield* Fiber.await(occupying)
+    yield* Fiber.await(waiting)
+    assert.isDefined(atDeadline)
+    assert.isTrue(Exit.isFailure(atDeadline!))
+  }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+
+it.effect("orders a release clear before successor draws while the navigation watch is closing", () =>
+  Effect.gen(function*() {
+    const page = yield* Browser.newPage()
+    const owner = (page.locator("body") as LocatorImpl).owner
+    const closing = yield* Deferred.make<void>()
+    const resume = yield* Deferred.make<void>()
+    const changes = owner.page.state.changes
+    let first = true
+    Object.defineProperty(owner.page.state, "changes", {
+      configurable: true,
+      value: changes.pipe(Stream.ensuring(Effect.suspend(() => {
+        if (!first) return Effect.void
+        first = false
+        return Deferred.succeed(closing, undefined).pipe(Effect.andThen(Deferred.await(resume)))
+      })))
+    })
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        Object.defineProperty(owner.page.state, "changes", { configurable: true, value: changes })
+      })
+    )
+    let rendered: ReadonlyArray<Engine.OverlayItem> = []
+    const send = vi.spyOn(Runtime, "send").mockImplementation((_runtime, _page, request) =>
+      Effect.sync(() => {
+        if (request.op === "overlay") rendered = request.overlays
+        return { _tag: "Overlaid" } as const
+      })
+    )
+    yield* Effect.addFinalizer(() => Effect.sync(() => send.mockRestore()))
+    const held = yield* Scope.make()
+    const acquire = Overlays.acquire(owner.runtime, owner.page, owner.grant).pipe(Operation.named("test.acquire"))
+    const old = yield* acquire.pipe(Scope.provide(held))
+    yield* old.add("old")
+    yield* TestClock.adjust(0)
+    const release = yield* Scope.close(held, Exit.void).pipe(Effect.forkChild)
+    yield* Deferred.await(closing)
+    const replacement = yield* Effect.gen(function*() {
+      const current = yield* acquire
+      yield* current.add("current")
+    }).pipe(Effect.forkChild)
+    yield* TestClock.adjust(0)
+    yield* Deferred.succeed(resume, undefined)
+    yield* Fiber.join(release)
+    yield* Fiber.join(replacement)
+    assert.deepStrictEqual(rendered.map((item) => item._tag === "Html" ? item.html : item._tag), ["current"])
   }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
