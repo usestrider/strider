@@ -54,7 +54,7 @@ const harness = (info = { protocol: "cdp", product: "Chrome/155.0" }) => {
       })
     )
   const baselineOf = (stem: string, extension: string) =>
-    join(directory, "__snapshots__", "invoice.test.ts", `${stem}-chromium-${process.platform}.${extension}`)
+    join(directory, "__baselines__", "invoice.test.ts", `${stem}-chromium-${process.platform}.${extension}`)
   return { attached, baselineOf, directory, provide }
 }
 
@@ -212,7 +212,7 @@ describe("SnapshotBaseline.toMatch", () => {
         const reason = yield* reasonOf(SnapshotBaseline.toMatch(text("x"), name).pipe(provide("all")))
         assert.deepInclude(reason, { _tag: "InvalidName", name })
       }
-      assert.isFalse(existsSync(join(directory, "__snapshots__")))
+      assert.isFalse(existsSync(join(directory, "__baselines__")))
     }))
 
   it("keys the default path by file, name, browser and platform, keeping the extension", () => {
@@ -223,7 +223,7 @@ describe("SnapshotBaseline.toMatch", () => {
         browser: "firefox",
         platform: "linux"
       }),
-      "/r/__snapshots__/a.test.ts/report.v2-firefox-linux.pdf"
+      "/r/__baselines__/a.test.ts/report.v2-firefox-linux.pdf"
     )
     // A Vitest snapshot file sits beside the directory, never in it
     assert.notStrictEqual(
@@ -243,7 +243,7 @@ describe("SnapshotBaseline.toMatch", () => {
       const { directory, provide } = harness({ protocol: "bidi", product: "firefox" })
       yield* SnapshotBaseline.toMatch(text("a"), "a.txt").pipe(provide("all"))
       assert.isTrue(
-        existsSync(join(directory, "__snapshots__", "invoice.test.ts", `a-firefox-${process.platform}.txt`))
+        existsSync(join(directory, "__baselines__", "invoice.test.ts", `a-firefox-${process.platform}.txt`))
       )
     }))
 

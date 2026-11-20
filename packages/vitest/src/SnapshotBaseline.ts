@@ -85,7 +85,7 @@ const namePattern = /^[a-z0-9][a-z0-9._-]*\.[a-z0-9]+$/
  * import { SnapshotBaseline } from "@usestrider/vitest"
  *
  * const path = (key: SnapshotBaseline.Key) =>
- *   SnapshotBaseline.defaultPath(key).replace("__snapshots__", `baselines/${key.browser}`)
+ *   SnapshotBaseline.defaultPath(key).replace("__baselines__", `baselines/${key.browser}`)
  * ```
  *
  * @stability unstable
@@ -100,6 +100,21 @@ export const Key = Schema.Struct({
 
 /**
  * What names a baseline; `Key` checks it.
+ *
+ * **Example** (Naming a baseline's file)
+ *
+ * ```ts import.meta.vitest
+ * import { SnapshotBaseline } from "@usestrider/vitest"
+ *
+ * const key: SnapshotBaseline.Key = {
+ *   testFile: "/repo/invoice.test.ts",
+ *   name: "invoice.pdf",
+ *   browser: "chromium",
+ *   platform: "linux"
+ * }
+ * // "/repo/__baselines__/invoice.test.ts/invoice-chromium-linux.pdf"
+ * const path = SnapshotBaseline.defaultPath(key)
+ * ```
  *
  * @stability unstable
  * @category models
@@ -141,7 +156,7 @@ export interface Settings {
    * The baseline's path for a key. Return a distinct path for each key, or baselines overwrite each other;
    * `defaultPath` does.
    *
-   * @default `defaultPath`: `<test file's directory>/__snapshots__/<test file's name>/<name without extension>-<browser>-<platform>.<extension>`
+   * @default `defaultPath`: `<test file's directory>/__baselines__/<test file's name>/<name without extension>-<browser>-<platform>.<extension>`
    */
   readonly path?: ((key: Key) => string) | undefined
   /**
@@ -166,7 +181,7 @@ export interface Settings {
  * import { Effect } from "effect"
  *
  * const withBaselines = Effect.provideService(SnapshotBaseline.CurrentSettings, {
- *   path: (key) => SnapshotBaseline.defaultPath(key).replace("__snapshots__", "baselines")
+ *   path: (key) => SnapshotBaseline.defaultPath(key).replace("__baselines__", "baselines")
  * })
  * ```
  *
@@ -495,14 +510,14 @@ const parts = (key: Key): readonly [string, string] => {
 }
 
 /**
- * The default baseline path for a key: `__snapshots__/<test file's name>/<name without extension>-<browser>-<platform>.<extension>`
+ * The default baseline path for a key: `__baselines__/<test file's name>/<name without extension>-<browser>-<platform>.<extension>`
  * in the test file's directory, so `invoice.pdf` is `invoice-chromium-linux.pdf`.
  *
  * **Details**
  *
  * The parts are used as they are, never rewritten, and a key that doesn't satisfy `Key` is refused: `defaultPath`
- * throws its `Schema` error, as for a name with no extension. So two distinct keys never share a path. The files
- * sit in a directory named for the test file, never beside Vitest's own `__snapshots__/<test file's name>.snap`.
+ * throws its `Schema` error, as for a name with no extension. So two distinct keys never share a path. Vitest
+ * writes nothing under `__baselines__`, and screenshots use `__screenshots__`, so neither can reach these files.
  *
  * **Example** (Moving baselines under one directory)
  *
@@ -511,7 +526,7 @@ const parts = (key: Key): readonly [string, string] => {
  * import { Effect } from "effect"
  *
  * const withBaselines = Effect.provideService(SnapshotBaseline.CurrentSettings, {
- *   path: (key) => SnapshotBaseline.defaultPath(key).replace("__snapshots__", "baselines")
+ *   path: (key) => SnapshotBaseline.defaultPath(key).replace("__baselines__", "baselines")
  * })
  * ```
  *
@@ -522,7 +537,7 @@ const parts = (key: Key): readonly [string, string] => {
 export const defaultPath = (key: Key): string => {
   const valid = decodeKey(key)
   const [stem, extension] = parts(valid)
-  return join(dirname(valid.testFile), "__snapshots__", basename(valid.testFile), `${stem}${extension}`)
+  return join(dirname(valid.testFile), "__baselines__", basename(valid.testFile), `${stem}${extension}`)
 }
 
 /** The first index where two byte arrays differ, or the shorter one's length. */
@@ -637,7 +652,7 @@ const run = (
  * `name` is the baseline's file name with its extension, such as `invoice.pdf`: lower-case letters, digits, `.`,
  * `_`, and `-`, starting with a letter or digit and ending in an extension of letters and digits; any other name
  * fails with `InvalidName` before anything is read. The baseline is keyed by test file, `name`, browser engine,
- * and platform (`Key`), at `defaultPath`'s `__snapshots__/<test file>/<name without extension>-<browser>-<platform>.<extension>`
+ * and platform (`Key`), at `defaultPath`'s `__baselines__/<test file>/<name without extension>-<browser>-<platform>.<extension>`
  * beside the test file unless `CurrentSettings` says otherwise. The value is compared once, as it is given.
  *
  * A `.png` value must be a PNG Strider reads, or it fails with `InvalidValue`; it matches when its bytes are the
@@ -650,7 +665,7 @@ const run = (
  * A missing baseline is written under the `"missing"` and `"all"` updates; under `"missing"`, Vitest's default
  * locally, the assertion still fails with `MissingBaseline`, so a first run never passes unseen. Under `"all"`
  * (`vitest -u`), a differing or unreadable baseline is rewritten and it passes. Under `"none"`, Vitest's default on
- * CI, nothing is written.
+ * CI, no baseline is written, though a mismatch still writes its failure files.
  *
  * **Example** (Checking a PDF and a chart)
  *
