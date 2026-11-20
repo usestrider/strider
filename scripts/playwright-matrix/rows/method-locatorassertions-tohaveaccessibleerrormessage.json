@@ -3,9 +3,15 @@
   "upstream": [
     "method:LocatorAssertions.toHaveAccessibleErrorMessage"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding public Strider capability for this member.",
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toHaveAccessibleErrorMessage",
+      "url": "/docs/api/browser/Expect#toHaveAccessibleErrorMessage"
+    }
+  ],
+  "notes": "Retries exactly one match, also under not. Reads aria-errormessage while aria-invalid is set to anything but empty or false, or native validation fails; hidden referenced elements contribute. Strings normalize whitespace; ignoreCase overrides regex flags. Failures retain observed messages or match counts.",
   "capabilities": [],
   "requirements": []
 }

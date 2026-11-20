@@ -39,6 +39,8 @@ Each matcher takes a locator, except `toHaveURL` and `toHaveTitle`, which take t
 | `toContainText(expected)`                      | its text contains `expected`                                     |
 | `toBeEmpty` | the field value is empty, or other element text is only whitespace |
 | `toHaveAccessibleName(expected, options?)` | its accessible name matches; `ignoreCase` overrides regex flags |
+| `toHaveAccessibleDescription(expected, options?)` | its accessible description matches; `not` negates the comparison |
+| `toHaveAccessibleErrorMessage(expected, options?)` | while it's invalid, its error message matches; `not` negates the comparison |
 | `toHaveValue(expected)`                        | a form control's value is `expected`                             |
 | `toHaveValues(expected)` | one multiple select has the selected values in option order |
 | `toHaveAttribute(name, expected?)`             | it has the attribute, with that value if given                   |
@@ -172,6 +174,26 @@ const saveName = Effect.fn("saveName")(function*(page: Page.ReadonlyPage) {
   yield* Expect.toHaveAccessibleName(page.getByTestId("save"), /save/, {
     ignoreCase: true
   })
+})
+```
+
+The accessible description comes from the elements `aria-describedby` names, then `aria-description`, then a
+`title` that isn't already the name. The accessible error message is the text of the elements `aria-errormessage`
+names, read only while the element is invalid: its `aria-invalid` is set to anything but `false`, or the browser's
+own validation rejects its value. Both compare as names do, take `ignoreCase`, and take `not`, which negates the
+comparison but still needs exactly one match:
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const emailField = Effect.fn("emailField")(function*(page: Page.Page) {
+  const email = page.getByLabel("Email")
+  yield* email.pipe(Expect.toHaveAccessibleDescription("We never share it"))
+  yield* email.pipe(Expect.toHaveAccessibleErrorMessage(""))
+  yield* email.fill("not an address")
+  yield* email.pipe(Expect.toHaveAccessibleErrorMessage("Enter a valid email address"))
+  yield* email.pipe(Expect.toHaveAccessibleErrorMessage("", { not: true }))
 })
 ```
 

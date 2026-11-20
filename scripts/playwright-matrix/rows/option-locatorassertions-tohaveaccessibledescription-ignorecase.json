@@ -1,7 +1,13 @@
 {
-  "status": "missing",
-  "api": [],
-  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toHaveAccessibleDescription",
+      "url": "/docs/api/browser/Expect#toHaveAccessibleDescription"
+    }
+  ],
+  "notes": "Retries exactly one match, also under not. Reads aria-describedby, then aria-description, then a title that isn't the name; hidden referenced elements contribute and hidden elements have empty descriptions. Strings normalize whitespace; ignoreCase overrides regex flags. Failures retain observed descriptions or match counts.",
   "capabilities": [],
   "id": "option-locatorassertions-tohaveaccessibledescription-ignorecase",
   "upstream": [
