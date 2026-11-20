@@ -1848,3 +1848,13 @@ were rejected for those reasons. A name is restricted, not transformed: it must 
 readable rewrite keeps every input distinct: a literal name can equal another's rewritten form. Names are lower-case
 because `Cart` and `cart` would share a file on a case-insensitive filesystem. The PNG codec and comparator are native rather than
 dependencies.
+
+## Recording overlays are page DOM
+
+Recording overlays (`Capability.Overlay`) are elements the engine draws in the page's main document, under a closed
+shadow root that its own queries, snapshots and hit tests leave out, and draws again in each document the main frame
+commits. One mechanism then serves all three browsers, and screenshots show the overlays as video does. Following
+[Pay for what you use](#pay-for-what-you-use), nothing is drawn or watched until a page acquires the capability, and
+only a page showing its actions waits before input. Compositing overlays into video frames in `VideoWriter` was
+rejected: Firefox writes its own video file, which no frame passes through, and screenshots would lack them.
+Playwright's deprecated `fontSize` option is not built; `style.title` sets the title's font like any other CSS.

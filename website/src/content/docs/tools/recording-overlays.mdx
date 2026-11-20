@@ -1,0 +1,83 @@
+---
+title: Recording overlays
+description: Titles, chapter cards and action marks drawn over a page while it records.
+order: 3.5
+---
+
+Recording overlays are elements Strider draws over a page, such as a label, a chapter card, or a mark for each
+action, so a video shows what each step was doing. You take them with
+[`Capability.Overlay`](/docs/api/browser/Capability#Overlay) on a page you control, on every browser.
+
+## Showing HTML
+
+[`overlay.add`](/docs/api/browser/Capability#OverlayControl) shows your HTML over the page until the scope that
+added it closes, or until its `duration` passes:
+
+```ts
+import { Capability, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const labeled = Effect.fn("labeled")(function*(page: Page.Page) {
+  const overlay = yield* page.capability(Capability.Overlay)
+  yield* overlay.add(
+    `<div style="position:fixed;top:8px;left:8px">Step 1: sign in</div>`,
+    {
+      duration: "3 seconds"
+    }
+  )
+  yield* page.getByRole("button", { name: "Sign in" }).click()
+}, Effect.scoped)
+```
+
+`overlay.hide` and `overlay.show` hide and show every overlay without removing any.
+
+## Chapters
+
+`overlay.chapter` shows a centered title card over a blurred page for its `duration`, 2 seconds unless you give
+one, and returns once the card has gone:
+
+```ts
+import { Capability, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const checkout = Effect.fn("checkout")(function*(page: Page.Page) {
+  const overlay = yield* page.capability(Capability.Overlay)
+  yield* overlay.chapter("Checkout", { description: "Paying by card" })
+  yield* page.getByRole("button", { name: "Pay" }).click()
+}, Effect.scoped)
+```
+
+## Showing actions
+
+While the scope of `overlay.actions` is open, each locator action that sends input, such as `click`, `fill` or
+`press`, shows a title naming the action and its locator, and a cursor at its point. It then waits `duration`,
+500 milliseconds unless you give one, before it checks its target a last time and sends the input:
+
+```ts
+import { Capability, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const signIn = Effect.fn("signIn")(function*(page: Page.Page) {
+  const overlay = yield* page.capability(Capability.Overlay)
+  yield* overlay.actions({
+    position: "bottom",
+    style: {
+      highlight: "outline: 2px solid orange",
+      point: "width: 12px; height: 12px; background: red"
+    }
+  })
+  yield* page.getByLabel("Email").fill("ada@example.com")
+  yield* page.getByRole("button", { name: "Sign in" }).click()
+}, Effect.scoped)
+```
+
+A point marker and a highlight over the target are drawn only when `style` gives them; `cursor: "none"` leaves
+the cursor out. The wait counts toward the action's deadline.
+
+## What to expect
+
+- Overlays are elements in the page, so screenshots show them as video does. Locators, snapshots and clicks never
+  see them, and they're drawn again after the page navigates.
+- WebKit's video takes screenshots at an interval, so it can miss a mark shown for less than that interval.
+- Input through `page.mouse` and `page.keyboard` isn't annotated, and neither is a trial action, which sends no
+  input.
