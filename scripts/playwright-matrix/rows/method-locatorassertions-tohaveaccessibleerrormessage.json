@@ -11,7 +11,7 @@
       "url": "/docs/api/browser/Expect#toHaveAccessibleErrorMessage"
     }
   ],
-  "notes": "Retries exactly one match, also under not. Reads aria-errormessage while aria-invalid is set to anything but empty or false, or native validation fails; hidden referenced elements contribute. Strings normalize whitespace; ignoreCase overrides regex flags. Failures retain observed messages or match counts.",
+  "notes": "Retries exactly one match, also under not. Reads aria-errormessage while aria-invalid is anything but blank or exactly false (ASCII case-insensitive), or native validation fails; hidden referenced elements contribute. Strings normalize whitespace; ignoreCase overrides regex flags. Failures retain observed messages or match counts.",
   "capabilities": [],
   "requirements": []
 }

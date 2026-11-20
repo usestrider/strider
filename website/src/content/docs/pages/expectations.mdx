@@ -40,7 +40,7 @@ Each matcher takes a locator, except `toHaveURL` and `toHaveTitle`, which take t
 | `toBeEmpty` | the field value is empty, or other element text is only whitespace |
 | `toHaveAccessibleName(expected, options?)` | its accessible name matches; `ignoreCase` overrides regex flags |
 | `toHaveAccessibleDescription(expected, options?)` | its accessible description matches; `not` negates the comparison |
-| `toHaveAccessibleErrorMessage(expected, options?)` | while it's invalid, its error message matches; `not` negates the comparison |
+| `toHaveAccessibleErrorMessage(expected, options?)` | its error message, empty unless it's invalid, matches; `not` negates the comparison |
 | `toHaveValue(expected)`                        | a form control's value is `expected`                             |
 | `toHaveValues(expected)` | one multiple select has the selected values in option order |
 | `toHaveAttribute(name, expected?)`             | it has the attribute, with that value if given                   |
@@ -177,10 +177,11 @@ const saveName = Effect.fn("saveName")(function*(page: Page.ReadonlyPage) {
 })
 ```
 
-The accessible description comes from the elements `aria-describedby` names, then `aria-description`, then a
-`title` that isn't already the name. The accessible error message is the text of the elements `aria-errormessage`
-names, read only while the element is invalid: its `aria-invalid` is set to anything but `false`, or the browser's
-own validation rejects its value. Both compare as names do, take `ignoreCase`, and take `not`, which negates the
+The accessible description comes from the first of these an element has, even when its text is empty: the elements
+`aria-describedby` names, `aria-description`, a table's caption, a `summary` element's content, or a button input's
+`value` when that isn't the name, and last a `title` that isn't the name. The accessible error message is the text
+of the elements `aria-errormessage` names while the element is invalid, and empty otherwise. An element is invalid
+when its `aria-invalid` is anything but blank or `false`, or when the browser's own validation rejects its value. Both compare as names do, take `ignoreCase`, and take `not`, which negates the
 comparison but still needs exactly one match:
 
 ```ts

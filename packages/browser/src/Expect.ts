@@ -418,8 +418,10 @@ export const toHaveAccessibleName: DualMatcher<
  *
  * **Details**
  *
- * The description comes from the elements `aria-describedby` names, joined by a space, then from
- * `aria-description`, then from the `title` attribute when the title isn't already the element's name. An
+ * The description comes from the first of these that applies, even when its text is empty: the elements
+ * `aria-describedby` names, joined by a space, when at least one of its IDs names an element; `aria-description`,
+ * when present; a table's caption, a `summary` element's content, or a button, submit, or reset input's `value`,
+ * when that didn't give the element its name; and the `title` attribute, when it isn't the element's name. An
  * element named there counts even when it's hidden, with its hidden content; a hidden element itself has an
  * empty description. Strings and regular expressions match as in `toHaveAccessibleName`, and so does
  * `ignoreCase`. `not` negates only the comparison: missing or multiple matches keep retrying and fail with their
@@ -471,7 +473,7 @@ export const toHaveAccessibleDescription: DualMatcher<
  * **Details**
  *
  * The error message is the text of the elements `aria-errormessage` names, joined by a space, while the element is
- * invalid: its `aria-invalid` is set to anything but an empty value or `false` (in any case), or the browser's
+ * invalid: its `aria-invalid` is set to anything but a blank value or exactly `false` (in any case), or the browser's
  * own validation finds its value invalid, as a `required` field left empty or an email field holding no address.
  * Otherwise it's empty. An element named there counts even when it's hidden. Strings and regular expressions
  * match as in `toHaveAccessibleName`, and so does `ignoreCase`. `not` negates only the comparison: missing or
