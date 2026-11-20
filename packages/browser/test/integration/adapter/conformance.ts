@@ -7,6 +7,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
 import * as Cause from "effect/Cause"
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
@@ -1484,9 +1485,13 @@ export const conformance = (backend: Backend) =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
             const { page } = yield* newPage(world)
+            const before = Date.now()
             yield* goto(world, page, `${world.site.origin}/console`)
             const hello = yield* world.facts.when("ConsoleMessage", (fact) =>
               fact.message.text === "hello 42")
+            // The browser's wall-clock time when it logged the message, which runs on this machine's clock
+            assert.isAtLeast(DateTime.toEpochMillis(hello.message.timestamp), before)
+            assert.isAtMost(DateTime.toEpochMillis(hello.message.timestamp), Date.now())
             assert.strictEqual(hello.message.level, "log")
             assert.deepStrictEqual(hello.message.origin, { _tag: "Page", page })
             // 1-based, as stack traces print it: the page is one line
@@ -1502,6 +1507,20 @@ export const conformance = (backend: Backend) =>
             const raw = yield* world.facts.when("UncaughtException", (fact) =>
               fact.exception.message === "a string")
             assert.strictEqual(raw.exception.name, "Error")
+            // A message logged again is its own message, at its own time, though stock WebKit reports it as a repeat
+            // of the first
+            yield* evaluate(
+              world,
+              page,
+              `() => { for (let i = 0; i < 2; i++) { console.log("again"); const end = Date.now() + 5; while (Date.now() < end); } }`
+            )
+            const first = yield* world.facts.when("ConsoleMessage", (fact) => fact.message.text === "again")
+            const second = yield* world.facts.when("ConsoleMessage", (fact) =>
+              fact.message.text === "again" && fact !== first)
+            assert.isAbove(
+              DateTime.toEpochMillis(second.message.timestamp),
+              DateTime.toEpochMillis(first.message.timestamp)
+            )
           }), timeout)
 
         it.effect("captures overridden viewports and full pages beyond the native view", () =>
@@ -1841,6 +1860,7 @@ export const conformance = (backend: Backend) =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
             const { context, page } = yield* newPage(world)
+            const before = Date.now()
             yield* goto(world, page, `${world.site.origin}/worker`)
             const realm = yield* world.facts.when("RealmAdded", (fact) => fact.kind._tag === "Worker")
             assert(realm.kind._tag === "Worker")
@@ -1848,6 +1868,8 @@ export const conformance = (backend: Backend) =>
             // A dedicated worker belongs to its page, and so to its context
             assert.deepStrictEqual([realm.kind.page, realm.kind.context], [Option.some(page), Option.some(context)])
             const message = yield* world.facts.when("ConsoleMessage", (fact) => fact.message.text === "from the worker")
+            assert.isAtLeast(DateTime.toEpochMillis(message.message.timestamp), before)
+            assert.isAtMost(DateTime.toEpochMillis(message.message.timestamp), Date.now())
             // Firefox 158 attributes a dedicated worker's console to its owner, the window realm (recorded 2026-10-20)
             const owner = realm.kind.worker._tag === "Dedicated"
               ? Option.getOrUndefined(realm.kind.worker.owner)
