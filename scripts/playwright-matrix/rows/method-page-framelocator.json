@@ -9,9 +9,14 @@
       "module": "Page",
       "symbol": "ReadonlyPage.frame",
       "url": "/docs/api/browser/Page#ReadonlyPage.frame"
+    },
+    {
+      "module": "Page",
+      "symbol": "ReadonlyPage.anyFrame",
+      "url": "/docs/api/browser/Page#ReadonlyPage.anyFrame"
     }
   ],
-  "notes": "",
+  "notes": "`page.anyFrame` is the any-frame form (`internal:control=any-frame`): strict across frames, so a chain matching in more than one frame fails rather than picking one.",
   "capabilities": [],
   "audit": {
     "sources": [

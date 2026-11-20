@@ -293,6 +293,19 @@ const payByCard = Effect.fn("payByCard")(function*(page: Page.Page) {
 It finds the iframe again on every attempt, so a frame that reloads or arrives late is waited for like any
 element. Cross-site frames work the same, and frames nest: `payment.frame(payment.locator("iframe"))`.
 
+When you don't know which iframe holds an element, `page.anyFrame` searches the page's document and every frame
+under it, and acts in the one frame where the chain matches. A chain that matches in more than one frame fails
+with `StrictViolation`, `count` included; a frame locator's `anyFrame` searches only below that frame:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const pay = Effect.fn("pay")(function*(page: Page.Page) {
+  yield* page.anyFrame.getByRole("button", { name: "Pay" }).click()
+})
+```
+
 ## Counting matches
 
 An action or read needs exactly one match: several fail it at once with

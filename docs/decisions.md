@@ -1824,6 +1824,15 @@ move: a drag of one held move shows its first `dragover` at the release or the n
 `dragOver` at the move that starts the drag, which shows the drag over the target while the button is held, was
 rejected: every drop would then end with a second `dragover`, which Playwright's and Puppeteer's drag tests both reject.
 
+## A search across frames is opt-in and strict across frames
+
+A query searches one document unless its chain asks for more with `anyFrame`, on a page or a frame locator, which
+tests each part of the chain in every document under it and goes on in the one where it matches. More than one
+matching document fails every operation, `count` and `all` included, with `StrictViolation`, as an ambiguous element
+does. Rejected: page queries that search frames by default, which would make every query's cost and meaning depend on
+the frames a page happens to embed; and taking the first frame that matches, which would depend on the order frames
+load in.
+
 ## Handles don't lead back to their browser
 
 Code reaches its browser through the `Browser` service (`yield* Browser.Browser`), and `browser.info` names the product
