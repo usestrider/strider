@@ -1514,7 +1514,8 @@ export const conformance = (backend: Backend) =>
               page,
               `() => { for (let i = 0; i < 2; i++) { console.log("again"); const end = Date.now() + 5; while (Date.now() < end); } }`
             )
-            const first = yield* world.facts.when("ConsoleMessage", (fact) => fact.message.text === "again")
+            const first = yield* world.facts.when("ConsoleMessage", (fact) =>
+              fact.message.text === "again")
             const second = yield* world.facts.when("ConsoleMessage", (fact) =>
               fact.message.text === "again" && fact !== first)
             assert.isAbove(
@@ -1979,8 +1980,7 @@ export const conformance = (backend: Backend) =>
               fact.subject._tag === "Prompt")
             assert.deepInclude(opened.subject, { kind: "beforeunload" })
             yield* world.adapter.resolve(opened.obligation, { _tag: "Accept", promptText: Option.none() })
-            const removed = yield* world.facts.when("NavigableRemoved", (fact) =>
-              fact.navigable === page)
+            const removed = yield* world.facts.when("NavigableRemoved", (fact) => fact.navigable === page)
             assert.deepStrictEqual(removed.reason, new Target.PageClosed({ by: "command" }))
           }), timeout)
 

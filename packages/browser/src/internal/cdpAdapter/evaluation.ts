@@ -22,6 +22,7 @@ import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as BrowserClock from "../browserClock.ts"
 import * as ConsoleFormat from "../consoleFormat.ts"
+import * as EpochTime from "../epochTime.ts"
 import * as Argument from "../evaluationArgument.ts"
 import * as Groups from "../objectGroups.ts"
 import * as Operation from "../operation.ts"
@@ -300,6 +301,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
             ? { _tag: "Page", page: realm.frame.page.id }
             : { _tag: "Worker", realm: realm.id },
           source: { _tag: "Page" },
+          timestamp: EpochTime.fromMillis(params.timestamp),
           at: Adapter.now()
         })
       })
@@ -347,6 +349,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
             ? { _tag: "Worker", realm: realm.id }
             : { _tag: "Page", page: page!.id },
           source: { _tag: "Browser", category: categoryOf(entry) },
+          timestamp: EpochTime.fromMillis(entry.timestamp),
           at: Adapter.now()
         })
       }
