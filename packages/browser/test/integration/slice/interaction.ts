@@ -6351,12 +6351,12 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
       )
 
       it.effect(
-        "expects accessible descriptions from references, the description attribute and the title",
+        "expects accessible descriptions from the first source that applies and isn't the name",
         () =>
           Effect.gen(function*() {
             // aria-describedby beats aria-description beats a title that isn't the name; a hidden reference counts.
             const { url } = yield* fixture(() =>
-              `<span id="hint" hidden>Hidden  hint</span><span id="second">Second</span><button id="referenced" aria-describedby="hint second" aria-description="Ignored" title="Ignored">Save</button><button id="attribute" aria-description="From attribute" title="Ignored">Go</button><button id="titled" title="Tooltip">Act</button><button id="title-name" title="Only title"></button><button id="hidden" hidden aria-description="Secret"></button><div id="region" role="region" aria-label="Panel" aria-describedby="second"></div><button id="unresolved" aria-describedby="missing" aria-description="Fallback">X</button><input id="value-name" type="submit" value="Send" title="Tooltip"><input id="value-description" type="submit" aria-label="Send form" value="Send" title="Ignored"><button class="many" title="One">A</button><button class="many" title="Two">B</button>`
+              `<span id="hint" hidden>Hidden  hint</span><span id="second">Second</span><button id="referenced" aria-describedby="hint second" aria-description="Ignored" title="Ignored">Save</button><button id="attribute" aria-description="From attribute" title="Ignored">Go</button><button id="titled" title="Tooltip">Act</button><button id="title-name" title="Only title"></button><button id="hidden" hidden aria-description="Secret"></button><div id="region" role="region" aria-label="Panel" aria-describedby="second"></div><button id="unresolved" aria-describedby="missing" aria-description="Fallback">X</button><input id="value-name" type="submit" value="Send" title="Tooltip"><input id="value-description" type="submit" aria-label="Send form" value="Send" title="Ignored"><span id="empty-hint"></span><button id="empty-describedby" aria-describedby="empty-hint" aria-description="Fallback">Save</button><button id="empty-description" aria-description="" title="Fallback">Save</button><table id="caption-table" aria-label="Revenue" title="Tooltip"><caption>Quarterly totals</caption><tr><td>42</td></tr></table><table id="empty-caption" aria-label="Costs" title="Tooltip"><caption></caption><tr><td>42</td></tr></table><table title="Table hint"><caption>Sales</caption><tr><td>42</td></tr></table><input type="submit" title="Submit hint"><input id="send" type="submit" aria-labelledby="send" value="Dispatch" title="Dispatch hint"><style>#owning::before { content: "Prefix " }</style><details open><summary id="owning" role="button" aria-owns="owned">Details</summary></details><div id="owned">Owned</div><details open><summary id="summary-hint" role="button" title="Summary hint">Details</summary></details><span id="ref-other">Wrong</span><span id="ref-hint" aria-labelledby="ref-other" aria-describedby="ref-other">Hint</span><button id="reference" aria-describedby="ref-hint">Save</button><p id="prohibited" title="Paragraph hint">Text</p><button class="many" title="One">A</button><button class="many" title="Two">B</button>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* newPage
@@ -6375,6 +6375,34 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               // A button input's value is its description only when it isn't its name.
               yield* page.locator("#value-name").pipe(Expect.toHaveAccessibleDescription("Tooltip"))
               yield* page.locator("#value-description").pipe(Expect.toHaveAccessibleDescription("Send"))
+              // The first source that applies wins even when it's empty.
+              yield* page.locator("#empty-describedby").pipe(Expect.toHaveAccessibleDescription(""))
+              yield* page.locator("#empty-description").pipe(Expect.toHaveAccessibleDescription(""))
+              yield* page.getByRole("table", { name: "Revenue" }).pipe(
+                Expect.toHaveAccessibleDescription("Quarterly totals")
+              )
+              yield* page.getByRole("table", { name: "Costs" }).pipe(Expect.toHaveAccessibleDescription(""))
+              // A source that gave the name, directly or through a self reference, isn't also the description.
+              yield* page.getByRole("table", { name: "Sales" }).pipe(Expect.toHaveAccessibleDescription("Table hint"))
+              yield* page.getByRole("button", { name: "Submit" }).pipe(
+                Expect.toHaveAccessibleDescription("Submit hint")
+              )
+              yield* page.getByRole("button", { name: "Dispatch" }).pipe(
+                Expect.toHaveAccessibleDescription("Dispatch hint")
+              )
+              yield* page.locator("#summary-hint").pipe(Expect.toHaveAccessibleName("Details"))
+              yield* page.locator("#summary-hint").pipe(Expect.toHaveAccessibleDescription("Summary hint"))
+              yield* page.getByRole("button", { name: "Only title" }).pipe(Expect.toHaveAccessibleDescription(""))
+              yield* page.locator("#prohibited").pipe(Expect.toHaveAccessibleDescription("Paragraph hint"))
+              // A referenced element's own aria-labelledby and aria-describedby aren't followed.
+              yield* page.locator("#reference").pipe(Expect.toHaveAccessibleDescription("Hint"))
+              // A summary's description reads its content as its name does.
+              const owning = page.locator("#owning")
+              yield* owning.pipe(Expect.toHaveAccessibleName("Prefix Details Owned"))
+              yield* page.evaluateInMainWorld(() => {
+                document.querySelector("#owning")!.setAttribute("aria-label", "Toggle")
+              })
+              yield* owning.pipe(Expect.toHaveAccessibleDescription("Prefix Details Owned"))
               yield* page.locator("#titled").pipe(Expect.toHaveAccessibleDescription("Other", { not: true }))
               yield* page.evaluateInMainWorld(() => {
                 document.querySelector("#second")!.textContent = "Updated"
@@ -6405,157 +6433,6 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
-      for (
-        const [source, html] of [
-          [
-            "empty describedby target",
-            "<span id=\"hint\"></span><button aria-describedby=\"hint\" aria-description=\"Fallback\">Save</button>"
-          ],
-          ["empty description attribute", "<button aria-description=\"\" title=\"Fallback\">Save</button>"]
-        ] as const
-      ) {
-        it.effect(
-          `keeps accessible description precedence for an ${source}`,
-          () =>
-            Effect.gen(function*() {
-              const { url } = yield* fixture(() => html)
-              yield* Effect.scoped(Effect.gen(function*() {
-                const page = yield* newPage
-                yield* page.goto(url)
-                yield* page.locator("button").pipe(Expect.toHaveAccessibleDescription(""))
-              }))
-            }),
-          timeout
-        )
-      }
-
-      it.effect(
-        "uses an unused native caption as the accessible description before the title",
-        () =>
-          Effect.gen(function*() {
-            const { url } = yield* fixture(() =>
-              "<table aria-label=\"Sales\" title=\"Tooltip\"><caption>Quarterly totals</caption><tr><td>42</td></tr></table>"
-            )
-            yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* newPage
-              yield* page.goto(url)
-              yield* page.getByRole("table", { name: "Sales" }).pipe(
-                Expect.toHaveAccessibleDescription("Quarterly totals")
-              )
-            }))
-          }),
-        timeout
-      )
-
-      it.effect(
-        "keeps an empty native accessible description ahead of the title",
-        () =>
-          Effect.gen(function*() {
-            const { url } = yield* fixture(() =>
-              "<table aria-label=\"Sales\" title=\"Tooltip\"><caption></caption><tr><td>42</td></tr></table>"
-            )
-            yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* newPage
-              yield* page.goto(url)
-              yield* page.getByRole("table", { name: "Sales" }).pipe(Expect.toHaveAccessibleDescription(""))
-            }))
-          }),
-        timeout
-      )
-
-      it.effect(
-        "uses the same summary content for accessible names and descriptions",
-        () =>
-          Effect.gen(function*() {
-            const { url } = yield* fixture(() =>
-              "<style>summary::before { content: \"Prefix \" }</style><details open><summary role=\"button\" aria-owns=\"owned\">Details</summary></details><div id=\"owned\">Owned</div>"
-            )
-            yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* newPage
-              yield* page.goto(url)
-              const summary = page.locator("summary")
-              yield* summary.pipe(Expect.toHaveAccessibleName("Prefix Details Owned"))
-              yield* page.evaluateInMainWorld(() => {
-                document.querySelector("summary")!.setAttribute("aria-label", "Toggle")
-              })
-              yield* summary.pipe(Expect.toHaveAccessibleDescription("Prefix Details Owned"))
-            }))
-          }),
-        timeout
-      )
-
-      it.effect(
-        "tracks a native name source reached through a self reference",
-        () =>
-          Effect.gen(function*() {
-            const { url } = yield* fixture(() =>
-              "<input id=\"send\" type=\"submit\" aria-labelledby=\"send\" value=\"Send\" title=\"Tooltip\">"
-            )
-            yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* newPage
-              yield* page.goto(url)
-              yield* page.getByRole("button", { name: "Send" }).pipe(Expect.toHaveAccessibleDescription("Tooltip"))
-            }))
-          }),
-        timeout
-      )
-
-      it.effect(
-        "tracks native and content name sources before computing descriptions",
-        () =>
-          Effect.gen(function*() {
-            const { url } = yield* fixture(() =>
-              "<table title=\"Table hint\"><caption>Sales</caption><tr><td>42</td></tr></table><input type=\"submit\" title=\"Submit hint\"><details open><summary role=\"button\" title=\"Summary hint\">Details</summary></details>"
-            )
-            yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* newPage
-              yield* page.goto(url)
-              yield* page.getByRole("table", { name: "Sales" }).pipe(Expect.toHaveAccessibleDescription("Table hint"))
-              yield* page.getByRole("button", { name: "Submit" }).pipe(
-                Expect.toHaveAccessibleDescription("Submit hint")
-              )
-              yield* page.locator("summary").pipe(Expect.toHaveAccessibleName("Details"))
-              yield* page.locator("summary").pipe(Expect.toHaveAccessibleDescription("Summary hint"))
-            }))
-          }),
-        timeout
-      )
-
-      it.effect(
-        "keeps accessible reference traversal and cached title provenance separate",
-        () =>
-          Effect.gen(function*() {
-            const { url } = yield* fixture(() =>
-              "<span id=\"other\">Wrong</span><span id=\"hint\" aria-labelledby=\"other\" aria-describedby=\"other\">Hint</span><button id=\"reference\" aria-describedby=\"hint\">Save</button><button id=\"title\" title=\"Only title\"></button><p id=\"prohibited\" title=\"Paragraph hint\">Text</p><input id=\"native-false\" required aria-invalid=\"false\" aria-errormessage=\"hint\">"
-            )
-            yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* newPage
-              yield* page.goto(url)
-              yield* page.locator("#reference").pipe(Expect.toHaveAccessibleDescription("Hint"))
-              yield* page.getByRole("button", { name: "Only title" }).pipe(Expect.toHaveAccessibleDescription(""))
-              yield* page.locator("#prohibited").pipe(Expect.toHaveAccessibleDescription("Paragraph hint"))
-              yield* page.locator("#native-false").pipe(Expect.toHaveAccessibleErrorMessage("Hint"))
-            }))
-          }),
-        timeout
-      )
-
-      it.effect(
-        "reads accessible error messages for an unrecognized padded invalid token",
-        () =>
-          Effect.gen(function*() {
-            const { url } = yield* fixture(() =>
-              "<input aria-invalid=\" false \" aria-errormessage=\"error\"><span id=\"error\">Invalid value</span>"
-            )
-            yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* newPage
-              yield* page.goto(url)
-              yield* page.locator("input").pipe(Expect.toHaveAccessibleErrorMessage("Invalid value"))
-            }))
-          }),
-        timeout
-      )
-
       it.effect(
         "expects accessible error messages only while the element is invalid",
         () =>
@@ -6563,7 +6440,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             // aria-invalid other than absent, empty or false (any case), or failed native validation, reads
             // aria-errormessage's references, hidden ones included.
             const { url } = yield* fixture(() =>
-              `<span id="required" hidden>Required</span><span id="field">field</span><input id="invalid" aria-invalid="true" aria-errormessage="required field"><input id="upper" aria-invalid="FALSE" aria-errormessage="required"><input id="blank" aria-invalid=" " aria-errormessage="required"><input id="spelling" aria-invalid="spelling" aria-errormessage="required"><input id="other" aria-invalid="yes" aria-errormessage="required"><input id="valid" aria-errormessage="required"><input id="native" type="email" aria-errormessage="field"><div id="group" role="radiogroup" aria-invalid="true" aria-errormessage="field"></div>`
+              `<span id="required" hidden>Required</span><span id="field">field</span><input id="invalid" aria-invalid="true" aria-errormessage="required field"><input id="upper" aria-invalid="FALSE" aria-errormessage="required"><input id="blank" aria-invalid=" " aria-errormessage="required"><input id="spelling" aria-invalid="spelling" aria-errormessage="required"><input id="other" aria-invalid="yes" aria-errormessage="required"><input id="valid" aria-errormessage="required"><input id="native" type="email" aria-errormessage="field"><div id="group" role="radiogroup" aria-invalid="true" aria-errormessage="field"></div><input id="padded" aria-invalid=" false " aria-errormessage="required"><input id="native-false" required aria-invalid="false" aria-errormessage="required">`
             )
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* newPage
@@ -6578,6 +6455,9 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               yield* page.locator("#spelling").pipe(Expect.toHaveAccessibleErrorMessage("Required"))
               yield* page.locator("#other").pipe(Expect.toHaveAccessibleErrorMessage("Required"))
               yield* page.locator("#group").pipe(Expect.toHaveAccessibleErrorMessage("field"))
+              // Only an exact false, in any case, is false: a padded one is an unknown token, so invalid.
+              yield* page.locator("#padded").pipe(Expect.toHaveAccessibleErrorMessage("Required"))
+              yield* page.locator("#native-false").pipe(Expect.toHaveAccessibleErrorMessage("Required"))
               yield* page.locator("#valid").pipe(Expect.toHaveAccessibleErrorMessage("Required", { not: true }))
               yield* page.locator("#native").fill("not an address")
               yield* page.locator("#native").pipe(Expect.toHaveAccessibleErrorMessage("field"))
@@ -6586,7 +6466,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                   [page.locator("#upper"), "Required", undefined, ""],
                   [invalid, /required/, { ignoreCase: false }, "Required field"],
                   [invalid, "Required field", { not: true }, "Required field"],
-                  [page.locator("input"), "", { not: true }, { matches: 7 }]
+                  [page.locator("input"), "", { not: true }, { matches: 9 }]
                 ] as const
               ) {
                 const error = yield* locator.pipe(
