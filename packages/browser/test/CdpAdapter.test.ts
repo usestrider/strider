@@ -4167,7 +4167,11 @@ describe("CDP context publication", () => {
       assert.isDefined(initializationFailure, "CDP initialization must fail after the expired deadline")
       assert.isDefined(createdId)
       if (!stallDisposalWrite) assert.include(sent, "Target.disposeBrowserContext")
-      return { listed: yield* browser.contexts, context: createdId!.context }
+      // A refused removal's release is delivered in the connection's scope, after the creation ends
+      const listed = refuseDisposal
+        ? yield* browser.contexts.waitFor((list) => list.length === 2)
+        : yield* browser.contexts
+      return { listed, context: createdId!.context }
     },
     onTestClock
   )

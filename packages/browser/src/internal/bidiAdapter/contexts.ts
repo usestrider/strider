@@ -290,9 +290,14 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
                   settle(entry.proxyUsed === true || state.contexts.has(entry.id))
                 })
               ),
-              // Unremoved, the context is released: listed as one the connection observes
+              // Unremoved, the context is released: listed as one the connection observes, delivered in the
+              // connection's scope so the rollback's budget doesn't wait on the fold
               Effect.tapError(() =>
-                state.buffer.run(() => state.buffer.emit({ _tag: "UserContextReleased", context: entry.id }))
+                Effect.sync(() =>
+                  state.buffer.start(
+                    state.buffer.run(() => state.buffer.emit({ _tag: "UserContextReleased", context: entry.id }))
+                  )
+                )
               )
             ),
             `BiDi context ${entry.id} initialization rollback could not confirm removal`

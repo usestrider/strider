@@ -187,7 +187,8 @@ const rollback = (state: State, id: UserContext.Id) =>
     )
     if (removed) return
     yield* Effect.logWarning(`CDP context ${id} initialization rollback could not confirm removal`)
-    yield* state.buffer.run(() => state.buffer.emit({ _tag: "UserContextReleased", context: id }))
+    // Delivered in the connection's scope, so the rollback's budget doesn't wait on the fold
+    state.buffer.start(state.buffer.run(() => state.buffer.emit({ _tag: "UserContextReleased", context: id })))
   }))
 
 export const removeUserContext = Effect.fnUntraced(function*(state: State, id: UserContext.Id) {
