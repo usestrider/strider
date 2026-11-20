@@ -10,6 +10,7 @@ import { Firefox } from "@usestrider/browser/firefox"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import { assertPinned, firefox } from "../browsers.ts"
+import { anyFrame } from "./anyFrame.ts"
 import { attaching, firefoxAttachable } from "./attaching.ts"
 import { clientCertificates } from "./clientCertificates.ts"
 import { contents } from "./contents.ts"
@@ -47,6 +48,7 @@ slice("Firefox", backend, (info) => assertPinned("Firefox", info.version, firefo
 events("Firefox", backend)
 modules("Firefox", backend)
 interaction("Firefox", backend)
+anyFrame("Firefox", backend)
 declarations("Firefox", backend)
 contents("Firefox", backend)
 tooling("Firefox", backend)

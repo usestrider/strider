@@ -1,0 +1,145 @@
+/**
+ * The search across a page's frames (`page.anyFrame`, `frameLocator.anyFrame`): one case for each rule of it.
+ */
+import { assert, describe, layer } from "@effect/vitest"
+import { type Browser, Deadline, Locator } from "@usestrider/browser"
+import * as Effect from "effect/Effect"
+import type * as Layer from "effect/Layer"
+import { site } from "../adapter/harness.ts"
+import * as SharedContext from "./sharedContext.ts"
+import { newPage } from "./sharedContext.ts"
+
+const timeout = 60_000
+
+const fixtureUrl = (origin: string, html: string) => `${origin}/fixture?html=${encodeURIComponent(html)}`
+
+/** A button that writes "clicked" into the `#out` of its own document. */
+const button = (label: string) =>
+  `<button onclick="document.getElementById('out').textContent='clicked'">${label}</button><p id="out"></p>`
+
+const frame = (origin: string, html: string) => `<iframe src="${fixtureUrl(origin, html)}"></iframe>`
+
+const strict = (error: unknown, frames: number) => {
+  assert(Locator.isLocatorError(error), String(error))
+  assert.strictEqual(error.reason._tag, "StrictViolation")
+  if (error.reason._tag === "StrictViolation") {
+    assert.include(error.reason.hint, `${frames} frames`)
+  }
+}
+
+export const anyFrame = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.Layer<Browser.Browser, unknown>) =>
+  describe(`${name} any-frame locators`, () => {
+    layer(SharedContext.layer(backend), { excludeTestServices: true, timeout })((suite) => {
+      const it = SharedContext.guard(suite)
+
+      it.effect(
+        "acts in the main frame or the one child frame that matches",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { origin } = yield* site
+            const page = yield* newPage
+            yield* page.goto(fixtureUrl(origin, `${button("Main")}${frame(origin, button("Pay"))}`))
+            yield* page.anyFrame.getByRole("button", { name: "Main" }).click()
+            assert.strictEqual(yield* page.locator("#out").readText, "clicked")
+            yield* page.anyFrame.getByRole("button", { name: "Pay" }).click()
+            assert.strictEqual(yield* page.frame(page.locator("iframe")).locator("#out").readText, "clicked")
+            assert.strictEqual(yield* page.anyFrame.getByRole("button", { name: "Pay" }).count, 1)
+          })),
+        timeout
+      )
+
+      it.effect(
+        "fails strictly when more than one frame matches, for actions and count alike",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { origin } = yield* site
+            const page = yield* newPage
+            yield* page.goto(fixtureUrl(origin, `${button("Pay")}${frame(origin, button("Pay"))}`))
+            const pay = page.anyFrame.getByRole("button", { name: "Pay" })
+            strict(yield* pay.click().pipe(Deadline.within("1 second"), Effect.flip), 2)
+            strict(yield* pay.count.pipe(Effect.flip), 2)
+            assert.strictEqual(yield* page.locator("#out").readText, "")
+          })),
+        timeout
+      )
+
+      it.effect(
+        "matches nothing until a frame with a match appears, and waits for it",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { origin } = yield* site
+            const page = yield* newPage
+            const later = frame(origin, button("Pay")).replaceAll("\"", "'")
+            yield* page.goto(
+              fixtureUrl(
+                origin,
+                `<p id="out"></p><button id="add" onclick="document.body.insertAdjacentHTML('beforeend', &quot;${later}&quot;)">Add</button>`
+              )
+            )
+            const pay = page.anyFrame.getByRole("button", { name: "Pay" })
+            assert.strictEqual(yield* pay.count, 0)
+            const missing = yield* pay.readText.pipe(Effect.flip)
+            assert(Locator.isLocatorError(missing), String(missing))
+            assert.strictEqual(missing.reason._tag, "NoMatch")
+            const clicked = yield* pay.click().pipe(Deadline.within("5 seconds"), Effect.forkScoped)
+            yield* page.locator("#add").click()
+            yield* clicked.await
+            assert.strictEqual(yield* page.frame(page.locator("iframe")).locator("#out").readText, "clicked")
+          })),
+        timeout
+      )
+
+      it.effect("never matches a chain across a frame boundary", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* newPage
+          yield* page.goto(fixtureUrl(origin, `<div id="outer">${frame(origin, `<p id="inner">x</p>`)}</div>`))
+          assert.strictEqual(yield* page.anyFrame.locator("#outer #inner").count, 0)
+          assert.strictEqual(yield* page.anyFrame.locator("#inner").count, 1)
+        })), timeout)
+
+      it.effect(
+        "enters a frame it found, and searches below a frame locator only",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { origin } = yield* site
+            const page = yield* newPage
+            const checkout = `<iframe id="checkout" src="${
+              fixtureUrl(origin, `${button("Pay")}${frame(origin, button("Pay"))}`)
+            }"></iframe>`
+            yield* page.goto(fixtureUrl(origin, `${button("Pay")}${frame(origin, checkout)}`))
+            // The entered frame's own subframes aren't searched
+            const entered = page.anyFrame.frame(page.anyFrame.locator("#checkout"))
+            yield* entered.getByRole("button", { name: "Pay" }).click()
+            assert.strictEqual(yield* entered.locator("#out").readText, "clicked")
+            // Below the frame locator, its subframe and it both match; the page's own button is outside
+            const below = page.frame(page.locator("iframe")).anyFrame
+            assert.strictEqual(yield* below.locator("#checkout").count, 1)
+            strict(yield* below.getByRole("button", { name: "Pay" }).count.pipe(Effect.flip), 2)
+            assert.strictEqual(yield* page.locator("#out").readText, "")
+          })),
+        timeout
+      )
+
+      it.effect("searches past a sibling frame that has no document yet", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { origin } = yield* site
+          const page = yield* newPage
+          yield* page.goto(
+            fixtureUrl(origin, `<iframe src="${origin}/pending-page"></iframe>${frame(origin, button("Pay"))}`),
+            { waitUntil: "commit" }
+          )
+          yield* page.anyFrame.getByRole("button", { name: "Pay" }).click().pipe(Deadline.within("1 second"))
+          assert.strictEqual(yield* page.anyFrame.locator("#out").readText, "clicked")
+        })), timeout)
+
+      it.effect("acts in a cross-site frame", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { origin, crossSite } = yield* site
+          const page = yield* newPage
+          yield* page.goto(fixtureUrl(origin, frame(crossSite, button("Pay"))))
+          yield* page.anyFrame.getByRole("button", { name: "Pay" }).click()
+          assert.strictEqual(yield* page.anyFrame.locator("#out").readText, "clicked")
+        })), timeout)
+    })
+  })

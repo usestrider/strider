@@ -292,6 +292,8 @@ self.addEventListener("fetch", (event) => {
     response.writeHead(200, { "content-type": "image/svg+xml" })
     response.write("<svg xmlns=\"http://www.w3.org/2000/svg\">")
   },
+  // A page that never answers, not even its headers: a frame loading it has no document
+  "/pending-page": () => {},
   // A script that never completes: a deferred one holds DOMContentLoaded back while the page is interactive
   "/pending-script": (_request, response) => {
     response.writeHead(200, { "content-type": "text/javascript" })
