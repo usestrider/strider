@@ -82,6 +82,12 @@ export type Step =
    */
   | { readonly _tag: "Frame" }
   /**
+   * A search across frames: the steps after it, up to the next frame boundary, resolve in whichever one document
+   * of the current one and the frames under it, at any depth, they match in. L1 resolves it before the engine
+   * sees the steps.
+   */
+  | { readonly _tag: "AnyFrame" }
+  /**
    * A snapshot's ref: the one node it was given to, in the document and engine that gave
    * it, never another. L1 checks the document; the engine its generation and the node.
    */
@@ -473,7 +479,12 @@ export const Response = Schema.Union([
      */
     provisional: Schema.optional(Schema.Boolean)
   }),
-  Schema.TaggedStruct("Strict", { candidates: Schema.Array(Candidate), count: Schema.Number }),
+  Schema.TaggedStruct("Strict", {
+    candidates: Schema.Array(Candidate),
+    count: Schema.Number,
+    /** How many frames matched, for a search across frames that matched in more than one. */
+    frames: Schema.optionalKey(Schema.Number)
+  }),
   Schema.TaggedStruct("InvalidSelector", {
     selector: Schema.String,
     message: Schema.String,

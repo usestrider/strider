@@ -2033,6 +2033,105 @@ export interface ReadonlyFrameLocator extends Queries<ReadonlyLocator> {
    * ```
    */
   frame(iframe: ReadonlyLocator): ReadonlyFrameLocator
+  /**
+   * Searches this frame's document and the frames under it, at any depth, but not its parents.
+   *
+   * **Example** (Finding a button somewhere inside a checkout frame)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const payLabel = Effect.fn("payLabel")(function*(page: Page.ReadonlyPage) {
+   *   const checkout = page.frame(page.locator("iframe#checkout"))
+   *   return yield* checkout.anyFrame.getByRole("button", { name: "Pay" }).readText
+   * })
+   * ```
+   */
+  readonly anyFrame: ReadonlyAnyFrameLocator
+}
+
+/**
+ * A search of a document and the frames under it, at any depth, for the frame a chain matches in: its locators
+ * act in that one frame.
+ *
+ * **Details**
+ *
+ * Each part of a chain up to the next frame boundary is tested in every document of the search, so a chain never
+ * matches across a frame boundary. When one document has matches, the operation goes on there, with the usual
+ * strictness inside it. When none has, it is the same as a frame that isn't there yet: reads fail with `NoMatch`,
+ * `count` returns 0, and actions and expectations wait. A frame with no document yet matches nothing and doesn't
+ * hold the search up.
+ *
+ * **Gotchas**
+ *
+ * - When more than one document has matches, every operation fails with `Locator.StrictViolation`, `count` and
+ *   `all` included, rather than picking one: which frame loaded first doesn't decide.
+ * - `and`, `or`, and `filter({ has })` take operands built from the same search.
+ *
+ * **Example** (Reading a label in whichever frame holds it)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const brand = Effect.fn("brand")(function*(page: Page.ReadonlyPage) {
+ *   return yield* page.anyFrame.getByTestId("card-brand").readText
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export interface ReadonlyAnyFrameLocator extends Queries<ReadonlyLocator> {
+  /**
+   * Enters the frame an iframe this search found holds. The entered frame's own subframes aren't searched; use
+   * its `anyFrame` for that.
+   *
+   * **Example** (Entering a frame found by the search)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const total = Effect.fn("total")(function*(page: Page.ReadonlyPage) {
+   *   const checkout = page.anyFrame.frame(page.anyFrame.locator("iframe#checkout"))
+   *   return yield* checkout.getByTestId("total").readText
+   * })
+   * ```
+   */
+  frame(iframe: ReadonlyLocator): ReadonlyFrameLocator
+}
+
+/**
+ * A search across frames on a page you control, whose locators can act.
+ *
+ * **Example** (Paying in whichever frame holds the button)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const pay = Effect.fn("pay")(function*(page: Page.Page) {
+ *   yield* page.anyFrame.getByRole("button", { name: "Pay" }).click()
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export interface AnyFrameLocator extends ReadonlyAnyFrameLocator {
+  getByRole(role: AriaRole.AriaRole, options?: RoleOptions | undefined): Locator
+  getByText(text: string | RegExp, options?: TextOptions | undefined): Locator
+  getByLabel(text: string | RegExp, options?: TextOptions | undefined): Locator
+  getByPlaceholder(text: string | RegExp, options?: TextOptions | undefined): Locator
+  getByAltText(text: string | RegExp, options?: TextOptions | undefined): Locator
+  getByTitle(text: string | RegExp, options?: TextOptions | undefined): Locator
+  getByTestId(id: string | RegExp): Locator
+  locator(selector: string | XPath): Locator
+  frame(iframe: ReadonlyLocator): FrameLocator
 }
 
 /**
@@ -2065,6 +2164,7 @@ export interface FrameLocator extends ReadonlyFrameLocator {
   getByTestId(id: string | RegExp): Locator
   locator(selector: string | XPath): Locator
   frame(iframe: ReadonlyLocator): FrameLocator
+  readonly anyFrame: AnyFrameLocator
   /**
    * Adds a `<script>` element to the iframe's current document, returning it once it has loaded, run, or been
    * accepted: a URL's script loads, a classic inline script runs, and an inline module is accepted without waiting

@@ -283,7 +283,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     const other = this.samePageLocator(iframe, "frame")
     const mine = Runtime.split(this.steps)
     const theirs = Runtime.split(other.steps)
-    if (JSON.stringify(mine.frames) !== JSON.stringify(theirs.frames)) {
+    if (JSON.stringify(mine.frames) !== JSON.stringify(theirs.frames) || mine.searched !== theirs.searched) {
       throw new Error("Locator.frame: the iframe's locator is in another frame than this one")
     }
     // The iframe under this locator: its own steps when it was built from this one, or its query applied here
@@ -327,7 +327,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     }
     const mine = Runtime.split(this.steps)
     const theirs = Runtime.split(other.steps)
-    if (JSON.stringify(mine.frames) !== JSON.stringify(theirs.frames)) {
+    if (JSON.stringify(mine.frames) !== JSON.stringify(theirs.frames) || mine.searched !== theirs.searched) {
       throw new Error(`Locator.${member}: the other locator is in another frame`)
     }
     return theirs.last
@@ -1201,6 +1201,18 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
   }
 
   strict(operation: string, response: Extract<Engine.Response, { _tag: "Strict" }>, id: Diagnostics.OperationId) {
+    if (response.frames !== undefined) {
+      return this.error(
+        operation,
+        new Locator.StrictViolation({
+          candidates: response.candidates,
+          suggestions: [],
+          hint:
+            `${response.count} elements match in ${response.frames} frames, and a search across frames needs one; narrow the locator, or enter its frame with frame()`
+        }),
+        id
+      )
+    }
     const visible = response.candidates.filter((candidate) => candidate.visible).length
     return this.error(
       operation,
@@ -2166,8 +2178,39 @@ export const frameLocator = (owner: Owner, steps: ReadonlyArray<Engine.Step>): L
         "FrameLocator.addStyleTag",
         Tags.style(owner.runtime, style)
       ),
+    get anyFrame() {
+      return anyFrameLocator(owner, inside)
+    },
     toString: () => `FrameLocator(page.frame(page.${describeSteps(steps)}))`
   } as Locator.FrameLocator
+}
+
+/**
+ * A search of the document `within` leads to and the frames under it: a search step after `within`, which every
+ * locator it makes begins with.
+ */
+export const anyFrameLocator = (owner: Owner, within: ReadonlyArray<Engine.Step>): Locator.AnyFrameLocator => {
+  const inside: ReadonlyArray<Engine.Step> = [...within, { _tag: "AnyFrame" }]
+  const make = (each: ReadonlyArray<Engine.Step>) => new LocatorImpl(owner, each)
+  return {
+    ...queries(inside, make, () => testIdAttribute(owner)),
+    frame: (iframe) => {
+      if (!(iframe instanceof LocatorImpl) || iframe.owner.page.id !== owner.page.id) {
+        throw new Error("AnyFrameLocator.frame: the iframe's locator belongs to another page")
+      }
+      const theirs = Runtime.split(iframe.steps)
+      if (
+        !startsWith(iframe.steps, inside) || !theirs.searched ||
+        theirs.frames.length !== Runtime.split(inside).frames.length
+      ) {
+        throw new Error(
+          "AnyFrameLocator.frame: the iframe's locator isn't in this frame; build it from this search"
+        )
+      }
+      return frameLocator(owner, iframe.steps)
+    },
+    toString: () => `AnyFrameLocator(page.${describeSteps(inside)})`
+  } as Locator.AnyFrameLocator
 }
 
 /** `page.frame(iframe)`: the iframe may be any locator of the page's, one in a frame included. */

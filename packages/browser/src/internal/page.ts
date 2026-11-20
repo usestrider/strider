@@ -322,6 +322,9 @@ export const make = (owner: PageOwner): Page.Page => {
     ...observeMembers(owner),
     ...queries,
     frame: (iframe) => LocatorImpl.pageFrame({ runtime, page: entry, grant: owner.grant }, iframe),
+    get anyFrame() {
+      return LocatorImpl.anyFrameLocator({ runtime, page: entry, grant: owner.grant }, [])
+    },
     get viewportSize() {
       return Effect.gen(function*() {
         const record = yield* Operation.record
