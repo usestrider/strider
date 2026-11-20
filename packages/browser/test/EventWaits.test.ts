@@ -1,6 +1,7 @@
 /** A wait whose event came just before its target ended gets the event, not `TargetGone`. */
 import { assert, describe, it } from "@effect/vitest"
 import { ConsoleMessage, Page, Target, Url, UserContext } from "@usestrider/browser"
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Fold from "../src/internal/fold.ts"
@@ -36,7 +37,8 @@ describe("Event waits at their target's end", () => {
           location: Option.none(),
           origin: { _tag: "Page", page: id },
           source: { _tag: "Page" },
-          at: 0 as ConsoleMessage.ConsoleMessage["at"]
+          at: 0 as ConsoleMessage.ConsoleMessage["at"],
+          timestamp: DateTime.makeUnsafe(0)
         })
       })
       yield* fold.sink({
