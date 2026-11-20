@@ -186,6 +186,12 @@ export const observed = (owner: ObservedOwner): Page.ObservedPage => {
  * What runs a navigation or an evaluation in one navigable of a page: the page's own, or one of its frames. `ended`
  * fails once the navigable is gone, and `error` makes the operation's own error from a reason.
  */
+/** The realm an evaluation runs in, and the document it was found in, where known. */
+export interface Realm {
+  readonly realm: Target.RealmId
+  readonly document: Option.Option<Target.DocumentId>
+}
+
 export interface Driven<E> {
   readonly runtime: Runtime.Runtime
   readonly entry: Model.PageEntry
@@ -193,22 +199,29 @@ export interface Driven<E> {
   readonly ended: Effect.Effect<never, Target.TargetGone>
   readonly error: (operation: string, reason: Page.PageErrorReason, id: Diagnostics.OperationId) => E
   readonly attributes: Readonly<Record<string, string>>
-  /** The realm of a world in the navigable's current document. */
+  /**
+   * The realm of a world in the navigable's current document, with that document where the navigable says which
+   * it was, for `gone`.
+   */
   readonly realm: (
     world: Adapter.World,
     id: Diagnostics.OperationId,
     at: MonotonicInstant.MonotonicInstant
-  ) => Effect.Effect<Target.RealmId, Evaluation.Failure>
+  ) => Effect.Effect<Realm, Evaluation.Failure>
   /** What a deadline before the call says the navigable had: "page" or "frame". */
   readonly noun: string
   /** Run first: whether the handle's access still holds. */
   readonly check: Effect.Effect<void, Target.TargetGone | E>
   /**
    * What a realm's end means for this navigable, when an evaluation fails because its realm went away: a frame's
-   * removal, rather than its document's. Absent for a page, whose realm errors stand as they are.
+   * removal, rather than its document's. `document` is the one this call's realm was found in. Absent for a page,
+   * whose realm errors stand as they are.
    */
   readonly gone?:
-    | ((error: Target.TargetGone, at: MonotonicInstant.MonotonicInstant) => Effect.Effect<Target.TargetGone>)
+    | ((
+      error: Target.TargetGone,
+      document: Option.Option<Target.DocumentId>
+    ) => Effect.Effect<Target.TargetGone, Deadline.Timeout>)
     | undefined
 }
 
@@ -299,8 +312,12 @@ export const evaluateIn = <E, B, R>(
     const id = record.id
     const budget = record.budget
     const gesture = world._tag === "Main" && (yield* Effect.service(Page.UserGesture))
+    // This call's document, for what its realm's end means
+    let document = Option.none<Target.DocumentId>()
     return yield* Effect.gen(function*() {
-      const realm = yield* target.realm(world, id, budget.at)
+      const found = yield* target.realm(world, id, budget.at)
+      const realm = found.realm
+      document = found.document
       const values = yield* Evaluation.toLocal(args, realm)
       const group = yield* Evaluation.groupFor(runtime, realm, result)
       // The call is on its way: a deadline after it can't say the function didn't run
@@ -334,7 +351,7 @@ export const evaluateIn = <E, B, R>(
         return gone === undefined ? self : Effect.catchIf(
           self,
           (error): error is Target.TargetGone => Target.isTargetGone(error),
-          (error) => Effect.flatMap(gone(error, budget.at), Effect.fail)
+          (error) => Effect.flatMap(gone(error, document), Effect.fail)
         )
       },
       Effect.annotateSpans({ "browser.evaluation.user_gesture": gesture })
@@ -377,7 +394,8 @@ export const make = (owner: PageOwner): Page.Page => {
     ended: Runtime.pageEnded(entry),
     error: pageError,
     attributes: { "browser.page.id": entry.id },
-    realm: (world, id, at) => Evaluation.pageRealm(runtime, entry, world, id, at),
+    realm: (world, id, at) =>
+      Effect.map(Evaluation.pageRealm(runtime, entry, world, id, at), (realm) => ({ realm, document: Option.none() })),
     noun: "page",
     check: Effect.void
   }

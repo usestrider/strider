@@ -145,7 +145,7 @@ export const make = (owner: Owner): Frame.Frame => {
     world: Adapter.World,
     id: Diagnostics.OperationId,
     at: MonotonicInstant.MonotonicInstant
-  ): Effect.Effect<Target.RealmId, Evaluation.Failure> =>
+  ): Effect.Effect<PageImpl.Realm, Evaluation.Failure> =>
     Effect.gen(function*() {
       while (true) {
         if ((yield* BrowserClock.left(at)) <= 0) return yield* Effect.fail<Evaluation.Failure>({ _tag: "Deadline" })
@@ -171,21 +171,18 @@ export const make = (owner: Owner): Frame.Frame => {
             failure._tag === "Gone" ? Effect.succeed(Option.none<Target.RealmId>()) : Effect.fail(failure)
           )
         )
-        if (Option.isSome(found)) {
-          documents.set(found.value, document.value)
-          return found.value
-        }
+        if (Option.isSome(found)) return { realm: found.value, document }
       }
     })
 
   /**
-   * An evaluation whose realm went away: the frame's removal when the realm's document ended with its frame, and
-   * the realm's own end otherwise, as when a navigation replaced the document. A browser can report the realm's end
-   * before the document's or the frame's, so the first of the document's recorded end and the frame leaving the
-   * page decides.
+   * An evaluation whose realm went away: the frame's removal when the frame has left the page or the call's document
+   * ended with it, and the realm's own end otherwise, as when a navigation replaced the document. A browser can
+   * report the realm's end just before the frame's removal, so one round trip first brings in what the browser sent
+   * before it; whatever the model says then decides, at once.
    */
   const gone = Effect.fnUntraced(
-    function*(error: Target.TargetGone, at: MonotonicInstant.MonotonicInstant) {
+    function*(error: Target.TargetGone, document: Option.Option<Target.DocumentId>) {
       if (error.target._tag !== "Realm") return error
       const detached = new Target.TargetGone({
         target,
@@ -193,21 +190,13 @@ export const make = (owner: Owner): Frame.Frame => {
         diagnostics: error.diagnostics
       })
       if (Option.isNone((yield* state.get).frame)) return detached
-      const used = documents.get(error.target.id)
-      documents.delete(error.target.id)
-      const document = Option.flatMap(Option.fromUndefinedOr(used), model.document)
-      if (Option.isNone(document)) return error
-      const removed = yield* Deferred.await(document.value.ended).pipe(
-        Effect.map((why) => why._tag === "FrameDetached"),
-        Effect.raceFirst(Effect.as(Effect.flip(ended), true)),
-        BrowserClock.until(at)
-      )
-      return Option.getOrElse(removed, () => false) ? detached : error
+      yield* model.adapter.settled(frame)
+      if (Option.isNone((yield* state.get).frame)) return detached
+      const entry = Option.flatMap(document, model.document)
+      const why = Option.isSome(entry) ? yield* Deferred.poll(entry.value.ended) : Option.none()
+      return Option.isSome(why) && (yield* why.value)._tag === "FrameDetached" ? detached : error
     }
   )
-
-  /** The document each realm a frame evaluation used belongs to, for what its end means. */
-  const documents = new Map<Target.RealmId, Target.DocumentId>()
 
   const driven: PageImpl.Driven<Frame.FrameError> = {
     runtime,
