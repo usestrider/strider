@@ -2108,6 +2108,125 @@ export const contents = (
           }))
         }), timeout)
 
+      it.effect("toSatisfy waits for its match, then for the page function to return true after a change", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(
+              fixtureUrl(
+                origin,
+                `<script>setTimeout(() => { const p = document.createElement("p"); p.id = "x"; document.body.append(p);` +
+                  ` setTimeout(() => p.dataset.ready = "yes", 150) }, 150)</script>`
+              ),
+              { waitUntil: "load" }
+            )
+            const ready = (element: Element) => (element as HTMLElement).dataset["ready"] === "yes"
+            if (yield* isolatedRefused(page.locator("#x").pipe(Expect.toSatisfy(ready)))) return
+            yield* page.locator("#x").pipe(Expect.toSatisfy(ready), Deadline.within("5 seconds"))
+            assert.strictEqual(yield* page.locator("#x").evaluate((element) => element.getAttribute("data-ready")), "yes")
+          }))
+        }), timeout)
+
+      it.effect("toSatisfy passes its arguments, a handle among them, after the match", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<p id="x" data-n="3">hello</p>`), { waitUntil: "load" })
+            if (yield* isolatedRefused(Expect.toSatisfy(page.locator("#x"), () => true))) return
+            const expected = yield* page.evaluateHandle(() => ({ text: "hello" }))
+            yield* Expect.toSatisfy(
+              page.locator("#x"),
+              (element, wanted: { readonly text: string }, n: number) =>
+                element.textContent === wanted.text && (element as HTMLElement).dataset["n"] === String(n),
+              expected,
+              3
+            ).pipe(Deadline.within("1 second"))
+          }))
+        }), timeout)
+
+      it.effect("toSatisfy awaits a promise the page function returns", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<p id="x">hello</p>`), { waitUntil: "load" })
+            const later = async (element: Element) => {
+              await new Promise((resume) => setTimeout(resume, 20))
+              return element.textContent === "hello"
+            }
+            if (yield* isolatedRefused(page.locator("#x").pipe(Expect.toSatisfy(later)))) return
+            yield* page.locator("#x").pipe(Expect.toSatisfy(later), Deadline.within("1 second"))
+            // A promise of something other than true doesn't pass
+            const failed = reasonOf(
+              yield* Effect.exit(
+                page.locator("#x").pipe(
+                  Expect.toSatisfy(async () => "true" as unknown as boolean),
+                  Deadline.within("300 millis")
+                )
+              )
+            )
+            assert.strictEqual(failed?._tag, "ExpectationFailed")
+          }))
+        }), timeout)
+
+      it.effect("toSatisfy fails at once with the locator's error when the page function throws", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<p id="x">hello</p>`), { waitUntil: "load" })
+            const throws = (): boolean => {
+              throw new Error("not yet")
+            }
+            if (yield* isolatedRefused(page.locator("#x").pipe(Expect.toSatisfy(throws)))) return
+            const started = Date.now()
+            const failed = reasonOf(
+              yield* Effect.exit(page.locator("#x").pipe(Expect.toSatisfy(throws), Deadline.within("5 seconds")))
+            ) as Locator.LocatorError
+            assert.strictEqual(failed._tag, "LocatorError")
+            assert.strictEqual(failed.reason._tag, "EvaluationThrown")
+            assert.isBelow(Date.now() - started, 4000)
+            const rejected = reasonOf(
+              yield* Effect.exit(
+                page.locator("#x").pipe(
+                  Expect.toSatisfy(() => Promise.reject(new Error("rejected"))),
+                  Deadline.within("5 seconds")
+                )
+              )
+            ) as Locator.LocatorError
+            assert.strictEqual(rejected.reason._tag, "EvaluationThrown")
+          }))
+        }), timeout)
+
+      it.effect("toSatisfy keeps checking through no match or several, and fails with what it saw", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<p>a</p><p>b</p><button>Save</button>`), { waitUntil: "load" })
+            if (yield* isolatedRefused(page.locator("p").pipe(Expect.toSatisfy(() => true)))) return
+            const several = reasonOf(
+              yield* Effect.exit(page.locator("p").pipe(Expect.toSatisfy(() => true), Deadline.within("300 millis")))
+            ) as unknown as Expect.ExpectationFailed
+            assert.strictEqual(several._tag, "ExpectationFailed")
+            assert.deepStrictEqual(Option.getOrThrow(several.last).value, { matches: 2 })
+            assert.isAbove(several.checks.count, 1)
+            const none = reasonOf(
+              yield* Effect.exit(
+                page.getByRole("button", { name: "Sav", exact: true }).pipe(
+                  Expect.toSatisfy(() => true),
+                  Deadline.within("300 millis")
+                )
+              )
+            ) as unknown as Expect.ExpectationFailed
+            assert.strictEqual(none._tag, "ExpectationFailed")
+            assert.deepStrictEqual(Option.getOrThrow(none.last).value, { matches: 0 })
+            assert.deepStrictEqual(none.suggestions, [`page.getByRole("button", { name: "Save", exact: true })`])
+          }))
+        }), timeout)
+
       it.effect("evaluates snapshot matches detached between query and callback", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
