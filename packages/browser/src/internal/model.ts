@@ -322,8 +322,9 @@ export interface PageEntry {
   /** The page the backend says opened this one; `None` when it names none. */
   readonly openerId: Option.Option<Target.NavigableId>
   /**
-   * The opener's entry, once the model has it: an adopted page can be listed before its opener, so this is set
-   * when the opener is added, and kept after it ends, so a crashed opener stays readable.
+   * The opener's page, once the model has it, or the page of the frame that opened this one: an adopted page can
+   * be listed before its opener, so this is set when the opener's page or frame is added, and kept after it ends,
+   * so a crashed opener stays readable.
    */
   opener: PageEntry | undefined
 }

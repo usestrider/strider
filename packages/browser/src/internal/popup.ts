@@ -1,6 +1,7 @@
 /**
  * The popups a page opens (`Popup`): which entries a filter takes and how one is delivered.
  */
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as SubscriptionRef from "effect/SubscriptionRef"
@@ -46,7 +47,8 @@ export const { history, next, stream } = EventModule.make<
 })
 
 // The opener as an observed page: a popup taken over with `control` can have an opener the caller doesn't control.
-// `None` once the opener closed, but not after it crashed, whose handle still says so through `closed`
+// `None` once the opener closed, and once its context ended, but not after the opener alone crashed, whose handle
+// still says so through `closed`
 export const opener = (target: Page.ObservedPage): Effect.Effect<Option.Option<Page.ObservedPage>, Page.PageError> => {
   const behind = Handles.page(target)
   return Effect.flatMap(SubscriptionRef.get(behind.runtime.model.adapter.capabilities), (capabilities) => {
@@ -71,7 +73,8 @@ export const opener = (target: Page.ObservedPage): Effect.Effect<Option.Option<P
     if (entry === undefined) return Effect.succeed(Option.none())
     const status = entry.state.getUnsafe().status
     return Effect.succeed(
-      status._tag === "Closed" && status.reason._tag !== "PageCrashed"
+      status._tag === "Closed" &&
+        (status.reason._tag !== "PageCrashed" || Deferred.isDoneUnsafe(entry.contextEntry.closed))
         ? Option.none()
         : Option.some(behind.runtime.observed(entry))
     )
