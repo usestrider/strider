@@ -5151,6 +5151,45 @@ it.effect("keeps proxy credential bindings separate by scheme at the same host a
   }))
 
 describe("BiDi adopted popup openers", () => {
+  it.effect("links surviving popups when their shared opener frame arrives after one popup ends", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { state, page, facts } = yield* withPage()
+      const fold = yield* Fold.make({ release: () => Effect.void })
+      let cursor = 0
+      const pump = Effect.fnUntraced(function*() {
+        yield* state.buffer.flush
+        while (cursor < facts.length) yield* fold.sink(facts[cursor++]!)
+      })
+      const popups = ["P1", "P2", "P3"].map((context) =>
+        Tree.addNavigable(state, {
+          context: context as BrowsingContext.BrowsingContext,
+          userContext: "default",
+          originalOpener: "F1",
+          url: "about:blank"
+        }, true)!
+      )
+      yield* pump()
+      const entries = popups.map((popup) => Option.getOrThrow(fold.page(popup.id)))
+      for (const entry of entries) assert.strictEqual(entry.opener, undefined)
+      const reserved = state.reservedIds.get("F1")!
+      Tree.removeNavigable(state, popups[0]!, new Target.PageClosed({ by: "command" }), "test")
+      yield* pump()
+      assert.deepStrictEqual(reserved.popups, new Set(popups.slice(1).map((popup) => popup.id)))
+      const frame = Tree.addNavigable(state, {
+        context: "F1" as BrowsingContext.BrowsingContext,
+        parent: "C1",
+        userContext: "default",
+        originalOpener: null,
+        url: "about:blank"
+      }, true)!
+      yield* pump()
+      assert.strictEqual(frame.id, reserved.id)
+      assert.strictEqual(state.reservedIds.size, 0)
+      const opener = Option.getOrThrow(fold.page(page.id))
+      assert.strictEqual(entries[0]!.opener, undefined)
+      for (const entry of entries.slice(1)) assert.strictEqual(entry.opener, opener)
+    })))
+
   it.effect("resolves an iframe opener to its page when the popup is listed first", () =>
     Effect.scoped(Effect.gen(function*() {
       const { state, page, facts } = yield* withPage()

@@ -3960,3 +3960,81 @@ it.effect("falls back for malformed network and paused request URLs", () =>
       assert.strictEqual(obligation.subject.request.url, "about:blank")
     } else assert.fail("expected a paused request")
   }))
+
+describe("CDP popup opener reservations", () => {
+  const setup = Effect.fnUntraced(function*() {
+    const handlers = Targets.register(Kit.handlers<State.Event>())
+    const sessions = new Map<string, ProtocolClient.Session>()
+    const localControl: ProtocolClient.FoldControl = {
+      ...control,
+      session: (key) => sessions.get(key)
+    }
+    const facts: Array<Adapter.Fact> = []
+    const buffer = yield* Kit.makeFactBuffer((fact) => Effect.sync(() => void facts.push(fact)))
+    buffer.connect(localControl)
+    const state = State.make({
+      handlers,
+      cleanupScope: yield* Effect.scope,
+      connect: { sink: () => Effect.void, ownership: "attached" },
+      ids: Kit.makeIds(),
+      buffer,
+      control: localControl,
+      root: () => session,
+      release: Responses.release
+    })
+    state.contexts.set(state.defaultContext, new State.ContextEntry(state.defaultContext, undefined, true))
+    const attach = (id: string, openerId?: string) => {
+      const child = { ...session, key: id } as ProtocolClient.Session
+      sessions.set(id, child)
+      handlers.apply("Target.attachedToTarget", {
+        sessionId: id,
+        waitingForDebugger: false,
+        targetInfo: { targetId: id, type: "page", title: "", url: "about:blank", attached: true, openerId }
+      }, { state, target: undefined })
+      return state.targetsById.get(id)!.page!
+    }
+    return { state, handlers, attach, facts }
+  })
+
+  it.effect("keeps the shared reservation until the opener attaches after one popup closes", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { state, attach, facts } = yield* setup()
+      const first = attach("P1", "O")
+      const second = attach("P2", "O")
+      const reserved = state.reservedIds.get("O")!
+      assert.deepStrictEqual(reserved.popups, new Set([first.id, second.id]))
+      Targets.ended(state, first.target.session, new Protocol.SessionEnded({ why: "targetDestroyed" }))
+      assert.deepStrictEqual(reserved.popups, new Set([second.id]))
+      const opener = attach("O")
+      assert.strictEqual(opener.id, reserved.id)
+      assert.strictEqual(state.reservedIds.size, 0)
+      yield* state.buffer.flush
+      const added = facts.find((fact) => fact._tag === "PageAdded" && fact.page === second.id)
+      assert(added?._tag === "PageAdded" && added.origin._tag !== "Created")
+      assert.deepStrictEqual(added.origin.opener, Option.some(opener.id))
+    })))
+
+  for (const end of ["detach", "crash"] as const) {
+    it.effect(`releases the shared reservation when the last popup ends by ${end}`, () =>
+      Effect.scoped(Effect.gen(function*() {
+        const { state, handlers, attach } = yield* setup()
+        const first = attach("P1", "O")
+        const second = attach("P2", "O")
+        const finish = (page: State.PageEntry) => {
+          if (end === "detach") {
+            Targets.ended(state, page.target.session, new Protocol.SessionEnded({ why: "targetDestroyed" }))
+          } else {
+            handlers.apply("Target.targetCrashed", { targetId: page.targetId, status: "crashed", errorCode: 1 }, {
+              state,
+              target: undefined
+            })
+          }
+        }
+        finish(first)
+        assert.isFalse(state.pages.has(first.id))
+        assert.deepStrictEqual(state.reservedIds.get("O")!.popups, new Set([second.id]))
+        finish(second)
+        assert.strictEqual(state.reservedIds.size, 0)
+      })))
+  }
+})
