@@ -27,7 +27,6 @@ import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Deadline from "./Deadline.ts"
 import * as ConsoleMessageImpl from "./internal/consoleMessage.ts"
-import * as NotBuilt from "./internal/notBuilt.ts"
 import type * as JSHandle from "./JSHandle.ts"
 import * as MonotonicInstant from "./MonotonicInstant.ts"
 import type * as Page from "./Page.ts"
@@ -395,7 +394,7 @@ export const nextCall: <PE = never, PR = never>(
   Effect.Effect<Call, PE | Target.TargetGone | Deadline.Timeout>,
   Subscription.SubscriptionError,
   Scope.Scope | PR
-> = NotBuilt.fn("ConsoleMessage.nextCall")
+> = ConsoleMessageImpl.nextCall
 
 /**
  * Subscribes to console calls and emits every match from now on, each message with handles to its arguments.
@@ -435,4 +434,4 @@ export const streamCalls: <PE = never, PR = never>(
   Stream.Stream<Call, PE | Subscription.EventOverflow | Target.TargetGone>,
   Subscription.SubscriptionError,
   Scope.Scope | PR
-> = NotBuilt.fn("ConsoleMessage.streamCalls")
+> = ConsoleMessageImpl.streamCalls

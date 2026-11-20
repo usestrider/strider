@@ -98,6 +98,8 @@ export interface Registry {
     context: UserContext.Id
   ) => Option.Option<Extract<Adapter.Declaration, { _tag: "Downloads" }>["behavior"]>
   readonly fileChooser: (placement: Placement) => boolean
+  /** Whether a placement's console messages carry their arguments as handles. */
+  readonly consoleArguments: (placement: Placement) => boolean
   /** Whether a placement's authentication challenges are paused, whatever its intercepts. */
   readonly challenges: (placement: Placement) => boolean
   /**
@@ -224,7 +226,8 @@ export const make = (): Registry => {
       return winner?.declaration._tag === "Downloads" ? Option.some(winner.declaration.behavior) : Option.none()
     },
     fileChooser: (placement) => inScope(placement).some((entry) => entry.declaration._tag === "FileChooser"),
-    challenges: (placement) => inScope(placement).some((entry) => entry.declaration._tag === "Challenges")
+    challenges: (placement) => inScope(placement).some((entry) => entry.declaration._tag === "Challenges"),
+    consoleArguments: (placement) => inScope(placement).some((entry) => entry.declaration._tag === "ConsoleArguments")
   }
   return registry
 }

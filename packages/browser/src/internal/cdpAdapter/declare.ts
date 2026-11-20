@@ -748,7 +748,9 @@ const applyToTarget = (state: State, declaration: Adapter.Declaration, target: T
         Effect.void
     case "BodyCollection":
       return keepBodies(state, target, page)
+    // The console handler reads the registry as each message arrives
     case "Downloads":
+    case "ConsoleArguments":
       return Effect.void
   }
 }

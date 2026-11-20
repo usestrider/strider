@@ -295,6 +295,8 @@ export class HandleImpl<A> implements JSHandle.JSHandle<A> {
   readonly runtime: Runtime.Runtime
   readonly page: Option.Option<Model.PageEntry>
   released = false
+  /** What its release does instead of releasing its object, for a handle that shares it with other owners. */
+  disown: Effect.Effect<void> | undefined = undefined
   constructor(
     runtime: Runtime.Runtime,
     realm: Target.RealmId,
@@ -376,6 +378,7 @@ export class HandleImpl<A> implements JSHandle.JSHandle<A> {
     return Effect.suspend(() => {
       if (this.released) return Effect.void
       this.released = true
+      if (this.disown !== undefined) return this.disown
       return Option.match(this.remote, {
         onNone: () => Effect.void,
         onSome: (handle) => this.runtime.model.adapter.releaseHandles([handle])

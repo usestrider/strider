@@ -30,6 +30,7 @@ import * as Target from "../Target.ts"
 import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as Adapter from "./adapter.ts"
+import * as ConsoleArguments from "./consoleArguments.ts"
 import * as Events from "./events.ts"
 import * as Execution from "./execution.ts"
 import * as Input from "./input.ts"
@@ -874,6 +875,9 @@ export const make = Effect.fnUntraced(function*(options: {
           const owner = Option.flatMap(fact.realm, (realm) => Option.fromNullishOr(realmOwners.get(realm))).pipe(
             Option.getOrElse(() => origin._tag === "Page" ? ownerOfPage(pageOf(origin.page)) : nobody)
           )
+          if (fact.args !== undefined && Option.isSome(fact.realm)) {
+            ConsoleArguments.keep(fact.message, fact.realm.value, fact.args)
+          }
           publish(owner, fact.message, (events) => events.console, (events) => events.console)
           return
         }
