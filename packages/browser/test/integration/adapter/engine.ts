@@ -6,6 +6,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as SubscriptionRef from "effect/SubscriptionRef"
@@ -27,9 +28,18 @@ const timeout = 60_000
 const string = (value: string): Adapter.LocalValue => ({ _tag: "Value", value: { type: "string", value } })
 
 /** A page showing `html`, and a function that sends the engine a request in the world the library would use. */
-const open = Effect.fnUntraced(function*(_backend: Backend, html: string, beforeInstall?: string, origin?: string) {
+const open = Effect.fnUntraced(function*(
+  _backend: Backend,
+  html: string,
+  beforeInstall?: string,
+  origin?: string,
+  context?: "fresh"
+) {
   const served = origin === undefined ? yield* site : { origin }
-  const { adapter, page, context, facts } = yield* (yield* Connection.Shared).page
+  const connection = yield* Connection.Shared
+  const { adapter, page, context: userContext, facts } = yield* (context === "fresh"
+    ? connection.freshPage
+    : connection.page)
   const navigation = yield* adapter.navigate(
     page,
     `${served.origin}/fixture?html=${encodeURIComponent(html)}`,
@@ -69,7 +79,7 @@ const open = Effect.fnUntraced(function*(_backend: Backend, html: string, before
     // Decoded as the library decodes it, so every answer the tests see is one the schema accepts
     return yield* Engine.decodeResponse(result.value.value).pipe(Effect.orDie)
   })
-  return { send, call, adapter, page, context, document, realm }
+  return { send, call, adapter, page, context: userContext, document, realm, facts }
 })
 
 const text = (value: string, exact = false): Engine.TextMatcher => ({ _tag: "String", value, exact })
@@ -3401,11 +3411,189 @@ document.getElementById("outer").attachShadow({ mode: "open" }).innerHTML =
             assert(twice._tag === "Strict")
             assert.strictEqual(twice.count, 4)
           }), timeout)
+        it.effect("rejects a raw-engine service worker registration left for the next case", () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            const call = Effect.fnUntraced(
+              function*(opened: Effect.Success<ReturnType<typeof open>>, functionDeclaration: string) {
+                const realm = yield* opened.adapter.realm(opened.document, { _tag: "Main" })
+                return yield* opened.adapter.evaluate(realm, {
+                  functionDeclaration,
+                  arguments: [],
+                  awaitPromise: true,
+                  result: "value",
+                  userActivation: false
+                })
+              }
+            )
+            const leaked = yield* Effect.scoped(Effect.gen(function*() {
+              const opened = yield* open(backend, "<p>register</p>", undefined, origin)
+              const registered = yield* call(
+                opened,
+                `async () => {
+                await navigator.serviceWorker.register("/sw.js");
+                await navigator.serviceWorker.ready;
+                return (await navigator.serviceWorker.getRegistrations()).length;
+              }`
+              )
+              assert.deepStrictEqual(registered, { _tag: "Value", value: { type: "number", value: 1 } })
+            })).pipe(Effect.exit)
+            const next = yield* Effect.scoped(Effect.gen(function*() {
+              const opened = yield* open(backend, "<p>next</p>", undefined, origin)
+              return yield* call(
+                opened,
+                `async () => {
+                const registrations = await navigator.serviceWorker.getRegistrations();
+                await Promise.all(registrations.map(registration => registration.unregister()));
+                return registrations.length;
+              }`
+              )
+            })).pipe(Effect.exit)
+            assert.isTrue(
+              Exit.isFailure(leaked),
+              `cleanup accepted a service worker; next case: ${JSON.stringify(next)}`
+            )
+            assert.include(String(Exit.isFailure(leaked) ? leaked.cause : ""), "worker")
+            assert.deepStrictEqual(next, Exit.succeed({ _tag: "Value", value: { type: "number", value: 0 } }))
+          }), timeout)
+
+        it.effect("rejects raw-engine storage left by a closed second page", () =>
+          Effect.gen(function*() {
+            const { origin, crossSite } = yield* site
+            const leaked = yield* Effect.scoped(Effect.gen(function*() {
+              const opened = yield* open(backend, "<p>first</p>", undefined, origin)
+              const second = yield* opened.adapter.createPage(opened.context)
+              const navigation = yield* opened.adapter.navigate(second, `${crossSite}/fixture`, {
+                referrer: Option.none()
+              })
+              const ended = yield* opened.facts.when("NavigationEnded", (fact) =>
+                fact.navigation === navigation)
+              assert(ended.outcome._tag === "Committed")
+              const realm = yield* opened.adapter.realm(ended.outcome.document, { _tag: "Main" })
+              const written = yield* opened.adapter.evaluate(realm, {
+                functionDeclaration:
+                  "() => { localStorage.setItem(\"closed-page\", \"left\"); return localStorage.getItem(\"closed-page\") }",
+                arguments: [],
+                awaitPromise: true,
+                result: "value",
+                userActivation: false
+              })
+              assert.deepStrictEqual(written, { _tag: "Value", value: { type: "string", value: "left" } })
+              yield* opened.adapter.closePage(second, { runBeforeUnload: false })
+              yield* opened.facts.when("NavigableRemoved", (fact) =>
+                fact.navigable === second)
+            })).pipe(Effect.exit)
+            const next = yield* Effect.scoped(Effect.gen(function*() {
+              const opened = yield* open(backend, "<p>next</p>", undefined, crossSite)
+              return yield* opened.call(
+                "() => { const value = localStorage.getItem(\"closed-page\"); localStorage.clear(); return value }",
+                []
+              )
+            }))
+            assert.isTrue(
+              Exit.isFailure(leaked),
+              `cleanup accepted the closed page's storage; next case: ${JSON.stringify(next)}`
+            )
+            assert.include(String(Exit.isFailure(leaked) ? leaked.cause : ""), "localStorage")
+            assert.deepStrictEqual(next, { _tag: "Value", value: { type: "null" } })
+          }), timeout)
+
+        it.effect("rejects a raw-engine popup left open after its opener closes", () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            const leaked = yield* Effect.scoped(Effect.gen(function*() {
+              const opened = yield* open(backend, "<p>opener</p>", undefined, origin)
+              const realm = yield* opened.adapter.realm(opened.document, { _tag: "Main" })
+              const result = yield* opened.adapter.evaluate(realm, {
+                functionDeclaration: `() => new Promise(resolve => {
+                  const popup = window.open("/fixture?popup");
+                  if (!popup) return resolve(false);
+                  popup.addEventListener("load", () => resolve(true), { once: true });
+                })`,
+                arguments: [],
+                awaitPromise: true,
+                result: "value",
+                userActivation: true
+              })
+              assert.deepStrictEqual(result, { _tag: "Value", value: { type: "boolean", value: true } })
+            })).pipe(Effect.exit)
+            assert.isTrue(Exit.isFailure(leaked))
+            assert.include(String(Exit.isFailure(leaked) ? leaked.cause : ""), "page(s) open")
+            yield* Effect.scoped(open(backend, "<p>next</p>", undefined, origin))
+          }), timeout)
+
+        for (const source of ["previous document", "cross-origin frame"] as const) {
+          it.effect(`rejects raw-engine storage left by a ${source} and replaces the context`, () =>
+            Effect.gen(function*() {
+              const { origin, crossSite } = yield* site
+              // Keep the server alive across both cases, as a suite-level fixture would be.
+              const leaked = yield* Effect.scoped(Effect.gen(function*() {
+                const child = `${crossSite}/fixture?html=${
+                  encodeURIComponent(
+                    "<script>localStorage.setItem(\"left\", \"1\")</script>"
+                  )
+                }`
+                const opened = yield* open(
+                  backend,
+                  source === "cross-origin frame" ? `<iframe src="${child}"></iframe>` : "<p>first</p>",
+                  source === "previous document" ? "() => localStorage.setItem(\"left\", \"1\")" : undefined,
+                  origin
+                )
+                if (source === "previous document") {
+                  const navigation = yield* opened.adapter.navigate(opened.page, `${crossSite}/fixture`, {
+                    referrer: Option.none()
+                  })
+                  const ended = yield* opened.facts.when("NavigationEnded", (fact) =>
+                    fact.navigation === navigation)
+                  assert(ended.outcome._tag === "Committed")
+                  const document = ended.outcome.document
+                  yield* opened.facts.when("DocumentReadiness", (fact) =>
+                    fact.document === document && fact.readiness === "complete")
+                }
+                return opened.context
+              })).pipe(Effect.exit)
+              // Read and clear the actual leftover before asserting, so this regression cannot poison later cases.
+              const next = yield* Effect.scoped(Effect.gen(function*() {
+                const child = `${crossSite}/fixture?html=${
+                  encodeURIComponent(
+                    "<script>parent.postMessage(localStorage.getItem(\"left\"), \"*\"); localStorage.clear()</script>"
+                  )
+                }`
+                const opened = yield* open(
+                  backend,
+                  source === "previous document" ?
+                    "<p>next</p>" :
+                    `<script>globalThis.stored = new Promise(resolve => addEventListener("message", event => resolve(event.data), { once: true }))</script><iframe src="${child}"></iframe>`,
+                  undefined,
+                  origin
+                )
+                const realm = yield* opened.adapter.realm(opened.document, { _tag: "Main" })
+                const stored = yield* opened.adapter.evaluate(realm, {
+                  functionDeclaration: source === "previous document"
+                    ? "() => { const value = localStorage.getItem(\"left\"); localStorage.clear(); return value }"
+                    : "() => globalThis.stored",
+                  arguments: [],
+                  awaitPromise: true,
+                  result: "value",
+                  userActivation: false
+                })
+                return { context: opened.context, stored }
+              }))
+              assert.isTrue(
+                Exit.isFailure(leaked),
+                `cleanup accepted the leak; the next case read ${JSON.stringify(next.stored)}`
+              )
+              assert.include(String(Exit.isFailure(leaked) ? leaked.cause : ""), "localStorage")
+              assert.deepStrictEqual(next.stored, { _tag: "Value", value: { type: "null" } })
+            }), timeout)
+        }
+
+        // About the harness's contexts themselves, so each half opens a context of its own
         it.effect("keeps raw-engine documents, realms and storage private to each scoped context", () =>
           Effect.gen(function*() {
             const { origin } = yield* site
             const first = yield* Effect.scoped(Effect.gen(function*() {
-              const opened = yield* open(backend, "<p>First</p>", undefined, origin)
+              const opened = yield* open(backend, "<p>First</p>", undefined, origin, "fresh")
               const written = yield* opened.call(
                 `() => {
                 localStorage.setItem("engine-fixture", "first");
@@ -3428,7 +3616,7 @@ document.getElementById("outer").attachShadow({ mode: "open" }).innerHTML =
               return opened
             }))
             yield* Effect.scoped(Effect.gen(function*() {
-              const second = yield* open(backend, "<p>Second</p>", undefined, origin)
+              const second = yield* open(backend, "<p>Second</p>", undefined, origin, "fresh")
               assert.strictEqual(first.adapter, second.adapter)
               assert.notStrictEqual(first.context, second.context)
               assert.notStrictEqual(first.page, second.page)

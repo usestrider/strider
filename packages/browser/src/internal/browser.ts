@@ -27,6 +27,7 @@ import { pipeArguments } from "effect/Pipeable"
 import * as Redacted from "effect/Redacted"
 import * as Scope from "effect/Scope"
 import * as SubscriptionRef from "effect/SubscriptionRef"
+import * as Binding from "../Binding.ts"
 import type * as Browser from "../Browser.ts"
 import * as CookieJar from "../CookieJar.ts"
 import * as Deadline from "../Deadline.ts"
@@ -44,6 +45,7 @@ import * as UserContext from "../UserContext.ts"
 import * as WebSocketRoute from "../WebSocketRoute.ts"
 import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
+import * as Bindings from "./bindings.ts"
 import * as BrowserService from "./browserService.ts"
 import * as ClaimHooks from "./claimHooks.ts"
 import * as ClientCertificates from "./clientCertificates.ts"
@@ -210,6 +212,7 @@ const makeContext = (
         (options?.phase ?? "request") as P
       )) as UserContext.UserContext["route"],
     routeWebSocket: (pattern, handler, options) => WebSocketRoutes.register(runtime, entry, handler, pattern, options),
+    exposeBinding: (name, schemas, handler) => Bindings.expose(runtime, entry, undefined, name, schemas, handler),
     addInitScript: (script, options) =>
       InitScripts.add({ runtime, scope: declared, operation: "UserContext.addInitScript" }, entry.id, script, options),
     emulate: (settings) => Emulation.emulate({ runtime, scope: declared, operation: "UserContext.emulate" }, settings),
@@ -362,6 +365,14 @@ const makeDeniedContext = (
       Effect.fail(
         new WebSocketRoute.WebSocketRouteError({
           reason: notPermitted("UserContext.routeWebSocket"),
+          diagnostics: Operation.diagnostics(id())
+        })
+      ),
+    exposeBinding: (name: string) =>
+      Effect.fail(
+        new Binding.BindingError({
+          name,
+          reason: notPermitted("UserContext.exposeBinding"),
           diagnostics: Operation.diagnostics(id())
         })
       ),
