@@ -273,6 +273,12 @@ export * as StorageState from "./StorageState.ts"
  * @stability unstable
  * @since 0.1.0
  */
+export * as StyleTag from "./StyleTag.ts"
+
+/**
+ * @stability unstable
+ * @since 0.1.0
+ */
 export * as Subscription from "./Subscription.ts"
 
 /**

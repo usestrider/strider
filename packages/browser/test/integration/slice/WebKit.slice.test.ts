@@ -29,6 +29,7 @@ import { screenshotBaselines } from "./screenshotBaselines.ts"
 import { sharedContextChecks } from "./sharedContextChecks.ts"
 import { slice } from "./slice.ts"
 import { storageReplacement } from "./storageReplacement.ts"
+import { styleTags } from "./styleTags.ts"
 import { tooling } from "./tooling.ts"
 import { toolkit } from "./toolkit.ts"
 import { webauthn } from "./webauthn.ts"
@@ -65,6 +66,7 @@ requestTiming("WebKit", backend)
 
 storageReplacement("WebKit", backend)
 requestSizes("WebKit", backend)
+styleTags("WebKit", backend)
 
 bindings("WebKit", backend)
 clientCertificates("WebKit", backend)
