@@ -1414,6 +1414,16 @@ the caller’s budget. Changing how observations are collected is not required b
 
 
 
+## Page-function expectations
+
+A predicate that runs in the page is one named expectation, `Expect.toSatisfy`, over a locator's one match. Each
+check finds the match and calls the function in the caller's isolated world, as `locator.evaluate` does, and the
+engine waits for the next page change between checks; user code never runs in the engine's world. A throw fails
+it at once, as an evaluation's throw fails a read. Rejected: locators found by a function and predicates as source
+text, which would put user code into every resolution of a locator and leave locators that can't describe
+themselves in errors, traces and suggestions; an `Effect` form, which would overlap `Expect.that`; and retrying
+while the function throws, which hides the page's error until the deadline.
+
 ## Diagnostic evidence at failure
 
 An error's diagnostics are a snapshot of what its operation and steps know when it is built. A write starts
