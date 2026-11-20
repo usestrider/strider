@@ -12,7 +12,16 @@ import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as ConsoleFormat from "../consoleFormat.ts"
 import * as Urls from "../urls.ts"
-import { contextKey, type Event, type RealmEntry, type State, type TargetEntry, type WorkerEntry } from "./state.ts"
+import { consoleArguments } from "./evaluation.ts"
+import {
+  contextKey,
+  type Event,
+  placement,
+  type RealmEntry,
+  type State,
+  type TargetEntry,
+  type WorkerEntry
+} from "./state.ts"
 
 // ── Messages ──────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -62,9 +71,14 @@ const consoleMessage = (
     realmOfObject(state, target, message.parameters?.find((parameter) => parameter.objectId !== undefined)?.objectId) ??
     mainRealmOf(target)
   if (realm === undefined) return
+  // Only where a subscriber asked for them does a message keep its arguments, each object as a handle
+  const args = message.parameters !== undefined && state.registry.consoleArguments(placement(target.page))
+    ? consoleArguments(state, realm, message.parameters)
+    : undefined
   state.buffer.emit({
     _tag: "ConsoleMessage",
     realm: Option.some(realm.id),
+    args,
     message: new ConsoleMessage.ConsoleMessage({
       level: Kit.consoleLevel(message.level),
       text: message.parameters !== undefined && message.parameters.length > 0

@@ -409,6 +409,25 @@ export const evaluate = Effect.fnUntraced(function*(
   )
 })
 
+/** A console message's arguments, each object with a handle the model owns, and their release. */
+export const consoleArguments = (state: State, realm: RealmEntry, objects: ReadonlyArray<Runtime.RemoteObject>) => ({
+  values: objects.map((object): Adapter.RemoteValue => {
+    const type = remoteType(object)
+    if (object.objectId === undefined || object.subtype === "null") return primitive(object)
+    const handle = state.ids.handle()
+    state.handles.set(handle, { session: realm.session, realm: realm.id, objectId: object.objectId, group: undefined })
+    const document = realm.document
+    return type === "node"
+      ? {
+        type,
+        handle,
+        ...(document === undefined ? {} : { node: { document: document.id, binding: object.objectId } })
+      }
+      : { type, handle } as Adapter.RemoteValue
+  }),
+  release: (handles: ReadonlyArray<Adapter.HandleId>) => releaseHandles(state, handles)
+})
+
 /** A group given whole goes in one command, its anchors with it (QUIRKS.md, Q132). */
 export const releaseHandles = (state: State, list: ReadonlyArray<Adapter.HandleId>) =>
   Effect.forEach(Groups.release(state.groups, state.handles, list), (released) =>
