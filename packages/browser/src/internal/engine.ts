@@ -194,6 +194,13 @@ export type Expectation =
   | { readonly _tag: "Text"; readonly expected: ReadonlyArray<TextMatcher>; readonly list: boolean }
   | { readonly _tag: "Role"; readonly expected: string }
   | { readonly _tag: "AccessibleName"; readonly expected: TextMatcher; readonly ignoreCase: boolean }
+  /** The one match's accessible description or error message matches; with `not`, it doesn't. */
+  | {
+    readonly _tag: "AccessibleDescription" | "AccessibleErrorMessage"
+    readonly expected: TextMatcher
+    readonly ignoreCase: boolean
+    readonly not: boolean
+  }
   /** The raw class string of one match, or each match in order. */
   | { readonly _tag: "Class"; readonly expected: ReadonlyArray<TextMatcher>; readonly list: boolean }
   | { readonly _tag: "ContainsText"; readonly expected: TextMatcher }
@@ -1671,7 +1678,10 @@ export function engine(render: (root: SnapNode) => string) {
     }
     // 2I: the tooltip, except on a presentational element, then a placeholder (HTML-AAM)
     const title = role === "none" || role === "presentation" ? "" : dom.getAttribute(element, "title") ?? ""
-    if (title.trim() !== "") return title
+    if (title.trim() !== "") {
+      if (context.embedded === "self") (context.includeHidden ? hiddenNamesFromTitle : namesFromTitle).add(element)
+      return title
+    }
     const placeholder = dom.getAttribute(element, "placeholder") ?? ""
     if ((element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) && placeholder.trim() !== "") {
       return placeholder
@@ -1741,6 +1751,11 @@ export function engine(render: (root: SnapNode) => string) {
   const namesFromContent = new Set<Element>()
   const nameCache = new Map<Element, string>()
   const hiddenNameCache = new Map<Element, string>()
+  /** Elements whose own name, as last computed, came from their title. */
+  const namesFromTitle = new Set<Element>()
+  const hiddenNamesFromTitle = new Set<Element>()
+  const descriptionCache = new Map<Element, string>()
+  const hiddenDescriptionCache = new Map<Element, string>()
   /** An element's accessible name, as a flat string. With `includeHidden`, hidden descendants count too. */
   const accessibleName = (element: Element, includeHidden: boolean): string => {
     const cache = includeHidden ? hiddenNameCache : nameCache
@@ -1762,6 +1777,72 @@ export function engine(render: (root: SnapNode) => string) {
     if (provenance && contribution.fieldContent) namesFromFields.add(element)
     cache.set(element, name)
     return name
+  }
+
+  /**
+   * The text of an ID reference list's elements, each computed as a reference traversal, so a hidden element
+   * named there counts with its hidden content, joined by a space.
+   */
+  const referencedText = (element: Element, attribute: string, includeHidden: boolean): string =>
+    (dom.getAttribute(element, attribute) ?? "").split(ID_SEPARATOR).flatMap((id) => {
+      const target = id === "" ? null : byId(element, id)
+      return target === null ? [] : [
+        nameOfElement(target, {
+          visited: new Set(),
+          labelledBy: true,
+          hiddenReference: hiddenFromAccessibility(target),
+          embedded: "reference",
+          includeHidden,
+          contribution: { fieldContent: false }
+        })
+      ]
+    }).join(" ")
+
+  /**
+   * An element's accessible description, as a flat string: empty when it's hidden, else its `aria-describedby`
+   * references, else `aria-description`, else its title when the title isn't its name.
+   */
+  const accessibleDescription = (element: Element, includeHidden: boolean): string => {
+    const cache = includeHidden ? hiddenDescriptionCache : descriptionCache
+    const cached = cache.get(element)
+    if (cached !== undefined) return cached
+    let description = ""
+    if (includeHidden || !hiddenFromAccessibility(element)) {
+      description = flatString(referencedText(element, "aria-describedby", includeHidden))
+      const attribute = dom.getAttribute(element, "aria-description")
+      if (description === "" && attribute !== null) description = flatString(attribute)
+      if (description === "") {
+        accessibleName(element, includeHidden)
+        const title = dom.getAttribute(element, "title") ?? ""
+        if (!(includeHidden ? hiddenNamesFromTitle : namesFromTitle).has(element)) description = flatString(title)
+      }
+    }
+    cache.set(element, description)
+    return description
+  }
+
+  /**
+   * An element's accessible error message: its `aria-errormessage` references while it's invalid, through an
+   * `aria-invalid` other than empty or `false` in any case, or its own failed constraint validation; else empty.
+   */
+  const accessibleErrorMessage = (element: Element): string => {
+    const invalid = (dom.getAttribute(element, "aria-invalid") ?? "").trim()
+    const ariaInvalid = invalid !== "" && invalid.toLowerCase() !== "false"
+    const validity = "validity" in element ? (element as { readonly validity?: ValidityState }).validity : undefined
+    if (!ariaInvalid && validity?.valid !== false) return ""
+    return flatString(referencedText(element, "aria-errormessage", false)).trim()
+  }
+
+  /**
+   * Whether a computed accessible text matches: a regular expression tests it as computed, and a string compares
+   * whole after whitespace is collapsed and zero-width and soft hyphen characters are dropped on both sides.
+   */
+  const accessibleTextMatches = (text: string, matcher: TextMatcher, ignoreCase: boolean): boolean => {
+    if (matcher._tag === "RegExp") return new RegExp(matcher.source, matcher.flags).test(text)
+    const normalize = (value: string) => collapse(value.replace(/[\u200b\u00ad]/g, ""))
+    return ignoreCase
+      ? normalize(text).toLocaleLowerCase() === normalize(matcher.value).toLocaleLowerCase()
+      : normalize(text) === normalize(matcher.value)
   }
 
   // Queries
@@ -3399,16 +3480,15 @@ export function engine(render: (root: SnapNode) => string) {
       }
       case "AccessibleName": {
         const name = accessibleName(element, false)
-        const matcher = expectation.expected
-        const normalize = (text: string) => collapse(text.replace(/[\u200b\u00ad]/g, ""))
-        return {
-          passed: matcher._tag === "RegExp"
-            ? new RegExp(matcher.source, matcher.flags).test(name)
-            : expectation.ignoreCase
-            ? normalize(name).toLocaleLowerCase() === normalize(matcher.value).toLocaleLowerCase()
-            : normalize(name) === normalize(matcher.value),
-          observed: name
-        }
+        return { passed: accessibleTextMatches(name, expectation.expected, expectation.ignoreCase), observed: name }
+      }
+      case "AccessibleDescription":
+      case "AccessibleErrorMessage": {
+        const text = expectation._tag === "AccessibleDescription"
+          ? accessibleDescription(element, false)
+          : accessibleErrorMessage(element)
+        const matches = accessibleTextMatches(text, expectation.expected, expectation.ignoreCase)
+        return { passed: expectation.not ? !matches : matches, observed: text }
       }
       case "ContainsText": {
         const text = textOf(element)
@@ -3778,6 +3858,10 @@ export function engine(render: (root: SnapNode) => string) {
     roleCache.clear()
     nameCache.clear()
     hiddenNameCache.clear()
+    namesFromTitle.clear()
+    hiddenNamesFromTitle.clear()
+    descriptionCache.clear()
+    hiddenDescriptionCache.clear()
     inertness = undefined
     inertAncestors.clear()
     insideModal.clear()
@@ -4241,6 +4325,10 @@ export function engine(render: (root: SnapNode) => string) {
       roleCache.clear()
       nameCache.clear()
       hiddenNameCache.clear()
+      namesFromTitle.clear()
+      hiddenNamesFromTitle.clear()
+      descriptionCache.clear()
+      hiddenDescriptionCache.clear()
       inertness = undefined
       inertAncestors.clear()
       insideModal.clear()
