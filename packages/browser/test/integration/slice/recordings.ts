@@ -15,6 +15,7 @@ import {
   Expect,
   Har,
   NetworkRequest,
+  NetworkRequestEnd,
   NetworkResponse,
   Operation,
   Page,
@@ -174,6 +175,60 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
           }))
           const error = yield* NetworkRequest.failure(page, request).pipe(Effect.flip)
           assert.deepInclude(error.reason, { _tag: "RequestUnavailable", why: "ownerLost" })
+        })))
+
+      it.effect("reports an HTTP error as finished and an aborted request as failed, with its text", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const page = yield* SharedContext.newPage
+          const { origin } = yield* site
+          yield* page.route(`${origin}/blocked`, () => Route.abort())
+          const missing = yield* NetworkRequestEnd.next(page, { url: `${origin}/missing` })
+          const blocked = yield* NetworkRequestEnd.next(page, { url: `${origin}/blocked` })
+          yield* page.goto(`${origin}/missing`)
+          assert.strictEqual((yield* missing)._tag, "Finished")
+          yield* page.evaluateInMainWorld(() => {
+            void fetch("/blocked").catch(() => undefined)
+            return true
+          })
+          const failed = yield* blocked
+          assert.strictEqual(failed._tag, "Failed")
+          if (failed._tag === "Failed") assert.isAbove(failed.failure.errorText.length, 0)
+        })))
+
+      it.effect("reports request ends to a context subscription from a page opened after it", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const context = yield* SharedContext.current
+          const { origin } = yield* site
+          const ended = yield* NetworkRequestEnd.next(context, { url: `${origin}/hello`, end: "finished" })
+          const page = yield* SharedContext.newPage
+          yield* page.goto(`${origin}/hello`)
+          const end = yield* ended
+          assert.strictEqual(end.request.url, `${origin}/hello`)
+        })))
+
+      it.effect("waits for one request's end, and gives it at once once it has ended", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const page = yield* SharedContext.newPage
+          const { origin } = yield* site
+          yield* page.goto(`${origin}/hello`)
+          const release = yield* Deferred.make<void>()
+          yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
+          yield* page.route(`${origin}/json`, () => Deferred.await(release).pipe(Effect.andThen(Route.continue)))
+          const next = yield* NetworkRequest.next(page, { url: `${origin}/json` })
+          yield* page.evaluateInMainWorld(() => {
+            void fetch("/json")
+            return true
+          })
+          const request = yield* next
+          const ended = yield* NetworkRequestEnd.of(page, request)
+          const waiting = yield* ended.pipe(Effect.forkScoped)
+          yield* Effect.yieldNow
+          assert.isUndefined(waiting.pollUnsafe())
+          yield* Deferred.succeed(release, undefined)
+          const end = yield* Fiber.join(waiting)
+          assert.strictEqual(end._tag, "Finished")
+          assert.strictEqual(end.request, request)
+          assert.strictEqual((yield* ended).request, request)
         })))
 
       it.effect("associates an observed request with its response before and after arrival", () =>
