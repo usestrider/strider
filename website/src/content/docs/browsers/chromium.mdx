@@ -194,6 +194,9 @@ one it's `Unsupported`.
 
 **Cross-site frames render only in view,** so actions scroll each iframe into view first.
 
+**`console.timeLog` reads as `log`.** Chromium sends it as a plain message, so its
+[`method`](/docs/events/console) is `log`. The capability `console.method` is `partial` here.
+
 ## The raw protocol
 
 What Strider doesn't wrap, you can send yourself: `@usestrider/browser/cdp`'s commands are values, and

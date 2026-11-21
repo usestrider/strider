@@ -239,6 +239,10 @@ checks" as a script error, so it arrives as an [`UncaughtException`](/docs/event
 [`source`](/docs/events/console). Its other CORS and CSP messages are console messages from the
 browser. The capability `console.source` is `partial` here.
 
+**Two console methods read as others.** WebKit sends `console.timeLog` as it sends `timeEnd`, so its
+[`method`](/docs/events/console) is `timeEnd`, and `console.count` as a plain message at level `debug`, so its method
+is `debug`. The capability `console.method` is `partial` here.
+
 **No downloads, file choosers, PDFs, or screencasts.** [`setInputFiles`](/docs/pages/actions#files) works. Screenshots are PNG.
 
 ## The raw protocol
