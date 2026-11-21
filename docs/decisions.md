@@ -1878,3 +1878,13 @@ that takes an event name. Each module gives its own typed payload and its own fi
 wait names what it matches in the event's terms and its result needs no cast. Rejected: a `waitForEvent(name)` or
 `on(name)` dispatch over event names, as Playwright and Node's emitters have, whose payload and filter types follow
 from a string, and which would put every kind's lifetime and delivery rules behind one untyped entry point.
+
+## Recording overlays are page DOM
+
+Recording overlays (`Capability.Overlay`) are elements the engine draws in the page's main document, under a closed
+shadow root that its own queries, snapshots and hit tests leave out, and draws again in each document the main frame
+commits. One mechanism then serves all three browsers, and screenshots show the overlays as video does. Following
+[Pay for what you use](#pay-for-what-you-use), nothing is drawn or watched until a page acquires the capability, and
+only a page showing its actions waits before input. Compositing overlays into video frames in `VideoWriter` was
+rejected: Firefox writes its own video file, which no frame passes through, and screenshots would lack them.
+Playwright's deprecated `fontSize` option is not built; `style.title` sets the title's font like any other CSS.

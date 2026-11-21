@@ -1,12 +1,26 @@
 {
-  "status": "missing",
-  "api": [],
-  "notes": "The parent capability is missing; this option is not implemented by that contract.",
-  "capabilities": [],
+  "status": "different",
+  "api": [
+    {
+      "module": "Capability",
+      "symbol": "OverlayControl",
+      "url": "/docs/api/browser/Capability#OverlayControl"
+    }
+  ],
+  "notes": "The deprecated fontSize option is not built; style.title sets the title's font like any other CSS.",
+  "capabilities": [
+    "capability.overlay"
+  ],
   "id": "option-screencast-showactions-fontsize",
   "upstream": [
     "method:Screencast.showActions"
   ],
   "option": "fontSize",
-  "requirements": []
+  "requirements": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "recording-overlays-are-page-dom",
+    "quote": "Playwright's deprecated `fontSize` option is not built; `style.title` sets the title's font like any other CSS.",
+    "revision": "29c750e4dc7e78ef5a7bade31f28994c15ea5c38"
+  }
 }

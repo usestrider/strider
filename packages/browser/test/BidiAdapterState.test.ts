@@ -19,7 +19,7 @@ import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as TestClock from "effect/testing/TestClock"
-import type * as BrowsingContext from "../src/bidi-protocol/BrowsingContext.ts"
+import * as BrowsingContext from "../src/bidi-protocol/BrowsingContext.ts"
 import * as Script from "../src/bidi-protocol/Script.ts"
 import * as Deadline from "../src/Deadline.ts"
 import type * as Adapter from "../src/internal/adapter.ts"
@@ -5149,3 +5149,91 @@ it.effect("keeps proxy credential bindings separate by scheme at the same host a
       "socks4://proxy.test:8080"
     ])
   }))
+
+describe("BiDi adopted popup openers", () => {
+  it.effect("links surviving popups when their shared opener frame arrives after one popup ends", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { state, page, facts } = yield* withPage()
+      const fold = yield* Fold.make({ release: () => Effect.void })
+      let cursor = 0
+      const pump = Effect.fnUntraced(function*() {
+        yield* state.buffer.flush
+        while (cursor < facts.length) yield* fold.sink(facts[cursor++]!)
+      })
+      const popups = ["P1", "P2", "P3"].map((context) =>
+        Tree.addNavigable(state, {
+          context: context as BrowsingContext.BrowsingContext,
+          userContext: "default",
+          originalOpener: "F1",
+          url: "about:blank"
+        }, true)!
+      )
+      yield* pump()
+      const entries = popups.map((popup) => Option.getOrThrow(fold.page(popup.id)))
+      for (const entry of entries) assert.strictEqual(entry.opener, undefined)
+      const reserved = state.reservedIds.get("F1")!
+      Tree.removeNavigable(state, popups[0]!, new Target.PageClosed({ by: "command" }), "test")
+      yield* pump()
+      assert.deepStrictEqual(reserved.popups, new Set(popups.slice(1).map((popup) => popup.id)))
+      const frame = Tree.addNavigable(state, {
+        context: "F1" as BrowsingContext.BrowsingContext,
+        parent: "C1",
+        userContext: "default",
+        originalOpener: null,
+        url: "about:blank"
+      }, true)!
+      yield* pump()
+      assert.strictEqual(frame.id, reserved.id)
+      assert.strictEqual(state.reservedIds.size, 0)
+      const opener = Option.getOrThrow(fold.page(page.id))
+      assert.strictEqual(entries[0]!.opener, undefined)
+      for (const entry of entries.slice(1)) assert.strictEqual(entry.opener, opener)
+    })))
+
+  it.effect("resolves an iframe opener to its page when the popup is listed first", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { state, page, facts } = yield* withPage()
+      const info = (context: string, originalOpener: string | null, children: Array<unknown> = []) => ({
+        context,
+        originalOpener,
+        children,
+        parent: null,
+        userContext: "default",
+        clientWindow: "W1",
+        url: "about:blank"
+      })
+      // A getTree result may list the popup before the tree containing its original opener.
+      const frame = { ...info("F1", null), parent: "C1" }
+      Tree.reconcile(
+        state,
+        Schema.decodeUnknownSync(BrowsingContext.GetTreeResult)({
+          contexts: [info("P1", "F1"), info("C1", null, [frame])]
+        })
+      )
+      yield* state.buffer.flush
+      const popup = state.navigables.get("P1")!
+      const added = facts.find((fact) => fact._tag === "PageAdded" && fact.page === popup.id)
+      assert(added?._tag === "PageAdded")
+      assert.strictEqual(added.origin._tag, "Adopted")
+      assert(added.origin._tag === "Adopted")
+      assert.deepStrictEqual(added.origin.opener, Option.some(page.id))
+    })))
+
+  it.effect("releases an unresolved opener reservation when its last popup is removed", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { state } = yield* withPage()
+      const popup = Tree.addNavigable(state, {
+        context: "P1" as BrowsingContext.BrowsingContext,
+        originalOpener: "already-closed",
+        userContext: "default",
+        url: "about:blank"
+      }, true)!
+      Tree.removeNavigable(
+        state,
+        popup,
+        new Target.PageClosed({ by: "command" }),
+        "bidi:browsingContext.contextDestroyed"
+      )
+      assert.strictEqual(state.reservedIds.size, 0)
+    })))
+})

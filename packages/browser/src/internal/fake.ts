@@ -131,6 +131,7 @@ export const capabilities: ReadonlyArray<Browser.CapabilityEntry> = [
   entry("capability.virtualAuthenticator", "unsupported", ["The test backend does not implement native WebAuthn"]),
   entry("capability.axTree", "unsupported", [noDom]),
   entry("capability.screencast", "unsupported", ["nothing is painted"]),
+  entry("capability.overlay", "unsupported", [noDom]),
   entry("capability.video", "unsupported", ["nothing is painted"])
 ]
 
