@@ -287,6 +287,8 @@ export const connect = (
                     status: 200 as NetworkResponse.StatusCode,
                     statusText: "OK",
                     httpVersion: Option.some("http/1.1"),
+                    serverAddress: Option.none(),
+                    securityDetails: Option.none(),
                     headers: Headers.empty,
                     servedBy: "network",
                     at: Adapter.now()

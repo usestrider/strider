@@ -26,6 +26,7 @@ import { recordings } from "./recordings.ts"
 import { requestBodies } from "./requestBodies.ts"
 import { requestSizes } from "./requestSizes.ts"
 import { requestTiming } from "./requestTiming.ts"
+import { responseSecurityCases } from "./responseSecurity.ts"
 import { screenshotBaselines } from "./screenshotBaselines.ts"
 import { sharedContextChecks } from "./sharedContextChecks.ts"
 import { slice } from "./slice.ts"
@@ -74,3 +75,4 @@ bindings("WebKit", backend)
 clientCertificates("WebKit", backend)
 screenshotBaselines("WebKit", backend)
 sharedContextChecks("WebKit", backend)
+responseSecurityCases("WebKit", backend)

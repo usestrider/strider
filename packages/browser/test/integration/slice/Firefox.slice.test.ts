@@ -24,6 +24,7 @@ import { recycling } from "./recycledBrowser.ts"
 import { requestBodies } from "./requestBodies.ts"
 import { requestSizes } from "./requestSizes.ts"
 import { requestTiming } from "./requestTiming.ts"
+import { responseSecurityCases } from "./responseSecurity.ts"
 import { screenshotBaselines } from "./screenshotBaselines.ts"
 import { sharedContextChecks } from "./sharedContextChecks.ts"
 import { slice } from "./slice.ts"
@@ -82,3 +83,4 @@ styleTags("Firefox", backend)
 bindings("Firefox", backend)
 clientCertificates("Firefox", backend)
 screenshotBaselines("Firefox", backend)
+responseSecurityCases("Firefox", backend)
