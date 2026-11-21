@@ -673,7 +673,8 @@ export const toHaveCount: DualMatcher<Locator.ReadonlyLocator, [count: number]> 
  * and gets the match first, then the arguments, which cross as they do for `locator.evaluate`: by value, or a handle
  * as what it holds. A promise it returns is awaited. Only `true` passes.
  *
- * On each check it runs the page's locator handlers, finds the one match again, and calls the function. It checks
+ * On each check it runs the page's locator handlers, finds the one match again, and calls the function; while
+ * the function is pending, the handlers run again on each change signal, so one can dismiss what it waits on. It checks
  * again after each change signal the other locator matchers check on (a mutation, an input, change or focus event,
  * or an animation frame), including one that came while the function ran. Each check reads the page as it is then,
  * so a state that comes and goes between two checks isn't seen. While nothing matches, or several elements
