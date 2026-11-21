@@ -34,22 +34,22 @@ Each matcher takes a locator, except `toHaveURL` and `toHaveTitle`, which take t
 | `toBeEnabled`, `toBeDisabled`                  | the element is enabled, or disabled                              |
 | `toBeChecked`, `toBeFocused`, `toBeEditable`   | it's checked; it has focus, through open shadow roots; it's editable |
 | `toBeInViewport(options?)` | one element intersects the viewport at the requested ratio |
-| `toHaveText(expected)`                         | its text is `expected`, or for a list, each match's in order      |
+| `toHaveText(expected, options?)`               | its text is `expected`, or for a list, each match's in order      |
 | `toHaveClass(expected)` | its full class string matches, or for a list, each element’s in order |
-| `toContainText(expected)`                      | its text contains `expected`                                     |
+| `toContainText(expected, options?)`            | its text contains `expected`, or a list's entries are in matches, in order |
 | `toBeEmpty` | the field value is empty, or other element text is only whitespace |
 | `toHaveAccessibleName(expected, options?)` | its accessible name matches; `ignoreCase` overrides regex flags |
 | `toHaveAccessibleDescription(expected, options?)` | its accessible description matches; `not` negates the comparison |
 | `toHaveAccessibleErrorMessage(expected, options?)` | its error message, empty unless it's invalid, matches; `not` negates the comparison |
 | `toHaveValue(expected)`                        | a form control's value is `expected`                             |
 | `toHaveValues(expected)` | one multiple select has the selected values in option order |
-| `toHaveAttribute(name, expected?)`             | it has the attribute, with that value if given                   |
+| `toHaveAttribute(name, expected?, options?)`   | it has the attribute, with that value if given                   |
 | `toHaveRole(expected)`                         | its computed ARIA role equals the string exactly                 |
 | `toHaveCSS(name, expected, options?)`          | its computed CSS property matches an exact string or regular expression |
 | `toHaveJSProperty(path, expected, options?)` | a JavaScript property, read in the page's own world, deeply equals `expected` |
 | `toHaveCount(n)`                               | exactly `n` elements match                                       |
 | `toMatchAria(pattern, options?)`               | its accessibility tree matches a pattern; `not` waits for it not to |
-| `toHaveURL(expected)`, `toHaveTitle(expected)` | the page's URL or title matches                                  |
+| `toHaveURL(expected, options?)`, `toHaveTitle(expected)` | the page's URL or title matches                        |
 
 Roles can be implicit, such as a button's `button` role, or set with `role`. Role assertions compare exact,
 case-sensitive strings, so `switch` does not match `checkbox`. Plain elements such as `div` have the shared engine's
@@ -155,6 +155,28 @@ const searchHerons = Effect.fn("searchHerons")(function*(page: Page.Page) {
   yield* results.pipe(Expect.toHaveText(["Grey heron", /^Great blue heron/]))
   yield* page.pipe(Expect.toHaveTitle(/heron/))
   yield* page.pipe(Expect.toHaveURL(/[?&]q=heron/))
+})
+```
+
+`toContainText` with a list passes when each entry is contained in a match after the one the entry before it was
+in, so it can skip matches between them. `ignoreCase` on `toHaveText`, `toContainText`, `toHaveAttribute`, and
+`toHaveURL` compares strings without case and sets a regular expression's `i` flag, or clears it when `false`.
+`useInnerText` on `toHaveText` and `toContainText` reads the rendered `innerText`, which leaves out hidden
+descendants that the text content keeps; it depends on layout, so browsers can differ.
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const checkResults = Effect.fn("checkResults")(function*(page: Page.ReadonlyPage) {
+  const results = page.getByRole("list", { name: "Results" }).getByRole("listitem")
+  yield* results.pipe(
+    Expect.toContainText(["grey", "great blue"], { ignoreCase: true })
+  )
+  yield* page.getByRole("status").pipe(
+    Expect.toHaveText("2 results", { useInnerText: true })
+  )
+  yield* page.pipe(Expect.toHaveURL(/q=HERON/, { ignoreCase: true }))
 })
 ```
 

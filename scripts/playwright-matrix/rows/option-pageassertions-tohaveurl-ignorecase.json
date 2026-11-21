@@ -1,7 +1,13 @@
 {
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding public option for this contract.",
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toHaveURL",
+      "url": "/docs/api/browser/Expect#toHaveURL"
+    }
+  ],
+  "notes": "ignoreCase compares a string URL without case and sets or clears a regular expression's i flag, in both the page.url watcher and the in-page check used while locator handlers are registered.",
   "capabilities": [],
   "id": "option-pageassertions-tohaveurl-ignorecase",
   "upstream": [
