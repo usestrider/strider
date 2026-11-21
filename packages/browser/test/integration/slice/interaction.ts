@@ -6915,6 +6915,79 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
+      it.effect("expects rendered text inside an iframe", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<iframe srcdoc='<p>Hello <span hidden>secret </span>World</p>'></iframe>`
+          )
+          const page = yield* newPage
+          yield* page.goto(url)
+          const target = page.frame(page.locator("iframe")).locator("p")
+          yield* Expect.toHaveText(target, "Hello World", { useInnerText: true })
+          yield* target.pipe(Expect.toContainText(["o W"], { useInnerText: true }))
+        })), timeout)
+
+      it.effect(
+        "expects text, attributes and URLs ignoring case, rendered text, and contained lists",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<p id="greeting" data-state="Ready">Hello <span hidden>secret </span>World</p><ul><li>Apple pie</li><li>Banana</li><li>Cherry tart</li></ul>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              const greeting = page.locator("#greeting")
+              const fails = <E>(effect: Effect.Effect<void, E>) =>
+                effect.pipe(
+                  Deadline.within("200 millis"),
+                  Effect.flip,
+                  Effect.map((error) => {
+                    assert(Expect.isExpectationFailed(error), String(error))
+                    return error
+                  })
+                )
+              // A string compares without case; the option sets or clears a regular expression's i flag
+              yield* greeting.pipe(Expect.toHaveText("hello secret world", { ignoreCase: true }))
+              yield* greeting.pipe(Expect.toHaveText(/^HELLO/, { ignoreCase: true }))
+              yield* greeting.pipe(Expect.toContainText("SECRET", { ignoreCase: true }))
+              const cleared = yield* fails(greeting.pipe(Expect.toHaveText(/^hello/i, { ignoreCase: false })))
+              assert.strictEqual(cleared.condition, "to have the text /^hello/i matching case")
+              const cased = yield* fails(greeting.pipe(Expect.toHaveText("hello secret world")))
+              assert.strictEqual(cased.condition, `to have the text "hello secret world"`)
+              // The rendered text leaves out the hidden child that the text content keeps
+              yield* greeting.pipe(Expect.toHaveText("Hello World", { useInnerText: true }))
+              yield* greeting.pipe(Expect.toContainText(["o W"], { useInnerText: true }))
+              const content = yield* fails(greeting.pipe(Expect.toHaveText("Hello World")))
+              assert.deepStrictEqual(
+                content.last.pipe(Option.map((each) => each.value)),
+                Option.some("Hello secret World")
+              )
+              // Attribute values and URLs
+              yield* greeting.pipe(Expect.toHaveAttribute("data-state", "ready", { ignoreCase: true }))
+              yield* fails(greeting.pipe(Expect.toHaveAttribute("data-state", "ready")))
+              yield* page.pipe(Expect.toHaveURL(url.toUpperCase(), { ignoreCase: true }))
+              yield* Expect.toHaveURL(page, /^HTTPS?:\/\//, { ignoreCase: true })
+              const upper = yield* fails(page.pipe(Expect.toHaveURL(url.toUpperCase())))
+              assert.strictEqual(upper.condition, `to have the URL ${JSON.stringify(url.toUpperCase())}`)
+              // A list is contained in a subsequence of the matches, in order
+              const items = page.getByRole("listitem")
+              yield* items.pipe(Expect.toContainText(["Apple", /tart$/]))
+              yield* items.pipe(Expect.toContainText(["apple", "banana", "cherry"], { ignoreCase: true }))
+              const order = yield* fails(items.pipe(Expect.toContainText(["Cherry", "Apple"])))
+              assert.strictEqual(order.condition, `to contain the text ["Cherry", "Apple"]`)
+              assert.deepStrictEqual(
+                order.last.pipe(Option.map((each) => each.value)),
+                Option.some(["Apple pie", "Banana", "Cherry tart"])
+              )
+              yield* fails(items.pipe(Expect.toContainText(["Apple", "Apple"])))
+              yield* page.locator("#none").pipe(Expect.toContainText([]))
+              yield* fails(items.pipe(Expect.toContainText([])))
+            }))
+          }),
+        timeout
+      )
+
       it.effect(
         "expects a page's URL across a navigation, and anything with Expect.that",
         () =>

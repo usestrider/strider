@@ -1,7 +1,13 @@
 {
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding public option for this contract.",
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toHaveText",
+      "url": "/docs/api/browser/Expect#toHaveText"
+    }
+  ],
+  "notes": "ignoreCase compares strings without case and sets or clears a regular expression's i flag; left out, strings match case and regular expressions keep their flags.",
   "capabilities": [],
   "id": "option-locatorassertions-tohavetext-ignorecase",
   "upstream": [
