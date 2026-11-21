@@ -1,6 +1,6 @@
 /** Console calls with their arguments as handles (`ConsoleMessage.nextCall`, `streamCalls`), on every backend. */
 import { assert } from "@effect/vitest"
-import { Browser, ConsoleMessage, type Page, Subscription } from "@usestrider/browser"
+import { Browser, ConsoleMessage, JSHandle, type Page, Subscription } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
@@ -124,8 +124,9 @@ export const consoleCalls = (
       const logged = yield* ConsoleMessage.nextCall(page)
       yield* page.evaluateInMainWorld(() => console.log(() => 1))
       const call = yield* logged
-      const result = yield* Effect.exit(call.args[0]!.read)
-      assert.isTrue(Exit.isFailure(result), "an unserializable console argument must fail, not become undefined")
+      const error = yield* Effect.flip(call.args[0]!.read)
+      assert(JSHandle.isJSHandleError(error))
+      assert.strictEqual(error.reason._tag, "NotSerializable")
     }).pipe(Effect.scoped))
 
   it.effect("gives a worker's call its arguments", () =>
