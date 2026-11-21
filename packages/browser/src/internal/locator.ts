@@ -228,6 +228,21 @@ const syntheticDrag = (
 /** How a snapshot of this owner's page makes the locator for a ref. */
 export const locatorOn = (owner: Owner): Locate => (steps, label) => new LocatorImpl(owner, steps, label)
 
+/** What `readJSProperty` found: the value at its path, or how many elements matched when that isn't one. */
+type JSPropertyRead =
+  | { readonly _tag: "Value"; readonly value: unknown }
+  | { readonly _tag: "Unmatched"; readonly matches: number }
+
+/** Reads a property path from an element in the page: a step through anything but an object reads `undefined`. */
+const readPath = (element: Element, path: ReadonlyArray<string>): unknown => {
+  let value: unknown = element
+  for (const key of path) {
+    if (value === null || (typeof value !== "object" && typeof value !== "function")) return undefined
+    value = (value as Record<string, unknown>)[key]
+  }
+  return value
+}
+
 export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
   readonly [LocatorTypeId] = LocatorTypeId as typeof LocatorTypeId
   readonly owner: Owner
@@ -523,16 +538,19 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
   }
 
   /**
-   * Calls `fn` in the caller's isolated world of the one match's document, with the match first:
-   * resolved now, as a read is, and passed by its node binding, since the engine's world isn't the
-   * caller's. Its result comes back by value, or as a handle in the caller's scope.
+   * Calls `fn` in a world of the one match's document, the caller's isolated world unless another is named,
+   * with the match first: resolved now, as a read is, and passed by its node binding, since the engine's world
+   * isn't the caller's. Its result comes back by value, or as a handle in the caller's scope. With `unmatched`,
+   * no match or several are its answer rather than a failure.
    */
   private evaluation<B, R>(
     operation: string,
     fn: Function,
     args: ReadonlyArray<unknown>,
     result: "value" | "handle",
-    then: (realm: Target.RealmId, value: Adapter.RemoteValue) => Effect.Effect<B, Evaluation.Failure, R>
+    then: (realm: Target.RealmId, value: Adapter.RemoteValue) => Effect.Effect<B, Evaluation.Failure, R>,
+    world: Adapter.World = Evaluation.isolatedWorld,
+    unmatched?: (matches: number) => B
   ): Effect.Effect<B, Locator.LocatorError | Target.TargetGone | Deadline.Timeout, R> {
     const owner = this.owner
     return Effect.gen({ self: this }, function*() {
@@ -545,6 +563,9 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       )
       if (found._tag === "Response") {
         const response = found.response
+        if (unmatched !== undefined && (response._tag === "NoMatch" || response._tag === "Strict")) {
+          return unmatched(response._tag === "NoMatch" ? 0 : response.count)
+        }
         switch (response._tag) {
           case "NoMatch":
             return yield* Effect.fail(this.error(
@@ -559,12 +580,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         }
       }
       return yield* Effect.gen(function*() {
-        const realm = yield* Evaluation.documentRealm(
-          owner.runtime,
-          found.routed.document,
-          Evaluation.isolatedWorld,
-          id
-        )
+        const realm = yield* Evaluation.documentRealm(owner.runtime, found.routed.document, world, id)
         const rest = yield* Evaluation.toLocal(args, realm, 1)
         const group = yield* Evaluation.groupFor(owner.runtime, realm, result)
         // The call is on its way: a deadline after it can't say the function didn't run
@@ -611,6 +627,24 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       JSHandle.Serialized<B>,
       Locator.LocatorError | Target.TargetGone | Deadline.Timeout
     >
+  }
+
+  /**
+   * The value at `path` from the one match, read now in its document's main world, where the page's own
+   * scripts set properties, and returned by value; or how many elements matched when that isn't one.
+   */
+  readJSProperty(
+    path: ReadonlyArray<string>
+  ): Effect.Effect<JSPropertyRead, Locator.LocatorError | Target.TargetGone | Deadline.Timeout> {
+    return this.evaluation<JSPropertyRead, never>(
+      "Locator.readJSProperty",
+      readPath,
+      [path],
+      "value",
+      (_realm, value) => Effect.map(Evaluation.fromRemote(value), (value) => ({ _tag: "Value" as const, value })),
+      { _tag: "Main" },
+      (matches) => ({ _tag: "Unmatched" as const, matches })
+    )
   }
 
   evaluateHandle<Args extends ReadonlyArray<unknown>, B>(
