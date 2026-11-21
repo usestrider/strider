@@ -504,7 +504,7 @@ export interface UserContext extends ObservedUserContext {
    * import { Page } from "@usestrider/browser"
    * import { Effect } from "effect"
    *
-   * const refuseNotifications = Effect.fn("refuseNotifications")(function*(page: Page.Page) {
+   * const noAlerts = Effect.fn("noAlerts")(function*(page: Page.Page) {
    *   yield* page.context.deny(["notifications"], { origin: "https://news.example.com" })
    * })
    * ```

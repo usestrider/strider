@@ -1819,7 +1819,12 @@ export const conformance = (backend: Backend) =>
             yield* world.adapter.clearCookies(context)
             assert.isEmpty(yield* world.adapter.cookies(context))
             const capabilities = yield* SubscriptionRef.get(world.adapter.capabilities)
-            const granted = world.adapter.grantPermissions(context, Option.some(world.site.origin), ["geolocation"], "granted")
+            const granted = world.adapter.grantPermissions(
+              context,
+              Option.some(world.site.origin),
+              ["geolocation"],
+              "granted"
+            )
             if (!capabilities.has("permissions")) {
               const error = yield* Effect.flip(granted)
               assert.deepInclude(error.reason, { _tag: "Unsupported", capability: "permissions" })
