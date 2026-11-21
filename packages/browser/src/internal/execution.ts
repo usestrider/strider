@@ -1,5 +1,5 @@
 /** Page-local execution dispatch. Ordinary pages share the ordinary functions, without feature preflights. */
-import type * as Effect from "effect/Effect"
+import * as Effect from "effect/Effect"
 import type * as Option from "effect/Option"
 import type * as Deadline from "../Deadline.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
@@ -42,6 +42,8 @@ export interface Dispatch {
    * every other page, so an action there makes no added call.
    */
   readonly annotate?: Annotate | undefined
+  /** Services the page's locator handlers once, before a check that doesn't go through the engine. */
+  readonly beforeCheck: Effect.Effect<void, Failure>
 }
 
 /** An input action about to be checked a last time and sent: what it is, and its point in the top-level page. */
@@ -83,5 +85,6 @@ export const annotateWith = (page: Model.PageEntry, annotate: Annotate | undefin
 export const ordinary: Dispatch = {
   action: Runtime.sendRouted,
   expect: Runtime.send,
+  beforeCheck: Effect.void,
   url: (page, expected) => ExpectImpl.watchURL(page, expected)
 }

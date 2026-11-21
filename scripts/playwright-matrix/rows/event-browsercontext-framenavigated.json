@@ -3,13 +3,19 @@
   "upstream": [
     "event:BrowserContext.frameNavigated"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding UserContext operation/event. Its public API provides pages/workers, cookies, clock, storage export, routes, scripts, scoped emulation and grants; it does not implement this contract.",
+  "status": "has",
+  "api": [
+    {
+      "module": "PageNavigation",
+      "symbol": "stream",
+      "url": "/docs/api/browser/PageNavigation#stream"
+    }
+  ],
+  "notes": "`PageNavigation.stream(context, { frames: \"all\" })`; each navigation names its page and frame. Strider reports navigations that got somewhere, not every frame URL change Playwright reports.",
   "capabilities": [],
   "audit": {
     "sources": [
-      "packages/browser/src/UserContext.ts"
+      "packages/browser/src/PageNavigation.ts"
     ],
     "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
   },

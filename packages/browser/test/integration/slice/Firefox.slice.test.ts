@@ -1,3 +1,4 @@
+import { bindings } from "./bindings.ts"
 import { locatorHandlers } from "./locatorHandlers.ts"
 /**
  * The slices against Firefox, through the public layer: the pinned Firefox (`browsers.ts`), in the Nix
@@ -23,9 +24,11 @@ import { requestBodies } from "./requestBodies.ts"
 import { requestSizes } from "./requestSizes.ts"
 import { requestTiming } from "./requestTiming.ts"
 import { screenshotBaselines } from "./screenshotBaselines.ts"
+import { sharedContextChecks } from "./sharedContextChecks.ts"
 import { slice } from "./slice.ts"
 import { stalledReadProbes } from "./stalledReadProbes.ts"
 import { storageReplacement } from "./storageReplacement.ts"
+import { styleTags } from "./styleTags.ts"
 import { tooling } from "./tooling.ts"
 import { toolkit } from "./toolkit.ts"
 import { webauthn } from "./webauthn.ts"
@@ -69,7 +72,11 @@ requestTiming("Firefox", backend)
 
 storageReplacement("Firefox", backend)
 requestSizes("Firefox", backend)
+sharedContextChecks("Firefox", backend)
 
 stalledReadProbes("Firefox", backend)
+styleTags("Firefox", backend)
+
+bindings("Firefox", backend)
 clientCertificates("Firefox", backend)
 screenshotBaselines("Firefox", backend)

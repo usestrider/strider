@@ -215,10 +215,17 @@ export type Fact =
     readonly _tag: "UserContextAdded"
     readonly context: UserContext.Id
     readonly isDefault: boolean
+    /** Created by this connection's `createUserContext`, rather than found. */
+    readonly created?: boolean | undefined
     readonly requestTiming?: boolean | undefined
     readonly requestSizes?: boolean | undefined
   }
   | { readonly _tag: "UserContextRemoved"; readonly context: UserContext.Id }
+  /**
+   * The connection no longer creates the context, which stays open: a failed creation whose removal couldn't be
+   * confirmed. It is listed as a context the connection observes.
+   */
+  | { readonly _tag: "UserContextReleased"; readonly context: UserContext.Id }
   | {
     readonly _tag: "PageAdded"
     readonly page: Target.NavigableId
@@ -452,6 +459,31 @@ export type RemoteValue =
     readonly handle?: HandleId | undefined
   }
 
+/** The node types a protocol's description names with a `#` (`#text`), by that name. */
+const describedTypes: Readonly<Record<string, number>> = {
+  "#text": 3,
+  "#cdata-section": 4,
+  "#comment": 8,
+  "#document": 9,
+  "#document-fragment": 11
+}
+
+/**
+ * A node handle's value, from the description CDP and WebKit's inspector give a node's remote object: an element's
+ * starts with its local name, as CDP's `p#x.note` and WebKit's `<p id="x">` do, and another node's is its name
+ * (`#text`).
+ * `undefined` where the description says neither.
+ */
+export const describedNode = (
+  description: string | undefined
+): Extract<RemoteValue, { readonly type: "node" }>["value"] => {
+  if (description === undefined) return undefined
+  const named = describedTypes[description]
+  if (named !== undefined) return { nodeType: named, nodeName: description }
+  const localName = /^<?([A-Za-z][^\s#.[>]*)/.exec(description)?.[1]
+  return localName === undefined ? undefined : { nodeType: 1, localName: localName.toLowerCase() }
+}
+
 /**
  * An argument for an evaluation: a value to serialize, a handle the caller holds, or a node by its binding,
  * resolved in the realm called, whichever world it came from.
@@ -541,8 +573,8 @@ export type Override =
   | { readonly _tag: "FocusEmulation"; readonly enabled: boolean }
   | { readonly _tag: "CacheDisabled"; readonly disabled: boolean }
 
-/** Internal host transport belonging only to a WebSocket routing declaration. */
-export interface WebSocketBridge {
+/** A host transport that belongs to one declaration: a WebSocket routing or a binding. */
+export interface HostBridge {
   readonly name: string
   readonly token: string
   readonly scope: Scope.Scope
@@ -565,7 +597,7 @@ export interface WebSocketBridge {
 export type Declaration =
   | {
     readonly _tag: "InitScript"
-    readonly webSocket?: WebSocketBridge | undefined
+    readonly hostBridge?: HostBridge | undefined
     readonly source: string
     readonly world: World
     /** `environment` scripts (library shims such as the page clock) run before `user` scripts. */

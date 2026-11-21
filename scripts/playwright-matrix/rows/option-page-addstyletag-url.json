@@ -1,7 +1,13 @@
 {
-  "status": "missing",
-  "api": [],
-  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "status": "has",
+  "api": [
+    {
+      "module": "StyleTag",
+      "symbol": "Source",
+      "url": "/docs/api/browser/StyleTag#Source"
+    }
+  ],
+  "notes": "{ url } becomes a <link rel=\"stylesheet\">, waited for until it loads.",
   "capabilities": [],
   "id": "option-page-addstyletag-url",
   "upstream": [

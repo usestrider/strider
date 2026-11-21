@@ -19,6 +19,7 @@
  *   whose delayed destruction must not be confused with initial about:blank realm reuse.
  */
 import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
 import type * as Scope from "effect/Scope"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as BidiBrowser from "../bidi-protocol/Browser.ts"
@@ -383,8 +384,18 @@ export const connect: (
       on,
       Effect.catch(failConnect)
     )
-    const { tree } = yield* snapshot(state).pipe(Effect.catch(failConnect))
+    // An attached browser's contexts, empty ones too, are asked for alongside its tree: no event announces them, and
+    // a launched browser's fresh profile has none
+    const [{ tree }, userContexts] = yield* Effect.all([
+      snapshot(state),
+      options.ownership === "launched"
+        ? Effect.succeed(Option.none())
+        : BidiBrowser.getUserContexts().pipe(on, Effect.option)
+    ], { concurrency: "unbounded" }).pipe(Effect.catch(failConnect))
     yield* buffer.run(() => {
+      if (Option.isSome(userContexts)) {
+        for (const { userContext } of userContexts.value.userContexts) Tree.contextFor(state, userContext)
+      }
       Tree.reconcile(state, tree)
       state.adopting = false
     })

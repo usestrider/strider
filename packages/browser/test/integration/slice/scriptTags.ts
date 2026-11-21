@@ -223,6 +223,10 @@ export const scriptTags = <R>(
         Effect.flip
       )
       assert.strictEqual(reasonOf(remote)?._tag, "RefusedByPolicy")
+      // The reported URL omits the fragment
+      const fragment = yield* page.addScriptTag({ url: `${script(served.crossSite, "window.refused = true")}#script` })
+        .pipe(Effect.flip)
+      assert.strictEqual(reasonOf(fragment)?._tag, "RefusedByPolicy")
       assert.strictEqual(yield* global(page, "refused"), undefined)
     }).pipe(Effect.scoped))
 

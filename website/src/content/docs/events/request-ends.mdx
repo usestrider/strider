@@ -1,0 +1,90 @@
+---
+title: Request ends
+description: Waiting for a request to finish or fail.
+order: 4
+---
+
+`NetworkRequestEnd` is the event module for how each request ends. Each event is a `NetworkRequest.End`:
+`Finished` once the browser has loaded the request, whatever its HTTP status, or `Failed` with the browser's error
+text. Like every event module it has [`next`, `stream`, and `history`](/docs/events/events#next-stream-and-history),
+on a page or a context.
+
+```ts
+import { NetworkRequestEnd, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const saveDraft = Effect.fn("saveDraft")(function*(page: Page.Page) {
+  const saved = yield* NetworkRequestEnd.next(page, { url: "**/api/drafts" })
+  yield* page.getByRole("button", { name: "Save" }).click()
+  const end = yield* saved
+  return end._tag === "Failed" ? end.failure.errorText : "saved"
+})
+```
+
+A 404 or a 503 is `Finished`: it is a response, not a failure. Each redirect hop ends on its own. A `Failed`
+event carries the same [`NetworkRequest.Failure`](/docs/events/request-failures) as `NetworkRequest.failure`, and
+its `request` is the request as it was delivered, so the other request reads accept it.
+
+Only an end the browser reports is an event. A request still in flight when its page, its context, or the browser
+connection closes reports no end, because losing the page isn't a network failure.
+
+## Choosing one kind of end
+
+The filter takes `NetworkRequest`'s `url`, `method`, and `resourceType`, and `end` to match only `"finished"` or
+only `"failed"`. This logs each failed fetch of a context's pages, those opened later included:
+
+```ts
+import { NetworkRequestEnd, UserContext } from "@usestrider/browser"
+import { Console, Effect, Stream } from "effect"
+
+const logFailedFetches = Effect.fn("logFailedFetches")(
+  function*(context: UserContext.UserContext) {
+    const failed = yield* NetworkRequestEnd.stream(context, {
+      resourceType: "fetch",
+      end: "failed"
+    })
+    yield* failed.pipe(
+      Stream.runForEach((end) =>
+        Console.log(end.request.url, end._tag === "Failed" ? end.failure.errorText : "")
+      ),
+      Effect.forkScoped
+    )
+  }
+)
+```
+
+`history` reads the ends the event log kept, without waiting, so a test can count the failures after the fact:
+
+```ts
+import { NetworkRequestEnd, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const countFailures = Effect.fn("countFailures")(function*(page: Page.ObservedPage) {
+  const failed = yield* NetworkRequestEnd.history(page, { end: "failed" })
+  return failed.entries.length
+})
+```
+
+## Waiting for one request
+
+`NetworkRequest.end` takes a request you already observed and returns a wait for its end, as
+[`NetworkRequest.response`](/docs/events/request-responses) does for its response. It gives the end at once if the
+request has ended, and otherwise waits under the deadline.
+
+```ts
+import { NetworkRequest, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const exportReport = Effect.fn("exportReport")(function*(page: Page.Page) {
+  const sent = yield* NetworkRequest.next(page, { url: "**/api/export" })
+  yield* page.getByRole("button", { name: "Export" }).click()
+  const ended = yield* NetworkRequest.end(page, yield* sent)
+  return yield* ended
+})
+```
+
+Acquiring the wait needs the request still in the bounded request index, which keeps 1000 hops and drops completed
+ones first. Once acquired, a request that has ended keeps its end readable through the wait until the scope closes.
+A request still in flight that the index drops fails the wait with `ResponseUnavailable` (`evicted`). The wait also
+fails once the scope closes (`released`), when the page or context closes first (`targetClosed`), and for a request
+another page or context observed (`foreignTarget`).

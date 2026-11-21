@@ -233,7 +233,8 @@ const activate = (page: Model.PageEntry, state: State) => {
             )
           ),
         Runtime.send(runtime, target, request, id, at)
-      )
+      ),
+    beforeCheck: dispatch(check(state, false).pipe(Effect.asVoid), Effect.void)
   })
 }
 

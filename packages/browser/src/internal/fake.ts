@@ -347,7 +347,7 @@ export const connect = (
       createUserContext: Effect.fnUntraced(function*() {
         const context = ids.userContext()
         contexts.add(context)
-        yield* emit({ _tag: "UserContextAdded", context, isDefault: false })
+        yield* emit({ _tag: "UserContextAdded", context, isDefault: false, created: true })
         return context
       }),
       removeUserContext: Effect.fnUntraced(function*(context: UserContext.Id) {

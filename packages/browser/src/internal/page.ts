@@ -36,11 +36,13 @@ import * as Reason from "../Reason.ts"
 import type * as Route from "../Route.ts"
 import type * as ScriptTag from "../ScriptTag.ts"
 import type * as Snapshot from "../Snapshot.ts"
+import type * as StyleTag from "../StyleTag.ts"
 import * as Target from "../Target.ts"
 import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
+import * as Bindings from "./bindings.ts"
 import * as BrowserClock from "./browserClock.ts"
 import * as Capabilities from "./capabilities.ts"
 import * as Captures from "./captures.ts"
@@ -236,6 +238,7 @@ export const make = (owner: PageOwner): Page.Page => {
         model,
         operation,
         started.value,
+        entry.id,
         entry.id,
         url,
         at,
@@ -622,6 +625,18 @@ export const make = (owner: PageOwner): Page.Page => {
         "handle",
         (realm, value) => Evaluation.own<Awaited<A>>(runtime, realm, value, Option.some(entry))
       ),
+    evaluateHandleInMainWorld: <Args extends ReadonlyArray<unknown>, A>(
+      fn: (...args: Args) => A | Promise<A>,
+      ...args: Args
+    ) =>
+      evaluation(
+        "Page.evaluateHandleInMainWorld",
+        { _tag: "Main" },
+        fn,
+        args,
+        "handle",
+        (realm, value) => Evaluation.own<Awaited<A>>(runtime, realm, value, Option.some(entry))
+      ),
     keyboard: Devices.keyboard({ runtime, page: entry }),
     mouse: Devices.mouse({ runtime, page: entry }),
     clock: Clock.make({
@@ -652,6 +667,8 @@ export const make = (owner: PageOwner): Page.Page => {
       )) as Page.Page["route"],
     addLocatorHandler: (locator, handler, options) =>
       LocatorHandlers.add({ runtime, page: entry, grant: owner.grant }, locator, handler, options),
+    exposeBinding: (name, schemas, handler) =>
+      Bindings.expose(runtime, entry.contextEntry, entry, name, schemas, handler),
     addInitScript: (script, options) =>
       InitScripts.add({ runtime, scope: declared, operation: "Page.addInitScript" }, entry.context, script, options),
     addScriptTag: Effect.fnUntraced(
@@ -669,6 +686,22 @@ export const make = (owner: PageOwner): Page.Page => {
         )
       },
       Operation.named("Page.addScriptTag", { attributes: { "browser.page.id": entry.id } })
+    ),
+    addStyleTag: Effect.fnUntraced(
+      function*(style: StyleTag.Source) {
+        const record = yield* Operation.record
+        return yield* Effect.gen(function*() {
+          const spec = yield* Effect.mapError(Tags.style(runtime, style), (reason): Tags.Failure => ({
+            _tag: "Reason",
+            reason
+          }))
+          const realm = yield* Evaluation.pageRealm(runtime, entry, { _tag: "Main" }, record.id, record.budget.at)
+          return yield* Tags.insert<HTMLStyleElement | HTMLLinkElement>(runtime, realm, entry, spec, record)
+        }).pipe(
+          Effect.mapError(Tags.fail(record, (reason) => pageError("Page.addStyleTag", reason, record.id)))
+        )
+      },
+      Operation.named("Page.addStyleTag", { attributes: { "browser.page.id": entry.id } })
     ),
     emulate: (settings) => Emulation.emulate({ runtime, scope: declared, operation: "Page.emulate" }, settings),
     activate: Effect.gen(function*() {

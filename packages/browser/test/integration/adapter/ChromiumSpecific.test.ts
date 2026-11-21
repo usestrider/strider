@@ -556,12 +556,20 @@ describe("Chromium adapter, CDP only", () => {
                 Effect.match({ onFailure: (error) => error, onSuccess: () => undefined }),
                 Effect.forkScoped
               )
+              // A call for a handle is held the same way, and ends with the worker too
+              const held = yield* worker.evaluateHandle(() => self).pipe(
+                Deadline.within("20 seconds"),
+                Effect.match({ onFailure: (error) => error, onSuccess: () => undefined }),
+                Effect.forkScoped
+              )
               const begun = Date.now()
               // The server stalls the script's body, so the worker ends before its script loads.
               yield* page.locator("#stop").click()
               const error = yield* Fiber.join(pending)
               assert.isDefined(error, "the evaluation ran before the worker's script loaded")
               assert.isFalse(Deadline.isTimeout(error), String(error))
+              const unheld = yield* Fiber.join(held)
+              assert.strictEqual(unheld?._tag, "TargetGone", String(unheld))
               assert.isBelow(Date.now() - begun, 5_000)
             })).pipe(Effect.provide(loggedBackend(log)))
             const attached = log.find(({ sent, wire }) =>
@@ -1228,7 +1236,7 @@ describe("Chromium adapter, CDP only", () => {
               const page = yield* Browser.newPage()
               const fixture =
                 `<script>window.log='';addEventListener('dragstart',e=>console.log('drag source',e.target.id,e.composedPath()[0].id),true)</script><div id="host"></div><script>host.attachShadow({mode:'closed'}).innerHTML=\`<div id="source" draggable="true" ondragend="console.log('source dragend')" ondragstart="window.log+='1';this.remove()" style="position:absolute;left:10px;top:10px;width:60px;height:60px;background:red">Source</div>\`</script><div id="target" style="position:absolute;left:300px;top:10px;width:60px;height:60px">Target</div>`
-              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(fixture)}`)
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(fixture)}`, { waitUntil: "load" })
               yield* page.mouse.move({ x: 40, y: 40 })
               yield* Effect.scoped(Effect.gen(function*() {
                 const held = yield* page.mouse.hold("left")
@@ -1251,7 +1259,7 @@ describe("Chromium adapter, CDP only", () => {
               const page = yield* Browser.newPage()
               const fixture =
                 `<script>window.log='';addEventListener('dragstart',e=>console.log('drag source',e.target.id,e.composedPath()[0].id),true)</script><div id="host" draggable="true"></div><script>host.attachShadow({mode:'closed'}).innerHTML=\`<div id="source" draggable="true" ondragend="console.log('source dragend')" ondragstart="window.log+='1';this.remove()" style="position:absolute;left:10px;top:10px;width:60px;height:60px;background:red">Source</div>\`</script><div id="target" style="position:absolute;left:300px;top:10px;width:60px;height:60px">Target</div>`
-              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(fixture)}`)
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(fixture)}`, { waitUntil: "load" })
               yield* page.mouse.move({ x: 40, y: 40 })
               yield* Effect.scoped(Effect.gen(function*() {
                 const held = yield* page.mouse.hold("left")
