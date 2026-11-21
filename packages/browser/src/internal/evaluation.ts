@@ -106,6 +106,37 @@ export const localOf = (handle: HandleImpl<unknown>): Adapter.LocalValue =>
     ? { _tag: "Handle", handle: handle.value.handle }
     : { _tag: "Value", value: handle.value }
 
+/** The kinds of value that cross only by reference, so a handle that holds one without a remote object can't cross. */
+const byReferenceOnly: ReadonlySet<Adapter.RemoteValue["type"]> = new Set([
+  "symbol",
+  "function",
+  "weakmap",
+  "weakset",
+  "generator",
+  "error",
+  "proxy",
+  "promise",
+  "typedarray",
+  "arraybuffer",
+  "window"
+])
+
+/**
+ * Why a handle can't be an argument at `path`, if it can't. One that holds its value rather than a remote object, as
+ * a console argument may, can't when the value has no by-value form, such as a function, which would otherwise
+ * cross as `undefined`. Only the top level is checked: what such a value holds is left out as it is when read.
+ */
+const refusal = (handle: HandleImpl<unknown>, path: string): Failure | undefined => {
+  const local = localOf(handle)
+  if (local._tag !== "Value" || !byReferenceOnly.has(local.value.type)) return undefined
+  return notSerializable(
+    new Serialization.Unserializable(
+      path,
+      `A ${local.value.type} has no by-value form, and this handle holds no reference to it`
+    )
+  )
+}
+
 /**
  * The arguments as local values. A handle crosses as itself into its own realm; anything else crosses by value,
  * and the first that can't fails with the path to it.
@@ -130,6 +161,8 @@ export const toLocal = (
           })
         }
         if (arg.released) return Effect.die(new Error("A JSHandle was used after it was released"))
+        const refused = refusal(arg, path)
+        if (refused !== undefined) return Effect.fail(refused)
         values.push(localOf(arg))
         continue
       }
@@ -327,6 +360,8 @@ export class HandleImpl<A> implements JSHandle.JSHandle<A> {
       const budget = record.budget
       const group = yield* groupFor(this.runtime, this.realm, result)
       return yield* Effect.gen({ self: this }, function*() {
+        const refused = refusal(this as HandleImpl<unknown>, "args[0]")
+        if (refused !== undefined) return yield* Effect.fail(refused)
         const rest = yield* toLocal(args, this.realm, 1)
         // The call is on its way: a deadline after it can't say the function didn't run
         const value = yield* call(this.runtime, {

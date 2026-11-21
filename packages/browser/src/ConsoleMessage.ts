@@ -380,6 +380,7 @@ export interface Call {
  * - The arguments are what the browser reports, which differs from what the page passed when the first argument is
  *   a format string: Chromium sends a `%s` argument as the string it formats to, and Firefox sends what it made of
  *   the format. The `console.arguments` capability says how each backend's arguments are held.
+ * - On Firefox, an argument with no by-value form, such as a function, fails `NotSerializable` when read.
  * - Messages logged before the subscription have no arguments.
  *
  * **Example** (Reading the object a page logged)
@@ -418,6 +419,7 @@ export const nextCall: <PE = never, PR = never>(
  * - The arguments are what the browser reports, which differs from what the page passed when the first argument is
  *   a format string: Chromium sends a `%s` argument as the string it formats to, and Firefox sends what it made of
  *   the format. The `console.arguments` capability says how each backend's arguments are held.
+ * - On Firefox, an argument with no by-value form, such as a function, fails `NotSerializable` when read.
  * - Every call's handles last until the subscription's scope closes, so release the ones a long stream is done with.
  *
  * **Example** (Collecting the objects a page logs)
