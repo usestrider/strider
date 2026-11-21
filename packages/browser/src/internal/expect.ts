@@ -788,30 +788,32 @@ export const toSatisfy = (locator: Locator.ReadonlyLocator, fn: Function, args: 
           }
           return undefined
         })
-        const fiber = yield* Effect.forkChild(servicing)
-        const raced = yield* Effect.raceFirst(
-          Effect.map(call, (checked) => ({ _tag: "Checked" as const, checked })),
-          Effect.map(Fiber.join(fiber), (reason) => ({ _tag: "Serviced" as const, reason }))
-        ).pipe(
-          // On a failed check, a handler failure or interruption, servicing ends with the check: a handler mid-run
-          // finishes, and none starts after, before the expectation releases its watches
-          Effect.onError(() =>
-            Effect.suspend(() => {
+        // Servicing lives exactly as long as the check, the join of a running handler included: on every exit no
+        // handler starts after it, and one mid-run finishes, before the expectation releases its watches
+        return yield* Effect.uninterruptibleMask((restore) =>
+          Effect.flatMap(Effect.forkChild(servicing), (fiber) => {
+            const stop = Effect.suspend(() => {
               done = true
               return busy ? Effect.asVoid(Effect.exit(Fiber.join(fiber))) : Effect.asVoid(Fiber.interrupt(fiber))
             })
-          )
+            return restore(Effect.gen(function*() {
+              const raced = yield* Effect.raceFirst(
+                Effect.map(call, (checked) => ({ _tag: "Checked" as const, checked })),
+                Effect.map(Fiber.join(fiber), (reason) => ({ _tag: "Serviced" as const, reason }))
+              )
+              done = true
+              const reason = raced._tag === "Serviced"
+                ? raced.reason
+                : busy
+                ? yield* Fiber.join(fiber)
+                : yield* Effect.as(Fiber.interrupt(fiber), undefined)
+              return {
+                checked: raced._tag === "Checked" ? raced.checked : Option.none(),
+                failure: reason
+              }
+            })).pipe(Effect.ensuring(stop))
+          })
         )
-        done = true
-        const reason = raced._tag === "Serviced"
-          ? raced.reason
-          : busy
-          ? yield* Fiber.join(fiber)
-          : yield* Effect.as(Fiber.interrupt(fiber), undefined)
-        return {
-          checked: raced._tag === "Checked" ? raced.checked : Option.none(),
-          failure: reason
-        }
       })
       const checking = watcher()
       return yield* Effect.gen(function*() {
