@@ -3,13 +3,19 @@
   "upstream": [
     "method:Frame.page"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding retained Frame operation. Page.frames exposes the observed tree and page.frame enters by iframe locator; these do not implement this contract.",
+  "status": "has",
+  "api": [
+    {
+      "module": "Frame",
+      "symbol": "ObservedFrame.page",
+      "url": "/docs/api/browser/Frame#ObservedFrame.page"
+    }
+  ],
+  "notes": "",
   "capabilities": [],
   "audit": {
     "sources": [
-      "packages/browser/src/Page.ts"
+      "packages/browser/src/Frame.ts"
     ],
     "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
   },

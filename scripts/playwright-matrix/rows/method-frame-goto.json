@@ -3,13 +3,19 @@
   "upstream": [
     "method:Frame.goto"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No public navigation operation on a frame locator. Page.goto navigates the top-level page; Locator.evaluate runs inside a frame but is not a general cross-origin frame navigation API.",
+  "status": "has",
+  "api": [
+    {
+      "module": "Frame",
+      "symbol": "Frame.goto",
+      "url": "/docs/api/browser/Frame#Frame.goto"
+    }
+  ],
+  "notes": "A frame handle, from Page.frameById or FrameLocator.resolve, navigates its own frame and returns its PageNavigation. On stock WebKit the frame navigates by script, without a referrer, and a child frame's goto that waits past commit fails with Unsupported (frames.readiness), since WebKit doesn't report a child frame's readiness.",
   "capabilities": [],
   "audit": {
     "sources": [
-      "packages/browser/src/Page.ts"
+      "packages/browser/src/Frame.ts"
     ],
     "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
   },

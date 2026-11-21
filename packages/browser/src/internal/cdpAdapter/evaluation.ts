@@ -34,6 +34,7 @@ import {
   contextKey,
   documentOf,
   type Event,
+  frameById,
   frameOf,
   placement,
   realmEnd,
@@ -688,3 +689,13 @@ export const releaseHandles = (state: State, list: ReadonlyArray<Adapter.HandleI
         Effect.ignore
       )
   }, { concurrency: "unbounded", discard: true })
+
+/**
+ * A round trip on the frame's session: `Runtime.getIsolateId` changes nothing, and once its reply is in, the
+ * worker folds every event received before it, on any session of the connection.
+ */
+export const settled = Effect.fnUntraced(function*(state: State, id: L1Target.NavigableId) {
+  const frame = yield* Effect.option(frameById(state, id))
+  if (Option.isSome(frame)) yield* Effect.ignore(Runtime.getIsolateId().pipe(Protocol.on(frame.value.owner.session)))
+  yield* state.buffer.run(() => {})
+})
