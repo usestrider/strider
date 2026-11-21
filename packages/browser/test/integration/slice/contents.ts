@@ -3541,11 +3541,9 @@ document.getElementById("form").addEventListener("submit", (event) => {
           yield* Effect.scoped(Effect.gen(function*() {
             const context = yield* Browser.newContext()
             const page = yield* context.newPage
-            yield* page.goto(fixtureUrl(origin, "<title>Opener</title>"))
+            yield* page.goto(fixtureUrl(origin, `<a target="_blank" href="${origin}/unanswered">Open popup</a>`))
             const opened = yield* Popup.next(page)
-            yield* page.evaluate((url) => {
-              window.open(url)
-            }, `${origin}/unanswered`)
+            yield* page.getByRole("link", { name: "Open popup" }).click()
             const popup = yield* opened
             const top = yield* popup.frameById(popup.id)
             // The frame is attached from the start, with no document until one commits
