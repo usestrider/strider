@@ -115,8 +115,7 @@ export class ServerAddress extends Schema.Class<ServerAddress>("@usestrider/brow
  * **Details**
  *
  * - `protocol` is the TLS version, such as `TLS 1.3`.
- * - `subjectName` is the certificate's subject, its common name on Chromium and the whole distinguished name on
- *   WebKit.
+ * - `subjectName` is the certificate's subject, its common name, such as `example.com`.
  * - `issuer` is the certificate's issuer, its common name. WebKit doesn't report it, so it's `None` there.
  * - `validFrom` and `validTo` bound the certificate's validity, in seconds since the Unix epoch.
  *
