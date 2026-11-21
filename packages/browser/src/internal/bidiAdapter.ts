@@ -235,6 +235,7 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
         "Firefox implements authenticators through classic WebDriver, not this BiDi transport"
       ]),
       entry("capability.axTree", "unsupported", ["WebDriver BiDi has no accessibility tree"]),
+      entry("capability.overlay", "supported", ["drawn in the page, so screenshots show it too"]),
       entry("capability.screencast", "unsupported", [
         "Firefox's browsingContext.startScreencast records a WebM file on the browser's host, and streams no frames"
       ]),

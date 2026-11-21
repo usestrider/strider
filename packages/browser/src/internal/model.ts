@@ -333,6 +333,17 @@ export interface PageEntry {
    */
   readonly inputState: Input.State
   readonly events: PageEvents
+  /**
+   * The id of the page, or of the frame, the backend says opened this one, which can name a page or frame the model
+   * doesn't have yet; `None` when it names none.
+   */
+  readonly openerId: Option.Option<Target.NavigableId>
+  /**
+   * The opener's page, once the model has it, or the page of the frame that opened this one: an adopted page can
+   * be listed before its opener, so this is set when the opener's page or frame is added, and kept after it ends,
+   * so a crashed opener stays readable.
+   */
+  opener: PageEntry | undefined
 }
 
 /** A context's settings, from the options it was created with (`UserContext.Options`). */

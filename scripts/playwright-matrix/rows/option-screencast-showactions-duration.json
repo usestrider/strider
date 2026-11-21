@@ -1,8 +1,16 @@
 {
-  "status": "missing",
-  "api": [],
-  "notes": "The parent capability is missing; this option is not implemented by that contract.",
-  "capabilities": [],
+  "status": "has",
+  "api": [
+    {
+      "module": "Capability",
+      "symbol": "OverlayControl",
+      "url": "/docs/api/browser/Capability#OverlayControl"
+    }
+  ],
+  "notes": "duration, 500 milliseconds by default, waits before the action's last check and its input.",
+  "capabilities": [
+    "capability.overlay"
+  ],
   "id": "option-screencast-showactions-duration",
   "upstream": [
     "method:Screencast.showActions"

@@ -325,20 +325,49 @@ export const attaching = (
             })).pipe(Effect.provide(attached))
           }), timeout)
 
-        it.effect("navigates an attached browser's open tab as soon as it's controlled", () =>
-          Effect.gen(function*() {
-            const { origin } = yield* site
-            const { layer: attached } = yield* start(tabUrl(origin, "First"), tabUrl(origin, "Second"))
-            yield* Effect.scoped(Effect.gen(function*() {
-              const browser = yield* Browser.Browser
-              const pages = yield* browser.pages
-              assert.isAbove(pages.length, 0, "the attached browser lists its open tabs")
-              // A tab whose startup navigation hasn't committed would supersede the goto
-              const tab = yield* (yield* byHeading(browser, "First")).control
-              yield* tab.goto(`data:text/html,${encodeURIComponent("<h1>Adopted</h1>")}`, { waitUntil: "load" })
-              assert.strictEqual(yield* tab.getByRole("heading").readText, "Adopted")
-            })).pipe(Effect.provide(attached))
-          }), timeout)
+        it.effect(
+          "navigates an attached browser's open tab as soon as it's controlled, and names its popup's opener when attached again",
+          () =>
+            Effect.gen(function*() {
+              const { origin } = yield* site
+              const { layer: attached } = yield* start(tabUrl(origin, "First"), tabUrl(origin, "Second"))
+              const linked = yield* Effect.scoped(Effect.gen(function*() {
+                const browser = yield* Browser.Browser
+                const pages = yield* browser.pages
+                assert.isAbove(pages.length, 0, "the attached browser lists its open tabs")
+                // A tab whose startup navigation hasn't committed would supersede the goto
+                const tab = yield* (yield* byHeading(browser, "First")).control
+                yield* tab.goto(`data:text/html,${encodeURIComponent("<h1>Adopted</h1>")}`, { waitUntil: "load" })
+                assert.strictEqual(yield* tab.getByRole("heading").readText, "Adopted")
+                if (!(yield* supports("popups.opener"))) {
+                  return false
+                }
+                yield* tab.goto(
+                  fixtureUrl(
+                    origin,
+                    `<h1>Opener</h1><a target="_blank" href="${tabUrl(origin, "Popup")}">Open popup</a>`
+                  )
+                )
+                yield* tab.activate
+                const opened = yield* Popup.next(tab)
+                yield* tab.getByRole("link", { name: "Open popup" }).click()
+                yield* opened
+                return true
+              })).pipe(Effect.provide(attached))
+              if (!linked) {
+                return
+              }
+              // Attached again, the browser lists the popup among pages it already had, in whatever order it keeps
+              yield* Effect.scoped(Effect.gen(function*() {
+                const browser = yield* Browser.Browser
+                const popup = yield* byHeading(browser, "Popup")
+                const opener = yield* Popup.opener(popup)
+                assert(Option.isSome(opener))
+                assert.strictEqual(opener.value.id, (yield* byHeading(browser, "Opener")).id)
+              })).pipe(Effect.provide(attached))
+            }),
+          timeout
+        )
 
         it.effect("isolates certificate acceptance in new contexts of an attached browser", () =>
           Effect.gen(function*() {

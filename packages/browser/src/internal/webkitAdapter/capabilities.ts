@@ -197,6 +197,9 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
         "Stock WebKit Automation refuses credential management; inspector has no WebAuthn domain"
       ]),
       entry("capability.axTree", "unsupported", ["WebKit reads accessibility one node at a time"]),
+      entry("capability.overlay", "supported", [
+        "drawn in the page, so screenshots show it too; polled video can miss one shown for less than its interval"
+      ]),
       entry("capability.screencast", "unsupported", ["stock WebKit's inspector has no Screencast domain"]),
       entry(
         "capability.video",
