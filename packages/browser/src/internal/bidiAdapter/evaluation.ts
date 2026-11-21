@@ -152,8 +152,8 @@ export const localValue = (value: Adapter.RemoteValue): Script.LocalValue => {
 
 /**
  * A console call's text from its arguments. Firefox applies the call's format itself, `%f` as printf does (QUIRKS.md,
- * Q33), and sends what it made of the format and the arguments it took as the first argument, so the arguments are
- * joined as they are. An `Error`'s serialization has neither its name nor its message, so a call with one keeps
+ * Q33), and sends what it made of the format and the values it took as string arguments, with each object a `%o` or
+ * `%O` took kept as an argument of its own between them, so the arguments are joined as they are. An `Error`'s serialization has neither its name nor its message, so a call with one keeps
  * Firefox's own text.
  */
 const textOf = (entry: {

@@ -52,8 +52,9 @@ const errorDelay = Effect.fn("errorDelay")(function*(page: Page.Page) {
 
 A message's `text` is the call's arguments with their format specifiers applied, each object as a preview of its
 value, as the browser's developer tools print it: `console.log([1, 2, 3], {a: 1}, window)` reads
-`[1, 2, 3] {a: 1} Window` on every browser. An `Error` reads as its browser describes it, and the `console`
-capability lists where a browser's previews differ.
+`[1, 2, 3] {a: 1} Window` on every browser. An `Error` reads as its browser describes it, and a function, a symbol,
+a date, or an instance of a class can read differently from one browser to another, so match a message on the text
+the page wrote rather than on how such a value reads.
 
 ## Arguments
 

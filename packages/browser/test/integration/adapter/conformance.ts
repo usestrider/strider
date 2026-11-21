@@ -1647,9 +1647,7 @@ export const conformance = (backend: Backend) =>
                 yield* frames.pipe(
                   Stream.take(6),
                   Stream.runForEach((frame) =>
-                    Effect.sync(() =>
-                      seen[key]!.push([frame.width, frame.height])
-                    )
+                    Effect.sync(() => seen[key]!.push([frame.width, frame.height]))
                   ),
                   Effect.timeout("3 seconds"),
                   Effect.ignore
@@ -1851,7 +1849,8 @@ export const conformance = (backend: Backend) =>
             yield* declared
             yield* goto(world, page, `${world.site.origin}/form`)
             yield* evaluate(world, page, "() => document.querySelector('#f').click()", true)
-            const opened = yield* world.facts.when("ObligationOpened", (fact) => fact.subject._tag === "FileChooser")
+            const opened = yield* world.facts.when("ObligationOpened", (fact) =>
+              fact.subject._tag === "FileChooser")
             assert(opened.subject._tag === "FileChooser")
             assert.isTrue(opened.subject.multiple)
             yield* world.adapter.resolve(opened.obligation, { _tag: "SetFiles", files: [import.meta.filename] })
@@ -2012,7 +2011,8 @@ export const conformance = (backend: Backend) =>
               fact.subject._tag === "Prompt")
             assert.deepInclude(opened.subject, { kind: "beforeunload" })
             yield* world.adapter.resolve(opened.obligation, { _tag: "Accept", promptText: Option.none() })
-            const removed = yield* world.facts.when("NavigableRemoved", (fact) => fact.navigable === page)
+            const removed = yield* world.facts.when("NavigableRemoved", (fact) =>
+              fact.navigable === page)
             assert.deepStrictEqual(removed.reason, new Target.PageClosed({ by: "command" }))
           }), timeout)
 
