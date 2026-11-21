@@ -349,6 +349,16 @@ const preview = (value: Adapter.RemoteValue): string => {
 }
 
 /** A handle: a remote object in one realm, or a primitive held here; released once. */
+/** The kinds of value with no properties of their own to hold. */
+const primitive: ReadonlySet<Adapter.RemoteValue["type"]> = new Set([
+  "undefined",
+  "null",
+  "string",
+  "number",
+  "boolean",
+  "bigint"
+])
+
 export class HandleImpl<A> implements JSHandle.JSHandle<A> {
   readonly [TypeId] = TypeId as typeof TypeId
   readonly realm: Target.RealmId
@@ -462,7 +472,7 @@ export class HandleImpl<A> implements JSHandle.JSHandle<A> {
     return Effect.gen({ self: this }, function*() {
       if (this.released) return yield* Effect.die(new Error(`${operation}: the handle was released`))
       const properties = new Map<string, JSHandle.JSHandle>()
-      if (Option.isNone(this.remote)) return properties as ReadonlyMap<string, JSHandle.JSHandle>
+      if (primitive.has(this.value.type)) return properties as ReadonlyMap<string, JSHandle.JSHandle>
       const collected = yield* Scope.make()
       return yield* Effect.gen({ self: this }, function*() {
         const entries = (yield* this.hold((value): ReadonlyArray<readonly [string, unknown]> =>
