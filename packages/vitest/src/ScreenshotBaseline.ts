@@ -4,23 +4,19 @@
  * @stability unstable
  * @since 0.1.0
  */
-import * as Browser from "@usestrider/browser/Browser"
+import type * as Browser from "@usestrider/browser/Browser"
 import type * as Deadline from "@usestrider/browser/Deadline"
-import * as FilePath from "@usestrider/browser/FilePath"
 import * as Operation from "@usestrider/browser/Operation"
 import type * as Page from "@usestrider/browser/Page"
 import type * as Target from "@usestrider/browser/Target"
-import { TestRun } from "@usestrider/browser/test"
+import type { TestRun } from "@usestrider/browser/test"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import { dual } from "effect/Function"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
-import { createHash } from "node:crypto"
-import { mkdir, readFile, writeFile } from "node:fs/promises"
-import { basename, dirname, join, resolve } from "node:path"
-import { expect } from "vitest"
-import { compare } from "./internal/pixelmatch.ts"
+import { basename, dirname, join } from "node:path"
+import * as Baseline from "./internal/baseline.ts"
 import * as Png from "./internal/png.ts"
 
 /**
@@ -108,16 +104,7 @@ export type Update = "none" | "missing" | "all"
  * @category schemas
  * @since 0.1.0
  */
-export const Key = Schema.Struct({
-  /** The test file's absolute path. */
-  testFile: Schema.String,
-  /** The name given to `toMatch`. */
-  name: Schema.String.pipe(Schema.check(Schema.isPattern(/^[a-z0-9][a-z0-9._-]*$/))),
-  /** The browser engine, with no version. */
-  browser: Schema.String.pipe(Schema.check(Schema.isPattern(/^[a-z0-9_]+$/))),
-  /** Node's `process.platform`. */
-  platform: Schema.String.pipe(Schema.check(Schema.isPattern(/^[a-z0-9_]+$/)))
-})
+export const Key = Baseline.Key
 
 /**
  * What names a baseline; `Key` checks it.
@@ -332,7 +319,7 @@ export class MissingBaseline
   }
 }
 
-const namePattern = /^[a-z0-9][a-z0-9._-]*$/
+const namePattern = Baseline.namePattern
 
 /**
  * The name given to `toMatch` isn't a baseline name: lower-case letters, digits, `.`, `_`, and `-`, starting with a
@@ -463,30 +450,8 @@ export class ScreenshotBaselineError
 export const isScreenshotBaselineError = (u: unknown): u is ScreenshotBaselineError =>
   Predicate.hasProperty(u, ScreenshotBaselineErrorTypeId)
 
-/**
- * The engine key of a browser's product, as each backend reports it: Chromium's `HeadlessChrome/<version>` or
- * `Chrome/<version>`, Firefox's `firefox`, stock WebKit's `MiniBrowser (stock WebKit)` or `WebKit (stock)`, and
- * Safari's `Safari`. Any other product keys under `other_`, with its letters and digits and a digest of its exact
- * name, so it can't take a known engine's key or another product's.
- */
-const engineOf = (product: string): string => {
-  const exact = product.split("/")[0]!
-  const name = exact.trim().toLowerCase()
-  if (/^(headless)?chrome$|^chromium$/.test(name)) return "chromium"
-  if (name === "firefox") return "firefox"
-  if (name === "safari") return "safari"
-  if (name.endsWith("(stock webkit)") || name === "webkit (stock)") return "webkit"
-  return `other_${name.replace(/[^a-z0-9]+/g, "")}_${createHash("sha256").update(exact).digest("hex").slice(0, 8)}`
-}
-
 /** A key's file name without the extension, its parts as they are: only the name can contain `-`. */
 const stem = (key: Key): string => `${key.name}-${key.browser}-${key.platform}`
-
-/** `vitest -u` is `all`, a local run `new`, CI `none`: Vitest's public snapshot state. */
-const vitestUpdate = (): Update => {
-  const state = expect.getState().snapshotState?.snapshotUpdateState
-  return state === "all" ? "all" : state === "new" ? "missing" : "none"
-}
 
 /**
  * The default baseline path for a key: `__screenshots__/<test file's name>/<name>-<browser>-<platform>.png` in
@@ -520,57 +485,6 @@ export const defaultPath = (key: Key): string => {
 
 const decodeKey = Schema.decodeUnknownSync(Key)
 
-/** A directory name for a test file: its name, then the first 8 hex digits of its absolute path's SHA-256. */
-const fileIdentity = (testFile: string): string =>
-  `${basename(testFile)}-${createHash("sha256").update(resolve(testFile)).digest("hex").slice(0, 8)}`
-
-const sameBytes = (a: Uint8Array, b: Uint8Array): boolean =>
-  a.length === b.length && a.every((byte, index) => byte === b[index])
-
-const write = (path: string, bytes: Uint8Array) =>
-  Effect.promise(async () => {
-    await mkdir(dirname(path), { recursive: true })
-    await writeFile(path, bytes)
-  })
-
-type Baseline =
-  | { readonly _tag: "Missing" }
-  | { readonly _tag: "Invalid"; readonly detail: string }
-  | { readonly _tag: "Present"; readonly bytes: Uint8Array; readonly image: Png.Image }
-
-const readBaseline = (path: string): Effect.Effect<Baseline> =>
-  Effect.promise(() =>
-    readFile(path).then(
-      (bytes): Baseline => {
-        try {
-          return { _tag: "Present", bytes, image: Png.decode(bytes) }
-        } catch (error) {
-          return { _tag: "Invalid", detail: (error as Error).message }
-        }
-      },
-      (error: NodeJS.ErrnoException): Baseline =>
-        error.code === "ENOENT" ? { _tag: "Missing" } : { _tag: "Invalid", detail: error.message }
-    )
-  )
-
-type Verdict =
-  | { readonly _tag: "Match" }
-  | { readonly _tag: "Size"; readonly actual: Png.Image }
-  | { readonly _tag: "Pixels"; readonly diffPixels: number; readonly diff: Png.Image }
-
-const judge = (expected: Png.Image, bytes: Uint8Array, options: Options | undefined): Verdict => {
-  const actual = Png.decode(bytes)
-  if (actual.width !== expected.width || actual.height !== expected.height) return { _tag: "Size", actual }
-  const { diff, diffPixels } = compare(expected, actual, options?.threshold ?? 0.2)
-  const pixels = options?.maxDiffPixels
-  const ratio = options?.maxDiffPixelRatio
-  const total = actual.width * actual.height
-  const passes = pixels === undefined && ratio === undefined
-    ? diffPixels === 0
-    : (pixels === undefined || diffPixels <= pixels) && (ratio === undefined || diffPixels / total <= ratio)
-  return passes ? { _tag: "Match" } : { _tag: "Pixels", diffPixels, diff }
-}
-
 const run = (
   page: Page.ReadonlyPage,
   name: string,
@@ -582,24 +496,17 @@ const run = (
 > =>
   Effect.gen(function*() {
     const settings = yield* CurrentSettings
-    const test = yield* TestRun.TestRun
-    const browser = yield* Browser.Browser
     if (!namePattern.test(name)) {
       return yield* Effect.fail(new ScreenshotBaselineError({ name, reason: new InvalidName({ name }) }))
     }
-    const key = decodeKey({
-      testFile: test.info.file,
+    const { key, output: directory, path, test, update } = yield* Baseline.locate(
       name,
-      browser: engineOf(browser.info.product),
-      platform: process.platform
-    })
-    const path = resolve((settings.path ?? defaultPath)(key))
-    const update = settings.update ?? vitestUpdate()
-    const output = join(
-      resolve(settings.outputDirectory ?? ".vitest-screenshots"),
-      fileIdentity(key.testFile),
-      stem(key)
+      settings,
+      decodeKey,
+      defaultPath,
+      ".vitest-screenshots"
     )
+    const output = join(directory, stem(key))
     const capture = page.screenshot({
       area: options?.area,
       scale: options?.scale,
@@ -608,25 +515,22 @@ const run = (
     const fail = (reason: ScreenshotBaselineError["reason"]) =>
       Effect.fail(new ScreenshotBaselineError({ name, reason }))
     const artifacts = Effect.fnUntraced(function*(images: ReadonlyArray<readonly [string, Uint8Array]>) {
-      for (const [suffix, bytes] of images) {
-        const file = `${output}-${suffix}.png`
-        yield* write(file, bytes)
-        yield* test.attach({ screenshot: FilePath.Local.make(file) })
-      }
+      for (const [suffix, bytes] of images) yield* Baseline.writeImage(test, `${output}-${suffix}.png`, bytes)
     })
     // Captures until two in a row are the same image.
     const stable = (previous: Uint8Array): Effect.Effect<
       Uint8Array,
       Page.PageError | Target.TargetGone | Deadline.Timeout
-    > => Effect.flatMap(capture, (next) => sameBytes(previous, next) ? Effect.succeed(next) : stable(next))
+    > => Effect.flatMap(capture, (next) => Baseline.sameBytes(previous, next) ? Effect.succeed(next) : stable(next))
 
-    const baseline = yield* readBaseline(path)
+    const stored = yield* Baseline.read(path)
+    const baseline = stored._tag === "Present" ? decodePng(stored.bytes) : stored
     if (baseline._tag !== "Present") {
       if (baseline._tag === "Invalid" && update !== "all") {
         return yield* fail(new InvalidBaseline({ baseline: path, detail: baseline.detail }))
       }
       if (update === "none") return yield* fail(new MissingBaseline({ baseline: path, written: false }))
-      yield* write(path, yield* Effect.flatMap(capture, stable))
+      yield* Baseline.write(path, yield* Effect.flatMap(capture, stable))
       if (update === "all") return
       return yield* fail(new MissingBaseline({ baseline: path, written: true }))
     }
@@ -634,20 +538,21 @@ const run = (
     let previous: Uint8Array | undefined
     while (true) {
       const bytes = yield* capture
-      const verdict = judge(baseline.image, bytes, options)
+      const actual = Png.decode(bytes)
+      const verdict = Baseline.judge(baseline.image, actual, options)
       if (verdict._tag === "Match") return
-      if (previous === undefined || !sameBytes(previous, bytes)) {
+      if (previous === undefined || !Baseline.sameBytes(previous, bytes)) {
         previous = bytes
         continue
       }
-      if (update === "all") return yield* write(path, bytes)
+      if (update === "all") return yield* Baseline.write(path, bytes)
       if (verdict._tag === "Size") {
         yield* artifacts([["actual", bytes], ["expected", baseline.bytes]])
         return yield* fail(
           new SizeMismatch({
             baseline: path,
             expectedSize: { width: baseline.image.width, height: baseline.image.height },
-            actualSize: { width: verdict.actual.width, height: verdict.actual.height },
+            actualSize: { width: actual.width, height: actual.height },
             actual: `${output}-actual.png`,
             expected: `${output}-expected.png`
           })
@@ -666,6 +571,15 @@ const run = (
       )
     }
   }).pipe(Operation.named("ScreenshotBaseline.toMatch", { attributes: { "browser.screenshot.name": name } }))
+
+/** A baseline's image, or why it can't be read. */
+const decodePng = (bytes: Uint8Array) => {
+  try {
+    return { _tag: "Present" as const, bytes, image: Png.decode(bytes) }
+  } catch (error) {
+    return { _tag: "Invalid" as const, detail: (error as Error).message }
+  }
+}
 
 /**
  * Expects the page's screenshot to match the baseline named `name`, capturing until one matches or two captures

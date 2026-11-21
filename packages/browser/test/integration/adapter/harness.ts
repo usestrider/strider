@@ -58,6 +58,27 @@ const routes: Record<string, Route> = {
     })
     response.end(new URL(request.url ?? "/", "http://site").searchParams.get("html") ?? "")
   },
+  // Any page, as `/fixture`, under a policy that allows only the site's own stylesheets
+  "/style-csp": (request, response) => {
+    response.writeHead(200, {
+      "content-type": "text/html; charset=utf-8",
+      "content-security-policy": "style-src 'self'"
+    })
+    response.end(new URL(request.url ?? "/", "http://site").searchParams.get("html") ?? "")
+  },
+  // Reports disallowed inline styles without blocking them.
+  "/style-report-only": (_request, response) => {
+    response.writeHead(200, {
+      "content-type": "text/html; charset=utf-8",
+      "content-security-policy-report-only": "style-src 'self'"
+    })
+    response.end("<body>x</body>")
+  },
+  // Any stylesheet: its source is the `css` parameter
+  "/style": (request, response) => {
+    response.writeHead(200, { "content-type": "text/css; charset=utf-8" })
+    response.end(new URL(request.url ?? "/", "http://site").searchParams.get("css") ?? "")
+  },
   // Any page, as `/fixture`, under a policy that only reports scripts that aren't the site's own
   "/csp-report-only": (request, response) => {
     response.writeHead(200, {

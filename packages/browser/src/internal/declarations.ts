@@ -84,7 +84,7 @@ export interface Registry {
     {
       readonly world: Adapter.World
       readonly source: string
-      readonly webSockets?: ReadonlyArray<Adapter.WebSocketBridge> | undefined
+      readonly hostBridges?: ReadonlyArray<Adapter.HostBridge> | undefined
     }
   >
   /** The intercept patterns in force, per phase. */
@@ -183,7 +183,7 @@ export const make = (): Registry => {
       const scripts = scriptsOf(placement)
       const bundles = new Map<
         string,
-        { world: Adapter.World; sources: Array<string>; webSockets?: Array<Adapter.WebSocketBridge> }
+        { world: Adapter.World; sources: Array<string>; hostBridges?: Array<Adapter.HostBridge> }
       >()
       for (const entry of scripts) {
         const key = worldKey(entry.declaration.world)
@@ -193,7 +193,7 @@ export const make = (): Registry => {
           bundles.set(key, bundle)
         }
         bundle.sources.push(wrap(entry.id, entry.declaration.source, entry.declaration.after))
-        if (entry.declaration.webSocket !== undefined) (bundle.webSockets ??= []).push(entry.declaration.webSocket)
+        if (entry.declaration.hostBridge !== undefined) (bundle.hostBridges ??= []).push(entry.declaration.hostBridge)
       }
       return new Map(
         [...bundles].map((
@@ -201,7 +201,7 @@ export const make = (): Registry => {
         ) => [key, {
           world: bundle.world,
           source: block(bundle.sources),
-          ...(bundle.webSockets === undefined ? {} : { webSockets: bundle.webSockets })
+          ...(bundle.hostBridges === undefined ? {} : { hostBridges: bundle.hostBridges })
         }])
       )
     },

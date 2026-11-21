@@ -9,16 +9,18 @@ import * as Inspectable from "effect/Inspectable"
 import * as Option from "effect/Option"
 import { pipeArguments } from "effect/Pipeable"
 import * as BrowserWorker from "../BrowserWorker.ts"
+import type * as Deadline from "../Deadline.ts"
 import type * as JSHandle from "../JSHandle.ts"
 import * as Reason from "../Reason.ts"
+import type * as Target from "../Target.ts"
 import type * as Adapter from "./adapter.ts"
+import * as Evaluation from "./evaluation.ts"
 import { exception } from "./evaluation.ts"
 import * as Filters from "./filters.ts"
 import * as FunctionSource from "./functionSource.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import type * as Runtime from "./runtime.ts"
-import * as Serialization from "./serialization.ts"
 
 const TypeId = "~@usestrider/browser/BrowserWorker"
 
@@ -26,30 +28,39 @@ export const make = (runtime: Runtime.Runtime, entry: Model.WorkerEntry): Browse
   const failure = (reason: BrowserWorker.BrowserWorkerErrorReason, id = Operation.idNow()) =>
     new BrowserWorker.BrowserWorkerError({ reason, diagnostics: Operation.diagnostics(id) })
 
-  const evaluate = Operation.fn("BrowserWorker.evaluate", { attributes: { "browser.realm.id": entry.realm } })(
-    function*<Args extends ReadonlyArray<unknown>, B>(fn: (...args: Args) => B | Promise<B>, ...args: Args) {
+  /** Calls `fn` in the worker's realm: its result by value, or as a handle in the caller's scope. */
+  const run = <B, R>(
+    operation: string,
+    fn: Function,
+    args: ReadonlyArray<unknown>,
+    result: "value" | "handle",
+    then: (value: Adapter.RemoteValue) => Effect.Effect<B, Evaluation.Failure, R>
+  ): Effect.Effect<B, BrowserWorker.BrowserWorkerError | Target.TargetGone | Deadline.Timeout, R> =>
+    Effect.gen(function*() {
       const record = yield* Operation.record
       const id = record.id
-      yield* Filters.requires(runtime, "BrowserWorker.evaluate", "workers.evaluate").pipe(
+      yield* Filters.requires(runtime, operation, "workers.evaluate").pipe(
         Effect.mapError((error) => failure(error.reason as Reason.Unsupported, id))
       )
-      let values: ReadonlyArray<Adapter.LocalValue>
-      try {
-        values = args.map((arg, index) => ({
-          _tag: "Value",
-          value: Serialization.toRemote(arg, `args[${index}]`)
-        }))
-      } catch (error) {
-        if (!(error instanceof Serialization.Unserializable)) throw error
-        return yield* Effect.fail(failure(new Reason.NotSerializable({ path: error.path, hint: error.hint }), id))
-      }
+      const fromFailure = (cause: Evaluation.Failure) =>
+        cause._tag === "Gone"
+          ? cause.error
+          : cause._tag === "Deadline"
+          ? cause.error ??
+            record.timeout(
+              Option.some("The worker didn't answer before the deadline; the function may still be running")
+            )
+          : failure(cause.reason as BrowserWorker.BrowserWorkerErrorReason, id)
+      const values = yield* Evaluation.toLocal(args, entry.realm).pipe(Effect.mapError(fromFailure))
+      const group = yield* Evaluation.groupFor(runtime, entry.realm, result)
       // The call is on its way: a deadline after it can't say the function didn't run
       record.markSent()
-      const result = yield* runtime.model.adapter.evaluate(entry.realm, {
+      const evaluated = yield* runtime.model.adapter.evaluate(entry.realm, {
         functionDeclaration: FunctionSource.declaration(fn),
         arguments: values,
         awaitPromise: true,
-        result: "value",
+        result,
+        ...(group === undefined ? {} : { group }),
         userActivation: false
       }).pipe(
         Effect.catch((error) => {
@@ -62,23 +73,35 @@ export const make = (runtime: Runtime.Runtime, entry: Model.WorkerEntry): Browse
             () => Option.some("The worker didn't answer before the deadline; the function may still be running")
           )
       )
-      if (result._tag === "Exception") {
+      if (evaluated._tag === "Exception") {
         return yield* Effect.fail(failure(
           new Reason.EvaluationThrown({
-            exception: exception(result),
+            exception: exception(evaluated),
             hint: "The function threw in the worker, or returned a promise that rejected"
           }),
           id
         ))
       }
-      try {
-        return Serialization.fromRemote(result.value) as JSHandle.Serialized<B>
-      } catch (error) {
-        if (!(error instanceof Serialization.Unserializable)) throw error
-        return yield* Effect.fail(failure(new Reason.NotSerializable({ path: error.path, hint: error.hint }), id))
-      }
-    }
-  )
+      return yield* then(evaluated.value).pipe(Effect.mapError(fromFailure))
+    }).pipe(Operation.named(operation, { attributes: { "browser.realm.id": entry.realm } }))
+
+  const evaluate = <Args extends ReadonlyArray<unknown>, B>(fn: (...args: Args) => B | Promise<B>, ...args: Args) =>
+    run("BrowserWorker.evaluate", fn, args, "value", Evaluation.fromRemote) as Effect.Effect<
+      JSHandle.Serialized<B>,
+      BrowserWorker.BrowserWorkerError | Target.TargetGone | Deadline.Timeout
+    >
+
+  const evaluateHandle = <Args extends ReadonlyArray<unknown>, B>(
+    fn: (...args: Args) => B | Promise<B>,
+    ...args: Args
+  ) =>
+    run(
+      "BrowserWorker.evaluateHandle",
+      fn,
+      args,
+      "handle",
+      (value) => Evaluation.own<Awaited<B>>(runtime, entry.realm, value, Option.none())
+    )
 
   const worker: BrowserWorker.BrowserWorker = {
     [TypeId]: TypeId,
@@ -87,6 +110,7 @@ export const make = (runtime: Runtime.Runtime, entry: Model.WorkerEntry): Browse
     url: entry.url,
     closed: Deferred.await(entry.closed),
     evaluate,
+    evaluateHandle,
     pipe() {
       return pipeArguments(this, arguments)
     },

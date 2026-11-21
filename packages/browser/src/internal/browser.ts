@@ -27,6 +27,7 @@ import { pipeArguments } from "effect/Pipeable"
 import * as Redacted from "effect/Redacted"
 import * as Scope from "effect/Scope"
 import * as SubscriptionRef from "effect/SubscriptionRef"
+import * as Binding from "../Binding.ts"
 import type * as Browser from "../Browser.ts"
 import * as CookieJar from "../CookieJar.ts"
 import * as Deadline from "../Deadline.ts"
@@ -44,6 +45,7 @@ import * as UserContext from "../UserContext.ts"
 import * as WebSocketRoute from "../WebSocketRoute.ts"
 import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
+import * as Bindings from "./bindings.ts"
 import * as BrowserService from "./browserService.ts"
 import * as ClaimHooks from "./claimHooks.ts"
 import * as ClientCertificates from "./clientCertificates.ts"
@@ -210,6 +212,7 @@ const makeContext = (
         (options?.phase ?? "request") as P
       )) as UserContext.UserContext["route"],
     routeWebSocket: (pattern, handler, options) => WebSocketRoutes.register(runtime, entry, handler, pattern, options),
+    exposeBinding: (name, schemas, handler) => Bindings.expose(runtime, entry, undefined, name, schemas, handler),
     addInitScript: (script, options) =>
       InitScripts.add({ runtime, scope: declared, operation: "UserContext.addInitScript" }, entry.id, script, options),
     emulate: (settings) => Emulation.emulate({ runtime, scope: declared, operation: "UserContext.emulate" }, settings),
@@ -365,6 +368,14 @@ const makeDeniedContext = (
           diagnostics: Operation.diagnostics(id())
         })
       ),
+    exposeBinding: (name: string) =>
+      Effect.fail(
+        new Binding.BindingError({
+          name,
+          reason: notPermitted("UserContext.exposeBinding"),
+          diagnostics: Operation.diagnostics(id())
+        })
+      ),
     addInitScript: () => declaration("UserContext.addInitScript"),
     emulate: () => declaration("UserContext.emulate"),
     grant: () => declaration("UserContext.grant")
@@ -394,6 +405,8 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
   const handles = new WeakMap<Model.PageEntry, Page.Page>()
   const observedHandles = new WeakMap<Model.PageEntry, Page.ObservedPage>()
   const denied = new WeakMap<Model.ContextEntry, UserContext.UserContext>()
+  // The observed handle of each context the connection lists but didn't create
+  const observedContexts = new WeakMap<Model.ContextEntry, UserContext.ObservedUserContext>()
 
   /** Whether the connection controls a page for its whole life: it created the page, or the page's context. */
   const lifelong = (entry: Model.PageEntry) =>
@@ -522,9 +535,17 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
     path: yield* Effect.serviceOption(Path.Path),
     engineRealms: yield* Runtime.makeEngineRealms(model),
     timelines: Clock.makeTimelines(),
-    settle: (operation, navigation, frame, url, at, outcome, id) =>
-      Navigation.settle(model, operation, navigation, frame, url, at, outcome, id)
+    settle: (operation, navigation, page, frame, url, at, outcome, id) =>
+      Navigation.settle(model, operation, navigation, page, frame, url, at, outcome, id)
   }
+
+  /** Ends a context setup: lists the context it made, as its handle or, if setup failed, as observed. */
+  const settled = (awaiting: { entry?: Model.ContextEntry }) =>
+    Effect.suspend(() => {
+      if (awaiting.entry?.awaitingHandle !== true) return Effect.void
+      awaiting.entry.awaitingHandle = false
+      return model.touchContexts
+    })
 
   const setupContext = (
     options?: UserContext.Options,
@@ -533,8 +554,10 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       readonly ownership: { committed: boolean }
       readonly adopt?: boolean
     }
-  ): Effect.Effect<UserContext.UserContext, UserContext.UserContextError | Deadline.Timeout, Scope.Scope> =>
-    Effect.gen(function*() {
+  ): Effect.Effect<UserContext.UserContext, UserContext.UserContextError | Deadline.Timeout, Scope.Scope> => {
+    // The context this setup creates: listed once setup ends, as its handle or, if setup failed, as observed
+    const awaiting: { entry?: Model.ContextEntry } = {}
+    return Effect.gen(function*() {
       const operation = mode !== undefined && "context" in mode ? "UserContext.reclaim" : "Browser.newContext"
       const { id } = yield* Operation.record
       const proxy = options?.proxy === undefined ? Option.none<Adapter.ProxyOptions>() : Option.some(
@@ -811,7 +834,11 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
             requestSizes: options?.requestSizes
           })).pipe(
             Effect.catch(failed),
-            Effect.flatMap(model.context)
+            Effect.flatMap((id) =>
+              mode !== undefined && "context" in mode ? model.context(id) : model.createdContext(id)
+            ),
+            // Set as the entry is acquired, so setup's end lists it even if setup is interrupted right after
+            Effect.tap((entry) => Effect.sync(() => void (awaiting.entry = entry)))
           ),
         (entry) =>
           (!committed() || (reclaimable && Handoff.leavesOpen(ownerScope)) ? Effect.void : model.remove(entry)).pipe(
@@ -957,7 +984,11 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       }
       if (ownership === undefined) Handoff.ownContext(entry, ownerScope)
       return context
-    }).pipe(Operation.named(mode !== undefined && "context" in mode ? "UserContext.reclaim" : "Browser.newContext"))
+    }).pipe(
+      Effect.ensuring(Effect.suspend(() => settled(awaiting))),
+      Operation.named(mode !== undefined && "context" in mode ? "UserContext.reclaim" : "Browser.newContext")
+    )
+  }
 
   // Setup is interruptible; ownership, registrations and delivery share a single commit region.
   const recover = <A>(
@@ -995,6 +1026,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
   })
 
   const defaultEntry = yield* model.context(adapter.defaultContext)
+  const defaultContext = makeObservedContext(runtime, defaultEntry, upgradeContext(defaultEntry))
   const browser: Browser.Browser = {
     [BrowserTypeId]: BrowserTypeId,
     info: adapter.info,
@@ -1027,7 +1059,35 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       target: { _tag: "Browser" },
       operation: "Browser.pages.waitFor"
     }),
-    defaultContext: makeObservedContext(runtime, defaultEntry, upgradeContext(defaultEntry))
+    defaultContext,
+    contexts: Watchable.make({
+      ref: model.contexts,
+      project: (entries) => {
+        const listed: Array<UserContext.ObservedUserContext> = [defaultContext]
+        for (const entry of entries) {
+          if (entry === defaultEntry) continue
+          const created = contexts.get(entry.id)
+          if (created !== undefined) {
+            listed.push(created)
+            continue
+          }
+          const known = observedContexts.get(entry)
+          if (known !== undefined) {
+            listed.push(known)
+            continue
+          }
+          // One this connection is creating is listed once `newContext` has its handle
+          if (entry.awaitingHandle === true) continue
+          const context = makeObservedContext(runtime, entry, upgradeContext(entry))
+          observedContexts.set(entry, context)
+          listed.push(context)
+        }
+        return Option.some(listed)
+      },
+      ended: () => Option.none(),
+      target: { _tag: "Browser" },
+      operation: "Browser.contexts.waitFor"
+    })
   }
   ClaimHooks.register(browser, { runtime, context: newContext, recover })
   return browser

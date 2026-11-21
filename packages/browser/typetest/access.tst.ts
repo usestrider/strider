@@ -40,6 +40,13 @@ describe("access is typed", () => {
     expect(observed.viewportSize).type.toRaiseError()
   })
 
+  it("a JavaScript property is read among the page's scripts, so it needs a full locator", () => {
+    expect(page.locator("div").pipe(Expect.toHaveJSProperty("value", "x"))).type.not.toRaiseError()
+    expect(Expect.toHaveJSProperty(page.locator("div"), "value", "x")).type.not.toRaiseError()
+    expect(Expect.toHaveJSProperty(reader.locator("div"), "value", "x")).type.toRaiseError()
+    expect(reader.locator("div").pipe(Expect.toHaveJSProperty("value", "x"))).type.toRaiseError()
+  })
+
   it("a page you may only inspect offers no actions", () => {
     expect(reader.locator("div").boundingBox).type.not.toRaiseError()
     expect(reader.getByRole("button").click()).type.toRaiseError("Property 'click' does not exist")

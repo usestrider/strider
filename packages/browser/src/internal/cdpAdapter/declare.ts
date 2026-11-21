@@ -29,10 +29,10 @@ import * as Cleanup from "../declarationCleanup.ts"
 import * as Declarations from "../declarations.ts"
 import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
+import * as HostBridge from "./hostBridge.ts"
 import { contextLock, downloadDirectory, forgetRetiredFrames } from "./state.ts"
 import { type ContextEntry, type PageEntry, placement, type State, type TargetEntry } from "./state.ts"
-import { installWebSocketGates } from "./targets.ts"
-import * as WebSocketBridge from "./webSocketBridge.ts"
+import { installHostBridgeGates } from "./targets.ts"
 
 /** Initial commands are written before resume; their replies and state updates finish in the gate's scope. */
 export interface Setup {
@@ -449,10 +449,10 @@ const writeScripts = Effect.fnUntraced(function*(state: State, target: TargetEnt
     if (!bundles.has(key)) yield* removeScript(target, identifier, key)
   }
   for (const [key, bundle] of bundles) {
-    if (bundle.webSockets !== undefined) {
+    if (bundle.hostBridges !== undefined) {
       // The bridge's bindings go before its capture script, which calls them; a paused page queues them with the
       // rest of its setup, so they reach the page before it resumes.
-      const bindings = yield* WebSocketBridge.prepare(state, target, bundle.webSockets, setup === undefined)
+      const bindings = yield* HostBridge.prepare(state, target, bundle.hostBridges, setup === undefined)
       if (setup !== undefined) { for (const binding of bindings) yield* setup.send(binding) }
     }
     const previous = target.scripts.get(key)
@@ -860,9 +860,9 @@ export const declare = Effect.fnUntraced(function*(
   scope: Adapter.DeclarationScope,
   declaration: Adapter.Declaration
 ) {
-  if (declaration._tag === "InitScript" && declaration.webSocket !== undefined && scope._tag === "UserContext") {
+  if (declaration._tag === "InitScript" && declaration.hostBridge !== undefined && scope._tag === "UserContext") {
     const context = state.contexts.get(scope.context)
-    if (context !== undefined) yield* installWebSocketGates(context, yield* Effect.scope, declaration.workers)
+    if (context !== undefined) yield* installHostBridgeGates(context, yield* Effect.scope, declaration.workers)
   }
   const id = state.ids.registration()
   state.registry.add(scope, declaration, id)

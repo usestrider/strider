@@ -71,6 +71,8 @@ const TypeId = "~@usestrider/browser/JSHandle"
  *
  * A handle belongs to the scope that acquired it, and is released when that scope closes, in one command with the
  * scope's other handles in its realm. Using it after its realm ends fails with `TargetGone` (`RealmDestroyed`).
+ * Its string shows its realm and a preview of the value, taken when the handle was made: a primitive's value
+ * (`JSHandle(<realm> 42)`), a node's tag (`node <p>`), or another object's kind (`array`, `object`).
  *
  * **Example** (Reading from a DOM node)
  *
@@ -146,6 +148,35 @@ export interface JSHandle<A = unknown> extends Pipeable.Pipeable, Inspectable.In
     fn: (value: A, ...args: Args) => B | Promise<B>,
     ...args: Args
   ): Effect.Effect<JSHandle<Awaited<B>>, JSHandleError | Target.TargetGone | Deadline.Timeout, Scope.Scope>
+  /**
+   * The value's own enumerable string-keyed properties, each as a handle in the same realm, in the caller's scope.
+   *
+   * **Details**
+   *
+   * The keys are read once, in the order `Object.keys` gives them, and each getter runs once. A primitive,
+   * `null`, or `undefined` gives an empty map. The handles in the map are released when the caller's scope closes,
+   * like any other handle.
+   *
+   * **Example** (Reading each field of a settings object)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const settingNames = Effect.fn("settingNames")(function*(page: Page.Page) {
+   *   const settings = yield* page.evaluateHandleInMainWorld(() =>
+   *     Reflect.get(window, "settings")
+   *   )
+   *   const properties = yield* settings.properties
+   *   return [...properties.keys()]
+   * })
+   * ```
+   */
+  readonly properties: Effect.Effect<
+    ReadonlyMap<string, JSHandle>,
+    JSHandleError | Target.TargetGone | Deadline.Timeout,
+    Scope.Scope
+  >
   /**
    * The value itself, by value.
    *

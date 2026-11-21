@@ -15,9 +15,9 @@ import * as Kit from "../adapterKit.ts"
 import * as Declarations from "../declarations.ts"
 import { pageHandleOf, processOfContext, resizeWindow } from "./automation.ts"
 import { overrideCapability } from "./capabilities.ts"
+import * as HostBridge from "./hostBridge.ts"
 import { type PageEntry, placement, type State, type TargetEntry } from "./state.ts"
 import * as Viewport from "./viewport.ts"
-import * as WebSocketBridge from "./webSocketBridge.ts"
 
 // ── Mapping ───────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -126,8 +126,8 @@ const applyBootstrap = (state: State, target: TargetEntry) =>
 const writeBootstrap = Effect.fnUntraced(function*(state: State, target: TargetEntry) {
   const bundles = state.registry.bundles(placement(target.page))
   const main = bundles.get(Declarations.worldKey({ _tag: "Main" }))
-  if (main?.webSockets !== undefined) {
-    yield* WebSocketBridge.prepare(state, target, main.webSockets)
+  if (main?.hostBridges !== undefined) {
+    yield* HostBridge.prepare(state, target, main.hostBridges)
   }
   return yield* Page.setBootstrapScript(main === undefined ? {} : { source: main.source }).pipe(
     Protocol.on(target.session)

@@ -44,6 +44,7 @@ Each matcher takes a locator, except `toHaveURL` and `toHaveTitle`, which take t
 | `toHaveAttribute(name, expected?)`             | it has the attribute, with that value if given                   |
 | `toHaveRole(expected)`                         | its computed ARIA role equals the string exactly                 |
 | `toHaveCSS(name, expected, options?)`          | its computed CSS property matches an exact string or regular expression |
+| `toHaveJSProperty(path, expected, options?)` | a JavaScript property, read in the page's own world, deeply equals `expected` |
 | `toHaveCount(n)`                               | exactly `n` elements match                                       |
 | `toMatchAria(pattern, options?)`               | its accessibility tree matches a pattern; `not` waits for it not to |
 | `toHaveURL(expected)`, `toHaveTitle(expected)` | the page's URL or title matches                                  |
@@ -195,6 +196,32 @@ CSS expectations require exactly one match even with `not: true`. Missing or mul
 the deadline and report the match count; Playwright rejects multiple matches immediately.
 Use `Deadline.within` to bound the expectation. Without options, it compares the element's own computed style.
 
+A JavaScript property is read where the page's own scripts set it, so a value a script assigned to an element is
+seen, and the property can be a dotted path into nested objects. The value is compared by deep equality: Dates by
+time, arrays, Maps and Sets by their entries, and plain objects by their own keys. Because a getter of the page's can
+run during the read, it takes a `Locator` rather than a `ReadonlyLocator`:
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const loaded = Effect.fn("loaded")(function*(page: Page.Page) {
+  const profile = page.locator("#profile")
+  yield* profile.pipe(
+    Expect.toHaveJSProperty("model", { plan: "pro", since: new Date("2026-01-01") })
+  )
+  yield* profile.pipe(Expect.toHaveJSProperty("model.plan", "free", { not: true }))
+  yield* page.getByRole("checkbox").pipe(Expect.toHaveJSProperty("checked", true))
+})
+```
+
+Assigning a property is no change the page reports, so instead of waiting on page events it reads the property
+again every `Expect.CheckInterval`, 100 ms unless `Expect.withCheckInterval` sets it. The interval is also how
+often a getter of the page's on the path runs.
+
+Like CSS expectations, it requires exactly one match even with `not: true`, retries until the deadline, and reports
+the value read or the match count.
+
 A matcher without arguments is the function itself; one with arguments is dual:
 
 ```ts
@@ -217,7 +244,7 @@ A locator's expectation returns its first observation without waiting for change
 browser measures the element at its next rendering update, so the first observation can be the match count alone;
 the ratio follows as soon as the browser reports it. Later rounds re-check in the
 page on DOM changes, animation frames, and `input`, `change`, or focus events, for up to a second at a time until
-the deadline. A failure keeps the observations received before the deadline; a browser stall before the first
+the deadline; `toHaveJSProperty`, which reads at `Expect.CheckInterval` instead, is the exception. A failure keeps the observations received before the deadline; a browser stall before the first
 reply can leave its history empty. Replies received after the deadline cannot change the returned failure.
 
 The first failed expectation stops the rest. To see every failure, collect them with Effect:
@@ -456,6 +483,31 @@ const viewport = Effect.fn("viewport")(function*(page: Page.Page) {
 - The result comes back by value, typed as what arrives.
 - A DOM node can't come back by value: [`evaluateHandle`](/docs/api/browser/Page#Page.evaluateHandle) gives a
   handle, released with its scope.
+
+A handle is a reference to a value that stays in the page, in one realm. `page.evaluateHandle` and
+`locator.evaluateHandle` make one in the isolated world, `evaluateHandleInMainWorld` makes one among the page's
+scripts, on WebKit too, and `handle.properties` gives a handle for each of a value's own enumerable properties:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const cartItems = Effect.fn("cartItems")(function*(page: Page.Page) {
+  const cart = yield* page.evaluateHandleInMainWorld(() =>
+    Reflect.get(window, "cart") as Record<string, number>
+  )
+  const items = yield* cart.properties
+  const quantities: Array<readonly [string, number]> = []
+  for (const [name, item] of items) {
+    quantities.push([name, (yield* item.read) as number])
+  }
+  return quantities
+})
+```
+
+- A handle passes into calls in its own realm only: a main-world handle given to `page.evaluate` fails with
+  `NotSerializable`. On WebKit, `page.evaluate` fails with `Unsupported` before it looks at its arguments.
+- Its string previews the value it held when it was made, such as `JSHandle(R3 node <p>)`.
 
 To read every locator match together, use `evaluateAll`. It passes an empty array when nothing matches:
 

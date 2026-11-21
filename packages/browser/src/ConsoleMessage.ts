@@ -200,6 +200,27 @@ export type Source = typeof Source.Type
  * includes its stack. The `console` capability says where a backend's previews differ. `source` says whether the
  * page or the browser wrote it.
  *
+ * `timestamp` is when the browser logged the message, by the browser's wall clock, to the millisecond: the time a
+ * message logged again was logged again, on every browser. It is the clock of the machine the browser runs on, so it
+ * compares with the test's own `Date.now()` only when that is the same machine, and a page's `Date`, which a page
+ * clock can set, doesn't move it. `at` is when Strider received the message, by Strider's monotonic clock, which
+ * orders it among the other events Strider reports but never reads as a date.
+ *
+ * **Example** (How long after navigating a page logged an error)
+ *
+ * ```ts import.meta.vitest
+ * import { ConsoleMessage, Page } from "@usestrider/browser"
+ * import { DateTime, Effect } from "effect"
+ *
+ * const errorDelay = Effect.fn("errorDelay")(function*(page: Page.Page) {
+ *   const error = yield* ConsoleMessage.next(page, { level: "error" })
+ *   const started = DateTime.makeUnsafe(Date.now())
+ *   yield* page.goto("https://app.example.com")
+ *   const message = yield* error
+ *   return DateTime.distance(started, message.timestamp)
+ * })
+ * ```
+ *
  * @stability unstable
  * @category models
  * @since 0.1.0
@@ -210,6 +231,7 @@ export class ConsoleMessage extends Schema.Class<ConsoleMessage>("@usestrider/br
   location: Schema.Option(SourceLocation),
   origin: Target.EventOrigin,
   source: Source,
+  timestamp: Schema.DateTimeUtc,
   at: MonotonicInstant.MonotonicInstant
 }) {}
 

@@ -28,12 +28,12 @@ import * as Capture from "../src/internal/bidiAdapter/capture.ts"
 import * as Contexts from "../src/internal/bidiAdapter/contexts.ts"
 import * as Declare from "../src/internal/bidiAdapter/declare.ts"
 import * as Evaluation from "../src/internal/bidiAdapter/evaluation.ts"
+import * as HostBridge from "../src/internal/bidiAdapter/hostBridge.ts"
 import * as Navigation from "../src/internal/bidiAdapter/navigation.ts"
 import * as Network from "../src/internal/bidiAdapter/network.ts"
 import * as Obligations from "../src/internal/bidiAdapter/obligations.ts"
 import * as State from "../src/internal/bidiAdapter/state.ts"
 import * as Tree from "../src/internal/bidiAdapter/tree.ts"
-import * as WebSocketBridge from "../src/internal/bidiAdapter/webSocketBridge.ts"
 import * as BidiWire from "../src/internal/bidiWire.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as Fold from "../src/internal/fold.ts"
@@ -4780,7 +4780,7 @@ it.effect("passes a closing page's reason to the WebSocket bridge after the real
     state = fixture.state
     const received = yield* Deferred.make<void>()
     const ended = yield* Deferred.make<Target.CloseReason | undefined>()
-    const bridge: Adapter.WebSocketBridge = {
+    const bridge: Adapter.HostBridge = {
       name: "test-channel",
       token: "test-token",
       scope: yield* Effect.scope,
@@ -4794,7 +4794,7 @@ it.effect("passes a closing page's reason to the WebSocket bridge after the real
       },
       failed: () => {}
     }
-    const preparing = yield* WebSocketBridge.prepare(state, { _tag: "Browser" }, bridge).pipe(Effect.forkChild)
+    const preparing = yield* HostBridge.prepare(state, { _tag: "Browser" }, bridge).pipe(Effect.forkChild)
     const command = yield* browser.next
     yield* browser.receive({
       type: "success",

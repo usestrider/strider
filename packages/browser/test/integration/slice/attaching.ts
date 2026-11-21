@@ -333,7 +333,8 @@ export const attaching = (
               const browser = yield* Browser.Browser
               const pages = yield* browser.pages
               assert.isAbove(pages.length, 0, "the attached browser lists its open tabs")
-              const tab = yield* pages[0]!.control
+              // A tab whose startup navigation hasn't committed would supersede the goto
+              const tab = yield* (yield* byHeading(browser, "First")).control
               yield* tab.goto(`data:text/html,${encodeURIComponent("<h1>Adopted</h1>")}`, { waitUntil: "load" })
               assert.strictEqual(yield* tab.getByRole("heading").readText, "Adopted")
             })).pipe(Effect.provide(attached))
@@ -495,6 +496,30 @@ export const attaching = (
               }))
             }).pipe(Effect.provide(attached))
           }), timeout)
+
+        if (name === "Chromium") {
+          it.effect("lists an empty context another client created as observed when attaching", () =>
+            Effect.gen(function*() {
+              const { origin } = yield* site
+              const { layer: attached } = yield* start(tabUrl(origin, "First"), tabUrl(origin, "Second"))
+              yield* Effect.scoped(Effect.gen(function*() {
+                const created = yield* Browser.newContext()
+                // A second connection of its own, beside the first
+                const seen = yield* Effect.gen(function*() {
+                  const browser = yield* Browser.Browser
+                  const listed = yield* browser.contexts
+                  assert.strictEqual(listed[0], browser.defaultContext)
+                  return listed.find((each) =>
+                    each.id !== browser.defaultContext.id
+                  )
+                }).pipe(Effect.provide(Layer.fresh(attached)))
+                // Found from the browser's own list of contexts, though no page is open in it
+                assert.isDefined(seen)
+                assert.isFalse("newPage" in seen!)
+                assert.notStrictEqual(seen, created)
+              })).pipe(Effect.provide(attached))
+            }), timeout)
+        }
 
         if (name === "Firefox") {
           it.effect("refuses a second client while one holds Firefox's one session", () =>

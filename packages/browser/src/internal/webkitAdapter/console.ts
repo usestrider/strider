@@ -11,6 +11,7 @@ import * as Console from "../../webkit-stock-protocol/Console.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as ConsoleFormat from "../consoleFormat.ts"
+import * as EpochTime from "../epochTime.ts"
 import * as Urls from "../urls.ts"
 import { consoleArguments } from "./evaluation.ts"
 import {
@@ -61,7 +62,8 @@ const consoleMessage = (
   state: State,
   message: Console.ConsoleMessage,
   target: TargetEntry,
-  worker: WorkerEntry | undefined
+  worker: WorkerEntry | undefined,
+  timestamp: number
 ) => {
   if (message.source === "javascript" && message.level === "error") {
     uncaught(state, message, target, worker)
@@ -92,6 +94,7 @@ const consoleMessage = (
         ? { _tag: "Page", page: target.page.id }
         : { _tag: "Worker", realm: realm.id },
       source: sourceOf(message.source),
+      timestamp: EpochTime.fromSeconds(timestamp),
       at: Adapter.now()
     })
   })
@@ -142,11 +145,12 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       const holder = worker ?? target
       if (holder === undefined) return
       holder.lastConsole = params.message
-      consoleMessage(state, params.message, worker?.target ?? target!, worker)
+      consoleMessage(state, params.message, worker?.target ?? target!, worker, params.message.timestamp)
     })
-    .on(Console.messageRepeatCountUpdated, (_, { state, target, worker }) => {
+    // WebKit reports a message logged again as a repeat of the last, at the time it was logged again
+    .on(Console.messageRepeatCountUpdated, (params, { state, target, worker }) => {
       const holder = worker ?? target
       const message = holder?.lastConsole
       if (holder === undefined || message === undefined) return
-      consoleMessage(state, message, worker?.target ?? target!, worker)
+      consoleMessage(state, message, worker?.target ?? target!, worker, params.timestamp)
     })

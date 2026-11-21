@@ -29,6 +29,7 @@ import type * as NetworkConnection from "../NetworkConnection.ts"
 import type * as NetworkRequest from "../NetworkRequest.ts"
 import type * as NetworkResponse from "../NetworkResponse.ts"
 import type * as Page from "../Page.ts"
+import type * as PageLifecycle from "../PageLifecycle.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
 import * as Target from "../Target.ts"
 import type * as UncaughtException from "../UncaughtException.ts"
@@ -141,6 +142,8 @@ export interface RouteEntry {
 /** A navigation of a page, when it ended. */
 export interface NavigationEvent {
   readonly navigation: PageNavigation.Id
+  /** The page it happened in. */
+  readonly page: Target.NavigableId
   /** The navigable it happened in: the page's own id, or a frame's. */
   readonly frame: Target.NavigableId
   /** Where it ended: the committed document's URL, or the one a same-document navigation set; else where it was going. */
@@ -202,6 +205,12 @@ export interface ResponseEvent {
   readonly hop: HopEntry
 }
 
+/** A hop's end as the browser reported it: never `Forgotten`, nor a failure connection teardown made up. */
+export interface RequestEndEvent {
+  readonly hop: HopEntry
+  readonly end: Exclude<HopEnd, { readonly _tag: "Forgotten" }>
+}
+
 /** A download's progress, and where the browser wrote it once it completed. */
 export interface DownloadState {
   readonly status: Download.Status
@@ -248,8 +257,10 @@ export interface PageEvents {
   readonly fileChooser: Events.Channel<FileChooserEvent>
   readonly autoResolution: Events.Channel<AutoResolutionEvent>
   readonly navigation: Events.Channel<NavigationEvent>
+  readonly lifecycle: Events.Channel<PageLifecycle.PageLifecycle>
   readonly request: Events.Channel<NetworkRequest.NetworkRequest>
   readonly response: Events.Channel<ResponseEvent>
+  readonly requestEnd: Events.Channel<RequestEndEvent>
   readonly console: Events.Channel<ConsoleMessage.ConsoleMessage>
   readonly exception: Events.Channel<UncaughtException.UncaughtException>
   readonly download: Events.Channel<DownloadEntry>
@@ -260,8 +271,11 @@ export interface PageEvents {
 /** The events of a context: the kinds its modules take a context for. */
 export interface ContextEvents {
   readonly autoResolution: Events.Channel<AutoResolutionEvent>
+  readonly navigation: Events.Channel<NavigationEvent>
+  readonly lifecycle: Events.Channel<PageLifecycle.PageLifecycle>
   readonly request: Events.Channel<NetworkRequest.NetworkRequest>
   readonly response: Events.Channel<ResponseEvent>
+  readonly requestEnd: Events.Channel<RequestEndEvent>
   readonly console: Events.Channel<ConsoleMessage.ConsoleMessage>
   readonly exception: Events.Channel<UncaughtException.UncaughtException>
   readonly download: Events.Channel<DownloadEntry>
@@ -366,6 +380,8 @@ export interface StorageSourceObserver {
 }
 
 export interface ContextEntry {
+  /** Created by this connection and not yet handed out: `browser.contexts` leaves it out until it has its handle. */
+  awaitingHandle?: boolean | undefined
   storageReplacing?: boolean | undefined
   storageSources?: StorageSourceObserver | undefined
   timings?: Map<NetworkRequest.HopId, NetworkRequest.Timing> | undefined
@@ -420,6 +436,10 @@ export interface Model {
 
   /** Every page of the browser, in the order they were added. */
   readonly pages: Readable<ReadonlyArray<PageEntry>>
+  /** Every context of the browser, in the order they were added, until it is removed or the connection is lost. */
+  readonly contexts: Readable<ReadonlyArray<ContextEntry>>
+  /** Announces `contexts` again, unchanged, once a context has its handle. */
+  readonly touchContexts: Effect.Effect<void>
   /** A page the model keeps, by id. */
   readonly page: (id: Target.NavigableId) => Option.Option<PageEntry>
   /** A document the model keeps, by id, until it ends. */
@@ -437,6 +457,11 @@ export interface Model {
 
   /** A context's entry, made now if its fact hasn't arrived yet, as when its creation's reply comes first. */
   readonly context: (id: UserContext.Id) => Effect.Effect<ContextEntry>
+  /**
+   * A context this connection's `createUserContext` just made: when the reply comes before the browser's report, the
+   * entry is made here, marked as awaiting its handle, as the report would have made it.
+   */
+  readonly createdContext: (id: UserContext.Id) => Effect.Effect<ContextEntry>
   /** Sets a context's settings, as the library creates it. */
   readonly configure: (context: ContextEntry, settings: ContextSettings) => Effect.Effect<void>
   /** Observes storage sources only within the requesting context's scope. */
@@ -513,7 +538,15 @@ export const make = Effect.fnUntraced(function*() {
   const attach = (connected: Adapter.AdapterConnection): Effect.Effect<Model, never, Scope.Scope> =>
     Effect.gen(function*() {
       attached = connected
-      const bounded = BoundedAdapter.make(connected)
+      const bounded = BoundedAdapter.make({
+        ...connected,
+        // A removal that fails releases a context still being created, such as one a late cleanup removes after
+        // its creator's deadline: it is listed as observed rather than hidden
+        removeUserContext: (id) =>
+          connected.removeUserContext(id).pipe(
+            Effect.onError(() => fold.sink({ _tag: "UserContextReleased", context: id }))
+          )
+      })
       yield* ownership.attach(connected, bounded.claims)
       yield* connected.closed.pipe(
         Effect.andThen(fold.loseConnection(new Target.ConnectionLost({}))),
@@ -529,6 +562,8 @@ export const make = Effect.fnUntraced(function*() {
         adapter: bounded,
         consoleArguments,
         pages: fold.pages,
+        contexts: fold.contexts,
+        touchContexts: fold.touchContexts,
         page: fold.page,
         document: fold.document,
         documentOf: fold.documentOf,
@@ -536,6 +571,7 @@ export const make = Effect.fnUntraced(function*() {
         hop: fold.hop,
         lost: fold.lost,
         context: (id) => fold.context(id, false),
+        createdContext: (id) => fold.context(id, false, true),
         configure: fold.configure,
         observeStorageSources: fold.observeStorageSources,
         navigation: fold.navigation,

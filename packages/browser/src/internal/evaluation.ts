@@ -13,6 +13,7 @@
  *   one object group, which its close releases in one command (QUIRKS.md, Q132).
  */
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Inspectable from "effect/Inspectable"
 import * as Option from "effect/Option"
 import { pipeArguments } from "effect/Pipeable"
@@ -195,6 +196,8 @@ export interface Call {
   readonly functionDeclaration: string
   readonly arguments: ReadonlyArray<Adapter.LocalValue>
   readonly result: "value" | "handle"
+  /** Waits for a returned promise, and so assimilates a thenable; without it, the promise is the result. */
+  readonly awaitPromise?: boolean | undefined
   /** The object group a handle result joins (`groupOf`). */
   readonly group?: string | undefined
   readonly userActivation: boolean
@@ -211,7 +214,7 @@ export const call = (runtime: Runtime.Runtime, options: Call): Effect.Effect<Ada
     const call = runtime.model.adapter.evaluate(options.realm, {
       functionDeclaration: options.functionDeclaration,
       arguments: options.arguments,
-      awaitPromise: true,
+      awaitPromise: options.awaitPromise ?? true,
       result: options.result,
       ...(options.releaseResult === true ? { releaseResult: true } : {}),
       ...(options.group === undefined ? {} : { group: options.group }),
@@ -320,6 +323,31 @@ const asHandleFailure = (operation: string, record: Operation.Record) => (failur
     : handleError(operation, failure.reason, id)
 }
 
+/**
+ * What a handle holds, from the response that made it: a primitive's value, a node's tag or name, and another
+ * object's kind.
+ */
+const preview = (value: Adapter.RemoteValue): string => {
+  switch (value.type) {
+    case "undefined":
+    case "null":
+      return value.type
+    case "string":
+      return JSON.stringify(value.value)
+    case "bigint":
+      return `${value.value}n`
+    case "number":
+    case "boolean":
+      return String(value.value)
+    case "node": {
+      const name = value.value?.localName === undefined ? value.value?.nodeName : `<${value.value.localName}>`
+      return name === undefined ? "node" : `node ${name}`
+    }
+    default:
+      return value.type
+  }
+}
+
 /** A handle: a remote object in one realm, or a primitive held here; released once. */
 export class HandleImpl<A> implements JSHandle.JSHandle<A> {
   readonly [TypeId] = TypeId as typeof TypeId
@@ -351,7 +379,8 @@ export class HandleImpl<A> implements JSHandle.JSHandle<A> {
     fn: Function,
     args: ReadonlyArray<unknown>,
     result: "value" | "handle",
-    then: (value: Adapter.RemoteValue) => Effect.Effect<B, Failure, R>
+    then: (value: Adapter.RemoteValue) => Effect.Effect<B, Failure, R>,
+    awaitPromise = true
   ): Effect.Effect<B, JSHandle.JSHandleError | Target.TargetGone | Deadline.Timeout, R> {
     return Effect.gen({ self: this }, function*() {
       if (this.released) return yield* Effect.die(new Error(`${operation}: the handle was released`))
@@ -370,6 +399,7 @@ export class HandleImpl<A> implements JSHandle.JSHandle<A> {
           functionDeclaration: FunctionSource.declaration(fn),
           arguments: [localOf(this as HandleImpl<unknown>), ...rest],
           result,
+          awaitPromise,
           group,
           userActivation: false,
           page: this.page,
@@ -401,6 +431,54 @@ export class HandleImpl<A> implements JSHandle.JSHandle<A> {
     )
   }
 
+  /**
+   * `fn`'s result as a handle, as it is: a promise it returns is held, not waited for, and a thenable's `then`
+   * isn't called.
+   */
+  private hold<Args extends ReadonlyArray<unknown>, B>(fn: (value: A, ...args: Args) => B, ...args: Args) {
+    return this.run(
+      "JSHandle.evaluateHandle",
+      fn,
+      args,
+      "handle",
+      (value) => own<B>(this.runtime, this.realm, value, this.page),
+      false
+    )
+  }
+
+  /**
+   * The value's own enumerable string-keyed properties, each a handle in the caller's scope. One call collects
+   * every key with its value, so each getter runs once, and one call per key hands its value out; the collection
+   * is released after. Neither call waits for a promise, so a promise property is held as itself and a
+   * thenable's `then` never runs. A primitive, which has no properties of its own to hold, gives an empty map at
+   * once.
+   */
+  get properties(): Effect.Effect<
+    ReadonlyMap<string, JSHandle.JSHandle>,
+    JSHandle.JSHandleError | Target.TargetGone | Deadline.Timeout,
+    Scope.Scope
+  > {
+    const operation = "JSHandle.properties"
+    return Effect.gen({ self: this }, function*() {
+      if (this.released) return yield* Effect.die(new Error(`${operation}: the handle was released`))
+      const properties = new Map<string, JSHandle.JSHandle>()
+      if (Option.isNone(this.remote)) return properties as ReadonlyMap<string, JSHandle.JSHandle>
+      const collected = yield* Scope.make()
+      return yield* Effect.gen({ self: this }, function*() {
+        const entries = (yield* this.hold((value): ReadonlyArray<readonly [string, unknown]> =>
+          Object.keys(value as object).map((key) =>
+            [key, (value as Record<string, unknown>)[key]] as const
+          )
+        ).pipe(Scope.provide(collected))) as unknown as HandleImpl<ReadonlyArray<readonly [string, unknown]>>
+        const keys = yield* entries.evaluate((entries) => entries.map(([key]) => key))
+        for (const [index, key] of keys.entries()) {
+          properties.set(key, yield* entries.hold((entries, at: number) => entries[at]![1], index))
+        }
+        return properties as ReadonlyMap<string, JSHandle.JSHandle>
+      }).pipe(Effect.ensuring(Scope.close(collected, Exit.void)))
+    }).pipe(Operation.named(operation, { attributes: { "browser.realm.id": this.realm } }))
+  }
+
   /** The value, read in its realm, which says whether the realm is still there. */
   get read() {
     return this.run("JSHandle.read", (value: unknown) => value, [], "value", fromRemote) as Effect.Effect<
@@ -425,10 +503,10 @@ export class HandleImpl<A> implements JSHandle.JSHandle<A> {
     return pipeArguments(this, arguments)
   }
   toString() {
-    return `JSHandle(${this.realm} ${this.value.type})`
+    return `JSHandle(${this.realm} ${preview(this.value)})`
   }
   toJSON() {
-    return { _id: "JSHandle", realm: this.realm, type: this.value.type }
+    return { _id: "JSHandle", realm: this.realm, type: this.value.type, preview: preview(this.value) }
   }
   [Inspectable.NodeInspectSymbol]() {
     return this.toJSON()

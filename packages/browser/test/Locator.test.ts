@@ -199,6 +199,18 @@ describe("Locator.fill", () => {
   }
 })
 
+describe("Locator.toString", () => {
+  it.effect("prints the chain as written", () =>
+    Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      assert.strictEqual(
+        String(page.getByRole("button", { name: "Save" }).first),
+        `Locator(page.getByRole("button", { name: "Save" }).first)`
+      )
+      assert.strictEqual(String(page.locator("#x").nth(2)), `Locator(page.locator("#x").nth(2))`)
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+})
+
 describe("Locator.selectText", () => {
   it.effect("uses the owned action path and reports the backend's typed refusal", () =>
     Effect.gen(function*() {

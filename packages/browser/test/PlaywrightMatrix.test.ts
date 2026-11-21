@@ -31,6 +31,12 @@ const rows: Array<any> = matrix.rows
 const row = (id: string) => rows.find((row) => row.id === id)
 
 describe("Playwright matrix", () => {
+  it("reports main-world page handles as available on stock WebKit", () => {
+    const handles = row("method-page-evaluatehandle")
+    expect(handles.browsers["webkit.launched"].status).not.toBe("missing")
+    expect(handles.browsers["webkit.attached"].status).not.toBe("missing")
+  })
+
   // A deliberate difference cites the decision behind it, not a whole section of the decisions document.
   it("cites a specific decision for each deliberate difference", () => {
     const sections = ["principles", "the-public-api-l2", "the-browser-model-l1"]

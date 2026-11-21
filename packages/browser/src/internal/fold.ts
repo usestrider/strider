@@ -25,6 +25,7 @@ import type * as Download from "../Download.ts"
 import type * as NetworkConnection from "../NetworkConnection.ts"
 import type * as NetworkRequest from "../NetworkRequest.ts"
 import type * as NetworkResponse from "../NetworkResponse.ts"
+import type * as PageLifecycle from "../PageLifecycle.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
 import * as Target from "../Target.ts"
 import type * as Url from "../Url.ts"
@@ -88,6 +89,9 @@ export interface Fold {
 
   // Reads
   readonly pages: Readable.Readable<ReadonlyArray<Model.PageEntry>>
+  readonly contexts: Readable.Readable<ReadonlyArray<Model.ContextEntry>>
+  /** Announces the contexts again, unchanged, for a reader whose view of them has changed. */
+  readonly touchContexts: Effect.Effect<void>
   readonly page: (id: Target.NavigableId) => Option.Option<Model.PageEntry>
   readonly document: (id: Target.DocumentId) => Option.Option<Model.DocumentEntry>
   readonly documentOf: (navigable: Target.NavigableId) => Effect.Effect<Option.Option<Target.DocumentId>>
@@ -96,7 +100,7 @@ export interface Fold {
   readonly lost: Deferred.Deferred<void>
 
   // Commands
-  readonly context: (id: UserContext.Id, isDefault: boolean) => Effect.Effect<Model.ContextEntry>
+  readonly context: (id: UserContext.Id, isDefault: boolean, created?: boolean) => Effect.Effect<Model.ContextEntry>
   readonly configure: (context: Model.ContextEntry, settings: Model.ContextSettings) => Effect.Effect<void>
   readonly observeStorageSources: (
     context: Model.ContextEntry,
@@ -199,6 +203,8 @@ export const make = Effect.fnUntraced(function*(options: {
   const pages = new Map<Target.NavigableId, Model.PageEntry>()
   // Every page of the browser, in the order they were added
   const pageList = yield* cell<ReadonlyArray<Model.PageEntry>>([])
+  // Every context of the browser, in the order they were added
+  const contextList = yield* cell<ReadonlyArray<Model.ContextEntry>>([])
   // Frames, by the page they belong to
   const frames = new Map<Target.NavigableId, Model.PageEntry>()
   const documents = new Map<Target.DocumentId, Model.DocumentEntry>()
@@ -268,6 +274,9 @@ export const make = Effect.fnUntraced(function*(options: {
     if (Option.isSome(owner.context)) Events.publish(contextChannel(owner.context.value.events), value)
   }
 
+  const publishLifecycle = (page: Model.PageEntry, event: PageLifecycle.PageLifecycle) =>
+    publish(ownerOfPage(Option.some(page)), event, (events) => events.lifecycle, (events) => events.lifecycle)
+
   const updateOpen = (
     page: Model.PageEntry,
     change: (open: Extract<Model.PageStatus, { _tag: "Open" }>) => Model.PageStatus
@@ -315,6 +324,9 @@ export const make = Effect.fnUntraced(function*(options: {
     for (const frame of gone) {
       frames.delete(frame)
       page.contextEntry.storageSources?.origins.delete(frame)
+    }
+    for (const frame of list) {
+      if (gone.has(frame.id)) publishLifecycle(page, { _tag: "FrameRemoved", page: page.id, frame: frame.id })
     }
     yield* update(page.state, (state) => ({ ...state, frames: state.frames.filter((frame) => !gone.has(frame.id)) }))
     for (const document of Array.from(documents.values())) {
@@ -378,6 +390,8 @@ export const make = Effect.fnUntraced(function*(options: {
       frames.delete(frame)
       page.contextEntry.storageSources?.origins.delete(frame)
     }
+    // Its close is an event before its channels end, so a page's stream and its context's both see it
+    publishLifecycle(page, { _tag: "Closed", page: page.id, frame: page.id, reason })
     const how = endOf(reason)
     for (const channel of Object.values(page.events)) Events.end(channel as Events.Channel<unknown>, how)
     yield* update(page.state, (state): Model.PageState => ({
@@ -408,7 +422,7 @@ export const make = Effect.fnUntraced(function*(options: {
     }
   })
 
-  const ensureContext = Effect.fnUntraced(function*(id: UserContext.Id, isDefault: boolean) {
+  const ensureContext = Effect.fnUntraced(function*(id: UserContext.Id, isDefault: boolean, created = false) {
     const existing = contexts.get(id)
     if (existing !== undefined) return existing
     const target: Target.Description = { _tag: "UserContext" }
@@ -428,8 +442,11 @@ export const make = Effect.fnUntraced(function*(options: {
       closed: yield* Deferred.make<Target.CloseReason>(),
       events: {
         autoResolution: Events.make(target, cap),
+        navigation: Events.make(target, cap),
+        lifecycle: Events.make(target, cap),
         request: Events.make(target, cap),
         response: Events.make(target, cap),
+        requestEnd: Events.make(target, cap),
         console: Events.make(target, cap),
         exception: Events.make(target, cap),
         download: Events.make(target, cap),
@@ -437,7 +454,9 @@ export const make = Effect.fnUntraced(function*(options: {
         connection: Events.make(target, cap)
       }
     }
+    if (created) entry.awaitingHandle = true
     contexts.set(id, entry)
+    yield* update(contextList, (list) => [...list, entry])
     return entry
   })
 
@@ -445,6 +464,7 @@ export const make = Effect.fnUntraced(function*(options: {
     entry.timings?.clear()
     entry.sizes?.clear()
     contexts.delete(entry.id)
+    yield* update(contextList, (list) => list.filter((each) => each !== entry))
     for (const hop of hops.values()) {
       if (Option.isSome(hop.context) && hop.context.value === entry) Deferred.doneUnsafe(hop.sentKnown, Effect.void)
     }
@@ -463,11 +483,14 @@ export const make = Effect.fnUntraced(function*(options: {
     yield* Deferred.succeed(entry.closed, reason)
   })
 
-  const endHop = (id: NetworkRequest.HopId, end: Model.HopEnd) => {
+  /** Ends a hop the browser reported ending, and publishes the end once, to the hop's owner. */
+  const endHop = (id: NetworkRequest.HopId, end: Model.RequestEndEvent["end"]) => {
     const hop = hops.get(id)
     if (Option.isNone(hop)) return
-    Deferred.doneUnsafe(hop.value.end, Effect.succeed(end))
     Deferred.doneUnsafe(hop.value.sentKnown, Effect.void)
+    if (Deferred.isDoneUnsafe(hop.value.end)) return
+    Deferred.doneUnsafe(hop.value.end, Effect.succeed(end))
+    publish(hop.value, { hop: hop.value, end }, (events) => events.requestEnd, (events) => events.requestEnd)
   }
 
   /** The URL a navigation ended at, by its outcome's document; else where it was going. */
@@ -501,9 +524,16 @@ export const make = Effect.fnUntraced(function*(options: {
     Effect.gen(function*() {
       switch (fact._tag) {
         case "UserContextAdded": {
-          const entry = yield* ensureContext(fact.context, fact.isDefault)
+          const entry = yield* ensureContext(fact.context, fact.isDefault, fact.created === true)
           if (fact.requestTiming) entry.timings ??= new Map()
           if (fact.requestSizes) entry.sizes ??= new Map()
+          return
+        }
+        case "UserContextReleased": {
+          const context = contexts.get(fact.context)
+          if (context === undefined || context.awaitingHandle !== true) return
+          context.awaitingHandle = false
+          yield* update(contextList, (list) => [...list])
           return
         }
         case "UserContextRemoved": {
@@ -552,8 +582,10 @@ export const make = Effect.fnUntraced(function*(options: {
               fileChooser: Events.make(target, cap),
               autoResolution: Events.make(target, cap),
               navigation: Events.make(target, cap),
+              lifecycle: Events.make(target, cap),
               request: Events.make(target, cap),
               response: Events.make(target, cap),
+              requestEnd: Events.make(target, cap),
               console: Events.make(target, cap),
               exception: Events.make(target, cap),
               download: Events.make(target, cap),
@@ -591,6 +623,12 @@ export const make = Effect.fnUntraced(function*(options: {
             document: Option.none(),
             url: Urls.reported("about:blank")
           }
+          publishLifecycle(page.value, {
+            _tag: "FrameAdded",
+            page: page.value.id,
+            frame: fact.frame,
+            parent: fact.parent
+          })
           yield* update(page.value.state, (state) => ({
             ...state,
             frames: [...state.frames.filter((each) => each.id !== fact.frame), frame]
@@ -702,6 +740,19 @@ export const make = Effect.fnUntraced(function*(options: {
           const document = documents.get(fact.document)
           if (document === undefined) return
           const page = pages.get(document.navigable)
+          // The event first, then the state: `goto` returns once the state has it, and a subscription its caller
+          // makes then must not see it. A backend can report a readiness more than once; the event is the change.
+          const state = yield* document.state.get
+          const owner = page ?? frames.get(document.navigable)
+          if (state.readiness !== fact.readiness && owner !== undefined && pages.has(owner.id)) {
+            publishLifecycle(owner, {
+              _tag: fact.readiness === "interactive" ? "DomContentLoaded" : "Loaded",
+              page: owner.id,
+              frame: document.navigable,
+              document: document.id,
+              url: state.url
+            })
+          }
           if (page !== undefined) {
             yield* updateOpen(page, (open) =>
               open.document.id === fact.document
@@ -760,12 +811,18 @@ export const make = Effect.fnUntraced(function*(options: {
           if (Option.isSome(start)) {
             started.delete(fact.navigation)
             if (pages.has(start.value.page.id)) {
-              Events.publish(start.value.page.events.navigation, {
-                navigation: fact.navigation,
-                frame: start.value.frame,
-                url: endedAt(fact.outcome, start.value.url),
-                outcome: fact.outcome
-              })
+              publish(
+                ownerOfPage(Option.some(start.value.page)),
+                {
+                  navigation: fact.navigation,
+                  page: start.value.page.id,
+                  frame: start.value.frame,
+                  url: endedAt(fact.outcome, start.value.url),
+                  outcome: fact.outcome
+                },
+                (events) => events.navigation,
+                (events) => events.navigation
+              )
             }
           }
           yield* Deferred.succeed(navigation(fact.navigation).outcome, fact.outcome)
@@ -1132,13 +1189,15 @@ export const make = Effect.fnUntraced(function*(options: {
       ),
     obligations,
     pages: pageList,
+    contexts: contextList,
+    touchContexts: apply(Effect.suspend(() => update(contextList, (list) => [...list]))),
     page: (id) => Option.fromNullishOr(pages.get(id)),
     document: (id) => Option.fromNullishOr(documents.get(id)),
     documentOf,
     response: (hop) => responses.get(hop),
     hop: (hop) => hops.get(hop),
     lost,
-    context: (id, isDefault) => apply(ensureContext(id, isDefault)),
+    context: (id, isDefault, created) => apply(ensureContext(id, isDefault, created)),
     configure: (context, settings) => apply(update(context.state, (state) => ({ ...state, settings }))),
     navigation: (id) => apply(Effect.sync(() => navigation(id))),
     forget: (id) => apply(Effect.sync(() => void navigations.delete(id))),
