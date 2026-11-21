@@ -297,6 +297,8 @@ describe("A HAR an export writes", () => {
           status: response.status as NetworkResponse.StatusCode,
           statusText: "OK",
           httpVersion: Option.some("http/1.1"),
+          serverAddress: Option.none(),
+          securityDetails: Option.none(),
           headers: Headers.fromInput(response.headers),
           servedBy: "network",
           at: at(2)
@@ -321,7 +323,9 @@ describe("A HAR an export writes", () => {
         transferBytes: Option.none(),
         bodyBytes: Option.none(),
         at: at(3),
-        httpVersion: Option.none()
+        httpVersion: Option.none(),
+        serverAddress: Option.none(),
+        securityProtocol: Option.none()
       }),
       body: Option.some(bodies.response),
       requestBody: Option.some(Option.some(bodies.request)),
@@ -438,7 +442,15 @@ describe("A HAR an export writes", () => {
     const counted = (transferBytes: Option.Option<number>, bodyBytes: Option.Option<number>) =>
       entryOf({
         ...hop,
-        end: Option.some({ _tag: "Finished", transferBytes, bodyBytes, at: at(3), httpVersion: Option.none() })
+        end: Option.some({
+          _tag: "Finished",
+          transferBytes,
+          bodyBytes,
+          at: at(3),
+          httpVersion: Option.none(),
+          serverAddress: Option.none(),
+          securityProtocol: Option.none()
+        })
       })
         .response
     const known = counted(Option.some(300), Option.some(40))

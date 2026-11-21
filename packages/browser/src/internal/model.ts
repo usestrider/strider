@@ -162,6 +162,10 @@ export type HopEnd =
     readonly at: MonotonicInstant.MonotonicInstant
     /** The protocol, where the backend says it only now (WebKit). */
     readonly httpVersion: Option.Option<string>
+    /** The server's address, where the backend says it only now (WebKit). */
+    readonly serverAddress: Option.Option<NetworkResponse.ServerAddress>
+    /** The TLS version, where the backend says it only now (WebKit). */
+    readonly securityProtocol: Option.Option<string>
   }
   | {
     readonly _tag: "Failed"

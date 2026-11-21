@@ -98,6 +98,45 @@ export const ServedBy = Schema.Literals([
 export type ServedBy = typeof ServedBy.Type
 
 /**
+ * The address of the server a response came from: its IP address and port.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export class ServerAddress extends Schema.Class<ServerAddress>("@usestrider/browser/NetworkResponse/ServerAddress")({
+  ip: Schema.String,
+  port: Schema.Int
+}) {}
+
+/**
+ * The TLS connection and server certificate an HTTPS response came over.
+ *
+ * **Details**
+ *
+ * - `protocol` is the TLS version, such as `TLS 1.3`.
+ * - `subjectName` is the certificate's subject, its common name on Chromium and the whole distinguished name on
+ *   WebKit.
+ * - `issuer` is the certificate's issuer, its common name. WebKit doesn't report it, so it's `None` there.
+ * - `validFrom` and `validTo` bound the certificate's validity, in seconds since the Unix epoch.
+ *
+ * Each is `None` where the browser doesn't report it.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export class SecurityDetails extends Schema.Class<SecurityDetails>(
+  "@usestrider/browser/NetworkResponse/SecurityDetails"
+)({
+  protocol: Schema.Option(Schema.String),
+  subjectName: Schema.Option(Schema.String),
+  issuer: Schema.Option(Schema.String),
+  validFrom: Schema.Option(Schema.Number),
+  validTo: Schema.Option(Schema.Number)
+}) {}
+
+/**
  * The status and headers of one redirect hop's response.
  *
  * **Details**
@@ -106,6 +145,10 @@ export type ServedBy = typeof ServedBy.Type
  * - `statusText` is the status line's reason phrase as the browser reports it, empty for HTTP/2 and later.
  * - `httpVersion` is the protocol as the browser names it, such as `http/1.1` or `h2`. It's `None` where the
  *   browser doesn't report it with the response, as WebKit doesn't: it reports it only when the response ends.
+ * - `serverAddress` is the IP address and port of the server that answered. It's `None` where the browser doesn't
+ *   report it with the response: WebKit reports it only when the response ends, and Firefox not at all.
+ * - `securityDetails` is the TLS connection and certificate of an HTTPS response. It's `None` for plain HTTP, and
+ *   where the browser doesn't report them, as Firefox doesn't.
  *
  * @stability unstable
  * @category models
@@ -117,6 +160,8 @@ export class NetworkResponse extends Schema.Class<NetworkResponse>("@usestrider/
   status: StatusCode,
   statusText: Schema.String,
   httpVersion: Schema.Option(Schema.String),
+  serverAddress: Schema.Option(ServerAddress),
+  securityDetails: Schema.Option(SecurityDetails),
   headers: Schema.Headers,
   servedBy: ServedBy,
   at: MonotonicInstant.MonotonicInstant

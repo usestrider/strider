@@ -74,11 +74,40 @@ const emitResponse = (state: State, request: RequestEntry, response: Network.Res
       status: Math.min(599, Math.max(100, response.status || 200)) as NetworkResponse.StatusCode,
       statusText: response.statusText,
       httpVersion: Option.none(),
+      serverAddress: Option.none(),
+      securityDetails: securityDetails(response),
       headers: Kit.headersOf(response.headers),
       servedBy: servedBy(request, response),
       at: Adapter.now()
     })
   })
+}
+
+/**
+ * The TLS details of an HTTPS response, from its certificate: WebKit sends `security` as `{}` for plain HTTP and
+ * none for a redirect, its certificate names no issuer, and the TLS version comes only as the response ends, in
+ * `loadingFinished`'s metrics.
+ */
+const securityDetails = (response: Network.Response) => {
+  const connection = response.security?.connection
+  const certificate = response.security?.certificate
+  return connection === undefined && certificate === undefined
+    ? Option.none()
+    : Option.some(
+      new NetworkResponse.SecurityDetails({
+        protocol: Option.fromUndefinedOr(connection?.protocol || undefined),
+        subjectName: Option.fromUndefinedOr(certificate?.subject || undefined),
+        issuer: Option.none(),
+        validFrom: Option.fromUndefinedOr(certificate?.validFrom),
+        validTo: Option.fromUndefinedOr(certificate?.validUntil)
+      })
+    )
+}
+
+/** The server's address from WebKit's one string, `127.0.0.1:41865` or `[::1]:41865`. */
+const serverAddress = (address: string | undefined) => {
+  const parsed = address === undefined ? null : /^\[?(.+?)\]?:(\d+)$/.exec(address)
+  return parsed === null ? undefined : new NetworkResponse.ServerAddress({ ip: parsed[1]!, port: Number(parsed[2]) })
 }
 
 /** What answered, from the response's source; a route's response is `inspector-override`. */
@@ -249,7 +278,9 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         hop: request.hop,
         ...(request.network ? Sizes.transferred(Sizes.webkit(params.metrics)) : Sizes.unknown),
         at: Adapter.now(),
-        httpVersion: params.metrics?.protocol
+        httpVersion: params.metrics?.protocol,
+        serverAddress: serverAddress(params.metrics?.remoteAddress),
+        securityProtocol: params.metrics?.securityConnection?.protocol
       })
       if (
         request.resourceType === "document" && request.frame !== undefined &&
@@ -327,6 +358,8 @@ export const register = (handlers: Kit.Handlers<Event>) =>
           status: Math.min(599, Math.max(100, resource.response?.status || 200)) as NetworkResponse.StatusCode,
           statusText: resource.response?.statusText ?? "",
           httpVersion: Option.none(),
+          serverAddress: Option.none(),
+          securityDetails: resource.response === undefined ? Option.none() : securityDetails(resource.response),
           headers: Kit.headersOf(resource.response?.headers),
           servedBy: "cache",
           at: Adapter.now()
