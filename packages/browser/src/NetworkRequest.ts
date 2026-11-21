@@ -604,6 +604,99 @@ export class Failure extends Schema.Class<Failure>("@usestrider/browser/NetworkR
 }) {}
 
 /**
+ * A request hop the browser finished loading, whatever its HTTP status: a 404 finishes too.
+ *
+ * **Details**
+ *
+ * `request` is the request as it was delivered, so `failure`, `timing`, `sizes`, and `response` accept it. Each
+ * redirect hop finishes on its own.
+ *
+ * **Example** (Reading where a finished request went)
+ *
+ * ```ts import.meta.vitest
+ * import { NetworkRequest } from "@usestrider/browser"
+ *
+ * const describeFinished = (end: NetworkRequest.Finished) =>
+ *   `${end.request.method} ${end.request.url} finished`
+ * ```
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export class Finished extends Schema.TaggedClass<Finished>("@usestrider/browser/NetworkRequest/Finished")(
+  "Finished",
+  {
+    request: NetworkRequest,
+    at: MonotonicInstant.MonotonicInstant
+  }
+) {}
+
+/**
+ * A request hop that failed before it finished: refused, aborted by a route, or canceled.
+ *
+ * **Details**
+ *
+ * `failure` is what `failure` reads: the browser's error text, and on Chromium and WebKit whether the page or a
+ * navigation canceled it. A page, context, or browser connection that closes while a request is in flight doesn't
+ * make it fail.
+ *
+ * **Example** (Reading why a request failed)
+ *
+ * ```ts import.meta.vitest
+ * import { NetworkRequest } from "@usestrider/browser"
+ *
+ * const describeFailed = (end: NetworkRequest.Failed) =>
+ *   `${end.request.url}: ${end.failure.errorText}`
+ * ```
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export class Failed extends Schema.TaggedClass<Failed>("@usestrider/browser/NetworkRequest/Failed")("Failed", {
+  request: NetworkRequest,
+  failure: Failure,
+  at: MonotonicInstant.MonotonicInstant
+}) {}
+
+/**
+ * How a request hop ended: `Finished` or `Failed`.
+ *
+ * **Example** (Telling the two ends apart)
+ *
+ * ```ts import.meta.vitest
+ * import { NetworkRequest } from "@usestrider/browser"
+ *
+ * const outcome = (end: NetworkRequest.End) =>
+ *   end._tag === "Failed" ? end.failure.errorText : "finished"
+ * ```
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export const End = Schema.Union([Finished, Failed])
+
+/**
+ * How a request hop ended: `Finished` or `Failed`.
+ *
+ * **Example** (Counting the failures among ends)
+ *
+ * ```ts import.meta.vitest
+ * import type { NetworkRequest } from "@usestrider/browser"
+ *
+ * const failures = (ends: ReadonlyArray<NetworkRequest.End>) =>
+ *   ends.filter((end) => end._tag === "Failed").length
+ * ```
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export type End = Finished | Failed
+
+/**
  * Reason a request's live observation is unavailable.
  *
  * **Details**
@@ -952,6 +1045,49 @@ export const response = (
   RequestError,
   Scope.Scope
 > => NetworkRequestImpl.response(target, request)
+
+/**
+ * Retains one request hop in the caller's scope and returns a wait for its end.
+ *
+ * **Details**
+ *
+ * Acquire on the page or context that observed the request, while the hop is still in the bounded request index,
+ * which keeps 1000 hops and drops completed ones first. Once acquired, the wait gives the hop's end at once if it
+ * has ended, even after the index has dropped it, and otherwise waits under the deadline in force when it runs.
+ * It fails with `ResponseUnavailable`: `evicted` when the index drops the hop before it ends, `released` once the
+ * scope closes, `targetClosed` when the target or the browser connection closes first, and `foreignTarget` when
+ * another page or context observed the request. Only this acquisition retains the hop; it enables no browser
+ * instrumentation.
+ *
+ * **Example** (Waiting for a download request to finish loading)
+ *
+ * ```ts import.meta.vitest
+ * import { NetworkRequest, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const loaded = Effect.fn("loaded")(function*(page: Page.Page) {
+ *   const sent = yield* NetworkRequest.next(page, {
+ *     url: "https://example.com/report.pdf"
+ *   })
+ *   yield* page.goto("https://example.com/reports")
+ *   const ended = yield* NetworkRequest.end(page, yield* sent)
+ *   const end = yield* ended
+ *   return end._tag === "Finished"
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category subscriptions
+ * @since 0.1.0
+ */
+export const end = (
+  target: Page.ObservedPage | UserContext.ObservedUserContext,
+  request: NetworkRequest
+): Effect.Effect<
+  Effect.Effect<End, RequestError | Deadline.Timeout>,
+  RequestError,
+  Scope.Scope
+> => NetworkRequestImpl.end(target, request)
 
 /**
  * Reads the failure reported for a request so far, without waiting or sending browser commands.

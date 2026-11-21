@@ -1,11 +1,12 @@
 /**
- * The navigations of a page (`PageNavigation`): which entries a filter takes, and, for `next`, settling the
+ * The navigations of a page or a context (`PageNavigation`): which entries a filter takes, and, for `next`, settling the
  * navigation until its document reaches the load state asked for.
  */
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import type * as Page from "../Page.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
+import type * as UserContext from "../UserContext.ts"
 import * as EventModule from "./eventModule.ts"
 import type * as Events from "./events.ts"
 import * as Filters from "./filters.ts"
@@ -19,7 +20,7 @@ const succeeded = (event: Model.NavigationEvent) =>
   event.outcome._tag === "Activated"
 
 export const { history, next, stream } = EventModule.make<
-  Page.ObservedPage,
+  Page.ObservedPage | UserContext.ObservedUserContext,
   PageNavigation.NextFilter,
   Model.NavigationEvent,
   PageNavigation.PageNavigation,
@@ -28,12 +29,13 @@ export const { history, next, stream } = EventModule.make<
   name: "PageNavigation",
   noun: "a navigation",
   prepare: (target, filter, operation) => {
-    const behind = Handles.page(target)
+    const { behind } = Handles.target(target)
     const all = filter?.frames === "all"
     const waitUntil = filter?.waitUntil ?? "commit"
     const { model } = behind.runtime
     return Effect.map(Filters.url(operation, filter?.url), (matches) => {
-      const ours = (entry: Events.Entry<Model.NavigationEvent>) => all || entry.value.frame === behind.entry.id
+      // A page's own navigations, not its frames', unless the filter takes all of them
+      const ours = (entry: Events.Entry<Model.NavigationEvent>) => all || entry.value.frame === entry.value.page
       return {
         channel: behind.entry.events.navigation,
         accepts: (entry: Events.Entry<Model.NavigationEvent>) =>
@@ -43,12 +45,15 @@ export const { history, next, stream } = EventModule.make<
           ours(entry) && Filters.urlMatches(matches, entry.value.url),
         // Only a navigation that got somewhere is delivered as one (`succeeded` accepts nothing else)
         deliver: (event: Model.NavigationEvent) =>
-          Option.getOrThrow(Navigated.succeeded(model, event.navigation, event.frame, event.url, event.outcome)),
+          Option.getOrThrow(
+            Navigated.succeeded(model, event.navigation, event.page, event.frame, event.url, event.outcome)
+          ),
         delivery: {
           deliver: Effect.fnUntraced(function*(event: Model.NavigationEvent) {
             const result = yield* behind.runtime.settle(
               "PageNavigation.next",
               event.navigation,
+              event.page,
               event.frame,
               Option.some(event.url),
               event.url,

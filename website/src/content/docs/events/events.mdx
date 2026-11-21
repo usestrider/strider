@@ -66,12 +66,14 @@ Each module has the verbs above, and filters on fields of its own:
 
 | Module              | Reports                                                     | Filter                             |
 | ------------------- | ----------------------------------------------------------- | ---------------------------------- |
-| [`PageNavigation`](/docs/events/kinds#navigations) | navigations of the page, and optionally its frames           | `url`, `frames`, and `waitUntil` for `next` |
+| [`PageNavigation`](/docs/events/kinds#navigations) | navigations of the page or every page of a context, and optionally their frames | `url`, `frames`, and `waitUntil` for `next` |
+| [`PageLifecycle`](/docs/events/kinds#frames-loads-and-closes) | frames added and removed, loads, and pages closing             | `events`, `frames`                 |
 | [`Popup`](/docs/events/kinds#popups) | pages this page opened                                       | `url`                              |
 | [`Dialog`](/docs/events/kinds#dialogs-and-file-choosers) | alerts, confirms, prompts, and `beforeunload`                | `kind`                             |
 | [`FileChooser`](/docs/events/kinds#dialogs-and-file-choosers) | file pickers the page opened                                 | `multiple`                         |
 | [`Download`](/docs/events/kinds#downloads) | downloads                                                    | `url`                              |
 | [`NetworkRequest`](/docs/events/network) | requests, one per redirect hop                               | `url`, `method`, `resourceType`    |
+| [`NetworkRequestEnd`](/docs/events/request-ends) | each request's end: finished, or failed with its reason | `url`, `method`, `resourceType`, `end` |
 | [`NetworkResponse`](/docs/events/network) | responses, with their bodies when asked                      | `url`, `method`, `status`, `body`  |
 | [`ConsoleMessage`](/docs/events/console) | console output, from the page or the browser                 | `level`, `text`                    |
 | `UncaughtException` | errors nothing caught, and rejections nothing handled        | `message`                          |

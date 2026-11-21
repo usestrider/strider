@@ -1,5 +1,18 @@
 # @usestrider/browser
 
+## 0.14.1
+
+### Added
+
+- **`page.addStyleTag` and `frameLocator.addStyleTag`** (#410) add a stylesheet to the current document of a page or an iframe, from CSS source, a URL, or a file (`StyleTag.Source`), and return a scoped handle to its element once it has loaded. A stylesheet the page's Content Security Policy refuses fails with `RefusedByPolicy`, and a URL that doesn't load fails with `ResourceFailed`.
+- **`browser.contexts`** (#409), the browser's contexts, kept up to date as they open and close: the default context first, then the others in the order they were added. A context this connection created is the `UserContext` that `newContext` returned; any other is an observed context with `control`. Connecting to a running Chromium or Firefox lists the contexts it already has, empty ones too.
+- **Handles for properties, locators, the main world, and workers** (#408): `JSHandle.properties` gives each of a value's own enumerable properties as a handle; `Locator.evaluateHandle` returns the one match's evaluation as a handle; `Page.evaluateHandleInMainWorld` gives a handle in the page's own world, on WebKit too; and `BrowserWorker.evaluateHandle` gives one in a worker's realm, where the browser can evaluate in workers. A worker's evaluations now take handles from its realm as arguments, and a handle's string previews its value: a primitive's value, a node's tag, or an object's kind.
+
+### Fixed
+
+- **`addScriptTag` reports a refused script URL with a fragment, a username, or a password as `RefusedByPolicy`** (#410), where it failed with `ResourceFailed`: the browser's violation names the URL without them, and the call now compares it the same way.
+- **A `newContext` that fails on Chromium after the browser made its context no longer leaves that context open** (#409), a timed-out one included. Strider removes it within five seconds; if the browser refuses the removal, `browser.contexts` lists it as an observed context.
+
 ## 0.14.0
 
 ### Breaking changes
