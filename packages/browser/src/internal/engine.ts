@@ -1405,10 +1405,12 @@ export function engine(render: (root: SnapNode) => string) {
   const visible = (element: Element): boolean => rendered(element, true)
 
   // Accessible names (accname 1.2)
-  /** Where an element's own name came from, of the sources its description could otherwise come from. */
-  type NameSource = "native" | "content" | "title"
+  /**
+   * Where an element's own name came from, of the sources its description could otherwise come from, or `label`
+   * for `aria-label` or `aria-labelledby`.
+   */
+  type NameSource = "label" | "native" | "content" | "title"
   const nameSources = new Map<Element, NameSource>()
-  const hiddenNameSources = new Map<Element, NameSource>()
 
   interface NameContext {
     readonly visited: Set<Element>
@@ -1607,10 +1609,12 @@ export function engine(render: (root: SnapNode) => string) {
   /**
    * Records which of the sources HTML-AAM also reads for a description gave the root its own name, however the
    * computation reached it, as through an `aria-labelledby` that names the root itself. Another element's
-   * sources only contribute, and aren't recorded.
+   * sources only contribute, and aren't recorded, and neither is a name that counts hidden content, which no
+   * description reads. An `aria-labelledby` that names the root keeps the source its traversal of the root found.
    */
   const nameSource = (context: NameContext, element: Element, source: NameSource): void => {
-    if (element === nameRoot) (context.includeHidden ? hiddenNameSources : nameSources).set(element, source)
+    if (element !== nameRoot || context.includeHidden) return
+    if (source !== "label" || !nameSources.has(element)) nameSources.set(element, source)
   }
 
   /**
@@ -1666,7 +1670,10 @@ export function engine(render: (root: SnapNode) => string) {
         ]
       })
       const joined = parts.join(" ")
-      if (joined.trim() !== "") return joined
+      if (joined.trim() !== "") {
+        nameSource(context, element, "label")
+        return joined
+      }
     }
     // Marked only now, so an element whose aria-labelledby names itself still reaches its own aria-label
     context.visited.add(element)
@@ -1682,7 +1689,10 @@ export function engine(render: (root: SnapNode) => string) {
     }
     // 2C: aria-label
     const label = dom.getAttribute(element, "aria-label") ?? ""
-    if (label.trim() !== "") return label
+    if (label.trim() !== "") {
+      nameSource(context, element, "label")
+      return label
+    }
     // 2D: the host language's label
     if (role !== "none" && role !== "presentation") {
       const native = nativeName(element, context)
@@ -1782,7 +1792,6 @@ export function engine(render: (root: SnapNode) => string) {
   const nameCache = new Map<Element, string>()
   const hiddenNameCache = new Map<Element, string>()
   const descriptionCache = new Map<Element, string>()
-  const hiddenDescriptionCache = new Map<Element, string>()
   /** An element's accessible name, as a flat string. With `includeHidden`, hidden descendants count too. */
   const accessibleName = (element: Element, includeHidden: boolean): string => {
     const cache = includeHidden ? hiddenNameCache : nameCache
@@ -1840,42 +1849,40 @@ export function engine(render: (root: SnapNode) => string) {
   /**
    * An element's accessible description, as a flat string (HTML-AAM): empty when it's hidden; else the elements
    * `aria-describedby` names, when any exists, even if their text is empty; else `aria-description`, when
-   * present; else, when it didn't give the name, a table's caption, a summary element's content or a button,
-   * submit or reset input's value; else the title, when it isn't the name.
+   * present; else, when it didn't give the name, a table's caption or a button, submit or reset input's value;
+   * else a summary element's content, when `aria-label` or `aria-labelledby` gave the name; else the title, when
+   * it isn't the name.
    */
-  const accessibleDescription = (element: Element, includeHidden: boolean): string => {
-    const cache = includeHidden ? hiddenDescriptionCache : descriptionCache
-    const cached = cache.get(element)
+  const accessibleDescription = (element: Element): string => {
+    const cached = descriptionCache.get(element)
     if (cached !== undefined) return cached
     const compute = (): string => {
-      if (!includeHidden && hiddenFromAccessibility(element)) return ""
-      const referenced = referencedText(element, "aria-describedby", includeHidden)
+      if (hiddenFromAccessibility(element)) return ""
+      const referenced = referencedText(element, "aria-describedby", false)
       if (referenced !== null) return referenced
       const attribute = dom.getAttribute(element, "aria-description")
       if (attribute !== null) return attribute
-      accessibleName(element, includeHidden)
-      const source = (includeHidden ? hiddenNameSources : nameSources).get(element)
+      accessibleName(element, false)
+      const source = nameSources.get(element)
       // The host language's source, when the element has one and it didn't give the name, wins even when empty.
       if (source !== "native" && source !== "content") {
         if (element instanceof HTMLTableElement) {
           const caption = Array.from(dom.children(element)).find((child) => dom.localName(child) === "caption")
-          if (caption !== undefined) return nameOfElement(caption, referenceContext(caption, includeHidden))
+          if (caption !== undefined) return nameOfElement(caption, referenceContext(caption, false))
         } else if (dom.localName(element) === "summary") {
-          const context = referenceContext(element, includeHidden)
-          context.visited.add(element)
-          return contentOf(element, context)
-        } else if (
-          element instanceof HTMLInputElement &&
-          (element.type === "button" || element.type === "submit" || element.type === "reset") &&
-          dom.hasAttribute(element, "value")
-        ) {
+          if (source === "label") {
+            const context = referenceContext(element, false)
+            context.visited.add(element)
+            return contentOf(element, context)
+          }
+        } else if (buttonLikeInput(element) && dom.hasAttribute(element, "value")) {
           return element.value
         }
       }
       return source === "title" ? "" : dom.getAttribute(element, "title") ?? ""
     }
     const description = flatString(compute())
-    cache.set(element, description)
+    descriptionCache.set(element, description)
     return description
   }
 
@@ -1892,7 +1899,7 @@ export function engine(render: (root: SnapNode) => string) {
     const ariaInvalid = invalid !== null && invalid.trim() !== "" && asciiLowercase(invalid) !== "false"
     const validity = "validity" in element ? (element as { readonly validity?: ValidityState }).validity : undefined
     if (!ariaInvalid && validity?.valid !== false) return ""
-    return flatString(referencedText(element, "aria-errormessage", false) ?? "").trim()
+    return flatString(referencedText(element, "aria-errormessage", false) ?? "")
   }
 
   /**
@@ -3548,7 +3555,7 @@ export function engine(render: (root: SnapNode) => string) {
       case "AccessibleDescription":
       case "AccessibleErrorMessage": {
         const text = expectation._tag === "AccessibleDescription"
-          ? accessibleDescription(element, false)
+          ? accessibleDescription(element)
           : accessibleErrorMessage(element)
         const matches = accessibleTextMatches(text, expectation.expected, expectation.ignoreCase)
         return { passed: expectation.not ? !matches : matches, observed: text }
@@ -3922,9 +3929,7 @@ export function engine(render: (root: SnapNode) => string) {
     nameCache.clear()
     hiddenNameCache.clear()
     nameSources.clear()
-    hiddenNameSources.clear()
     descriptionCache.clear()
-    hiddenDescriptionCache.clear()
     inertness = undefined
     inertAncestors.clear()
     insideModal.clear()
@@ -4389,9 +4394,7 @@ export function engine(render: (root: SnapNode) => string) {
       nameCache.clear()
       hiddenNameCache.clear()
       nameSources.clear()
-      hiddenNameSources.clear()
       descriptionCache.clear()
-      hiddenDescriptionCache.clear()
       inertness = undefined
       inertAncestors.clear()
       insideModal.clear()
