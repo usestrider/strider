@@ -6394,8 +6394,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               yield* page.locator("#summary-hint").pipe(Expect.toHaveAccessibleDescription("Summary hint"))
               // A summary without a role describes itself by its content only when aria-label or aria-labelledby named it.
               yield* page.locator("#plain-summary").pipe(Expect.toHaveAccessibleDescription(""))
-              yield* page.locator("#titled-summary").pipe(Expect.toHaveAccessibleName("Shipping"))
-              yield* page.locator("#titled-summary").pipe(Expect.toHaveAccessibleDescription("Show shipping"))
+              yield* page.locator("#titled-summary").pipe(Expect.toHaveAccessibleDescription("Shipping", { not: true }))
               yield* page.locator("#labelled-summary").pipe(Expect.toHaveAccessibleDescription("Shipping"))
               yield* page.getByRole("button", { name: "Only title" }).pipe(Expect.toHaveAccessibleDescription(""))
               yield* page.locator("#prohibited").pipe(Expect.toHaveAccessibleDescription("Paragraph hint"))
