@@ -220,9 +220,10 @@ const nearestStore = Effect.fn("nearestStore")(function*(page: Page.Page) {
 })
 ```
 
-`deny` refuses the permissions it names for its scope, as a visitor who said no would. Grants and denials apply in
-the order they were made, so a denial overrides an earlier grant of the same permission until it's removed, and
-removing the last one leaves the permission at `prompt` again:
+`deny` refuses the permissions it names for its scope, as a visitor who said no would. For each permission and
+origin, the latest grant or denial that covers it wins, whether it names that origin or every origin, so a denial
+overrides an earlier grant of the same permission until it's removed, and removing the last one leaves the
+permission at `prompt` again:
 
 ```ts
 import { Expect, Page } from "@usestrider/browser"

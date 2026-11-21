@@ -16,7 +16,10 @@ const settled = (grants: ReadonlyArray<Model.GrantEntry>) =>
 describe("permission declarations in force", () => {
   it("lets a later declaration for every origin override an origin's own", () => {
     assert.deepStrictEqual(
-      settled([at("https://a.test", ["notifications", "geolocation"], "granted"), at(undefined, ["notifications"], "denied")]),
+      settled([
+        at("https://a.test", ["notifications", "geolocation"], "granted"),
+        at(undefined, ["notifications"], "denied")
+      ]),
       [[undefined, "notifications", "denied"], ["https://a.test", "notifications", "denied"], [
         "https://a.test",
         "geolocation",

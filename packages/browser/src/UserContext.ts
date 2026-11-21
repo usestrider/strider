@@ -462,8 +462,8 @@ export interface UserContext extends ObservedUserContext {
    *
    * **Details**
    *
-   * Removing one leaves the others in force, and a later `deny` of the same permission and origin overrides it while
-   * the denial lives. A name the browser doesn't know fails with `InvalidInput`
+   * Removing one leaves the others in force, and a later `deny` of the same permission, for its origin or every
+   * origin, overrides it while the denial lives. A name the browser doesn't know fails with `InvalidInput`
    * naming it: Firefox's list is shorter than Chromium's. WebKit can't grant permissions, so there `grant` fails
    * with `Unsupported` (`permissions`).
    *
@@ -492,8 +492,8 @@ export interface UserContext extends ObservedUserContext {
    *
    * **Details**
    *
-   * Grants and denials apply in the order they were made, so for each permission and origin the latest one in
-   * force wins. Removing a denial restores what the others say, or `prompt` when none is left: there is no separate
+   * For each permission and origin, the latest grant or denial in force that covers it wins, whether it names that
+   * origin or every origin. Removing a denial restores what the others say, or `prompt` when none is left: there is no separate
    * way to set a permission back to `prompt`. Only the permissions named are denied. A name the browser doesn't know
    * fails with `InvalidInput` naming it. WebKit can't set permissions, so there `deny` fails with `Unsupported`
    * (`permissions`).

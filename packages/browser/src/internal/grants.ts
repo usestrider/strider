@@ -110,9 +110,9 @@ export const grant = (
         { discard: true }
       )
     // A declaration for every origin overrides the settings of origins of their own for its names too
-    const overridden = Option.isSome(where) ? [] : resolve(yield* inForce).filter((each) =>
-      Option.isSome(each.origin) && permissions.includes(each.permissions[0]!)
-    )
+    const overridden = Option.isSome(where) ?
+      [] :
+      resolve(yield* inForce).filter((each) => Option.isSome(each.origin) && permissions.includes(each.permissions[0]!))
     const sends = [
       ...permissions.map((name) => ({ origin: where, name, reported: true })),
       ...overridden.map((each) => ({ origin: each.origin, name: each.permissions[0]!, reported: false }))

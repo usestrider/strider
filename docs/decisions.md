@@ -1901,11 +1901,15 @@ Playwright's deprecated `fontSize` option is not built; `style.title` sets the t
 
 ## A permission denial names its permissions
 
-`UserContext.deny` sets the permissions it names to `denied` for its scope, as `grant` sets them to `granted`; the
-context's grants and denials are set again in the order they were made, so for each permission and origin the latest
-one in force wins, and removing the last leaves `prompt`. There is no separate setting back to `prompt`: removing the
-declaration that changed a permission is how it returns. `grant([])` grants nothing. Rejected: Playwright's rule that
+`UserContext.deny` sets the permissions it names to `denied` for its scope, as `grant` sets them to `granted`. For
+each permission and origin, the latest grant or denial in force that covers it wins, whether it names that origin or
+every origin, and removing the last leaves `prompt`. Chromium keeps a setting for one origin ahead of one for every
+origin whichever came later, so the library works out what is in force and sends that, a setting for every origin
+going also to each origin with one of its own, rather than sending declarations in turn. There is no separate setting
+back to `prompt`: removing the declaration that changed a permission is how it returns. `grant([])` grants nothing.
+Rejected: Playwright's rule that
 a grant denies every permission it doesn't list, which comes from Chromium's `Browser.grantPermissions` and lands
 differently on each browser (`denied` on Chromium, `prompt` on Firefox, and `denied` on WebKit only once a page has
 used the API), so an empty list would have an effect no one stated over a set of names that differs by browser; and a
-`prompt` setting of its own, which would be a third declaration whose removal has nothing to restore.
+`prompt` declaration of its own, which would only hide an earlier grant or denial until its removal restored it, as a
+denial over a grant already can, while making each backend carry and reset a third setting for that alone.

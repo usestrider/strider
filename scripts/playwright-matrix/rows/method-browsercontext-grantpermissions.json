@@ -16,7 +16,7 @@
       "url": "/docs/api/browser/UserContext#UserContext.deny"
     }
   ],
-  "notes": "Permission grants and denials last for the caller scope; the latest in force wins, and removing the last restores prompt. A grant denies nothing it doesn't name: deny names what it denies.",
+  "notes": "Permission grants and denials last for the caller scope; for each permission and origin, the latest in force covering it, for that origin or every origin, wins, and removing the last restores prompt. A grant denies nothing it doesn't name: deny names what it denies.",
   "capabilities": [
     "permissions"
   ],
