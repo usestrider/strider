@@ -9,6 +9,7 @@ import { Chromium } from "@usestrider/browser/chromium"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import { assertPinned, chromium } from "../browsers.ts"
+import { anyFrame } from "./anyFrame.ts"
 import { attaching, chromiumAttachable } from "./attaching.ts"
 import { clientCertificates } from "./clientCertificates.ts"
 import { contents } from "./contents.ts"
@@ -37,6 +38,7 @@ slice("Chromium", backend, (info) => assertPinned("Chromium", info.version, chro
 events("Chromium", backend)
 modules("Chromium", backend)
 interaction("Chromium", backend)
+anyFrame("Chromium", backend)
 declarations("Chromium", backend)
 contents("Chromium", backend)
 tooling("Chromium", backend)

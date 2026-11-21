@@ -597,6 +597,25 @@ export interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.Read
    */
   frame(iframe: Locator.ReadonlyLocator): Locator.ReadonlyFrameLocator
   /**
+   * Searches the page's document and every frame under it, at any depth, for the one frame a chain matches in.
+   *
+   * **Gotchas**
+   *
+   * - A chain that matches in more than one frame fails with `Locator.StrictViolation`, `count` included.
+   *
+   * **Example** (Clicking a button without naming its iframe)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const cardBrand = Effect.fn("cardBrand")(function*(page: Page.ReadonlyPage) {
+   *   return yield* page.anyFrame.getByTestId("card-brand").readText
+   * })
+   * ```
+   */
+  readonly anyFrame: Locator.ReadonlyAnyFrameLocator
+  /**
    * A handle on one of the page's frames, by its id in `page.frames`, the page's own id included. It reaches a
    * frame no locator can, such as one inside a closed shadow root, and fails with `InvalidInput` when the page has
    * no frame with that id now.
@@ -831,6 +850,7 @@ export interface Page extends ReadonlyPage {
   getByTestId(id: string | RegExp): Locator.Locator
   locator(selector: string | Locator.XPath): Locator.Locator
   frame(iframe: Locator.ReadonlyLocator): Locator.FrameLocator
+  readonly anyFrame: Locator.AnyFrameLocator
   frameById(id: Target.NavigableId): Effect.Effect<Frame.Frame, PageError | Target.TargetGone>
   snapshot(
     options?: Snapshot.Options | undefined
