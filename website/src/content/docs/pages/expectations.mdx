@@ -242,7 +242,9 @@ When the state is something only the page can compute, such as a property a scri
 function that runs in the page. It gets the one matching element first, then the arguments you pass, and the
 expectation passes once it returns `true`, or a promise of `true`. Like the other matchers, it checks again each time
 the page signals a change, and waits while nothing or several elements match. Each check reads the page as it is
-then, so a state that comes and goes between two checks isn't seen:
+then, so a state that comes and goes between two checks isn't seen. While the function is pending, the page's
+[locator handlers](/docs/pages/locator-handlers/) run on each change, and one still running when the function
+answers finishes before the answer counts:
 
 ```ts
 import { Expect, Page } from "@usestrider/browser"

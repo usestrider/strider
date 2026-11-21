@@ -1422,7 +1422,12 @@ engine waits for the next page change between checks; user code never runs in th
 it at once, as an evaluation's throw fails a read. Rejected: locators found by a function and predicates as source
 text, which would put user code into every resolution of a locator and leave locators that can't describe
 themselves in errors, traces and suggestions; an `Effect` form, which would overlap `Expect.that`; and retrying
-while the function throws, which hides the page's error until the deadline.
+while the function throws, which hides the page's error until the deadline. Locator handlers run on each change
+signal while the function is pending, and one still running when it answers finishes before the answer counts, with
+no second check: the answer is an observation of the page when it was made, as a holding check is for the other
+matchers, and the function may be waiting for exactly what the handler does, such as an overlay's dismissal.
+Rejected: checking again after any handler ran during a check, which never ends when each call reveals what a
+handler dismisses.
 
 ## Diagnostic evidence at failure
 
