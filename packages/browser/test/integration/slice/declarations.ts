@@ -1724,6 +1724,37 @@ export const declarations = (
           }))
         }), timeout)
 
+      it.effect("denies a permission, which its change reports, and restores what was in force once removed", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const query = "return navigator.permissions.query({ name: 'notifications' }).then((p) => p.state)"
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            if (!(yield* supports("permissions"))) {
+              const error = yield* Effect.flip(page.context.deny(["notifications"], { origin }))
+              assert(Declaration.isDeclarationError(error) && error.reason._tag === "Unsupported", String(error))
+              return
+            }
+            // The page that's open hears the change
+            yield* page.goto(fixtureUrl(
+              origin,
+              `<p id="state">pending</p><script>navigator.permissions.query({ name: 'notifications' }).then((status) => { document.getElementById('state').textContent = status.state; status.onchange = () => { document.getElementById('state').textContent = 'changed ' + status.state } })</script>`
+            ))
+            yield* page.locator("#state").pipe(Expect.toHaveText("prompt"))
+            const denied = yield* page.context.deny(["notifications"], { origin })
+            yield* page.locator("#state").pipe(Expect.toHaveText("changed denied"))
+            assert.strictEqual(yield* run(page, origin, query), "denied")
+            yield* denied.remove
+            assert.strictEqual(yield* run(page, origin, query), "prompt")
+            // A denial over a grant holds while it lives; once it goes, the grant is in force again
+            yield* page.context.grant(["notifications"], { origin })
+            const over = yield* page.context.deny(["notifications"], { origin })
+            assert.strictEqual(yield* run(page, origin, query), "denied")
+            yield* over.remove
+            assert.strictEqual(yield* run(page, origin, query), "granted")
+          }))
+        }), timeout)
+
       // ── Content Security Policy ──
 
       it.effect(
