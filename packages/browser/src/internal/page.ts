@@ -183,16 +183,16 @@ export const observed = (owner: ObservedOwner): Page.ObservedPage => {
   return page
 }
 
-/**
- * What runs a navigation or an evaluation in one navigable of a page: the page's own, or one of its frames. `ended`
- * fails once the navigable is gone, and `error` makes the operation's own error from a reason.
- */
 /** The realm an evaluation runs in, and the document it was found in, where known. */
 export interface Realm {
   readonly realm: Target.RealmId
   readonly document: Option.Option<Target.DocumentId>
 }
 
+/**
+ * What runs a navigation or an evaluation in one navigable of a page: the page's own, or one of its frames. `ended`
+ * fails once the navigable is gone, and `error` makes the operation's own error from a reason.
+ */
 export interface Driven<E> {
   readonly runtime: Runtime.Runtime
   readonly entry: Model.PageEntry

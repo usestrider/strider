@@ -39,7 +39,10 @@ export interface Owner {
   readonly id: Target.NavigableId
 }
 
-/** The frame as the model has it now: its URL and current document, or `None` once it has left its page. */
+/**
+ * The frame as the model has it now: its URL and current document, or `None` once it has left its page. A page's top
+ * frame is attached from the start, without a document until its first one commits.
+ */
 interface View {
   readonly page: Model.PageState
   readonly frame: Option.Option<{ readonly url: Url.Url; readonly document: Option.Option<Target.DocumentId> }>
@@ -48,9 +51,14 @@ interface View {
 
 const frameIn = (owner: Owner, state: Model.PageState): View["frame"] => {
   if (owner.id === owner.page.id) {
-    return state.status._tag === "Open"
-      ? Option.some({ url: state.status.url, document: Option.some(state.status.document.id) })
-      : Option.none()
+    switch (state.status._tag) {
+      case "Opening":
+        return Option.some({ url: state.status.url, document: Option.none() })
+      case "Open":
+        return Option.some({ url: state.status.url, document: Option.some(state.status.document.id) })
+      default:
+        return Option.none()
+    }
   }
   const entry = state.frames.find((frame) => frame.id === owner.id)
   return entry === undefined ? Option.none() : Option.some({ url: entry.url, document: entry.document })
@@ -85,7 +93,6 @@ const view = (owner: Owner): Readable<View> => {
 }
 
 const project = (state: View): Option.Option<Frame.Status> => {
-  if (state.page.status._tag === "Opening") return Option.none()
   if (Option.isNone(state.frame)) return Option.some({ _tag: "Detached" })
   const frame = state.frame.value
   const document = Option.flatMap(

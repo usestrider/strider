@@ -2229,7 +2229,9 @@ export const frameLocator = (owner: Owner, steps: ReadonlyArray<Engine.Step>): L
         "FrameLocator.addStyleTag",
         Tags.style(owner.runtime, style)
       ),
-    resolve: make(steps).resolveFrame(inside),
+    get resolve() {
+      return make(steps).resolveFrame(inside)
+    },
     toString: () => `FrameLocator(page.frame(page.${describeSteps(steps)}))`
   } as Locator.FrameLocator
 }
