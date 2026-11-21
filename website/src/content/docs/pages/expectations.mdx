@@ -179,9 +179,9 @@ const saveName = Effect.fn("saveName")(function*(page: Page.ReadonlyPage) {
 ```
 
 The accessible description comes from the first of these an element has, even when its text is empty: the elements
-`aria-describedby` names, `aria-description`, a table's caption, a `summary` element's content, or a button input's
-`value` when that isn't the name, and last a `title` that isn't the name. The accessible error message is the text
-of the elements `aria-errormessage` names while the element is invalid, and empty otherwise. An element is invalid
+`aria-describedby` names, `aria-description`, a table's caption or a button input's `value` when that isn't the name,
+a `summary` element's content when `aria-label` or `aria-labelledby` gave the name, and last a `title` that isn't
+the name. The accessible error message is the text of the elements `aria-errormessage` names while the element is invalid, and empty otherwise. An element is invalid
 when its `aria-invalid` is anything but blank or `false`, or when the browser's own validation rejects its value. Both compare as names do, take `ignoreCase`, and take `not`, which negates the
 comparison but still needs exactly one match:
 

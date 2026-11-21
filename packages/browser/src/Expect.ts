@@ -421,10 +421,10 @@ export const toHaveAccessibleName: DualMatcher<
  *
  * The description comes from the first of these that applies, even when its text is empty: the elements
  * `aria-describedby` names, joined by a space, when at least one of its IDs names an element; `aria-description`,
- * when present; a table's caption, a `summary` element's content, or a button, submit, or reset input's `value`,
- * when that didn't give the element its name; and the `title` attribute, when it isn't the element's name. An
- * element named there counts even when it's hidden, with its hidden content; a hidden element itself has an
- * empty description. Strings and regular expressions match as in `toHaveAccessibleName`, and so does
+ * when present; a table's caption or a button, submit, or reset input's `value`, when that didn't give the element
+ * its name; a `summary` element's content, when `aria-label` or `aria-labelledby` gave it its name; and the `title`
+ * attribute, when it isn't the element's name. An element named there counts even when it's hidden, with its
+ * hidden content; a hidden element itself has an empty description. Strings and regular expressions match as in `toHaveAccessibleName`, and so does
  * `ignoreCase`. `not` negates only the comparison: missing or multiple matches keep retrying and fail with their
  * match count, with or without it.
  *
