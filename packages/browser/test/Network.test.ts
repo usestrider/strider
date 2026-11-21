@@ -81,32 +81,43 @@ describe("A request in a log", () => {
     }))
 })
 
-describe("NetworkResponse compatibility", () => {
-  const previous = {
-    hop: "Q1.0" as NetworkRequest.HopId,
-    url: "https://example.com/" as NetworkResponse.NetworkResponse["url"],
-    status: 200 as NetworkResponse.StatusCode,
-    statusText: "OK",
-    httpVersion: Option.some("h2"),
-    headers: Headers.empty,
-    servedBy: "network" as const,
-    at: 0 as NetworkResponse.NetworkResponse["at"]
-  }
+describe("NetworkResponse encoding", () => {
+  const response = (
+    serverAddress: Option.Option<NetworkResponse.ServerAddress>,
+    securityDetails: Option.Option<NetworkResponse.SecurityDetails>
+  ) =>
+    new NetworkResponse.NetworkResponse({
+      hop: "Q1.0" as NetworkRequest.HopId,
+      url: "https://example.com/" as NetworkResponse.NetworkResponse["url"],
+      status: 200 as NetworkResponse.StatusCode,
+      statusText: "OK",
+      httpVersion: Option.some("h2"),
+      serverAddress,
+      securityDetails,
+      headers: Headers.empty,
+      servedBy: "network",
+      at: 0 as NetworkResponse.NetworkResponse["at"]
+    })
+  const codec = Schema.toCodecJson(NetworkResponse.NetworkResponse)
 
-  it("constructs a response using the fields accepted before server and TLS metadata", () => {
-    // Reflect calls the constructor as a JavaScript consumer does, without TypeScript rejecting the old shape.
-    const response = Reflect.construct(NetworkResponse.NetworkResponse, [previous])
-    assert.strictEqual(response.status, 200)
-  })
-
-  it("decodes a response encoded before server and TLS metadata", () => {
-    const encoded = {
-      ...previous,
-      httpVersion: { _tag: "Some", value: "h2" },
-      headers: {}
+  it("round-trips the server address and TLS details, present or not", () => {
+    const present = response(
+      Option.some(new NetworkResponse.ServerAddress({ ip: "127.0.0.1", port: 8443 })),
+      Option.some(
+        new NetworkResponse.SecurityDetails({
+          protocol: Option.some("TLS 1.3"),
+          subjectName: Option.some("example.com"),
+          issuer: Option.none(),
+          validFrom: Option.some(1794897046),
+          validTo: Option.some(4948497046)
+        })
+      )
+    )
+    for (const sent of [present, response(Option.none(), Option.none())]) {
+      const decoded = Schema.decodeUnknownSync(codec)(JSON.parse(JSON.stringify(Schema.encodeSync(codec)(sent))))
+      assert.deepStrictEqual(decoded.serverAddress, sent.serverAddress)
+      assert.deepStrictEqual(decoded.securityDetails, sent.securityDetails)
     }
-    const response = Schema.decodeUnknownSync(Schema.toCodecJson(NetworkResponse.NetworkResponse))(encoded)
-    assert.strictEqual(response.status, 200)
   })
 })
 
