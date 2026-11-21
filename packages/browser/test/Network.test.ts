@@ -81,6 +81,35 @@ describe("A request in a log", () => {
     }))
 })
 
+describe("NetworkResponse compatibility", () => {
+  const previous = {
+    hop: "Q1.0" as NetworkRequest.HopId,
+    url: "https://example.com/" as NetworkResponse.NetworkResponse["url"],
+    status: 200 as NetworkResponse.StatusCode,
+    statusText: "OK",
+    httpVersion: Option.some("h2"),
+    headers: Headers.empty,
+    servedBy: "network" as const,
+    at: 0 as NetworkResponse.NetworkResponse["at"]
+  }
+
+  it("constructs a response using the fields accepted before server and TLS metadata", () => {
+    // Reflect calls the constructor as a JavaScript consumer does, without TypeScript rejecting the old shape.
+    const response = Reflect.construct(NetworkResponse.NetworkResponse, [previous])
+    assert.strictEqual(response.status, 200)
+  })
+
+  it("decodes a response encoded before server and TLS metadata", () => {
+    const encoded = {
+      ...previous,
+      httpVersion: { _tag: "Some", value: "h2" },
+      headers: {}
+    }
+    const response = Schema.decodeUnknownSync(Schema.toCodecJson(NetworkResponse.NetworkResponse))(encoded)
+    assert.strictEqual(response.status, 200)
+  })
+})
+
 const recorded = (sent: NetworkRequest.NetworkRequest, body: Uint8Array | undefined): Har.Recorded => ({
   request: sent,
   hop: Option.none(),
