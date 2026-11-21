@@ -266,7 +266,8 @@ export interface OverlayControl {
    * **Details**
    *
    * It returns once the overlay is in the page; the removal at `duration` happens apart from the caller. The HTML
-   * is the caller's and is inserted as it is; its scripts don't run.
+   * is the caller's and is inserted as it is: its `<script>` elements don't run, but its inline event handlers,
+   * such as an `onerror` attribute, do, in the page's own JavaScript world.
    *
    * **Example** (Labeling a recording while a step runs)
    *
@@ -291,6 +292,11 @@ export interface OverlayControl {
    * **Details**
    *
    * The title and description are shown as text, never as HTML.
+   *
+   * **Gotchas**
+   *
+   * The card's wait counts against the operation's deadline: when `duration` is longer than the time the
+   * operation has left, as the default 2-second card under a 1-second deadline, `chapter` fails with `Timeout`.
    *
    * **Example** (Opening a chapter of a recording)
    *
