@@ -138,7 +138,7 @@ const explain = (subject: InPage, id: Diagnostics.OperationId): Effect.Effect<Ex
     Operation.apart("Expect.explain", Duration.millis(explainBudget)),
     Effect.map((response): Explained => {
       if (response._tag !== "Explained" || response.matched) return none
-      const boundary = subject.steps.findLastIndex((step) => step._tag === "Frame")
+      const boundary = subject.steps.findLastIndex((step) => step._tag === "Frame" || step._tag === "AnyFrame")
       const frames = subject.steps.slice(0, boundary + 1)
       const last = subject.steps.slice(boundary + 1)
       return {
