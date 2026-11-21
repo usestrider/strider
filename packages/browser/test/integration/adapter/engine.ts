@@ -301,6 +301,36 @@ export const engine = (backend: Backend) =>
             assert.strictEqual(observed.foreign.changed, true)
           }), timeout)
 
+        it.effect("change watch release settles pending waits without rearming and releases resources", () =>
+          Effect.gen(function*() {
+            const { call } = yield* open(backend, "<p>unchanged</p>", controlledCooperativeClock)
+            const result = yield* call(
+              `async () => {
+              const engine = globalThis[Symbol.for(${JSON.stringify(Engine.installKey)})]
+              const send = async (request) => JSON.parse(await engine.run(JSON.stringify(request)))
+              const arm = () => send({ op: "change", steps: [], token: null, cap: 0 })
+              const first = await arm()
+              await send({ op: "unwatch", token: first.token })
+              const forgotten = await send({ op: "change", steps: [], token: first.token, cap: 0 })
+              await send({ op: "unwatch", token: forgotten.token })
+              const second = await arm()
+              const pending = send({ op: "change", steps: [], token: second.token, cap: 1000 })
+              await send({ op: "unwatch", token: second.token })
+              const released = await pending
+              await send({ op: "unwatch", token: second.token })
+              const resources = globalThis.engineTestResources
+              return JSON.stringify({ forgotten: forgotten.changed, released,
+                resources: Object.fromEntries(Object.entries(resources).map(([key, value]) => [key, value.size])) })
+            }`,
+              []
+            )
+            assert(result._tag === "Value" && result.value.type === "string")
+            const observed = JSON.parse(result.value.value)
+            assert.isTrue(observed.forgotten)
+            assert.deepStrictEqual(observed.released, { _tag: "Watching", changed: false, token: "" })
+            assert.deepStrictEqual(observed.resources, { timers: 0, frames: 0, observers: 0, listeners: 0 })
+          }), timeout)
+
         it.effect("change watch expiry settles a wait already consuming that watch", () =>
           Effect.gen(function*() {
             const { call } = yield* open(backend, "<p>unchanged</p>", controlledCooperativeClock)

@@ -2289,6 +2289,109 @@ export const contents = (
           }))
         }), timeout)
 
+      it.effect("toSatisfy preserves a handler failure while the page function is pending", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<div id="overlay" hidden>Overlay</div><p id="x">waiting</p>`))
+            if (
+              yield* isolatedRefused(Expect.toSatisfy(page.locator("#x"), () =>
+                true))
+            ) {
+              return
+            }
+            const sentinel = { message: "handler failed" }
+            yield* page.addLocatorHandler(page.locator("#overlay"), () =>
+              Effect.fail(sentinel))
+            const failed = reasonOf(
+              yield* Effect.exit(
+                page.locator("#x").pipe(
+                  Expect.toSatisfy((element) => {
+                    element.ownerDocument.querySelector<HTMLElement>("#overlay")!.hidden = false
+                    return new Promise<boolean>(() => {})
+                  }),
+                  Deadline.within("2 seconds")
+                )
+              )
+            ) as unknown as Expect.ExpectationFailed
+            assert.strictEqual(failed._tag, "ExpectationFailed")
+            assert.strictEqual(failed.handlerFailure?.error, sentinel)
+          }))
+        }), timeout)
+
+      it.effect("toSatisfy interruption finishes a running handler finalizer", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<div id="overlay" hidden>Overlay</div><p id="x">waiting</p>`))
+            if (
+              yield* isolatedRefused(Expect.toSatisfy(page.locator("#x"), () =>
+                true))
+            ) {
+              return
+            }
+            const entered = yield* Deferred.make<void>()
+            let finalized = false
+            yield* page.addLocatorHandler(page.locator("#overlay"), () =>
+              Deferred.succeed(entered, undefined).pipe(
+                Effect.andThen(Effect.never),
+                Effect.ensuring(Effect.sync(() => {
+                  finalized = true
+                }))
+              ))
+            const pending = yield* page.locator("#x").pipe(
+              Expect.toSatisfy((element) => {
+                element.ownerDocument.querySelector<HTMLElement>("#overlay")!.hidden = false
+                return new Promise<boolean>(() => {})
+              }),
+              Deadline.within("2 seconds"),
+              Effect.forkChild
+            )
+            yield* Deferred.await(entered).pipe(Effect.timeout("1 second"))
+            yield* Fiber.interrupt(pending)
+            assert.isTrue(finalized)
+          }))
+        }), timeout)
+
+      it.effect("toSatisfy stops servicing handlers after its page function throws", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<p id="x">waiting</p>`))
+            if (
+              yield* isolatedRefused(Expect.toSatisfy(page.locator("#x"), () =>
+                true))
+            ) {
+              return
+            }
+            const extra = yield* Deferred.make<void>()
+            let returned = false
+            yield* page.addLocatorHandler(page.locator("p"), () =>
+              Effect.gen(function*() {
+                if (returned) {
+                  yield* Deferred.succeed(extra, undefined)
+                }
+              }), { noWaitAfter: true })
+            const failed = reasonOf(
+              yield* Effect.exit(
+                page.locator("#x").pipe(
+                  Expect.toSatisfy(() => {
+                    throw new Error("stop checking")
+                  }),
+                  Deadline.within("2 seconds")
+                )
+              )
+            )
+            assert.strictEqual(failed?.reason?._tag, "EvaluationThrown")
+            returned = true
+            const after = yield* Deferred.await(extra).pipe(Effect.timeoutOption("300 millis"))
+            assert.isTrue(Option.isNone(after), "a handler ran after the expectation had already failed")
+          }))
+        }), timeout)
+
       it.effect("toSatisfy reports several containing iframes as match observations", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -2296,17 +2399,14 @@ export const contents = (
             const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, `<p>outside</p><iframe></iframe><iframe></iframe>`))
             if (
-              yield* isolatedRefused(Expect.toSatisfy(page.locator("p"), () =>
-                true))
+              yield* isolatedRefused(Expect.toSatisfy(page.locator("p"), () => true))
             ) {
               return
             }
             const failed = reasonOf(
               yield* Effect.exit(
                 page.frame(page.locator("iframe")).locator("p").pipe(
-                  Expect.toSatisfy(() =>
-                    true
-                  ),
+                  Expect.toSatisfy(() => true),
                   Deadline.within("300 millis")
                 )
               )
@@ -2322,8 +2422,7 @@ export const contents = (
             const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, `<p id="x">waiting</p>`))
             if (
-              yield* isolatedRefused(Expect.toSatisfy(page.locator("#x"), () =>
-                true))
+              yield* isolatedRefused(Expect.toSatisfy(page.locator("#x"), () => true))
             ) return
             yield* page.addLocatorHandler(page.locator("p"), () => Effect.never)
             const failed = reasonOf(
