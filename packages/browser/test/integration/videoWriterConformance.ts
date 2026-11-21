@@ -173,6 +173,50 @@ export const writerConformance = (
       60_000
     )
 
+    for (
+      const scenario of [
+        { name: "stop on a slot boundary", fps: 10, input: [0, 1000], slots: 10 },
+        { name: "single image", fps: 10, input: [0], slots: 1 },
+        { name: "fractional frame rate", fps: 12.5, input: [0, 237, 1000], slots: 13 },
+        { name: "fractional slots between milliseconds", fps: 30000 / 1001, input: [0, 237, 1000], slots: 30 }
+      ]
+    ) {
+      it.effect(`${name} resamples ${scenario.name}`, () =>
+        Effect.gen(function*() {
+          const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-writer-edge-"))
+          yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
+          const encoder = yield* VideoWriter.VideoWriter
+          const data = png(2, 2, [255, 0, 0])
+          const file = yield* encoder.write(
+            Stream.fromIterable(scenario.input).pipe(Stream.map((at) => ({
+              at: at * 1e6,
+              format: "png" as const,
+              width: 2,
+              height: 2,
+              data
+            }))),
+            { path: path.join(directory, "edge.webm"), width: 2, height: 2, fps: scenario.fps }
+          )
+          const probe = JSON.parse(execFileSync(process.env["STRIDER_FFPROBE"]!, [
+            "-v",
+            "error",
+            "-show_frames",
+            "-show_format",
+            "-of",
+            "json",
+            file
+          ], { encoding: "utf8" }))
+          const times = probe.frames.map((frame: { best_effort_timestamp_time: string }) =>
+            Number(frame.best_effort_timestamp_time)
+          )
+          assert.strictEqual(times.length, scenario.slots + 1, JSON.stringify(times))
+          for (let index = 0; index < times.length; index++) {
+            assert.closeTo(times[index], index / scenario.fps, 0.001)
+          }
+          assert.closeTo(Number(probe.format.duration), scenario.slots / scenario.fps, 0.002)
+        }), 60_000)
+    }
+
     it.effect(
       `${name} validates the final picture after a delayed first frame`,
       () =>
