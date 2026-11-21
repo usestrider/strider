@@ -195,13 +195,25 @@ export const anyFrame = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer
           Effect.scoped(Effect.gen(function*() {
             const { origin } = yield* site
             const page = yield* newPage
-            yield* page.goto(fixtureUrl(origin, `${button("Pay").repeat(6)}${frame(origin, button("Pay").repeat(6))}`))
+            const labels = Array.from({ length: 12 }, (_, index) => `Pay ${index}`)
+            yield* page.goto(
+              fixtureUrl(
+                origin,
+                labels.slice(0, 6).map(button).join("") + frame(origin, labels.slice(6).map(button).join(""))
+              )
+            )
             const error = yield* page.anyFrame.getByRole("button", { name: "Pay" }).count.pipe(Effect.flip)
             assert(Locator.isLocatorError(error), String(error))
             assert.strictEqual(error.reason._tag, "StrictViolation")
             if (error.reason._tag === "StrictViolation") {
               assert.include(error.reason.hint, "12 elements match in 2 frames")
               assert.lengthOf(error.reason.candidates, 10)
+              assert.strictEqual(error.reason.count, 12)
+              assert.match(error.reason.message, /^12 matches/)
+              for (const [index, candidate] of error.reason.candidates.entries()) {
+                assert.include(candidate.description, labels[index]!)
+                assert.isTrue(candidate.visible)
+              }
             }
           })),
         timeout
@@ -223,6 +235,30 @@ export const anyFrame = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer
               assert.include(error.reason.hint, "12 elements match in 2 frames")
               strict(yield* pay.filter({ visible: true }).count.pipe(Effect.flip), 2)
               assert.deepEqual(error.reason.suggestions, [])
+              assert.strictEqual(error.reason.count, 12)
+              assert.match(error.reason.message, /^12 matches/)
+            }
+            // The single-document path must count visibility beyond its own ten-candidate sample too.
+            const child = page.frame(page.locator("iframe")).locator("button")
+            const single = yield* child.readText.pipe(Effect.flip)
+            assert(Locator.isLocatorError(single), String(single))
+            assert.strictEqual(single.reason._tag, "StrictViolation")
+            if (single.reason._tag === "StrictViolation") {
+              assert.strictEqual(single.reason.count, 11)
+              assert.match(single.reason.message, /^11 matches/)
+              assert.deepEqual(single.reason.candidates.map((candidate) => candidate.visible), Array(10).fill(false))
+              assert.lengthOf(single.reason.suggestions, 1)
+              assert.strictEqual(yield* child.filter({ visible: true }).count, 1)
+            }
+            yield* page.evaluateInMainWorld(() =>
+              document.querySelector("iframe")!.contentDocument!.querySelector("button")!.removeAttribute("hidden")
+            )
+            const two = yield* child.readText.pipe(Effect.flip)
+            assert(Locator.isLocatorError(two), String(two))
+            assert.strictEqual(two.reason._tag, "StrictViolation")
+            if (two.reason._tag === "StrictViolation") {
+              assert.strictEqual(two.reason.count, 11)
+              assert.deepEqual(two.reason.suggestions, [])
             }
           })),
         timeout
