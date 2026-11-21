@@ -4,6 +4,7 @@
  */
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
 import type * as AriaPattern from "../AriaPattern.ts"
@@ -677,87 +678,160 @@ export const toSatisfy = (locator: Locator.ReadonlyLocator, fn: Function, args: 
           )
         )
       const dispatch = subject.page.execution
-      // Armed before the first check, so a change while the function runs wakes the next check at once
-      let token: string | null = null
-      const watch = (cap: number) =>
-        Runtime.send(subject.runtime, subject.page, { op: "change", steps, token, cap }, id, record.budget.at).pipe(
-          Effect.flatMap((response) => {
-            if (response._tag !== "Watching") {
-              return Effect.die(new Error(`The engine answered ${response._tag} unexpectedly`))
-            }
-            token = response.token
-            return Effect.succeed(response.changed)
-          }),
-          Effect.catch((failure) =>
-            failure._tag === "Deadline"
-              ? Effect.succeed(false)
-              : Effect.fail(impl.sendFailure(operation, failure, record))
-          )
+      // The watches this expectation armed, with the document each was armed in: released on every exit, so one
+      // left only expires when its release can't reach the page
+      const owned = new Map<string, Target.DocumentId>()
+      const release = (token: string, document: Target.DocumentId) =>
+        Runtime.releaseInDocument(subject.runtime, document, { op: "unwatch", token }, id).pipe(
+          Effect.ignore,
+          Operation.detached
         )
-      yield* watch(0)
-      while (true) {
-        checks++
-        // Registered locator handlers run before each check, as they do in the other locator expectations' rounds
-        const handled = yield* cut(dispatch.handle.pipe(
-          Effect.as(Option.none<Reason.LocatorHandlerFailed>()),
-          Effect.catch((failure) =>
-            failure._tag === "Reason" && failure.reason._tag === "LocatorHandlerFailed"
-              ? Effect.succeed(Option.some(failure.reason as Reason.LocatorHandlerFailed))
-              : Effect.fail(impl.sendFailure(operation, failure, record))
-          )
-        ))
-        if (Option.isNone(handled)) {
-          if (history.length === 0) {
-            Operation.appendObservation(history, { error: "a check was still running at the deadline" })
-          }
-          return yield* failed()
-        }
-        if (Option.isSome(handled.value)) return yield* failed(handled.value.value)
-        // A handler that ran changed the page, which the watch armed before it has seen
-        // A check the expectation's deadline cut off is one that didn't finish
-        const checked = yield* cut(impl.satisfying(operation, fn, args))
-        if (Option.isNone(checked)) {
-          if (history.length === 0) {
-            Operation.appendObservation(history, { error: "a check was still running at the deadline" })
-          }
-          return yield* failed()
-        }
-        const outcome = checked.value
-        if (outcome._tag === "Value") {
-          Operation.appendObservation(history, outcome.value)
-          if (outcome.value === true) return
-        } else {
-          const response = outcome.response
-          switch (response._tag) {
-            case "NoMatch":
-              Operation.appendObservation(history, { matches: 0 })
-              break
-            case "Strict":
-              Operation.appendObservation(history, { matches: response.count })
-              break
-            // What no waiting mends ends it, as it ends the other locator expectations
-            case "InvalidSelector":
-              Operation.appendObservation(history, {
-                error: `invalid selector ${JSON.stringify(response.selector)}: ${response.message}`
-              })
-              return yield* failed()
-            case "StaleRef":
-              Operation.appendObservation(history, { error: `stale ref (${response.why})` })
-              return yield* failed()
-            case "Final":
-              Operation.appendObservation(history, { error: `${response.final.element} on the way isn't an iframe` })
-              return yield* failed()
-            default:
-              Operation.appendObservation(history, { error: `unexpected answer ${response._tag}` })
-          }
-        }
-        const left = record.left()
-        if (left <= 0) return yield* failed()
-        // Answers at once when anything changed since the watch was armed, before this check
-        const changed = yield* watch(Runtime.roundCap(left))
-        if (changed) triggers.add("change")
-        if (record.left() <= 0) return yield* failed()
+      const releaseAll = Effect.suspend(() =>
+        Effect.forEach(Array.from(owned), ([token, document]) => release(token, document), { discard: true })
+      )
+      type Waited =
+        | { readonly _tag: "Waited"; readonly changed: boolean }
+        | { readonly _tag: "Routed"; readonly response: Engine.Response }
+      /**
+       * A sequence of waits on the page's change signals: each answers at once when a signal came since the last
+       * one answered, which armed the watch it reads. The first only arms.
+       */
+      const watcher = () => {
+        let token: string | null = null
+        return (cap: number) =>
+          Runtime.sendRouted(subject.runtime, subject.page, { op: "change", steps, token, cap }, id, record.budget.at)
+            .pipe(
+              Effect.flatMap(({ response, routed }) => {
+                const previous = token === null ? undefined : owned.get(token)
+                const released = previous === undefined || previous === routed.document
+                  ? Effect.void
+                  : release(token!, previous)
+                if (token !== null) owned.delete(token)
+                if (response._tag !== "Watching") {
+                  token = null
+                  return Effect.as(released, { _tag: "Routed", response } as Waited)
+                }
+                token = response.token
+                owned.set(token, routed.document)
+                return Effect.as(released, { _tag: "Waited", changed: response.changed } as Waited)
+              }),
+              Effect.catch((failure) =>
+                failure._tag === "Deadline"
+                  ? Effect.succeed<Waited>({ _tag: "Waited", changed: false })
+                  : Effect.fail(impl.sendFailure(operation, failure, record))
+              )
+            )
       }
+      // The page's locator handlers: a callback's typed failure fails the expectation with it, and its own
+      // Timeout or TargetGone is the expectation's, as in the other locator expectations
+      const handle = dispatch.handle.pipe(
+        Effect.map((ran) => ({ _tag: "Handled" as const, ran })),
+        Effect.catch((failure) =>
+          failure._tag === "Reason" && failure.reason._tag === "LocatorHandlerFailed"
+            ? Effect.succeed({ _tag: "HandlerFailed" as const, reason: failure.reason as Reason.LocatorHandlerFailed })
+            : Effect.fail(impl.sendFailure(operation, failure, record))
+        )
+      )
+      /** An answer for why there isn't one match: whether the expectation goes on, as for its checks. */
+      const observe = (response: Engine.Response): boolean => {
+        switch (response._tag) {
+          case "NoMatch":
+            Operation.appendObservation(history, { matches: 0 })
+            return true
+          case "Strict":
+            Operation.appendObservation(history, { matches: response.count })
+            return true
+          // What no waiting mends ends it, as it ends the other locator expectations
+          case "InvalidSelector":
+            Operation.appendObservation(history, {
+              error: `invalid selector ${JSON.stringify(response.selector)}: ${response.message}`
+            })
+            return false
+          case "StaleRef":
+            Operation.appendObservation(history, { error: `stale ref (${response.why})` })
+            return false
+          case "Final":
+            Operation.appendObservation(history, { error: `${response.final.element} on the way isn't an iframe` })
+            return false
+          default:
+            Operation.appendObservation(history, { error: `unexpected answer ${response._tag}` })
+            return true
+        }
+      }
+      const cutOff = () => {
+        if (history.length === 0) {
+          Operation.appendObservation(history, { error: "a check was still running at the deadline" })
+        }
+        return failed()
+      }
+      /**
+       * One check, with the page's handlers run on each change signal while the function is pending, as an
+       * in-page round runs them. A handler still running when the result arrives is let finish before the result
+       * is used: the result can be what the handler made, as when the function waits for an overlay's dismissal.
+       */
+      const check = Effect.fnUntraced(function*() {
+        const call = cut(impl.satisfying(operation, fn, args))
+        if (!dispatch.handlers) return { checked: yield* call, failure: undefined }
+        const signals = watcher()
+        let done = false
+        let busy = false
+        const servicing = Effect.gen(function*() {
+          yield* signals(0)
+          while (!done) {
+            if (record.left() <= 0) return yield* Effect.never
+            yield* signals(Runtime.roundCap(record.left()))
+            if (done) return undefined
+            busy = true
+            const outcome = yield* handle
+            busy = false
+            if (outcome._tag === "HandlerFailed") return outcome.reason
+          }
+          return undefined
+        })
+        const fiber = yield* Effect.forkChild(servicing)
+        const raced = yield* Effect.raceFirst(
+          Effect.map(call, (checked) => ({ _tag: "Checked" as const, checked })),
+          Effect.map(Fiber.join(fiber), (reason) => ({ _tag: "Serviced" as const, reason }))
+        )
+        done = true
+        const reason = raced._tag === "Serviced"
+          ? raced.reason
+          : busy
+          ? yield* Fiber.join(fiber)
+          : yield* Effect.as(Fiber.interrupt(fiber), undefined)
+        return {
+          checked: raced._tag === "Checked" ? raced.checked : Option.none(),
+          failure: reason
+        }
+      })
+      const checking = watcher()
+      return yield* Effect.gen(function*() {
+        // Armed before the first check, so a change while the function runs wakes the next check at once
+        yield* checking(0)
+        while (true) {
+          checks++
+          // Registered locator handlers run before each check, as they do in the other locator expectations' rounds
+          const before = yield* handle
+          if (before._tag === "HandlerFailed") return yield* failed(before.reason)
+          // A check the expectation's deadline cut off is one that didn't finish
+          const { checked, failure: handlerFailure } = yield* check()
+          if (handlerFailure !== undefined) return yield* failed(handlerFailure)
+          if (Option.isNone(checked)) return yield* cutOff()
+          const outcome = checked.value
+          if (outcome._tag === "Value") {
+            Operation.appendObservation(history, outcome.value)
+            if (outcome.value === true) return
+          } else if (!observe(outcome.response)) return yield* failed()
+          const left = record.left()
+          if (left <= 0) return yield* failed()
+          // Answers at once when anything changed since the watch was armed, before this check
+          const waited = yield* checking(Runtime.roundCap(left))
+          if (waited._tag === "Routed") {
+            if (!observe(waited.response)) return yield* failed()
+          } else if (waited.changed) triggers.add("change")
+          if (record.left() <= 0) return yield* failed()
+        }
+      }).pipe(Effect.ensuring(releaseAll))
     }).pipe(Operation.named(operation, {
       attributes: { "browser.page.id": subject.page.id, "browser.subject": description }
     }))

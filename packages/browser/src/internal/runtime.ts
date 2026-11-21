@@ -1022,7 +1022,7 @@ export const insertText = (
 export const releaseInDocument = (
   runtime: Runtime,
   document: Target.DocumentId,
-  request: Extract<Engine.Request, { readonly op: "validationStop" | "fillDisarm" | "expectStop" }>,
+  request: Extract<Engine.Request, { readonly op: "validationStop" | "fillDisarm" | "expectStop" | "unwatch" }>,
   id: Diagnostics.OperationId
 ): Effect.Effect<void, SendFailure> =>
   Effect.suspend(() => {

@@ -38,13 +38,16 @@ export interface Dispatch {
   ) => Effect.Effect<Engine.Response, Failure>
   /**
    * The page's locator handlers, run as a check made outside the engine needs them before it checks: whichever
-   * trigger is visible has its handler run, unless handlers are suppressed here.
+   * trigger is visible has its handler run, unless handlers are suppressed here. Whether one ran.
    */
-  readonly handle: Effect.Effect<void, Failure>
+  readonly handle: Effect.Effect<boolean, Failure>
+  /** Whether the page has locator handlers registered, which `handle` would run. */
+  readonly handlers: boolean
 }
 export const ordinary: Dispatch = {
   action: Runtime.sendRouted,
   expect: Runtime.send,
-  handle: Effect.void,
+  handle: Effect.succeed(false),
+  handlers: false,
   url: (page, expected) => ExpectImpl.watchURL(page, expected)
 }

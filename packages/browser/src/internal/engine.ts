@@ -386,6 +386,8 @@ export type Request =
     readonly token: string | null
     readonly cap: number
   }
+  /** Releases a watch `change` armed, ending a wait on it without arming another. */
+  | { readonly op: "unwatch"; readonly token: string }
   | { readonly op: "title" }
   | { readonly op: "role"; readonly steps: ReadonlyArray<Step> }
   /**
@@ -3660,7 +3662,8 @@ export function engine(render: (root: SnapNode) => string) {
    */
   interface Watch {
     changed: boolean
-    waiter: (() => void) | undefined
+    /** Settles the wait on this watch: with whether it changed, and whether to arm the next. */
+    waiter: ((changed: boolean, arm: boolean) => void) | undefined
     stop: () => void
   }
   const watches = new Map<string, Watch>()
@@ -3679,15 +3682,17 @@ export function engine(render: (root: SnapNode) => string) {
     const noticed = () => {
       unlisten()
       watch.changed = true
-      watch.waiter?.()
+      watch.waiter?.(true, true)
     }
     const observer = new MutationObserver(noticed)
     observer.observe(document, { subtree: true, childList: true, attributes: true, characterData: true })
     for (const type of EVENTS) addEventListener(type, noticed, true)
     const frame = onFrame(noticed)
+    // A watch forgotten counts as changed: what happened since is unknown
     const expiry = setTimer(() => {
       unlisten()
       watches.delete(token)
+      watch.waiter?.(true, true)
     }, watchLifetime)
     const watch: Watch = {
       changed: false,
@@ -3703,7 +3708,8 @@ export function engine(render: (root: SnapNode) => string) {
   /** The first change since a token was armed, at once if it came already, or the cap: whether it changed. */
   const change = (request: Extract<Request, { op: "change" }>): Promise<Response> =>
     new Promise((resume) => {
-      const answer = (changed: boolean) => resume({ _tag: "Watching", changed, token: armWatch() })
+      const answer = (changed: boolean, arm = true) =>
+        resume({ _tag: "Watching", changed, token: arm ? armWatch() : "" })
       if (request.token === null) return answer(false)
       const watch = watches.get(request.token)
       // Armed in another document, or forgotten: what changed since is unknown, so it counts as a change
@@ -3713,15 +3719,29 @@ export function engine(render: (root: SnapNode) => string) {
         watch.stop()
         return answer(watch.changed)
       }
-      const timer = setTimer(() => finish(false), request.cap)
-      const finish = (changed: boolean) => {
-        if (!watches.delete(request.token!)) return
+      let settled = false
+      const timer = setTimer(() => finish(false, true), request.cap)
+      const finish = (changed: boolean, arm: boolean) => {
+        if (settled) return
+        settled = true
+        watches.delete(request.token!)
         clearTimer(timer)
         watch.stop()
-        answer(changed)
+        answer(changed, arm)
       }
-      watch.waiter = () => finish(true)
+      watch.waiter = finish
     })
+
+  /** Releases a watch, and ends a wait on it without arming another: its owner has gone. */
+  const unwatch = (token: string): Response => {
+    const watch = watches.get(token)
+    if (watch !== undefined) {
+      watches.delete(token)
+      watch.stop()
+      watch.waiter?.(false, false)
+    }
+    return { _tag: "Watching", changed: false, token: "" }
+  }
 
   // Snapshots
   const INTERACTIVE = new Set([
@@ -4395,6 +4415,8 @@ export function engine(render: (root: SnapNode) => string) {
           return JSON.stringify(await expect(request))
         case "change":
           return JSON.stringify(await change(request))
+        case "unwatch":
+          return JSON.stringify(unwatch(request.token))
         case "title":
           return JSON.stringify({ _tag: "Title", title: dom.title(document) } satisfies Response)
         case "frame":
