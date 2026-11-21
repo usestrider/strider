@@ -234,6 +234,24 @@ export const overlays = <R>(it: ReturnType<typeof SharedContext.guard<R>>) => {
       assert.isAtLeast(performance.now() - started, 1_000)
     }))
 
+  it.effect("removes an action's annotation when the action is interrupted during its wait", () =>
+    Effect.gen(function*() {
+      const page = yield* opened(button)
+      const overlay = yield* page.capability(Capability.Overlay)
+      yield* overlay.actions({ duration: "2 seconds", cursor: "none", style: { point } })
+      const started = performance.now()
+      const click = yield* page.getByRole("button", { name: "Go" }).click().pipe(Effect.forkChild)
+      let shown = false
+      while (!shown && performance.now() - started < 1_500) shown = yield* pixelsAt(page, 14, 14, isRed)
+      yield* Fiber.interrupt(click)
+      assert.isTrue(shown)
+      const interrupted = performance.now()
+      let removed = false
+      while (!removed && performance.now() - interrupted < 1_000) removed = !(yield* pixelsAt(page, 14, 14, isRed))
+      assert.isTrue(removed)
+      assert.notStrictEqual(yield* page.title, "clicked")
+    }))
+
   it.effect("draws a cursor at the last action's point, and none with cursor none", () =>
     Effect.gen(function*() {
       const page = yield* opened(button)
