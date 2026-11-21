@@ -591,28 +591,64 @@ export const toBeInViewport = (
     `to ${inViewport ? "" : "not "}intersect the viewport at ratio ${ratio}`
   )
 }
+/** An accessible text's matcher: `ignoreCase`, when given, replaces a regular expression's `i` flag. */
+const accessibleText = (expected: string | RegExp, ignoreCase: boolean | undefined) => ({
+  expected: typeof expected === "string" ? matcher(expected, true) : {
+    _tag: "RegExp" as const,
+    source: expected.source,
+    flags: ignoreCase === undefined ? expected.flags : expected.flags.replace(/i/g, "") + (ignoreCase ? "i" : "")
+  },
+  ignoreCase: ignoreCase === true,
+  shown: `${show(expected)}${ignoreCase === undefined ? "" : ignoreCase ? " ignoring case" : " matching case"}`
+})
+
 /** Accessible names use the shared engine only when this expectation is requested. */
 export const toHaveAccessibleName = (
   locator: Locator.ReadonlyLocator,
   expected: string | RegExp,
   options?: { readonly ignoreCase?: boolean | undefined } | undefined
 ) => {
-  const ignoreCase = options?.ignoreCase
-  const flags = typeof expected === "string" ? "" : expected.flags
-  const text = typeof expected === "string" ? matcher(expected, true) : {
-    _tag: "RegExp" as const,
-    source: expected.source,
-    flags: ignoreCase === undefined ? flags : flags.replace(/i/g, "") + (ignoreCase ? "i" : "")
-  }
+  const { expected: text, ignoreCase, shown } = accessibleText(expected, options?.ignoreCase)
   return expectLocator(
     locator,
-    { _tag: "AccessibleName", expected: text, ignoreCase: ignoreCase === true },
+    { _tag: "AccessibleName", expected: text, ignoreCase },
     "toHaveAccessibleName",
-    `to have the accessible name ${show(expected)}${
-      ignoreCase === undefined ? "" : ignoreCase ? " ignoring case" : " matching case"
-    }`
+    `to have the accessible name ${shown}`
   )
 }
+
+const toHaveAccessible = (
+  tag: "AccessibleDescription" | "AccessibleErrorMessage",
+  matcherName: string,
+  noun: string
+) =>
+(
+  locator: Locator.ReadonlyLocator,
+  expected: string | RegExp,
+  options?: { readonly ignoreCase?: boolean | undefined; readonly not?: boolean | undefined } | undefined
+) => {
+  const { expected: text, ignoreCase, shown } = accessibleText(expected, options?.ignoreCase)
+  const not = options?.not ?? false
+  return expectLocator(
+    locator,
+    { _tag: tag, expected: text, ignoreCase, not },
+    matcherName,
+    `${not ? "not " : ""}to have the accessible ${noun} ${shown}`
+  )
+}
+
+/** Descriptions and error messages are computed only when these expectations run. */
+export const toHaveAccessibleDescription = toHaveAccessible(
+  "AccessibleDescription",
+  "toHaveAccessibleDescription",
+  "description"
+)
+
+export const toHaveAccessibleErrorMessage = toHaveAccessible(
+  "AccessibleErrorMessage",
+  "toHaveAccessibleErrorMessage",
+  "error message"
+)
 
 export const toHaveCSS = (
   locator: Locator.ReadonlyLocator,

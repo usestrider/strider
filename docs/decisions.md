@@ -1608,7 +1608,8 @@ A transient duplicate during a render should settle under the same deadline as a
 the value comparison must not let an absent or ambiguous element satisfy it. This follows the existing
 single-element expectation engine. Rejected: immediate multiple-match rejection as in Playwright, which treats
 transient ambiguity differently from other unsettled expectation states, and negating cardinality together with
-the value, which could pass without observing the requested element.
+the value, which could pass without observing the requested element. The accessible description and error
+message expectations' `not` follows the same rule.
 
 ## Extra request header ownership
 

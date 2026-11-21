@@ -194,6 +194,13 @@ export type Expectation =
   | { readonly _tag: "Text"; readonly expected: ReadonlyArray<TextMatcher>; readonly list: boolean }
   | { readonly _tag: "Role"; readonly expected: string }
   | { readonly _tag: "AccessibleName"; readonly expected: TextMatcher; readonly ignoreCase: boolean }
+  /** The one match's accessible description or error message matches; with `not`, it doesn't. */
+  | {
+    readonly _tag: "AccessibleDescription" | "AccessibleErrorMessage"
+    readonly expected: TextMatcher
+    readonly ignoreCase: boolean
+    readonly not: boolean
+  }
   /** The raw class string of one match, or each match in order. */
   | { readonly _tag: "Class"; readonly expected: ReadonlyArray<TextMatcher>; readonly list: boolean }
   | { readonly _tag: "ContainsText"; readonly expected: TextMatcher }
@@ -1556,6 +1563,13 @@ export function engine(render: (root: SnapNode) => string) {
   const visible = (element: Element): boolean => rendered(element, true)
 
   // Accessible names (accname 1.2)
+  /**
+   * Where an element's own name came from, of the sources its description could otherwise come from, or `label`
+   * for `aria-label` or `aria-labelledby`.
+   */
+  type NameSource = "label" | "native" | "content" | "title"
+  const nameSources = new Map<Element, NameSource>()
+
   interface NameContext {
     readonly visited: Set<Element>
     /** Inside an `aria-labelledby` traversal, so `aria-labelledby` isn't followed again. */
@@ -1747,6 +1761,51 @@ export function engine(render: (root: SnapNode) => string) {
     return value
   }
 
+  /** The element whose own name `accessibleName` is computing, or `null` outside that computation. */
+  let nameRoot: Element | null = null
+
+  /**
+   * Records which of the sources HTML-AAM also reads for a description gave the root its own name, however the
+   * computation reached it, as through an `aria-labelledby` that names the root itself. Another element's
+   * sources only contribute, and aren't recorded, and neither is a name that counts hidden content, which no
+   * description reads. An `aria-labelledby` that names the root keeps the source its traversal of the root found.
+   */
+  const nameSource = (context: NameContext, element: Element, source: NameSource): void => {
+    if (element !== nameRoot || context.includeHidden) return
+    if (source !== "label" || !nameSources.has(element)) nameSources.set(element, source)
+  }
+
+  /**
+   * An element's content as name from content reads it: its `::before`, then its own CSS content, which replaces
+   * its children, or its children and the elements it owns through `aria-owns`, then its `::after`. `child` is
+   * the context its children are read in.
+   */
+  const contentOf = (element: Element, child: NameContext): string => {
+    let content = cssContent(element, "::before") ?? ""
+    const own = cssContent(element)
+    if (own !== undefined) {
+      // Content on the element itself replaces its children.
+      content += own
+    } else {
+      for (const node of flatChildNodes(element)) {
+        if (node instanceof Element && SKIPPED.has(dom.localName(node))) continue
+        const name = nameOfNode(node, child)
+        // Only an inline child runs into its neighbours; <br> always separates.
+        const inline = !(node instanceof Element) ||
+          (getComputedStyle(node).display === "inline" && dom.localName(node) !== "br")
+        content += inline ? name : ` ${name} `
+      }
+      // Elements it owns through aria-owns follow its children
+      for (const owned of (dom.getAttribute(element, "aria-owns") ?? "").split(ID_SEPARATOR)) {
+        const target = owned === "" ? null : byId(element, owned)
+        if (target === null) continue
+        const name = nameOfElement(target, child)
+        content += getComputedStyle(target).display === "inline" ? name : ` ${name} `
+      }
+    }
+    return content + (cssContent(element, "::after") ?? "")
+  }
+
   const nameOfElementValue = (element: Element, context: NameContext): string => {
     if (context.visited.has(element)) return ""
     // 2A: hidden, unless asked for or in a traversal from a hidden reference
@@ -1769,7 +1828,10 @@ export function engine(render: (root: SnapNode) => string) {
         ]
       })
       const joined = parts.join(" ")
-      if (joined.trim() !== "") return joined
+      if (joined.trim() !== "") {
+        nameSource(context, element, "label")
+        return joined
+      }
     }
     // Marked only now, so an element whose aria-labelledby names itself still reaches its own aria-label
     context.visited.add(element)
@@ -1785,11 +1847,17 @@ export function engine(render: (root: SnapNode) => string) {
     }
     // 2C: aria-label
     const label = dom.getAttribute(element, "aria-label") ?? ""
-    if (label.trim() !== "") return label
+    if (label.trim() !== "") {
+      nameSource(context, element, "label")
+      return label
+    }
     // 2D: the host language's label
     if (role !== "none" && role !== "presentation") {
       const native = nativeName(element, context)
-      if (native.trim() !== "") return native
+      if (native.trim() !== "") {
+        nameSource(context, element, "native")
+        return native
+      }
     }
     // 2F: name from content. In the target's own content, only a descendant whose role allows it.
     const fromContent = context.embedded === "reference" ||
@@ -1797,39 +1865,21 @@ export function engine(render: (root: SnapNode) => string) {
       (context.embedded === "descendant" && (role === null || NAME_FROM_CONTENT_DESCENDANT.has(role)))
     if (fromContent) {
       const child: NameContext = context.embedded === "self" ? { ...context, embedded: "descendant" } : context
-      let content = cssContent(element, "::before") ?? ""
-      const own = cssContent(element)
-      if (own !== undefined) {
-        // Content on the element itself replaces its children.
-        content += own
-      } else {
-        for (const node of flatChildNodes(element)) {
-          if (node instanceof Element && SKIPPED.has(dom.localName(node))) continue
-          const name = nameOfNode(node, child)
-          // Only an inline child runs into its neighbours; <br> always separates.
-          const inline = !(node instanceof Element) ||
-            (getComputedStyle(node).display === "inline" && dom.localName(node) !== "br")
-          content += inline ? name : ` ${name} `
-        }
-        // Elements it owns through aria-owns follow its children
-        for (const owned of (dom.getAttribute(element, "aria-owns") ?? "").split(ID_SEPARATOR)) {
-          const target = owned === "" ? null : byId(element, owned)
-          if (target === null) continue
-          const name = nameOfElement(target, child)
-          content += getComputedStyle(target).display === "inline" ? name : ` ${name} `
-        }
-      }
-      content += cssContent(element, "::after") ?? ""
+      const content = contentOf(element, child)
       // Only the target's own name is trimmed: a descendant's whitespace separates its neighbours.
       if (context.embedded === "self" ? content.trim() !== "" : content !== "") {
         if (provenance && context.embedded === "self") namesFromContent.add(element)
+        nameSource(context, element, "content")
         if (inField(element) && content.trim() !== "") context.contribution.fieldContent = true
         return content
       }
     }
     // 2I: the tooltip, except on a presentational element, then a placeholder (HTML-AAM)
     const title = role === "none" || role === "presentation" ? "" : dom.getAttribute(element, "title") ?? ""
-    if (title.trim() !== "") return title
+    if (title.trim() !== "") {
+      nameSource(context, element, "title")
+      return title
+    }
     const placeholder = dom.getAttribute(element, "placeholder") ?? ""
     if ((element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) && placeholder.trim() !== "") {
       return placeholder
@@ -1899,6 +1949,7 @@ export function engine(render: (root: SnapNode) => string) {
   const namesFromContent = new Set<Element>()
   const nameCache = new Map<Element, string>()
   const hiddenNameCache = new Map<Element, string>()
+  const descriptionCache = new Map<Element, string>()
   /** An element's accessible name, as a flat string. With `includeHidden`, hidden descendants count too. */
   const accessibleName = (element: Element, includeHidden: boolean): string => {
     const cache = includeHidden ? hiddenNameCache : nameCache
@@ -1906,20 +1957,119 @@ export function engine(render: (root: SnapNode) => string) {
     if (cached !== undefined) return cached
     const contribution = { fieldContent: false }
     const role = roleOf(element)
-    // This restriction is on the root, not on descendants or references contributing to another element's name.
-    const name = role !== null && NAME_PROHIBITED.has(role) ? "" : flatString(
-      nameOfElement(element, {
-        visited: new Set(),
-        labelledBy: false,
-        hiddenReference: false,
-        embedded: "self",
-        includeHidden,
-        contribution
-      })
-    )
+    const outer = nameRoot
+    nameRoot = element
+    let name: string
+    try {
+      // This restriction is on the root, not on descendants or references contributing to another element's name.
+      name = role !== null && NAME_PROHIBITED.has(role) ? "" : flatString(
+        nameOfElement(element, {
+          visited: new Set(),
+          labelledBy: false,
+          hiddenReference: false,
+          embedded: "self",
+          includeHidden,
+          contribution
+        })
+      )
+    } finally {
+      nameRoot = outer
+    }
     if (provenance && contribution.fieldContent) namesFromFields.add(element)
     cache.set(element, name)
     return name
+  }
+
+  const referenceContext = (target: Element, includeHidden: boolean): NameContext => ({
+    visited: new Set(),
+    labelledBy: true,
+    hiddenReference: hiddenFromAccessibility(target),
+    embedded: "reference",
+    includeHidden,
+    contribution: { fieldContent: false }
+  })
+
+  /**
+   * The text of an ID reference list's elements, each computed as a reference traversal, so a hidden element
+   * named there counts with its hidden content, joined by a space; `null` when no ID names an element, so the
+   * relation counts as absent.
+   */
+  const referencedText = (element: Element, attribute: string, includeHidden: boolean): string | null => {
+    const targets = (dom.getAttribute(element, attribute) ?? "").split(ID_SEPARATOR).flatMap((id) => {
+      const target = id === "" ? null : byId(element, id)
+      return target === null ? [] : [target]
+    })
+    return targets.length === 0
+      ? null
+      : targets.map((target) => nameOfElement(target, referenceContext(target, includeHidden))).join(" ")
+  }
+
+  /**
+   * An element's accessible description, as a flat string (HTML-AAM): empty when it's hidden; else the elements
+   * `aria-describedby` names, when any exists, even if their text is empty; else `aria-description`, when
+   * present; else, when it didn't give the name, a table's caption or a button, submit or reset input's value;
+   * else a summary element's content, when `aria-label` or `aria-labelledby` gave the name; else the title, when
+   * it isn't the name.
+   */
+  const accessibleDescription = (element: Element): string => {
+    const cached = descriptionCache.get(element)
+    if (cached !== undefined) return cached
+    const compute = (): string => {
+      if (hiddenFromAccessibility(element)) return ""
+      const referenced = referencedText(element, "aria-describedby", false)
+      if (referenced !== null) return referenced
+      const attribute = dom.getAttribute(element, "aria-description")
+      if (attribute !== null) return attribute
+      accessibleName(element, false)
+      const source = nameSources.get(element)
+      // The host language's source, when the element has one and it didn't give the name, wins even when empty.
+      if (source !== "native" && source !== "content") {
+        if (element instanceof HTMLTableElement) {
+          const caption = Array.from(dom.children(element)).find((child) => dom.localName(child) === "caption")
+          if (caption !== undefined) return nameOfElement(caption, referenceContext(caption, false))
+        } else if (dom.localName(element) === "summary") {
+          if (source === "label") {
+            const context = referenceContext(element, false)
+            context.visited.add(element)
+            return contentOf(element, context)
+          }
+        } else if (buttonLikeInput(element) && dom.hasAttribute(element, "value")) {
+          return element.value
+        }
+      }
+      return source === "title" ? "" : dom.getAttribute(element, "title") ?? ""
+    }
+    const description = flatString(compute())
+    descriptionCache.set(element, description)
+    return description
+  }
+
+  /** An ASCII-case-insensitive token: ASCII letters lowercased, nothing trimmed. */
+  const asciiLowercase = (token: string): string => token.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+
+  /**
+   * An element's accessible error message: its `aria-errormessage` references while it's invalid, through an
+   * `aria-invalid` other than blank or exactly `false` in any ASCII case, or its own failed constraint validation;
+   * else empty.
+   */
+  const accessibleErrorMessage = (element: Element): string => {
+    const invalid = dom.getAttribute(element, "aria-invalid")
+    const ariaInvalid = invalid !== null && invalid.trim() !== "" && asciiLowercase(invalid) !== "false"
+    const validity = "validity" in element ? (element as { readonly validity?: ValidityState }).validity : undefined
+    if (!ariaInvalid && validity?.valid !== false) return ""
+    return flatString(referencedText(element, "aria-errormessage", false) ?? "")
+  }
+
+  /**
+   * Whether a computed accessible text matches: a regular expression tests it as computed, and a string compares
+   * whole after whitespace is collapsed and zero-width and soft hyphen characters are dropped on both sides.
+   */
+  const accessibleTextMatches = (text: string, matcher: TextMatcher, ignoreCase: boolean): boolean => {
+    if (matcher._tag === "RegExp") return new RegExp(matcher.source, matcher.flags).test(text)
+    const normalize = (value: string) => collapse(value.replace(/[\u200b\u00ad]/g, ""))
+    return ignoreCase
+      ? normalize(text).toLocaleLowerCase() === normalize(matcher.value).toLocaleLowerCase()
+      : normalize(text) === normalize(matcher.value)
   }
 
   // Queries
@@ -2352,7 +2502,8 @@ export function engine(render: (root: SnapNode) => string) {
     }
     const role = roleOf(element)
     if (role === null || !CHECKABLE_ROLES.has(role)) return { state: null, checked: null }
-    const token = dom.getAttribute(element, "aria-checked")?.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+    const attribute = dom.getAttribute(element, "aria-checked")
+    const token = attribute === null ? undefined : asciiLowercase(attribute)
     if (token === "true") return { state: true, checked: true }
     if (token === "false") return { state: false, checked: false }
     if (token === "mixed") {
@@ -3560,16 +3711,15 @@ export function engine(render: (root: SnapNode) => string) {
       }
       case "AccessibleName": {
         const name = accessibleName(element, false)
-        const matcher = expectation.expected
-        const normalize = (text: string) => collapse(text.replace(/[\u200b\u00ad]/g, ""))
-        return {
-          passed: matcher._tag === "RegExp"
-            ? new RegExp(matcher.source, matcher.flags).test(name)
-            : expectation.ignoreCase
-            ? normalize(name).toLocaleLowerCase() === normalize(matcher.value).toLocaleLowerCase()
-            : normalize(name) === normalize(matcher.value),
-          observed: name
-        }
+        return { passed: accessibleTextMatches(name, expectation.expected, expectation.ignoreCase), observed: name }
+      }
+      case "AccessibleDescription":
+      case "AccessibleErrorMessage": {
+        const text = expectation._tag === "AccessibleDescription"
+          ? accessibleDescription(element)
+          : accessibleErrorMessage(element)
+        const matches = accessibleTextMatches(text, expectation.expected, expectation.ignoreCase)
+        return { passed: expectation.not ? !matches : matches, observed: text }
       }
       case "ContainsText": {
         const text = textOf(element)
@@ -3939,6 +4089,8 @@ export function engine(render: (root: SnapNode) => string) {
     roleCache.clear()
     nameCache.clear()
     hiddenNameCache.clear()
+    nameSources.clear()
+    descriptionCache.clear()
     inertness = undefined
     inertAncestors.clear()
     insideModal.clear()
@@ -4420,6 +4572,8 @@ export function engine(render: (root: SnapNode) => string) {
       roleCache.clear()
       nameCache.clear()
       hiddenNameCache.clear()
+      nameSources.clear()
+      descriptionCache.clear()
       inertness = undefined
       inertAncestors.clear()
       insideModal.clear()

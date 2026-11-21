@@ -415,6 +415,110 @@ export const toHaveAccessibleName: DualMatcher<
 )
 
 /**
+ * Expects the one match's accessible description to match `expected`, retrying until the deadline.
+ *
+ * **Details**
+ *
+ * The description comes from the first of these that applies, even when its text is empty: the elements
+ * `aria-describedby` names, joined by a space, when at least one of its IDs names an element; `aria-description`,
+ * when present; a table's caption or a button, submit, or reset input's `value`, when that didn't give the element
+ * its name; a `summary` element's content, when `aria-label` or `aria-labelledby` gave it its name; and the `title`
+ * attribute, when it isn't the element's name. An element named there counts even when it's hidden, with its
+ * hidden content; a hidden element itself has an empty description. Strings and regular expressions match as in `toHaveAccessibleName`, and so does
+ * `ignoreCase`. `not` negates only the comparison: missing or multiple matches keep retrying and fail with their
+ * match count, with or without it.
+ *
+ * **Example** (Checking a field's hint)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const checkHint = Effect.fn("checkHint")(function*(page: Page.ReadonlyPage) {
+ *   const password = page.getByLabel("Password")
+ *   yield* password.pipe(Expect.toHaveAccessibleDescription("At least 12 characters"))
+ *   yield* Expect.toHaveAccessibleDescription(password, /characters/, {
+ *     ignoreCase: true
+ *   })
+ *   yield* password.pipe(Expect.toHaveAccessibleDescription("", { not: true }))
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category matchers
+ * @since 0.1.0
+ */
+export const toHaveAccessibleDescription: DualMatcher<
+  Locator.ReadonlyLocator,
+  [
+    expected: string | RegExp,
+    options?: {
+      /** Compares without regard to case, replacing a regular expression's `i` flag. @default undefined */
+      readonly ignoreCase?: boolean | undefined
+      /** Negates the comparison; still requires exactly one match. @default false */
+      readonly not?: boolean | undefined
+    } | undefined
+  ]
+> = dual(
+  (args) => Locator.isLocator(args[0]),
+  (
+    locator: Locator.ReadonlyLocator,
+    expected: string | RegExp,
+    options?: { readonly ignoreCase?: boolean | undefined; readonly not?: boolean | undefined } | undefined
+  ) => ExpectImpl.toHaveAccessibleDescription(locator, expected, options)
+)
+
+/**
+ * Expects the one match's accessible error message to match `expected`, retrying until the deadline.
+ *
+ * **Details**
+ *
+ * The error message is the text of the elements `aria-errormessage` names, joined by a space, while the element is
+ * invalid: its `aria-invalid` is set to anything but a blank value or exactly `false` (in any case), or the browser's
+ * own validation finds its value invalid, as a `required` field left empty or an email field holding no address.
+ * Otherwise it's empty. An element named there counts even when it's hidden. Strings and regular expressions
+ * match as in `toHaveAccessibleName`, and so does `ignoreCase`. `not` negates only the comparison: missing or
+ * multiple matches keep retrying and fail with their match count, with or without it.
+ *
+ * **Example** (Checking a field's error)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const checkError = Effect.fn("checkError")(function*(page: Page.Page) {
+ *   const email = page.getByLabel("Email")
+ *   yield* email.fill("not an address")
+ *   yield* email.pipe(Expect.toHaveAccessibleErrorMessage("Enter a valid email address"))
+ *   yield* Expect.toHaveAccessibleErrorMessage(email, /valid email/, { ignoreCase: true })
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category matchers
+ * @since 0.1.0
+ */
+export const toHaveAccessibleErrorMessage: DualMatcher<
+  Locator.ReadonlyLocator,
+  [
+    expected: string | RegExp,
+    options?: {
+      /** Compares without regard to case, replacing a regular expression's `i` flag. @default undefined */
+      readonly ignoreCase?: boolean | undefined
+      /** Negates the comparison; still requires exactly one match. @default false */
+      readonly not?: boolean | undefined
+    } | undefined
+  ]
+> = dual(
+  (args) => Locator.isLocator(args[0]),
+  (
+    locator: Locator.ReadonlyLocator,
+    expected: string | RegExp,
+    options?: { readonly ignoreCase?: boolean | undefined; readonly not?: boolean | undefined } | undefined
+  ) => ExpectImpl.toHaveAccessibleErrorMessage(locator, expected, options)
+)
+
+/**
  * Expects the one match's class string to match `expected`, or, given a list, as many matches as the list has entries,
  * each matching its entry in order.
  *
