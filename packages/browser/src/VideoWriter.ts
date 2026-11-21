@@ -137,6 +137,39 @@ export const VideoWriter: Context.Service<VideoWriter, VideoWriter> = Context.Se
   "@usestrider/browser/VideoWriter"
 )
 
+/**
+ * Frames at a constant rate: output slot k, at k / fps, shows the latest image at or before it. Slots run until the
+ * final image's time, the recording's end, rounded up to a whole slot, and a copy of the last image at that rounded
+ * end marks where the file stops, lasting one millisecond, as the variable-rate end marker does.
+ */
+const resample = (frames: Stream.Stream<Frame>, fps: number): Stream.Stream<Frame> =>
+  Streams.suspend(() => {
+    const slot = (k: number) => (k * 1e9) / fps
+    let next = 0
+    let latest: Frame | undefined
+    const due = (before: number) => {
+      const out: Array<Frame> = []
+      while (slot(next) < before) {
+        if (latest !== undefined) out.push({ ...latest, at: slot(next) })
+        next++
+      }
+      return out
+    }
+    return frames.pipe(
+      Streams.flatMap((frame) => {
+        const out = due(frame.at)
+        latest = frame
+        return Streams.fromIterable(out)
+      }),
+      Streams.concat(Streams.suspend(() => {
+        if (latest === undefined) return Streams.empty
+        const end = Math.max(1, next, Math.ceil((latest.at * fps) / 1e9 - 1e-9))
+        const out = due(slot(end))
+        return Streams.fromIterable([...out, { ...latest, at: slot(end) }])
+      }))
+    )
+  })
+
 const failure = (hint: string) =>
   new VideoWriterError({
     reason: new Reason.BackendFailure({ kind: "Rejected", method: "VideoWriter.write", hint })
@@ -185,12 +218,9 @@ export const layerFfmpeg = (
             return yield* Effect.fail(failure("ffmpeg path must be absolute"))
           }
           const { fps, height, path, width } = destination
-          // Without a frame rate each image keeps its own time. With one, the output's constant-rate sync repeats or
-          // drops images and ends at the final image, the stop time, which lasts its own millisecond. The fps filter
-          // isn't used: it gives the last image the gap before it as its duration, lengthening a still ending.
-          const timing = fps === undefined
-            ? ["-fps_mode", "passthrough", "-enc_time_base", "1:1000"]
-            : ["-fps_mode", "cfr", "-r", String(fps)]
+          // ffmpeg always receives exact timestamps and passes them through; a frame rate is applied here
+          // (`resample`), so the file's end is computed rather than inferred by ffmpeg's rate conversion
+          const input = fps === undefined ? frames : resample(frames, fps)
           const process = yield* spawner.spawn(ChildProcess.make(options.path, [
             "-nostdin",
             "-loglevel",
@@ -218,7 +248,10 @@ export const layerFfmpeg = (
             "50",
             "-pix_fmt",
             "yuv420p",
-            ...timing,
+            "-fps_mode",
+            "passthrough",
+            "-enc_time_base",
+            "1:1000",
             "-an",
             "-y",
             "-f",
@@ -235,7 +268,7 @@ export const layerFfmpeg = (
             Effect.forkScoped
           )
           let initialized = false
-          yield* frames.pipe(
+          yield* input.pipe(
             Streams.map((frame) => {
               const image = VideoContainer.image(frame)
               if (initialized) return image

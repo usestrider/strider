@@ -45,7 +45,7 @@ describe("Video options", () => {
     assert.deepStrictEqual(VideoOptions.defaultSize({ width: 640, height: 480 }), { width: 640, height: 480 })
   })
 
-  it.effect("encodes at a constant rate only when a frame rate is given", () =>
+  it.effect("leaves ffmpeg no rate conversion of its own", () =>
     Effect.gen(function*() {
       const seen: Array<ReadonlyArray<string>> = []
       const handle = ChildProcessSpawner.makeHandle({
@@ -76,9 +76,11 @@ describe("Video options", () => {
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)
       )
       assert.strictEqual(seen.length, 2)
-      const [variable, constant] = seen.map((args) => args.join(" "))
-      assert.include(variable, "-fps_mode passthrough")
-      assert.include(constant, "-fps_mode cfr -r 10")
-      assert.notInclude(constant, "passthrough")
+      // The writer resamples to a frame rate itself, so ffmpeg passes exact timestamps through either way
+      for (const args of seen.map((each) => each.join(" "))) {
+        assert.include(args, "-fps_mode passthrough -enc_time_base 1:1000")
+        assert.notInclude(args, "cfr")
+        assert.notInclude(args, "fps=")
+      }
     }))
 })

@@ -38,6 +38,18 @@ const probe = (file: string) =>
     file
   ], { encoding: "utf8" }))
 
+const frameTimes = (file: string): Array<number> =>
+  JSON.parse(execFileSync(process.env["STRIDER_FFPROBE"]!, [
+    "-v",
+    "error",
+    "-show_frames",
+    "-of",
+    "json",
+    file
+  ], { encoding: "utf8" })).frames.map((frame: { best_effort_timestamp_time: string }) =>
+    Number(frame.best_effort_timestamp_time)
+  )
+
 describe("Chromium video writer", () => {
   layer(backend, { excludeTestServices: true })((it) => {
     it.effect(
@@ -158,7 +170,12 @@ describe("Chromium video writer", () => {
           assert.strictEqual(yield* recording.file, target)
           const video = probe(target).streams[0]
           assert.deepStrictEqual([video.width, video.height], [320, 200])
-          assert.strictEqual(video.r_frame_rate, "10/1")
+          // Frames every 100 milliseconds, the last of them the one-millisecond end marker at the rounded stop time
+          const times = frameTimes(target)
+          assert.isAtLeast(times.length, 3)
+          for (let index = 1; index < times.length; index++) {
+            assert.closeTo(times[index]! - times[index - 1]!, 0.1, 0.001)
+          }
           assert.deepStrictEqual(fs.readdirSync(directory), ["run.webm"])
         }),
       60_000

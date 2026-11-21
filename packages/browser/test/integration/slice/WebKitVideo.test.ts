@@ -73,6 +73,18 @@ const probe = (file: string) => {
   return info
 }
 
+const frameTimes = (file: string): Array<number> =>
+  JSON.parse(execFileSync(process.env["STRIDER_FFPROBE"]!, [
+    "-v",
+    "error",
+    "-show_frames",
+    "-of",
+    "json",
+    file
+  ], { encoding: "utf8" })).frames.map((frame: { best_effort_timestamp_time: string }) =>
+    Number(frame.best_effort_timestamp_time)
+  )
+
 describe("WebKit polled video", () => {
   for (const [enabled, writer] of [[false, false], [true, false], [false, true]] as const) {
     it.live(`refuses video with polling=${enabled}, writer=${writer}`, () =>
@@ -132,7 +144,10 @@ describe("WebKit polled video", () => {
         assert.strictEqual(yield* recording.file, target)
         const video = probe(target).streams[0]
         assert.deepStrictEqual([video.width, video.height], [320, 200])
-        assert.strictEqual(video.r_frame_rate, "10/1")
+        // Frames every 100 milliseconds, the last of them the one-millisecond end marker at the rounded stop time
+        const times = frameTimes(target)
+        assert.isAtLeast(times.length, 3)
+        for (let index = 1; index < times.length; index++) assert.closeTo(times[index]! - times[index - 1]!, 0.1, 0.001)
         assert.deepStrictEqual(yield* fs.readDirectory(directory), ["run.webm"])
       }))),
     30_000
