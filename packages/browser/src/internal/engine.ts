@@ -413,13 +413,16 @@ export type Request =
   /** The one match's box in its viewport, and its document's scroll offset. */
   | { readonly op: "rect"; readonly steps: ReadonlyArray<Step> }
   /**
-   * Stops the document's animations for a capture, its open shadow roots' included, until `animationsResume` with
-   * the same token: a finite one is finished, firing its end events, and an infinite one cancelled; those that
-   * start meanwhile are stopped as they start. Answers after the page's next animation frame, once the end events'
+   * Stops the document's animations for a capture, its open shadow roots' included, until every token that stopped
+   * them has resumed (`animationsResume`): a finite one is finished, firing its end events, and an infinite one
+   * cancelled; those that start meanwhile, in roots there then too, are stopped as they start. Answers after the page's next animation frame, once the end events'
    * handlers have run.
    */
   | { readonly op: "animationsStop"; readonly token: string }
-  /** Plays again the infinite animations `animationsStop` cancelled, and stops stopping those that start. */
+  /**
+   * Ends `animationsStop`'s token. When it is the last stop of the document still active, the infinite animations
+   * cancelled play again, and those that start are no longer stopped.
+   */
   | { readonly op: "animationsResume"; readonly token: string }
   /** The document's doctype and HTML. */
   | { readonly op: "html" }
@@ -4565,63 +4568,85 @@ export function engine(render: (root: SnapNode) => string) {
   // Invalid events do not bubble or cross shadow boundaries. Listen on each existing open root,
   // without probing validity or changing page behavior. Each call owns its listeners and deduplication.
   const validationObservers = new Map<string, () => Array<string>>()
-  /** What resumes each `animationsStop`'s animations, by its token. */
-  const animationResumes = new Map<string, () => void>()
-  const stopAnimations = async (token: string): Promise<Response> => {
-    animationResumes.get(token)?.()
-    const roots: Array<Document | ShadowRoot> = []
-    const collect = (root: Document | ShadowRoot) => {
-      roots.push(root)
+  /**
+   * The document's stopped animations, shared by every capture that stopped them: the captures' tokens, the
+   * infinite animations cancelled, and the roots listened to for animations that start. They play again, and the
+   * listeners go, when the last token resumes.
+   */
+  let animationsStopped:
+    | {
+      readonly tokens: Set<string>
+      readonly cancelled: Set<Animation>
+      readonly roots: Map<Document | ShadowRoot, () => void>
+    }
+    | undefined
+  const stopRootAnimations = (root: Document | ShadowRoot, cancelled: Set<Animation>) => {
+    for (const animation of root.getAnimations()) {
+      try {
+        // An animation with no effect or at a playback rate of 0 has no end to reach, and `finish` refuses one
+        // at rate 0, which stays as it is
+        if (
+          animation.effect === null || animation.playbackRate === 0 ||
+          animation.effect.getComputedTiming().endTime !== Infinity
+        ) {
+          animation.finish()
+        } else if (!cancelled.has(animation)) {
+          animation.cancel()
+          cancelled.add(animation)
+        }
+      } catch {
+        // An animation the browser won't finish is left as it is
+      }
+    }
+  }
+  /** Stops the animations of the document and of every open shadow root now in it, listening to roots new to it. */
+  const stopAllAnimations = () => {
+    const stopped = animationsStopped
+    if (stopped === undefined) return
+    const visit = (root: Document | ShadowRoot) => {
+      if (!stopped.roots.has(root)) {
+        const listener = () => stopAllAnimations()
+        root.addEventListener("transitionrun", listener)
+        root.addEventListener("animationstart", listener)
+        stopped.roots.set(root, () => {
+          root.removeEventListener("transitionrun", listener)
+          root.removeEventListener("animationstart", listener)
+        })
+      }
+      stopRootAnimations(root, stopped.cancelled)
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT)
       for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
         const shadow = (node as Element).shadowRoot
-        if (shadow !== null) collect(shadow)
+        if (shadow !== null) visit(shadow)
       }
     }
-    collect(document)
-    const cancelled = new Set<Animation>()
-    const stop = (root: Document | ShadowRoot) => {
-      for (const animation of root.getAnimations()) {
-        try {
-          // An animation with no effect or at a playback rate of 0 has no end to reach, and `finish` refuses one
-          // at rate 0, which stays as it is
-          if (
-            animation.effect === null || animation.playbackRate === 0 ||
-            animation.effect.getComputedTiming().endTime !== Infinity
-          ) {
-            animation.finish()
-          } else if (!cancelled.has(animation)) {
-            animation.cancel()
-            cancelled.add(animation)
-          }
-        } catch {
-          // An animation the browser won't finish is left as it is
-        }
-      }
-    }
-    const listeners = roots.map((root) => {
-      const listener = () => stop(root)
-      root.addEventListener("transitionrun", listener)
-      root.addEventListener("animationstart", listener)
-      stop(root)
-      return () => {
-        root.removeEventListener("transitionrun", listener)
-        root.removeEventListener("animationstart", listener)
-      }
-    })
-    animationResumes.set(token, () => {
-      animationResumes.delete(token)
-      for (const remove of listeners) remove()
-      for (const animation of cancelled) {
-        try {
-          animation.play()
-        } catch {
-          // An animation removed from the document has nothing to play
-        }
-      }
-    })
+    visit(document)
+  }
+  const stopAnimations = async (token: string): Promise<Response> => {
+    animationsStopped ??= { tokens: new Set(), cancelled: new Set(), roots: new Map() }
+    animationsStopped.tokens.add(token)
+    stopAllAnimations()
     // The end events are dispatched as the next frame's animations update, before its animation frame callbacks
     await new Promise((resolve) => requestAnimationFrame(resolve))
+    // What their handlers added is stopped too: a shadow root attached since has no listener yet, and its
+    // animations' start events stop at it
+    stopAllAnimations()
+    return { _tag: "Animations" }
+  }
+  const resumeAnimations = (token: string): Response => {
+    const stopped = animationsStopped
+    if (stopped === undefined || !stopped.tokens.delete(token) || stopped.tokens.size > 0) {
+      return { _tag: "Animations" }
+    }
+    animationsStopped = undefined
+    for (const remove of stopped.roots.values()) remove()
+    for (const animation of stopped.cancelled) {
+      try {
+        animation.play()
+      } catch {
+        // An animation removed from the document has nothing to play
+      }
+    }
     return { _tag: "Animations" }
   }
   const observeValidation = (token: string, full: boolean) => {
@@ -4721,8 +4746,7 @@ export function engine(render: (root: SnapNode) => string) {
         case "animationsStop":
           return JSON.stringify(await stopAnimations(request.token))
         case "animationsResume":
-          animationResumes.get(request.token)?.()
-          return JSON.stringify({ _tag: "Animations" } satisfies Response)
+          return JSON.stringify(resumeAnimations(request.token))
         case "html":
           return JSON.stringify(html())
         case "overlay":

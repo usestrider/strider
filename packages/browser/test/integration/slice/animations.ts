@@ -102,6 +102,19 @@ export const animations = <R>(it: ReturnType<typeof SharedContext.guard<R>>) => 
       assert.isTrue(pixelsAt(png, 10, 10, isRed))
     }))
 
+  it.effect("stops animations in a shadow root attached by a transitionend handler", () =>
+    Effect.gen(function*() {
+      const page = yield* opened(
+        `<style>#trigger{opacity:0;transition:opacity 1000s}#trigger.on{opacity:1}</style>` +
+          `<div id="trigger"></div><div id="host"></div><script>` +
+          `trigger.addEventListener("transitionend",()=>{` +
+          `host.attachShadow({mode:"open"}).innerHTML=${JSON.stringify(`${infinite()}<div class="box"></div>`)}});` +
+          `getComputedStyle(trigger).opacity;trigger.classList.add("on")</script>`
+      )
+      const png = yield* page.screenshot({ animations: "disabled" })
+      assert.isTrue(pixelsAt(png, 10, 10, isRed))
+    }))
+
   it.effect("leaves an animation with a playback rate of 0 as it is", () =>
     Effect.gen(function*() {
       const page = yield* opened(

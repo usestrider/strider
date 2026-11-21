@@ -112,8 +112,10 @@ const documentsOf = (page: Model.PageEntry): Effect.Effect<ReadonlyArray<Target.
 
 /**
  * Runs `self` with the animations of every document of the page stopped (the engine's `animationsStop`), and
- * resumes them however it exits. A document that has gone has nothing to resume, and a resumption that fails, or
- * that the page doesn't answer within 5 seconds, leaves the capture's own result as it is.
+ * resumes them however it exits. Stopping them can add documents, as a frame an end event's handler attaches, so
+ * the page's documents are read again after each round of stops until none is new. A document that has gone has
+ * nothing to resume, and a resumption that fails, or that the page doesn't answer within 5 seconds, leaves the
+ * capture's own result as it is.
  */
 const animationsStopped = <A, E>(
   runtime: Runtime.Runtime,
@@ -123,22 +125,27 @@ const animationsStopped = <A, E>(
   self: Effect.Effect<A, E>
 ): Effect.Effect<A, E | Page.PageError | Target.TargetGone | Deadline.Timeout> => {
   const token = record.id
+  const stop = (document: Target.DocumentId) =>
+    Runtime.sendToDocument(runtime, page, document, { op: "animationsStop", token }, record.id).pipe(
+      Effect.mapError(failed(operation, record)),
+      (stopping) => record.bound(stopping, () => Option.some("The page didn't stop its animations before the deadline"))
+    )
   return Effect.acquireUseRelease(
-    documentsOf(page),
-    (documents) =>
+    Effect.sync(() => new Set<Target.DocumentId>()),
+    (stopped) =>
+      Effect.gen(function*() {
+        while (true) {
+          const fresh = (yield* documentsOf(page)).filter((document) => !stopped.has(document))
+          if (fresh.length === 0) break
+          // Each is resumed on release from before its stop is sent, so a stop cut short is undone too
+          for (const document of fresh) stopped.add(document)
+          yield* Effect.forEach(fresh, stop, { concurrency: "unbounded", discard: true })
+        }
+        return yield* self
+      }),
+    (stopped) =>
       Effect.forEach(
-        documents,
-        (document) =>
-          Runtime.sendToDocument(runtime, page, document, { op: "animationsStop", token }, record.id).pipe(
-            Effect.mapError(failed(operation, record)),
-            (stopping) =>
-              record.bound(stopping, () => Option.some("The page didn't stop its animations before the deadline"))
-          ),
-        { concurrency: "unbounded", discard: true }
-      ).pipe(Effect.andThen(self)),
-    (documents) =>
-      Effect.forEach(
-        documents,
+        stopped,
         (document) =>
           Runtime.sendToDocument(runtime, page, document, { op: "animationsResume", token }, record.id).pipe(
             BrowserClock.timeoutOption(5000),
