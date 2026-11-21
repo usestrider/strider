@@ -5,12 +5,15 @@
  * names that origin or every origin. Chromium keeps a setting for one origin ahead of one for every origin, whichever
  * came later, so L1 sends what that rule resolves to (`resolve`), not each declaration in turn: a setting for every
  * origin also goes to each origin that has one of its own. Each name is set on its own, so a name a backend rejects
- * (Firefox's list is shorter) fails naming it.
+ * (Firefox's list is shorter) fails naming it. Each change holds its context's one permit (`locks`) from reading
+ * what's in force to recording it, and a removal from taking its declaration out to setting the rest again, so the
+ * browser's settings and the declarations a later reset sets again never disagree.
  */
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
+import * as Semaphore from "effect/Semaphore"
 import type * as Deadline from "../Deadline.ts"
 import * as Declaration from "../Declaration.ts"
 import * as Reason from "../Reason.ts"
@@ -25,6 +28,17 @@ const origin = (input: string | undefined): Option.Option<string> | undefined =>
   if (input === undefined) return Option.none()
   const parsed = URL.parse(input)
   return parsed === null ? undefined : Option.some(parsed.origin)
+}
+
+const locks = new WeakMap<Model.ContextEntry, Semaphore.Semaphore>()
+
+const lockOf = (entry: Model.ContextEntry): Semaphore.Semaphore => {
+  let lock = locks.get(entry)
+  if (lock === undefined) {
+    lock = Semaphore.makeUnsafe(1)
+    locks.set(entry, lock)
+  }
+  return lock
 }
 
 const key = (origin: string, name: string) => JSON.stringify([origin, name])
@@ -109,39 +123,41 @@ export const grant = (
         (each) => adapter.grantPermissions(context, each.origin, each.permissions, each.setting),
         { discard: true }
       )
-    // A declaration for every origin overrides the settings of origins of their own for its names too
-    const overridden = Option.isSome(where) ?
-      [] :
-      resolve(yield* inForce).filter((each) => Option.isSome(each.origin) && permissions.includes(each.permissions[0]!))
-    const sends = [
-      ...permissions.map((name) => ({ origin: where, name, reported: true })),
-      ...overridden.map((each) => ({ origin: each.origin, name: each.permissions[0]!, reported: false }))
-    ]
+    const lock = lockOf(entry)
+    const replay = adapter.resetPermissions(context).pipe(Effect.andThen(Effect.flatMap(inForce, apply)), Effect.ignore)
     const scope = yield* Scope.fork(yield* Effect.scope)
-    for (const send of sends) {
-      yield* adapter.grantPermissions(context, send.origin, [send.name], setting).pipe(
-        Effect.mapError((error) => mapped(error, send.reported ? send.name : undefined)),
-        // What this call set goes again, with the declarations before it: cleanup, which the deadline doesn't end
-        Effect.onError(() =>
-          adapter.resetPermissions(context).pipe(
-            Effect.andThen(Effect.flatMap(inForce, apply)),
-            Effect.ignore,
-            Effect.andThen(Scope.close(scope, Exit.void)),
-            Operation.detached
-          )
+    // Waiting for the permit is part of the operation, under its deadline
+    yield* lock.withPermits(1)(Effect.gen(function*() {
+      // A declaration for every origin overrides the settings of origins of their own for its names too
+      const overridden = Option.isSome(where) ?
+        [] :
+        resolve(yield* inForce).filter((each) =>
+          Option.isSome(each.origin) && permissions.includes(each.permissions[0]!)
         )
-      )
-    }
-    // What a removal sets again, after it resets; once this one is removed, the others
-    yield* Scope.addFinalizer(
-      scope,
-      adapter.resetPermissions(context).pipe(
-        Effect.andThen(Effect.flatMap(inForce, apply)),
-        Effect.ignore,
-        Operation.detached
-      )
-    )
-    yield* runtime.model.grant(entry, grant).pipe(Scope.provide(scope))
+      const sends = [
+        ...permissions.map((name) => ({ origin: where, name, reported: true })),
+        ...overridden.map((each) => ({ origin: each.origin, name: each.permissions[0]!, reported: false }))
+      ]
+      for (const send of sends) {
+        yield* adapter.grantPermissions(context, send.origin, [send.name], setting).pipe(
+          Effect.mapError((error) => mapped(error, send.reported ? send.name : undefined)),
+          // What this call set goes again, with the declarations before it, under the permit this call holds:
+          // cleanup, which the deadline doesn't end
+          Effect.onError(() => replay.pipe(Effect.andThen(Scope.close(scope, Exit.void)), Operation.detached))
+        )
+      }
+      // The model holds the declaration in a scope of its own, which only its removal closes, under the permit
+      // A removal takes it out, then resets and sets the others again, all under one hold of the permit; recording
+      // and arranging its removal aren't interrupted apart
+      yield* Effect.uninterruptible(Effect.gen(function*() {
+        const recorded = yield* Scope.make()
+        yield* runtime.model.grant(entry, grant).pipe(Scope.provide(recorded))
+        yield* Scope.addFinalizer(
+          scope,
+          lock.withPermits(1)(Scope.close(recorded, Exit.void).pipe(Effect.andThen(replay))).pipe(Operation.detached)
+        )
+      }))
+    }))
     return { remove: Scope.close(scope, Exit.void) } satisfies Declaration.Registration
   }).pipe(Operation.named(operation, {
     attributes: { "browser.context.id": entry.id, "browser.permissions": permissions.join(",") }
