@@ -231,6 +231,8 @@ interface RequestSnapshot {
 interface ResponseSnapshot {
   readonly hop: RequestHopId; readonly status: StatusCode; readonly url: Url; readonly headers: Headers
   readonly servedBy: "network" | "cache" | "serviceWorker" | "cacheOrServiceWorker" | "route" | "unknown"   // what answered
+  readonly serverAddress: Option<{ ip: string; port: number }>   // where the backend reports it with the response
+  readonly securityDetails: Option<SecurityDetails>     // TLS connection and certificate; None for plain HTTP
   readonly body: BodyAccess                             // availability is read through an Effect
 }
 interface ConnectionModel {                            // long-lived connections

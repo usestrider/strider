@@ -145,6 +145,8 @@ class NetworkResponse extends Schema.Class<NetworkResponse>("@usestrider/browser
   status: StatusCode,                                   // a branded Int from 100 to 599, so it goes wherever Effect HTTP expects a status
   statusText: Schema.String,                            // the reason phrase; empty for HTTP/2 and later
   httpVersion: Schema.Option(Schema.String),            // http/1.1, h2…; None on WebKit, which says it only at the end
+  serverAddress: Schema.Option(ServerAddress),          // { ip, port }; None on WebKit, which says it only at the end, and on Firefox
+  securityDetails: Schema.Option(SecurityDetails),      // TLS protocol, subjectName, issuer, validFrom, validTo (each an Option); None for plain HTTP and on Firefox
   headers: Schema.Headers,                              // Effect's Headers; classified values are redacted
   servedBy: ServedBy,                                   // network, cache, serviceWorker, cacheOrServiceWorker, route
   at: MonotonicInstant.MonotonicInstant
