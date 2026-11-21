@@ -2217,6 +2217,69 @@ export const contents = (
           }))
         }), timeout)
 
+      it.effect("toSatisfy runs locator handlers while waiting for its predicate", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<div id="overlay" hidden>Overlay</div><p id="x">waiting</p>`), {
+              waitUntil: "load"
+            })
+            if (
+              yield* isolatedRefused(Expect.toSatisfy(page.locator("#x"), () =>
+                true))
+            ) {
+              return
+            }
+            let calls = 0
+            yield* page.addLocatorHandler(page.locator("#overlay"), () =>
+              Effect.gen(function*() {
+                calls++
+                yield* page.evaluateInMainWorld(() => {
+                  document.querySelector<HTMLElement>("#overlay")!.hidden = true
+                  document.querySelector("#x")!.textContent = "done"
+                })
+              }))
+            yield* page.locator("#x").pipe(
+              Expect.toSatisfy((element) => {
+                if (element.textContent === "done") {
+                  return true
+                }
+                element.ownerDocument.querySelector<HTMLElement>("#overlay")!.hidden = false
+                return false
+              }),
+              Deadline.within("1 second")
+            )
+            assert.strictEqual(calls, 1)
+          }))
+        }), timeout)
+
+      it.effect("toSatisfy reports ExpectationFailed when its predicate is still pending at the deadline", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<p id="x">waiting</p>`), { waitUntil: "load" })
+            if (
+              yield* isolatedRefused(Expect.toSatisfy(page.locator("#x"), () =>
+                true))
+            ) {
+              return
+            }
+            const failed = reasonOf(
+              yield* Effect.exit(
+                page.locator("#x").pipe(
+                  Expect.toSatisfy(() =>
+                    new Promise<boolean>(() => {})
+                  ),
+                  Deadline.within("300 millis")
+                )
+              )
+            )
+            assert.strictEqual(failed?._tag, "ExpectationFailed")
+          }))
+        }), timeout)
+
       it.effect("toSatisfy keeps checking through no match or several, and fails with what it saw", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
