@@ -125,7 +125,18 @@ const video = Effect.fnUntraced(function*(
     const parent = target.replace(/[\\/][^\\/]*$/, "") || "/"
     const kind = yield* fs.stat(parent).pipe(Effect.map((info) => info.type), Effect.orElseSucceed(() => "missing"))
     if (kind !== "Directory") return yield* refuse("path", "a file in a directory that exists", target)
-    if (!overwrite && (yield* fs.exists(target).pipe(Effect.orElseSucceed(() => true)))) {
+    // What is at the path already, if anything: only a file can be replaced, and only when overwrite allows it
+    const existing = yield* fs.stat(target).pipe(
+      Effect.map((info) => Option.some(info.type)),
+      // A path that can't be read, as without permission, is refused as an entry that isn't a file
+      Effect.catch((error) =>
+        Effect.succeed(error.reason._tag === "NotFound" ? Option.none<string>() : Option.some("Unreadable"))
+      )
+    )
+    if (Option.isSome(existing) && existing.value !== "File") {
+      return yield* refuse("path", "a file path, not a directory or other entry", target)
+    }
+    if (!overwrite && Option.isSome(existing)) {
       return yield* refuse("path", "a path with no file, since overwrite is false", target)
     }
     directory = Option.some(parent)

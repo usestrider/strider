@@ -180,7 +180,9 @@ export const layerFfmpeg = (
             return yield* Effect.fail(failure("ffmpeg path must be absolute"))
           }
           const { fps, height, path, width } = destination
-          // Without a frame rate each image keeps its own time; with one, ffmpeg repeats or drops images to keep it
+          // Without a frame rate each image keeps its own time. With one, the output's constant-rate sync repeats or
+          // drops images and ends at the final image, the stop time, which lasts its own millisecond. The fps filter
+          // isn't used: it gives the last image the gap before it as its duration, lengthening a still ending.
           const timing = fps === undefined
             ? ["-fps_mode", "passthrough", "-enc_time_base", "1:1000"]
             : ["-fps_mode", "cfr", "-r", String(fps)]
@@ -194,9 +196,7 @@ export const layerFfmpeg = (
             "-i",
             "pipe:0",
             "-vf",
-            `${
-              fps === undefined ? "" : `fps=${fps},`
-            }scale=${width}:${height}:force_original_aspect_ratio=decrease,format=yuv444p,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,format=yuv420p,setsar=1`,
+            `scale=${width}:${height}:force_original_aspect_ratio=decrease,format=yuv444p,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,format=yuv420p,setsar=1`,
             "-c:v",
             "libvpx",
             "-deadline",
