@@ -535,8 +535,8 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
     path: yield* Effect.serviceOption(Path.Path),
     engineRealms: yield* Runtime.makeEngineRealms(model),
     timelines: Clock.makeTimelines(),
-    settle: (operation, navigation, frame, url, at, outcome, id) =>
-      Navigation.settle(model, operation, navigation, frame, url, at, outcome, id)
+    settle: (operation, navigation, page, frame, url, at, outcome, id) =>
+      Navigation.settle(model, operation, navigation, page, frame, url, at, outcome, id)
   }
 
   /** Ends a context setup: lists the context it made, as its handle or, if setup failed, as observed. */

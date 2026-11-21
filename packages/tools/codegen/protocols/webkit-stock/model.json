@@ -5201,7 +5201,7 @@
             "_tag": "Scalar",
             "scalar": "number"
           },
-          "optional": true,
+          "optional": false,
           "traits": {
             "status": "stable",
             "description": "Time when this message was added. Currently only used when an expensive operation happens to make sure that the frontend can account for it."
@@ -5475,7 +5475,7 @@
             "_tag": "Scalar",
             "scalar": "number"
           },
-          "optional": true,
+          "optional": false,
           "traits": {
             "status": "stable",
             "description": "Timestamp of the latest message."
