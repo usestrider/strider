@@ -287,6 +287,13 @@ self.addEventListener("fetch", (event) => {
       response.end("document.title = \"Deferred\"")
     }, 200)
   },
+  // A page the server answers after a second, so a popup opened to it is handed over before its document commits
+  "/slow-page": (_request, response) => {
+    setTimeout(() => {
+      response.writeHead(200, { "content-type": "text/html" })
+      response.end("<title>Slow</title>")
+    }, 1000)
+  },
   // A resource that never completes, until the page closes or replaces it. No sleep-based readiness assertion.
   "/pending-image": (_request, response) => {
     response.writeHead(200, { "content-type": "image/svg+xml" })

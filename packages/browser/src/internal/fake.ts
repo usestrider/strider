@@ -380,6 +380,7 @@ export const connect = (
       realm: () => unsupported("engine"),
       evaluate: () => unsupported("engine"),
       releaseHandles: () => Effect.void,
+      settled: () => Effect.void,
       textInsertion: "native",
       dispatchInput: () => Effect.mapError(unsupported("input.native"), Adapter.unsent),
       contentFrame: () => unsupported("engine"),

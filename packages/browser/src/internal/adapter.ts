@@ -1084,6 +1084,11 @@ export interface AdapterConnection {
    * waited for, since a backend reports it a moment after the document commits, until the document ends.
    */
   readonly realm: (document: Target.DocumentId, world: World) => Effect.Effect<Target.RealmId, AdapterError>
+  /**
+   * A round trip on a navigable's connection: one command that changes nothing, then a wait until every event the
+   * browser sent before its reply has been folded into the model. A navigable already gone needs no command.
+   */
+  readonly settled: (navigable: Target.NavigableId) => Effect.Effect<void>
   readonly evaluate: (realm: Target.RealmId, call: EvaluationCall) => Effect.Effect<RemoteResult, AdapterError>
   /**
    * Releases handles: a group given whole in one command (CDP's and WebKit's `Runtime.releaseObjectGroup`), the

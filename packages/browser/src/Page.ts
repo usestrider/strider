@@ -33,6 +33,7 @@ import type * as Declaration from "./Declaration.ts"
 import * as Diagnostics from "./Diagnostics.ts"
 import * as Dialog from "./Dialog.ts"
 import type * as Emulation from "./Emulation.ts"
+import type * as Frame from "./Frame.ts"
 import type * as InitScript from "./InitScript.ts"
 import * as ReasonCause from "./internal/reasonCause.ts"
 import type * as RoutePhaseDiagnostic from "./internal/routePhaseDiagnostic.ts"
@@ -596,6 +597,31 @@ export interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.Read
    */
   frame(iframe: Locator.ReadonlyLocator): Locator.ReadonlyFrameLocator
   /**
+   * A handle on one of the page's frames, by its id in `page.frames`, the page's own id included. It reaches a
+   * frame no locator can, such as one inside a closed shadow root, and fails with `InvalidInput` when the page has
+   * no frame with that id now.
+   *
+   * **Example** (Reading each frame's title)
+   *
+   * ```ts import.meta.vitest
+   * import type { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const titles = Effect.fn("titles")(function*(page: Page.ReadonlyPage) {
+   *   const tree = yield* page.frames
+   *   return yield* Effect.forEach(
+   *     tree.children,
+   *     (child) =>
+   *       Effect.flatMap(
+   *         page.frameById(child.id),
+   *         (frame) => frame.evaluate(() => document.title)
+   *       )
+   *   )
+   * })
+   * ```
+   */
+  frameById(id: Target.NavigableId): Effect.Effect<Frame.ReadonlyFrame, PageError | Target.TargetGone>
+  /**
    * The document's title, read now.
    *
    * **Example** (Checking the page's title)
@@ -805,6 +831,7 @@ export interface Page extends ReadonlyPage {
   getByTestId(id: string | RegExp): Locator.Locator
   locator(selector: string | Locator.XPath): Locator.Locator
   frame(iframe: Locator.ReadonlyLocator): Locator.FrameLocator
+  frameById(id: Target.NavigableId): Effect.Effect<Frame.Frame, PageError | Target.TargetGone>
   snapshot(
     options?: Snapshot.Options | undefined
   ): Effect.Effect<Snapshot.Snapshot<Locator.Locator>, PageError | Target.TargetGone | Deadline.Timeout>

@@ -126,6 +126,12 @@ export * as FileInput from "./FileInput.ts"
 export * as FilePath from "./FilePath.ts"
 
 /**
+ * @stability unstable
+ * @since 0.1.0
+ */
+export * as Frame from "./Frame.ts"
+
+/**
  * @stability experimental
  * @since 0.1.0
  */
