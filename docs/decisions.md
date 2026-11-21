@@ -85,7 +85,8 @@ shouldn't change how a site behaves. So:
   pages where their scripts could read it.
 - The query engine is one self-contained function in our source, with no library in the page.
 
-What does run in the main world is what the caller declared, their init scripts and the page clock, and, on stock
+What does run in the main world is what the caller declared, their init scripts, the page clock and the read of
+`Expect.toHaveJSProperty`, which asks for a property the page's scripts set, and, on stock
 WebKit alone, the library's own engine and reads, because its inspector makes no other world (QUIRKS.md, Q194).
 
 **The design is checked as compiled code.** A compiler checks what prose can't:
@@ -1036,8 +1037,11 @@ when requested rather than introducing separate name strings or speculative opti
 An event being published is not a completed match: delivery can load and decode a response body or wait for a
 navigation, and a caller predicate can reject it or still be running. A one-shot wait commits exactly one outcome:
 completed delivery accepted by its predicate, delivery/predicate failure, its registration-time deadline, target
-end, or acquiring-scope cancellation. Target end commits `TargetGone` in the channel's end path rather than waiting
-for its worker to take another queued entry. A channel that already ended commits that failure at registration.
+end, or acquiring-scope cancellation. Entries queued before target end, while none is being delivered, are still the
+wait's: the queue ends after them, so the worker delivers and checks them first and fails the wait with
+`TargetGone` only once it is empty. A delivery or predicate already running when the target ends may be blocked on
+it, so then target end commits `TargetGone` in the channel's end path.
+A channel that already ended commits that failure at registration.
 Scope cancellation commits before stopping workers; completed results, errors, and timeouts remain latched.
 
 The model's end path only commits immutable terminal data and signals the waiter; it runs no delivery, predicate,
@@ -1051,8 +1055,10 @@ its delivery worker is still using caller resources. Prompt terminal notificatio
 release has finished. The caller can keep the latched result. Streams retain their existing ordered
 buffer-draining contract on normal target end.
 
-Rejected: making target failure depend on worker progress, which can return success after the target has ended
-and contradicts the target-lifetime contract; treating publication as a match, which bypasses effectful delivery
+Rejected: making target failure wait on a delivery or predicate already running when the target ends, which can
+hold the wait on work blocked by the ended target and return success after it ended (entries still queued, with
+none running, are the accepted exception above: they were published before the end, and are delivered and checked
+first); treating publication as a match, which bypasses effectful delivery
 and predicates; draining or evaluating queued work during scope closure, which delays cancellation and starts user
 work after ownership ended; retaining completed subscriptions until their acquiring scope closes, which keeps
 unusable entries and callbacks alive. This is a correctness rule, not an observation optimization.
@@ -1535,6 +1541,16 @@ never request a feature gain no interception, injected instrumentation, per-acti
 state for it. Additions must include paired default-path benchmarks so review can assess their cost. Reject
 always-on preparation for optional features: unused capabilities must not slow existing automation.
 
+## Console arguments on a scoped subscription
+
+A console message stays a value, kept in the event log, and its arguments come only through a subscription to
+calls (`ConsoleMessage.nextCall`, `streamCalls`), which declares them for its page or context, per
+[Pay for what you use](#pay-for-what-you-use). As a message arrives, each subscription that could deliver it claims
+its arguments; delivering turns the claim into ownership in the subscription's scope, and the browser's object is
+freed once no claim or owner remains. Rejected: handles on the message itself, which the log would keep alive and
+every context would pay for; and counting owners only as subscribers take a message, which can't tell when all of
+them have passed on it.
+
 ## Client certificates through a per-context proxy
 
 No browser protocol Strider speaks sets a TLS client certificate for one context, so a context with
@@ -1602,7 +1618,8 @@ A transient duplicate during a render should settle under the same deadline as a
 the value comparison must not let an absent or ambiguous element satisfy it. This follows the existing
 single-element expectation engine. Rejected: immediate multiple-match rejection as in Playwright, which treats
 transient ambiguity differently from other unsettled expectation states, and negating cardinality together with
-the value, which could pass without observing the requested element.
+the value, which could pass without observing the requested element. The accessible description and error
+message expectations' `not` follows the same rule.
 
 ## Extra request header ownership
 
@@ -1871,3 +1888,22 @@ never writes to. A directory inside Vitest's `__snapshots__` was rejected, becau
 stays with Vitest's own `toMatchFileSnapshot`, which already diffs a string against a file; a Strider text matcher was
 rejected as a duplicate of it, and comparing JPEG by pixels was rejected because it needs a decoder the package
 doesn't have.
+
+## Each event kind is its own module
+
+Each kind of event is a module with its own `next`, `stream`, and `history` (principle 16): `PageNavigation`,
+`PageLifecycle`, `ConsoleMessage`, `Dialog`, and the rest, each on a page or a context as it allows. There is no wait
+that takes an event name. Each module gives its own typed payload and its own filter, compiled before buffering, so a
+wait names what it matches in the event's terms and its result needs no cast. Rejected: a `waitForEvent(name)` or
+`on(name)` dispatch over event names, as Playwright and Node's emitters have, whose payload and filter types follow
+from a string, and which would put every kind's lifetime and delivery rules behind one untyped entry point.
+
+## Recording overlays are page DOM
+
+Recording overlays (`Capability.Overlay`) are elements the engine draws in the page's main document, under a closed
+shadow root that its own queries, snapshots and hit tests leave out, and draws again in each document the main frame
+commits. One mechanism then serves all three browsers, and screenshots show the overlays as video does. Following
+[Pay for what you use](#pay-for-what-you-use), nothing is drawn or watched until a page acquires the capability, and
+only a page showing its actions waits before input. Compositing overlays into video frames in `VideoWriter` was
+rejected: Firefox writes its own video file, which no frame passes through, and screenshots would lack them.
+Playwright's deprecated `fontSize` option is not built; `style.title` sets the title's font like any other CSS.

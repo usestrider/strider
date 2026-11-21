@@ -395,6 +395,15 @@ export type Fact =
     readonly _tag: "ConsoleMessage"
     readonly realm: Option.Option<Target.RealmId>
     readonly message: ConsoleMessage.ConsoleMessage
+    /**
+     * The values the page passed, each object with a handle the model owns, where a `ConsoleArguments` declaration
+     * covers the message's page; absent elsewhere, and for the browser's own messages.
+     */
+    readonly args?: {
+      readonly values: ReadonlyArray<RemoteValue>
+      /** Releases the values' handles, which the model owns. */
+      readonly release: (handles: ReadonlyArray<HandleId>) => Effect.Effect<void>
+    } | undefined
   }
   | {
     readonly _tag: "UncaughtException"
@@ -640,6 +649,8 @@ export type Declaration =
     /** As on `Downloads`. */
     readonly retiring?: (() => boolean) | undefined
   }
+  /** Keeps console messages' arguments in scope as handles, which their `ConsoleMessage` facts carry. */
+  | { readonly _tag: "ConsoleArguments" }
   /**
    * Pauses the authentication challenges in scope that the backend can pause (`network.challenges`), as an `auth`
    * intercept pauses one, so the model answers a challenge no route answers, and the browser's prompt never opens.
@@ -1084,6 +1095,11 @@ export interface AdapterConnection {
    * waited for, since a backend reports it a moment after the document commits, until the document ends.
    */
   readonly realm: (document: Target.DocumentId, world: World) => Effect.Effect<Target.RealmId, AdapterError>
+  /**
+   * A round trip on a navigable's connection: one command that changes nothing, then a wait until every event the
+   * browser sent before its reply has been folded into the model. A navigable already gone needs no command.
+   */
+  readonly settled: (navigable: Target.NavigableId) => Effect.Effect<void>
   readonly evaluate: (realm: Target.RealmId, call: EvaluationCall) => Effect.Effect<RemoteResult, AdapterError>
   /**
    * Releases handles: a group given whole in one command (CDP's and WebKit's `Runtime.releaseObjectGroup`), the

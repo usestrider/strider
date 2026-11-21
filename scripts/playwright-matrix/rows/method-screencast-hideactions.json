@@ -3,18 +3,29 @@
   "upstream": [
     "method:Screencast.hideActions"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No built-in video overlay, chapter or action-caption editing. Frame streams and file recording do not add those presentation features.",
-  "capabilities": [],
+  "status": "has",
+  "api": [
+    {
+      "module": "Capability",
+      "symbol": "Overlay",
+      "url": "/docs/api/browser/Capability#Overlay"
+    },
+    {
+      "module": "Capability",
+      "symbol": "OverlayControl",
+      "url": "/docs/api/browser/Capability#OverlayControl"
+    }
+  ],
+  "notes": "Through Capability.Overlay, on every backend. Closing the scope of overlay.actions stops annotating actions.",
+  "capabilities": [
+    "capability.overlay"
+  ],
   "requirements": [],
   "audit": {
     "sources": [
       "packages/browser/src/Capability.ts",
-      "packages/browser/src/Trace.ts",
-      "packages/browser/src/Har.ts",
-      "packages/browser/src/Operation.ts"
+      "packages/browser/src/internal/overlays.ts"
     ],
-    "scope": "Recording declarations inspected; independent scopes, completed files and operation groups are distinguished from chunks and overlays."
+    "scope": "Overlay declarations and their implementation inspected."
   }
 }

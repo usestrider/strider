@@ -14,6 +14,7 @@
  * @since 0.1.0
  */
 import type * as Effect from "effect/Effect"
+import type * as Option from "effect/Option"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Deadline from "./Deadline.ts"
@@ -176,3 +177,38 @@ export const history: {
     filter?: Filter | undefined
   ): Effect.Effect<Subscription.History<Page.ObservedPage>, Subscription.SubscriptionError>
 } = PopupImpl.history as typeof history
+
+/**
+ * The page that opened this one, as an observed page: `None` for a page no page opened, and once its opener closed.
+ *
+ * **Details**
+ *
+ * It is the same page the context's `pages` gives for the opener, so a caller who holds the opener as a `Page` can
+ * compare the two by `id`. A crashed opener is still given, and its `closed` gives `PageCrashed`. A page already
+ * open when Strider attached to its browser names its opener too.
+ *
+ * **Gotchas**
+ *
+ * On a backend without the `popups.opener` capability, such as WebKit, it fails with `PageError`, reason
+ * `Unsupported`, rather than give `None` for a popup.
+ *
+ * **Example** (Whether a page is a popup of another)
+ *
+ * ```ts import.meta.vitest
+ * import { Page, Popup } from "@usestrider/browser"
+ * import { Effect, Option } from "effect"
+ *
+ * const openedBy = Effect.fn("openedBy")(
+ *   function*(popup: Page.ObservedPage, page: Page.ObservedPage) {
+ *     const opener = yield* Popup.opener(popup)
+ *     return Option.isSome(opener) && opener.value.id === page.id
+ *   }
+ * )
+ * ```
+ *
+ * @stability unstable
+ * @category getters
+ * @since 0.1.0
+ */
+export const opener: (target: Page.ObservedPage) => Effect.Effect<Option.Option<Page.ObservedPage>, Page.PageError> =
+  PopupImpl.opener

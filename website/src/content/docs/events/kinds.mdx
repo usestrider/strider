@@ -4,7 +4,7 @@ description: The events an action most often causes.
 order: 2
 ---
 
-These four kinds of event have modules that add what each needs to the
+These kinds of event have modules that add what each needs to the
 [`next`, `stream`, and `history`](/docs/events/events#next-stream-and-history) every event module has: a
 navigation's response, a popup's page, a handler for dialogs and file choosers, and a download's file.
 
@@ -36,6 +36,47 @@ WebKit doesn't report, `Restored` from the back/forward cache, and the rest of
 is an `Option`, with `None` for `about:blank`, `data:`, and `blob:` URLs, because these loads don't use the network.
 `waitUntil: "load"` also waits for the document to load.
 
+On a context, `PageNavigation` takes the navigations of every page in it, and each navigation's `page` says which:
+
+```ts
+import { PageNavigation, UserContext } from "@usestrider/browser"
+import { Effect, Stream } from "effect"
+
+const logVisits = Effect.fn("logVisits")(
+  function*(context: UserContext.ObservedUserContext) {
+    const navigations = yield* PageNavigation.stream(context)
+    yield* navigations.pipe(
+      Stream.runForEach((navigation) =>
+        Effect.log(`${navigation.page}: ${navigation.url}`)
+      ),
+      Effect.forkScoped
+    )
+  }
+)
+```
+
+## Frames, loads, and closes
+
+`PageLifecycle` reports each frame added and removed, each document reaching `domContentLoaded` and `load`, and
+each page closing, on a page or on every page of a context. A page's `frames` and `status` say only where it is
+now, so a frame added and removed between two reads is missed there, and seen here:
+
+```ts
+import { Page, PageLifecycle } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const previewFrames = Effect.fn("previewFrames")(function*(page: Page.Page) {
+  yield* page.getByRole("button", { name: "Show preview" }).click()
+  const log = yield* PageLifecycle.history(page, {
+    events: ["FrameAdded", "FrameRemoved"]
+  })
+  return log.entries.map((event) => `${event._tag} ${event.frame}`)
+})
+```
+
+`frames: "all"` takes frames' loads as well as the page's own. A page's `Closed` comes with its reason, and on a
+context each page's `Closed` comes before the context's stream ends.
+
 ## Popups
 
 `Popup.next` gives a page the page opened, as a `Page` that closes with its opener's scope:
@@ -62,6 +103,25 @@ On Chromium, a popup's opener stops rendering, and actions on it time out with a
 [`focus: "emulated"`](/docs/tools/testing#concurrent-pages). Firefox and WebKit keep rendering it, but WebKit
 names no opener, so `Popup.next` fails there with `Unsupported`:
 [wait for the context's new page](/docs/browsers/webkit#differences) instead.
+
+`Popup.opener` goes the other way, from a page to the page that opened it. It gives `Option.none()` for a page no
+page opened, and once the opener closed:
+
+```ts
+import { Page, Popup } from "@usestrider/browser"
+import { Effect, Option } from "effect"
+
+const openedBy = Effect.fn("openedBy")(
+  function*(popup: Page.ObservedPage, page: Page.ObservedPage) {
+    const opener = yield* Popup.opener(popup)
+    return Option.isSome(opener) && opener.value.id === page.id
+  }
+)
+```
+
+The opener comes back as an observed page, which reads but doesn't act; if you made the opener, you already hold it
+as a `Page`. A crashed opener is still given, and its `closed` gives `PageCrashed`. On WebKit, `Popup.opener` fails
+with `Unsupported` too.
 
 ## Dialogs and file choosers
 

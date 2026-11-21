@@ -3,13 +3,20 @@
   "upstream": [
     "event:Page.requestFailed"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding Page operation/event. Generic main-world evaluation is available, but does not implement this named contract and its waiting/lifetime guarantees.",
+  "status": "has",
+  "api": [
+    {
+      "module": "NetworkRequestEnd",
+      "symbol": "stream",
+      "url": "/docs/api/browser/NetworkRequestEnd#stream"
+    }
+  ],
+  "notes": "Subscribe before the triggering action. Events are scoped streams and next-event effects; filter `end: \"failed\"` for `Failed`, carrying `NetworkRequest.Failure`'s error text. Requests in flight when their owner or the connection closes publish no end.",
   "capabilities": [],
   "audit": {
     "sources": [
-      "packages/browser/src/Page.ts"
+      "packages/browser/src/NetworkRequestEnd.ts",
+      "packages/browser/src/internal/networkRequestEnd.ts"
     ],
     "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
   },

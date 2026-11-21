@@ -77,7 +77,9 @@ it.effect("keeps the WebKit default console table intact and scopes filtering an
       return { target, realm }
     }
     const first = make(), sibling = make()
-    const ordinary = { message: { source: "console-api", level: "debug", text: "ordinary" } }
+    const ordinary = {
+      message: { source: "console-api", level: "debug", text: "ordinary", timestamp: 1793065316.7090697 }
+    }
     sibling.target.event.handlers.apply("Console.messageAdded", ordinary, sibling.target.event)
     assert.strictEqual(facts.length, 1)
     const bridge: Adapter.HostBridge = {

@@ -218,7 +218,7 @@ export interface ConsoleMessage {
   /**
    * Time when this message was added. Currently only used when an expensive operation happens to make sure that the frontend can account for it.
    */
-  readonly timestamp?: number | undefined
+  readonly timestamp: number
 }
 
 /**
@@ -241,7 +241,7 @@ export const ConsoleMessage = /*#__PURE__*/ Schema.suspend(() =>
     parameters: Schema.optional(Schema.Array(Runtime.RemoteObject)),
     stackTrace: Schema.optional(StackTrace),
     networkRequestId: Schema.optional(Network.RequestId),
-    timestamp: Schema.optional(Schema.Number)
+    timestamp: Schema.Number
   }).annotate({ identifier: "Console.ConsoleMessage" })
 ) as any as Schema.Codec<ConsoleMessage, unknown>
 
@@ -444,7 +444,7 @@ export interface MessageRepeatCountUpdatedParams {
   /**
    * Timestamp of the latest message.
    */
-  readonly timestamp?: number | undefined
+  readonly timestamp: number
 }
 
 /**
@@ -457,7 +457,7 @@ export interface MessageRepeatCountUpdatedParams {
 export const MessageRepeatCountUpdatedParams = /*#__PURE__*/ Schema.suspend(() =>
   Schema.Struct({
     count: Schema.Int,
-    timestamp: Schema.optional(Schema.Number)
+    timestamp: Schema.Number
   }).annotate({ identifier: "Console.MessageRepeatCountUpdatedParams" })
 ) as any as Schema.Codec<MessageRepeatCountUpdatedParams>
 

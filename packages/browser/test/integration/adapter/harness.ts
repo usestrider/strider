@@ -171,6 +171,11 @@ const routes: Record<string, Route> = {
       response,
       `<title>console</title><script>console.log("hello", 42); console.error("bad"); setTimeout(() => { throw new TypeError("thrown here") })</script>`
     ),
+  "/console-previews": (_request, response) =>
+    html(
+      response,
+      `<title>console previews</title><div id="d">x</div><script>console.log([1, 2, 3], {a: 1}, window); console.log({toString() { return "x" }, valueOf() { return 1 }}); { const s = []; s[1] = 1; s[4] = 2; console.log(s) } console.log([[1, [2]], {b: {c: "d"}}], new Map([["k", 1]]), new Set([1]), null, undefined, -0, 1n, "str"); console.log(document.getElementById("d"), document); console.log("an error", new Error("boom")); console.log("%o and %d", {a: 1}, 5, [2]); console.log("%cstyled", "color: red", {a: 1}); new Worker(URL.createObjectURL(new Blob(['console.log("worker", {a: 1})'])))</script>`
+    ),
   "/form": (_request, response) =>
     html(
       response,
@@ -286,6 +291,13 @@ self.addEventListener("fetch", (event) => {
       response.writeHead(200, { "content-type": "text/javascript" })
       response.end("document.title = \"Deferred\"")
     }, 200)
+  },
+  // A page the server answers after a second, so a popup opened to it is handed over before its document commits
+  "/slow-page": (_request, response) => {
+    setTimeout(() => {
+      response.writeHead(200, { "content-type": "text/html" })
+      response.end("<title>Slow</title>")
+    }, 1000)
   },
   // A resource that never completes, until the page closes or replaces it. No sleep-based readiness assertion.
   "/pending-image": (_request, response) => {

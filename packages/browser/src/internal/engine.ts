@@ -200,6 +200,13 @@ export type Expectation =
   | { readonly _tag: "Text"; readonly expected: ReadonlyArray<TextMatcher>; readonly list: boolean }
   | { readonly _tag: "Role"; readonly expected: string }
   | { readonly _tag: "AccessibleName"; readonly expected: TextMatcher; readonly ignoreCase: boolean }
+  /** The one match's accessible description or error message matches; with `not`, it doesn't. */
+  | {
+    readonly _tag: "AccessibleDescription" | "AccessibleErrorMessage"
+    readonly expected: TextMatcher
+    readonly ignoreCase: boolean
+    readonly not: boolean
+  }
   /** The raw class string of one match, or each match in order. */
   | { readonly _tag: "Class"; readonly expected: ReadonlyArray<TextMatcher>; readonly list: boolean }
   | { readonly _tag: "ContainsText"; readonly expected: TextMatcher }
@@ -415,6 +422,32 @@ export type Request =
   | { readonly op: "rect"; readonly steps: ReadonlyArray<Step> }
   /** The document's doctype and HTML. */
   | { readonly op: "html" }
+  /** Draws the page's overlays as they now are, over the document, or removes them all when there are none. */
+  | { readonly op: "overlay"; readonly overlays: ReadonlyArray<OverlayItem>; readonly hidden: boolean }
+
+/** One overlay: the caller's HTML, or a chapter's title card, fading out once it is `leaving`. */
+export type OverlayItem =
+  | { readonly _tag: "Html"; readonly id: string; readonly html: string }
+  | {
+    readonly _tag: "Chapter"
+    readonly id: string
+    readonly title: string
+    readonly description: string | null
+    readonly leaving: boolean
+  }
+  | {
+    readonly _tag: "Action"
+    readonly id: string
+    readonly title: string
+    readonly position: string
+    readonly titleStyle: string
+    readonly point: { readonly x: number; readonly y: number } | null
+    readonly pointStyle: string | null
+    readonly box: { readonly x: number; readonly y: number; readonly width: number; readonly height: number } | null
+    readonly highlightStyle: string | null
+  }
+  /** The cursor, at the last annotated action's point: moved in place, so it glides there from where it was. */
+  | { readonly _tag: "Cursor"; readonly id: string; readonly x: number; readonly y: number }
 
 /** A candidate of an ambiguous match. */
 export const Candidate = Schema.Struct({ description: Schema.String, visible: Schema.Boolean })
@@ -459,6 +492,7 @@ export const Response = Schema.Union([
   }),
   Schema.TaggedStruct("Final", { final: Final }),
   Schema.TaggedStruct("Guarded", { blocked: Schema.NullOr(Schema.String) }),
+  Schema.TaggedStruct("Overlaid", {}),
   Schema.TaggedStruct("Inserted", { inserted: Schema.Boolean }),
   /** The focused element is the `index`th of the document's frames, in the order a `"iframe, frame"` query finds them. */
   Schema.TaggedStruct("InFrame", { index: Schema.Number }),
@@ -691,6 +725,135 @@ export function engine(render: (root: SnapNode) => string) {
   const SKIPPED = new Set(["script", "style", "noscript", "template"])
 
   /**
+   * The element the page's overlays are drawn in, under a closed shadow root: `null` while there are none. Queries,
+   * snapshots and the document's HTML leave it out, and it ignores the pointer, so no hit test finds it.
+   */
+  let overlayHost: Element | null = null
+  let overlayRoot: ShadowRoot | null = null
+  /**
+   * What drawing overlays needs, built on a document's first `overlay` request: a page that never shows one
+   * builds none of it.
+   */
+  const makeOverlays = () => {
+    const overlayItems = new Map<string, Element>()
+    const OVERLAY_HOST = "all:initial;position:fixed;inset:0;z-index:2147483647;pointer-events:none;display:block"
+    const OVERLAY_STYLE = `*{pointer-events:none!important}` +
+      `.item{position:absolute;inset:0}` +
+      `.chapter{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;` +
+      `background:rgba(0,0,0,.4);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);color:#fff;` +
+      `font:600 40px system-ui,sans-serif;text-align:center;opacity:1;transition:opacity .2s}` +
+      `.chapter.leaving{opacity:0}.description{font-size:20px;font-weight:400;opacity:.85}` +
+      `.action-title{position:absolute;max-width:60%;padding:6px 10px;border-radius:4px;background:rgba(0,0,0,.75);` +
+      `color:#fff;font:14px system-ui,sans-serif}` +
+      `.cursor{position:absolute;left:0;top:0;width:20px;height:20px;background:rgb(20,20,20);` +
+      `clip-path:polygon(0 0,0 100%,70% 70%);transition:transform .2s}`
+    const TITLE_AT: Record<string, string> = {
+      "top-left": "top:12px;left:12px",
+      "top": "top:12px;left:50%;transform:translateX(-50%)",
+      "top-right": "top:12px;right:12px",
+      "bottom-left": "bottom:12px;left:12px",
+      "bottom": "bottom:12px;left:50%;transform:translateX(-50%)",
+      "bottom-right": "bottom:12px;right:12px"
+    }
+    const cursorStyle = (x: number, y: number) => `transform:translate(${x}px,${y}px)`
+    const actionElement = (each: Extract<OverlayItem, { _tag: "Action" }>): Element => {
+      const element = overlayElement("item")
+      if (each.box !== null && each.highlightStyle !== null) {
+        const highlight = overlayElement("highlight")
+        setAttribute(
+          highlight,
+          "style",
+          `position:absolute;left:${each.box.x}px;top:${each.box.y}px;width:${each.box.width}px;` +
+            `height:${each.box.height}px;${each.highlightStyle}`
+        )
+        appendChild(element, highlight)
+      }
+      if (each.point !== null && each.pointStyle !== null) {
+        const point = overlayElement("point")
+        setAttribute(
+          point,
+          "style",
+          `position:absolute;left:${each.point.x}px;top:${each.point.y}px;transform:translate(-50%,-50%);` +
+            each.pointStyle
+        )
+        appendChild(element, point)
+      }
+      const title = overlayElement("action-title", each.title)
+      setAttribute(title, "style", `${TITLE_AT[each.position] ?? TITLE_AT["top-right"]};${each.titleStyle}`)
+      appendChild(element, title)
+      return element
+    }
+    const innerHTMLSetter = Object.getOwnPropertyDescriptor(Element.prototype, "innerHTML")!.set!
+    const textContentSetter = Object.getOwnPropertyDescriptor(Node.prototype, "textContent")!.set!
+    const appendChild = method(Node.prototype, "appendChild")
+    const removeElement = method(Element.prototype, "remove")
+    const setAttribute = method(Element.prototype, "setAttribute")
+    const attachShadow = method(Element.prototype, "attachShadow")
+    const overlayElement = (className: string, text?: string): Element => {
+      const element = dom.createElement(document, "div")
+      setAttribute(element, "class", className)
+      if (text !== undefined) call(textContentSetter, element, [text])
+      return element
+    }
+
+    const overlay = (request: Extract<Request, { op: "overlay" }>): Response => {
+      if (request.overlays.length === 0) {
+        if (overlayHost !== null) removeElement(overlayHost)
+        overlayHost = overlayRoot = null
+        overlayItems.clear()
+        return { _tag: "Overlaid" }
+      }
+      const root = dom.documentElement(document)
+      if (root === null) return { _tag: "Overlaid" }
+      if (overlayHost === null || overlayRoot === null) {
+        overlayHost = dom.createElement(document, "strider-overlay")
+        overlayRoot = attachShadow(overlayHost, { mode: "closed" })
+        const style = dom.createElement(document, "style")
+        call(textContentSetter, style, [OVERLAY_STYLE])
+        appendChild(overlayRoot, style)
+      }
+      // Drawn again where the page removed it, last in the document so it stacks over what came before
+      if (dom.parentNode(overlayHost) !== root || dom.nextElementSibling(overlayHost) !== null) {
+        appendChild(root, overlayHost)
+      }
+      setAttribute(overlayHost, "style", request.hidden ? `${OVERLAY_HOST};display:none` : OVERLAY_HOST)
+      const wanted = new Set(request.overlays.map((each) => each.id))
+      for (const [id, element] of overlayItems) {
+        if (!wanted.has(id)) {
+          removeElement(element)
+          overlayItems.delete(id)
+        }
+      }
+      for (const each of request.overlays) {
+        let element = overlayItems.get(each.id)
+        if (element === undefined) {
+          if (each._tag === "Html") {
+            element = overlayElement("item")
+            call(innerHTMLSetter, element, [each.html])
+          } else if (each._tag === "Action") {
+            element = actionElement(each)
+          } else if (each._tag === "Cursor") {
+            element = overlayElement("cursor")
+          } else {
+            element = overlayElement("item chapter")
+            appendChild(element, overlayElement("title", each.title))
+            if (each.description !== null) appendChild(element, overlayElement("description", each.description))
+          }
+          appendChild(overlayRoot, element)
+          overlayItems.set(each.id, element)
+        }
+        if (each._tag === "Cursor") setAttribute(element, "style", cursorStyle(each.x, each.y))
+        if (each._tag === "Chapter") {
+          setAttribute(element, "class", each.leaving ? "item chapter leaving" : "item chapter")
+        }
+      }
+      return { _tag: "Overlaid" }
+    }
+    return overlay
+  }
+  let drawOverlays: ((request: Extract<Request, { op: "overlay" }>) => Response) | undefined
+
+  /**
    * Every element under `root`, in tree order, with each open shadow root's elements after its host. An element
    * root's own open shadow root counts as under it, before its light children.
    */
@@ -706,6 +869,8 @@ export function engine(render: (root: SnapNode) => string) {
         child !== null;
         child = dom.nextElementSibling(child)
       ) {
+        // The overlays' host is the library's own drawing, never part of the page a query sees
+        if (child === overlayHost) continue
         out.push(child)
         const shadow = dom.shadowRoot(child)
         if (shadow !== null) visit(shadow)
@@ -1413,6 +1578,13 @@ export function engine(render: (root: SnapNode) => string) {
   const visible = (element: Element): boolean => rendered(element, true)
 
   // Accessible names (accname 1.2)
+  /**
+   * Where an element's own name came from, of the sources its description could otherwise come from, or `label`
+   * for `aria-label` or `aria-labelledby`.
+   */
+  type NameSource = "label" | "native" | "content" | "title"
+  const nameSources = new Map<Element, NameSource>()
+
   interface NameContext {
     readonly visited: Set<Element>
     /** Inside an `aria-labelledby` traversal, so `aria-labelledby` isn't followed again. */
@@ -1604,6 +1776,51 @@ export function engine(render: (root: SnapNode) => string) {
     return value
   }
 
+  /** The element whose own name `accessibleName` is computing, or `null` outside that computation. */
+  let nameRoot: Element | null = null
+
+  /**
+   * Records which of the sources HTML-AAM also reads for a description gave the root its own name, however the
+   * computation reached it, as through an `aria-labelledby` that names the root itself. Another element's
+   * sources only contribute, and aren't recorded, and neither is a name that counts hidden content, which no
+   * description reads. An `aria-labelledby` that names the root keeps the source its traversal of the root found.
+   */
+  const nameSource = (context: NameContext, element: Element, source: NameSource): void => {
+    if (element !== nameRoot || context.includeHidden) return
+    if (source !== "label" || !nameSources.has(element)) nameSources.set(element, source)
+  }
+
+  /**
+   * An element's content as name from content reads it: its `::before`, then its own CSS content, which replaces
+   * its children, or its children and the elements it owns through `aria-owns`, then its `::after`. `child` is
+   * the context its children are read in.
+   */
+  const contentOf = (element: Element, child: NameContext): string => {
+    let content = cssContent(element, "::before") ?? ""
+    const own = cssContent(element)
+    if (own !== undefined) {
+      // Content on the element itself replaces its children.
+      content += own
+    } else {
+      for (const node of flatChildNodes(element)) {
+        if (node instanceof Element && SKIPPED.has(dom.localName(node))) continue
+        const name = nameOfNode(node, child)
+        // Only an inline child runs into its neighbours; <br> always separates.
+        const inline = !(node instanceof Element) ||
+          (getComputedStyle(node).display === "inline" && dom.localName(node) !== "br")
+        content += inline ? name : ` ${name} `
+      }
+      // Elements it owns through aria-owns follow its children
+      for (const owned of (dom.getAttribute(element, "aria-owns") ?? "").split(ID_SEPARATOR)) {
+        const target = owned === "" ? null : byId(element, owned)
+        if (target === null) continue
+        const name = nameOfElement(target, child)
+        content += getComputedStyle(target).display === "inline" ? name : ` ${name} `
+      }
+    }
+    return content + (cssContent(element, "::after") ?? "")
+  }
+
   const nameOfElementValue = (element: Element, context: NameContext): string => {
     if (context.visited.has(element)) return ""
     // 2A: hidden, unless asked for or in a traversal from a hidden reference
@@ -1626,7 +1843,10 @@ export function engine(render: (root: SnapNode) => string) {
         ]
       })
       const joined = parts.join(" ")
-      if (joined.trim() !== "") return joined
+      if (joined.trim() !== "") {
+        nameSource(context, element, "label")
+        return joined
+      }
     }
     // Marked only now, so an element whose aria-labelledby names itself still reaches its own aria-label
     context.visited.add(element)
@@ -1642,11 +1862,17 @@ export function engine(render: (root: SnapNode) => string) {
     }
     // 2C: aria-label
     const label = dom.getAttribute(element, "aria-label") ?? ""
-    if (label.trim() !== "") return label
+    if (label.trim() !== "") {
+      nameSource(context, element, "label")
+      return label
+    }
     // 2D: the host language's label
     if (role !== "none" && role !== "presentation") {
       const native = nativeName(element, context)
-      if (native.trim() !== "") return native
+      if (native.trim() !== "") {
+        nameSource(context, element, "native")
+        return native
+      }
     }
     // 2F: name from content. In the target's own content, only a descendant whose role allows it.
     const fromContent = context.embedded === "reference" ||
@@ -1654,39 +1880,21 @@ export function engine(render: (root: SnapNode) => string) {
       (context.embedded === "descendant" && (role === null || NAME_FROM_CONTENT_DESCENDANT.has(role)))
     if (fromContent) {
       const child: NameContext = context.embedded === "self" ? { ...context, embedded: "descendant" } : context
-      let content = cssContent(element, "::before") ?? ""
-      const own = cssContent(element)
-      if (own !== undefined) {
-        // Content on the element itself replaces its children.
-        content += own
-      } else {
-        for (const node of flatChildNodes(element)) {
-          if (node instanceof Element && SKIPPED.has(dom.localName(node))) continue
-          const name = nameOfNode(node, child)
-          // Only an inline child runs into its neighbours; <br> always separates.
-          const inline = !(node instanceof Element) ||
-            (getComputedStyle(node).display === "inline" && dom.localName(node) !== "br")
-          content += inline ? name : ` ${name} `
-        }
-        // Elements it owns through aria-owns follow its children
-        for (const owned of (dom.getAttribute(element, "aria-owns") ?? "").split(ID_SEPARATOR)) {
-          const target = owned === "" ? null : byId(element, owned)
-          if (target === null) continue
-          const name = nameOfElement(target, child)
-          content += getComputedStyle(target).display === "inline" ? name : ` ${name} `
-        }
-      }
-      content += cssContent(element, "::after") ?? ""
+      const content = contentOf(element, child)
       // Only the target's own name is trimmed: a descendant's whitespace separates its neighbours.
       if (context.embedded === "self" ? content.trim() !== "" : content !== "") {
         if (provenance && context.embedded === "self") namesFromContent.add(element)
+        nameSource(context, element, "content")
         if (inField(element) && content.trim() !== "") context.contribution.fieldContent = true
         return content
       }
     }
     // 2I: the tooltip, except on a presentational element, then a placeholder (HTML-AAM)
     const title = role === "none" || role === "presentation" ? "" : dom.getAttribute(element, "title") ?? ""
-    if (title.trim() !== "") return title
+    if (title.trim() !== "") {
+      nameSource(context, element, "title")
+      return title
+    }
     const placeholder = dom.getAttribute(element, "placeholder") ?? ""
     if ((element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) && placeholder.trim() !== "") {
       return placeholder
@@ -1756,6 +1964,7 @@ export function engine(render: (root: SnapNode) => string) {
   const namesFromContent = new Set<Element>()
   const nameCache = new Map<Element, string>()
   const hiddenNameCache = new Map<Element, string>()
+  const descriptionCache = new Map<Element, string>()
   /** An element's accessible name, as a flat string. With `includeHidden`, hidden descendants count too. */
   const accessibleName = (element: Element, includeHidden: boolean): string => {
     const cache = includeHidden ? hiddenNameCache : nameCache
@@ -1763,20 +1972,119 @@ export function engine(render: (root: SnapNode) => string) {
     if (cached !== undefined) return cached
     const contribution = { fieldContent: false }
     const role = roleOf(element)
-    // This restriction is on the root, not on descendants or references contributing to another element's name.
-    const name = role !== null && NAME_PROHIBITED.has(role) ? "" : flatString(
-      nameOfElement(element, {
-        visited: new Set(),
-        labelledBy: false,
-        hiddenReference: false,
-        embedded: "self",
-        includeHidden,
-        contribution
-      })
-    )
+    const outer = nameRoot
+    nameRoot = element
+    let name: string
+    try {
+      // This restriction is on the root, not on descendants or references contributing to another element's name.
+      name = role !== null && NAME_PROHIBITED.has(role) ? "" : flatString(
+        nameOfElement(element, {
+          visited: new Set(),
+          labelledBy: false,
+          hiddenReference: false,
+          embedded: "self",
+          includeHidden,
+          contribution
+        })
+      )
+    } finally {
+      nameRoot = outer
+    }
     if (provenance && contribution.fieldContent) namesFromFields.add(element)
     cache.set(element, name)
     return name
+  }
+
+  const referenceContext = (target: Element, includeHidden: boolean): NameContext => ({
+    visited: new Set(),
+    labelledBy: true,
+    hiddenReference: hiddenFromAccessibility(target),
+    embedded: "reference",
+    includeHidden,
+    contribution: { fieldContent: false }
+  })
+
+  /**
+   * The text of an ID reference list's elements, each computed as a reference traversal, so a hidden element
+   * named there counts with its hidden content, joined by a space; `null` when no ID names an element, so the
+   * relation counts as absent.
+   */
+  const referencedText = (element: Element, attribute: string, includeHidden: boolean): string | null => {
+    const targets = (dom.getAttribute(element, attribute) ?? "").split(ID_SEPARATOR).flatMap((id) => {
+      const target = id === "" ? null : byId(element, id)
+      return target === null ? [] : [target]
+    })
+    return targets.length === 0
+      ? null
+      : targets.map((target) => nameOfElement(target, referenceContext(target, includeHidden))).join(" ")
+  }
+
+  /**
+   * An element's accessible description, as a flat string (HTML-AAM): empty when it's hidden; else the elements
+   * `aria-describedby` names, when any exists, even if their text is empty; else `aria-description`, when
+   * present; else, when it didn't give the name, a table's caption or a button, submit or reset input's value;
+   * else a summary element's content, when `aria-label` or `aria-labelledby` gave the name; else the title, when
+   * it isn't the name.
+   */
+  const accessibleDescription = (element: Element): string => {
+    const cached = descriptionCache.get(element)
+    if (cached !== undefined) return cached
+    const compute = (): string => {
+      if (hiddenFromAccessibility(element)) return ""
+      const referenced = referencedText(element, "aria-describedby", false)
+      if (referenced !== null) return referenced
+      const attribute = dom.getAttribute(element, "aria-description")
+      if (attribute !== null) return attribute
+      accessibleName(element, false)
+      const source = nameSources.get(element)
+      // The host language's source, when the element has one and it didn't give the name, wins even when empty.
+      if (source !== "native" && source !== "content") {
+        if (element instanceof HTMLTableElement) {
+          const caption = Array.from(dom.children(element)).find((child) => dom.localName(child) === "caption")
+          if (caption !== undefined) return nameOfElement(caption, referenceContext(caption, false))
+        } else if (dom.localName(element) === "summary") {
+          if (source === "label") {
+            const context = referenceContext(element, false)
+            context.visited.add(element)
+            return contentOf(element, context)
+          }
+        } else if (buttonLikeInput(element) && dom.hasAttribute(element, "value")) {
+          return element.value
+        }
+      }
+      return source === "title" ? "" : dom.getAttribute(element, "title") ?? ""
+    }
+    const description = flatString(compute())
+    descriptionCache.set(element, description)
+    return description
+  }
+
+  /** An ASCII-case-insensitive token: ASCII letters lowercased, nothing trimmed. */
+  const asciiLowercase = (token: string): string => token.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+
+  /**
+   * An element's accessible error message: its `aria-errormessage` references while it's invalid, through an
+   * `aria-invalid` other than blank or exactly `false` in any ASCII case, or its own failed constraint validation;
+   * else empty.
+   */
+  const accessibleErrorMessage = (element: Element): string => {
+    const invalid = dom.getAttribute(element, "aria-invalid")
+    const ariaInvalid = invalid !== null && invalid.trim() !== "" && asciiLowercase(invalid) !== "false"
+    const validity = "validity" in element ? (element as { readonly validity?: ValidityState }).validity : undefined
+    if (!ariaInvalid && validity?.valid !== false) return ""
+    return flatString(referencedText(element, "aria-errormessage", false) ?? "")
+  }
+
+  /**
+   * Whether a computed accessible text matches: a regular expression tests it as computed, and a string compares
+   * whole after whitespace is collapsed and zero-width and soft hyphen characters are dropped on both sides.
+   */
+  const accessibleTextMatches = (text: string, matcher: TextMatcher, ignoreCase: boolean): boolean => {
+    if (matcher._tag === "RegExp") return new RegExp(matcher.source, matcher.flags).test(text)
+    const normalize = (value: string) => collapse(value.replace(/[\u200b\u00ad]/g, ""))
+    return ignoreCase
+      ? normalize(text).toLocaleLowerCase() === normalize(matcher.value).toLocaleLowerCase()
+      : normalize(text) === normalize(matcher.value)
   }
 
   // Queries
@@ -1909,7 +2217,10 @@ export function engine(render: (root: SnapNode) => string) {
 
   /** The candidates of one query under `scope`, in tree order. */
   const query = (scope: Document | Element, step: Step): Array<Element> => {
-    if (step._tag === "XPath") return xpathQuery(scope, step.expression)
+    if (step._tag === "XPath") {
+      const found = xpathQuery(scope, step.expression)
+      return overlayHost === null ? found : found.filter((element) => element !== overlayHost)
+    }
     const under = scope === document ? documentElements() : elementsUnder(scope)
     switch (step._tag) {
       case "Css": {
@@ -2206,7 +2517,8 @@ export function engine(render: (root: SnapNode) => string) {
     }
     const role = roleOf(element)
     if (role === null || !CHECKABLE_ROLES.has(role)) return { state: null, checked: null }
-    const token = dom.getAttribute(element, "aria-checked")?.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+    const attribute = dom.getAttribute(element, "aria-checked")
+    const token = attribute === null ? undefined : asciiLowercase(attribute)
     if (token === "true") return { state: true, checked: true }
     if (token === "false") return { state: false, checked: false }
     if (token === "mixed") {
@@ -3414,16 +3726,15 @@ export function engine(render: (root: SnapNode) => string) {
       }
       case "AccessibleName": {
         const name = accessibleName(element, false)
-        const matcher = expectation.expected
-        const normalize = (text: string) => collapse(text.replace(/[\u200b\u00ad]/g, ""))
-        return {
-          passed: matcher._tag === "RegExp"
-            ? new RegExp(matcher.source, matcher.flags).test(name)
-            : expectation.ignoreCase
-            ? normalize(name).toLocaleLowerCase() === normalize(matcher.value).toLocaleLowerCase()
-            : normalize(name) === normalize(matcher.value),
-          observed: name
-        }
+        return { passed: accessibleTextMatches(name, expectation.expected, expectation.ignoreCase), observed: name }
+      }
+      case "AccessibleDescription":
+      case "AccessibleErrorMessage": {
+        const text = expectation._tag === "AccessibleDescription"
+          ? accessibleDescription(element)
+          : accessibleErrorMessage(element)
+        const matches = accessibleTextMatches(text, expectation.expected, expectation.ignoreCase)
+        return { passed: expectation.not ? !matches : matches, observed: text }
       }
       case "ContainsText": {
         const text = textOf(element)
@@ -3793,6 +4104,8 @@ export function engine(render: (root: SnapNode) => string) {
     roleCache.clear()
     nameCache.clear()
     hiddenNameCache.clear()
+    nameSources.clear()
+    descriptionCache.clear()
     inertness = undefined
     inertAncestors.clear()
     insideModal.clear()
@@ -3879,7 +4192,7 @@ export function engine(render: (root: SnapNode) => string) {
         if (textShown) pending += dom.textContent(node) ?? ""
         return
       }
-      if (!(node instanceof Element) || SKIPPED.has(dom.localName(node))) return
+      if (!(node instanceof Element) || SKIPPED.has(dom.localName(node)) || node === overlayHost) return
       if (dom.getAttribute(node, "aria-hidden") === "true") return
       if (inert(node)) {
         // An inert ancestor of the topmost modal dialog adds nothing of its own, but the dialog escapes it
@@ -4127,7 +4440,25 @@ export function engine(render: (root: SnapNode) => string) {
     const type = dom.doctype(document)
     const doctype = type === null ? "" : new XMLSerializer().serializeToString(type)
     const root = dom.documentElement(document)
-    return { _tag: "Read", value: doctype + (root === null ? "" : dom.outerHTML(root)) }
+    if (root === null) return { _tag: "Read", value: doctype }
+    if (overlayHost === null || !dom.contains(root, overlayHost)) {
+      return { _tag: "Read", value: doctype + dom.outerHTML(root) }
+    }
+    // The overlays' host leaves the page's HTML by node, wherever the page moved it: the document element is
+    // copied into a document with no browsing context, where nothing upgrades, loads or observes, and the host's
+    // copy, found by its path of child indices, is removed before serializing. The page's tree is never touched
+    const path: Array<number> = []
+    for (let node: Node = overlayHost; node !== root;) {
+      const parent = dom.parentNode(node)!
+      path.unshift(Array.prototype.indexOf.call(dom.childNodes(parent), node))
+      node = parent
+    }
+    const inert = document.implementation.createHTMLDocument("")
+    const copy = inert.importNode(root, true)
+    let twin: Node = copy
+    for (const index of path) twin = twin.childNodes[index]!
+    twin.parentNode!.removeChild(twin)
+    return { _tag: "Read", value: doctype + (copy as Element).outerHTML }
   }
 
   // Every match's count and how many are visible, and the first ten described
@@ -4258,6 +4589,8 @@ export function engine(render: (root: SnapNode) => string) {
       roleCache.clear()
       nameCache.clear()
       hiddenNameCache.clear()
+      nameSources.clear()
+      descriptionCache.clear()
       inertness = undefined
       inertAncestors.clear()
       insideModal.clear()
@@ -4337,6 +4670,8 @@ export function engine(render: (root: SnapNode) => string) {
           return JSON.stringify(rect(request.steps))
         case "html":
           return JSON.stringify(html())
+        case "overlay":
+          return JSON.stringify((drawOverlays ??= makeOverlays())(request))
         case "role":
           return JSON.stringify(
             {

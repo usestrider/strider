@@ -47,6 +47,7 @@ import * as Evaluation from "./evaluation.ts"
 import type * as Execution from "./execution.ts"
 import * as FileInputImpl from "./fileInput.ts"
 import * as Filters from "./filters.ts"
+import * as FrameImpl from "./frame.ts"
 import * as FunctionSource from "./functionSource.ts"
 import * as Geometry from "./geometry.ts"
 import * as Input from "./input.ts"
@@ -226,6 +227,37 @@ const syntheticDrag = (
 
 /** How a snapshot of this owner's page makes the locator for a ref. */
 export const locatorOn = (owner: Owner): Locate => (steps, label) => new LocatorImpl(owner, steps, label)
+
+/** The actions that send input, which a page showing its actions annotates. */
+const annotatedActions = new Set([
+  "Locator.click",
+  "Locator.dblclick",
+  "Locator.hover",
+  "Locator.tap",
+  "Locator.check",
+  "Locator.uncheck",
+  "Locator.dragTo",
+  "Locator.fill",
+  "Locator.press",
+  "Locator.pressSequentially",
+  "Locator.selectOption",
+  "Locator.clear"
+])
+
+/** What `readJSProperty` found: the value at its path, or how many elements matched when that isn't one. */
+type JSPropertyRead =
+  | { readonly _tag: "Value"; readonly value: unknown }
+  | { readonly _tag: "Unmatched"; readonly matches: number }
+
+/** Reads a property path from an element in the page: a step through anything but an object reads `undefined`. */
+const readPath = (element: Element, path: ReadonlyArray<string>): unknown => {
+  let value: unknown = element
+  for (const key of path) {
+    if (value === null || (typeof value !== "object" && typeof value !== "function")) return undefined
+    value = (value as Record<string, unknown>)[key]
+  }
+  return value
+}
 
 export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
   readonly [LocatorTypeId] = LocatorTypeId as typeof LocatorTypeId
@@ -522,16 +554,19 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
   }
 
   /**
-   * Calls `fn` in the caller's isolated world of the one match's document, with the match first:
-   * resolved now, as a read is, and passed by its node binding, since the engine's world isn't the
-   * caller's. Its result comes back by value, or as a handle in the caller's scope.
+   * Calls `fn` in a world of the one match's document, the caller's isolated world unless another is named,
+   * with the match first: resolved now, as a read is, and passed by its node binding, since the engine's world
+   * isn't the caller's. Its result comes back by value, or as a handle in the caller's scope. With `unmatched`,
+   * no match or several are its answer rather than a failure.
    */
   private evaluation<B, R>(
     operation: string,
     fn: Function,
     args: ReadonlyArray<unknown>,
     result: "value" | "handle",
-    then: (realm: Target.RealmId, value: Adapter.RemoteValue) => Effect.Effect<B, Evaluation.Failure, R>
+    then: (realm: Target.RealmId, value: Adapter.RemoteValue) => Effect.Effect<B, Evaluation.Failure, R>,
+    world: Adapter.World = Evaluation.isolatedWorld,
+    unmatched?: (matches: number) => B
   ): Effect.Effect<B, Locator.LocatorError | Target.TargetGone | Deadline.Timeout, R> {
     const owner = this.owner
     return Effect.gen({ self: this }, function*() {
@@ -544,6 +579,9 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       )
       if (found._tag === "Response") {
         const response = found.response
+        if (unmatched !== undefined && (response._tag === "NoMatch" || response._tag === "Strict")) {
+          return unmatched(response._tag === "NoMatch" ? 0 : response.count)
+        }
         switch (response._tag) {
           case "NoMatch":
             return yield* Effect.fail(this.error(
@@ -558,12 +596,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         }
       }
       return yield* Effect.gen(function*() {
-        const realm = yield* Evaluation.documentRealm(
-          owner.runtime,
-          found.routed.document,
-          Evaluation.isolatedWorld,
-          id
-        )
+        const realm = yield* Evaluation.documentRealm(owner.runtime, found.routed.document, world, id)
         const rest = yield* Evaluation.toLocal(args, realm, 1)
         const group = yield* Evaluation.groupFor(owner.runtime, realm, result)
         // The call is on its way: a deadline after it can't say the function didn't run
@@ -610,6 +643,24 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       JSHandle.Serialized<B>,
       Locator.LocatorError | Target.TargetGone | Deadline.Timeout
     >
+  }
+
+  /**
+   * The value at `path` from the one match, read now in its document's main world, where the page's own
+   * scripts set properties, and returned by value; or how many elements matched when that isn't one.
+   */
+  readJSProperty(
+    path: ReadonlyArray<string>
+  ): Effect.Effect<JSPropertyRead, Locator.LocatorError | Target.TargetGone | Deadline.Timeout> {
+    return this.evaluation<JSPropertyRead, never>(
+      "Locator.readJSProperty",
+      readPath,
+      [path],
+      "value",
+      (_realm, value) => Effect.map(Evaluation.fromRemote(value), (value) => ({ _tag: "Value" as const, value })),
+      { _tag: "Main" },
+      (matches) => ({ _tag: "Unmatched" as const, matches })
+    )
   }
 
   evaluateHandle<Args extends ReadonlyArray<unknown>, B>(
@@ -1182,6 +1233,34 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       yield* Effect.annotateCurrentSpan("browser.drag.outcome", String(outcome))
       return "done" as const
     })
+  }
+
+  /** `frameLocator.resolve`: a handle on the frame this iframe locator's element holds now. */
+  resolveFrame(inside: ReadonlyArray<Engine.Step>) {
+    const operation = "FrameLocator.resolve"
+    return Effect.gen({ self: this }, function*() {
+      yield* Access.check(this.owner.grant)
+      const record = yield* Operation.record
+      const { runtime, page, grant } = this.owner
+      const found = yield* Runtime.frameAt(runtime, page, inside, record.id, record.budget.at).pipe(
+        Effect.mapError((failure) =>
+          failure._tag === "Deadline"
+            ? record.timeout(Option.fromUndefinedOr(failure.hint))
+            : this.sendFailure(operation, failure, record)
+        )
+      )
+      if (found._tag === "Answer") return yield* this.unmatched(operation, found.response, record.id)
+      if (found._tag === "Missing") {
+        return yield* Effect.fail(
+          this.error(
+            operation,
+            new Locator.NoMatch({ hint: "No iframe matched that holds a frame with a document" }),
+            record.id
+          )
+        )
+      }
+      return FrameImpl.make({ runtime, page, grant, id: found.frame })
+    }).pipe(Operation.named(operation, { attributes: { "browser.page.id": this.owner.page.id } }))
   }
 
   // ── Errors ──
@@ -2032,6 +2111,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       // A round that reached the deadline is the action's own Timeout, with what the record saw
       const attempts = Effect.gen({ self: this }, function*() {
         let firstObservation = true
+        let annotated = false
         while (true) {
           const left = record.left()
           if (left <= 0) return yield* Effect.fail(timedOut())
@@ -2047,6 +2127,20 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
             Effect.flatMap(settle)
           )
           if (Option.isNone(first)) continue
+          // A page that shows its actions draws this one, and waits, once, before the last check and the input; a trial
+          // sends no input, so it has nothing to show
+          const annotate = owner.page.execution.annotate
+          if (annotate !== undefined && !annotated && options?.trial !== true && annotatedActions.has(operation)) {
+            annotated = true
+            yield* annotate({
+              title: `${operation.slice("Locator.".length)} ${this.description}`,
+              point: first.value.response.point,
+              box: this.boundingBox.pipe(
+                Effect.map(Option.map((box) => ({ x: box.x, y: box.y, width: box.width, height: box.height }))),
+                Effect.catch(() => Effect.succeedNone)
+              )
+            })
+          }
           // Input to a page is serialized; acquiring the permit takes from the deadline, and the checks run again
           const underPermit = Effect.fnUntraced(function*(this: LocatorImpl, stability?: string) {
             const apply = options?.trial !== true
@@ -2184,6 +2278,9 @@ export const frameLocator = (owner: Owner, steps: ReadonlyArray<Engine.Step>): L
       ),
     get anyFrame() {
       return anyFrameLocator(owner, inside)
+    },
+    get resolve() {
+      return make(steps).resolveFrame(inside)
     },
     toString: () => `FrameLocator(page.frame(page.${describeSteps(steps)}))`
   } as Locator.FrameLocator

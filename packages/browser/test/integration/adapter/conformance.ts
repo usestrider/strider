@@ -7,6 +7,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
 import * as Cause from "effect/Cause"
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
@@ -1484,9 +1485,13 @@ export const conformance = (backend: Backend) =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
             const { page } = yield* newPage(world)
+            const before = Date.now()
             yield* goto(world, page, `${world.site.origin}/console`)
             const hello = yield* world.facts.when("ConsoleMessage", (fact) =>
               fact.message.text === "hello 42")
+            // The browser's wall-clock time when it logged the message, which runs on this machine's clock
+            assert.isAtLeast(DateTime.toEpochMillis(hello.message.timestamp), before)
+            assert.isAtMost(DateTime.toEpochMillis(hello.message.timestamp), Date.now())
             assert.strictEqual(hello.message.level, "log")
             assert.deepStrictEqual(hello.message.origin, { _tag: "Page", page })
             // 1-based, as stack traces print it: the page is one line
@@ -1502,6 +1507,56 @@ export const conformance = (backend: Backend) =>
             const raw = yield* world.facts.when("UncaughtException", (fact) =>
               fact.exception.message === "a string")
             assert.strictEqual(raw.exception.name, "Error")
+            // A message logged again is its own message, at its own time, though stock WebKit reports it as a repeat
+            // of the first
+            yield* evaluate(
+              world,
+              page,
+              `() => { for (let i = 0; i < 2; i++) { console.log("again"); const end = Date.now() + 5; while (Date.now() < end); } }`
+            )
+            const first = yield* world.facts.when("ConsoleMessage", (fact) =>
+              fact.message.text === "again")
+            const second = yield* world.facts.when("ConsoleMessage", (fact) =>
+              fact.message.text === "again" && fact !== first)
+            assert.isAbove(
+              DateTime.toEpochMillis(second.message.timestamp),
+              DateTime.toEpochMillis(first.message.timestamp)
+            )
+          }), timeout)
+
+        it.effect("renders a console message's objects as previews of their values", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            const { page } = yield* newPage(world)
+            yield* goto(world, page, `${world.site.origin}/console-previews`)
+            const texts = (yield* world.facts.when("ConsoleMessage", (fact) =>
+              fact.message.text.startsWith("worker")))
+              .message.text
+            const all = world.facts.all("ConsoleMessage").map((fact) =>
+              fact.message.text
+            )
+            assert.deepStrictEqual(all.slice(0, 2), [
+              "[1, 2, 3] {a: 1} Window",
+              "{toString: Function, valueOf: Function}"
+            ])
+            // BiDi serializes an array's holes as `undefined`, so Firefox can't tell one from the other
+            assert.strictEqual(
+              all[2],
+              world.adapter.info.protocol === "bidi"
+                ? "[undefined, 1, undefined, undefined, 2]"
+                : "[empty, 1, empty x 2, 2]"
+            )
+            assert.strictEqual(all[3], "[Array(2), Object] Map(1) {'k' => 1} Set(1) {1} null undefined -0 1n str")
+            assert.strictEqual(all[4], "div#d #document")
+            // An Error reads as its browser describes it, which may include its stack
+            assert.match(all[5]!, /^an error Error: boom/)
+            // A format takes the arguments it names, and the rest follow it. Firefox applies the format itself and
+            // sends the text around an object `%o` took as arguments of their own, which join with a space
+            assert.deepStrictEqual(all.slice(6, 8), [
+              world.adapter.info.protocol === "bidi" ? "{a: 1}  and 5 [2]" : "{a: 1} and 5 [2]",
+              "styled {a: 1}"
+            ])
+            assert.strictEqual(texts, "worker {a: 1}")
           }), timeout)
 
         it.effect("captures overridden viewports and full pages beyond the native view", () =>
@@ -1592,9 +1647,7 @@ export const conformance = (backend: Backend) =>
                 yield* frames.pipe(
                   Stream.take(6),
                   Stream.runForEach((frame) =>
-                    Effect.sync(() =>
-                      seen[key]!.push([frame.width, frame.height])
-                    )
+                    Effect.sync(() => seen[key]!.push([frame.width, frame.height]))
                   ),
                   Effect.timeout("3 seconds"),
                   Effect.ignore
@@ -1811,9 +1864,7 @@ export const conformance = (backend: Backend) =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
             const { context, page } = yield* newPage(world)
-            const directory = (yield* Effect.promise(() =>
-              import("node:os")
-            )).tmpdir() +
+            const directory = (yield* Effect.promise(() => import("node:os"))).tmpdir() +
               `/strider-downloads-${process.pid}`
             const declared = world.adapter.declare({ _tag: "UserContext", context }, {
               _tag: "Downloads",
@@ -1841,6 +1892,7 @@ export const conformance = (backend: Backend) =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
             const { context, page } = yield* newPage(world)
+            const before = Date.now()
             yield* goto(world, page, `${world.site.origin}/worker`)
             const realm = yield* world.facts.when("RealmAdded", (fact) => fact.kind._tag === "Worker")
             assert(realm.kind._tag === "Worker")
@@ -1848,6 +1900,8 @@ export const conformance = (backend: Backend) =>
             // A dedicated worker belongs to its page, and so to its context
             assert.deepStrictEqual([realm.kind.page, realm.kind.context], [Option.some(page), Option.some(context)])
             const message = yield* world.facts.when("ConsoleMessage", (fact) => fact.message.text === "from the worker")
+            assert.isAtLeast(DateTime.toEpochMillis(message.message.timestamp), before)
+            assert.isAtMost(DateTime.toEpochMillis(message.message.timestamp), Date.now())
             // Firefox 158 attributes a dedicated worker's console to its owner, the window realm (recorded 2026-10-20)
             const owner = realm.kind.worker._tag === "Dedicated"
               ? Option.getOrUndefined(realm.kind.worker.owner)

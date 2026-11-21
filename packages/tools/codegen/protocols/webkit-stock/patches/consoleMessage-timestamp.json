@@ -1,0 +1,12 @@
+{
+  "spec": "Console.ConsoleMessage marks timestamp: number optional, \"Time when this message was added. Currently only used when an expensive operation happens\" (WebKitGTK 2.54.1, Source/JavaScriptCore/inspector/protocol/Console.json).",
+  "wire": "WebKitGTK 2.54.1 sends timestamp, in seconds since the epoch, on every Console.messageAdded: each Inspector::ConsoleMessage constructor sets it to the time it is given or else WallTime::now(), and the message is sent with it whenever it is set.",
+  "evidence": "WebKitGTK 2.54.1 source, Source/JavaScriptCore/inspector/ConsoleMessage.cpp: lines 60, 73, 86, 105, 123 and 134 (m_timestamp = timestamp ? timestamp : WallTime::now()), and 263-264 (if (m_timestamp) messageObject->setTimestamp(m_timestamp.secondsSinceEpoch().value())). Every Console.messageAdded in the recorded stock WebKit traffic carries one, such as 1793065316.7090697.",
+  "operations": [
+    {
+      "op": "replace",
+      "path": "/shapes/Console#ConsoleMessage/members/timestamp/optional",
+      "value": false
+    }
+  ]
+}

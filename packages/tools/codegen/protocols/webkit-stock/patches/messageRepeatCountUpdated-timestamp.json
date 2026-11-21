@@ -1,0 +1,12 @@
+{
+  "spec": "Console.messageRepeatCountUpdated marks timestamp: number, \"Timestamp of the latest message\", optional (WebKitGTK 2.54.1, Source/JavaScriptCore/inspector/protocol/Console.json).",
+  "wire": "WebKitGTK 2.54.1 sends timestamp, in seconds since the epoch, on every Console.messageRepeatCountUpdated: the time the message was logged again.",
+  "evidence": "WebKitGTK 2.54.1 source, Source/JavaScriptCore/inspector/ConsoleMessage.cpp, lines 341-342 (ConsoleMessage::updateRepeatCountInConsole): auto timestamp = WallTime::now(); consoleFrontendDispatcher.messageRepeatCountUpdated(m_repeatCount, timestamp.secondsSinceEpoch().value()), the only place the event is sent.",
+  "operations": [
+    {
+      "op": "replace",
+      "path": "/shapes/Console#messageRepeatCountUpdated.Params/members/timestamp/optional",
+      "value": false
+    }
+  ]
+}

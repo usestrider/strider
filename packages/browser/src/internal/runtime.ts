@@ -100,6 +100,7 @@ export interface Runtime {
   readonly settle: (
     operation: string,
     navigation: PageNavigation.Id,
+    page: Target.NavigableId,
     frame: Target.NavigableId,
     url: Option.Option<Url.Url>,
     at: Url.Url,
@@ -695,6 +696,33 @@ const routing = <A, E = never, R = never>(
       const answered = yield* answer(routed.value, last)
       if (Option.isSome(answered)) return answered.value
     }
+  })
+
+/**
+ * The frame a frame locator's steps enter now: its iframe's frame, once the frame has a document; `Missing` when no
+ * iframe matches, or it holds no frame or document yet, and the engine's answer for an iframe it can't enter.
+ */
+export const frameAt = (
+  runtime: Runtime,
+  page: Model.PageEntry,
+  steps: ReadonlyArray<Engine.Step>,
+  id: Diagnostics.OperationId,
+  at: MonotonicInstant.MonotonicInstant
+): Effect.Effect<
+  | { readonly _tag: "Entered"; readonly frame: Target.NavigableId }
+  | { readonly _tag: "Missing" }
+  | { readonly _tag: "Answer"; readonly response: Engine.Response },
+  SendFailure
+> =>
+  routing(runtime, page, steps, false, id, at, (route) => {
+    const last = route.routed.hops.at(-1)
+    return Effect.succeed(Option.some(
+      route._tag === "Answer"
+        ? { _tag: "Answer" as const, response: route.response }
+        : route._tag === "Entered" && last !== undefined
+        ? { _tag: "Entered" as const, frame: last.frame }
+        : { _tag: "Missing" as const }
+    ))
   })
 
 /** What the engine answered, and where. */

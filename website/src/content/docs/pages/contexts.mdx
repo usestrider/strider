@@ -51,6 +51,37 @@ A context someone else made, such as one in a browser you attached to, is listed
 connect is listed once a page opens in it. On Chromium, a context another client removes stays listed until you
 disconnect, though its pages close.
 
+## Events across a context
+
+`PageNavigation` and `PageLifecycle` take a context as well as a page, for the events of every page in it, including
+pages opened after you subscribe, and each of their events names its page. This makes two independent waits before
+the click: one for whichever page of the context loads the receipt, and one for the first page of the context to
+close, which need not be the same page:
+
+```ts
+import { Page, PageLifecycle, PageNavigation, UserContext } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const printReceipt = Effect.fn("printReceipt")(
+  function*(context: UserContext.UserContext, page: Page.Page) {
+    const receipt = yield* PageNavigation.next(context, {
+      url: "**/receipt",
+      waitUntil: "load"
+    })
+    const closed = yield* PageLifecycle.next(context, { events: "Closed" })
+    yield* page.getByRole("button", { name: "Print receipt" }).click()
+    const opened = yield* receipt
+    const gone = yield* closed
+    return { opened: opened.page, closed: gone.page }
+  }
+)
+```
+
+[`PageLifecycle`](/docs/events/kinds#frames-loads-and-closes) reports frames added and removed, loads, and closes;
+console messages, requests, responses, uncaught exceptions, downloads, workers, and connections take a context too,
+with [modules of their own](/docs/events/events#event-modules), while `Popup`, `Dialog`, and `FileChooser` take only a
+page. A context's subscription and a page's each get an event once.
+
 ## Settings for a context's life
 
 Options to `newContext` or `newPage` hold for the context's life. They apply before its first page loads, so what

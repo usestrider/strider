@@ -310,6 +310,24 @@ const pay = Effect.fn("pay")(function*(page: Page.Page) {
 })
 ```
 
+A frame handle holds one frame itself, through its own navigations, until it is removed from the page. `resolve`
+gives the frame a frame locator's iframe holds now, and `page.frameById` takes an id from `page.frames`, which also
+reaches a frame no locator can, such as one in a closed shadow root. The handle navigates and evaluates in its frame:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const openReceipt = Effect.fn("openReceipt")(function*(page: Page.Page) {
+  const frame = yield* page.frame(page.locator("iframe#payment")).resolve
+  yield* frame.goto("https://pay.example.com/receipt", { waitUntil: "load" })
+  return yield* frame.evaluateInMainWorld(() => document.title)
+})
+```
+
+Its `status` is `Attached`, with the frame's URL and document, or `Detached`. Stock WebKit doesn't report a child
+frame's readiness, so there a frame's `goto` can only wait for `"commit"`.
+
 ## Counting matches
 
 An action or read needs exactly one match: several fail it at once with

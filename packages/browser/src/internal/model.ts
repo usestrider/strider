@@ -29,6 +29,7 @@ import type * as NetworkConnection from "../NetworkConnection.ts"
 import type * as NetworkRequest from "../NetworkRequest.ts"
 import type * as NetworkResponse from "../NetworkResponse.ts"
 import type * as Page from "../Page.ts"
+import type * as PageLifecycle from "../PageLifecycle.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
 import * as Target from "../Target.ts"
 import type * as UncaughtException from "../UncaughtException.ts"
@@ -36,6 +37,7 @@ import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
 import type * as Adapter from "./adapter.ts"
 import * as BoundedAdapter from "./boundedAdapter.ts"
+import * as ConsoleArguments from "./consoleArguments.ts"
 import type * as Events from "./events.ts"
 import * as Fold from "./fold.ts"
 import type * as Input from "./input.ts"
@@ -140,6 +142,8 @@ export interface RouteEntry {
 /** A navigation of a page, when it ended. */
 export interface NavigationEvent {
   readonly navigation: PageNavigation.Id
+  /** The page it happened in. */
+  readonly page: Target.NavigableId
   /** The navigable it happened in: the page's own id, or a frame's. */
   readonly frame: Target.NavigableId
   /** Where it ended: the committed document's URL, or the one a same-document navigation set; else where it was going. */
@@ -201,6 +205,12 @@ export interface ResponseEvent {
   readonly hop: HopEntry
 }
 
+/** A hop's end as the browser reported it: never `Forgotten`, nor a failure connection teardown made up. */
+export interface RequestEndEvent {
+  readonly hop: HopEntry
+  readonly end: Exclude<HopEnd, { readonly _tag: "Forgotten" }>
+}
+
 /** A download's progress, and where the browser wrote it once it completed. */
 export interface DownloadState {
   readonly status: Download.Status
@@ -247,8 +257,10 @@ export interface PageEvents {
   readonly fileChooser: Events.Channel<FileChooserEvent>
   readonly autoResolution: Events.Channel<AutoResolutionEvent>
   readonly navigation: Events.Channel<NavigationEvent>
+  readonly lifecycle: Events.Channel<PageLifecycle.PageLifecycle>
   readonly request: Events.Channel<NetworkRequest.NetworkRequest>
   readonly response: Events.Channel<ResponseEvent>
+  readonly requestEnd: Events.Channel<RequestEndEvent>
   readonly console: Events.Channel<ConsoleMessage.ConsoleMessage>
   readonly exception: Events.Channel<UncaughtException.UncaughtException>
   readonly download: Events.Channel<DownloadEntry>
@@ -259,8 +271,11 @@ export interface PageEvents {
 /** The events of a context: the kinds its modules take a context for. */
 export interface ContextEvents {
   readonly autoResolution: Events.Channel<AutoResolutionEvent>
+  readonly navigation: Events.Channel<NavigationEvent>
+  readonly lifecycle: Events.Channel<PageLifecycle.PageLifecycle>
   readonly request: Events.Channel<NetworkRequest.NetworkRequest>
   readonly response: Events.Channel<ResponseEvent>
+  readonly requestEnd: Events.Channel<RequestEndEvent>
   readonly console: Events.Channel<ConsoleMessage.ConsoleMessage>
   readonly exception: Events.Channel<UncaughtException.UncaughtException>
   readonly download: Events.Channel<DownloadEntry>
@@ -319,6 +334,17 @@ export interface PageEntry {
    */
   readonly inputState: Input.State
   readonly events: PageEvents
+  /**
+   * The id of the page, or of the frame, the backend says opened this one, which can name a page or frame the model
+   * doesn't have yet; `None` when it names none.
+   */
+  readonly openerId: Option.Option<Target.NavigableId>
+  /**
+   * The opener's page, once the model has it, or the page of the frame that opened this one: an adopted page can
+   * be listed before its opener, so this is set when the opener's page or frame is added, and kept after it ends,
+   * so a crashed opener stays readable.
+   */
+  opener: PageEntry | undefined
 }
 
 /** A context's settings, from the options it was created with (`UserContext.Options`). */
@@ -414,6 +440,8 @@ export interface Model {
   readonly scope: Scope.Scope
   /** The adapter, its calls bounded by the operation they run in (`boundedAdapter.ts`). */
   readonly adapter: BoundedAdapter.Bounded
+  /** The console arguments kept for subscriptions to calls, and their claims. */
+  readonly consoleArguments: ConsoleArguments.Table
 
   // ── Reads: entities by id, and the state they hold ──
 
@@ -509,7 +537,8 @@ export const maxHops = Fold.maxHops
 export const make = Effect.fnUntraced(function*() {
   const modelScope = yield* Effect.scope
   const ownership = yield* Ownership.make()
-  const fold = yield* Fold.make({ release: ownership.release })
+  const consoleArguments = ConsoleArguments.make()
+  const fold = yield* Fold.make({ release: ownership.release, consoleArguments })
   // Runs after the browser's own finalizers, which close it, and after the watcher of its connection is gone: what
   // is still open, such as a context or page held past the browser's scope, ends with the browser
   yield* Effect.addFinalizer(() => fold.loseConnection(new Target.BrowserClosed({})))
@@ -542,6 +571,7 @@ export const make = Effect.fnUntraced(function*() {
       const model: Model = {
         scope: modelScope,
         adapter: bounded,
+        consoleArguments,
         pages: fold.pages,
         contexts: fold.contexts,
         touchContexts: fold.touchContexts,

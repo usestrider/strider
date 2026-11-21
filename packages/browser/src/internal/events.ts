@@ -50,7 +50,16 @@ export interface End {
 export type Failure = Subscription.EventOverflow | Target.TargetGone | Cause.Done
 
 interface Subscriber<A> {
-  readonly onEnd: ((how: End) => void) | undefined
+  /**
+   * A wait's end path: given the entries still queued, it latches the end itself and returns `true`, or returns
+   * `false` to have the queue end, or fail, after them.
+   */
+  readonly onEnd: ((how: End, pending: number) => boolean) | undefined
+  /**
+   * Told that the subscription ended before its scope closed: its target ended, or it overflowed, with the entry
+   * that overflowed it, which it never queued.
+   */
+  readonly settled: ((overflowed?: A) => void) | undefined
   readonly accepts: (entry: Entry<A>) => boolean
   readonly queue: Queue.Queue<Entry<A>, Failure>
   /** The entries offered already, so a revised entry reaches a subscription at most once. */
@@ -93,6 +102,7 @@ const offer = <A>(channel: Channel<A>, entry: Entry<A>): void => {
     if (Queue.offerUnsafe(subscriber.queue, entry)) continue
     // A full buffer fails its own subscription, and no other
     channel.subscribers.delete(subscriber)
+    subscriber.settled?.(entry.value)
     Queue.failCauseUnsafe(
       subscriber.queue,
       Cause.fail(
@@ -145,8 +155,8 @@ export const end = <A>(channel: Channel<A>, how: End): void => {
 }
 
 const close = <A>(channel: Channel<A>, subscriber: Subscriber<A>, how: End): void => {
-  if (subscriber.onEnd !== undefined) {
-    subscriber.onEnd(how)
+  subscriber.settled?.()
+  if (subscriber.onEnd !== undefined && subscriber.onEnd(how, Queue.sizeUnsafe(subscriber.queue))) {
     Queue.shutdownUnsafe(subscriber.queue)
   } else if (how.normal) Queue.endUnsafe(subscriber.queue)
   else Queue.failCauseUnsafe(subscriber.queue, Cause.fail(gone(channel.target, how.reason)))
@@ -157,11 +167,20 @@ const subscribe = <A>(
   channel: Channel<A>,
   accepts: (entry: Entry<A>) => boolean,
   bound: number,
-  onEnd?: ((how: End) => void) | undefined
+  onEnd?: ((how: End, pending: number) => boolean) | undefined,
+  settled?: ((overflowed?: A) => void) | undefined
 ): Effect.Effect<Subscriber<A>, never, Scope.Scope> =>
   Effect.gen(function*() {
     const queue = yield* Queue.make<Entry<A>, Failure>({ capacity: bound })
-    const subscriber: Subscriber<A> = { accepts, queue, offered: new WeakSet(), bound, from: channel.published, onEnd }
+    const subscriber: Subscriber<A> = {
+      accepts,
+      queue,
+      offered: new WeakSet(),
+      bound,
+      from: channel.published,
+      onEnd,
+      settled
+    }
     if (Option.isSome(channel.end)) {
       close(channel, subscriber, channel.end.value)
       return subscriber
@@ -222,7 +241,9 @@ export const next = <A, B, PE, PR, DE = never>(
   channel: Channel<A>,
   accepts: (entry: Entry<A>) => boolean,
   where: Subscription.Where<B, PE, PR> | undefined,
-  delivery: Delivery<A, B, DE> = immediate(kind) as Delivery<A, B, DE>
+  delivery: Delivery<A, B, DE> = immediate(kind) as Delivery<A, B, DE>,
+  /** Told once that the wait ended, and whether it failed. */
+  ended?: ((failed: boolean) => void) | undefined
 ): Effect.Effect<
   Effect.Effect<B, PE | DE | Target.TargetGone | Deadline.Timeout>,
   never,
@@ -249,17 +270,26 @@ export const next = <A, B, PE, PR, DE = never>(
       if (outcome === undefined) {
         outcome = exit
         release()
+        ended?.(Exit.isFailure(exit))
       }
       if (notify) Deferred.doneUnsafe(deferred, outcome)
     }
-    const registered = yield* subscribe(channel, accepts, Number.POSITIVE_INFINITY, (how) =>
-      commit(Exit.fail(gone(channel.target, how.reason)))).pipe(Effect.provideService(Scope.Scope, lifetime))
+    // The entry being delivered, if the deadline passes while it is
+    let delivering: Option.Option<A> = Option.none()
+    // Whether an entry is being delivered or checked against `where`
+    let busy = false
+    // Entries queued before the end, with none being delivered, are still the wait's: the queue ends after them,
+    // and the worker delivers and checks them first, failing the wait once it is empty. Otherwise the end latches
+    // `TargetGone` now, so a delivery or predicate blocked on the ended target can't hold the wait.
+    const registered = yield* subscribe(channel, accepts, Number.POSITIVE_INFINITY, (how, pending) => {
+      if (pending > 0 && !busy) return false
+      commit(Exit.fail(gone(channel.target, how.reason)))
+      return true
+    }).pipe(Effect.provideService(Scope.Scope, lifetime))
     subscriber = registered
     if (outcome !== undefined) {
       release()
     }
-    // The entry being delivered, if the deadline passes while it is
-    let delivering: Option.Option<A> = Option.none()
     const take: Effect.Effect<B, PE | DE | Target.TargetGone | Subscription.EventOverflow | Cause.Done> = Effect.gen(
       function*() {
         while (true) {
@@ -270,6 +300,7 @@ export const next = <A, B, PE, PR, DE = never>(
           if (outcome !== undefined) {
             return yield* Effect.interrupt
           }
+          busy = true
           delivering = Option.some(entry.value)
           const event = yield* delivery.deliver(entry.value)
           delivering = Option.none()
@@ -279,6 +310,7 @@ export const next = <A, B, PE, PR, DE = never>(
           if (where === undefined || (yield* Effect.provideContext(where(event), context))) {
             return event
           }
+          busy = false
         }
       }
     )
@@ -286,9 +318,7 @@ export const next = <A, B, PE, PR, DE = never>(
       if (Option.isSome(delivering)) {
         return Option.some(delivery.unfinished(delivering.value))
       }
-      const late = channel.entries.filter((entry) =>
-        entry.sequence < since && accepts(entry)
-      ).at(-1)
+      const late = channel.entries.filter((entry) => entry.sequence < since && accepts(entry)).at(-1)
       return late === undefined ? Option.none() : Option.some(
         `${kind.noun} came ${
           Math.round((subscribed - late.at) / 1e6)
@@ -319,9 +349,7 @@ export const next = <A, B, PE, PR, DE = never>(
     // Notify at the deadline, but leave this scope attached until the delivery worker exits.
     // Closing it here would detach it before its uninterruptible work has stopped.
     yield* record.bound(Effect.never, missed, "waitingForEvent").pipe(
-      Effect.onExit((exit) =>
-        Effect.sync(() => commit(exit))
-      ),
+      Effect.onExit((exit) => Effect.sync(() => commit(exit))),
       Effect.forkIn(lifetime)
     )
     yield* Effect.raceFirst(work, Deferred.await(deferred)).pipe(
@@ -348,7 +376,12 @@ export const stream = <A, B, PE, PR, DE = never>(
   channel: Channel<A>,
   accepts: (entry: Entry<A>) => boolean,
   where: Subscription.Where<B, PE, PR> | undefined,
-  delivery?: Delivery<A, B, DE>
+  delivery?: Delivery<A, B, DE>,
+  /**
+   * Told once that the stream's subscription ended, with the entry that overflowed it, if it did; what it queued
+   * before is still delivered.
+   */
+  ended?: ((overflowed: A | undefined) => void) | undefined
 ): Effect.Effect<
   Stream.Stream<B, PE | DE | Subscription.EventOverflow | Target.TargetGone>,
   never,
@@ -356,7 +389,13 @@ export const stream = <A, B, PE, PR, DE = never>(
 > =>
   Effect.gen(function*() {
     const context = yield* Effect.context<PR>()
-    const subscriber = yield* subscribe(channel, accepts, yield* Subscription.Capacity)
+    let told = false
+    const settled = (overflowed?: A) => {
+      if (told) return
+      told = true
+      ended?.(overflowed)
+    }
+    const subscriber = yield* subscribe(channel, accepts, yield* Subscription.Capacity, undefined, settled)
     const entries = Stream.fromQueue(subscriber.queue)
     const events: Stream.Stream<B, DE | Subscription.EventOverflow | Target.TargetGone> = delivery === undefined
       ? entries.pipe(Stream.map((entry) => kind.deliver(entry.value)))

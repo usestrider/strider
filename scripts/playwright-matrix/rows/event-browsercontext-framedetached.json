@@ -3,13 +3,19 @@
   "upstream": [
     "event:BrowserContext.frameDetached"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding UserContext operation/event. Its public API provides pages/workers, cookies, clock, storage export, routes, scripts, scoped emulation and grants; it does not implement this contract.",
+  "status": "has",
+  "api": [
+    {
+      "module": "PageLifecycle",
+      "symbol": "stream",
+      "url": "/docs/api/browser/PageLifecycle#stream"
+    }
+  ],
+  "notes": "`FrameRemoved` events on a context, one for each frame removed, nested frames included. Subscribe before the triggering action.",
   "capabilities": [],
   "audit": {
     "sources": [
-      "packages/browser/src/UserContext.ts"
+      "packages/browser/src/PageLifecycle.ts"
     ],
     "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
   },

@@ -22,13 +22,25 @@ import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as BrowserClock from "../browserClock.ts"
 import * as ConsoleFormat from "../consoleFormat.ts"
+import * as EpochTime from "../epochTime.ts"
 import * as Argument from "../evaluationArgument.ts"
 import * as Groups from "../objectGroups.ts"
 import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
 import * as Urls from "../urls.ts"
 import * as HostBridge from "./hostBridge.ts"
-import { closingOf, contextKey, documentOf, type Event, frameOf, realmEnd, realmOf, type State } from "./state.ts"
+import {
+  closingOf,
+  contextKey,
+  documentOf,
+  type Event,
+  frameById,
+  frameOf,
+  placement,
+  realmEnd,
+  realmOf,
+  type State
+} from "./state.ts"
 import { addRealm, removeRealm } from "./tree.ts"
 
 // ── Remote values ─────────────────────────────────────────────────────────────────────────────────────────
@@ -283,9 +295,24 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       const realm = state.realmsByContext.get(contextKey(target, params.executionContextId as number))
       if (realm === undefined) return
       const top = params.stackTrace?.callFrames[0]
+      const page = realm.frame?.page ?? realm.target.page
+      // Only where a subscriber asked for them does a message keep its arguments, each object as a handle
+      const args = page !== undefined && state.registry.consoleArguments(placement(page))
+        ? {
+          values: params.args.map((object): Adapter.RemoteValue => {
+            const value = toRemoteValue(shallow(object), (loaderId) => state.documentsByLoader.get(loaderId)?.id)
+            if (object.objectId === undefined) return value
+            const handle = state.ids.handle()
+            state.handles.set(handle, { target: realm.target, realm, objectId: object.objectId, group: undefined })
+            return withHandle(value, handle)
+          }),
+          release: (handles: ReadonlyArray<Adapter.HandleId>) => releaseHandles(state, handles)
+        }
+        : undefined
       state.buffer.emitFrom(realm, {
         _tag: "ConsoleMessage",
         realm: Option.some(realm.id),
+        args,
         message: new ConsoleMessage.ConsoleMessage({
           level: Kit.consoleLevel(params.type),
           text: ConsoleFormat.format(params.args.map(Kit.argumentOf)),
@@ -300,6 +327,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
             ? { _tag: "Page", page: realm.frame.page.id }
             : { _tag: "Worker", realm: realm.id },
           source: { _tag: "Page" },
+          timestamp: EpochTime.fromMillis(params.timestamp),
           at: Adapter.now()
         })
       })
@@ -347,6 +375,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
             ? { _tag: "Worker", realm: realm.id }
             : { _tag: "Page", page: page!.id },
           source: { _tag: "Browser", category: categoryOf(entry) },
+          timestamp: EpochTime.fromMillis(entry.timestamp),
           at: Adapter.now()
         })
       }
@@ -660,3 +689,13 @@ export const releaseHandles = (state: State, list: ReadonlyArray<Adapter.HandleI
         Effect.ignore
       )
   }, { concurrency: "unbounded", discard: true })
+
+/**
+ * A round trip on the frame's session: `Runtime.getIsolateId` changes nothing, and once its reply is in, the
+ * worker folds every event received before it, on any session of the connection.
+ */
+export const settled = Effect.fnUntraced(function*(state: State, id: L1Target.NavigableId) {
+  const frame = yield* Effect.option(frameById(state, id))
+  if (Option.isSome(frame)) yield* Effect.ignore(Runtime.getIsolateId().pipe(Protocol.on(frame.value.owner.session)))
+  yield* state.buffer.run(() => {})
+})
