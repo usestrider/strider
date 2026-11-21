@@ -1234,10 +1234,12 @@ export type RequestBody =
   | { readonly _tag: "OverLimit" }
   | { readonly _tag: "Unavailable"; readonly why: "notCollected" | "redirect" | "unavailable" }
 
-/** How a video is recorded: its size in pixels, an optional constant frame rate, and a directory for its file. */
+/**
+ * How a video is recorded: its size in pixels, an optional constant frame rate, and a directory for its file. Without
+ * a size, the backend fits the viewport into 800 by 800 from what a navigation can't take away: never a page realm.
+ */
 export interface VideoOptions {
-  readonly width: number
-  readonly height: number
+  readonly size: Option.Option<{ readonly width: number; readonly height: number }>
   readonly fps: Option.Option<number>
   /** Where the file goes in place of the context's downloads directory, or the backend's own. */
   readonly directory: Option.Option<string>

@@ -189,8 +189,9 @@ export interface VideoOptions {
    * fit, centred, and padded black. On Firefox it is a box: the page is fitted inside it with its shape kept and no
    * padding, so one side may be shorter.
    *
-   * @default the page's viewport in CSS pixels when the capability is acquired, scaled down (never up) to fit 800 by
-   * 800: a 1280 by 720 viewport gives 800 by 450
+   * @default the page's viewport when the capability is acquired, scaled down (never up) to fit 800 by 800: a 1280 by
+   * 720 viewport gives 800 by 450. It is in CSS pixels, except on WebKit without an emulated viewport, where it is the
+   * first picture's size in device pixels
    */
   readonly size?: { readonly width: number; readonly height: number } | undefined
   /**

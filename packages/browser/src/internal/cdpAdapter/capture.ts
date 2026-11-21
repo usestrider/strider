@@ -30,6 +30,7 @@ import * as BrowserClock from "../browserClock.ts"
 import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
 import * as Video from "../video.ts"
+import * as VideoOptions from "../videoOptions.ts"
 import { type CaptureGuard, downloadDirectory, pageOf, type State, type TargetEntry } from "./state.ts"
 
 interface Guard {
@@ -605,6 +606,18 @@ export const video = Effect.fnUntraced(
     if (Option.isNone(directory)) {
       return yield* Effect.fail(Kit.unsupported("capability.video", "The context must allow downloads to a directory"))
     }
+    // Without a size, the window's layout viewport in CSS pixels, read on the page's session, which a navigation
+    // keeps, unlike a realm
+    const size = Option.isSome(options.size)
+      ? options.size.value
+      : yield* layoutMetrics(page.target.session).pipe(
+        Effect.map((metrics) =>
+          VideoOptions.defaultSize({
+            width: metrics.cssLayoutViewport.clientWidth,
+            height: metrics.cssLayoutViewport.clientHeight
+          })
+        )
+      )
     return yield* Video.record(
       Effect.gen(function*() {
         const frames = yield* screencastDeliveries(state, id)
@@ -628,7 +641,7 @@ export const video = Effect.fnUntraced(
       }),
       writer.value,
       directory.value,
-      options
+      { size: Option.some(size), fps: options.fps }
     )
   }
 )

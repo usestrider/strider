@@ -19,7 +19,6 @@ import * as Reason from "../Reason.ts"
 import * as Target from "../Target.ts"
 import type * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
-import * as Evaluation from "./evaluation.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import * as Runtime from "./runtime.ts"
@@ -49,50 +48,6 @@ const fromAdapter = (runtime: Runtime.Runtime, capability: string, id: Diagnosti
 /** The page's end, as a `TargetGone`. */
 const gone = (page: Model.PageEntry, reason: Target.CloseReason, id: Diagnostics.OperationId) =>
   new Target.TargetGone({ target: { _tag: "Page", id: page.id }, reason, diagnostics: Operation.diagnostics(id) })
-
-/** The viewport in CSS pixels: the one emulated, or else the window's. */
-const viewport = Effect.fnUntraced(function*(runtime: Runtime.Runtime, page: Model.PageEntry) {
-  const record = yield* Operation.record
-  const declared = yield* runtime.model.adapter.viewportSize(page.id).pipe(
-    Effect.mapError(fromAdapter(runtime, "Video", record.id))
-  )
-  if (Option.isSome(declared)) return declared.value
-  const realm = yield* Evaluation.pageRealm(
-    runtime,
-    page,
-    yield* Runtime.engineWorld(runtime),
-    record.id,
-    record.budget.at
-  ).pipe(
-    Effect.mapError((failure) =>
-      failure._tag === "Gone"
-        ? failure.error
-        : failure._tag === "Deadline"
-        ? record.timeout(Option.some("The page had no document to measure before the deadline"))
-        : capabilityError(
-          "Video",
-          new Reason.BackendFailure({ kind: "Rejected", method: "viewport", hint: failure.reason.message }),
-          record.id
-        )
-    )
-  )
-  const measured = yield* runtime.model.adapter.evaluate(realm, {
-    functionDeclaration: "() => [innerWidth, innerHeight]",
-    arguments: [],
-    awaitPromise: false,
-    result: "value",
-    userActivation: false
-  }).pipe(Effect.mapError(fromAdapter(runtime, "Video", record.id)))
-  const [width, height] = measured._tag === "Value" && measured.value.type === "array"
-    ? (measured.value.value ?? []).map((each) => each.type === "number" ? each.value : undefined)
-    : []
-  if (typeof width === "number" && typeof height === "number" && width > 0 && height > 0) return { width, height }
-  return yield* Effect.fail(capabilityError(
-    "Video",
-    new Reason.BackendFailure({ kind: "IncompatibleResponse", method: "viewport", hint: "The window has no size" }),
-    record.id
-  ))
-})
 
 /** A video of a page: its options checked, its size settled, and its file moved to `path` when it ends. */
 const video = Effect.fnUntraced(function*(
@@ -141,10 +96,15 @@ const video = Effect.fnUntraced(function*(
     }
     directory = Option.some(parent)
   }
-  const size = options.size ?? VideoOptions.defaultSize(yield* viewport(runtime, page))
+  // A declared viewport is the model's, so it is read here; without one, the backend measures the window in a way a
+  // navigation can't interrupt
+  const declared = options.size === undefined
+    ? yield* runtime.model.adapter.viewportSize(page.id).pipe(Effect.mapError(fromAdapter(runtime, "Video", id)))
+    : Option.none()
   const written = yield* runtime.model.adapter.video(page.id, {
-    width: size.width,
-    height: size.height,
+    size: options.size !== undefined
+      ? Option.some(options.size)
+      : Option.map(declared, VideoOptions.defaultSize),
     fps: Option.fromNullishOr(options.fps),
     directory
   }).pipe(Effect.mapError(fromAdapter(runtime, "Video", id)))

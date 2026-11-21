@@ -125,9 +125,10 @@ export const video = Effect.fnUntraced(function*(
   const started = yield* Kit.protocol(state.send(BrowsingContext.startScreencast({
     context: navigable.bidi,
     destinationFolder: directory,
+    // Without a size, an 800 by 800 box: Firefox fits the viewport inside it, scaling down and never up, which is the
+    // default without a measurement a navigation could interrupt
     video: {
-      width: options.width,
-      height: options.height,
+      ...Option.getOrElse(options.size, () => ({ width: 800, height: 800 })),
       ...(Option.isSome(options.fps) ? { frameRate: options.fps.value } : {})
     }
   })))
