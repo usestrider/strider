@@ -6915,6 +6915,18 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
+      it.effect("expects rendered text inside an iframe", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<iframe srcdoc='<p>Hello <span hidden>secret </span>World</p>'></iframe>`
+          )
+          const page = yield* newPage
+          yield* page.goto(url)
+          const target = page.frame(page.locator("iframe")).locator("p")
+          yield* Expect.toHaveText(target, "Hello World", { useInnerText: true })
+          yield* target.pipe(Expect.toContainText(["o W"], { useInnerText: true }))
+        })), timeout)
+
       it.effect(
         "expects text, attributes and URLs ignoring case, rendered text, and contained lists",
         () =>
