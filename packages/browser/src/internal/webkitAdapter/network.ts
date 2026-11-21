@@ -85,21 +85,20 @@ const emitResponse = (state: State, request: RequestEntry, response: Network.Res
 
 /**
  * The TLS details of an HTTPS response, from its certificate: WebKit sends `security` as `{}` for plain HTTP and
- * none for a redirect, its certificate names no issuer, and the TLS version comes only as the response ends, in
+ * none for a redirect, and its certificate names no issuer. The TLS version comes only as the response ends, in
  * `loadingFinished`'s metrics.
  */
 const securityDetails = (response: Network.Response) => {
-  const connection = response.security?.connection
   const certificate = response.security?.certificate
-  return connection === undefined && certificate === undefined
+  return certificate === undefined
     ? Option.none()
     : Option.some(
       new NetworkResponse.SecurityDetails({
-        protocol: Option.fromUndefinedOr(connection?.protocol || undefined),
-        subjectName: Option.fromUndefinedOr(certificate?.subject || undefined),
+        protocol: Option.none(),
+        subjectName: Option.fromUndefinedOr(certificate.subject || undefined),
         issuer: Option.none(),
-        validFrom: Option.fromUndefinedOr(certificate?.validFrom),
-        validTo: Option.fromUndefinedOr(certificate?.validUntil)
+        validFrom: Option.fromUndefinedOr(certificate.validFrom),
+        validTo: Option.fromUndefinedOr(certificate.validUntil)
       })
     )
 }
