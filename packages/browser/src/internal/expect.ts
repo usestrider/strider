@@ -792,6 +792,15 @@ export const toSatisfy = (locator: Locator.ReadonlyLocator, fn: Function, args: 
         const raced = yield* Effect.raceFirst(
           Effect.map(call, (checked) => ({ _tag: "Checked" as const, checked })),
           Effect.map(Fiber.join(fiber), (reason) => ({ _tag: "Serviced" as const, reason }))
+        ).pipe(
+          // On a failed check, a handler failure or interruption, servicing ends with the check: a handler mid-run
+          // finishes, and none starts after, before the expectation releases its watches
+          Effect.onError(() =>
+            Effect.suspend(() => {
+              done = true
+              return busy ? Effect.asVoid(Effect.exit(Fiber.join(fiber))) : Effect.asVoid(Fiber.interrupt(fiber))
+            })
+          )
         )
         done = true
         const reason = raced._tag === "Serviced"
