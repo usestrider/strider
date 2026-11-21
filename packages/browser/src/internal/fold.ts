@@ -207,6 +207,15 @@ export const make = Effect.fnUntraced(function*(options: {
   const contextList = yield* cell<ReadonlyArray<Model.ContextEntry>>([])
   // Frames, by the page they belong to
   const frames = new Map<Target.NavigableId, Model.PageEntry>()
+  // The popups whose opener the backend named before the model had it, by the opener's id: an attached browser can
+  // list a popup before the page or frame that opened it
+  const awaitingOpener = new Map<Target.NavigableId, Set<Model.PageEntry>>()
+  const resolveOpener = (id: Target.NavigableId, opener: Model.PageEntry) => {
+    const waiting = awaitingOpener.get(id)
+    if (waiting === undefined) return
+    awaitingOpener.delete(id)
+    for (const popup of waiting) popup.opener = opener
+  }
   const documents = new Map<Target.DocumentId, Model.DocumentEntry>()
   const navigations = NetworkIndex.bounded<PageNavigation.Id, Model.NavigationEntry>(maxNavigations)
   // A page's navigations and its frames', from their start to their end: where they went, for the event
@@ -381,6 +390,11 @@ export const make = Effect.fnUntraced(function*(options: {
     }
     pages.delete(page.id)
     page.contextEntry.storageSources?.origins.delete(page.id)
+    if (page.opener === undefined && Option.isSome(page.openerId)) {
+      const waiting = awaitingOpener.get(page.openerId.value)
+      waiting?.delete(page)
+      if (waiting?.size === 0) awaitingOpener.delete(page.openerId.value)
+    }
     yield* update(pageList, (list) => list.filter((each) => each !== page))
     popupUrls.delete(page.id)
     const closing = new Set<Target.NavigableId>([page.id])
@@ -554,6 +568,7 @@ export const make = Effect.fnUntraced(function*(options: {
           const opener = fact.kind === "popup" && fact.origin._tag === "Opened"
             ? Option.flatMap(fact.origin.opener, (id) => Option.fromNullishOr(pages.get(id)))
             : Option.none()
+          const openerId = fact.origin._tag === "Created" ? Option.none<Target.NavigableId>() : fact.origin.opener
           // Owned with its opener, released by the scope that acquired it (CONCEPTS.md §3)
           const owner = Option.flatMap(opener, (page) => page.state.getUnsafe().owner)
           const entry: Model.PageEntry = {
@@ -591,9 +606,18 @@ export const make = Effect.fnUntraced(function*(options: {
               download: Events.make(target, cap),
               worker: Events.make(target, cap),
               connection: Events.make(target, cap)
-            }
+            },
+            openerId,
+            // A popup a frame opened names that frame's page
+            opener: Option.isSome(openerId) ? pages.get(openerId.value) ?? frames.get(openerId.value) : undefined
           }
           pages.set(fact.page, entry)
+          if (entry.opener === undefined && Option.isSome(openerId)) {
+            const waiting = awaitingOpener.get(openerId.value)
+            if (waiting === undefined) awaitingOpener.set(openerId.value, new Set([entry]))
+            else waiting.add(entry)
+          }
+          resolveOpener(fact.page, entry)
           // A popup is reported to its opener, when the backend names one; before the
           // context's pages change, so a caller woken by that change subscribes after it, as with every event
           if (Option.isSome(opener)) {
@@ -617,6 +641,7 @@ export const make = Effect.fnUntraced(function*(options: {
           const page = pageOf(fact.page)
           if (Option.isNone(page)) return
           frames.set(fact.frame, page.value)
+          resolveOpener(fact.frame, page.value)
           const frame: Model.FrameEntry = {
             id: fact.frame,
             parent: fact.parent,

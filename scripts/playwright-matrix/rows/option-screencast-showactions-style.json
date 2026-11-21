@@ -1,8 +1,16 @@
 {
-  "status": "missing",
-  "api": [],
-  "notes": "The parent capability is missing; this option is not implemented by that contract.",
-  "capabilities": [],
+  "status": "has",
+  "api": [
+    {
+      "module": "Capability",
+      "symbol": "OverlayControl",
+      "url": "/docs/api/browser/Capability#OverlayControl"
+    }
+  ],
+  "notes": "style takes point, highlight and title CSS declarations; point and highlight are drawn only when given.",
+  "capabilities": [
+    "capability.overlay"
+  ],
   "id": "option-screencast-showactions-style",
   "upstream": [
     "method:Screencast.showActions"

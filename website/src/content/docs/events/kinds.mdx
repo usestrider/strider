@@ -104,6 +104,25 @@ On Chromium, a popup's opener stops rendering, and actions on it time out with a
 names no opener, so `Popup.next` fails there with `Unsupported`:
 [wait for the context's new page](/docs/browsers/webkit#differences) instead.
 
+`Popup.opener` goes the other way, from a page to the page that opened it. It gives `Option.none()` for a page no
+page opened, and once the opener closed:
+
+```ts
+import { Page, Popup } from "@usestrider/browser"
+import { Effect, Option } from "effect"
+
+const openedBy = Effect.fn("openedBy")(
+  function*(popup: Page.ObservedPage, page: Page.ObservedPage) {
+    const opener = yield* Popup.opener(popup)
+    return Option.isSome(opener) && opener.value.id === page.id
+  }
+)
+```
+
+The opener comes back as an observed page, which reads but doesn't act; if you made the opener, you already hold it
+as a `Page`. A crashed opener is still given, and its `closed` gives `PageCrashed`. On WebKit, `Popup.opener` fails
+with `Unsupported` too.
+
 ## Dialogs and file choosers
 
 A handler decides each dialog as it opens, until its scope closes. Register it before the action, since a dialog

@@ -3,13 +3,21 @@
   "upstream": [
     "method:Page.opener"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding Page operation/event. Generic main-world evaluation is available, but does not implement this named contract and its waiting/lifetime guarantees.",
-  "capabilities": [],
+  "status": "has",
+  "api": [
+    {
+      "module": "Popup",
+      "symbol": "opener",
+      "url": "/docs/api/browser/Popup#opener"
+    }
+  ],
+  "notes": "A module function over the page: Option.none() for a page no page opened and once its opener closed; a crashed opener is still given. The opener is an observed page.",
+  "capabilities": [
+    "popups.opener"
+  ],
   "audit": {
     "sources": [
-      "packages/browser/src/Page.ts"
+      "packages/browser/src/Popup.ts"
     ],
     "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
   },

@@ -227,6 +227,22 @@ const syntheticDrag = (
 /** How a snapshot of this owner's page makes the locator for a ref. */
 export const locatorOn = (owner: Owner): Locate => (steps, label) => new LocatorImpl(owner, steps, label)
 
+/** The actions that send input, which a page showing its actions annotates. */
+const annotatedActions = new Set([
+  "Locator.click",
+  "Locator.dblclick",
+  "Locator.hover",
+  "Locator.tap",
+  "Locator.check",
+  "Locator.uncheck",
+  "Locator.dragTo",
+  "Locator.fill",
+  "Locator.press",
+  "Locator.pressSequentially",
+  "Locator.selectOption",
+  "Locator.clear"
+])
+
 /** What `readJSProperty` found: the value at its path, or how many elements matched when that isn't one. */
 type JSPropertyRead =
   | { readonly _tag: "Value"; readonly value: unknown }
@@ -2050,6 +2066,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       // A round that reached the deadline is the action's own Timeout, with what the record saw
       const attempts = Effect.gen({ self: this }, function*() {
         let firstObservation = true
+        let annotated = false
         while (true) {
           const left = record.left()
           if (left <= 0) return yield* Effect.fail(timedOut())
@@ -2065,6 +2082,20 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
             Effect.flatMap(settle)
           )
           if (Option.isNone(first)) continue
+          // A page that shows its actions draws this one, and waits, once, before the last check and the input; a trial
+          // sends no input, so it has nothing to show
+          const annotate = owner.page.execution.annotate
+          if (annotate !== undefined && !annotated && options?.trial !== true && annotatedActions.has(operation)) {
+            annotated = true
+            yield* annotate({
+              title: `${operation.slice("Locator.".length)} ${this.description}`,
+              point: first.value.response.point,
+              box: this.boundingBox.pipe(
+                Effect.map(Option.map((box) => ({ x: box.x, y: box.y, width: box.width, height: box.height }))),
+                Effect.catch(() => Effect.succeedNone)
+              )
+            })
+          }
           // Input to a page is serialized; acquiring the permit takes from the deadline, and the checks run again
           const underPermit = Effect.fnUntraced(function*(this: LocatorImpl, stability?: string) {
             const apply = options?.trial !== true
