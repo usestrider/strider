@@ -4,7 +4,7 @@
  * one paused at a playback rate of 0 left alone, and an element captured where its animation leaves it.
  */
 import { assert } from "@effect/vitest"
-import { Expect } from "@usestrider/browser"
+import { Deadline, Expect } from "@usestrider/browser"
 import type { Page } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import { pngRegion } from "../../pngRegion.ts"
@@ -112,6 +112,36 @@ export const animations = <R>(it: ReturnType<typeof SharedContext.guard<R>>) => 
           `getComputedStyle(trigger).opacity;trigger.classList.add("on")</script>`
       )
       const png = yield* page.screenshot({ animations: "disabled" })
+      assert.isTrue(pixelsAt(png, 10, 10, isRed))
+    }))
+
+  it.effect("stops animations in a shadow root that a second round of end handlers attaches", () =>
+    Effect.gen(function*() {
+      const page = yield* opened(
+        `<style>#trigger{opacity:0;transition:opacity 1000s}#trigger.on{opacity:1}</style>` +
+          `<div id="trigger"></div><div id="first"></div><div id="second"></div><script>` +
+          `trigger.addEventListener("transitionend",()=>{const root=first.attachShadow({mode:"open"});` +
+          `root.innerHTML=${
+            JSON.stringify(`<style>#t2{opacity:0;transition:opacity 1000s}#t2.on{opacity:1}</style><div id="t2"></div>`)
+          };const next=root.getElementById("t2");` +
+          `next.addEventListener("transitionend",()=>{second.attachShadow({mode:"open"}).innerHTML=` +
+          `${JSON.stringify(`${infinite()}<div class="box"></div>`)}});` +
+          `getComputedStyle(next).opacity;next.classList.add("on")});` +
+          `getComputedStyle(trigger).opacity;trigger.classList.add("on")</script>`
+      )
+      const png = yield* page.screenshot({ animations: "disabled" })
+      assert.isTrue(pixelsAt(png, 10, 10, isRed))
+    }))
+
+  it.effect("captures with a frame still loading", () =>
+    Effect.gen(function*() {
+      const page = yield* opened(`${infinite()}<div class="box"></div>`)
+      yield* page.evaluateInMainWorld(() => {
+        const frame = document.createElement("iframe")
+        frame.src = "/slow-page"
+        document.body.append(frame)
+      })
+      const png = yield* page.screenshot({ animations: "disabled" }).pipe(Deadline.within("3 seconds"))
       assert.isTrue(pixelsAt(png, 10, 10, isRed))
     }))
 

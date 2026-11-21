@@ -6,6 +6,7 @@
  */
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import * as Stream from "effect/Stream"
 import type * as Deadline from "../Deadline.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
 import * as Locator from "../Locator.ts"
@@ -101,21 +102,27 @@ const elementBox = (
     return Option.some({ x: x + scroll.x, y: y + scroll.y, width: response.rect.width, height: response.rect.height })
   })
 
-/** The page's current documents, its frames' included. */
-const documentsOf = (page: Model.PageEntry): Effect.Effect<ReadonlyArray<Target.DocumentId>> =>
-  Effect.map(page.state.get, ({ frames, status }) => {
-    const documents: Array<Target.DocumentId> = []
-    if (status._tag === "Open") documents.push(status.document.id)
-    for (const frame of frames) documents.push(...Option.toArray(frame.document))
-    return documents
-  })
+/** The page's current documents, its frames' included, each with the frame it is the document of. */
+const documentsOf = (
+  state: Model.PageState,
+  page: Model.PageEntry
+): ReadonlyArray<{ readonly frame: Target.NavigableId; readonly document: Target.DocumentId }> => {
+  const documents: Array<{ readonly frame: Target.NavigableId; readonly document: Target.DocumentId }> = []
+  if (state.status._tag === "Open") documents.push({ frame: page.id, document: state.status.document.id })
+  for (const frame of state.frames) {
+    if (Option.isSome(frame.document)) documents.push({ frame: frame.id, document: frame.document.value })
+  }
+  return documents
+}
 
 /**
  * Runs `self` with the animations of every document of the page stopped (the engine's `animationsStop`), and
- * resumes them however it exits. Stopping them can add documents, as a frame an end event's handler attaches, so
- * the page's documents are read again after each round of stops until none is new. A document that has gone has
- * nothing to resume, and a resumption that fails, or that the page doesn't answer within 5 seconds, leaves the
- * capture's own result as it is.
+ * resumes them however it exits. Stopping them can add frames, as one an end event's handler attaches, and the
+ * page reports them before the browser's events about them arrive, so each stopped document answers with its
+ * child frame count, and preparation waits, within the operation's deadline, until the page's state holds that
+ * many frames with a document under each stopped document's frame, stopping each document new to it, before
+ * `self` runs. A document that has gone has nothing to resume, and a resumption that fails, or that the page
+ * doesn't answer within 5 seconds, leaves the capture's own result as it is.
  */
 const animationsStopped = <A, E>(
   runtime: Runtime.Runtime,
@@ -125,27 +132,57 @@ const animationsStopped = <A, E>(
   self: Effect.Effect<A, E>
 ): Effect.Effect<A, E | Page.PageError | Target.TargetGone | Deadline.Timeout> => {
   const token = record.id
-  const stop = (document: Target.DocumentId) =>
-    Runtime.sendToDocument(runtime, page, document, { op: "animationsStop", token }, record.id).pipe(
-      Effect.mapError(failed(operation, record)),
-      (stopping) => record.bound(stopping, () => Option.some("The page didn't stop its animations before the deadline"))
-    )
   return Effect.acquireUseRelease(
-    Effect.sync(() => new Set<Target.DocumentId>()),
-    (stopped) =>
-      Effect.gen(function*() {
+    // Each stopped document, with the child frame count it answered; it is here from before its stop is sent, so
+    // a stop cut short is undone on release too
+    Effect.sync(() => new Map<Target.DocumentId, number>()),
+    (stopped) => {
+      const stop = (document: Target.DocumentId) =>
+        Runtime.sendToDocument(runtime, page, document, { op: "animationsStop", token }, record.id).pipe(
+          Effect.mapError(failed(operation, record)),
+          (stopping) =>
+            record.bound(stopping, () => Option.some("The page didn't stop its animations before the deadline")),
+          Effect.map((answer) => {
+            // A document that has gone has no frames to wait for
+            stopped.set(document, Option.isSome(answer) && answer.value._tag === "Animations" ? answer.value.frames : 0)
+          })
+        )
+      const fresh = (state: Model.PageState) =>
+        documentsOf(state, page).filter(({ document }) => !stopped.has(document))
+      /** Whether the state holds, under each stopped document's frame, as many frames with a document as it has. */
+      const known = (state: Model.PageState) =>
+        documentsOf(state, page).every(({ document, frame }) => {
+          const frames = stopped.get(document)
+          return frames === undefined ||
+            state.frames.filter((each) => each.parent === frame && Option.isSome(each.document)).length >= frames
+        })
+      return Effect.gen(function*() {
         while (true) {
-          const fresh = (yield* documentsOf(page)).filter((document) => !stopped.has(document))
-          if (fresh.length === 0) break
-          // Each is resumed on release from before its stop is sent, so a stop cut short is undone too
-          for (const document of fresh) stopped.add(document)
-          yield* Effect.forEach(fresh, stop, { concurrency: "unbounded", discard: true })
+          const state = yield* page.state.get
+          const next = fresh(state)
+          if (next.length > 0) {
+            for (const { document } of next) stopped.set(document, 0)
+            yield* Effect.forEach(next, ({ document }) => stop(document), { concurrency: "unbounded", discard: true })
+            continue
+          }
+          if (known(state)) break
+          const changed = yield* page.state.changes.pipe(
+            Stream.filter((state) => fresh(state).length > 0 || known(state)),
+            Stream.runHead,
+            BrowserClock.until(record.budget.at)
+          )
+          if (Option.isNone(changed)) {
+            return yield* Effect.fail(
+              record.timeout(Option.some("The browser didn't report the page's frames before the deadline"))
+            )
+          }
         }
         return yield* self
-      }),
+      })
+    },
     (stopped) =>
       Effect.forEach(
-        stopped,
+        stopped.keys(),
         (document) =>
           Runtime.sendToDocument(runtime, page, document, { op: "animationsResume", token }, record.id).pipe(
             BrowserClock.timeoutOption(5000),
@@ -160,7 +197,7 @@ const animationsStopped = <A, E>(
 export const screenshot = (
   runtime: Runtime.Runtime,
   page: Model.PageEntry,
-  options: Page.ScreenshotOptions | undefined
+  options: Page.ControlScreenshotOptions | undefined
 ): Effect.Effect<Uint8Array, Page.PageError | Target.TargetGone | Deadline.Timeout> => {
   const operation = "Page.screenshot"
   const area = options?.area ?? "viewport"

@@ -415,8 +415,9 @@ export type Request =
   /**
    * Stops the document's animations for a capture, its open shadow roots' included, until every token that stopped
    * them has resumed (`animationsResume`): a finite one is finished, firing its end events, and an infinite one
-   * cancelled; those that start meanwhile, in roots there then too, are stopped as they start. Answers after the page's next animation frame, once the end events'
-   * handlers have run.
+   * cancelled; those that start meanwhile, in roots there then too, are stopped as they start. Answers with the
+   * document's child frame count after the page's next animation frame, once the end events' handlers have run,
+   * and after each further frame while those handlers attach shadow roots.
    */
   | { readonly op: "animationsStop"; readonly token: string }
   /**
@@ -497,7 +498,8 @@ export const Response = Schema.Union([
   Schema.TaggedStruct("Final", { final: Final }),
   Schema.TaggedStruct("Guarded", { blocked: Schema.NullOr(Schema.String) }),
   Schema.TaggedStruct("Overlaid", {}),
-  Schema.TaggedStruct("Animations", {}),
+  /** The document's child frames, `window.length`, as it answers `animationsStop` or `animationsResume`. */
+  Schema.TaggedStruct("Animations", { frames: Schema.Number }),
   Schema.TaggedStruct("Inserted", { inserted: Schema.Boolean }),
   /** The focused element is the `index`th of the document's frames, in the order a `"iframe, frame"` query finds them. */
   Schema.TaggedStruct("InFrame", { index: Schema.Number }),
@@ -4599,12 +4601,17 @@ export function engine(render: (root: SnapNode) => string) {
       }
     }
   }
-  /** Stops the animations of the document and of every open shadow root now in it, listening to roots new to it. */
-  const stopAllAnimations = () => {
+  /**
+   * Stops the animations of the document and of every open shadow root now in it, listening to roots new to it:
+   * whether there were any.
+   */
+  const stopAllAnimations = (): boolean => {
     const stopped = animationsStopped
-    if (stopped === undefined) return
+    if (stopped === undefined) return false
+    let found = false
     const visit = (root: Document | ShadowRoot) => {
       if (!stopped.roots.has(root)) {
+        found = true
         const listener = () => stopAllAnimations()
         root.addEventListener("transitionrun", listener)
         root.addEventListener("animationstart", listener)
@@ -4621,22 +4628,23 @@ export function engine(render: (root: SnapNode) => string) {
       }
     }
     visit(document)
+    return found
   }
   const stopAnimations = async (token: string): Promise<Response> => {
     animationsStopped ??= { tokens: new Set(), cancelled: new Set(), roots: new Map() }
     animationsStopped.tokens.add(token)
     stopAllAnimations()
-    // The end events are dispatched as the next frame's animations update, before its animation frame callbacks
-    await new Promise((resolve) => requestAnimationFrame(resolve))
-    // What their handlers added is stopped too: a shadow root attached since has no listener yet, and its
-    // animations' start events stop at it
-    stopAllAnimations()
-    return { _tag: "Animations" }
+    // The end events are dispatched as the next frame's animations update, before its animation frame callbacks.
+    // What their handlers added is stopped too, a frame at a time until a walk finds no new shadow root: a root
+    // attached since has no listener yet, and its animations' start events stop at it
+    do await new Promise((resolve) => requestAnimationFrame(resolve))
+    while (stopAllAnimations())
+    return { _tag: "Animations", frames: window.length }
   }
   const resumeAnimations = (token: string): Response => {
     const stopped = animationsStopped
     if (stopped === undefined || !stopped.tokens.delete(token) || stopped.tokens.size > 0) {
-      return { _tag: "Animations" }
+      return { _tag: "Animations", frames: window.length }
     }
     animationsStopped = undefined
     for (const remove of stopped.roots.values()) remove()
@@ -4647,7 +4655,7 @@ export function engine(render: (root: SnapNode) => string) {
         // An animation removed from the document has nothing to play
       }
     }
-    return { _tag: "Animations" }
+    return { _tag: "Animations", frames: window.length }
   }
   const observeValidation = (token: string, full: boolean) => {
     validationObservers.get(token)?.()
