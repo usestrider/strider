@@ -277,6 +277,27 @@ export const engine = (backend: Backend) =>
     ).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor)))
     layer(fixture, { excludeTestServices: true })(
       (it) => {
+        it.effect("keeps animations stopped until the last overlapping capture resumes", () =>
+          Effect.gen(function*() {
+            const { call, send } = yield* open(backend, "<div id=\"box\"></div>")
+            yield* call(
+              `function() {
+              globalThis.captureAnimation = document.querySelector('#box').animate(
+                [{ opacity: 0 }, { opacity: 1 }], { duration: 1000, iterations: Infinity }
+              )
+            }`,
+              []
+            )
+            yield* send({ op: "animationsStop", token: "first" })
+            yield* send({ op: "animationsStop", token: "second" })
+            yield* send({ op: "animationsResume", token: "first" })
+            const during = yield* call("function() { return globalThis.captureAnimation.playState }", [])
+            yield* send({ op: "animationsResume", token: "second" })
+            assert.deepStrictEqual(during, { _tag: "Value", value: { type: "string", value: "idle" } })
+            const after = yield* call("function() { return globalThis.captureAnimation.playState }", [])
+            assert.deepStrictEqual(after, { _tag: "Value", value: { type: "string", value: "running" } })
+          }))
+
         it.effect("accepts an XPath document root result and skips the non-element node", () =>
           Effect.gen(function*() {
             const { send } = yield* open(backend, "<b>inside</b>")

@@ -85,6 +85,23 @@ export const animations = <R>(it: ReturnType<typeof SharedContext.guard<R>>) => 
       assert.isTrue(pixelsAt(png, 70, 10, isRed))
     }))
 
+  it.effect("stops animations in a frame attached by a transitionend handler", () =>
+    Effect.gen(function*() {
+      const child = `${infinite()}<div class="box"></div>`
+      const page = yield* opened(
+        `<style>#trigger{opacity:0;transition:opacity 1000s}#trigger.on{opacity:1}` +
+          `iframe{position:absolute;left:0;top:0;border:0;width:60px;height:60px}</style>` +
+          `<div id="trigger"></div><script>` +
+          `trigger.addEventListener("transitionend",()=>{` +
+          `const frame=document.createElement("iframe");document.body.append(frame);` +
+          `frame.contentDocument.open();frame.contentDocument.write(${JSON.stringify(child)});` +
+          `frame.contentDocument.close()});` +
+          `getComputedStyle(trigger).opacity;trigger.classList.add("on")</script>`
+      )
+      const png = yield* page.screenshot({ animations: "disabled" })
+      assert.isTrue(pixelsAt(png, 10, 10, isRed))
+    }))
+
   it.effect("leaves an animation with a playback rate of 0 as it is", () =>
     Effect.gen(function*() {
       const page = yield* opened(
