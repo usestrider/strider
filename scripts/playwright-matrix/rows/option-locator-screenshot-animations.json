@@ -4,19 +4,25 @@
     "method:Locator.screenshot"
   ],
   "option": "animations",
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding public option; the parent row does not imply option parity.",
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "ScreenshotOptions",
+      "url": "/docs/api/browser/Page#ScreenshotOptions"
+    }
+  ],
+  "notes": "An element capture is page.screenshot({ area: { element }, animations }).",
   "capabilities": [],
   "requirements": [],
   "valueCoverage": [
     {
       "value": "allow",
-      "status": "missing"
+      "status": "has"
     },
     {
       "value": "disabled",
-      "status": "missing"
+      "status": "has"
     }
   ]
 }

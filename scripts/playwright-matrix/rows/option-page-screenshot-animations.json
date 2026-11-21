@@ -4,19 +4,25 @@
     "method:Page.screenshot"
   ],
   "option": "animations",
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding public option; the parent row does not imply option parity.",
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "ScreenshotOptions",
+      "url": "/docs/api/browser/Page#ScreenshotOptions"
+    }
+  ],
+  "notes": "animations on Page.ScreenshotOptions, \"allow\" by default; \"disabled\" finishes finite animations and cancels infinite ones for the capture.",
   "capabilities": [],
   "requirements": [],
   "valueCoverage": [
     {
       "value": "allow",
-      "status": "missing"
+      "status": "has"
     },
     {
       "value": "disabled",
-      "status": "missing"
+      "status": "has"
     }
   ]
 }
