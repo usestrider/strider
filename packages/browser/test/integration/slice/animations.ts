@@ -71,7 +71,9 @@ export const animations = <R>(it: ReturnType<typeof SharedContext.guard<R>>) => 
       const page = yield* opened(
         `<style>body{margin:0}iframe{position:absolute;left:60px;top:0;border:0;width:60px;height:60px}</style>` +
           `<div id="host"></div><iframe src="${child}"></iframe>` +
-          `<script>host.attachShadow({mode:"open"}).innerHTML=${JSON.stringify(`${infinite()}<div class="box"></div>`)}` +
+          `<script>host.attachShadow({mode:"open"}).innerHTML=${
+            JSON.stringify(`${infinite()}<div class="box"></div>`)
+          }` +
           `</script>`
       )
       yield* Expect.toBeAttached(page.frame(page.locator("iframe")).locator(".box"))

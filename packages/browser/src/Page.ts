@@ -192,7 +192,8 @@ export const FrameTree: Schema.Codec<FrameTree, FrameTreeEncoded> = Schema.Struc
  *
  * **Details**
  *
- * `quality` exists only for JPEG: `{ format: "jpeg", quality: 80 }`.
+ * `quality` exists only for JPEG: `{ format: "jpeg", quality: 80 }`. `animations: "disabled"` gives a capture
+ * that doesn't depend on when it was taken.
  *
  * @stability unstable
  * @category models
@@ -232,6 +233,31 @@ export type ScreenshotOptions = ScreenshotFormat & {
    * @default false
    */
   readonly omitBackground?: boolean | undefined
+  /**
+   * What happens to the page's CSS animations, CSS transitions and Web Animations during the capture, in every
+   * frame and open shadow root. `"allow"` leaves them running. `"disabled"` finishes the ones that end, firing
+   * their `transitionend` and `animationend` events and waiting one animation frame for the handlers, and cancels
+   * the infinite ones, which are captured as they are before they start and play again from the start after the
+   * capture. Animations that start during the capture are stopped the same way. One at a playback rate of 0 is
+   * left as it is.
+   *
+   * **Example** (Capturing a card with its animations stopped)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const card = Effect.fn("card")(function*(page: Page.Page) {
+   *   return yield* page.screenshot({
+   *     area: { element: page.locator(".card") },
+   *     animations: "disabled"
+   *   })
+   * })
+   * ```
+   *
+   * @default "allow"
+   */
+  readonly animations?: "allow" | "disabled" | undefined
 }
 
 /**

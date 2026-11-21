@@ -13,6 +13,7 @@ import * as Page from "../Page.ts"
 import * as Reason from "../Reason.ts"
 import type * as Target from "../Target.ts"
 import type * as Adapter from "./adapter.ts"
+import * as BrowserClock from "./browserClock.ts"
 import * as LocatorImpl from "./locator.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
@@ -100,6 +101,54 @@ const elementBox = (
     return Option.some({ x: x + scroll.x, y: y + scroll.y, width: response.rect.width, height: response.rect.height })
   })
 
+/** The page's current documents, its frames' included. */
+const documentsOf = (page: Model.PageEntry): Effect.Effect<ReadonlyArray<Target.DocumentId>> =>
+  Effect.map(page.state.get, ({ frames, status }) => {
+    const documents: Array<Target.DocumentId> = []
+    if (status._tag === "Open") documents.push(status.document.id)
+    for (const frame of frames) documents.push(...Option.toArray(frame.document))
+    return documents
+  })
+
+/**
+ * Runs `self` with the animations of every document of the page stopped (the engine's `animationsStop`), and
+ * resumes them however it exits. A document that has gone has nothing to resume, and a resumption that fails, or
+ * that the page doesn't answer within 5 seconds, leaves the capture's own result as it is.
+ */
+const animationsStopped = <A, E>(
+  runtime: Runtime.Runtime,
+  page: Model.PageEntry,
+  operation: string,
+  record: Operation.Record,
+  self: Effect.Effect<A, E>
+): Effect.Effect<A, E | Page.PageError | Target.TargetGone | Deadline.Timeout> => {
+  const token = record.id
+  return Effect.acquireUseRelease(
+    documentsOf(page),
+    (documents) =>
+      Effect.forEach(
+        documents,
+        (document) =>
+          Runtime.sendToDocument(runtime, page, document, { op: "animationsStop", token }, record.id).pipe(
+            Effect.mapError(failed(operation, record)),
+            (stopping) =>
+              record.bound(stopping, () => Option.some("The page didn't stop its animations before the deadline"))
+          ),
+        { concurrency: "unbounded", discard: true }
+      ).pipe(Effect.andThen(self)),
+    (documents) =>
+      Effect.forEach(
+        documents,
+        (document) =>
+          Runtime.sendToDocument(runtime, page, document, { op: "animationsResume", token }, record.id).pipe(
+            BrowserClock.timeoutOption(5000),
+            Effect.ignore
+          ),
+        { concurrency: "unbounded", discard: true }
+      ).pipe(Operation.detached)
+  )
+}
+
 /** `page.screenshot`. */
 export const screenshot = (
   runtime: Runtime.Runtime,
@@ -110,6 +159,7 @@ export const screenshot = (
   const area = options?.area ?? "viewport"
   const areaName = typeof area === "string" ? area : area.element !== undefined ? "element" : "clip"
   const format = options?.format ?? "png"
+  const animations = options?.animations ?? "allow"
   return Effect.gen(function*() {
     const record = yield* Operation.record
     const id = record.id
@@ -121,7 +171,7 @@ export const screenshot = (
         invalid(operation, id, "quality", "a JPEG quality from 0 to 100", `${quality} isn't one`)
       )
     }
-    const capture = Effect.gen(function*() {
+    const prepared = Effect.gen(function*() {
       let clip = Option.none<Box>()
       if (typeof area !== "string" && area.clip !== undefined) {
         const { height, width, x, y } = area.clip
@@ -167,6 +217,10 @@ export const screenshot = (
           record.bound(capturing, () => Option.some("The browser didn't finish the capture before the deadline"))
       )
     })
+    // The animations stop before the element is measured, so its box is where the capture shows it
+    const capture = animations === "disabled"
+      ? animationsStopped(runtime, page, operation, record, prepared)
+      : prepared
     const guard = runtime.model.adapter.captureGuard
     return yield* (guard === undefined ? capture : guard.run(page.id, capture).pipe(
       Effect.mapError((error) =>
@@ -183,6 +237,7 @@ export const screenshot = (
       attributes: {
         "browser.page.id": page.id,
         "browser.screenshot.area": areaName,
+        "browser.screenshot.animations": animations,
         "browser.screenshot.format": format,
         "browser.screenshot.scale": options?.scale ?? "device"
       }
