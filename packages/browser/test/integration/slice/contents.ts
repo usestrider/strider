@@ -2979,6 +2979,95 @@ export const contents = (
           }))
         }), timeout)
 
+      it.effect("masks every element a locator matches in the color given, and leaves the page as it was", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(
+              origin,
+              `<!DOCTYPE html><body style="margin:0;background:white"><div class="card" style="margin:10px;width:40px;height:40px;background:rgb(30,170,90)"></div><div class="card" style="margin:10px;width:40px;height:40px;background:rgb(30,170,90)"></div></body>`
+            ))
+            const ratio = yield* page.evaluateInMainWorld(() => devicePixelRatio)
+            // The color at a CSS point of a capture, from a few device pixels there
+            const at = (png: Uint8Array, x: number, y: number) => {
+              const pixels = pngRegion(png, { x: x * ratio, y: y * ratio, width: 2, height: 2 })
+              for (const value of pixels) assert.deepStrictEqual(value, pixels[0])
+              return pixels[0]
+            }
+            const html = yield* page.readHtml
+            const masked = yield* page.screenshot({ mask: [page.locator(".card"), page.locator("#none")] })
+            assert.deepStrictEqual(at(masked, 20, 20), [255, 0, 255, 255])
+            assert.deepStrictEqual(at(masked, 20, 80), [255, 0, 255, 255])
+            assert.deepStrictEqual(at(masked, 80, 20), [255, 255, 255, 255])
+            const colored = yield* page.screenshot({ mask: [page.locator(".card").first()], maskColor: "rgb(0,0,255)" })
+            assert.deepStrictEqual(at(colored, 20, 20), [0, 0, 255, 255])
+            assert.deepStrictEqual(at(colored, 20, 80), [30, 170, 90, 255])
+            // A mask is gone once its capture ends: from the pixels, the HTML and the page's queries
+            assert.deepStrictEqual(at(yield* page.screenshot(), 20, 20), [30, 170, 90, 255])
+            assert.strictEqual(yield* page.readHtml, html)
+            assert.strictEqual(yield* page.evaluateInMainWorld(() => document.documentElement.childElementCount), 2)
+          }))
+        }), timeout)
+
+      it.effect("masks an element in an iframe, below the fold of a full page, and inside an element captured", () =>
+        Effect.gen(function*() {
+          const { crossSite, origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(
+              origin,
+              `<!DOCTYPE html><body style="margin:0;background:white"><iframe id="frame" style="display:block;border:0;width:200px;height:100px" src="${
+                fixtureUrl(
+                  crossSite,
+                  `<!DOCTYPE html><body style="margin:0;background:white"><div id="inner" style="margin:20px;width:40px;height:40px;background:blue"></div></body>`
+                )
+              }"></iframe><div style="height:2000px"></div><div id="card" style="padding:20px;width:60px;background:rgb(30,170,90)"><div id="price" style="width:40px;height:40px;background:red"></div></div></body>`
+            ))
+            const ratio = yield* page.evaluateInMainWorld(() => devicePixelRatio)
+            const at = (png: Uint8Array, x: number, y: number) => {
+              const pixels = pngRegion(png, { x: x * ratio, y: y * ratio, width: 2, height: 2 })
+              for (const value of pixels) assert.deepStrictEqual(value, pixels[0])
+              return pixels[0]
+            }
+            const inner = page.frame(page.locator("#frame")).locator("#inner")
+            yield* inner.pipe(Expect.toBeVisible)
+            const framed = yield* page.screenshot({ mask: [inner] })
+            assert.deepStrictEqual(at(framed, 30, 30), [255, 0, 255, 255])
+            assert.deepStrictEqual(at(framed, 100, 30), [255, 255, 255, 255])
+            const full = yield* page.screenshot({ area: "fullPage", mask: [page.locator("#price")] })
+            assert.deepStrictEqual(at(full, 30, 2130), [255, 0, 255, 255])
+            assert.deepStrictEqual(at(full, 90, 2130), [30, 170, 90, 255])
+            const card = yield* page.screenshot({ area: { element: page.locator("#card") }, mask: [page.locator("#price")] })
+            assert.deepStrictEqual(at(card, 30, 30), [255, 0, 255, 255])
+            assert.deepStrictEqual(at(card, 5, 5), [30, 170, 90, 255])
+          }))
+        }), timeout)
+
+      it.effect("removes only its own masks when masked captures overlap", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(
+              origin,
+              `<!DOCTYPE html><body style="margin:0;background:white"><div id="a" style="width:40px;height:40px;background:red"></div><div id="b" style="width:40px;height:40px;background:blue"></div></body>`
+            ))
+            const ratio = yield* page.evaluateInMainWorld(() => devicePixelRatio)
+            const at = (png: Uint8Array, x: number, y: number) =>
+              pngRegion(png, { x: x * ratio, y: y * ratio, width: 1, height: 1 })[0]
+            const [first, second] = yield* Effect.all([
+              page.screenshot({ mask: [page.locator("#a")] }),
+              page.screenshot({ mask: [page.locator("#b")], maskColor: "rgb(0,0,0)" })
+            ], { concurrency: "unbounded" })
+            assert.deepStrictEqual(at(first, 20, 20), [255, 0, 255, 255])
+            assert.deepStrictEqual(at(second, 20, 60), [0, 0, 0, 255])
+            const after = yield* page.screenshot()
+            assert.deepStrictEqual(at(after, 20, 20), [255, 0, 0, 255])
+            assert.deepStrictEqual(at(after, 20, 60), [0, 0, 255, 255])
+          }))
+        }), timeout)
+
       it.effect("prints a PDF where the backend can, and reads the document's HTML", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
