@@ -21,8 +21,9 @@ export const supports = (name: string) => Effect.map(status(name), (found) => fo
 export const fullySupports = (name: string) => Effect.map(status(name), (found) => found === "supported")
 
 /**
- * What a backend whose `console.method` is partial reads each method it can't tell as, or `null` where the browser
- * reports no message for it: Chromium sends `timeLog` as a plain `log`, Firefox sends nothing for `groupEnd`, and
+ * What each backend reads a method of the slice's console case as, where it differs, or `null` where the browser
+ * reports no message for it; a backend with an entry here has `console.method` partial, and one without has it
+ * supported: Chromium sends `timeLog` as a plain `log`, Firefox sends nothing for `groupEnd`, and
  * stock WebKit sends `count` as a plain message at level `debug` and `timeLog` as the same `timing` as `timeEnd`.
  */
 export const consoleMethodReads: Readonly<

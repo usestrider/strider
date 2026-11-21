@@ -124,7 +124,10 @@ export const capabilities = (
       entry("console.arguments", "supported"),
       entry("console.source", "supported"),
       entry("console.method", "partial", [
-        "`console.timeLog` reads as `log`, since Chromium sends it as a plain message"
+        "`console.timeLog` reads as `log`, since Chromium sends it as a plain message",
+        "`console.countReset`, `timeLog`, and `timeEnd` of a counter or timer that doesn't exist read as `warn`, since " +
+        "Chromium sends them as a warning",
+        "`console.countReset` of a counter that exists writes no message, since Chromium sends none for it"
       ]),
       entry("prompts", "supported"),
       entry("prompts.kind", "supported"),

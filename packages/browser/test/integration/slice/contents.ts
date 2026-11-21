@@ -42,7 +42,7 @@ import * as Runtime from "../../../src/internal/runtime.ts"
 import * as Protocol from "../../../src/protocol/Protocol.ts"
 import { pngRegion } from "../../pngRegion.ts"
 import { site } from "../adapter/harness.ts"
-import { consoleMethodReads, fullySupports, supports } from "./capabilities.ts"
+import { consoleMethodReads, fullySupports, status, supports } from "./capabilities.ts"
 import { consoleCalls } from "./consoleCalls.ts"
 import { overlays } from "./overlays.ts"
 import { scriptTags } from "./scriptTags.ts"
@@ -579,7 +579,13 @@ export const contents = (
             "timeEnd",
             "log"
           ]
-          const reads = (yield* fullySupports("console.method")) ? {} : consoleMethodReads[name] ?? {}
+          // The backend's table says `partial` exactly where it reads some method as another
+          const reads = consoleMethodReads[name] ?? {}
+          assert.strictEqual(
+            yield* status("console.method"),
+            Object.keys(reads).length > 0 ? "partial" : "supported",
+            "console.method"
+          )
           const expected = standard.flatMap((method) => {
             const read = Object.hasOwn(reads, method) ? reads[method] : method
             return read === null || read === undefined ? [] : [read]

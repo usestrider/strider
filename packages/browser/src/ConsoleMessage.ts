@@ -59,15 +59,46 @@ export type Level = typeof Level.Type
  * **Details**
  *
  * The names are the Console Standard's on every browser: `warn`, not CDP's `warning`, and `group` and `groupEnd`,
- * not `startGroup` and `endGroup`. A method's message has the level its method writes at: `warn` at `warning`,
- * `error` and `assert` at `error`, `info` at `info`, `debug` at `debug`, and the rest at `log`.
+ * not `startGroup` and `endGroup`. A message's `level` is the one its browser reports, which a method doesn't fix:
+ * `console.timeEnd` of a timer that doesn't exist writes at `warning` on Chromium and stock WebKit, and at `log` on
+ * Firefox.
  *
  * **Gotchas**
  *
- * Some browsers send two methods alike, so one reads as the other: Chromium sends `timeLog` as a plain message,
- * which reads as `log`, and stock WebKit sends `timeLog` as it sends `timeEnd`, which it reads as, and `count` as a
- * plain message at level `debug`, which reads as `debug`. Firefox sends no message for `groupEnd`. The
- * `console.method` capability says so.
+ * Browsers send some methods alike, or not at all, so a message can read as another method, or not arrive:
+ *
+ * - Chromium sends `timeLog` as a plain message, which reads as `log`, and `countReset`, `timeLog`, and `timeEnd` of
+ *   a counter or timer that doesn't exist as a warning, which reads as `warn`.
+ * - Firefox sends no message for `groupEnd` or `clear`. A counter or timer that doesn't exist keeps its method, at
+ *   level `log`.
+ * - Stock WebKit sends `timeLog` as it sends `timeEnd`, which it reads as, `count` as a plain message at level
+ *   `debug`, which reads as `debug`, and `countReset` of a counter that doesn't exist as a warning, which reads as
+ *   `warn`. `timeLog` and `timeEnd` of a timer that doesn't exist read as `timeEnd`, at level `warning`.
+ * - `countReset` of a counter that exists writes no message on Chromium and stock WebKit, and `time`, `profile`, and
+ *   `profileEnd` write none on any browser.
+ *
+ * The `console.method` capability says so.
+ *
+ * **Example** (How many messages a page wrote with each method)
+ *
+ * ```ts import.meta.vitest
+ * import { ConsoleMessage, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const countByMethod = Effect.fn("countByMethod")(
+ *   function*(page: Page.ObservedPage) {
+ *     const messages = yield* ConsoleMessage.history(page)
+ *     const counts = new Map<ConsoleMessage.Method, number>()
+ *     for (const message of messages.entries) {
+ *       if (message.source._tag === "Page") {
+ *         const method = message.source.method
+ *         counts.set(method, (counts.get(method) ?? 0) + 1)
+ *       }
+ *     }
+ *     return counts
+ *   }
+ * )
+ * ```
  *
  * @stability unstable
  * @category schemas

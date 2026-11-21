@@ -99,7 +99,9 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
       ]),
       entry("console.method", "partial", [
         "`console.timeLog` reads as `timeEnd`, since WebKit sends both as one `timing` message",
-        "`console.count` reads as `debug`, since WebKit sends it as a plain message at level `debug`"
+        "`console.count` reads as `debug`, since WebKit sends it as a plain message at level `debug`",
+        "`console.countReset` of a counter that doesn't exist reads as `warn`, since WebKit sends it as a warning",
+        "`console.countReset` of a counter that exists writes no message, since WebKit sends none for it"
       ]),
       entry("prompts", "unsupported", [
         "stock WebKit's inspector has no Dialog domain: a dialog blocks the page unreported"

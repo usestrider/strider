@@ -49,8 +49,11 @@ const traces = Effect.fn("traces")(function*(page: Page.ObservedPage) {
 })
 ```
 
-Some browsers send two methods alike: Chromium's `timeLog` reads as `log`, and WebKit's as `timeEnd`, and WebKit's
-`count` as `debug`. Firefox sends nothing for `groupEnd`. The capability `console.method` says so.
+Browsers send some methods alike, or not at all: Chromium's `timeLog` reads as `log`, and WebKit's as `timeEnd`, and
+WebKit's `count` as `debug`. Firefox sends nothing for `groupEnd` or `clear`. A missing timer or counter reads as
+`warn` on Chromium, and a missing counter on WebKit, while Firefox keeps the method at level `log`. No browser sends
+anything for `time`, `profile`, or `profileEnd`. The capability `console.method` says so, and each
+[browser's page](/docs/browsers/chromium) gives the details.
 
 Each message's `timestamp` is when the browser logged it, by its own wall clock, as a `DateTime.Utc` to the
 millisecond, on every browser. It's the clock of the machine the browser runs on, which a page's clock doesn't move,
