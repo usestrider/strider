@@ -287,6 +287,8 @@ self.addEventListener("fetch", (event) => {
       response.end("document.title = \"Deferred\"")
     }, 200)
   },
+  // A page the server never answers, so a navigation to it commits nothing until another replaces it
+  "/unanswered": () => {},
   // A resource that never completes, until the page closes or replaces it. No sleep-based readiness assertion.
   "/pending-image": (_request, response) => {
     response.writeHead(200, { "content-type": "image/svg+xml" })

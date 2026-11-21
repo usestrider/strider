@@ -16,6 +16,7 @@ import {
   Locator,
   Page,
   Pixels,
+  Popup,
   Route,
   Snapshot,
   StorageState,
@@ -3529,6 +3530,34 @@ document.getElementById("form").addEventListener("submit", (event) => {
             // An id the page has no frame for fails
             const unknown = reasonOf(yield* Effect.exit(page.frameById("no-such-frame" as typeof page.id)))
             assert.isDefined(unknown)
+          }))
+        }), timeout)
+
+      it.effect("gives a popup's top frame before its first document commits", () =>
+        Effect.gen(function*() {
+          // Stock WebKit reports a popup as the browser's page, not its opener's, so there is no popup to read
+          if (!(yield* supports("popups.opener"))) return
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const context = yield* Browser.newContext()
+            const page = yield* context.newPage
+            yield* page.goto(fixtureUrl(origin, "<title>Opener</title>"))
+            const opened = yield* Popup.next(page)
+            yield* page.evaluate((url) => {
+              window.open(url)
+            }, `${origin}/unanswered`)
+            const popup = yield* opened
+            const top = yield* popup.frameById(popup.id)
+            // The frame is attached from the start, with no document until one commits
+            const status = yield* top.status
+            assert.strictEqual(status._tag, "Attached")
+            assert.isTrue(status._tag === "Attached" && Option.isNone(status.document))
+            // An evaluation waits for the document, which the frame's own navigation commits
+            const evaluated = yield* Effect.forkChild(top.evaluate(() => document.title))
+            yield* top.goto(fixtureUrl(origin, "<title>Arrived</title>"), { waitUntil: "load" })
+            assert.strictEqual(yield* Fiber.join(evaluated), "Arrived")
+            const arrived = yield* top.status
+            assert.isTrue(arrived._tag === "Attached" && Option.isSome(arrived.document))
           }))
         }), timeout)
 
