@@ -91,6 +91,19 @@ export const consoleCalls = (
       )
     }).pipe(Effect.scoped))
 
+  it.effect("gives an object argument's properties, and none of a primitive's", () =>
+    Effect.gen(function*() {
+      const page = yield* opened()
+      const logged = yield* ConsoleMessage.nextCall(page)
+      yield* page.evaluateInMainWorld(() => console.log({ a: 1 }, "ab"))
+      const call = yield* logged
+      // Firefox holds the object by value, with no reference to it
+      const properties = yield* call.args[0]!.properties
+      assert.deepStrictEqual(Array.from(properties.keys()), ["a"])
+      assert.strictEqual(yield* properties.get("a")!.read, 1)
+      assert.strictEqual((yield* call.args[1]!.properties).size, 0)
+    }).pipe(Effect.scoped))
+
   it.effect("ends a call's handles when released, and when the subscription's scope closes", () =>
     Effect.gen(function*() {
       const page = yield* opened()
