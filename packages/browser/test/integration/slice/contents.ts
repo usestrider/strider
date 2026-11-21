@@ -2254,6 +2254,90 @@ export const contents = (
           }))
         }), timeout)
 
+      it.effect("toSatisfy services an overlay while the page function awaits its dismissal", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<div id="overlay" hidden>Overlay</div><p id="x">waiting</p>`))
+            if (
+              yield* isolatedRefused(Expect.toSatisfy(page.locator("#x"), () =>
+                true))
+            ) {
+              return
+            }
+            yield* page.addLocatorHandler(page.locator("#overlay"), () =>
+              page.evaluateInMainWorld(() => {
+                document.querySelector<HTMLElement>("#overlay")!.hidden = true
+                document.querySelector("#x")!.textContent = "done"
+              }))
+            yield* page.locator("#x").pipe(
+              Expect.toSatisfy((element) =>
+                new Promise<boolean>((resolve) => {
+                  const observer = new MutationObserver(() => {
+                    if (element.textContent === "done") {
+                      observer.disconnect()
+                      resolve(true)
+                    }
+                  })
+                  observer.observe(element, { childList: true })
+                  element.ownerDocument.querySelector<HTMLElement>("#overlay")!.hidden = false
+                })
+              ),
+              Deadline.within("1 second")
+            )
+          }))
+        }), timeout)
+
+      it.effect("toSatisfy reports several containing iframes as match observations", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<p>outside</p><iframe></iframe><iframe></iframe>`))
+            if (
+              yield* isolatedRefused(Expect.toSatisfy(page.locator("p"), () =>
+                true))
+            ) {
+              return
+            }
+            const failed = reasonOf(
+              yield* Effect.exit(
+                page.frame(page.locator("iframe")).locator("p").pipe(
+                  Expect.toSatisfy(() =>
+                    true
+                  ),
+                  Deadline.within("300 millis")
+                )
+              )
+            )
+            assert.strictEqual(failed?._tag, "ExpectationFailed")
+          }))
+        }), timeout)
+
+      it.effect("toSatisfy preserves a locator handler callback timeout", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<p id="x">waiting</p>`))
+            if (
+              yield* isolatedRefused(Expect.toSatisfy(page.locator("#x"), () =>
+                true))
+            ) return
+            yield* page.addLocatorHandler(page.locator("p"), () => Effect.never)
+            const failed = reasonOf(
+              yield* Effect.exit(
+                page.locator("#x").pipe(
+                  Expect.toSatisfy(() => true),
+                  Deadline.within("300 millis")
+                )
+              )
+            )
+            assert.strictEqual(failed?._tag, "Timeout")
+          }))
+        }), timeout)
+
       it.effect("toSatisfy reports ExpectationFailed when its predicate is still pending at the deadline", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -2936,8 +3020,7 @@ export const contents = (
             yield* page.evaluateInMainWorld(() => {
               document.querySelector<HTMLInputElement>("#all")!.indeterminate = true
             })
-            const anywhere = (pattern: AriaPattern.AriaPattern) =>
-              AriaPattern.anywhere(AriaPattern.including(pattern))
+            const anywhere = (pattern: AriaPattern.AriaPattern) => AriaPattern.anywhere(AriaPattern.including(pattern))
             yield* page.pipe(Expect.toMatchAria(anywhere(
               AriaPattern.node("heading", "Plans", AriaPattern.unchecked, { level: 2 })
             )))
