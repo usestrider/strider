@@ -3,7 +3,7 @@
  * name: a case runs where the backend has what it needs, and checks the refusal where it hasn't.
  */
 import { assert } from "@effect/vitest"
-import { Browser } from "@usestrider/browser"
+import { Browser, type ConsoleMessage } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 
 /** A capability's status in the browser's table; a name the table lacks fails the test. */
@@ -19,6 +19,20 @@ export const supports = (name: string) => Effect.map(status(name), (found) => fo
 
 /** Whether the browser has a capability in full. */
 export const fullySupports = (name: string) => Effect.map(status(name), (found) => found === "supported")
+
+/**
+ * What a backend whose `console.method` is partial reads each method it can't tell as, or `null` where the browser
+ * reports no message for it: Chromium sends `timeLog` as a plain `log`, Firefox sends nothing for `groupEnd`, and
+ * stock WebKit sends `count` as a plain message at level `debug` and `timeLog` as the same `timing` as `timeEnd`.
+ */
+export const consoleMethodReads: Readonly<
+  Record<string, Readonly<Partial<Record<ConsoleMessage.Method, ConsoleMessage.Method | null>>>>
+> = {
+  Chromium: { timeLog: "log" },
+  "Chromium attached": { timeLog: "log" },
+  Firefox: { groupEnd: null },
+  WebKit: { count: "debug", timeLog: "timeEnd" }
+}
 
 /** Native upload metadata supplied by the pinned browsers, independently of transferred File construction. */
 export const nativeFileModificationTime: Readonly<Record<string, "disk" | "creation">> = {

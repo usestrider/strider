@@ -124,6 +124,7 @@ export const capabilities: ReadonlyArray<Browser.CapabilityEntry> = [
   entry("console", "unsupported", ["the timeline has no console messages"]),
   entry("console.arguments", "unsupported", ["the timeline has no console messages"]),
   entry("console.source", "unsupported", ["the timeline has no console messages"]),
+  entry("console.method", "unsupported", ["the timeline has no console messages"]),
   entry("fileChooser", "unsupported", [noDom]),
   entry("downloads", "unsupported", ["the timeline has no downloads"]),
   entry("screenshot", "unsupported", ["nothing is painted"]),

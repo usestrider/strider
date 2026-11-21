@@ -97,6 +97,10 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
         "with no source: WebKit sends it on its `javascript` channel at level `error`, which Strider reads as an " +
         "uncaught exception"
       ]),
+      entry("console.method", "partial", [
+        "`console.timeLog` reads as `timeEnd`, since WebKit sends both as one `timing` message",
+        "`console.count` reads as `debug`, since WebKit sends it as a plain message at level `debug`"
+      ]),
       entry("prompts", "unsupported", [
         "stock WebKit's inspector has no Dialog domain: a dialog blocks the page unreported"
       ]),

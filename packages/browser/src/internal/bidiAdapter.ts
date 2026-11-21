@@ -130,6 +130,7 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
         "the browser's own messages, such as a CSP violation or a CORS failure, arrive as uncaught exceptions, as " +
         "Firefox sends them as script errors, so every console message is the page's"
       ]),
+      entry("console.method", "partial", ["`console.groupEnd` writes no message, since Firefox sends none for it"]),
       entry("prompts", "supported"),
       entry("prompts.kind", "supported"),
       entry("navigation.sameDocument", "supported"),

@@ -54,6 +54,59 @@ export const Level = Schema.Literals(["debug", "log", "info", "warning", "error"
 export type Level = typeof Level.Type
 
 /**
+ * Schema for the `console` method a page called to write a message, by the Console Standard's name.
+ *
+ * **Details**
+ *
+ * The names are the Console Standard's on every browser: `warn`, not CDP's `warning`, and `group` and `groupEnd`,
+ * not `startGroup` and `endGroup`. A method's message has the level its method writes at: `warn` at `warning`,
+ * `error` and `assert` at `error`, `info` at `info`, `debug` at `debug`, and the rest at `log`.
+ *
+ * **Gotchas**
+ *
+ * Some browsers send two methods alike, so one reads as the other: Chromium sends `timeLog` as a plain message,
+ * which reads as `log`, and stock WebKit sends `timeLog` as it sends `timeEnd`, which it reads as, and `count` as a
+ * plain message at level `debug`, which reads as `debug`. Firefox sends no message for `groupEnd`. The
+ * `console.method` capability says so.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 0.1.0
+ */
+export const Method = Schema.Literals([
+  "log",
+  "debug",
+  "info",
+  "warn",
+  "error",
+  "dir",
+  "dirxml",
+  "table",
+  "trace",
+  "clear",
+  "group",
+  "groupCollapsed",
+  "groupEnd",
+  "assert",
+  "count",
+  "countReset",
+  "time",
+  "timeLog",
+  "timeEnd",
+  "profile",
+  "profileEnd"
+])
+
+/**
+ * The `console` method a page called to write a message.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export type Method = typeof Method.Type
+
+/**
  * Schema for where in a script a message was written.
  *
  * **Details**
@@ -143,8 +196,8 @@ export const Category = Schema.Literals([
 export type Category = typeof Category.Type
 
 /**
- * Schema for who wrote a console message: the page, with a `console` call in a page or worker, or the browser,
- * with its `category`.
+ * Schema for who wrote a console message: the page, with the `console` method it called in a page or worker, or
+ * the browser, with its `category`.
  *
  * **Gotchas**
  *
@@ -168,17 +221,35 @@ export type Category = typeof Category.Type
  * )
  * ```
  *
+ * **Example** (The groups a page opened)
+ *
+ * ```ts import.meta.vitest
+ * import { ConsoleMessage, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const groups = Effect.fn("groups")(
+ *   function*(page: Page.ObservedPage) {
+ *     const messages = yield* ConsoleMessage.history(page)
+ *     return messages.entries.filter((message) =>
+ *       message.source._tag === "Page" &&
+ *       (message.source.method === "group" || message.source.method === "groupCollapsed")
+ *     )
+ *   }
+ * )
+ * ```
+ *
  * @stability unstable
  * @category schemas
  * @since 0.1.0
  */
 export const Source = Schema.Union([
-  Schema.TaggedStruct("Page", {}),
+  Schema.TaggedStruct("Page", { method: Method }),
   Schema.TaggedStruct("Browser", { category: Category })
 ])
 
 /**
- * Who wrote a console message: the page, or the browser with what its message is about.
+ * Who wrote a console message: the page with the `console` method it called, or the browser with what its message
+ * is about.
  *
  * @stability unstable
  * @category models
@@ -199,7 +270,7 @@ export type Source = typeof Source.Type
  * and an object reads as its class (`{b: Object}`). An `Error` reads as its browser describes it, which on Chromium
  * includes its stack, and a function, a symbol, a date, or an instance of a class can read differently from one
  * browser to another. `source` says whether the
- * page or the browser wrote it.
+ * page or the browser wrote it, and for the page, which `console` method it called.
  *
  * `timestamp` is when the browser logged the message, by the browser's wall clock, to the millisecond: the time a
  * message logged again was logged again, on every browser. It is the clock of the machine the browser runs on, so it
@@ -219,6 +290,22 @@ export type Source = typeof Source.Type
  *   yield* page.goto("https://app.example.com")
  *   const message = yield* error
  *   return DateTime.distance(started, message.timestamp)
+ * })
+ * ```
+ *
+ * **Example** (The stack traces a page printed)
+ *
+ * ```ts import.meta.vitest
+ * import { ConsoleMessage, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const traces = Effect.fn("traces")(function*(page: Page.ObservedPage) {
+ *   const messages = yield* ConsoleMessage.history(page)
+ *   return messages.entries
+ *     .filter((message) =>
+ *       message.source._tag === "Page" && message.source.method === "trace"
+ *     )
+ *     .map((message) => message.text)
  * })
  * ```
  *

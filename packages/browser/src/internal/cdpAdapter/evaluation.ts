@@ -326,7 +326,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
           origin: realm.frame !== undefined
             ? { _tag: "Page", page: realm.frame.page.id }
             : { _tag: "Worker", realm: realm.id },
-          source: { _tag: "Page" },
+          source: { _tag: "Page", method: Kit.consoleMethod(params.type) },
           timestamp: EpochTime.fromMillis(params.timestamp),
           at: Adapter.now()
         })

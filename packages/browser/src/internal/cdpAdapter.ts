@@ -123,6 +123,9 @@ export const capabilities = (
       entry("console", "supported"),
       entry("console.arguments", "supported"),
       entry("console.source", "supported"),
+      entry("console.method", "partial", [
+        "`console.timeLog` reads as `log`, since Chromium sends it as a plain message"
+      ]),
       entry("prompts", "supported"),
       entry("prompts.kind", "supported"),
       entry("navigation.sameDocument", "supported"),
