@@ -1,5 +1,15 @@
 import { assert, describe, it } from "@effect/vitest"
+import { Browser } from "@usestrider/browser"
+import * as Clock from "effect/Clock"
+import * as Deferred from "effect/Deferred"
+import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
+import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as TestClock from "effect/testing/TestClock"
+import * as BrowserImpl from "../src/internal/browser.ts"
+import * as BrowserClock from "../src/internal/browserClock.ts"
+import * as Fake from "../src/internal/fake.ts"
 import * as Grants from "../src/internal/grants.ts"
 import type * as Model from "../src/internal/model.ts"
 
@@ -35,3 +45,53 @@ describe("permission declarations in force", () => {
     )
   })
 })
+
+it.effect("keeps overlapping permission calls consistent with their replay", () =>
+  Effect.gen(function*() {
+    const entered = yield* Deferred.make<void>()
+    const resume = yield* Deferred.make<void>()
+    const clock = yield* Clock.clockWith(Effect.succeed)
+    const settings = new Map<string, string>()
+    let hold = true
+    const layer = BrowserImpl.layer((sink) =>
+      Effect.map(
+        Fake.connect([], {
+          info: new Browser.Info(Fake.info),
+          capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+        })(sink),
+        (fake) => ({
+          ...fake,
+          grantPermissions: Effect.fnUntraced(function*(_context, origin, names, setting) {
+            if (Option.isNone(origin) && hold) {
+              hold = false
+              yield* Deferred.succeed(entered, undefined)
+              yield* Deferred.await(resume)
+            }
+            for (const name of names) {
+              settings.set(JSON.stringify([Option.getOrUndefined(origin), name]), setting)
+            }
+          }),
+          resetPermissions: () => Effect.sync(() => settings.clear())
+        })
+      )
+    ).pipe(Layer.provideMerge(Layer.succeed(BrowserClock.CurrentClock, BrowserClock.fromClock(clock))))
+    yield* Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const denying = yield* context.deny(["notifications"]).pipe(Effect.forkChild)
+      yield* Deferred.await(entered)
+      const granting = yield* context.grant(["notifications"], { origin: "https://a.test" }).pipe(Effect.forkChild)
+      // Let runnable work settle; a serialized implementation may leave the grant waiting for the denial.
+      yield* TestClock.adjust("1 millis")
+      yield* Deferred.succeed(resume, undefined)
+      yield* Fiber.join(denying)
+      yield* Fiber.join(granting)
+      const current = () =>
+        settings.get(JSON.stringify(["https://a.test", "notifications"])) ??
+          settings.get(JSON.stringify([undefined, "notifications"])) ?? "prompt"
+      const before = current()
+      // Removing an empty declaration changes no permission and must preserve the settled result.
+      const empty = yield* context.grant([])
+      yield* empty.remove
+      assert.strictEqual(current(), before)
+    }).pipe(Effect.provide(layer))
+  }))
