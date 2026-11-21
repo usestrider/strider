@@ -181,25 +181,31 @@ const resample = (frames: Stream.Stream<Frame>, fps: number): Stream.Stream<Fram
     const slot = (k: number) => (k * 1e9) / fps
     let next = 0
     let latest: Frame | undefined
-    const due = (before: number) => {
-      const out: Array<Frame> = []
-      while (slot(next) < before) {
-        if (latest !== undefined) out.push({ ...latest, at: slot(next) })
-        next++
+    // The slots before `before`, showing `shown`, one per pull, so a long still stretch is never held at once
+    const due = (shown: Frame | undefined, before: number): Stream.Stream<Frame> => {
+      if (shown === undefined) {
+        while (slot(next) < before) next++
+        return Streams.empty
       }
-      return out
+      return Streams.unfold(undefined, () =>
+        Effect.sync(() => {
+          if (slot(next) >= before) return undefined
+          const at = slot(next)
+          next++
+          return [{ ...shown, at }, undefined] as const
+        }))
     }
     return frames.pipe(
       Streams.flatMap((frame) => {
-        const out = due(frame.at)
+        const shown = latest
         latest = frame
-        return Streams.fromIterable(out)
+        return due(shown, frame.at)
       }),
       Streams.concat(Streams.suspend(() => {
-        if (latest === undefined) return Streams.empty
-        const end = Math.max(1, next, Math.ceil((latest.at * fps) / 1e9 - 1e-9))
-        const out = due(slot(end))
-        return Streams.fromIterable([...out, { ...latest, at: slot(end) }])
+        const last = latest
+        if (last === undefined) return Streams.empty
+        const end = Math.max(1, next, Math.ceil((last.at * fps) / 1e9 - 1e-9))
+        return due(last, slot(end)).pipe(Streams.concat(Streams.sync(() => ({ ...last, at: slot(end) }))))
       }))
     )
   })
