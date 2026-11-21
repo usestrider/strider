@@ -85,7 +85,8 @@ shouldn't change how a site behaves. So:
   pages where their scripts could read it.
 - The query engine is one self-contained function in our source, with no library in the page.
 
-What does run in the main world is what the caller declared, their init scripts and the page clock, and, on stock
+What does run in the main world is what the caller declared, their init scripts, the page clock and the read of
+`Expect.toHaveJSProperty`, which asks for a property the page's scripts set, and, on stock
 WebKit alone, the library's own engine and reads, because its inspector makes no other world (QUIRKS.md, Q194).
 
 **The design is checked as compiled code.** A compiler checks what prose can't:

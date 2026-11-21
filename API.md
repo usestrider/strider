@@ -810,6 +810,7 @@ declare const toHaveValue: DualMatcher<Locator.ReadonlyLocator, [expected: strin
 declare const toHaveValues: DualMatcher<Locator.ReadonlyLocator, [expected: ReadonlyArray<string | RegExp>]>
 declare const toHaveRole: DualMatcher<Locator.ReadonlyLocator, [expected: string]>
 declare const toHaveCSS: DualMatcher<Locator.ReadonlyLocator, [name: string, expected: string | RegExp, options?: { readonly not?: boolean | undefined; readonly pseudo?: "before" | "after" | undefined } | undefined]>
+declare const toHaveJSProperty: DualMatcher<Locator.Locator, [path: string, expected: unknown, options?: { readonly not?: boolean | undefined } | undefined]>   // reads a dotted path in the page's main world, compared by deep equality; a full Locator, since the page's getters run
 declare const toHaveAttribute: DualMatcher<Locator.ReadonlyLocator, [name: string, expected?: string | RegExp | undefined]>
 declare const toHaveCount: DualMatcher<Locator.ReadonlyLocator, [count: number]>
 declare const toMatchAria: DualMatcher<Locator.ReadonlyLocator | Page.ReadonlyPage, [pattern: AriaPattern.AriaPattern, options?: { readonly not?: boolean | undefined } | undefined]>   // a page is matched from its document node; not waits for no match
@@ -843,6 +844,7 @@ declare const unchecked: Children                                               
 
 - **How expectations evaluate.** An expectation checks once immediately, then again each time something its subject depends on changes. There is no backoff, because backoff adds more lag the longer a test waits (rule 23). Everything runs on the browser's clock, within the deadline (`Deadline.within` adjusts it). Where the change signal comes from depends on the subject:
   - **A locator's expectation waits in the page.** One round is one engine request: it checks, and if the condition doesn't hold, checks again on each mutation of the document (children, attributes, text), each `input`, `change`, `focusin`, and `focusout` event, and each animation frame, answering when the condition holds or after a second. L1 sends rounds until the deadline. No change is missed between checks, and there is no polling cadence; a page that renders no frames and changes nothing is checked again at the next round.
+  - **`toHaveJSProperty`** is the one locator expectation that doesn't: assigning a property is no change the page reports, so it reads the property in the page's main world again at `Expect.CheckInterval` (100 ms unless set), and the interval sets how often a getter of the page's on the path runs.
   - **A `Watchable`** (`toHaveURL` on `page.url`, `Expect.that` on any `Watchable`) is checked again on each change.
   - **Any other effect,** given to `Expect.that`, is run again at `Expect.CheckInterval` (100 ms unless set). It runs under the expectation's deadline, and a check still running at the deadline, or failing with it, is a check that didn't finish: the expectation fails with `ExpectationFailed`, not the subject's `Timeout`.
 
