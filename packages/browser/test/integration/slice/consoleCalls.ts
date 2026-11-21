@@ -259,13 +259,12 @@ export const consoleCalls = (
       assert.deepStrictEqual(yield* late.args[0]!.read, { a: 1 })
     }).pipe(Effect.scoped))
 
-  it.effect("stops claiming console arguments once a calls stream overflows", () =>
+  it.effect("delivers a call queued before a calls stream overflowed with its arguments, and claims no more", () =>
     Effect.gen(function*() {
       const page = yield* opened()
       const table = Handles.page(page).runtime.model.consoleArguments
       const before = ConsoleArguments.held(table)
       const calls = yield* ConsoleMessage.streamCalls(page).pipe(Effect.provideService(Subscription.Capacity, 1))
-      assert.isDefined(calls)
       // Nothing pulls the stream, so the second message overflows it, and the subscription ends
       yield* page.evaluateInMainWorld(() => {
         console.log({ a: 1 })
@@ -273,6 +272,18 @@ export const consoleCalls = (
         console.log({ c: 3 })
       })
       yield* page.evaluateInMainWorld(() => 1)
-      assert.strictEqual(ConsoleArguments.held(table), before)
+      // Only the queued message's argument is still held
+      assert.strictEqual(ConsoleArguments.held(table), before + 1)
+      const delivered: Array<ReadonlyArray<unknown>> = []
+      const failure = yield* calls.pipe(
+        Stream.runForEach((call) =>
+          Effect.map(Effect.forEach(call.args, (arg) => arg.read), (values) => {
+            delivered.push(values)
+          })
+        ),
+        Effect.flip
+      )
+      assert.strictEqual(failure._tag, "EventOverflow")
+      assert.deepStrictEqual(delivered, [[{ a: 1 }]])
     }).pipe(Effect.scoped))
 }

@@ -170,6 +170,24 @@ export const abandonedNow = (claimant: Claimant): Effect.Effect<void> => {
   return Effect.all(releases, { discard: true })
 }
 
+/**
+ * A stream whose subscription ended before its scope did, as when its target ended or it overflowed: it takes no
+ * more, and drops its claim on `overflowed`, the message it never queued, but keeps those on the messages already
+ * queued, which it still delivers, until it delivers each or its scope closes. Its bookkeeping is done now: it gives
+ * only the release of what it freed, to run apart.
+ */
+export const closed = (
+  claimant: Claimant,
+  overflowed: ConsoleMessage.ConsoleMessage | undefined
+): Effect.Effect<void> => {
+  claimant.done = true
+  const entry = overflowed === undefined ? undefined : claimant.claims.get(overflowed)
+  if (entry === undefined) return Effect.void
+  claimant.claims.delete(overflowed!)
+  entry.claims--
+  return free(entry)
+}
+
 /** One owner's release of an argument, which frees it once no owner and no claim remains. */
 export const disown = (entry: Kept, arg: Argument): Effect.Effect<void> =>
   Effect.suspend(() => {

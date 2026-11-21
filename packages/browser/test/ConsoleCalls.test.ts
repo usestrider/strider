@@ -13,7 +13,7 @@ it.effect("refuses console calls where the backend keeps no console arguments", 
       yield* Effect.flip(ConsoleMessage.streamCalls(page))
     ]
     for (const error of refusals) {
-      assert.strictEqual(error._tag, "SubscriptionError")
+      if (error._tag !== "SubscriptionError") return assert.fail(`expected a SubscriptionError, got ${error._tag}`)
       assert.strictEqual(error.reason._tag, "Unsupported")
       assert.strictEqual(error.reason._tag === "Unsupported" ? error.reason.capability : "", "console.arguments")
     }

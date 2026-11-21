@@ -61,7 +61,8 @@ the page wrote rather than on how such a value reads.
 `nextCall` and `streamCalls` subscribe to calls: each message with handles to the values the page passed, which
 [`read`](/docs/api/browser/JSHandle#JSHandle.read) gives by value and `evaluate` runs a function on. A page or context
 keeps console arguments only while it has a subscription to calls, and the handles end with the subscription's
-scope:
+scope. Since a handle can run code in the page's own scripts, subscribing to calls takes a `Page` or a `UserContext`,
+which control gives, not an observed one:
 
 ```ts
 import { ConsoleMessage, Page } from "@usestrider/browser"

@@ -197,7 +197,8 @@ export type Source = typeof Source.Type
  * print it: `console.log([1, 2, 3], {a: 1}, window)` reads `[1, 2, 3] {a: 1} Window`. A preview shows an object's
  * first five properties and an array's first hundred items, with `…` for the rest; inside it, a string is quoted
  * and an object reads as its class (`{b: Object}`). An `Error` reads as its browser describes it, which on Chromium
- * includes its stack. The `console` capability says where a backend's previews differ. `source` says whether the
+ * includes its stack, and a function, a symbol, a date, or an instance of a class can read differently from one
+ * browser to another. `source` says whether the
  * page or the browser wrote it.
  *
  * `timestamp` is when the browser logged the message, by the browser's wall clock, to the millisecond: the time a
@@ -395,7 +396,8 @@ export interface Call {
  * **When to use**
  *
  * Use when a test reads the values a page logged, not only their text. A page or context keeps console arguments
- * only while it has a subscription to calls; `next` and `stream` keep none.
+ * only while it has a subscription to calls; `next` and `stream` keep none. The handles run code in the page's own
+ * scripts, so this takes a `Page` or a `UserContext`, which control gives.
  *
  * **Gotchas**
  *
@@ -424,17 +426,22 @@ export interface Call {
  * @since 0.1.0
  */
 export const nextCall: <PE = never, PR = never>(
-  target: Page.ObservedPage | UserContext.ObservedUserContext,
+  target: Page.Page | UserContext.UserContext,
   filter?: Filter | undefined,
   where?: Subscription.Where<ConsoleMessage, PE, PR> | undefined
 ) => Effect.Effect<
   Effect.Effect<Call, PE | Target.TargetGone | Deadline.Timeout>,
-  Subscription.SubscriptionError,
+  Subscription.SubscriptionError | Target.TargetGone | Deadline.Timeout,
   Scope.Scope | PR
 > = ConsoleMessageImpl.nextCall
 
 /**
  * Subscribes to console calls and emits every match from now on, each message with handles to its arguments.
+ *
+ * **Details**
+ *
+ * The handles run code in the page's own scripts, so this takes a `Page` or a `UserContext`, which control gives.
+ * A stream that overflows, or whose target ends, still delivers the calls it queued before, with their arguments.
  *
  * **Gotchas**
  *
@@ -465,11 +472,11 @@ export const nextCall: <PE = never, PR = never>(
  * @since 0.1.0
  */
 export const streamCalls: <PE = never, PR = never>(
-  target: Page.ObservedPage | UserContext.ObservedUserContext,
+  target: Page.Page | UserContext.UserContext,
   filter?: Filter | undefined,
   where?: Subscription.Where<ConsoleMessage, PE, PR> | undefined
 ) => Effect.Effect<
   Stream.Stream<Call, PE | Subscription.EventOverflow | Target.TargetGone>,
-  Subscription.SubscriptionError,
+  Subscription.SubscriptionError | Target.TargetGone | Deadline.Timeout,
   Scope.Scope | PR
 > = ConsoleMessageImpl.streamCalls
