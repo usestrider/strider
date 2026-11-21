@@ -194,7 +194,8 @@ export interface VideoOptions {
    */
   readonly size?: { readonly width: number; readonly height: number } | undefined
   /**
-   * The file's frame rate, finite and positive: constant on Chromium and WebKit, and a ceiling on Firefox, whose
+   * The file's frame rate, finite and positive: constant on Chromium and WebKit, where the file ends at the stop
+   * time rounded up to a whole frame, and a ceiling on Firefox, whose
    * frames keep their own times and which takes whole numbers only. Without it, the file is variable-rate, and
    * each image lasts until the next.
    *

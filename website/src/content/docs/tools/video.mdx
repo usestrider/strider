@@ -89,7 +89,8 @@ Without `size`, the file is the page's viewport in CSS pixels when recording sta
 800: a 1280 by 720 viewport gives 800 by 450. Without `fps`, the file is variable-rate.
 
 On Chromium and WebKit the file is exactly `size`, each image fitted and padded black, and constant-rate at
-`fps`. Firefox records natively: `size` is a box the page fits inside with its shape kept and no padding, so one
+`fps`: each frame shows the latest picture at or before its time, and the file ends at the stop time rounded up to
+a whole frame. Firefox records natively: `size` is a box the page fits inside with its shape kept and no padding, so one
 side may be shorter, and `fps` is a ceiling, with frames keeping their own times. Firefox takes a whole frame rate
 only.
 

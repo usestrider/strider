@@ -42,7 +42,7 @@ absolute output directory first; it must be writable. The writer installs nothin
 `"100 millis"` is an explicit starting point, not a default or a responsiveness guarantee. The first screenshot
 is immediate; later captures wait the interval after capture completes, and a slow writer can hold them back.
 The actual sampling period includes screenshot latency. Without an [`fps`](/docs/tools/video#size-frame-rate-and-path), the output is variable-rate and
-keeps each sample until the next; with one, it repeats samples to keep that rate. Either way it can
+keeps each sample until the next; with one, it repeats or drops samples to keep that rate, and ends at the stop time rounded up to a whole frame. Either way it can
 miss animations, brief errors, and other states between captures. There is no audio. Larger pages and shorter
 intervals can add more page work.
 

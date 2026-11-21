@@ -55,7 +55,28 @@ export type Frame = typeof Frame.Type
  * The destination, fixed output size, and optional frame rate. Writers must output every frame at exactly these
  * dimensions, scaling to fit, centring, and padding with black. Without `fps`, writers must preserve frame
  * timestamps: the last picture lasts until the final frame's timestamp, which marks the recording end. With `fps`,
- * the file is constant-rate at that many frames a second, each showing the image in force at its time.
+ * the file is constant-rate at that many frames a second, each showing the latest image at or before its time, and
+ * ends at the recording end rounded up to a whole frame.
+ *
+ * **Example** (Writing a 10 fps file at 800 by 450)
+ *
+ * ```ts import.meta.vitest
+ * import { VideoWriter } from "@usestrider/browser"
+ * import { Effect, Schema, Stream } from "effect"
+ *
+ * const writeAt10 = Effect.fn("writeAt10")(
+ *   function*(frames: Stream.Stream<VideoWriter.Frame>) {
+ *     const destination = Schema.decodeUnknownSync(VideoWriter.Destination)({
+ *       path: "/tmp/run.webm",
+ *       width: 800,
+ *       height: 450,
+ *       fps: 10
+ *     })
+ *     const writer = yield* VideoWriter.VideoWriter
+ *     return yield* writer.write(frames, destination)
+ *   }
+ * )
+ * ```
  *
  * @stability unstable
  * @category schemas
@@ -76,6 +97,19 @@ export const Destination = Schema.Struct({
 /**
  * A file, its fixed output dimensions in pixels, and an optional constant frame rate. Writers fit images to this
  * size and, without a frame rate, preserve their timestamps through the final recording-end frame.
+ *
+ * **Example** (A destination for a 10 fps file)
+ *
+ * ```ts import.meta.vitest
+ * import { VideoWriter } from "@usestrider/browser"
+ *
+ * const destination: VideoWriter.Destination = {
+ *   path: "/tmp/run.webm",
+ *   width: 800,
+ *   height: 450,
+ *   fps: 10
+ * }
+ * ```
  *
  * @stability unstable
  * @category models
@@ -181,7 +215,8 @@ const failure = (hint: string) =>
  * **Details**
  *
  * Requires `ChildProcessSpawner`. The output has no audio. Without a destination `fps` it preserves variable frame
- * times to millisecond precision; with one it is constant-rate, repeating or dropping images to keep that rate.
+ * times to millisecond precision. With one it resamples to that constant rate before encoding, repeating or dropping
+ * images, and ends at the stop time rounded up to a whole frame.
  * Images are scaled proportionally and padded with black to the destination's dimensions. Closing the input
  * finishes the file.
  *
