@@ -1,6 +1,6 @@
 /**
- * Captures on BiDi: screenshots, PDFs, and a video, which Firefox writes as a WebM file where the page's context
- * downloads to.
+ * Captures on BiDi: screenshots, PDFs, and a video, which Firefox writes as a WebM file in the directory it is
+ * given, or else where the page's context downloads to.
  */
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -88,7 +88,11 @@ export const pdf = Effect.fnUntraced(function*(state: State, id: L1Target.Naviga
   return yield* Kit.decodeBase64(data, "browsingContext.print")
 })
 
-/** A WebM file Firefox writes where the context downloads to, which a launched browser shares with the program. */
+/**
+ * A WebM file Firefox writes in the given directory or else where the context downloads to, either shared with the
+ * program by a launched browser. Firefox fits the page inside the size with its shape kept and no padding, and
+ * takes the frame rate as a ceiling; neither is emulated.
+ */
 export const video = Effect.fnUntraced(function*(
   state: State,
   id: L1Target.NavigableId,

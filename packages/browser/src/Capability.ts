@@ -151,22 +151,52 @@ export interface ScreencastControl {
 /**
  * How `Video` records: the file's size and frame rate, and where it goes.
  *
+ * **Details**
+ *
+ * Chromium and WebKit make the file exactly `size`, padded black, and constant-rate at `fps`. Firefox records
+ * natively and treats `size` as a box the page fits inside with its shape kept and no padding, and `fps` as a
+ * ceiling on its frame rate, not a constant rate.
+ *
+ * **Example** (Recording a small, steady file to a path of your own)
+ *
+ * ```ts import.meta.vitest
+ * import { Capability, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const recordTo = Effect.fn("recordTo")(function*(page: Page.Page, path: string) {
+ *   const options: Capability.VideoOptions = {
+ *     size: { width: 640, height: 360 },
+ *     fps: 25,
+ *     path,
+ *     overwrite: false
+ *   }
+ *   const video = yield* Effect.scoped(Effect.gen(function*() {
+ *     const recording = yield* page.capability(Capability.Video, options)
+ *     yield* page.getByRole("button", { name: "Pay" }).click()
+ *     return recording
+ *   }))
+ *   return yield* video.file
+ * })
+ * ```
+ *
  * @stability unstable
  * @category models
  * @since 0.1.0
  */
 export interface VideoOptions {
   /**
-   * The file's width and height in pixels, each a positive integer. Every image is scaled to fit, centred, and
-   * padded black.
+   * The file's width and height in pixels, each a positive integer. On Chromium and WebKit every image is scaled to
+   * fit, centred, and padded black. On Firefox it is a box: the page is fitted inside it with its shape kept and no
+   * padding, so one side may be shorter.
    *
    * @default the page's viewport in CSS pixels when the capability is acquired, scaled down (never up) to fit 800 by
    * 800: a 1280 by 720 viewport gives 800 by 450
    */
   readonly size?: { readonly width: number; readonly height: number } | undefined
   /**
-   * The file's constant frame rate, finite and positive. Without it, the file is variable-rate, and each image
-   * lasts until the next.
+   * The file's frame rate, finite and positive: constant on Chromium and WebKit, and a ceiling on Firefox, whose
+   * frames keep their own times and which takes whole numbers only. Without it, the file is variable-rate, and
+   * each image lasts until the next.
    *
    * @default none: variable-rate
    */
@@ -235,10 +265,11 @@ export const Screencast: Capability<ScreencastControl> = make("Screencast")
  *
  * **Details**
  *
- * `page.capability(Capability.Video, options)` takes `VideoOptions`: the file's size, a constant frame rate, and
- * a path. The file is the page's viewport scaled down to fit 800 by 800 unless `size` says otherwise, and every
- * image is scaled to fit it, centred, and padded black, as when the viewport changes while recording.
- * Firefox writes the file itself, and is given the size and frame rate; Chromium uses a `VideoWriter` provided to
+ * `page.capability(Capability.Video, options)` takes `VideoOptions`: the file's size, a frame rate, and a path.
+ * The file is the page's viewport scaled down to fit 800 by 800 unless `size` says otherwise. On Chromium and
+ * WebKit every image is scaled to fit it, centred, and padded black, as when the viewport changes while
+ * recording, and `fps` makes the file constant-rate. Firefox writes the file itself: it fits the page inside the
+ * size with its shape kept and no padding, and takes `fps` as a ceiling. Chromium uses a `VideoWriter` provided to
  * its browser layer. Without a `path`, both write into the context's downloads directory until recording ends.
  * Temporary downloads are removed with the context; set `UserContext.Options.downloads`, or `path`, to keep the
  * file. WebKit requires explicit layer video options and a writer, and writes into the directory those options
@@ -256,8 +287,9 @@ export const Screencast: Capability<ScreencastControl> = make("Screencast")
  * polled-video options. It fails on Firefox too when Strider didn't launch it, because the file would be out of
  * reach, or, without a `path`, when the page's context denies downloads. Without a `path`, Chromium fails the
  * same way when the context has no downloads directory. A `size` that isn't positive integers, an `fps` that isn't
- * finite and positive, a relative `path`, a `path` in a directory that doesn't exist, and with `overwrite: false`
- * an existing file, fail with `InvalidInput` before recording starts. Firefox takes a whole frame rate only.
+ * finite and positive, a relative `path`, a `path` in a directory that doesn't exist or that names a directory,
+ * and with `overwrite: false` an existing file, fail with `InvalidInput` before recording starts. Firefox fails
+ * a fractional `fps` with `Unsupported`.
  *
  * **Example** (Recording a checkout)
  *

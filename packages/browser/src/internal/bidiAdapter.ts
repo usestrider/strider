@@ -238,7 +238,10 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
         "Firefox's browsingContext.startScreencast records a WebM file on the browser's host, and streams no frames"
       ]),
       ownership === "launched"
-        ? entry("capability.video", "supported", ["written where the page's context downloads to"])
+        ? entry("capability.video", "supported", [
+          "written to the given path, or else where the page's context downloads to",
+          "the size is a box the page fits inside with its shape kept, unpadded; the frame rate is a ceiling"
+        ])
         : entry("capability.video", "unsupported", [
           "Firefox writes the file on its own host, out of the program's reach"
         ])

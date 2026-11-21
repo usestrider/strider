@@ -62,7 +62,7 @@ instead. Firefox never reads a writer, and an attached Firefox can't record.
 ## Size, frame rate, and path
 
 [`VideoOptions`](/docs/api/browser/Capability#VideoOptions) come after the capability. `size` sets the file's
-width and height in pixels, `fps` makes it constant-rate, and `path` names the file:
+width and height in pixels, `fps` its frame rate, and `path` names the file:
 
 ```ts
 import { Browser, Capability } from "@usestrider/browser"
@@ -86,10 +86,14 @@ const recordAt = Effect.fn("recordAt")(function*() {
 ```
 
 Without `size`, the file is the page's viewport in CSS pixels when recording starts, scaled down to fit 800 by
-800: a 1280 by 720 viewport gives 800 by 450. Without `fps`, the file is variable-rate. Firefox fits the page into
-the size keeping its shape, so one side may be shorter, and Firefox takes a whole frame rate only.
+800: a 1280 by 720 viewport gives 800 by 450. Without `fps`, the file is variable-rate.
 
-A path's directory must exist. With `overwrite: false`, a file already there fails acquisition, and one that
+On Chromium and WebKit the file is exactly `size`, each image fitted and padded black, and constant-rate at
+`fps`. Firefox records natively: `size` is a box the page fits inside with its shape kept and no padding, so one
+side may be shorter, and `fps` is a ceiling, with frames keeping their own times. Firefox takes a whole frame rate
+only.
+
+A path's directory must exist, and the path can't be a directory itself. With `overwrite: false`, a file already there fails acquisition, and one that
 appears while recording fails `file`, leaving that file alone. A size, frame rate, or path that isn't valid fails
 with `InvalidInput` before anything records.
 

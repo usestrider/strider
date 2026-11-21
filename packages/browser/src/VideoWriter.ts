@@ -65,6 +65,11 @@ export const Destination = Schema.Struct({
   path: Schema.String,
   width: Schema.Number,
   height: Schema.Number,
+  /**
+   * The constant frame rate to write at.
+   *
+   * @default none: variable-rate, each image at its own time
+   */
   fps: Schema.optional(Schema.Number)
 })
 
