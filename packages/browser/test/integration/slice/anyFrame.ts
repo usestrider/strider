@@ -2,7 +2,7 @@
  * The search across a page's frames (`page.anyFrame`, `frameLocator.anyFrame`): one case for each rule of it.
  */
 import { assert, describe, layer } from "@effect/vitest"
-import { type Browser, Deadline, Locator } from "@usestrider/browser"
+import { type Browser, Deadline, Expect, Locator } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import type * as Layer from "effect/Layer"
@@ -349,7 +349,10 @@ export const anyFrame = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer
             fixtureUrl(origin, `<iframe src="${origin}/pending-page"></iframe>${frame(origin, button("Pay"))}`),
             { waitUntil: "commit" }
           )
-          yield* page.anyFrame.getByRole("button", { name: "Pay" }).click().pipe(Deadline.within("1 second"))
+          const pay = page.anyFrame.getByRole("button", { name: "Pay" })
+          // The bound is on finding Pay, which needs no rendered frame; a click also waits for the page to draw
+          yield* pay.pipe(Expect.toHaveText("Pay"), Deadline.within("1 second"))
+          yield* pay.click()
           assert.strictEqual(yield* page.anyFrame.locator("#out").readText, "clicked")
         })), timeout)
 
