@@ -1,8 +1,11 @@
 /**
  * Permission grants and denials. L0's reset clears every setting in a context, so L1 keeps the grants and denials
  * in force in the context's state, which the model's fold writes, and recomputes on each change: a removal resets,
- * then sets what remains, oldest first, so for each origin and name the latest declaration in force wins. Each name
- * is set on its own, so a name a backend rejects (Firefox's list is shorter) fails naming it.
+ * then sets what remains. For each origin and name, the latest declaration in force that covers it wins, whether it
+ * names that origin or every origin. Chromium keeps a setting for one origin ahead of one for every origin, whichever
+ * came later, so L1 sends what that rule resolves to (`resolve`), not each declaration in turn: a setting for every
+ * origin also goes to each origin that has one of its own. Each name is set on its own, so a name a backend rejects
+ * (Firefox's list is shorter) fails naming it.
  */
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -22,6 +25,37 @@ const origin = (input: string | undefined): Option.Option<string> | undefined =>
   if (input === undefined) return Option.none()
   const parsed = URL.parse(input)
   return parsed === null ? undefined : Option.some(parsed.origin)
+}
+
+const key = (origin: string, name: string) => JSON.stringify([origin, name])
+
+/**
+ * What declarations, oldest first, leave in force, one name per entry: for each name, the latest declaration for every
+ * origin that names it; for each origin a declaration names, and each name, the latest declaration covering both.
+ */
+export const resolve = (grants: ReadonlyArray<Model.GrantEntry>): ReadonlyArray<Model.GrantEntry> => {
+  const everywhere = new Map<string, Adapter.PermissionSetting>()
+  const each = new Map<string, Model.GrantEntry>()
+  for (const declaration of grants) {
+    for (const name of declaration.permissions) {
+      if (Option.isSome(declaration.origin)) {
+        each.set(key(declaration.origin.value, name), {
+          origin: declaration.origin,
+          permissions: [name],
+          setting: declaration.setting
+        })
+        continue
+      }
+      everywhere.set(name, declaration.setting)
+      for (const [at, setting] of each) {
+        if (setting.permissions[0] === name) each.set(at, { ...setting, setting: declaration.setting })
+      }
+    }
+  }
+  return [
+    ...Array.from(everywhere, ([name, setting]) => ({ origin: Option.none(), permissions: [name], setting })),
+    ...each.values()
+  ]
 }
 
 export const grant = (
@@ -70,13 +104,23 @@ export const grant = (
     const grant: Model.GrantEntry = { origin: where, permissions: [...permissions], setting }
     const inForce = Effect.map(entry.state.get, (state) => state.grants)
     const apply = (grants: ReadonlyArray<Model.GrantEntry>) =>
-      Effect.forEach(grants, (each) => adapter.grantPermissions(context, each.origin, each.permissions, each.setting), {
-        discard: true
-      })
+      Effect.forEach(
+        resolve(grants),
+        (each) => adapter.grantPermissions(context, each.origin, each.permissions, each.setting),
+        { discard: true }
+      )
+    // A declaration for every origin overrides the settings of origins of their own for its names too
+    const overridden = Option.isSome(where) ? [] : resolve(yield* inForce).filter((each) =>
+      Option.isSome(each.origin) && permissions.includes(each.permissions[0]!)
+    )
+    const sends = [
+      ...permissions.map((name) => ({ origin: where, name, reported: true })),
+      ...overridden.map((each) => ({ origin: each.origin, name: each.permissions[0]!, reported: false }))
+    ]
     const scope = yield* Scope.fork(yield* Effect.scope)
-    for (const name of permissions) {
-      yield* adapter.grantPermissions(context, where, [name], setting).pipe(
-        Effect.mapError((error) => mapped(error, name)),
+    for (const send of sends) {
+      yield* adapter.grantPermissions(context, send.origin, [send.name], setting).pipe(
+        Effect.mapError((error) => mapped(error, send.reported ? send.name : undefined)),
         // What this call set goes again, with the declarations before it: cleanup, which the deadline doesn't end
         Effect.onError(() =>
           adapter.resetPermissions(context).pipe(
