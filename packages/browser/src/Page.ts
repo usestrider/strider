@@ -8,8 +8,9 @@
  *
  * Access is granted for a `Scope`: `inspect` and `control` are the only ways up, and no type guard narrows a page's
  * access. A subtype never changes what an inherited member does: `evaluate` runs in the isolated world whatever
- * the page's access, and only `evaluateInMainWorld`, on a `Page`, runs among the page's own scripts. WebKit has no
- * isolated worlds: there, reads run in the page's own world, and `evaluate` fails with `Unsupported`.
+ * the page's access, and only `evaluateInMainWorld` on a `Page`, and `Expect.toHaveJSProperty` on a `Locator`, run
+ * among the page's own scripts. WebKit has no isolated worlds: there, reads run in the page's own world, and
+ * `evaluate` fails with `Unsupported`.
  *
  * @stability unstable
  * @since 0.1.0

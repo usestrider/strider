@@ -19,6 +19,7 @@ import type * as Model from "./model.ts"
 export const succeeded = (
   model: Model.Model,
   navigation: PageNavigation.Id,
+  page: Target.NavigableId,
   frame: Target.NavigableId,
   at: Url.Url,
   outcome: Adapter.NavigationOutcome
@@ -28,6 +29,7 @@ export const succeeded = (
       return Option.some({
         _tag: "Committed",
         id: navigation,
+        page,
         frame,
         url: at,
         document: outcome.document,
@@ -37,15 +39,16 @@ export const succeeded = (
       return Option.some({
         _tag: "SameDocument",
         id: navigation,
+        page,
         frame,
         url: at,
         document: outcome.document,
         via: outcome.via
       })
     case "Restored":
-      return Option.some({ _tag: "Restored", id: navigation, frame, url: at, document: outcome.document })
+      return Option.some({ _tag: "Restored", id: navigation, page, frame, url: at, document: outcome.document })
     case "Activated":
-      return Option.some({ _tag: "Activated", id: navigation, frame, url: at, document: outcome.document })
+      return Option.some({ _tag: "Activated", id: navigation, page, frame, url: at, document: outcome.document })
     default:
       return Option.none()
   }

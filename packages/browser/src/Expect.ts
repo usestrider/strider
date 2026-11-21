@@ -3,7 +3,8 @@
  *
  * A locator's expectation waits in the page: it checks once, then again on each change the page makes (a DOM
  * mutation, an `input`, `change`, or focus event, an animation frame), so there is no polling interval and no change
- * is missed between checks. `toHaveURL` checks the page's URL on each change. `Expect.that` checks a `Watchable` on
+ * is missed between checks. `toHaveJSProperty` is the exception: a property assignment is no change the page
+ * reports, so it reads the property again every `CheckInterval`. `toHaveURL` checks the page's URL on each change. `Expect.that` checks a `Watchable` on
  * each change, and runs any other effect again every `CheckInterval`. Everything runs on the real clock, within the
  * deadline. To collect several failures, use `Effect.validate` or `Effect.all(…, { mode: "result" })`.
  *
@@ -635,6 +636,68 @@ export const toHaveCSS: DualMatcher<
 )
 
 /**
+ * Expects a JavaScript property of the one match to deeply equal a value, read where the page's own scripts set it.
+ *
+ * **When to use**
+ *
+ * Use to check state a page keeps on an element rather than in its markup: a DOM property such as `checked`, or
+ * a value a script assigned, such as `element.model = { … }`.
+ *
+ * **Details**
+ *
+ * `path` is a property name or a dotted path into nested objects (`"model.user.name"`). A step through a value that
+ * isn't an object, or that lacks the key, reads `undefined`. Each check reads the path in the page's own JavaScript
+ * world and returns the value by value, then compares it with `expected`: Dates by time, regular expressions by
+ * source and flags, arrays, Maps and Sets by their entries, plain objects by their own enumerable keys, and `NaN`
+ * equals `NaN`. Missing and multiple matches, a value that can't be returned by value, and a mismatch are checked
+ * again until the deadline, and exactly one element must match, including with `not: true`. Failure history records
+ * the value read, or the match count when there is no single element.
+ *
+ * A property assignment is no change the page reports, so instead of waiting on page events the matcher reads the
+ * property again every `CheckInterval` (100 ms unless set with `withCheckInterval`).
+ *
+ * **Gotchas**
+ *
+ * - The read runs among the page's own scripts, so a getter the page defined runs and can see it; that is why it
+ *   needs a `Locator` and refuses a `ReadonlyLocator`.
+ * - A key that contains a dot can't be named in `path`.
+ * - `CheckInterval` sets how often the read runs, and so how often a getter of the page's on the path runs.
+ *
+ * **Example** (Checking state a script set)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const subscribed = Effect.fn("subscribed")(function*(page: Page.Page) {
+ *   yield* page.getByRole("checkbox", { name: "Subscribe" }).pipe(
+ *     Expect.toHaveJSProperty("checked", true)
+ *   )
+ *   yield* page.locator("#profile").pipe(Expect.toHaveJSProperty("model.plan", "pro"))
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category matchers
+ * @since 0.1.0
+ */
+export const toHaveJSProperty: DualMatcher<
+  Locator.Locator,
+  [
+    path: string,
+    expected: unknown,
+    options?: {
+      /** Negates the value comparison; still requires exactly one match. @default false */
+      readonly not?: boolean | undefined
+    } | undefined
+  ]
+> = dual(
+  (args) => Locator.isLocator(args[0]),
+  (locator: Locator.Locator, path: string, expected: unknown, options?: { readonly not?: boolean | undefined }) =>
+    ExpectImpl.toHaveJSProperty(locator, path, expected, options)
+)
+
+/**
  * Expects exactly `count` matches.
  *
  * **Example** (Checking how many results a search gave)
@@ -852,7 +915,8 @@ export const that = <A, E, R>(
     : ExpectImpl.polling(subject, condition)
 
 /**
- * Reference to how often `Expect.that` runs a subject that isn't a `Watchable` again; 100 ms unless set.
+ * Reference to how often `Expect.that` runs a subject that isn't a `Watchable` again, and how often
+ * `toHaveJSProperty` reads its property again, which runs any getter of the page's on its path; 100 ms unless set.
  *
  * @stability unstable
  * @category references
@@ -864,7 +928,7 @@ export const CheckInterval: Context.Reference<Duration.Duration> = Context.Refer
 )
 
 /**
- * Sets `CheckInterval` for every `Expect.that` inside an effect.
+ * Sets `CheckInterval` for every `Expect.that` and `toHaveJSProperty` inside an effect.
  *
  * **Example** (Polling saved state less often)
  *

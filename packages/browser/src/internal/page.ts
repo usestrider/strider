@@ -239,6 +239,7 @@ export const make = (owner: PageOwner): Page.Page => {
         operation,
         started.value,
         entry.id,
+        entry.id,
         url,
         at,
         outcome,

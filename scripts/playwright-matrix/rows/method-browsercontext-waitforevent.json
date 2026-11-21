@@ -3,9 +3,20 @@
   "upstream": [
     "method:BrowserContext.waitForEvent"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No arbitrary event-name wait dispatcher; use each event module. Event-specific rows show which events are available.",
+  "status": "different",
+  "api": [
+    {
+      "module": "PageLifecycle",
+      "symbol": "next",
+      "url": "/docs/api/browser/PageLifecycle#next"
+    },
+    {
+      "module": "PageNavigation",
+      "symbol": "next",
+      "url": "/docs/api/browser/PageNavigation#next"
+    }
+  ],
+  "notes": "No event-name dispatcher: each event module's `next(context, filter)` is the wait for that event, typed by it, such as `PageLifecycle.next(context, { events: \"Closed\" })` or `PageNavigation.next(context, { waitUntil: \"load\" })`.",
   "capabilities": [],
   "audit": {
     "sources": [
@@ -13,5 +24,11 @@
     ],
     "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
   },
-  "requirements": []
+  "requirements": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "each-event-kind-is-its-own-module",
+    "quote": "There is no wait that takes an event name.",
+    "revision": "662dc34afb6cd3569313166688e1e3ee99faed82"
+  }
 }

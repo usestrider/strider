@@ -85,7 +85,8 @@ shouldn't change how a site behaves. So:
   pages where their scripts could read it.
 - The query engine is one self-contained function in our source, with no library in the page.
 
-What does run in the main world is what the caller declared, their init scripts and the page clock, and, on stock
+What does run in the main world is what the caller declared, their init scripts, the page clock and the read of
+`Expect.toHaveJSProperty`, which asks for a property the page's scripts set, and, on stock
 WebKit alone, the library's own engine and reads, because its inspector makes no other world (QUIRKS.md, Q194).
 
 **The design is checked as compiled code.** A compiler checks what prose can't:
@@ -1036,8 +1037,11 @@ when requested rather than introducing separate name strings or speculative opti
 An event being published is not a completed match: delivery can load and decode a response body or wait for a
 navigation, and a caller predicate can reject it or still be running. A one-shot wait commits exactly one outcome:
 completed delivery accepted by its predicate, delivery/predicate failure, its registration-time deadline, target
-end, or acquiring-scope cancellation. Target end commits `TargetGone` in the channel's end path rather than waiting
-for its worker to take another queued entry. A channel that already ended commits that failure at registration.
+end, or acquiring-scope cancellation. Entries queued before target end, while none is being delivered, are still the
+wait's: the queue ends after them, so the worker delivers and checks them first and fails the wait with
+`TargetGone` only once it is empty. A delivery or predicate already running when the target ends may be blocked on
+it, so then target end commits `TargetGone` in the channel's end path.
+A channel that already ended commits that failure at registration.
 Scope cancellation commits before stopping workers; completed results, errors, and timeouts remain latched.
 
 The model's end path only commits immutable terminal data and signals the waiter; it runs no delivery, predicate,
@@ -1051,8 +1055,10 @@ its delivery worker is still using caller resources. Prompt terminal notificatio
 release has finished. The caller can keep the latched result. Streams retain their existing ordered
 buffer-draining contract on normal target end.
 
-Rejected: making target failure depend on worker progress, which can return success after the target has ended
-and contradicts the target-lifetime contract; treating publication as a match, which bypasses effectful delivery
+Rejected: making target failure wait on a delivery or predicate already running when the target ends, which can
+hold the wait on work blocked by the ended target and return success after it ended (entries still queued, with
+none running, are the accepted exception above: they were published before the end, and are delivered and checked
+first); treating publication as a match, which bypasses effectful delivery
 and predicates; draining or evaluating queued work during scope closure, which delays cancellation and starts user
 work after ownership ended; retaining completed subscriptions until their acquiring scope closes, which keeps
 unusable entries and callbacks alive. This is a correctness rule, not an observation optimization.
@@ -1862,3 +1868,12 @@ never writes to. A directory inside Vitest's `__snapshots__` was rejected, becau
 stays with Vitest's own `toMatchFileSnapshot`, which already diffs a string against a file; a Strider text matcher was
 rejected as a duplicate of it, and comparing JPEG by pixels was rejected because it needs a decoder the package
 doesn't have.
+
+## Each event kind is its own module
+
+Each kind of event is a module with its own `next`, `stream`, and `history` (principle 16): `PageNavigation`,
+`PageLifecycle`, `ConsoleMessage`, `Dialog`, and the rest, each on a page or a context as it allows. There is no wait
+that takes an event name. Each module gives its own typed payload and its own filter, compiled before buffering, so a
+wait names what it matches in the event's terms and its result needs no cast. Rejected: a `waitForEvent(name)` or
+`on(name)` dispatch over event names, as Playwright and Node's emitters have, whose payload and filter types follow
+from a string, and which would put every kind's lifetime and delivery rules behind one untyped entry point.

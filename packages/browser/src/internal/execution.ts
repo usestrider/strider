@@ -1,5 +1,5 @@
 /** Page-local execution dispatch. Ordinary pages share the ordinary functions, without feature preflights. */
-import type * as Effect from "effect/Effect"
+import * as Effect from "effect/Effect"
 import type * as Deadline from "../Deadline.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
 import type * as Expect from "../Expect.ts"
@@ -36,9 +36,12 @@ export interface Dispatch {
     id: Diagnostics.OperationId,
     at: MonotonicInstant.MonotonicInstant
   ) => Effect.Effect<Engine.Response, Failure>
+  /** Services the page's locator handlers once, before a check that doesn't go through the engine. */
+  readonly beforeCheck: Effect.Effect<void, Failure>
 }
 export const ordinary: Dispatch = {
   action: Runtime.sendRouted,
   expect: Runtime.send,
+  beforeCheck: Effect.void,
   url: (page, expected) => ExpectImpl.watchURL(page, expected)
 }
