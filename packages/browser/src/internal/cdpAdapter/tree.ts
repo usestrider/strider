@@ -120,7 +120,17 @@ export const removeFrame = (state: State, frame: FrameEntry, reason: L1Target.Cl
   })
 
 /** Ends a page: its frames, its obligations, its input state, and a wait for it to be ready. */
+/** Releases the ids an ended popup held for an opener that never attached; safe to run again. */
+const releaseReserved = (state: State, popup: L1Target.NavigableId) => {
+  for (const [targetId, reserved] of state.reservedIds) {
+    reserved.popups.delete(popup)
+    if (reserved.popups.size === 0) state.reservedIds.delete(targetId)
+  }
+}
+
 export const endPage = (state: State, page: PageEntry, reason: L1Target.CloseReason, evidence: string) => {
+  // Every page ends here, by detach or by either crash event, so a popup's hold on its opener's id ends with it
+  releaseReserved(state, page.id)
   if (page.ended) return
   page.ended = true
   state.endedPages.set(page.id, reason)
