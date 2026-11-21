@@ -241,6 +241,11 @@ export type ScreenshotOptions = ScreenshotFormat & {
    * capture. Animations that start during the capture are stopped the same way. One at a playback rate of 0 is
    * left as it is.
    *
+   * **Gotchas**
+   *
+   * Playing the animations again after the capture is best effort: it can add up to 5 seconds to the screenshot, as
+   * every frame's resumption runs at once, and a frame that doesn't answer is left with its animations stopped.
+   *
    * **Example** (Capturing a card with its animations stopped)
    *
    * ```ts import.meta.vitest
