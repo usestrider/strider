@@ -2979,6 +2979,113 @@ export const contents = (
           }))
         }), timeout)
 
+      it.effect("removes screenshot masks when interrupted before the drawing reply arrives", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<div id="secret">private</div>`))
+            const html = yield* page.readHtml
+            const target = page.locator("#secret")
+            assert(target instanceof LocatorImpl)
+            const adapter = target.owner.runtime.model.adapter
+            const original = adapter.evaluate
+            const drawn = yield* Deferred.make<void>()
+            const hook = vi.spyOn(adapter, "evaluate").mockImplementation((realm, options) => {
+              const argument = options.arguments[0]
+              const request = argument?._tag === "Value" && argument.value.type === "string"
+                ? JSON.parse(argument.value.value) as { op?: string }
+                : undefined
+              const result = original(realm, options)
+              // Run the real engine, then withhold its reply from capture bookkeeping.
+              return request?.op === "mask"
+                ? result.pipe(
+                  Effect.tap(() =>
+                    Deferred.succeed(drawn, undefined)
+                  ),
+                  Effect.andThen(Effect.never)
+                )
+                : result
+            })
+            yield* Effect.addFinalizer(() =>
+              Effect.sync(() =>
+                hook.mockRestore()
+              )
+            )
+            const pending = yield* page.screenshot({ mask: [target] }).pipe(Effect.forkChild)
+            yield* Deferred.await(drawn)
+            assert.strictEqual(yield* page.readHtml, html)
+            assert.strictEqual(yield* page.locator("strider-mask").count, 0)
+            assert.strictEqual(yield* page.locator(Locator.xpath("//strider-mask")).count, 0)
+            yield* Fiber.interrupt(pending)
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() => document.querySelectorAll("strider-mask").length),
+              0
+            )
+          }))
+        }), timeout)
+
+      it.effect("bounds screenshot mask cleanup when the document stops answering", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<div id="secret">private</div>`))
+            const target = page.locator("#secret")
+            assert(target instanceof LocatorImpl)
+            const adapter = target.owner.runtime.model.adapter
+            const original = adapter.evaluate
+            const cleaning = yield* Deferred.make<void>()
+            const release = yield* Deferred.make<void>()
+            const ended = yield* Deferred.make<void>()
+            const hook = vi.spyOn(adapter, "evaluate").mockImplementation((realm, options) => {
+              const argument = options.arguments[0]
+              const request = argument?._tag === "Value" && argument.value.type === "string"
+                ? JSON.parse(argument.value.value) as { op?: string }
+                : undefined
+              const result = original(realm, options)
+              return request?.op === "unmask"
+                ? Deferred.succeed(cleaning, undefined).pipe(
+                  Effect.andThen(Deferred.await(release)),
+                  Effect.andThen(result)
+                )
+                : result
+            })
+            yield* Effect.addFinalizer(() =>
+              Effect.sync(() =>
+                hook.mockRestore()
+              )
+            )
+            const pending = yield* page.screenshot({ mask: [target] }).pipe(
+              Deadline.within("1 second"),
+              Effect.onExit(() => Deferred.succeed(ended, undefined)),
+              Effect.forkChild
+            )
+            yield* Deferred.await(cleaning)
+            // Observe completion independently: timing out an uninterruptible finalizer would itself hang.
+            const completed = yield* Deferred.await(ended).pipe(Effect.timeoutOption("6 seconds"))
+            yield* Deferred.succeed(release, undefined)
+            yield* Fiber.await(pending)
+            assert.isTrue(Option.isSome(completed), "capture exit must bound its cleanup after the caller deadline")
+          }))
+        }), timeout)
+
+      it.effect("rejects an invalid screenshot mask color before returning an unmasked image", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<div id="secret">private</div>`))
+            const error = reasonOf(
+              yield* page.screenshot({
+                mask: [page.locator("#secret")],
+                maskColor: "not-a-css-color"
+              }).pipe(Effect.exit)
+            )
+            assert.strictEqual(error?.reason?._tag, "InvalidInput")
+          }))
+        }), timeout)
+
       it.effect("masks every element a locator matches in the color given, and leaves the page as it was", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
