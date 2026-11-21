@@ -344,7 +344,14 @@ export const toBeEditable: Matcher<Locator.ReadonlyLocator> = (locator) => Expec
  * **Details**
  *
  * A string must equal the whole text, case-sensitively, after whitespace is collapsed; a `RegExp` is tested as
- * given.
+ * given. `ignoreCase: true` compares strings without case and sets a regular expression's `i` flag;
+ * `ignoreCase: false` clears it; left out, regular expressions keep their flags. The text is the element's text
+ * content, which includes hidden descendants; `useInnerText: true` reads its rendered `innerText` instead.
+ *
+ * **Gotchas**
+ *
+ * `innerText` depends on layout and CSS, such as `display: none` and `text-transform`, and browsers compute it
+ * differently in places, so the same page can give different text in each.
  *
  * **Example** (Checking the cart's items in order)
  *
@@ -364,12 +371,37 @@ export const toBeEditable: Matcher<Locator.ReadonlyLocator> = (locator) => Expec
  */
 export const toHaveText: DualMatcher<
   Locator.ReadonlyLocator,
-  [expected: string | RegExp | ReadonlyArray<string | RegExp>]
+  [expected: string | RegExp | ReadonlyArray<string | RegExp>, options?: TextOptions | undefined]
 > = dual(
-  2,
-  (locator: Locator.ReadonlyLocator, expected: string | RegExp | ReadonlyArray<string | RegExp>) =>
-    ExpectImpl.toHaveText(locator, expected)
+  (args) => Locator.isLocator(args[0]),
+  (
+    locator: Locator.ReadonlyLocator,
+    expected: string | RegExp | ReadonlyArray<string | RegExp>,
+    options?: TextOptions | undefined
+  ) => ExpectImpl.toHaveText(locator, expected, options)
 )
+
+/**
+ * The options of `toHaveText` and `toContainText`.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export interface TextOptions {
+  /**
+   * Compares strings without case, and sets a regular expression's `i` flag; `false` clears it.
+   *
+   * @default undefined: strings match case, and regular expressions keep their flags
+   */
+  readonly ignoreCase?: boolean | undefined
+  /**
+   * Reads each element's rendered `innerText` instead of its text content, with whitespace collapsed alike.
+   *
+   * @default false
+   */
+  readonly useInnerText?: boolean | undefined
+}
 
 /**
  * Expects the one match's accessible name to match `expected`, retrying until the deadline.
@@ -554,8 +586,19 @@ export const toHaveClass: DualMatcher<
 )
 
 /**
- * Expects the text of the one match to contain `expected`. A string is matched case-sensitively, after whitespace
- * is collapsed.
+ * Expects the text of the one match to contain `expected`, or, given a list, the entries to be contained in
+ * matches in the same order, each entry in a later match than the one before.
+ *
+ * **Details**
+ *
+ * A string is matched case-sensitively, after whitespace is collapsed; a `RegExp` is tested as given.
+ * `ignoreCase` and `useInnerText` work as in `toHaveText`. A list needs no entry for every match: `["a", "c"]`
+ * passes for matches whose texts are `a`, `b`, and `c`, but not for `c`, `b`, and `a`. An empty list passes only
+ * when nothing matches.
+ *
+ * **Gotchas**
+ *
+ * With `useInnerText`, the text depends on layout and can differ between browsers, as in `toHaveText`.
  *
  * **Example** (Waiting for a save to be confirmed)
  *
@@ -572,9 +615,16 @@ export const toHaveClass: DualMatcher<
  * @category matchers
  * @since 0.1.0
  */
-export const toContainText: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]> = dual(
-  2,
-  (locator: Locator.ReadonlyLocator, expected: string | RegExp) => ExpectImpl.toContainText(locator, expected)
+export const toContainText: DualMatcher<
+  Locator.ReadonlyLocator,
+  [expected: string | RegExp | ReadonlyArray<string | RegExp>, options?: TextOptions | undefined]
+> = dual(
+  (args) => Locator.isLocator(args[0]),
+  (
+    locator: Locator.ReadonlyLocator,
+    expected: string | RegExp | ReadonlyArray<string | RegExp>,
+    options?: TextOptions | undefined
+  ) => ExpectImpl.toContainText(locator, expected, options)
 )
 
 /**
@@ -668,6 +718,11 @@ export const toHaveRole: DualMatcher<Locator.ReadonlyLocator, [expected: string]
 /**
  * Expects the one match to have the attribute, with a matching value when one is given.
  *
+ * **Details**
+ *
+ * A string must equal the whole value as written; a `RegExp` is tested as given. `ignoreCase: true` compares the
+ * value without case and sets a regular expression's `i` flag; `ignoreCase: false` clears it.
+ *
  * **Example** (Checking that a menu opened)
  *
  * ```ts import.meta.vitest
@@ -687,11 +742,19 @@ export const toHaveRole: DualMatcher<Locator.ReadonlyLocator, [expected: string]
  */
 export const toHaveAttribute: DualMatcher<
   Locator.ReadonlyLocator,
-  [name: string, expected?: string | RegExp | undefined]
+  [
+    name: string,
+    expected?: string | RegExp | undefined,
+    options?: { readonly ignoreCase?: boolean | undefined } | undefined
+  ]
 > = dual(
   (args) => Locator.isLocator(args[0]),
-  (locator: Locator.ReadonlyLocator, name: string, expected?: string | RegExp) =>
-    ExpectImpl.toHaveAttribute(locator, name, expected)
+  (
+    locator: Locator.ReadonlyLocator,
+    name: string,
+    expected?: string | RegExp | undefined,
+    options?: { readonly ignoreCase?: boolean | undefined } | undefined
+  ) => ExpectImpl.toHaveAttribute(locator, name, expected, options)
 )
 
 /**
@@ -932,6 +995,11 @@ export const toMatchAria: DualMatcher<
 /**
  * Expects the page's URL to match. A string must equal the whole URL; use a `RegExp` to match part of it.
  *
+ * **Details**
+ *
+ * `ignoreCase: true` compares a string without case and sets a regular expression's `i` flag;
+ * `ignoreCase: false` clears it; left out, a string matches case and a regular expression keeps its flags.
+ *
  * **Example** (Landing on the account page after signing in)
  *
  * ```ts import.meta.vitest
@@ -948,9 +1016,17 @@ export const toMatchAria: DualMatcher<
  * @category matchers
  * @since 0.1.0
  */
-export const toHaveURL: DualMatcher<Page.ReadonlyPage, [expected: string | RegExp]> = dual(
-  2,
-  (page: Page.ReadonlyPage, expected: string | RegExp) => ExpectImpl.toHaveURL(page, expected)
+export const toHaveURL: DualMatcher<
+  Page.ReadonlyPage,
+  [expected: string | RegExp, options?: { readonly ignoreCase?: boolean | undefined } | undefined]
+> = dual(
+  // Data-first when the expected URL follows the page
+  (args) => typeof args[1] === "string" || args[1] instanceof RegExp,
+  (
+    page: Page.ReadonlyPage,
+    expected: string | RegExp,
+    options?: { readonly ignoreCase?: boolean | undefined } | undefined
+  ) => ExpectImpl.toHaveURL(page, expected, options)
 )
 
 /**

@@ -206,6 +206,14 @@ export const locatorHandlers = (name: string, backend: Layer.Layer<Browser.Brows
             }), { times: 1, noWaitAfter: true })
           yield* Expect.toHaveURL(page, /#done$/)
           assert.strictEqual(calls, 2)
+          // The check in the page applies ignoreCase too
+          yield* Expect.toHaveURL(page, /#DONE$/, { ignoreCase: true })
+          const cased = yield* Expect.toHaveURL(page, /#DONE$/, { ignoreCase: false }).pipe(
+            Deadline.within("200 millis"),
+            Effect.flip
+          )
+          assert(Expect.isExpectationFailed(cased), String(cased))
+          assert.strictEqual(cased.condition, "to have the URL /#DONE$/ matching case")
         }).pipe(Effect.scoped))
 
       it.effect("supports an always-visible trigger once without disappearance waiting", () =>
