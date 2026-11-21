@@ -778,6 +778,39 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           }))
         }), timeout)
 
+      it.effect("sizes a recording by default when the page navigates as it is acquired", () =>
+        Effect.gen(function*() {
+          if (!(yield* supports("capability.video"))) return
+          const before = yield* fixture(`<p>before</p>`)
+          const after = yield* fixture(
+            `<p id="t"></p><script>setInterval(() => t.textContent = Date.now(), 50)</script>`
+          )
+          const [file, viewport] = yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(before)
+            const recording = yield* Effect.scoped(Effect.gen(function*() {
+              const recording = yield* page.capability(Capability.Video)
+              yield* page.goto(after)
+              yield* Effect.sleep("800 millis")
+              return recording
+            }))
+            return [yield* recording.file, yield* page.evaluate(() => [innerWidth, innerHeight])] as const
+          }))
+          const video = JSON.parse(execFileSync(process.env["STRIDER_FFPROBE"]!, [
+            "-v",
+            "error",
+            "-show_streams",
+            "-of",
+            "json",
+            file
+          ], { encoding: "utf8" })).streams[0]
+          console.log("Default video size", JSON.stringify({ viewport, width: video.width, height: video.height }))
+          // The viewport fitted into 800 by 800, scaled down, never up
+          const scale = Math.min(1, 800 / viewport[0]!, 800 / viewport[1]!)
+          assert.closeTo(video.width, viewport[0]! * scale, 2)
+          assert.closeTo(video.height, viewport[1]! * scale, 2)
+        }), timeout)
+
       it.effect(
         "records to a path at a size and frame rate where the browser writes one",
         () =>

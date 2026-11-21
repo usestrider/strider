@@ -125,6 +125,26 @@ describe("WebKit polled video", () => {
     })), 15_000)
 
   it.live(
+    "sizes a recording by default when the page navigates as it is acquired",
+    () =>
+      run(launched(Effect.gen(function*() {
+        const { origin } = yield* site
+        const page = yield* Browser.newPage()
+        yield* page.goto(`${origin}/fixture?html=${encodeURIComponent("<p>before</p>")}`)
+        const recording = yield* Effect.scoped(Effect.gen(function*() {
+          const video = yield* page.capability(Capability.Video)
+          yield* page.goto(`${origin}/fixture?html=${encodeURIComponent("<p>after</p>")}`)
+          yield* Effect.sleep("300 millis")
+          return video
+        }))
+        const video = probe(yield* recording.file).streams[0]
+        assert.isAtMost(Math.max(video.width, video.height), 800)
+        assert.isAbove(Math.min(video.width, video.height), 0)
+      }))),
+    30_000
+  )
+
+  it.live(
     "writes to a path at a size and frame rate in place of the layer's directory",
     () =>
       run(launched(Effect.gen(function*() {

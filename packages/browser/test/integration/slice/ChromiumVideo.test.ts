@@ -146,6 +146,21 @@ describe("Chromium video writer", () => {
         assert.deepStrictEqual([video.width, video.height], [800, 450])
       }), 60_000)
 
+    it.effect("sizes a recording by default when the page navigates as it is acquired", () =>
+      Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        yield* page.goto("data:text/html,<p>before</p>")
+        const recording = yield* Effect.scoped(Effect.gen(function*() {
+          const video = yield* page.capability(Capability.Video)
+          yield* page.goto("data:text/html,<p>after</p>")
+          yield* Effect.sleep("300 millis")
+          return video
+        }))
+        const video = probe(yield* recording.file).streams[0]
+        assert.isAtMost(Math.max(video.width, video.height), 800)
+        assert.isAbove(Math.min(video.width, video.height), 0)
+      }), 60_000)
+
     it.effect(
       "writes to a path at a size and constant frame rate, without a downloads directory",
       () =>
