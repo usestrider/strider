@@ -9,6 +9,7 @@ import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Filter from "effect/Filter"
+import { identity } from "effect/Function"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
@@ -100,9 +101,16 @@ const waitTurn = (turn: Turn | undefined): Effect.Effect<void> =>
     Effect.andThen(Effect.suspend(() => turn.cancelled ? waitTurn(turn.prev) : Effect.void))
   )
 
-/** Applies `apply` at `turn`, within the running operation's deadline; a turn given up is skipped. */
-const take = <E>(turn: Turn, apply: Effect.Effect<void, E>): Effect.Effect<void, E | Deadline.Timeout> =>
-  Effect.flatMap(
+/**
+ * Applies `apply` at `turn`, within the running operation's deadline; a turn given up is skipped. The wait and
+ * `apply` run under `restore`, the interruptibility of a caller that enqueued `turn` inside an uninterruptible mask.
+ */
+const take = <E>(
+  turn: Turn,
+  apply: Effect.Effect<void, E>,
+  restore: <A, E2, R>(effect: Effect.Effect<A, E2, R>) => Effect.Effect<A, E2, R> = identity
+): Effect.Effect<void, E | Deadline.Timeout> =>
+  restore(Effect.flatMap(
     Operation.record,
     (record) =>
       record.bound(Effect.interruptible(
@@ -111,7 +119,7 @@ const take = <E>(turn: Turn, apply: Effect.Effect<void, E>): Effect.Effect<void,
           return apply
         })))
       ))
-  ).pipe(
+  )).pipe(
     Effect.ensuring(Effect.sync(() => {
       if (turn.applied) turn.prev = undefined
       else turn.cancelled = true
@@ -148,8 +156,17 @@ const millisOf = (
  * acquisition's overlays.
  */
 const draw = (runtime: Runtime.Runtime, page: Model.PageEntry, state: State): Effect.Effect<void, Failure> =>
-  Effect.suspend(() =>
-    take(enqueue(page), Effect.suspend(() => states.get(page) === state ? send(runtime, page, state) : Effect.void))
+  // The turn is enqueued and its completion registered as one uninterruptible step, so an interruption between
+  // them never leaves later draws waiting on a turn that never ends; the wait and the send keep the caller's
+  // interruptibility
+  Effect.uninterruptibleMask((restore) =>
+    Effect.suspend(() =>
+      take(
+        enqueue(page),
+        Effect.suspend(() => states.get(page) === state ? send(runtime, page, state) : Effect.void),
+        restore
+      )
+    )
   )
 
 /** Sends `state`'s overlays, whether or not it is still the page's: only its release's last draw, clearing them. */
@@ -230,27 +247,39 @@ const annotation = (runtime: Runtime.Runtime, page: Model.PageEntry, state: Stat
     if (settings === undefined) return
     const box = settings.highlight === null ? Option.none() : yield* action.box
     const id = `action-${state.next++}`
-    state.items.push({
-      _tag: "Action",
-      id,
-      title: action.title,
-      position: settings.position,
-      titleStyle: settings.title,
-      point: action.point,
-      pointStyle: settings.point,
-      box: Option.getOrNull(box),
-      highlightStyle: settings.highlight
+    const shown = Effect.gen(function*() {
+      yield* Effect.ignore(
+        settings.cursor === "pointer" && action.point !== null
+          ? moveCursor(runtime, page, action.point)
+          : draw(runtime, page, state)
+      )
+      // The wait is the action's, read as it starts: it ends by the action's deadline, which the action's next
+      // check then reports as its own timeout
+      const left = (yield* Operation.record).left()
+      yield* BrowserClock.sleep(Math.min(settings.millis, Math.max(0, left)))
     })
-    yield* Effect.ignore(
-      settings.cursor === "pointer" && action.point !== null
-        ? moveCursor(runtime, page, action.point)
-        : draw(runtime, page, state)
+    // The item is added and its removal registered as one uninterruptible step, so an action interrupted while
+    // its annotation is drawn or shown still removes it
+    yield* Effect.uninterruptibleMask((restore) =>
+      Effect.suspend(() => {
+        state.items.push({
+          _tag: "Action",
+          id,
+          title: action.title,
+          position: settings.position,
+          titleStyle: settings.title,
+          point: action.point,
+          pointStyle: settings.point,
+          box: Option.getOrNull(box),
+          highlightStyle: settings.highlight
+        })
+        return restore(shown).pipe(
+          Effect.ensuring(
+            remove(runtime, page, state, id).pipe(Operation.detached, Effect.forkIn(state.scope), Effect.asVoid)
+          )
+        )
+      })
     )
-    // The wait is the action's, read as it starts: it ends by the action's deadline, which the action's next
-    // check then reports as its own timeout
-    const left = (yield* Operation.record).left()
-    yield* BrowserClock.sleep(Math.min(settings.millis, Math.max(0, left)))
-    yield* remove(runtime, page, state, id).pipe(Operation.detached, Effect.forkIn(state.scope))
   })
 
 /** The overlay capability of a page, for the caller's scope. */
