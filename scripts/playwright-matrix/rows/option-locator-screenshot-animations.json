@@ -8,8 +8,8 @@
   "api": [
     {
       "module": "Page",
-      "symbol": "ScreenshotOptions",
-      "url": "/docs/api/browser/Page#ScreenshotOptions"
+      "symbol": "ControlScreenshotOptions",
+      "url": "/docs/api/browser/Page#ControlScreenshotOptions"
     }
   ],
   "notes": "An element capture is page.screenshot({ area: { element }, animations }).",

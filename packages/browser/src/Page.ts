@@ -192,8 +192,8 @@ export const FrameTree: Schema.Codec<FrameTree, FrameTreeEncoded> = Schema.Struc
  *
  * **Details**
  *
- * `quality` exists only for JPEG: `{ format: "jpeg", quality: 80 }`. `animations: "disabled"` gives a capture
- * that doesn't depend on when it was taken.
+ * `quality` exists only for JPEG: `{ format: "jpeg", quality: 80 }`. Settings that change the page during the
+ * capture need control access: `ControlScreenshotOptions`.
  *
  * @stability unstable
  * @category models
@@ -233,6 +233,21 @@ export type ScreenshotOptions = ScreenshotFormat & {
    * @default false
    */
   readonly omitBackground?: boolean | undefined
+}
+
+/**
+ * Settings for `screenshot` with control access: `ScreenshotOptions`, and the settings that change the page while
+ * it is captured, which inspect access can't use.
+ *
+ * **Details**
+ *
+ * `animations: "disabled"` gives a capture that doesn't depend on when it was taken.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export type ControlScreenshotOptions = ScreenshotOptions & {
   /**
    * What happens to the page's CSS animations, CSS transitions and Web Animations during the capture, in every
    * frame and open shadow root. `"allow"` leaves them running. `"disabled"` finishes the ones that end, firing
@@ -242,6 +257,10 @@ export type ScreenshotOptions = ScreenshotFormat & {
    * left as it is.
    *
    * **Gotchas**
+   *
+   * The capture waits, within its deadline, until the browser has reported a document for each of the page's
+   * frames, so it stops the animations of a frame an end event's handler adds. On Chromium and WebKit, a frame
+   * still loading holds the capture until its document commits.
    *
    * Playing the animations again after the capture is best effort: it can add up to 5 seconds to the screenshot, as
    * every frame's resumption runs at once, and a frame that doesn't answer is left with its animations stopped.
@@ -852,6 +871,25 @@ export interface Page extends ReadonlyPage {
     Capability.CapabilityError | Target.TargetGone | Deadline.Timeout,
     Scope.Scope
   >
+
+  /**
+   * A screenshot; the viewport as PNG unless options say otherwise. With control access, the options include
+   * those that change the page while it is captured, such as `animations`.
+   *
+   * **Example** (Capturing a page with its animations stopped)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const still = Effect.fn("still")(function*(page: Page.Page) {
+   *   return yield* page.screenshot({ animations: "disabled" })
+   * })
+   * ```
+   */
+  screenshot(
+    options?: ControlScreenshotOptions | undefined
+  ): Effect.Effect<Uint8Array, PageError | Target.TargetGone | Deadline.Timeout>
 
   getByRole(role: AriaRole.AriaRole, options?: Locator.RoleOptions | undefined): Locator.Locator
   getByText(text: string | RegExp, options?: Locator.TextOptions | undefined): Locator.Locator

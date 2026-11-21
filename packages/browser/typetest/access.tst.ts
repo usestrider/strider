@@ -39,6 +39,13 @@ declare const observedContext: UserContext.ObservedUserContext
 declare const context: UserContext.UserContext
 
 describe("access is typed", () => {
+  it("screenshot settings that change the page need control", () => {
+    expect(page.screenshot({ animations: "disabled" })).type.not.toRaiseError()
+    expect(page.screenshot({ area: { element: page.locator("main") }, animations: "allow" })).type.not.toRaiseError()
+    expect(reader.screenshot({ animations: "disabled" })).type.toRaiseError()
+    expect(reader.screenshot({ area: "fullPage" })).type.not.toRaiseError()
+  })
+
   it("console calls give handles that evaluate in the main world, so they need control", () => {
     expect(ConsoleMessage.nextCall(page)).type.not.toRaiseError()
     expect(ConsoleMessage.streamCalls(context)).type.not.toRaiseError()

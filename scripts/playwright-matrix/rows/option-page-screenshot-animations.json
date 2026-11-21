@@ -8,11 +8,11 @@
   "api": [
     {
       "module": "Page",
-      "symbol": "ScreenshotOptions",
-      "url": "/docs/api/browser/Page#ScreenshotOptions"
+      "symbol": "ControlScreenshotOptions",
+      "url": "/docs/api/browser/Page#ControlScreenshotOptions"
     }
   ],
-  "notes": "animations on Page.ScreenshotOptions, \"allow\" by default; \"disabled\" finishes finite animations and cancels infinite ones for the capture.",
+  "notes": "animations on Page.ControlScreenshotOptions, control access only, \"allow\" by default; \"disabled\" finishes finite animations and cancels infinite ones for the capture.",
   "capabilities": [],
   "requirements": [],
   "valueCoverage": [
