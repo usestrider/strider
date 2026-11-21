@@ -235,6 +235,40 @@ export type ScreenshotOptions = ScreenshotFormat & {
 }
 
 /**
+ * Settings for `screenshot` on a page you control: `ScreenshotOptions`, and elements to hide behind a box.
+ *
+ * **Details**
+ *
+ * Each locator in `mask` hides every element it matches, in its own frame, behind a box of `maskColor` over the
+ * element's border box, in every area a capture takes: the viewport, the full page or an element. A locator that
+ * matches nothing hides nothing and isn't an error.
+ *
+ * **Gotchas**
+ *
+ * The boxes are drawn into the page for the capture and removed after it, however it ends, so a headed browser
+ * shows them for that long, and the page's scripts can see the change. They don't cover what the browser draws
+ * above the page, such as an open `<dialog>` or popover.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export type ControlScreenshotOptions = ScreenshotOptions & {
+  /**
+   * Elements to hide behind a box in the image.
+   *
+   * @default []
+   */
+  readonly mask?: ReadonlyArray<Locator.ReadonlyLocator> | undefined
+  /**
+   * The masks' color: any CSS color.
+   *
+   * @default "#FF00FF"
+   */
+  readonly maskColor?: string | undefined
+}
+
+/**
  * A screenshot's image format: PNG, or JPEG with a quality from 0 to 100.
  *
  * @stability unstable
@@ -855,6 +889,27 @@ export interface Page extends ReadonlyPage {
   snapshot(
     options?: Snapshot.Options | undefined
   ): Effect.Effect<Snapshot.Snapshot<Locator.Locator>, PageError | Target.TargetGone | Deadline.Timeout>
+  /**
+   * A screenshot; the viewport as PNG unless options say otherwise. With control, it can also hide elements
+   * behind a box (`mask`).
+   *
+   * **Example** (Hiding a timestamp that changes on every run)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const captureReceipt = Effect.fn("captureReceipt")(function*(page: Page.Page) {
+   *   return yield* page.screenshot({
+   *     mask: [page.getByTestId("issued-at")],
+   *     maskColor: "black"
+   *   })
+   * })
+   * ```
+   */
+  screenshot(
+    options?: ControlScreenshotOptions | undefined
+  ): Effect.Effect<Uint8Array, PageError | Target.TargetGone | Deadline.Timeout>
   readonly workers: Watchable.Watchable<ReadonlyArray<BrowserWorker.BrowserWorker>>
   readonly localStorage: OriginStorage.OriginStorage
   readonly sessionStorage: OriginStorage.OriginStorage

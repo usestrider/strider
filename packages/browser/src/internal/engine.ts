@@ -424,6 +424,13 @@ export type Request =
   | { readonly op: "html" }
   /** Draws the page's overlays as they now are, over the document, or removes them all when there are none. */
   | { readonly op: "overlay"; readonly overlays: ReadonlyArray<OverlayItem>; readonly hidden: boolean }
+  /**
+   * Covers every element the steps match with a box of `color` over its border box, for a capture: the boxes
+   * stay until `unmask` with the same token.
+   */
+  | { readonly op: "mask"; readonly steps: ReadonlyArray<Step>; readonly color: string; readonly token: string }
+  /** Removes the boxes `mask` drew with this token, and no others. */
+  | { readonly op: "unmask"; readonly token: string }
 
 /** One overlay: the caller's HTML, or a chapter's title card, fading out once it is `leaving`. */
 export type OverlayItem =
@@ -493,6 +500,8 @@ export const Response = Schema.Union([
   Schema.TaggedStruct("Final", { final: Final }),
   Schema.TaggedStruct("Guarded", { blocked: Schema.NullOr(Schema.String) }),
   Schema.TaggedStruct("Overlaid", {}),
+  /** How many elements a `mask` covered, or 0 for `unmask`. */
+  Schema.TaggedStruct("Masked", { count: Schema.Number }),
   Schema.TaggedStruct("Inserted", { inserted: Schema.Boolean }),
   /** The focused element is the `index`th of the document's frames, in the order a `"iframe, frame"` query finds them. */
   Schema.TaggedStruct("InFrame", { index: Schema.Number }),
@@ -854,6 +863,71 @@ export function engine(render: (root: SnapNode) => string) {
   let drawOverlays: ((request: Extract<Request, { op: "overlay" }>) => Response) | undefined
 
   /**
+   * The element a capture's masks are drawn in, under a closed shadow root of its own: `null` while there are
+   * none. Like the overlays' host, queries, snapshots and the document's HTML leave it out, and it ignores the
+   * pointer.
+   */
+  let maskHost: Element | null = null
+  let maskRoot: ShadowRoot | null = null
+  /** Each capture's boxes, by its token, so one capture's end removes only its own. */
+  const maskBoxes = new Map<string, Array<Element>>()
+  /** Whether a node is one of the library's own drawings, which the page a query sees never includes. */
+  const drawn = (node: Node): boolean => node === overlayHost || node === maskHost
+  const maskDom = {
+    appendChild: method(Node.prototype, "appendChild"),
+    remove: method(Element.prototype, "remove"),
+    setAttribute: method(Element.prototype, "setAttribute"),
+    attachShadow: method(Element.prototype, "attachShadow"),
+    style: getter(HTMLElement.prototype, "style"),
+    setProperty: method(CSSStyleDeclaration.prototype, "setProperty")
+  }
+  const MASK_HOST = "all:initial;position:absolute;left:0;top:0;width:0;height:0;overflow:visible;" +
+    "z-index:2147483647;pointer-events:none;display:block"
+  const mask = (request: Extract<Request, { op: "mask" }>): Response => {
+    const found = resolve(request.steps)
+    const root = dom.documentElement(document)
+    if (found.length === 0 || root === null) return { _tag: "Masked", count: 0 }
+    if (maskHost === null || maskRoot === null) {
+      maskHost = dom.createElement(document, "strider-mask")
+      maskRoot = maskDom.attachShadow(maskHost, { mode: "closed" })
+    }
+    // Last in the document, so it stacks over what came before
+    if (dom.parentNode(maskHost) !== root || dom.nextElementSibling(maskHost) !== null) {
+      maskDom.appendChild(root, maskHost)
+    }
+    maskDom.setAttribute(maskHost, "style", MASK_HOST)
+    // Boxes are placed from the host's own place, wherever its containing block puts it, so each stays over its
+    // element in the document, in a full-page capture and past the viewport too
+    const origin = dom.getBoundingClientRect(maskHost)
+    const boxes = maskBoxes.get(request.token) ?? []
+    for (const element of found) {
+      const rect = dom.getBoundingClientRect(element)
+      const box = dom.createElement(document, "div") as HTMLElement
+      maskDom.setAttribute(
+        box,
+        "style",
+        `position:absolute;left:${rect.x - origin.x}px;top:${rect.y - origin.y}px;width:${rect.width}px;` +
+          `height:${rect.height}px;pointer-events:none`
+      )
+      // Set on its own, so a color that doesn't parse leaves the box's place as it is
+      maskDom.setProperty(maskDom.style(box), "background", request.color)
+      maskDom.appendChild(maskRoot, box)
+      boxes.push(box)
+    }
+    maskBoxes.set(request.token, boxes)
+    return { _tag: "Masked", count: found.length }
+  }
+  const unmask = (token: string): Response => {
+    for (const box of maskBoxes.get(token) ?? []) maskDom.remove(box)
+    maskBoxes.delete(token)
+    if (maskBoxes.size === 0 && maskHost !== null) {
+      maskDom.remove(maskHost)
+      maskHost = maskRoot = null
+    }
+    return { _tag: "Masked", count: 0 }
+  }
+
+  /**
    * Every element under `root`, in tree order, with each open shadow root's elements after its host. An element
    * root's own open shadow root counts as under it, before its light children.
    */
@@ -870,7 +944,7 @@ export function engine(render: (root: SnapNode) => string) {
         child = dom.nextElementSibling(child)
       ) {
         // The overlays' host is the library's own drawing, never part of the page a query sees
-        if (child === overlayHost) continue
+        if (drawn(child)) continue
         out.push(child)
         const shadow = dom.shadowRoot(child)
         if (shadow !== null) visit(shadow)
@@ -2219,7 +2293,7 @@ export function engine(render: (root: SnapNode) => string) {
   const query = (scope: Document | Element, step: Step): Array<Element> => {
     if (step._tag === "XPath") {
       const found = xpathQuery(scope, step.expression)
-      return overlayHost === null ? found : found.filter((element) => element !== overlayHost)
+      return overlayHost === null && maskHost === null ? found : found.filter((element) => !drawn(element))
     }
     const under = scope === document ? documentElements() : elementsUnder(scope)
     switch (step._tag) {
@@ -4192,7 +4266,7 @@ export function engine(render: (root: SnapNode) => string) {
         if (textShown) pending += dom.textContent(node) ?? ""
         return
       }
-      if (!(node instanceof Element) || SKIPPED.has(dom.localName(node)) || node === overlayHost) return
+      if (!(node instanceof Element) || SKIPPED.has(dom.localName(node)) || drawn(node)) return
       if (dom.getAttribute(node, "aria-hidden") === "true") return
       if (inert(node)) {
         // An inert ancestor of the topmost modal dialog adds nothing of its own, but the dialog escapes it
@@ -4441,23 +4515,29 @@ export function engine(render: (root: SnapNode) => string) {
     const doctype = type === null ? "" : new XMLSerializer().serializeToString(type)
     const root = dom.documentElement(document)
     if (root === null) return { _tag: "Read", value: doctype }
-    if (overlayHost === null || !dom.contains(root, overlayHost)) {
-      return { _tag: "Read", value: doctype + dom.outerHTML(root) }
-    }
-    // The overlays' host leaves the page's HTML by node, wherever the page moved it: the document element is
-    // copied into a document with no browsing context, where nothing upgrades, loads or observes, and the host's
+    const hosts = [overlayHost, maskHost].filter((host): host is Element => host !== null && dom.contains(root, host))
+    if (hosts.length === 0) return { _tag: "Read", value: doctype + dom.outerHTML(root) }
+    // The library's hosts leave the page's HTML by node, wherever the page moved them: the document element is
+    // copied into a document with no browsing context, where nothing upgrades, loads or observes, and each host's
     // copy, found by its path of child indices, is removed before serializing. The page's tree is never touched
-    const path: Array<number> = []
-    for (let node: Node = overlayHost; node !== root;) {
-      const parent = dom.parentNode(node)!
-      path.unshift(Array.prototype.indexOf.call(dom.childNodes(parent), node))
-      node = parent
-    }
+    const paths = hosts.map((host) => {
+      const path: Array<number> = []
+      for (let node: Node = host; node !== root;) {
+        const parent = dom.parentNode(node)!
+        path.unshift(Array.prototype.indexOf.call(dom.childNodes(parent), node))
+        node = parent
+      }
+      return path
+    })
     const inert = document.implementation.createHTMLDocument("")
     const copy = inert.importNode(root, true)
-    let twin: Node = copy
-    for (const index of path) twin = twin.childNodes[index]!
-    twin.parentNode!.removeChild(twin)
+    // Every copy is found before any is removed, so one's removal doesn't move another's path
+    const twins = paths.map((path) => {
+      let twin: Node = copy
+      for (const index of path) twin = twin.childNodes[index]!
+      return twin
+    })
+    for (const twin of twins) twin.parentNode?.removeChild(twin)
     return { _tag: "Read", value: doctype + (copy as Element).outerHTML }
   }
 
@@ -4672,6 +4752,10 @@ export function engine(render: (root: SnapNode) => string) {
           return JSON.stringify(html())
         case "overlay":
           return JSON.stringify((drawOverlays ??= makeOverlays())(request))
+        case "mask":
+          return JSON.stringify(mask(request))
+        case "unmask":
+          return JSON.stringify(unmask(request.token))
         case "role":
           return JSON.stringify(
             {
