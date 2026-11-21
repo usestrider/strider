@@ -171,6 +171,11 @@ const routes: Record<string, Route> = {
       response,
       `<title>console</title><script>console.log("hello", 42); console.error("bad"); setTimeout(() => { throw new TypeError("thrown here") })</script>`
     ),
+  "/console-previews": (_request, response) =>
+    html(
+      response,
+      `<title>console previews</title><div id="d">x</div><script>console.log([1, 2, 3], {a: 1}, window); console.log({toString() { return "x" }, valueOf() { return 1 }}); { const s = []; s[1] = 1; s[4] = 2; console.log(s) } console.log([[1, [2]], {b: {c: "d"}}], new Map([["k", 1]]), new Set([1]), null, undefined, -0, 1n, "str"); console.log(document.getElementById("d"), document); console.log("an error", new Error("boom")); console.log("%o and %d", {a: 1}, 5, [2]); console.log("%cstyled", "color: red", {a: 1}); new Worker(URL.createObjectURL(new Blob(['console.log("worker", {a: 1})'])))</script>`
+    ),
   "/form": (_request, response) =>
     html(
       response,

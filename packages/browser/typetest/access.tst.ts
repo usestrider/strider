@@ -4,6 +4,7 @@
  */
 import {
   Capability,
+  ConsoleMessage,
   Deadline,
   Download,
   Expect,
@@ -14,7 +15,8 @@ import {
   Page,
   Snapshot,
   Subscription,
-  Target
+  Target,
+  UserContext
 } from "@usestrider/browser"
 import { Context, Effect, Schema, Scope } from "effect"
 import { HttpIncomingMessage } from "effect/http"
@@ -33,8 +35,20 @@ declare const observed: Page.ObservedPage
 declare const reader: Page.ReadonlyPage
 declare const page: Page.Page
 declare const ref: Snapshot.RefId
+declare const observedContext: UserContext.ObservedUserContext
+declare const context: UserContext.UserContext
 
 describe("access is typed", () => {
+  it("console calls give handles that evaluate in the main world, so they need control", () => {
+    expect(ConsoleMessage.nextCall(page)).type.not.toRaiseError()
+    expect(ConsoleMessage.streamCalls(context)).type.not.toRaiseError()
+    expect(ConsoleMessage.nextCall(observed)).type.toRaiseError()
+    expect(ConsoleMessage.streamCalls(observed)).type.toRaiseError()
+    expect(ConsoleMessage.nextCall(reader)).type.toRaiseError()
+    expect(ConsoleMessage.streamCalls(observedContext)).type.toRaiseError()
+    expect(ConsoleMessage.next(observed)).type.not.toRaiseError()
+  })
+
   it("configured viewport requires only inspect access", () => {
     expect(reader.viewportSize).type.not.toRaiseError()
     expect(observed.viewportSize).type.toRaiseError()

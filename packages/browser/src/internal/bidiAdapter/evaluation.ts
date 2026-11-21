@@ -14,6 +14,7 @@ import * as L1Target from "../../Target.ts"
 import * as UncaughtException from "../../UncaughtException.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as ConsolePreview from "../consolePreview.ts"
 import * as EpochTime from "../epochTime.ts"
 import * as Operation from "../operation.ts"
 import * as Urls from "../urls.ts"
@@ -24,6 +25,7 @@ import {
   type Event,
   navigableById,
   navigableOf,
+  placement,
   type RealmEntry,
   realmOf,
   type State
@@ -150,6 +152,20 @@ export const localValue = (value: Adapter.RemoteValue): Script.LocalValue => {
 
 // ── Events ────────────────────────────────────────────────────────────────────────────────────────────────
 
+/**
+ * A console call's text from its arguments. Firefox applies the call's format itself, `%f` as printf does (QUIRKS.md,
+ * Q33), and sends what it made of the format and the values it took as string arguments, with each object a `%o` or
+ * `%O` took kept as an argument of its own between them, so the arguments are joined as they are. An `Error`'s serialization has neither its name nor its message, so a call with one keeps
+ * Firefox's own text.
+ */
+const textOf = (entry: {
+  readonly args?: ReadonlyArray<ConsolePreview.Serialized> | undefined
+  readonly text: string | null
+}): string => {
+  const texts = (entry.args ?? []).map(ConsolePreview.serialized)
+  return texts.length === 0 || texts.some((text) => text === undefined) ? entry.text ?? "" : texts.join(" ")
+}
+
 // How Firefox's text begins for a thrown value that isn't an object
 const uncaughtValue = "uncaught exception: "
 
@@ -257,15 +273,22 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         : { _tag: "Page", page: "" as L1Target.NavigableId }
       if (params.type === "console") {
         if (realm === undefined) return
+        // Only where a subscriber asked for them does a message keep its arguments: BiDi gives them by value, with no
+        // handle to own, and a node by its shared id
+        const args = navigable !== undefined && state.registry.consoleArguments(placement(navigable))
+          ? {
+            values: ("args" in params ? params.args : []).map((value) => toRemote(state, value, realm, false)),
+            release: () => Effect.void
+          }
+          : undefined
         state.buffer.emitFrom(realm, {
           _tag: "ConsoleMessage",
           realm: Option.some(realm.id),
+          args,
           message: new ConsoleMessage.ConsoleMessage({
             // The console method says what the page wrote; BiDi's level is coarser (`console.log` is `info`)
             level: Kit.consoleLevel("method" in params ? params.method : "log"),
-            // Firefox formats the call itself, `%f` as printf does (QUIRKS.md, Q33), and sends that text as the only
-            // argument, so it is the text
-            text: params.text ?? "",
+            text: textOf(params),
             location,
             origin,
             // The browser's own messages come as `javascript` entries, which read as uncaught exceptions

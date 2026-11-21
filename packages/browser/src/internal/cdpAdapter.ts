@@ -121,6 +121,7 @@ export const capabilities = (
       ]),
       entry("bodies", "supported"),
       entry("console", "supported"),
+      entry("console.arguments", "supported"),
       entry("console.source", "supported"),
       entry("prompts", "supported"),
       entry("prompts.kind", "supported"),

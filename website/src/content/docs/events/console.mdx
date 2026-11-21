@@ -47,3 +47,35 @@ const errorDelay = Effect.fn("errorDelay")(function*(page: Page.Page) {
   return DateTime.distance(started, message.timestamp)
 })
 ```
+
+## Text
+
+A message's `text` is the call's arguments with their format specifiers applied, each object as a preview of its
+value, as the browser's developer tools print it: `console.log([1, 2, 3], {a: 1}, window)` reads
+`[1, 2, 3] {a: 1} Window` on every browser. An `Error` reads as its browser describes it, and a function, a symbol,
+a date, or an instance of a class can read differently from one browser to another, so match a message on the text
+the page wrote rather than on how such a value reads.
+
+## Arguments
+
+`nextCall` and `streamCalls` subscribe to calls: each message with handles to the values the page passed, which
+[`read`](/docs/api/browser/JSHandle#JSHandle.read) gives by value and `evaluate` runs a function on. A page or context
+keeps console arguments only while it has a subscription to calls, and the handles end with the subscription's
+scope. Since a handle can run code in the page's own scripts, subscribing to calls takes a `Page` or a `UserContext`,
+which control gives, not an observed one:
+
+```ts
+import { ConsoleMessage, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const loggedOrder = Effect.fn("loggedOrder")(function*(page: Page.Page) {
+  const logged = yield* ConsoleMessage.nextCall(page, { text: "order" })
+  yield* page.getByRole("button", { name: "Place order" }).click()
+  const call = yield* logged
+  return yield* call.args[1]!.read
+})
+```
+
+Each subscriber owns its own handles, so releasing one leaves another's working. On Firefox an argument holds its
+value as the browser serialized it at the call, and a node is the page's own; the `console.arguments` capability says
+so, and where a backend keeps no arguments, subscribing fails with `Unsupported`.

@@ -91,6 +91,7 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
       entry("console", "supported", [
         "a message with only primitive arguments is attributed to the main frame"
       ]),
+      entry("console.arguments", "supported"),
       entry("console.source", "partial", [
         "the browser's \"Fetch API cannot load … due to access control checks\" arrives as an uncaught exception, " +
         "with no source: WebKit sends it on its `javascript` channel at level `error`, which Strider reads as an " +

@@ -52,7 +52,24 @@ export interface EventModule<T, F, B, DE = never> {
   readonly next: <PE = never, PR = never>(
     target: T,
     filter?: F | undefined,
-    where?: Subscription.Where<B, PE, PR> | undefined
+    where?: Subscription.Where<B, PE, PR> | undefined,
+    /** Told once that the wait ended, and whether it failed. */
+    ended?: ((failed: boolean) => void) | undefined
+  ) => Effect.Effect<
+    Effect.Effect<B, PE | DE | Target.TargetGone | Deadline.Timeout>,
+    Subscription.SubscriptionError,
+    Scope.Scope | PR
+  >
+  /**
+   * `next` as a step of the caller's own operation, `operation`, which the caller opens: the wait it returns is
+   * named after it too.
+   */
+  readonly nextIn: <PE = never, PR = never>(
+    operation: string,
+    target: T,
+    filter?: F | undefined,
+    where?: Subscription.Where<B, PE, PR> | undefined,
+    ended?: ((failed: boolean) => void) | undefined
   ) => Effect.Effect<
     Effect.Effect<B, PE | DE | Target.TargetGone | Deadline.Timeout>,
     Subscription.SubscriptionError,
@@ -61,7 +78,9 @@ export interface EventModule<T, F, B, DE = never> {
   readonly stream: <PE = never, PR = never>(
     target: T,
     filter?: F | undefined,
-    where?: Subscription.Where<B, PE, PR> | undefined
+    where?: Subscription.Where<B, PE, PR> | undefined,
+    /** Told once that the stream's subscription ended, with the event that overflowed it, if it did. */
+    ended?: ((overflowed: B | undefined) => void) | undefined
   ) => Effect.Effect<
     Stream.Stream<B, PE | Subscription.EventOverflow | Target.TargetGone>,
     Subscription.SubscriptionError,
@@ -82,19 +101,34 @@ export const make = <T, F, A, B, DE = never>(spec: Spec<T, F, A, B, DE>): EventM
         kind: { operation, noun: spec.noun, deliver: prepared.deliver } satisfies Events.Kind<A, B>
       }))
     )
+  const nextIn: EventModule<T, F, B, DE>["nextIn"] = (operation, target, filter, where, ended) =>
+    Effect.flatMap(
+      prepare(target, filter, operation),
+      ({ kind, prepared }) =>
+        Events.next(kind, prepared.channel, prepared.waitsFor ?? prepared.accepts, where, prepared.delivery, ended)
+    )
   return {
-    next: (target, filter, where) => {
+    next: (target, filter, where, ended) => {
       const operation = `${spec.name}.next`
-      return Effect.flatMap(
-        prepare(target, filter, operation),
-        ({ kind, prepared }) =>
-          Events.next(kind, prepared.channel, prepared.waitsFor ?? prepared.accepts, where, prepared.delivery)
-      ).pipe(Operation.named(operation, { attributes: spec.attributes?.(filter) }))
+      return nextIn(operation, target, filter, where, ended).pipe(
+        Operation.named(operation, { attributes: spec.attributes?.(filter) })
+      )
     },
-    stream: (target, filter, where) =>
+    nextIn,
+    stream: (target, filter, where, ended) =>
       Effect.flatMap(
         prepare(target, filter, `${spec.name}.stream`),
-        ({ kind, prepared }) => Events.stream(kind, prepared.channel, prepared.accepts, where)
+        ({ kind, prepared }) =>
+          Events.stream(
+            kind,
+            prepared.channel,
+            prepared.accepts,
+            where,
+            undefined,
+            ended === undefined
+              ? undefined
+              : (overflowed) => ended(overflowed === undefined ? undefined : prepared.deliver(overflowed))
+          )
       ),
     history: (target, filter) =>
       Effect.flatMap(

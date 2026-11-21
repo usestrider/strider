@@ -55,6 +55,11 @@ interface Subscriber<A> {
    * `false` to have the queue end, or fail, after them.
    */
   readonly onEnd: ((how: End, pending: number) => boolean) | undefined
+  /**
+   * Told that the subscription ended before its scope closed: its target ended, or it overflowed, with the entry
+   * that overflowed it, which it never queued.
+   */
+  readonly settled: ((overflowed?: A) => void) | undefined
   readonly accepts: (entry: Entry<A>) => boolean
   readonly queue: Queue.Queue<Entry<A>, Failure>
   /** The entries offered already, so a revised entry reaches a subscription at most once. */
@@ -97,6 +102,7 @@ const offer = <A>(channel: Channel<A>, entry: Entry<A>): void => {
     if (Queue.offerUnsafe(subscriber.queue, entry)) continue
     // A full buffer fails its own subscription, and no other
     channel.subscribers.delete(subscriber)
+    subscriber.settled?.(entry.value)
     Queue.failCauseUnsafe(
       subscriber.queue,
       Cause.fail(
@@ -149,6 +155,7 @@ export const end = <A>(channel: Channel<A>, how: End): void => {
 }
 
 const close = <A>(channel: Channel<A>, subscriber: Subscriber<A>, how: End): void => {
+  subscriber.settled?.()
   if (subscriber.onEnd !== undefined && subscriber.onEnd(how, Queue.sizeUnsafe(subscriber.queue))) {
     Queue.shutdownUnsafe(subscriber.queue)
   } else if (how.normal) Queue.endUnsafe(subscriber.queue)
@@ -160,11 +167,20 @@ const subscribe = <A>(
   channel: Channel<A>,
   accepts: (entry: Entry<A>) => boolean,
   bound: number,
-  onEnd?: ((how: End, pending: number) => boolean) | undefined
+  onEnd?: ((how: End, pending: number) => boolean) | undefined,
+  settled?: ((overflowed?: A) => void) | undefined
 ): Effect.Effect<Subscriber<A>, never, Scope.Scope> =>
   Effect.gen(function*() {
     const queue = yield* Queue.make<Entry<A>, Failure>({ capacity: bound })
-    const subscriber: Subscriber<A> = { accepts, queue, offered: new WeakSet(), bound, from: channel.published, onEnd }
+    const subscriber: Subscriber<A> = {
+      accepts,
+      queue,
+      offered: new WeakSet(),
+      bound,
+      from: channel.published,
+      onEnd,
+      settled
+    }
     if (Option.isSome(channel.end)) {
       close(channel, subscriber, channel.end.value)
       return subscriber
@@ -225,7 +241,9 @@ export const next = <A, B, PE, PR, DE = never>(
   channel: Channel<A>,
   accepts: (entry: Entry<A>) => boolean,
   where: Subscription.Where<B, PE, PR> | undefined,
-  delivery: Delivery<A, B, DE> = immediate(kind) as Delivery<A, B, DE>
+  delivery: Delivery<A, B, DE> = immediate(kind) as Delivery<A, B, DE>,
+  /** Told once that the wait ended, and whether it failed. */
+  ended?: ((failed: boolean) => void) | undefined
 ): Effect.Effect<
   Effect.Effect<B, PE | DE | Target.TargetGone | Deadline.Timeout>,
   never,
@@ -252,6 +270,7 @@ export const next = <A, B, PE, PR, DE = never>(
       if (outcome === undefined) {
         outcome = exit
         release()
+        ended?.(Exit.isFailure(exit))
       }
       if (notify) Deferred.doneUnsafe(deferred, outcome)
     }
@@ -357,7 +376,12 @@ export const stream = <A, B, PE, PR, DE = never>(
   channel: Channel<A>,
   accepts: (entry: Entry<A>) => boolean,
   where: Subscription.Where<B, PE, PR> | undefined,
-  delivery?: Delivery<A, B, DE>
+  delivery?: Delivery<A, B, DE>,
+  /**
+   * Told once that the stream's subscription ended, with the entry that overflowed it, if it did; what it queued
+   * before is still delivered.
+   */
+  ended?: ((overflowed: A | undefined) => void) | undefined
 ): Effect.Effect<
   Stream.Stream<B, PE | DE | Subscription.EventOverflow | Target.TargetGone>,
   never,
@@ -365,7 +389,13 @@ export const stream = <A, B, PE, PR, DE = never>(
 > =>
   Effect.gen(function*() {
     const context = yield* Effect.context<PR>()
-    const subscriber = yield* subscribe(channel, accepts, yield* Subscription.Capacity)
+    let told = false
+    const settled = (overflowed?: A) => {
+      if (told) return
+      told = true
+      ended?.(overflowed)
+    }
+    const subscriber = yield* subscribe(channel, accepts, yield* Subscription.Capacity, undefined, settled)
     const entries = Stream.fromQueue(subscriber.queue)
     const events: Stream.Stream<B, DE | Subscription.EventOverflow | Target.TargetGone> = delivery === undefined
       ? entries.pipe(Stream.map((entry) => kind.deliver(entry.value)))

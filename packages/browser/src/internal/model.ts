@@ -37,6 +37,7 @@ import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
 import type * as Adapter from "./adapter.ts"
 import * as BoundedAdapter from "./boundedAdapter.ts"
+import * as ConsoleArguments from "./consoleArguments.ts"
 import type * as Events from "./events.ts"
 import * as Fold from "./fold.ts"
 import type * as Input from "./input.ts"
@@ -439,6 +440,8 @@ export interface Model {
   readonly scope: Scope.Scope
   /** The adapter, its calls bounded by the operation they run in (`boundedAdapter.ts`). */
   readonly adapter: BoundedAdapter.Bounded
+  /** The console arguments kept for subscriptions to calls, and their claims. */
+  readonly consoleArguments: ConsoleArguments.Table
 
   // ── Reads: entities by id, and the state they hold ──
 
@@ -534,7 +537,8 @@ export const maxHops = Fold.maxHops
 export const make = Effect.fnUntraced(function*() {
   const modelScope = yield* Effect.scope
   const ownership = yield* Ownership.make()
-  const fold = yield* Fold.make({ release: ownership.release })
+  const consoleArguments = ConsoleArguments.make()
+  const fold = yield* Fold.make({ release: ownership.release, consoleArguments })
   // Runs after the browser's own finalizers, which close it, and after the watcher of its connection is gone: what
   // is still open, such as a context or page held past the browser's scope, ends with the browser
   yield* Effect.addFinalizer(() => fold.loseConnection(new Target.BrowserClosed({})))
@@ -567,6 +571,7 @@ export const make = Effect.fnUntraced(function*() {
       const model: Model = {
         scope: modelScope,
         adapter: bounded,
+        consoleArguments,
         pages: fold.pages,
         contexts: fold.contexts,
         touchContexts: fold.touchContexts,

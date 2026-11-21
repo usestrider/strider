@@ -31,6 +31,7 @@ import * as Target from "../Target.ts"
 import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as Adapter from "./adapter.ts"
+import * as ConsoleArguments from "./consoleArguments.ts"
 import * as Events from "./events.ts"
 import * as Execution from "./execution.ts"
 import * as Input from "./input.ts"
@@ -142,7 +143,10 @@ interface Input {
 export const make = Effect.fnUntraced(function*(options: {
   /** Releases a popup its opener's owner releases (`ownership.ts`). */
   readonly release: (page: Model.PageEntry, by: Scope.Scope) => Effect.Effect<void>
+  /** The browser's console arguments kept for subscriptions to calls (`consoleArguments.ts`); a fresh table if absent. */
+  readonly consoleArguments?: ConsoleArguments.Table | undefined
 }) {
+  const consoleArguments = options.consoleArguments ?? ConsoleArguments.make()
   const modelScope = yield* Effect.scope
 
   // ── The stream ──
@@ -956,6 +960,17 @@ export const make = Effect.fnUntraced(function*(options: {
           const owner = Option.flatMap(fact.realm, (realm) => Option.fromNullishOr(realmOwners.get(realm))).pipe(
             Option.getOrElse(() => origin._tag === "Page" ? ownerOfPage(pageOf(origin.page)) : nobody)
           )
+          if (fact.args !== undefined && Option.isSome(fact.realm)) {
+            const channels = [
+              ...Option.toArray(owner.page).map((page) => page.events.console),
+              ...Option.toArray(owner.context).map((context) => context.events.console)
+            ]
+            // Arguments no subscription claims are released at once, apart from the fold
+            yield* ConsoleArguments.keep(consoleArguments, fact.message, fact.realm.value, fact.args, channels)
+              .pipe(
+                Effect.forkIn(modelScope)
+              )
+          }
           publish(owner, fact.message, (events) => events.console, (events) => events.console)
           return
         }

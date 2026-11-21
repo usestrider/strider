@@ -219,6 +219,7 @@ const applyDeclaration = (
     case "FileChooser":
     case "Downloads":
     case "Challenges":
+    case "ConsoleArguments":
     // WebKit keeps response bodies on its own, so there is nothing to collect
     case "BodyCollection":
       return Effect.void
