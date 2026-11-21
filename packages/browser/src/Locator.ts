@@ -1759,9 +1759,14 @@ export interface Locator extends ReadonlyLocator {
   selectText(options?: ActionOptions | undefined): ActionEffect
 
   /**
-   * Chooses options of a `<select>`, by value, label, or index. Checks: visible, enabled.
+   * Chooses options of a `<select>`, by value, label, or index, and succeeds with the values of the options it
+   * selected. Checks: visible, enabled.
    *
    * **Details**
+   *
+   * The values are those of the chosen options that are selected once `input` and `change` have run, in document
+   * order: a `<select>` without `multiple` keeps only the matching option that comes last, so it gives one value,
+   * and an empty list of choices deselects every option and gives `[]`. A `trial` selects nothing and gives `[]`.
    *
    * The options are chosen from an isolated world of Strider's, with `input` and `change` dispatched as for a
    * user's choice. An option that isn't there yet is waited for, and a timeout reports it as `NoSuchOption`. Enabled
@@ -1776,7 +1781,8 @@ export interface Locator extends ReadonlyLocator {
    * import { Effect } from "effect"
    *
    * const shipToPortugal = Effect.fn("shipToPortugal")(function*(page: Page.Page) {
-   *   yield* page.getByLabel("Country").selectOption({ label: "Portugal" })
+   *   const selected = yield* page.getByLabel("Country").selectOption({ label: "Portugal" })
+   *   yield* Effect.log(`Selected ${selected.join(", ")}`)
    * })
    * ```
    *
@@ -1785,7 +1791,7 @@ export interface Locator extends ReadonlyLocator {
   selectOption(
     choice: SelectOption | ReadonlyArray<SelectOption>,
     options?: ActionOptions | undefined
-  ): ActionEffect
+  ): Effect.Effect<ReadonlyArray<string>, LocatorError | Target.TargetGone | Deadline.Timeout>
   /**
    * Sets the files of a file input. Checks: none.
    *

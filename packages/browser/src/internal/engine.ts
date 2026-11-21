@@ -504,7 +504,9 @@ export const Response = Schema.Union([
     /** For `Checked`: whether it is checked. */
     checked: Schema.NullOr(Schema.Boolean),
     /** For `Fill`: whether the value is to be typed (focused, contents selected) or was set. */
-    fill: Schema.NullOr(Schema.Literals(["type", "set", "guarded"]))
+    fill: Schema.NullOr(Schema.Literals(["type", "set", "guarded"])),
+    /** For `Select`, once applied: the values of the options it selected, in document order. */
+    selected: Schema.NullOr(Schema.Array(Schema.String))
   }),
   Schema.TaggedStruct("NotReady", {
     reason: NotReady,
@@ -3491,7 +3493,8 @@ export function engine(render: (root: SnapNode) => string) {
       point: null as { x: number; y: number } | null,
       draggable: false,
       checked: null as boolean | null,
-      fill: null as "type" | "set" | "guarded" | null
+      fill: null as "type" | "set" | "guarded" | null,
+      selected: null as ReadonlyArray<string> | null
     }
     switch (action._tag) {
       case "Point": {
@@ -3601,7 +3604,13 @@ export function engine(render: (root: SnapNode) => string) {
         }
         fire(select, "input")
         fire(select, "change")
-        return answer
+        // What the round chose and is still selected after its events: a single select keeps only the last
+        const selected = options.flatMap((option, index) =>
+          option.selected && action.choices.some((choice) => optionMatches(option, index, choice)) ?
+            [option.value] :
+            []
+        )
+        return { ...answer, selected }
       }
       default:
         return answer
