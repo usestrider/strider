@@ -28,7 +28,7 @@ import * as Diagnostics from "./Diagnostics.ts"
 import * as ConditionImpl from "./internal/condition.ts"
 import * as ExpectImpl from "./internal/expect.ts"
 import * as Locator from "./Locator.ts"
-import type * as Page from "./Page.ts"
+import * as Page from "./Page.ts"
 import * as Reason from "./Reason.ts"
 import type * as Target from "./Target.ts"
 import * as Watchable from "./Watchable.ts"
@@ -345,8 +345,10 @@ export const toBeEditable: Matcher<Locator.ReadonlyLocator> = (locator) => Expec
  *
  * A string must equal the whole text, case-sensitively, after whitespace is collapsed; a `RegExp` is tested as
  * given. `ignoreCase: true` compares strings without case and sets a regular expression's `i` flag;
- * `ignoreCase: false` clears it; left out, regular expressions keep their flags. The text is the element's text
- * content, which includes hidden descendants; `useInnerText: true` reads its rendered `innerText` instead.
+ * `ignoreCase: false` clears it; left out, regular expressions keep their flags. Case is folded without regard to
+ * the browser's locale. The text is the element's text content, which includes hidden descendants;
+ * `useInnerText: true` reads its rendered `innerText` instead, and the text content still for an element that
+ * isn't an HTML element, such as an SVG one.
  *
  * **Gotchas**
  *
@@ -382,7 +384,20 @@ export const toHaveText: DualMatcher<
 )
 
 /**
- * The options of `toHaveText` and `toContainText`.
+ * The options of `toHaveText` and `toContainText`: whether to ignore case, and whether to read the rendered text.
+ *
+ * **Example** (Matching a heading's rendered text in any case)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const options: Expect.TextOptions = { ignoreCase: true, useInnerText: true }
+ *
+ * const checkHeading = Effect.fn("checkHeading")(function*(page: Page.ReadonlyPage) {
+ *   yield* page.getByRole("heading").pipe(Expect.toHaveText("order placed", options))
+ * })
+ * ```
  *
  * @stability unstable
  * @category models
@@ -390,13 +405,15 @@ export const toHaveText: DualMatcher<
  */
 export interface TextOptions {
   /**
-   * Compares strings without case, and sets a regular expression's `i` flag; `false` clears it.
+   * Compares strings without case, and sets a regular expression's `i` flag; `false` clears it. Case is folded
+   * without regard to the browser's locale, as the `i` flag folds it.
    *
    * @default undefined: strings match case, and regular expressions keep their flags
    */
   readonly ignoreCase?: boolean | undefined
   /**
-   * Reads each element's rendered `innerText` instead of its text content, with whitespace collapsed alike.
+   * Reads each element's rendered `innerText` instead of its text content, with whitespace collapsed alike. An
+   * element that isn't an HTML element, such as an SVG one, has no `innerText`, so its text content is read.
    *
    * @default false
    */
@@ -410,7 +427,8 @@ export interface TextOptions {
  *
  * Strings match the whole name after whitespace is collapsed on both sides, so a non-breaking space matches a
  * space. Regular expressions test the computed name, which keeps non-breaking spaces.
- * `ignoreCase` overrides a regular expression's `i` flag when supplied; otherwise strings are case-sensitive
+ * `ignoreCase` overrides a regular expression's `i` flag when supplied, and folds a string's case without regard
+ * to the browser's locale; otherwise strings are case-sensitive
  * and regular expressions keep their flags. Hidden elements have an empty name; hidden labels can name a
  * visible element. Roles that prohibit naming, such as generic, paragraph, and code, have an empty name;
  * their content can still contribute to another element's name. An explicit nameable role can override the
@@ -721,7 +739,8 @@ export const toHaveRole: DualMatcher<Locator.ReadonlyLocator, [expected: string]
  * **Details**
  *
  * A string must equal the whole value as written; a `RegExp` is tested as given. `ignoreCase: true` compares the
- * value without case and sets a regular expression's `i` flag; `ignoreCase: false` clears it.
+ * value without case and sets a regular expression's `i` flag; `ignoreCase: false` clears it. Case is folded
+ * without regard to the browser's locale.
  *
  * **Example** (Checking that a menu opened)
  *
@@ -745,7 +764,10 @@ export const toHaveAttribute: DualMatcher<
   [
     name: string,
     expected?: string | RegExp | undefined,
-    options?: { readonly ignoreCase?: boolean | undefined } | undefined
+    options?: {
+      /** Compares the value without regard to case, replacing a regular expression's `i` flag. @default undefined */
+      readonly ignoreCase?: boolean | undefined
+    } | undefined
   ]
 > = dual(
   (args) => Locator.isLocator(args[0]),
@@ -998,7 +1020,8 @@ export const toMatchAria: DualMatcher<
  * **Details**
  *
  * `ignoreCase: true` compares a string without case and sets a regular expression's `i` flag;
- * `ignoreCase: false` clears it; left out, a string matches case and a regular expression keeps its flags.
+ * `ignoreCase: false` clears it; left out, a string matches case and a regular expression keeps its flags. Case is
+ * folded without regard to the browser's locale.
  *
  * **Example** (Landing on the account page after signing in)
  *
@@ -1018,10 +1041,15 @@ export const toMatchAria: DualMatcher<
  */
 export const toHaveURL: DualMatcher<
   Page.ReadonlyPage,
-  [expected: string | RegExp, options?: { readonly ignoreCase?: boolean | undefined } | undefined]
+  [
+    expected: string | RegExp,
+    options?: {
+      /** Compares without regard to case, replacing a regular expression's `i` flag. @default undefined */
+      readonly ignoreCase?: boolean | undefined
+    } | undefined
+  ]
 > = dual(
-  // Data-first when the expected URL follows the page
-  (args) => typeof args[1] === "string" || args[1] instanceof RegExp,
+  (args) => Page.isPage(args[0]),
   (
     page: Page.ReadonlyPage,
     expected: string | RegExp,

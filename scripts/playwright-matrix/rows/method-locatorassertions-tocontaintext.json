@@ -11,7 +11,7 @@
       "url": "/docs/api/browser/Expect#toContainText"
     }
   ],
-  "notes": "A list passes when its entries are contained in matches in the same order, each in a later match than the one before, as Playwright's array form does; an empty list passes when nothing matches.",
+  "notes": "A list passes when its entries are contained in matches in the same order, each in a later match than the one before, as Playwright's array form does. An empty list passes only when nothing matches, where Playwright's passes with any number of matches.",
   "capabilities": [],
   "requirements": []
 }

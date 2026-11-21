@@ -2096,7 +2096,7 @@ export function engine(render: (root: SnapNode) => string) {
     if (matcher._tag === "RegExp") return new RegExp(matcher.source, matcher.flags).test(text)
     const normalize = (value: string) => collapse(value.replace(/[\u200b\u00ad]/g, ""))
     return ignoreCase
-      ? normalize(text).toLocaleLowerCase() === normalize(matcher.value).toLocaleLowerCase()
+      ? normalize(text).toLowerCase() === normalize(matcher.value).toLowerCase()
       : normalize(text) === normalize(matcher.value)
   }
 
