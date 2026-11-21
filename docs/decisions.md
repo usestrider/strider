@@ -1036,8 +1036,11 @@ when requested rather than introducing separate name strings or speculative opti
 An event being published is not a completed match: delivery can load and decode a response body or wait for a
 navigation, and a caller predicate can reject it or still be running. A one-shot wait commits exactly one outcome:
 completed delivery accepted by its predicate, delivery/predicate failure, its registration-time deadline, target
-end, or acquiring-scope cancellation. Target end commits `TargetGone` in the channel's end path rather than waiting
-for its worker to take another queued entry. A channel that already ended commits that failure at registration.
+end, or acquiring-scope cancellation. Entries queued before target end, while none is being delivered, are still the
+wait's: the queue ends after them, so the worker delivers and checks them first and fails the wait with
+`TargetGone` only once it is empty. A delivery or predicate already running when the target ends may be blocked on
+it, so then target end commits `TargetGone` in the channel's end path.
+A channel that already ended commits that failure at registration.
 Scope cancellation commits before stopping workers; completed results, errors, and timeouts remain latched.
 
 The model's end path only commits immutable terminal data and signals the waiter; it runs no delivery, predicate,
@@ -1051,8 +1054,10 @@ its delivery worker is still using caller resources. Prompt terminal notificatio
 release has finished. The caller can keep the latched result. Streams retain their existing ordered
 buffer-draining contract on normal target end.
 
-Rejected: making target failure depend on worker progress, which can return success after the target has ended
-and contradicts the target-lifetime contract; treating publication as a match, which bypasses effectful delivery
+Rejected: making target failure wait on a delivery or predicate already running when the target ends, which can
+hold the wait on work blocked by the ended target and return success after it ended (entries still queued, with
+none running, are the accepted exception above: they were published before the end, and are delivered and checked
+first); treating publication as a match, which bypasses effectful delivery
 and predicates; draining or evaluating queued work during scope closure, which delays cancellation and starts user
 work after ownership ended; retaining completed subscriptions until their acquiring scope closes, which keeps
 unusable entries and callbacks alive. This is a correctness rule, not an observation optimization.
@@ -1824,6 +1829,13 @@ move: a drag of one held move shows its first `dragover` at the release or the n
 `dragOver` at the move that starts the drag, which shows the drag over the target while the button is held, was
 rejected: every drop would then end with a second `dragover`, which Playwright's and Puppeteer's drag tests both reject.
 
+## Handles don't lead back to their browser
+
+Code reaches its browser through the `Browser` service (`yield* Browser.Browser`), and `browser.info` names the product
+and protocol; a context has no `browser` member, and a browser has no browser-type object. Requirements stay in the
+type: a function that needs the browser says so, rather than reaching it through a handle it was given. Rejected:
+`context.browser()` and `browser.browserType()`, which would duplicate the service and `info` with a second way in.
+
 ## Console messages name their source in one shared set of categories
 
 A `ConsoleMessage` carries a `source`: `Page` for the page's own `console` calls, or `Browser` with a `category` from
@@ -1847,4 +1859,20 @@ were rejected for those reasons. A name is restricted, not transformed: it must 
 `<name>-<browser>-<platform>` reads one way. Rewriting any text into a readable file name was rejected, because no
 readable rewrite keeps every input distinct: a literal name can equal another's rewritten form. Names are lower-case
 because `Cart` and `cart` would share a file on a case-insensitive filesystem. The PNG codec and comparator are native rather than
-dependencies.
+dependencies. `SnapshotBaseline` compares bytes a test already has on the same key, update modes, and failure files, through
+one internal module, so the two matchers can't drift: a `.png` name is compared by pixels and any other extension
+byte for byte, and the baseline keeps the name's extension under `__baselines__/<test file>/`, a directory Vitest
+never writes to. A directory inside Vitest's `__snapshots__` was rejected, because a test file whose name ends in
+`.snap` would make its directory the path of another test's snapshot file. Text
+stays with Vitest's own `toMatchFileSnapshot`, which already diffs a string against a file; a Strider text matcher was
+rejected as a duplicate of it, and comparing JPEG by pixels was rejected because it needs a decoder the package
+doesn't have.
+
+## Each event kind is its own module
+
+Each kind of event is a module with its own `next`, `stream`, and `history` (principle 16): `PageNavigation`,
+`PageLifecycle`, `ConsoleMessage`, `Dialog`, and the rest, each on a page or a context as it allows. There is no wait
+that takes an event name. Each module gives its own typed payload and its own filter, compiled before buffering, so a
+wait names what it matches in the event's terms and its result needs no cast. Rejected: a `waitForEvent(name)` or
+`on(name)` dispatch over event names, as Playwright and Node's emitters have, whose payload and filter types follow
+from a string, and which would put every kind's lifetime and delivery rules behind one untyped entry point.

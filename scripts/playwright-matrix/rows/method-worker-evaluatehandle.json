@@ -3,10 +3,18 @@
   "upstream": [
     "method:Worker.evaluateHandle"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "BrowserWorker exposes url, kind, closed and by-value evaluate; this event/handle operation is absent.",
-  "capabilities": [],
+  "status": "has",
+  "api": [
+    {
+      "module": "BrowserWorker",
+      "symbol": "BrowserWorker.evaluateHandle",
+      "url": "/docs/api/browser/BrowserWorker#BrowserWorker.evaluateHandle"
+    }
+  ],
+  "notes": "Returns a handle in the worker's realm, owned by the caller's scope and ended with the worker. Dedicated workers; on Chromium it waits for the worker's script to load, as evaluate does.",
+  "capabilities": [
+    "workers.evaluate"
+  ],
   "audit": {
     "sources": [
       "packages/browser/src/BrowserWorker.ts"

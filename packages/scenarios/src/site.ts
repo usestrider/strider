@@ -92,7 +92,7 @@ const routes: Record<
       "Mouse benchmark",
       `<button style="position:fixed;left:10px;top:10px;width:100px;height:30px" onclick="document.querySelector('#count').textContent = String(Number(document.querySelector('#count').textContent) + 1)">Increment</button><p id="count" style="position:fixed;left:10px;top:60px">0</p>${
         url.searchParams.has("drawn")
-          ? `<script>requestAnimationFrame(() => requestAnimationFrame(() => parent.postMessage('drawn', '*')))</script>`
+          ? `<script>requestAnimationFrame(() => requestAnimationFrame(() => parent.postMessage('drawn', '*')));addEventListener('mousemove', (e) => { if (e.isTrusted) parent.postMessage('routed', '*') })</script>`
           : ""
       }${
         url.searchParams.has("frame")
@@ -102,7 +102,7 @@ const routes: Record<
           : ""
       }${
         url.searchParams.get("frame") === "drawn"
-          ? `<p id="drawn" style="position:fixed;left:10px;top:90px"></p><script>addEventListener('message', (e) => { if (e.data === 'drawn') document.querySelector('#drawn').textContent = 'drawn' }, { once: true })</script>`
+          ? `<p id="drawn" style="position:fixed;left:10px;top:90px"></p><p id="routed" style="position:fixed;left:10px;top:120px"></p><script>addEventListener('message', (e) => { if (e.data === 'drawn' || e.data === 'routed') document.querySelector('#' + e.data).textContent = e.data })</script>`
           : ""
       }`
     )

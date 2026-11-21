@@ -3,13 +3,19 @@
   "upstream": [
     "event:BrowserContext.frameAttached"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding UserContext operation/event. Its public API provides pages/workers, cookies, clock, storage export, routes, scripts, scoped emulation and grants; it does not implement this contract.",
+  "status": "has",
+  "api": [
+    {
+      "module": "PageLifecycle",
+      "symbol": "stream",
+      "url": "/docs/api/browser/PageLifecycle#stream"
+    }
+  ],
+  "notes": "`FrameAdded` events on a context, for every page in it, including pages opened after the subscription. Subscribe before the triggering action.",
   "capabilities": [],
   "audit": {
     "sources": [
-      "packages/browser/src/UserContext.ts"
+      "packages/browser/src/PageLifecycle.ts"
     ],
     "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
   },

@@ -21,6 +21,7 @@ import {
   NetworkRequest,
   NetworkResponse,
   Page,
+  PageLifecycle,
   PageNavigation,
   Reason,
   Subscription,
@@ -331,6 +332,42 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             assert.strictEqual(yield* handler.handled, 0)
           }))
         }), timeout)
+
+      // ── PageNavigation and PageLifecycle on a context ──
+
+      it.effect(
+        "reports a context's navigations, frames, loads and closes from pages opened after it subscribed, and no other context's",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() => `<iframe srcdoc="<p>inside</p>"></iframe>`)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const context = yield* Browser.newContext()
+              const elsewhere = yield* Browser.newPage()
+              const before = yield* context.newPage
+              yield* before.goto(url, { waitUntil: "load" })
+              const navigations = yield* PageNavigation.stream(context)
+              const lifecycle = yield* PageLifecycle.stream(context, { events: ["FrameAdded", "Loaded", "Closed"] })
+              const seen = yield* Effect.forkScoped(Stream.runCollect(Stream.take(navigations, 1)))
+              const happened = yield* Effect.forkScoped(
+                Stream.runCollect(Stream.takeUntil(lifecycle, (event) => event._tag === "Closed"))
+              )
+              yield* elsewhere.goto(url)
+              const later = yield* Effect.scoped(Effect.gen(function*() {
+                const page = yield* context.newPage
+                yield* page.goto(url, { waitUntil: "load" })
+                return page.id
+              }))
+              const [navigation] = yield* Fiber.join(seen)
+              assert.strictEqual(navigation!.page, later)
+              const events = Array.from(yield* Fiber.join(happened))
+              assert.isTrue(events.every((event) => event.page === later))
+              assert.isTrue(events.some((event) => event._tag === "FrameAdded"))
+              assert.isTrue(events.some((event) => event._tag === "Loaded" && event.url === url))
+              assert.strictEqual(events.at(-1)!._tag, "Closed")
+            }))
+          }),
+        timeout
+      )
 
       // ── ConsoleMessage, UncaughtException ──
 
@@ -985,7 +1022,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
       // ── BrowserWorker ──
 
       it.effect(
-        "hands out a page's worker, evaluates in it where the backend can, and sees it end",
+        "hands out a page's worker, evaluates and holds handles in it where the backend can, and sees it end",
         () =>
           Effect.gen(function*() {
             const { origin, url } = yield* fixture(() =>
@@ -1001,16 +1038,31 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
               assert.isTrue((yield* page.workers).includes(worker))
               assert.isTrue((yield* page.context.workers).includes(worker))
               const evaluated = worker.evaluate((n: number) => [self.location.pathname, n * 2, new Map([["a", 1]])], 21)
-              if (name === "Firefox") {
-                const error = yield* Effect.flip(evaluated)
-                assert(BrowserWorker.isBrowserWorkerError(error), String(error))
-                assert.strictEqual(error.reason._tag, "Unsupported")
-              } else {
-                assert.deepStrictEqual(yield* evaluated, ["/worker.js", 42, new Map([["a", 1]])])
+              const held = worker.evaluateHandle(() => self)
+              if (!(yield* supports("workers.evaluate"))) {
+                for (const refused of [Effect.asVoid(evaluated), Effect.asVoid(held)]) {
+                  const error = yield* Effect.flip(refused)
+                  assert(BrowserWorker.isBrowserWorkerError(error), String(error))
+                  assert.deepInclude(error.reason, { _tag: "Unsupported", capability: "workers.evaluate" })
+                }
+                yield* page.getByText("Stop").click()
+                assert.strictEqual((yield* worker.closed)._tag, "RealmDestroyed")
+                return
               }
+              assert.deepStrictEqual(yield* evaluated, ["/worker.js", 42, new Map([["a", 1]])])
+              // A handle in the worker's realm crosses into its calls as itself, and ends with the worker
+              const global = yield* held
+              assert.strictEqual(global.realm, worker.realm)
+              assert.strictEqual(yield* global.evaluate((scope) => scope.location.pathname), "/worker.js")
+              const doubled = yield* worker.evaluateHandle((n: number) => ({ n: n * 2 }), 21)
+              assert.strictEqual(yield* worker.evaluate((value) => value.n, doubled as unknown as { n: number }), 42)
               yield* page.getByText("Stop").click()
               assert.strictEqual((yield* worker.closed)._tag, "RealmDestroyed")
               assert.deepStrictEqual(yield* page.workers, [])
+              const gone = yield* Effect.flip(global.evaluate((scope) => scope.location.pathname))
+              assert.strictEqual(gone._tag, "TargetGone", String(gone))
+              const ended = yield* Effect.flip(worker.evaluateHandle(() => self))
+              assert.strictEqual(ended._tag, "TargetGone", String(ended))
             }))
           }),
         timeout

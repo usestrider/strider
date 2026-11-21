@@ -14,6 +14,7 @@ import * as L1Target from "../../Target.ts"
 import * as UncaughtException from "../../UncaughtException.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as EpochTime from "../epochTime.ts"
 import * as Operation from "../operation.ts"
 import * as Urls from "../urls.ts"
 import { confirmFrameRemoval } from "./contexts.ts"
@@ -269,6 +270,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
             origin,
             // The browser's own messages come as `javascript` entries, which read as uncaught exceptions
             source: { _tag: "Page" },
+            timestamp: EpochTime.fromMillis(params.timestamp),
             at: Adapter.now()
           })
         })

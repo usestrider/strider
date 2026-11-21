@@ -3,8 +3,9 @@
  * settled by the element's own events. Nothing is installed before the call, and nothing is left after it.
  *
  * - **A resource from a URL** settles on the element's `load` or `error`. An enforced `securitypolicyviolation`
- *   whose `blockedURI` is the URL tells a refusal by the page's policy apart from a load failure; every backend
- *   dispatches it before the `error` event.
+ *   whose `blockedURI` is exactly the resolved URL, stripped as CSP strips a URL it reports (no fragment, username,
+ *   or password), tells a refusal by the page's policy apart from a load failure; every backend dispatches it
+ *   before the `error` event.
  * - **Inline JavaScript** runs, when the policy allows it, inside the append, and its text is the caller's. The
  *   policy decides during the append too, but every engine dispatches the element's `securitypolicyviolation`
  *   later, as a task, so the call needs a signal the engine orders before a second call reads the element's
@@ -18,6 +19,9 @@
  *   - Firefox dispatches the event in a runnable on the main thread, queued during the append
  *     (`nsCSPContext::AsyncReportViolation`), and the next command reaches the content process as a later
  *     message on the same thread, so the second call runs after the event.
+ * - **An inline stylesheet** settles on its `load` or `error`, or on an enforced `securitypolicyviolation` whose target
+ *   is the element: the policy refuses it in the append, and the violation comes as a task, before the `error` that
+ *   Chromium and WebKit fire after it; Firefox fires no `error` after it, so the violation settles the call there.
  * - **A module** is accepted or refused in the append as a classic script is, and the call returns then: without
  *   changing its text nothing tells when it has run, since it has no `load` event and top-level `await` can hold
  *   it.
@@ -32,6 +36,7 @@ import type * as Deadline from "../Deadline.ts"
 import type * as JSHandle from "../JSHandle.ts"
 import * as Reason from "../Reason.ts"
 import type * as ScriptTag from "../ScriptTag.ts"
+import type * as StyleTag from "../StyleTag.ts"
 import type * as Target from "../Target.ts"
 import type * as Adapter from "./adapter.ts"
 import * as Evaluation from "./evaluation.ts"
@@ -51,6 +56,8 @@ export interface Spec {
   readonly tag: string
   readonly attributes: ReadonlyArray<readonly [string, string]>
   readonly url: string | null
+  /** The attribute the URL is set as: a script's `src`, a stylesheet link's `href`. */
+  readonly urlAttribute: "src" | "href"
   readonly text: string | null
   /** Whether the browser runs or loads it, so the call waits for that. */
   readonly settles: boolean
@@ -109,20 +116,56 @@ export const script = Effect.fnUntraced(function*(
   if (type !== undefined) attributes.push(["type", type])
   if (options?.id !== undefined) attributes.push(["id", options.id])
   const settles = javaScriptTypes.has((type ?? "").trim().toLowerCase())
-  if ("url" in source) return { tag: "script", attributes, url: source.url, text: null, settles } satisfies Spec
+  if ("url" in source) {
+    return { tag: "script", attributes, url: source.url, urlAttribute: "src", text: null, settles } satisfies Spec
+  }
   const text = "source" in source ? source.source : yield* Effect.map(
     readPath(runtime, source.path),
     ({ path, text }) => `${text}\n//# sourceURL=${path.replace(/\n/g, "")}`
   )
-  return { tag: "script", attributes, url: null, text, settles } satisfies Spec
+  return { tag: "script", attributes, url: null, urlAttribute: "src", text, settles } satisfies Spec
 })
 
-/** Runs in the document's main world: appends an element from a URL, or one the browser doesn't run, and settles. */
+/**
+ * A stylesheet's spec: a `<link rel="stylesheet">` for a URL, otherwise a `<style>`; a path is read now and named
+ * by a `sourceURL` comment.
+ */
+export const style = Effect.fnUntraced(function*(runtime: Runtime.Runtime, source: StyleTag.Source) {
+  if ("url" in source) {
+    return {
+      tag: "link",
+      attributes: [["rel", "stylesheet"]],
+      url: source.url,
+      urlAttribute: "href",
+      text: null,
+      settles: true
+    } satisfies Spec
+  }
+  const text = "source" in source ? source.source : yield* Effect.map(
+    readPath(runtime, source.path),
+    ({ path, text }) => `${text}\n/*# sourceURL=${path.replace(/\n/g, "").replaceAll("*/", "*%2F")} */`
+  )
+  return { tag: "style", attributes: [], url: null, urlAttribute: "href", text, settles: true } satisfies Spec
+})
+
+/**
+ * Runs in the document's main world: appends an element from a URL, an inline stylesheet, or one the browser doesn't
+ * run, and settles.
+ */
 function insertElement(spec: Spec): Promise<Element | string> {
   return new Promise((resolve) => {
     const element = document.createElement(spec.tag)
     for (const [name, value] of spec.attributes) element.setAttribute(name, value)
     const href = spec.url === null ? null : new URL(spec.url, document.baseURI).href
+    // The URL as a violation reports it: CSP strips the fragment, the username, and the password
+    let reported: string | null = null
+    if (href !== null) {
+      const stripped = new URL(href)
+      stripped.hash = ""
+      stripped.username = ""
+      stripped.password = ""
+      reported = stripped.href
+    }
     const removals: Array<() => void> = []
     let refusal: string | null = null
     const settle = (outcome: Element | string) => {
@@ -133,20 +176,24 @@ function insertElement(spec: Spec): Promise<Element | string> {
       target.addEventListener(type, listener, true)
       removals.push(() => target.removeEventListener(type, listener, true))
     }
-    if (spec.url !== null && spec.settles) {
+    if (spec.settles) {
       listen(document, "securitypolicyviolation", (event) => {
         const violation = event as SecurityPolicyViolationEvent
-        if (violation.disposition === "report" || violation.blockedURI !== href) return
+        if (violation.disposition === "report") return
+        // A URL's violation is dispatched at the document and names it; an inline element's is dispatched at it
+        if (href === null ? violation.target !== element : violation.blockedURI !== reported) return
         refusal = JSON.stringify({
           _tag: "Refused",
           directive: violation.effectiveDirective || violation.violatedDirective,
           blocked: violation.blockedURI
         })
+        // Firefox fires no error after refusing an inline stylesheet
+        if (href === null) settle(refusal)
       })
       listen(element, "load", () => settle(element))
-      listen(element, "error", () => settle(refusal ?? JSON.stringify({ _tag: "Failed", url: href })))
+      listen(element, "error", () => settle(refusal ?? JSON.stringify({ _tag: "Failed", url: href ?? "" })))
     }
-    if (spec.url !== null) element.setAttribute("src", spec.url)
+    if (spec.url !== null) element.setAttribute(spec.urlAttribute, spec.url)
     if (spec.text !== null) element.textContent = spec.text
     ;(document.head ?? document.documentElement ?? document).append(element)
     if (!spec.settles) settle(element)
@@ -217,7 +264,8 @@ const outcome = (text: string): Failure => {
       })
       : new Reason.ResourceFailed({
         url: parsed.url,
-        hint: "The element's error event fired: unreachable, an error status, or not a script; it stays in the document"
+        hint:
+          "The element's error event fired: unreachable, an error status, or not a script or stylesheet; it stays in the document"
       })
   }
 }
@@ -276,7 +324,9 @@ export const insert = <A>(
       value.type === "string"
         ? Effect.fail(outcome(value.value))
         : Evaluation.own<A>(runtime, realm, value, Option.some(page))
-    if (spec.url !== null || !spec.settles) return yield* settled(yield* call(insertElement, [spec], true))
+    if (spec.tag !== "script" || spec.url !== null || !spec.settles) {
+      return yield* settled(yield* call(insertElement, [spec], true))
+    }
     const protocol = runtime.model.adapter.info.protocol
     const matches = protocol === "bidi"
       ? undefined

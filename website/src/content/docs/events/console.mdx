@@ -30,3 +30,20 @@ The categories are one set for every browser, listed in
 `other`. Firefox sends the browser's own messages as script errors, so they arrive as
 [uncaught exceptions](/docs/api/browser/UncaughtException) and every console message there is `Page`. WebKit
 does the same with "Fetch API cannot load … due to access control checks".
+
+Each message's `timestamp` is when the browser logged it, by its own wall clock, as a `DateTime.Utc` to the
+millisecond, on every browser. It's the clock of the machine the browser runs on, which a page's clock doesn't move,
+so a test running on the same machine can compare it with `Date.now()`:
+
+```ts
+import { ConsoleMessage, Page } from "@usestrider/browser"
+import { DateTime, Effect } from "effect"
+
+const errorDelay = Effect.fn("errorDelay")(function*(page: Page.Page) {
+  const error = yield* ConsoleMessage.next(page, { level: "error" })
+  const started = DateTime.makeUnsafe(Date.now())
+  yield* page.goto("https://app.example.com")
+  const message = yield* error
+  return DateTime.distance(started, message.timestamp)
+})
+```

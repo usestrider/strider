@@ -1,7 +1,18 @@
 {
-  "status": "missing",
-  "api": [],
-  "notes": "The parent capability is missing; Effect interruption does not provide that operation. This is a parent-capability gap, not a separate cancellation feature request.",
+  "status": "has",
+  "api": [
+    {
+      "package": "effect",
+      "module": "Fiber",
+      "symbol": "interrupt",
+      "url": "https://unpkg.com/effect@4.1.2/src/Fiber.ts",
+      "source": {
+        "file": "node_modules/effect/src/Fiber.ts",
+        "quote": "Interruption is cooperative. A fiber can continue running while it is inside\n * uninterruptible work or finalizers."
+      }
+    }
+  ],
+  "notes": "Interrupt the fiber that awaits an event module's `next(context, \u2026)` wait, or close the scope it subscribed in (Fiber.interrupt waits for cleanup); no per-call AbortSignal parameter. Interruption is cooperative and produces Effect interruption rather than an AbortSignal error. Deadline.within separately bounds the wait with a typed timeout.",
   "capabilities": [],
   "id": "option-browsercontext-waitforevent-signal",
   "upstream": [

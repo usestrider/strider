@@ -201,6 +201,12 @@ export * as NetworkRequest from "./NetworkRequest.ts"
  * @stability unstable
  * @since 0.1.0
  */
+export * as NetworkRequestEnd from "./NetworkRequestEnd.ts"
+
+/**
+ * @stability unstable
+ * @since 0.1.0
+ */
 export * as NetworkResponse from "./NetworkResponse.ts"
 
 /**
@@ -226,6 +232,12 @@ export * as Page from "./Page.ts"
  * @since 0.1.0
  */
 export * as PageClock from "./PageClock.ts"
+
+/**
+ * @stability unstable
+ * @since 0.1.0
+ */
+export * as PageLifecycle from "./PageLifecycle.ts"
 
 /**
  * @stability unstable
@@ -274,6 +286,12 @@ export * as Snapshot from "./Snapshot.ts"
  * @since 0.1.0
  */
 export * as StorageState from "./StorageState.ts"
+
+/**
+ * @stability unstable
+ * @since 0.1.0
+ */
+export * as StyleTag from "./StyleTag.ts"
 
 /**
  * @stability unstable

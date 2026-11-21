@@ -1,5 +1,42 @@
 # @usestrider/browser
 
+## 0.14.1
+
+### Added
+
+- **`page.addStyleTag` and `frameLocator.addStyleTag`** (#410) add a stylesheet to the current document of a page or an iframe, from CSS source, a URL, or a file (`StyleTag.Source`), and return a scoped handle to its element once it has loaded. A stylesheet the page's Content Security Policy refuses fails with `RefusedByPolicy`, and a URL that doesn't load fails with `ResourceFailed`.
+- **`browser.contexts`** (#409), the browser's contexts, kept up to date as they open and close: the default context first, then the others in the order they were added. A context this connection created is the `UserContext` that `newContext` returned; any other is an observed context with `control`. Connecting to a running Chromium or Firefox lists the contexts it already has, empty ones too.
+- **Handles for properties, locators, the main world, and workers** (#408): `JSHandle.properties` gives each of a value's own enumerable properties as a handle; `Locator.evaluateHandle` returns the one match's evaluation as a handle; `Page.evaluateHandleInMainWorld` gives a handle in the page's own world, on WebKit too; and `BrowserWorker.evaluateHandle` gives one in a worker's realm, where the browser can evaluate in workers. A worker's evaluations now take handles from its realm as arguments, and a handle's string previews its value: a primitive's value, a node's tag, or an object's kind.
+
+### Fixed
+
+- **`addScriptTag` reports a refused script URL with a fragment, a username, or a password as `RefusedByPolicy`** (#410), where it failed with `ResourceFailed`: the browser's violation names the URL without them, and the call now compares it the same way.
+- **A `newContext` that fails on Chromium after the browser made its context no longer leaves that context open** (#409), a timed-out one included. Strider removes it within five seconds; if the browser refuses the removal, `browser.contexts` lists it as an observed context.
+
+## 0.14.0
+
+### Breaking changes
+
+- **A `ConsoleMessage` says whether the page or the browser wrote it** (#398), in a required `source`: `{ _tag: "Page" }` for the page's own `console` calls, or `{ _tag: "Browser", category }` for what the browser writes itself, with `category` one of `network`, `security`, `deprecation`, `intervention`, `violation`, `rendering`, `storage`, or `other`. A program can check that a page caused no Content Security Policy violations without matching on the message's text. The new `console.source` capability says how far each browser tells them apart: fully on Chromium, partly on stock WebKit, and not on Firefox, where every console message is `Page`. Code that constructs a `ConsoleMessage` must give a `source`, and a console history encoded by an earlier release must be recorded again.
+- **Snapshots carry a node's level and mixed states** (#394). A heading, list item, row, or tree item has a `level`, rendered `[level=2]`, and `Snapshot.State` gains `"checked=mixed"` and `"pressed=mixed"`: an indeterminate checkbox, or `aria-checked="mixed"`, has `checked=mixed` in place of `checked`. Handle the two new states wherever you switch over every state, and update any snapshot text you compare against.
+
+### Added
+
+- **`page.addScriptTag` and `frameLocator.addScriptTag`** (#397) add a `<script>` to the current document of a page or an iframe, from a URL, inline source, or a file, with a `type` and an `id`, and return a handle to the element. The page's Content Security Policy applies: a refused script fails with the new reason `RefusedByPolicy`, naming the directive, and a URL that doesn't load fails with `ResourceFailed`. On stock WebKit, whose refusal message doesn't name the script, a call whose script is allowed but causes another inline script to be refused ends with `Timeout`.
+- **`exposeBinding` on pages and contexts** (#402): a host function that page scripts call as `window[name](...)`. Its Effect handler receives the calling page and frame, with schemas for the arguments and the result, and values cross by value as `evaluateInMainWorld`'s do. A context binding reaches every frame of its pages and popups before their own scripts, both kinds reach documents already open, and removing one rejects the calls still waiting. A context that exposes no binding gets nothing installed.
+- **`Expect.toMatchAria` takes a page and `{ not: true }`** (#394). A page is matched from its `document` node, and `not` waits until the subject doesn't match. `AriaPattern.anywhere(children)` matches a node at any depth beneath the subject, and `AriaPattern.node` takes a node's `level` and its `checked`, `pressed`, `expanded`, `selected`, `disabled`, `invalid`, and `focused` states.
+- **Locators accept XPath** (#393): `locator(Locator.xpath("//li[@id='three']"))`. Chained, a leading `/` searches inside each match, as `//li` reads `.//li`. A string is still CSS, and a malformed expression fails with `InvalidInput` at once.
+- **`getByTestId` takes a RegExp** (#389), such as `page.getByTestId(/^row-/)`, tested against the attribute as written, and **`UserContext.Options.testIdAttribute`** (#395) chooses the attribute it matches for a context, such as `data-qa`.
+- **`UserContext.Options.bypassCSP`** (#388) lets a context's pages run what their Content Security Policy forbids, on Chromium. Firefox and stock WebKit refuse it with `Unsupported`.
+- **`UserContext.Options.clientCertificates`** (#396) presents TLS client certificates per origin, through a loopback proxy only that context uses, on Chromium and launched Firefox. Chromium now takes `acceptInsecureCerts` per context instead of refusing it.
+- **SOCKS proxies and proxies reached over TLS** (#392). A context's `proxy` takes `socks5://` on Chromium, Firefox, and launched stock WebKit, `socks4://` on Firefox and launched WebKit, and `https://` on Chromium, with the proxy resolving names; a leading-dot bypass entry, `.example.com`, matches that domain's subdomains. Each browser refuses what it can't do, under a named capability.
+
+### Fixed
+
+- **`page.mouse`, touch, and wheel input at a point inside a cross-site frame reach the frame's content** (#381): on Chromium even before the frame has drawn, where it reached the page's `iframe` element, and on Firefox at all, where it never did. While a button is held, the release goes to the frame that got the press. Finding the frame costs commands only on a page holding such a frame.
+- **An HTML drag on Chromium enters and drops its target** (#385), as `dragTo` with its default steps and a hover with the button held make, where it delivered only `dragstart`. Escape cancels a drag, and a drag from an element in a cross-site frame onto its parent starts and drops.
+- **Releasing a viewport on a Chromium page that stays open no longer waits 30 seconds** (#384) for a size the page never reports, at a fractional device scale or with a scrollbar. Where the headless shell measures too late, the release warns that it couldn't verify the restore instead of waiting.
+
 ## 0.13.0
 
 ### Breaking changes

@@ -3,9 +3,17 @@
   "upstream": [
     "method:ConsoleMessage.timestamp"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding public Strider capability for this member.",
-  "capabilities": [],
+  "status": "has",
+  "api": [
+    {
+      "module": "ConsoleMessage",
+      "symbol": "ConsoleMessage",
+      "url": "/docs/api/browser/ConsoleMessage#ConsoleMessage"
+    }
+  ],
+  "notes": "`timestamp` is a `DateTime.Utc` from the browser's wall clock, to the millisecond, rather than Playwright's number of milliseconds since the epoch.",
+  "capabilities": [
+    "console"
+  ],
   "requirements": []
 }

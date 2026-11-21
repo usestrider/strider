@@ -15,7 +15,7 @@ import * as Protocol from "../../protocol/Protocol.ts"
 import * as L1Target from "../../Target.ts"
 import * as Console from "../../webkit-stock-protocol/Console.ts"
 import * as Runtime from "../../webkit-stock-protocol/Runtime.ts"
-import type * as Adapter from "../adapter.ts"
+import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as Groups from "../objectGroups.ts"
 import * as Utility from "../webkitUtility.ts"
@@ -357,7 +357,8 @@ export const evaluate = Effect.fnUntraced(function*(
           ? {
             type,
             handle,
-            ...(document === undefined ? {} : { node: { document: document.id, binding: object.objectId } })
+            ...(document === undefined ? {} : { node: { document: document.id, binding: object.objectId } }),
+            value: Adapter.describedNode(object.description)
           }
           : { type, handle } as Adapter.RemoteValue
       }
