@@ -42,6 +42,7 @@ import * as Protocol from "../../../src/protocol/Protocol.ts"
 import { pngRegion } from "../../pngRegion.ts"
 import { site } from "../adapter/harness.ts"
 import { fullySupports, supports } from "./capabilities.ts"
+import { overlays } from "./overlays.ts"
 import { scriptTags } from "./scriptTags.ts"
 import * as SharedContext from "./sharedContext.ts"
 
@@ -151,6 +152,7 @@ export const contents = (
     layer(SharedContext.layer(backend), { excludeTestServices: true, timeout })((suite) => {
       const it = SharedContext.guard(suite)
       scriptTags(name, it)
+      overlays(it)
 
       it.effect("preserves viewport assertions while a locator handler is registered", () =>
         Effect.gen(function*() {
