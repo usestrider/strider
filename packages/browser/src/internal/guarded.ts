@@ -37,6 +37,7 @@ export const context: Access.Members = {
     "exposeBinding",
     "emulate",
     "grant",
+    "deny",
     "clock.install"
   ])
 }

@@ -1,8 +1,8 @@
 /**
- * Permission grants. L0's reset clears every grant in a context, so L1 keeps the grants
+ * Permission grants and denials. L0's reset clears every setting in a context, so L1 keeps the grants and denials
  * in force in the context's state, which the model's fold writes, and recomputes on each change: a removal resets,
- * then grants what remains. Each name is
- * granted on its own, so a name a backend rejects (Firefox's list is shorter) fails naming it.
+ * then sets what remains, oldest first, so for each origin and name the latest declaration in force wins. Each name
+ * is set on its own, so a name a backend rejects (Firefox's list is shorter) fails naming it.
  */
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -13,6 +13,7 @@ import * as Declaration from "../Declaration.ts"
 import * as Reason from "../Reason.ts"
 import type * as Target from "../Target.ts"
 import type * as UserContext from "../UserContext.ts"
+import type * as Adapter from "./adapter.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import type * as Runtime from "./runtime.ts"
@@ -27,6 +28,7 @@ export const grant = (
   runtime: Runtime.Runtime,
   entry: Model.ContextEntry,
   operation: string,
+  setting: Adapter.PermissionSetting,
   permissions: ReadonlyArray<UserContext.Permission>,
   options: UserContext.GrantOptions | undefined
 ): Effect.Effect<
@@ -65,17 +67,17 @@ export const grant = (
           : failure.reason
       )
     }
-    const grant: Model.GrantEntry = { origin: where, permissions: [...permissions] }
+    const grant: Model.GrantEntry = { origin: where, permissions: [...permissions], setting }
     const inForce = Effect.map(entry.state.get, (state) => state.grants)
     const apply = (grants: ReadonlyArray<Model.GrantEntry>) =>
-      Effect.forEach(grants, (each) => adapter.grantPermissions(context, each.origin, each.permissions), {
+      Effect.forEach(grants, (each) => adapter.grantPermissions(context, each.origin, each.permissions, each.setting), {
         discard: true
       })
     const scope = yield* Scope.fork(yield* Effect.scope)
     for (const name of permissions) {
-      yield* adapter.grantPermissions(context, where, [name]).pipe(
+      yield* adapter.grantPermissions(context, where, [name], setting).pipe(
         Effect.mapError((error) => mapped(error, name)),
-        // What this call granted goes again, with the grants before it: cleanup, which the deadline doesn't end
+        // What this call set goes again, with the declarations before it: cleanup, which the deadline doesn't end
         Effect.onError(() =>
           adapter.resetPermissions(context).pipe(
             Effect.andThen(Effect.flatMap(inForce, apply)),
@@ -86,7 +88,7 @@ export const grant = (
         )
       )
     }
-    // What a removal grants again, after it resets; once this one is removed, the others
+    // What a removal sets again, after it resets; once this one is removed, the others
     yield* Scope.addFinalizer(
       scope,
       adapter.resetPermissions(context).pipe(

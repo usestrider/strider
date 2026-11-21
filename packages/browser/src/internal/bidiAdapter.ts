@@ -483,7 +483,8 @@ export const connect: (
       cookies: (context) => Storage.cookies(state, context),
       setCookies: (context, list) => Storage.setCookies(state, context, list),
       clearCookies: (context) => Storage.clearCookies(state, context),
-      grantPermissions: (context, origin, permissions) => Storage.grantPermissions(state, context, origin, permissions),
+      grantPermissions: (context, origin, permissions, setting) =>
+        Storage.grantPermissions(state, context, origin, permissions, setting),
       resetPermissions: (context) => Storage.resetPermissions(state, context),
       responseBody: (hop) => Network.responseBody(state, hop),
       captureRequestBody: (request, limit) => Network.captureRequestBody(state, request, limit),

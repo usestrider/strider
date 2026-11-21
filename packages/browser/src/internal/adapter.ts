@@ -1020,6 +1020,9 @@ export interface Claims {
   readonly findContext: (context: string) => Effect.Effect<UserContext.Id | undefined, AdapterError>
 }
 
+/** What a grant or a denial sets a permission to. */
+export type PermissionSetting = "granted" | "denied"
+
 export interface AdapterConnection {
   readonly ownership: "launched" | "attached"
   readonly claims?: Claims | undefined
@@ -1192,10 +1195,12 @@ export interface AdapterConnection {
     context: UserContext.Id,
     options?: { readonly page: Target.NavigableId }
   ) => Effect.Effect<void, AdapterError>
+  /** Sets each permission to `setting`, for one origin or, with none, every origin. */
   readonly grantPermissions: (
     context: UserContext.Id,
     origin: Option.Option<string>,
-    permissions: ReadonlyArray<string>
+    permissions: ReadonlyArray<string>,
+    setting: PermissionSetting
   ) => Effect.Effect<void, AdapterError>
   readonly resetPermissions: (context: UserContext.Id) => Effect.Effect<void, AdapterError>
   readonly responseBody: (hop: NetworkRequest.HopId) => Effect.Effect<Uint8Array, AdapterError>
