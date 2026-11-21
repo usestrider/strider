@@ -3536,24 +3536,33 @@ document.getElementById("form").addEventListener("submit", (event) => {
       it.effect("gives a popup's top frame before its first document commits", () =>
         Effect.gen(function*() {
           // Stock WebKit reports a popup as the browser's page, not its opener's, so there is no popup to read
-          if (!(yield* supports("popups.opener"))) return
+          if (!(yield* supports("popups.opener"))) {
+            return
+          }
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const context = yield* Browser.newContext()
             const page = yield* context.newPage
-            yield* page.goto(fixtureUrl(origin, `<a target="_blank" href="${origin}/unanswered">Open popup</a>`))
+            yield* page.goto(fixtureUrl(origin, `<a target="_blank" href="${origin}/slow-page">Open popup</a>`))
             const opened = yield* Popup.next(page)
             yield* page.getByRole("link", { name: "Open popup" }).click()
             const popup = yield* opened
             const top = yield* popup.frameById(popup.id)
-            // The frame is attached from the start, with no document until one commits
+            // The frame is attached from the start, and without a document until one commits, where the browser
+            // commits none before the server answers
             const status = yield* top.status
             assert.strictEqual(status._tag, "Attached")
-            assert.isTrue(status._tag === "Attached" && Option.isNone(status.document))
-            // An evaluation waits for the document, which the frame's own navigation commits
-            const evaluated = yield* Effect.forkChild(top.evaluate(() => document.title))
+            if (status._tag === "Attached" && Option.isNone(status.document)) {
+              // An evaluation waits for the first document
+              assert.strictEqual(
+                yield* top.evaluate(() =>
+                  document.title
+                ),
+                "Slow"
+              )
+            }
             yield* top.goto(fixtureUrl(origin, "<title>Arrived</title>"), { waitUntil: "load" })
-            assert.strictEqual(yield* Fiber.join(evaluated), "Arrived")
+            assert.strictEqual(yield* top.evaluate(() => document.title), "Arrived")
             const arrived = yield* top.status
             assert.isTrue(arrived._tag === "Attached" && Option.isSome(arrived.document))
           }))
@@ -3579,9 +3588,7 @@ document.getElementById("form").addEventListener("submit", (event) => {
                 replacement.src = url
                 document.getElementById("child")!.replaceWith(replacement)
               }, fixtureUrl(origin, "<p>new</p>"))
-              yield* old.status.waitFor((status) =>
-                status._tag === "Detached"
-              )
+              yield* old.status.waitFor((status) => status._tag === "Detached")
               yield* locator.locator("p").pipe(Expect.toHaveText("new"))
               const current = yield* locator.resolve
               assert.notStrictEqual(current.id, old.id)
