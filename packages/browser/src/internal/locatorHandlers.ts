@@ -233,7 +233,8 @@ const activate = (page: Model.PageEntry, state: State) => {
             )
           ),
         Runtime.send(runtime, target, request, id, at)
-      )
+      ),
+    handle: dispatch(Effect.asVoid(check(state, false)), Effect.void)
   }
 }
 

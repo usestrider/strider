@@ -375,11 +375,17 @@ export type Request =
   }
   | { readonly op: "expectStop"; readonly token: string }
   /**
-   * A wait for the next change the page makes (a mutation, an `input`, `change` or focus event, an animation
-   * frame), or `cap` milliseconds: what a check made outside the engine waits on before it checks again. Its steps
-   * only route it to the document their match is in.
+   * A wait for the first change the page makes (a mutation, an `input`, `change` or focus event, an animation frame)
+   * since `token` was armed, or `cap` milliseconds: what a check made outside the engine waits on before it checks
+   * again. It answers at once when the change came before it, and with `token: null` arms only. Either way it answers
+   * with a token armed as it answers, for the next wait. Its steps only route it to the document their match is in.
    */
-  | { readonly op: "change"; readonly steps: ReadonlyArray<Step>; readonly cap: number }
+  | {
+    readonly op: "change"
+    readonly steps: ReadonlyArray<Step>
+    readonly token: string | null
+    readonly cap: number
+  }
   | { readonly op: "title" }
   | { readonly op: "role"; readonly steps: ReadonlyArray<Step> }
   /**
@@ -478,6 +484,12 @@ export const Response = Schema.Union([
      * much of it is in view.
      */
     provisional: Schema.optional(Schema.Boolean)
+  }),
+  Schema.TaggedStruct("Watching", {
+    /** Whether the page changed since the token waited on was armed; a token this document never armed counts. */
+    changed: Schema.Boolean,
+    /** A watch armed as this answer was made, for the next wait. */
+    token: Schema.String
   }),
   Schema.TaggedStruct("Strict", { candidates: Schema.Array(Candidate), count: Schema.Number }),
   Schema.TaggedStruct("InvalidSelector", {
@@ -3642,26 +3654,73 @@ export function engine(render: (root: SnapNode) => string) {
     })
   }
 
-  /** The next change the page makes, as `expect` rechecks on, or the cap: whether it changed. */
+  /**
+   * Watches armed for `change`: each one stops at its first change signal, which it keeps until a wait reads it, and
+   * is forgotten a minute after it is armed, so one no wait reads holds nothing for long.
+   */
+  interface Watch {
+    changed: boolean
+    waiter: (() => void) | undefined
+    stop: () => void
+  }
+  const watches = new Map<string, Watch>()
+  let watchSequence = 0
+  const watchEpoch = Math.random().toString(36).slice(2)
+  const watchLifetime = 60_000
+  const armWatch = (): string => {
+    const token = `${watchEpoch}:${++watchSequence}`
+    const EVENTS = ["input", "change", "focusin", "focusout"]
+    const unlisten = () => {
+      observer.disconnect()
+      for (const type of EVENTS) removeEventListener(type, noticed, true)
+      cancelFrame(frame)
+    }
+    // The signal is kept until a wait reads it or the watch is forgotten
+    const noticed = () => {
+      unlisten()
+      watch.changed = true
+      watch.waiter?.()
+    }
+    const observer = new MutationObserver(noticed)
+    observer.observe(document, { subtree: true, childList: true, attributes: true, characterData: true })
+    for (const type of EVENTS) addEventListener(type, noticed, true)
+    const frame = onFrame(noticed)
+    const expiry = setTimer(() => {
+      unlisten()
+      watches.delete(token)
+    }, watchLifetime)
+    const watch: Watch = {
+      changed: false,
+      waiter: undefined,
+      stop: () => {
+        unlisten()
+        clearTimer(expiry)
+      }
+    }
+    watches.set(token, watch)
+    return token
+  }
+  /** The first change since a token was armed, at once if it came already, or the cap: whether it changed. */
   const change = (request: Extract<Request, { op: "change" }>): Promise<Response> =>
     new Promise((resume) => {
-      let done = false
-      const finish = (changed: boolean) => {
-        if (done) return
-        done = true
-        observer.disconnect()
-        for (const type of EVENTS) removeEventListener(type, noticed, true)
-        cancelFrame(frame)
-        clearTimer(timer)
-        resume({ _tag: "Expected", passed: changed, observed: null, changed })
+      const answer = (changed: boolean) => resume({ _tag: "Watching", changed, token: armWatch() })
+      if (request.token === null) return answer(false)
+      const watch = watches.get(request.token)
+      // Armed in another document, or forgotten: what changed since is unknown, so it counts as a change
+      if (watch === undefined) return answer(true)
+      if (watch.changed || request.cap <= 0) {
+        watches.delete(request.token)
+        watch.stop()
+        return answer(watch.changed)
       }
-      const noticed = () => finish(true)
-      const EVENTS = ["input", "change", "focusin", "focusout"]
-      const observer = new MutationObserver(noticed)
-      observer.observe(document, { subtree: true, childList: true, attributes: true, characterData: true })
-      for (const type of EVENTS) addEventListener(type, noticed, true)
-      const frame = onFrame(noticed)
-      const timer = setTimer(() => finish(false), Math.max(0, request.cap))
+      const timer = setTimer(() => finish(false), request.cap)
+      const finish = (changed: boolean) => {
+        if (!watches.delete(request.token!)) return
+        clearTimer(timer)
+        watch.stop()
+        answer(changed)
+      }
+      watch.waiter = () => finish(true)
     })
 
   // Snapshots

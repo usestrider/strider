@@ -645,21 +645,77 @@ export const toSatisfy = (locator: Locator.ReadonlyLocator, fn: Function, args: 
       // Where no world of Strider's own can run the function, no check could pass
       yield* impl.requires(operation, "isolatedWorlds", id)
       let checks = 0
-      const failed = () =>
-        Effect.flatMap(explain(subject, id), (explained) =>
-          Effect.fail(
-            failure(id, description, condition, started, history, checks, triggers, explained, "toSatisfy")
-          ))
-      while (true) {
-        checks++
-        const checked = yield* impl.satisfying(operation, fn, args).pipe(
+      const failed = (handlerFailure?: Reason.LocatorHandlerFailed) =>
+        Effect.flatMap(
+          handlerFailure === undefined
+            ? explain(subject, id)
+            : Effect.succeed<Explained>({ nearest: Option.none(), suggestions: [] }),
+          (explained) =>
+            Effect.fail(
+              failure(
+                id,
+                description,
+                condition,
+                started,
+                history,
+                checks,
+                triggers,
+                explained,
+                "toSatisfy",
+                undefined,
+                handlerFailure
+              )
+            )
+        )
+      // Whether the deadline ended a step: the check that didn't finish is no observation
+      const cut = <A, E, R>(self: Effect.Effect<A, E, R>) =>
+        self.pipe(
           Effect.map(Option.some),
-          // A check the expectation's deadline cut off is one that didn't finish
           Effect.catchIf(
-            (error): error is Deadline.Timeout => Deadline.isTimeout(error) && record.left() <= 0,
+            (error: E) => Deadline.isTimeout(error) && record.left() <= 0,
             () => Effect.succeedNone
           )
         )
+      const dispatch = subject.page.execution
+      // Armed before the first check, so a change while the function runs wakes the next check at once
+      let token: string | null = null
+      const watch = (cap: number) =>
+        Runtime.send(subject.runtime, subject.page, { op: "change", steps, token, cap }, id, record.budget.at).pipe(
+          Effect.flatMap((response) => {
+            if (response._tag !== "Watching") {
+              return Effect.die(new Error(`The engine answered ${response._tag} unexpectedly`))
+            }
+            token = response.token
+            return Effect.succeed(response.changed)
+          }),
+          Effect.catch((failure) =>
+            failure._tag === "Deadline"
+              ? Effect.succeed(false)
+              : Effect.fail(impl.sendFailure(operation, failure, record))
+          )
+        )
+      yield* watch(0)
+      while (true) {
+        checks++
+        // Registered locator handlers run before each check, as they do in the other locator expectations' rounds
+        const handled = yield* cut(dispatch.handle.pipe(
+          Effect.as(Option.none<Reason.LocatorHandlerFailed>()),
+          Effect.catch((failure) =>
+            failure._tag === "Reason" && failure.reason._tag === "LocatorHandlerFailed"
+              ? Effect.succeed(Option.some(failure.reason as Reason.LocatorHandlerFailed))
+              : Effect.fail(impl.sendFailure(operation, failure, record))
+          )
+        ))
+        if (Option.isNone(handled)) {
+          if (history.length === 0) {
+            Operation.appendObservation(history, { error: "a check was still running at the deadline" })
+          }
+          return yield* failed()
+        }
+        if (Option.isSome(handled.value)) return yield* failed(handled.value.value)
+        // A handler that ran changed the page, which the watch armed before it has seen
+        // A check the expectation's deadline cut off is one that didn't finish
+        const checked = yield* cut(impl.satisfying(operation, fn, args))
         if (Option.isNone(checked)) {
           if (history.length === 0) {
             Operation.appendObservation(history, { error: "a check was still running at the deadline" })
@@ -697,22 +753,8 @@ export const toSatisfy = (locator: Locator.ReadonlyLocator, fn: Function, args: 
         }
         const left = record.left()
         if (left <= 0) return yield* failed()
-        // The function ran outside the engine, so the page is watched again from now: a change since the check is
-        // in the state the next check reads, and the wait ends at the next one, or the next animation frame
-        const changed = yield* Runtime.send(
-          subject.runtime,
-          subject.page,
-          { op: "change", steps, cap: Runtime.roundCap(left) },
-          id,
-          record.budget.at
-        ).pipe(
-          Effect.map((response) => response._tag === "Expected" && response.changed),
-          Effect.catch((failure) =>
-            failure._tag === "Deadline"
-              ? Effect.succeed(false)
-              : Effect.fail(impl.sendFailure(operation, failure, record))
-          )
-        )
+        // Answers at once when anything changed since the watch was armed, before this check
+        const changed = yield* watch(Runtime.roundCap(left))
         if (changed) triggers.add("change")
         if (record.left() <= 0) return yield* failed()
       }
