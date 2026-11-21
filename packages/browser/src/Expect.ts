@@ -658,8 +658,8 @@ export const toHaveCount: DualMatcher<Locator.ReadonlyLocator, [count: number]> 
 )
 
 /**
- * Expects a function you pass to return `true` on a locator's one match, checking again after each change the page
- * makes until it does.
+ * Expects a function you pass to return `true` on a locator's one match, checking again each time the page signals a
+ * change until it does.
  *
  * **When to use**
  *
@@ -673,7 +673,10 @@ export const toHaveCount: DualMatcher<Locator.ReadonlyLocator, [count: number]> 
  * and gets the match first, then the arguments, which cross as they do for `locator.evaluate`: by value, or a handle
  * as what it holds. A promise it returns is awaited. Only `true` passes.
  *
- * On each check it finds the one match again and calls the function. While nothing matches, or several elements
+ * On each check it runs the page's locator handlers, finds the one match again, and calls the function. It checks
+ * again after each change signal the other locator matchers check on (a mutation, an input, change or focus event,
+ * or an animation frame), including one that came while the function ran. Each check reads the page as it is then,
+ * so a state that comes and goes between two checks isn't seen. While nothing matches, or several elements
  * do, it keeps waiting, and a failure says how many matched; with no match, it names the nearest match and
  * suggests locators, as the other matchers do. It returns nothing: to read a value once it passes, call
  * `locator.evaluate`.

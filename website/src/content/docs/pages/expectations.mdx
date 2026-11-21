@@ -240,8 +240,9 @@ const summary = Effect.fn("summary")(function*(page: Page.Page) {
 
 When the state is something only the page can compute, such as a property a script sets, `Expect.toSatisfy` takes a
 function that runs in the page. It gets the one matching element first, then the arguments you pass, and the
-expectation passes once it returns `true`, or a promise of `true`. Like the other matchers, it checks again after
-each change the page makes, and waits while nothing or several elements match:
+expectation passes once it returns `true`, or a promise of `true`. Like the other matchers, it checks again each time
+the page signals a change, and waits while nothing or several elements match. Each check reads the page as it is
+then, so a state that comes and goes between two checks isn't seen:
 
 ```ts
 import { Expect, Page } from "@usestrider/browser"
