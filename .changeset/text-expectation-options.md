@@ -1,5 +1,5 @@
 ---
-"@usestrider/browser": patch
+"@usestrider/browser": minor
 ---
 
 Add `ignoreCase` to `Expect.toHaveText`, `Expect.toContainText`, `Expect.toHaveAttribute`, and `Expect.toHaveURL`: a
@@ -10,3 +10,7 @@ case the same way, without regard to the locale. `toHaveText` and
 content; other elements, such as SVG ones, keep their text content.
 `toContainText` takes a list, which passes when its entries are contained in matches in the same order, each in a
 later match than the one before; an empty list passes when nothing matches.
+
+With `ignoreCase`, `toHaveAccessibleName`, `toHaveAccessibleDescription`, and `toHaveAccessibleErrorMessage` can
+now pass or fail differently in a browser whose locale has its own casing rules, such as Turkish, where `I`
+lowercases to `ı`: a string that relied on that locale's folding now compares as in any other locale.
