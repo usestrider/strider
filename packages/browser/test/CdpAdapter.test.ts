@@ -2507,6 +2507,23 @@ describe("Chromium video writer lifetime", () => {
       )
     }).pipe(onTestClock))
 
+  it.effect("prepares default-sized video without acquiring a document realm", () =>
+    Effect.gen(function*() {
+      const h = yield* sentHeaders(true).pipe(Effect.provideService(VideoWriter.VideoWriter, {
+        write: (_frames, target) => Effect.succeed(target.path)
+      }))
+      yield* h.connection.declare({ _tag: "UserContext", context: h.connection.defaultContext }, {
+        _tag: "Downloads",
+        behavior: { _tag: "Allow", directory: "/tmp" }
+      })
+      const page = yield* h.page.control
+      yield* page.capability(Capability.Video).pipe(Effect.forkScoped)
+      // No realm has been announced. Navigation can replace it while the page session survives.
+      const preparation = yield* Queue.take(h.preparation)
+      assert.strictEqual(preparation.method, "Page.getLayoutMetrics")
+      assert.notInclude(h.commands.map((command) => command.method), "Page.createIsolatedWorld")
+    }).pipe(onTestClock))
+
   it.effect("keeps idle images until the recording scope closes", () =>
     Effect.gen(function*() {
       const written = yield* Queue.unbounded<VideoWriter.Frame>()
