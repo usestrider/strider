@@ -85,7 +85,8 @@ shouldn't change how a site behaves. So:
   pages where their scripts could read it.
 - The query engine is one self-contained function in our source, with no library in the page.
 
-What does run in the main world is what the caller declared, their init scripts and the page clock, and, on stock
+What does run in the main world is what the caller declared, their init scripts, the page clock and the read of
+`Expect.toHaveJSProperty`, which asks for a property the page's scripts set, and, on stock
 WebKit alone, the library's own engine and reads, because its inspector makes no other world (QUIRKS.md, Q194).
 
 **The design is checked as compiled code.** A compiler checks what prose can't:
@@ -1540,6 +1541,16 @@ never request a feature gain no interception, injected instrumentation, per-acti
 state for it. Additions must include paired default-path benchmarks so review can assess their cost. Reject
 always-on preparation for optional features: unused capabilities must not slow existing automation.
 
+## Console arguments on a scoped subscription
+
+A console message stays a value, kept in the event log, and its arguments come only through a subscription to
+calls (`ConsoleMessage.nextCall`, `streamCalls`), which declares them for its page or context, per
+[Pay for what you use](#pay-for-what-you-use). As a message arrives, each subscription that could deliver it claims
+its arguments; delivering turns the claim into ownership in the subscription's scope, and the browser's object is
+freed once no claim or owner remains. Rejected: handles on the message itself, which the log would keep alive and
+every context would pay for; and counting owners only as subscribers take a message, which can't tell when all of
+them have passed on it.
+
 ## Client certificates through a per-context proxy
 
 No browser protocol Strider speaks sets a TLS client certificate for one context, so a context with
@@ -1607,7 +1618,8 @@ A transient duplicate during a render should settle under the same deadline as a
 the value comparison must not let an absent or ambiguous element satisfy it. This follows the existing
 single-element expectation engine. Rejected: immediate multiple-match rejection as in Playwright, which treats
 transient ambiguity differently from other unsettled expectation states, and negating cardinality together with
-the value, which could pass without observing the requested element.
+the value, which could pass without observing the requested element. The accessible description and error
+message expectations' `not` follows the same rule.
 
 ## Extra request header ownership
 
@@ -1829,6 +1841,15 @@ move: a drag of one held move shows its first `dragover` at the release or the n
 `dragOver` at the move that starts the drag, which shows the drag over the target while the button is held, was
 rejected: every drop would then end with a second `dragover`, which Playwright's and Puppeteer's drag tests both reject.
 
+## A search across frames is opt-in and strict across frames
+
+A query searches one document unless its chain asks for more with `anyFrame`, on a page or a frame locator, which
+tests each part of the chain in every document under it and goes on in the one where it matches. More than one
+matching document fails every operation, `count` and `all` included, with `StrictViolation`, as an ambiguous element
+does. Rejected: page queries that search frames by default, which would make every query's cost and meaning depend on
+the frames a page happens to embed; and taking the first frame that matches, which would depend on the order frames
+load in.
+
 ## Handles don't lead back to their browser
 
 Code reaches its browser through the `Browser` service (`yield* Browser.Browser`), and `browser.info` names the product
@@ -1876,3 +1897,13 @@ that takes an event name. Each module gives its own typed payload and its own fi
 wait names what it matches in the event's terms and its result needs no cast. Rejected: a `waitForEvent(name)` or
 `on(name)` dispatch over event names, as Playwright and Node's emitters have, whose payload and filter types follow
 from a string, and which would put every kind's lifetime and delivery rules behind one untyped entry point.
+
+## Recording overlays are page DOM
+
+Recording overlays (`Capability.Overlay`) are elements the engine draws in the page's main document, under a closed
+shadow root that its own queries, snapshots and hit tests leave out, and draws again in each document the main frame
+commits. One mechanism then serves all three browsers, and screenshots show the overlays as video does. Following
+[Pay for what you use](#pay-for-what-you-use), nothing is drawn or watched until a page acquires the capability, and
+only a page showing its actions waits before input. Compositing overlays into video frames in `VideoWriter` was
+rejected: Firefox writes its own video file, which no frame passes through, and screenshots would lack them.
+Playwright's deprecated `fontSize` option is not built; `style.title` sets the title's font like any other CSS.

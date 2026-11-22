@@ -1620,3 +1620,36 @@ describe("UserContext.Options.testIdAttribute", () => {
       assert.deepStrictEqual(testIds(sibling.locator("li").filter({ has: relative })), [standard])
     }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
 })
+
+describe("Page.anyFrame", () => {
+  it.effect("prints the search where the chain starts it", () =>
+    Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      assert.strictEqual(String(page.anyFrame.locator("#x")), `Locator(page.anyFrame.locator("#x"))`)
+      assert.strictEqual(
+        String(page.frame(page.locator("iframe")).anyFrame.getByRole("button")),
+        `Locator(page.frame(page.locator("iframe")).anyFrame.getByRole("button"))`
+      )
+      assert.strictEqual(
+        String(page.anyFrame.frame(page.anyFrame.locator("#checkout")).locator("a")),
+        `Locator(page.frame(page.anyFrame.locator("#checkout")).locator("a"))`
+      )
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+
+  it.effect("takes operands from the same search, and refuses one from outside it or from another", () =>
+    Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      const search = page.anyFrame
+      const pay = search.getByRole("button", { name: "Pay" })
+      // Built from the same search: accepted
+      pay.or(search.locator("#pay"))
+      pay.and(search.locator("button"))
+      // From outside the search
+      assert.throws(() => pay.or(page.locator("#pay")), /another frame/)
+      assert.throws(() => pay.and(page.frame(page.locator("iframe")).locator("button")), /another frame/)
+      // Starting a search of its own, below a frame
+      assert.throws(() => pay.or(page.frame(page.locator("iframe")).anyFrame.locator("#pay")), /another frame/)
+      // An iframe for `frame` comes from the search too
+      assert.throws(() => search.frame(page.locator("iframe")), /isn't in this frame/)
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+})

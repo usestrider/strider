@@ -63,6 +63,7 @@ const elementBox = (
       return new Page.PageError({
         operation,
         reason: new Locator.StrictViolation({
+          count: response.count,
           candidates: response.candidates,
           suggestions: [],
           hint: `${response.count} elements match ${locator.description}, and a capture needs exactly one`

@@ -91,10 +91,17 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
       entry("console", "supported", [
         "a message with only primitive arguments is attributed to the main frame"
       ]),
+      entry("console.arguments", "supported"),
       entry("console.source", "partial", [
         "the browser's \"Fetch API cannot load … due to access control checks\" arrives as an uncaught exception, " +
         "with no source: WebKit sends it on its `javascript` channel at level `error`, which Strider reads as an " +
         "uncaught exception"
+      ]),
+      entry("console.method", "partial", [
+        "`console.timeLog` reads as `timeEnd`, since WebKit sends both as one `timing` message",
+        "`console.count` reads as `debug`, since WebKit sends it as a plain message at level `debug`",
+        "`console.countReset` of a counter that doesn't exist reads as `warn`, since WebKit sends it as a warning",
+        "`console.countReset` of a counter that exists writes no message, since WebKit sends none for it"
       ]),
       entry("prompts", "unsupported", [
         "stock WebKit's inspector has no Dialog domain: a dialog blocks the page unreported"
@@ -197,6 +204,9 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
         "Stock WebKit Automation refuses credential management; inspector has no WebAuthn domain"
       ]),
       entry("capability.axTree", "unsupported", ["WebKit reads accessibility one node at a time"]),
+      entry("capability.overlay", "supported", [
+        "drawn in the page, so screenshots show it too; polled video can miss one shown for less than its interval"
+      ]),
       entry("capability.screencast", "unsupported", ["stock WebKit's inspector has no Screencast domain"]),
       entry(
         "capability.video",

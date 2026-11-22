@@ -16,6 +16,7 @@ import {
   Locator,
   Page,
   Pixels,
+  Popup,
   Route,
   Snapshot,
   StorageState,
@@ -41,7 +42,9 @@ import * as Runtime from "../../../src/internal/runtime.ts"
 import * as Protocol from "../../../src/protocol/Protocol.ts"
 import { pngRegion } from "../../pngRegion.ts"
 import { site } from "../adapter/harness.ts"
-import { fullySupports, supports } from "./capabilities.ts"
+import { consoleMethodReads, fullySupports, status, supports } from "./capabilities.ts"
+import { consoleCalls } from "./consoleCalls.ts"
+import { overlays } from "./overlays.ts"
 import { scriptTags } from "./scriptTags.ts"
 import * as SharedContext from "./sharedContext.ts"
 
@@ -151,6 +154,8 @@ export const contents = (
     layer(SharedContext.layer(backend), { excludeTestServices: true, timeout })((suite) => {
       const it = SharedContext.guard(suite)
       scriptTags(name, it)
+      consoleCalls(name, it)
+      overlays(it)
 
       it.effect("preserves viewport assertions while a locator handler is registered", () =>
         Effect.gen(function*() {
@@ -529,6 +534,79 @@ export const contents = (
           assert.strictEqual((yield* ConsoleMessage.history(page)).entries.at(-1)?.text, "after reload")
         }), timeout)
 
+      it.effect("reports the console method a page or a dedicated worker called", () =>
+        Effect.gen(function*() {
+          const page = yield* SharedContext.newPage
+          const { origin } = yield* site
+          // Each call writes one message on the Console Standard, but `time`, which writes none
+          const calls = [
+            "console.log('log')",
+            "console.debug('debug')",
+            "console.info('info')",
+            "console.warn('warn')",
+            "console.error('error')",
+            "console.dir({a: 1})",
+            "console.dirxml('dirxml')",
+            "console.table([1])",
+            "console.trace('trace')",
+            "console.group('group')",
+            "console.groupEnd()",
+            "console.groupCollapsed('groupCollapsed')",
+            "console.groupEnd()",
+            "console.assert(false, 'assert')",
+            "console.count('count')",
+            "console.time('time')",
+            "console.timeLog('time')",
+            "console.timeEnd('time')"
+          ].join(";")
+          const standard: ReadonlyArray<ConsoleMessage.Method> = [
+            "log",
+            "debug",
+            "info",
+            "warn",
+            "error",
+            "dir",
+            "dirxml",
+            "table",
+            "trace",
+            "group",
+            "groupEnd",
+            "groupCollapsed",
+            "groupEnd",
+            "assert",
+            "count",
+            "timeLog",
+            "timeEnd",
+            "log"
+          ]
+          // The backend's table says `partial` exactly where it reads some method as another
+          const reads = consoleMethodReads[name] ?? {}
+          assert.strictEqual(
+            yield* status("console.method"),
+            Object.keys(reads).length > 0 ? "partial" : "supported",
+            "console.method"
+          )
+          const expected = standard.flatMap((method) => {
+            const read = Object.hasOwn(reads, method) ? reads[method] : method
+            return read === null || read === undefined ? [] : [read]
+          })
+          const methods = (entries: ReadonlyArray<ConsoleMessage.ConsoleMessage>) =>
+            entries.map((entry) => entry.source._tag === "Page" ? entry.source.method : entry.source.category)
+          const done = yield* ConsoleMessage.next(page, { text: "page done" })
+          yield* page.goto(fixtureUrl(origin, `<script>${calls};console.log('page done')</script>`))
+          yield* done.pipe(Deadline.within("5 seconds"))
+          const fromPage = (yield* ConsoleMessage.history(page)).entries
+          assert.deepStrictEqual(methods(fromPage), expected, "from the page")
+          const workerDone = yield* ConsoleMessage.next(page, { text: "worker done" })
+          yield* page.evaluateInMainWorld(
+            (source) => void new Worker(URL.createObjectURL(new Blob([source]))),
+            `${calls};console.log('worker done');self.close()`
+          )
+          yield* workerDone.pipe(Deadline.within("5 seconds"))
+          const fromWorker = (yield* ConsoleMessage.history(page)).entries.slice(fromPage.length)
+          assert.deepStrictEqual(methods(fromWorker), expected, "from a dedicated worker")
+        }), timeout)
+
       it.effect("setContent settles when the page silences console.debug", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -559,7 +637,10 @@ export const contents = (
             "__striderDocumentOpened",
             "after marker text"
           ])
-          assert.deepStrictEqual(messages.map((entry) => entry.source), [{ _tag: "Page" }, { _tag: "Page" }])
+          assert.deepStrictEqual(messages.map((entry) => entry.source), [{ _tag: "Page", method: "log" }, {
+            _tag: "Page",
+            method: "log"
+          }])
         }), timeout)
 
       it.effect("reports repeated browser console entries on stock WebKit", () =>
@@ -608,9 +689,9 @@ export const contents = (
           assert.match(entries[1]!, /Content Security Policy/i)
           assert.strictEqual(entries[2], "after blocked style")
           assert.deepStrictEqual(messages.map((entry) => entry.source), [
-            { _tag: "Page" },
+            { _tag: "Page", method: "log" },
             { _tag: "Browser", category: "security" },
-            { _tag: "Page" }
+            { _tag: "Page", method: "log" }
           ])
         }), timeout)
 
@@ -3310,5 +3391,294 @@ document.getElementById("form").addEventListener("submit", (event) => {
             yield* page.frames.waitFor((tree) => tree.children.length === 0)
           }))
         }), timeout)
+
+      // ── Frame handles ──
+
+      it.effect("navigates a child frame, cross-site included, to each readiness, and reports it in its status", () =>
+        Effect.gen(function*() {
+          const { crossSite, origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(
+              fixtureUrl(origin, `<iframe id="child" src="${fixtureUrl(origin, "<p>first</p>")}"></iframe>`)
+            )
+            yield* page.frame(page.locator("#child")).locator("p").pipe(Expect.toHaveText("first"))
+            const frame = yield* page.frame(page.locator("#child")).resolve
+            assert.notStrictEqual(frame.id, page.id)
+            // The handle is on a frame of this page
+            assert.strictEqual(frame.page.id, page.id)
+            // Where a child frame's readiness isn't reported, a goto that waits for it is refused
+            const readiness = yield* fullySupports("frames.readiness")
+            let last: string = ""
+            const targets = [
+              ["commit", fixtureUrl(crossSite, "<p>committed</p>")],
+              ["domContentLoaded", fixtureUrl(origin, "<p>parsed</p><img src=\"/pending-image\">")],
+              ["load", fixtureUrl(crossSite, "<p>loaded</p>")]
+            ] as const
+            for (const [waitUntil, url] of targets) {
+              if (!readiness && waitUntil !== "commit") {
+                const refused = reasonOf(yield* Effect.exit(frame.goto(url, { waitUntil })))
+                assert.deepInclude(refused?.reason as object, { _tag: "Unsupported", capability: "frames.readiness" })
+                continue
+              }
+              const navigation = yield* frame.goto(url, { waitUntil })
+              last = url
+              assert.strictEqual(navigation.url, url)
+              const status = yield* frame.status
+              assert.strictEqual(status._tag, "Attached")
+              if (status._tag !== "Attached") {
+                return
+              }
+              assert.strictEqual(status.url, url)
+              if (waitUntil !== "commit") {
+                assert.isTrue(Option.isSome(status.document))
+                assert.include(
+                  waitUntil === "load" ? ["complete"] : ["interactive", "complete"],
+                  Option.getOrThrow(status.document).readiness
+                )
+              }
+            }
+            // The page's own document stays where it was, and its tree shows the frame's new URL
+            assert.include(yield* page.url, origin)
+            yield* page.frames.waitFor((tree) =>
+              tree.children[0]?.url === last
+            )
+            if (!readiness) return
+            // Waiting on the status is the frame's load-state wait
+            yield* frame.status.waitFor((status) =>
+              status._tag === "Attached" && Option.isSome(status.document) &&
+              status.document.value.readiness === "complete"
+            )
+          }))
+        }), timeout)
+
+      it.effect("fails a frame's goto when the frame detaches mid-navigation, and its status says so", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(
+              fixtureUrl(origin, `<iframe id="child" src="${fixtureUrl(origin, "<p>first</p>")}"></iframe>`)
+            )
+            yield* page.frame(page.locator("#child")).locator("p").pipe(Expect.toHaveText("first"))
+            const frame = yield* page.frame(page.locator("#child")).resolve
+            // The image never finishes, so the frame's document never loads until it goes away; where a child
+            // frame's readiness isn't reported, no goto can wait for it, and only the detach is checked
+            const readiness = yield* fullySupports("frames.readiness")
+            const pending = readiness
+              ? Option.some(
+                yield* frame.goto(
+                  fixtureUrl(origin, "<p>pending</p><img src=\"/pending-image\">"),
+                  { waitUntil: "load" }
+                ).pipe(Effect.forkScoped)
+              )
+              : Option.none()
+            if (readiness) {
+              yield* page.frame(page.locator("#child")).locator("p").pipe(Expect.toHaveText("pending"))
+            }
+            yield* page.evaluateInMainWorld(() =>
+              document.getElementById("child")!.remove()
+            )
+            if (Option.isSome(pending)) {
+              const failed = reasonOf(yield* Fiber.await(pending.value))
+              assert.strictEqual(failed?._tag, "TargetGone")
+              assert.strictEqual(failed?.reason?._tag, "FrameDetached")
+            }
+            yield* frame.status.waitFor((status) =>
+              status._tag === "Detached"
+            )
+            const after = reasonOf(
+              yield* Effect.exit(frame.evaluateInMainWorld(() => 1))
+            )
+            assert.strictEqual(after?._tag, "TargetGone")
+            assert.strictEqual(after?.reason?._tag, "FrameDetached")
+          }))
+        }), timeout)
+
+      it.effect(
+        "fails a running frame evaluation with its realm's end when the frame navigates, and FrameDetached when it is removed",
+        () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* SharedContext.newPage
+              yield* page.goto(
+                fixtureUrl(origin, `<iframe id="child" src="${fixtureUrl(origin, "<p>ready</p>")}"></iframe>`)
+              )
+              const locator = page.frame(page.locator("#child"))
+              yield* locator.locator("p").pipe(Expect.toHaveText("ready"))
+              const frame = yield* locator.resolve
+              // A navigation replaces the frame's document: the evaluation ends with its realm, the frame lives on
+              const replaced = yield* frame.evaluateInMainWorld(() => {
+                document.querySelector("p")!.textContent = "waiting"
+                return new Promise<void>(() => {})
+              }).pipe(Effect.forkScoped)
+              yield* locator.locator("p").pipe(Expect.toHaveText("waiting"))
+              yield* page.evaluateInMainWorld((url: string) => {
+                ;(document.getElementById("child") as HTMLIFrameElement).src = url
+              }, fixtureUrl(origin, "<p>ready</p>"))
+              const ended = reasonOf(yield* Fiber.await(replaced))
+              assert.strictEqual(ended?._tag, "TargetGone")
+              assert.notStrictEqual(ended?.reason?._tag, "FrameDetached")
+              assert.strictEqual(
+                (ended as unknown as { readonly target: { readonly _tag: string } }).target._tag,
+                "Realm"
+              )
+              assert.strictEqual((yield* frame.status)._tag, "Attached")
+              yield* locator.locator("p").pipe(Expect.toHaveText("ready"))
+              const pending = yield* frame.evaluateInMainWorld(() => {
+                document.querySelector("p")!.textContent = "running"
+                return new Promise<void>(() => {})
+              }).pipe(Effect.forkScoped)
+              yield* locator.locator("p").pipe(Expect.toHaveText("running"))
+              // Both evaluations share a realm; neither consumes the other's detach evidence.
+              const concurrent = yield* frame.evaluateInMainWorld(() => {
+                document.querySelector("p")!.setAttribute("data-second", "running")
+                return new Promise<void>(() => {})
+              }).pipe(Effect.forkScoped)
+              yield* locator.locator("p").pipe(Expect.toHaveAttribute("data-second", "running"))
+              yield* page.evaluateInMainWorld(() =>
+                document.getElementById("child")!.remove()
+              )
+              for (const evaluation of [pending, concurrent]) {
+                const failed = reasonOf(yield* Fiber.await(evaluation))
+                assert.strictEqual(failed?._tag, "TargetGone")
+                assert.strictEqual(failed?.reason?._tag, "FrameDetached")
+                assert.deepInclude(failed as object, { target: { _tag: "Frame", id: frame.id } })
+              }
+            }))
+          }),
+        timeout
+      )
+
+      it.effect("evaluates in a frame's own realms, holds a handle there, and finds its frames by id", () =>
+        Effect.gen(function*() {
+          const { crossSite, origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            const inner = fixtureUrl(crossSite, "<p>inner</p><script>window.innerGlobal = \"inner\"</script>")
+            // The iframe sits in a closed shadow root, where no locator reaches it
+            yield* page.goto(fixtureUrl(
+              origin,
+              `<script>window.outerGlobal = 'outer'</script><div id="host"></div><script>document.getElementById("host").attachShadow({ mode: "closed" }).innerHTML = '<iframe src="${inner}"></iframe>'</script>`
+            ))
+            const tree = yield* page.frames.waitFor((tree) =>
+              tree.children.length === 1 && tree.children[0]!.url === inner
+            )
+            const frame = yield* page.frameById(tree.children[0]!.id)
+            assert.strictEqual(frame.id, tree.children[0]!.id)
+            assert.strictEqual(frame.page.id, page.id)
+            // A frame handle has no locators: its document is read by evaluation, once it has loaded
+            yield* frame.evaluateInMainWorld(() =>
+              new Promise<void>((resolve) => {
+                if (document.readyState === "complete") {
+                  resolve()
+                } else {addEventListener("load", () =>
+                    resolve())}
+              })
+            )
+            // The main world sees the frame's own globals, not its parent's
+            assert.deepStrictEqual(
+              yield* frame.evaluateInMainWorld(() => [
+                Reflect.get(window, "innerGlobal"),
+                Reflect.get(window, "outerGlobal") ?? null,
+                location.href
+              ]),
+              ["inner", null, inner]
+            )
+            if (yield* supports("isolatedWorlds")) {
+              assert.strictEqual(
+                yield* frame.evaluate(() => Reflect.get(window, "innerGlobal") ?? null),
+                null
+              )
+              assert.strictEqual(
+                yield* frame.evaluate(() => document.querySelector("p")!.textContent),
+                "inner"
+              )
+            }
+            // A handle is in the isolated world, as the page's are: refused where there is none
+            if (yield* supports("isolatedWorlds")) {
+              const handle = yield* frame.evaluateHandle(() => ({ where: location.origin }))
+              assert.deepStrictEqual(yield* handle.read, { where: crossSite })
+            } else {
+              const refused = reasonOf(yield* Effect.exit(frame.evaluateHandle(() => location.origin)))
+              assert.deepInclude(refused?.reason as object, { _tag: "Unsupported", capability: "isolatedWorlds" })
+            }
+            // The root's id gives the page's own frame
+            const root = yield* page.frameById(page.id)
+            assert.strictEqual(yield* root.evaluateInMainWorld(() => Reflect.get(window, "outerGlobal")), "outer")
+            // An id the page has no frame for fails
+            const unknown = reasonOf(yield* Effect.exit(page.frameById("no-such-frame" as typeof page.id)))
+            assert.isDefined(unknown)
+          }))
+        }), timeout)
+
+      it.effect("gives a popup's top frame before its first document commits", () =>
+        Effect.gen(function*() {
+          // Stock WebKit reports a popup as the browser's page, not its opener's, so there is no popup to read
+          if (!(yield* supports("popups.opener"))) {
+            return
+          }
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const context = yield* Browser.newContext()
+            const page = yield* context.newPage
+            yield* page.goto(fixtureUrl(origin, `<a target="_blank" href="${origin}/slow-page">Open popup</a>`))
+            const opened = yield* Popup.next(page)
+            yield* page.getByRole("link", { name: "Open popup" }).click()
+            const popup = yield* opened
+            const top = yield* popup.frameById(popup.id)
+            // The frame is attached from the start, and without a document until one commits, where the browser
+            // commits none before the server answers
+            const status = yield* top.status
+            assert.strictEqual(status._tag, "Attached")
+            if (status._tag === "Attached" && Option.isNone(status.document)) {
+              // An evaluation waits for the first document
+              assert.strictEqual(
+                yield* top.evaluate(() =>
+                  document.title
+                ),
+                "Slow"
+              )
+            }
+            yield* top.goto(fixtureUrl(origin, "<title>Arrived</title>"), { waitUntil: "load" })
+            assert.strictEqual(yield* top.evaluate(() => document.title), "Arrived")
+            const arrived = yield* top.status
+            assert.isTrue(arrived._tag === "Attached" && Option.isSome(arrived.document))
+          }))
+        }), timeout)
+
+      it.effect(
+        "resolves a frame locator to the frame its iframe holds now, and an old handle reports it detached",
+        () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* SharedContext.newPage
+              yield* page.goto(
+                fixtureUrl(origin, `<iframe id="child" src="${fixtureUrl(origin, "<p>old</p>")}"></iframe>`)
+              )
+              const locator = page.frame(page.locator("#child"))
+              yield* locator.locator("p").pipe(Expect.toHaveText("old"))
+              const old = yield* locator.resolve
+              assert.strictEqual((yield* old.status)._tag, "Attached")
+              yield* page.evaluateInMainWorld((url: string) => {
+                const replacement = document.createElement("iframe")
+                replacement.id = "child"
+                replacement.src = url
+                document.getElementById("child")!.replaceWith(replacement)
+              }, fixtureUrl(origin, "<p>new</p>"))
+              yield* old.status.waitFor((status) => status._tag === "Detached")
+              yield* locator.locator("p").pipe(Expect.toHaveText("new"))
+              const current = yield* locator.resolve
+              assert.notStrictEqual(current.id, old.id)
+              assert.strictEqual(
+                yield* current.evaluateInMainWorld(() => document.querySelector("p")!.textContent),
+                "new"
+              )
+            }))
+          }),
+        timeout
+      )
     })
   })

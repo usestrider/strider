@@ -31,6 +31,7 @@ import * as Target from "../Target.ts"
 import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as Adapter from "./adapter.ts"
+import * as ConsoleArguments from "./consoleArguments.ts"
 import * as Events from "./events.ts"
 import * as Execution from "./execution.ts"
 import * as Input from "./input.ts"
@@ -142,7 +143,10 @@ interface Input {
 export const make = Effect.fnUntraced(function*(options: {
   /** Releases a popup its opener's owner releases (`ownership.ts`). */
   readonly release: (page: Model.PageEntry, by: Scope.Scope) => Effect.Effect<void>
+  /** The browser's console arguments kept for subscriptions to calls (`consoleArguments.ts`); a fresh table if absent. */
+  readonly consoleArguments?: ConsoleArguments.Table | undefined
 }) {
+  const consoleArguments = options.consoleArguments ?? ConsoleArguments.make()
   const modelScope = yield* Effect.scope
 
   // ── The stream ──
@@ -203,6 +207,15 @@ export const make = Effect.fnUntraced(function*(options: {
   const contextList = yield* cell<ReadonlyArray<Model.ContextEntry>>([])
   // Frames, by the page they belong to
   const frames = new Map<Target.NavigableId, Model.PageEntry>()
+  // The popups whose opener the backend named before the model had it, by the opener's id: an attached browser can
+  // list a popup before the page or frame that opened it
+  const awaitingOpener = new Map<Target.NavigableId, Set<Model.PageEntry>>()
+  const resolveOpener = (id: Target.NavigableId, opener: Model.PageEntry) => {
+    const waiting = awaitingOpener.get(id)
+    if (waiting === undefined) return
+    awaitingOpener.delete(id)
+    for (const popup of waiting) popup.opener = opener
+  }
   const documents = new Map<Target.DocumentId, Model.DocumentEntry>()
   const navigations = NetworkIndex.bounded<PageNavigation.Id, Model.NavigationEntry>(maxNavigations)
   // A page's navigations and its frames', from their start to their end: where they went, for the event
@@ -377,6 +390,11 @@ export const make = Effect.fnUntraced(function*(options: {
     }
     pages.delete(page.id)
     page.contextEntry.storageSources?.origins.delete(page.id)
+    if (page.opener === undefined && Option.isSome(page.openerId)) {
+      const waiting = awaitingOpener.get(page.openerId.value)
+      waiting?.delete(page)
+      if (waiting?.size === 0) awaitingOpener.delete(page.openerId.value)
+    }
     yield* update(pageList, (list) => list.filter((each) => each !== page))
     popupUrls.delete(page.id)
     const closing = new Set<Target.NavigableId>([page.id])
@@ -442,6 +460,7 @@ export const make = Effect.fnUntraced(function*(options: {
         lifecycle: Events.make(target, cap),
         request: Events.make(target, cap),
         response: Events.make(target, cap),
+        requestEnd: Events.make(target, cap),
         console: Events.make(target, cap),
         exception: Events.make(target, cap),
         download: Events.make(target, cap),
@@ -478,11 +497,14 @@ export const make = Effect.fnUntraced(function*(options: {
     yield* Deferred.succeed(entry.closed, reason)
   })
 
-  const endHop = (id: NetworkRequest.HopId, end: Model.HopEnd) => {
+  /** Ends a hop the browser reported ending, and publishes the end once, to the hop's owner. */
+  const endHop = (id: NetworkRequest.HopId, end: Model.RequestEndEvent["end"]) => {
     const hop = hops.get(id)
     if (Option.isNone(hop)) return
-    Deferred.doneUnsafe(hop.value.end, Effect.succeed(end))
     Deferred.doneUnsafe(hop.value.sentKnown, Effect.void)
+    if (Deferred.isDoneUnsafe(hop.value.end)) return
+    Deferred.doneUnsafe(hop.value.end, Effect.succeed(end))
+    publish(hop.value, { hop: hop.value, end }, (events) => events.requestEnd, (events) => events.requestEnd)
   }
 
   /** The URL a navigation ended at, by its outcome's document; else where it was going. */
@@ -546,6 +568,7 @@ export const make = Effect.fnUntraced(function*(options: {
           const opener = fact.kind === "popup" && fact.origin._tag === "Opened"
             ? Option.flatMap(fact.origin.opener, (id) => Option.fromNullishOr(pages.get(id)))
             : Option.none()
+          const openerId = fact.origin._tag === "Created" ? Option.none<Target.NavigableId>() : fact.origin.opener
           // Owned with its opener, released by the scope that acquired it (CONCEPTS.md §3)
           const owner = Option.flatMap(opener, (page) => page.state.getUnsafe().owner)
           const entry: Model.PageEntry = {
@@ -577,14 +600,24 @@ export const make = Effect.fnUntraced(function*(options: {
               lifecycle: Events.make(target, cap),
               request: Events.make(target, cap),
               response: Events.make(target, cap),
+              requestEnd: Events.make(target, cap),
               console: Events.make(target, cap),
               exception: Events.make(target, cap),
               download: Events.make(target, cap),
               worker: Events.make(target, cap),
               connection: Events.make(target, cap)
-            }
+            },
+            openerId,
+            // A popup a frame opened names that frame's page
+            opener: Option.isSome(openerId) ? pages.get(openerId.value) ?? frames.get(openerId.value) : undefined
           }
           pages.set(fact.page, entry)
+          if (entry.opener === undefined && Option.isSome(openerId)) {
+            const waiting = awaitingOpener.get(openerId.value)
+            if (waiting === undefined) awaitingOpener.set(openerId.value, new Set([entry]))
+            else waiting.add(entry)
+          }
+          resolveOpener(fact.page, entry)
           // A popup is reported to its opener, when the backend names one; before the
           // context's pages change, so a caller woken by that change subscribes after it, as with every event
           if (Option.isSome(opener)) {
@@ -608,6 +641,7 @@ export const make = Effect.fnUntraced(function*(options: {
           const page = pageOf(fact.page)
           if (Option.isNone(page)) return
           frames.set(fact.frame, page.value)
+          resolveOpener(fact.frame, page.value)
           const frame: Model.FrameEntry = {
             id: fact.frame,
             parent: fact.parent,
@@ -913,7 +947,9 @@ export const make = Effect.fnUntraced(function*(options: {
             transferBytes: fact.transferBytes,
             bodyBytes: fact.bodyBytes,
             at: fact.at,
-            httpVersion: Option.fromUndefinedOr(fact.httpVersion)
+            httpVersion: Option.fromUndefinedOr(fact.httpVersion),
+            serverAddress: Option.fromUndefinedOr(fact.serverAddress),
+            securityProtocol: Option.fromUndefinedOr(fact.securityProtocol)
           })
           return
         }
@@ -926,6 +962,17 @@ export const make = Effect.fnUntraced(function*(options: {
           const owner = Option.flatMap(fact.realm, (realm) => Option.fromNullishOr(realmOwners.get(realm))).pipe(
             Option.getOrElse(() => origin._tag === "Page" ? ownerOfPage(pageOf(origin.page)) : nobody)
           )
+          if (fact.args !== undefined && Option.isSome(fact.realm)) {
+            const channels = [
+              ...Option.toArray(owner.page).map((page) => page.events.console),
+              ...Option.toArray(owner.context).map((context) => context.events.console)
+            ]
+            // Arguments no subscription claims are released at once, apart from the fold
+            yield* ConsoleArguments.keep(consoleArguments, fact.message, fact.realm.value, fact.args, channels)
+              .pipe(
+                Effect.forkIn(modelScope)
+              )
+          }
           publish(owner, fact.message, (events) => events.console, (events) => events.console)
           return
         }

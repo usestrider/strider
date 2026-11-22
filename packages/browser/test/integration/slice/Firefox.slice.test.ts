@@ -10,6 +10,7 @@ import { Firefox } from "@usestrider/browser/firefox"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import { assertPinned, firefox } from "../browsers.ts"
+import { anyFrame } from "./anyFrame.ts"
 import { attaching, firefoxAttachable } from "./attaching.ts"
 import { clientCertificates } from "./clientCertificates.ts"
 import { contents } from "./contents.ts"
@@ -23,6 +24,7 @@ import { recycling } from "./recycledBrowser.ts"
 import { requestBodies } from "./requestBodies.ts"
 import { requestSizes } from "./requestSizes.ts"
 import { requestTiming } from "./requestTiming.ts"
+import { responseSecurityCases } from "./responseSecurity.ts"
 import { screenshotBaselines } from "./screenshotBaselines.ts"
 import { sharedContextChecks } from "./sharedContextChecks.ts"
 import { slice } from "./slice.ts"
@@ -47,6 +49,7 @@ slice("Firefox", backend, (info) => assertPinned("Firefox", info.version, firefo
 events("Firefox", backend)
 modules("Firefox", backend)
 interaction("Firefox", backend)
+anyFrame("Firefox", backend)
 declarations("Firefox", backend)
 contents("Firefox", backend)
 tooling("Firefox", backend)
@@ -80,3 +83,4 @@ styleTags("Firefox", backend)
 bindings("Firefox", backend)
 clientCertificates("Firefox", backend)
 screenshotBaselines("Firefox", backend)
+responseSecurityCases("Firefox", backend)

@@ -6351,6 +6351,145 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
       )
 
       it.effect(
+        "expects accessible descriptions from the first source that applies and isn't the name",
+        () =>
+          Effect.gen(function*() {
+            // aria-describedby beats aria-description beats a title that isn't the name; a hidden reference counts.
+            const { url } = yield* fixture(() =>
+              `<span id="hint" hidden>Hidden  hint</span><span id="second">Second</span><button id="referenced" aria-describedby="hint second" aria-description="Ignored" title="Ignored">Save</button><button id="attribute" aria-description="From attribute" title="Ignored">Go</button><button id="titled" title="Tooltip">Act</button><button id="title-name" title="Only title"></button><button id="hidden" hidden aria-description="Secret"></button><div id="region" role="region" aria-label="Panel" aria-describedby="second"></div><button id="unresolved" aria-describedby="missing" aria-description="Fallback">X</button><input id="value-name" type="submit" value="Send" title="Tooltip"><input id="value-description" type="submit" aria-label="Send form" value="Send" title="Ignored"><span id="empty-hint"></span><button id="empty-describedby" aria-describedby="empty-hint" aria-description="Fallback">Save</button><button id="empty-description" aria-description="" title="Fallback">Save</button><table id="caption-table" aria-label="Revenue" title="Tooltip"><caption>Quarterly totals</caption><tr><td>42</td></tr></table><table id="empty-caption" aria-label="Costs" title="Tooltip"><caption></caption><tr><td>42</td></tr></table><table title="Table hint"><caption>Sales</caption><tr><td>42</td></tr></table><input type="submit" title="Submit hint"><input id="send" type="submit" aria-labelledby="send" value="Dispatch" title="Dispatch hint"><style>#owning::before { content: "Prefix " }</style><details open><summary id="owning" role="button" aria-owns="owned">Details</summary></details><div id="owned">Owned</div><details open><summary id="summary-hint" role="button" title="Summary hint">Details</summary></details><details><summary id="plain-summary">Shipping</summary>Free</details><details><summary id="titled-summary" title="Show shipping">Shipping</summary>Free</details><details><summary id="labelled-summary" aria-label="Toggle shipping">Shipping</summary>Free</details><span id="ref-other">Wrong</span><span id="ref-hint" aria-labelledby="ref-other" aria-describedby="ref-other">Hint</span><button id="reference" aria-describedby="ref-hint">Save</button><p id="prohibited" title="Paragraph hint">Text</p><button class="many" title="One">A</button><button class="many" title="Two">B</button>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              const referenced = page.locator("#referenced")
+              yield* referenced.pipe(Expect.toHaveAccessibleDescription("Hidden hint Second"))
+              yield* Expect.toHaveAccessibleDescription(referenced, "hidden HINT second", { ignoreCase: true })
+              yield* referenced.pipe(Expect.toHaveAccessibleDescription(/^hidden hint/, { ignoreCase: true }))
+              yield* page.locator("#attribute").pipe(Expect.toHaveAccessibleDescription("From attribute"))
+              yield* page.locator("#titled").pipe(Expect.toHaveAccessibleDescription("Tooltip"))
+              yield* page.locator("#title-name").pipe(Expect.toHaveAccessibleName("Only title"))
+              yield* page.locator("#title-name").pipe(Expect.toHaveAccessibleDescription(""))
+              yield* page.locator("#hidden").pipe(Expect.toHaveAccessibleDescription(""))
+              yield* page.locator("#region").pipe(Expect.toHaveAccessibleDescription("Second"))
+              yield* page.locator("#unresolved").pipe(Expect.toHaveAccessibleDescription("Fallback"))
+              // A button input's value is its description only when it isn't its name.
+              yield* page.locator("#value-name").pipe(Expect.toHaveAccessibleDescription("Tooltip"))
+              yield* page.locator("#value-description").pipe(Expect.toHaveAccessibleDescription("Send"))
+              // The first source that applies wins even when it's empty.
+              yield* page.locator("#empty-describedby").pipe(Expect.toHaveAccessibleDescription(""))
+              yield* page.locator("#empty-description").pipe(Expect.toHaveAccessibleDescription(""))
+              yield* page.getByRole("table", { name: "Revenue" }).pipe(
+                Expect.toHaveAccessibleDescription("Quarterly totals")
+              )
+              yield* page.getByRole("table", { name: "Costs" }).pipe(Expect.toHaveAccessibleDescription(""))
+              // A source that gave the name, directly or through a self reference, isn't also the description.
+              yield* page.getByRole("table", { name: "Sales" }).pipe(Expect.toHaveAccessibleDescription("Table hint"))
+              yield* page.getByRole("button", { name: "Submit" }).pipe(
+                Expect.toHaveAccessibleDescription("Submit hint")
+              )
+              yield* page.getByRole("button", { name: "Dispatch" }).pipe(
+                Expect.toHaveAccessibleDescription("Dispatch hint")
+              )
+              yield* page.locator("#summary-hint").pipe(Expect.toHaveAccessibleName("Details"))
+              yield* page.locator("#summary-hint").pipe(Expect.toHaveAccessibleDescription("Summary hint"))
+              // A summary without a role describes itself by its content only when aria-label or aria-labelledby named it.
+              yield* page.locator("#plain-summary").pipe(Expect.toHaveAccessibleDescription(""))
+              yield* page.locator("#titled-summary").pipe(Expect.toHaveAccessibleDescription("Shipping", { not: true }))
+              yield* page.locator("#labelled-summary").pipe(Expect.toHaveAccessibleDescription("Shipping"))
+              yield* page.getByRole("button", { name: "Only title" }).pipe(Expect.toHaveAccessibleDescription(""))
+              yield* page.locator("#prohibited").pipe(Expect.toHaveAccessibleDescription("Paragraph hint"))
+              // A referenced element's own aria-labelledby and aria-describedby aren't followed.
+              yield* page.locator("#reference").pipe(Expect.toHaveAccessibleDescription("Hint"))
+              // A summary's description reads its content as its name does.
+              const owning = page.locator("#owning")
+              yield* owning.pipe(Expect.toHaveAccessibleName("Prefix Details Owned"))
+              yield* page.evaluateInMainWorld(() => {
+                document.querySelector("#owning")!.setAttribute("aria-label", "Toggle")
+              })
+              yield* owning.pipe(Expect.toHaveAccessibleDescription("Prefix Details Owned"))
+              yield* page.locator("#titled").pipe(Expect.toHaveAccessibleDescription("Other", { not: true }))
+              yield* page.evaluateInMainWorld(() => {
+                document.querySelector("#second")!.textContent = "Updated"
+              })
+              yield* referenced.pipe(Expect.toHaveAccessibleDescription("Hidden hint Updated"))
+              for (
+                const [locator, expected, options, observed] of [
+                  [page.locator("#titled"), "Other", undefined, "Tooltip"],
+                  [page.locator("#titled"), /tooltip/i, { ignoreCase: false }, "Tooltip"],
+                  [page.locator("#titled"), "Tooltip", { not: true }, "Tooltip"],
+                  [page.locator("#missing"), "", { not: true }, { matches: 0 }],
+                  [page.locator(".many"), "Three", { not: true }, { matches: 2 }]
+                ] as const
+              ) {
+                const error = yield* locator.pipe(
+                  Expect.toHaveAccessibleDescription(expected, options),
+                  Deadline.within("300 millis"),
+                  Effect.flip
+                )
+                assert(Expect.isExpectationFailed(error), String(error))
+                assert.deepStrictEqual(
+                  error.history.map((entry) => entry.value),
+                  error.history.length === 0 ? [] : [observed]
+                )
+              }
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "expects accessible error messages only while the element is invalid",
+        () =>
+          Effect.gen(function*() {
+            // aria-invalid other than absent, empty or false (any case), or failed native validation, reads
+            // aria-errormessage's references, hidden ones included.
+            const { url } = yield* fixture(() =>
+              `<span id="required" hidden>Required</span><span id="field">field</span><input id="invalid" aria-invalid="true" aria-errormessage="required field"><input id="upper" aria-invalid="FALSE" aria-errormessage="required"><input id="blank" aria-invalid=" " aria-errormessage="required"><input id="spelling" aria-invalid="spelling" aria-errormessage="required"><input id="other" aria-invalid="yes" aria-errormessage="required"><input id="valid" aria-errormessage="required"><input id="native" type="email" aria-errormessage="field"><div id="group" role="radiogroup" aria-invalid="true" aria-errormessage="field"></div><input id="padded" aria-invalid=" false " aria-errormessage="required"><input id="native-false" required aria-invalid="false" aria-errormessage="required">`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              const invalid = page.locator("#invalid")
+              yield* invalid.pipe(Expect.toHaveAccessibleErrorMessage("Required field"))
+              yield* Expect.toHaveAccessibleErrorMessage(invalid, "required FIELD", { ignoreCase: true })
+              yield* invalid.pipe(Expect.toHaveAccessibleErrorMessage(/^Required/))
+              for (const id of ["#upper", "#blank", "#valid", "#native"]) {
+                yield* page.locator(id).pipe(Expect.toHaveAccessibleErrorMessage(""))
+              }
+              yield* page.locator("#spelling").pipe(Expect.toHaveAccessibleErrorMessage("Required"))
+              yield* page.locator("#other").pipe(Expect.toHaveAccessibleErrorMessage("Required"))
+              yield* page.locator("#group").pipe(Expect.toHaveAccessibleErrorMessage("field"))
+              // Only an exact false, in any case, is false: a padded one is an unknown token, so invalid.
+              yield* page.locator("#padded").pipe(Expect.toHaveAccessibleErrorMessage("Required"))
+              yield* page.locator("#native-false").pipe(Expect.toHaveAccessibleErrorMessage("Required"))
+              yield* page.locator("#valid").pipe(Expect.toHaveAccessibleErrorMessage("Required", { not: true }))
+              yield* page.locator("#native").fill("not an address")
+              yield* page.locator("#native").pipe(Expect.toHaveAccessibleErrorMessage("field"))
+              for (
+                const [locator, expected, options, observed] of [
+                  [page.locator("#upper"), "Required", undefined, ""],
+                  [invalid, /required/, { ignoreCase: false }, "Required field"],
+                  [invalid, "Required field", { not: true }, "Required field"],
+                  [page.locator("input"), "", { not: true }, { matches: 9 }]
+                ] as const
+              ) {
+                const error = yield* locator.pipe(
+                  Expect.toHaveAccessibleErrorMessage(expected, options),
+                  Deadline.within("300 millis"),
+                  Effect.flip
+                )
+                assert(Expect.isExpectationFailed(error), String(error))
+                assert.deepStrictEqual(
+                  error.history.map((entry) => entry.value),
+                  error.history.length === 0 ? [] : [observed]
+                )
+              }
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
         "expects no accessible name where the element's role prohibits naming",
         () =>
           Effect.gen(function*() {
@@ -6470,6 +6609,93 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               assert.deepStrictEqual(error.history.map((entry) => entry.value), ["rgb(12, 34, 56)"])
               assert.strictEqual(instrumented, true)
               assert.deepStrictEqual(yield* page.locator("html").readAttribute("data-stalled"), Option.some("yes"))
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "expects JavaScript properties in the page's own world with deep equality",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() => `<div id="js">JS</div><input type="checkbox" checked>`)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              yield* page.evaluateInMainWorld(() => {
+                Object.assign(document.getElementById("js")!, {
+                  foo: { a: 1, when: new Date(0), list: [1, "two", null] },
+                  empty: null,
+                  keyed: new Map([[{ id: 1 }, "ready"]])
+                })
+              })
+              const target = page.locator("#js")
+              yield* target.pipe(
+                Expect.toHaveJSProperty("foo", { a: 1, when: new Date(0), list: [1, "two", null] })
+              )
+              yield* Expect.toHaveJSProperty(target, "foo.when", new Date(0))
+              yield* target.pipe(Expect.toHaveJSProperty("empty", null))
+              yield* target.pipe(Expect.toHaveJSProperty("missing", undefined))
+              yield* target.pipe(Expect.toHaveJSProperty("foo.a.deeper", undefined))
+              yield* target.pipe(Expect.toHaveJSProperty("foo", { a: 1 }, { not: true }))
+              yield* page.getByRole("checkbox").pipe(Expect.toHaveJSProperty("checked", true))
+              yield* target.pipe(
+                Expect.toHaveJSProperty("keyed", new Map([[{ id: 1 }, "ready"]])),
+                Deadline.within("1 second")
+              )
+            }))
+          }),
+        timeout
+      )
+
+      it.effect("retries a JavaScript property until a page timer sets it", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<div id="js">JS</div><script>setTimeout(() => { document.getElementById("js").ready = { at: new Date(5) } }, 300)</script>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(url)
+            yield* page.locator("#js").pipe(Expect.toHaveJSProperty("ready", { at: new Date(5) }))
+          }))
+        }), timeout)
+
+      it.effect(
+        "fails a JavaScript property mismatch at the deadline with the received value or match count",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() => `<p id="one">One</p><p>Two</p>`)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              yield* page.evaluateInMainWorld(() => {
+                Object.assign(document.getElementById("one")!, { foo: { a: 1 } })
+              })
+              const mismatch = yield* page.locator("#one").pipe(
+                Expect.toHaveJSProperty("foo", { a: 2 }),
+                Deadline.within("1 second"),
+                Effect.flip
+              )
+              assert(Expect.isExpectationFailed(mismatch), String(mismatch))
+              assert(mismatch.history.length > 0)
+              for (const entry of mismatch.history) assert.deepStrictEqual(entry.value, { a: 1 })
+              const negated = yield* page.locator("#one").pipe(
+                Expect.toHaveJSProperty("foo", { a: 1 }, { not: true }),
+                Deadline.within("1 second"),
+                Effect.flip
+              )
+              assert(Expect.isExpectationFailed(negated), String(negated))
+              assert.deepStrictEqual(negated.last.pipe(Option.map((entry) => entry.value)), Option.some({ a: 1 }))
+              for (const [selector, matches] of [["#missing", 0], ["p", 2]] as const) {
+                const error = yield* page.locator(selector).pipe(
+                  Expect.toHaveJSProperty("foo", undefined, { not: true }),
+                  Deadline.within("1 second"),
+                  Effect.flip
+                )
+                assert(Expect.isExpectationFailed(error), String(error))
+                assert(error.history.length > 0)
+                for (const entry of error.history) assert.deepStrictEqual(entry.value, { matches })
+              }
             }))
           }),
         timeout
@@ -6688,6 +6914,79 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             assert.deepStrictEqual(error.last, Option.fromNullishOr(error.history.at(-1)))
           }))
         }), timeout)
+
+      it.effect("expects rendered text inside an iframe", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<iframe srcdoc='<p>Hello <span hidden>secret </span>World</p>'></iframe>`
+          )
+          const page = yield* newPage
+          yield* page.goto(url)
+          const target = page.frame(page.locator("iframe")).locator("p")
+          yield* Expect.toHaveText(target, "Hello World", { useInnerText: true })
+          yield* target.pipe(Expect.toContainText(["o W"], { useInnerText: true }))
+        })), timeout)
+
+      it.effect(
+        "expects text, attributes and URLs ignoring case, rendered text, and contained lists",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<p id="greeting" data-state="Ready">Hello <span hidden>secret </span>World</p><ul><li>Apple pie</li><li>Banana</li><li>Cherry tart</li></ul>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              const greeting = page.locator("#greeting")
+              const fails = <E>(effect: Effect.Effect<void, E>) =>
+                effect.pipe(
+                  Deadline.within("200 millis"),
+                  Effect.flip,
+                  Effect.map((error) => {
+                    assert(Expect.isExpectationFailed(error), String(error))
+                    return error
+                  })
+                )
+              // A string compares without case; the option sets or clears a regular expression's i flag
+              yield* greeting.pipe(Expect.toHaveText("hello secret world", { ignoreCase: true }))
+              yield* greeting.pipe(Expect.toHaveText(/^HELLO/, { ignoreCase: true }))
+              yield* greeting.pipe(Expect.toContainText("SECRET", { ignoreCase: true }))
+              const cleared = yield* fails(greeting.pipe(Expect.toHaveText(/^hello/i, { ignoreCase: false })))
+              assert.strictEqual(cleared.condition, "to have the text /^hello/i matching case")
+              const cased = yield* fails(greeting.pipe(Expect.toHaveText("hello secret world")))
+              assert.strictEqual(cased.condition, `to have the text "hello secret world"`)
+              // The rendered text leaves out the hidden child that the text content keeps
+              yield* greeting.pipe(Expect.toHaveText("Hello World", { useInnerText: true }))
+              yield* greeting.pipe(Expect.toContainText(["o W"], { useInnerText: true }))
+              const content = yield* fails(greeting.pipe(Expect.toHaveText("Hello World")))
+              assert.deepStrictEqual(
+                content.last.pipe(Option.map((each) => each.value)),
+                Option.some("Hello secret World")
+              )
+              // Attribute values and URLs
+              yield* greeting.pipe(Expect.toHaveAttribute("data-state", "ready", { ignoreCase: true }))
+              yield* fails(greeting.pipe(Expect.toHaveAttribute("data-state", "ready")))
+              yield* page.pipe(Expect.toHaveURL(url.toUpperCase(), { ignoreCase: true }))
+              yield* Expect.toHaveURL(page, /^HTTPS?:\/\//, { ignoreCase: true })
+              const upper = yield* fails(page.pipe(Expect.toHaveURL(url.toUpperCase())))
+              assert.strictEqual(upper.condition, `to have the URL ${JSON.stringify(url.toUpperCase())}`)
+              // A list is contained in a subsequence of the matches, in order
+              const items = page.getByRole("listitem")
+              yield* items.pipe(Expect.toContainText(["Apple", /tart$/]))
+              yield* items.pipe(Expect.toContainText(["apple", "banana", "cherry"], { ignoreCase: true }))
+              const order = yield* fails(items.pipe(Expect.toContainText(["Cherry", "Apple"])))
+              assert.strictEqual(order.condition, `to contain the text ["Cherry", "Apple"]`)
+              assert.deepStrictEqual(
+                order.last.pipe(Option.map((each) => each.value)),
+                Option.some(["Apple pie", "Banana", "Cherry tart"])
+              )
+              yield* fails(items.pipe(Expect.toContainText(["Apple", "Apple"])))
+              yield* page.locator("#none").pipe(Expect.toContainText([]))
+              yield* fails(items.pipe(Expect.toContainText([])))
+            }))
+          }),
+        timeout
+      )
 
       it.effect(
         "expects a page's URL across a navigation, and anything with Expect.that",

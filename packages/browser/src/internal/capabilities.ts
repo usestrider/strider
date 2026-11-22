@@ -21,6 +21,7 @@ import type * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
+import * as Overlays from "./overlays.ts"
 import * as Runtime from "./runtime.ts"
 import * as VideoOptions from "./videoOptions.ts"
 import * as WebAuthn from "./webauthn.ts"
@@ -30,6 +31,7 @@ const known: Readonly<Record<string, { readonly entry: string; readonly backends
   VirtualAuthenticator: { entry: "capability.virtualAuthenticator", backends: "Chromium native WebAuthn (CDP)" },
   AxTree: { entry: "capability.axTree", backends: "Chromium's (CDP)" },
   Screencast: { entry: "capability.screencast", backends: "Chromium's (CDP)" },
+  Overlay: { entry: "capability.overlay", backends: "every browser backend" },
   Video: { entry: "capability.video", backends: "Chromium with VideoWriter, or Firefox launched by the program" }
 }
 
@@ -179,6 +181,8 @@ export const acquire = <H, Options = never>(
     switch (capability.name) {
       case "VirtualAuthenticator":
         return (yield* WebAuthn.acquire(runtime, page, grant)) as H
+      case "Overlay":
+        return (yield* Overlays.acquire(runtime, page, grant)) as H
       case "AxTree": {
         const reader: Capability.AxTreeReader = {
           read: Effect.flatMap(Operation.record, ({ id }) =>

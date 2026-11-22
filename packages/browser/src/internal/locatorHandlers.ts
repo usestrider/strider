@@ -50,7 +50,7 @@ interface State {
 const states = new WeakMap<Model.PageEntry, State>()
 const restore = (page: Model.PageEntry, state: State) => {
   if (states.get(page) === state && state.entries.size === 0 && state.running === 0 && !state.busy) {
-    page.execution = Execution.ordinary
+    Execution.handleWith(page, undefined)
     states.delete(page)
   }
 }
@@ -199,10 +199,14 @@ const activate = (page: Model.PageEntry, state: State) => {
       return yield* managed(self)
     }
   )
-  page.execution = {
-    url: Effect.fnUntraced(function*(page: Page.ReadonlyPage, expected: string | RegExp) {
-      if (yield* Effect.service(Suppressed)) return yield* ExpectImpl.watchURL(page, expected)
-      return yield* ExpectImpl.handlerURL(page, expected, (request, record) =>
+  Execution.handleWith(page, {
+    url: Effect.fnUntraced(function*(
+      page: Page.ReadonlyPage,
+      expected: string | RegExp,
+      options?: ExpectImpl.URLOptions | undefined
+    ) {
+      if (yield* Effect.service(Suppressed)) return yield* ExpectImpl.watchURL(page, expected, options)
+      return yield* ExpectImpl.handlerURL(page, expected, options, (request, record) =>
         managed(
           Runtime.sendCooperative<Execution.Failure, never>(
             Handles.page(page).runtime,
@@ -233,8 +237,9 @@ const activate = (page: Model.PageEntry, state: State) => {
             )
           ),
         Runtime.send(runtime, target, request, id, at)
-      )
-  }
+      ),
+    beforeCheck: dispatch(check(state, false).pipe(Effect.asVoid), Effect.void)
+  })
 }
 
 // Keep captured services in a separate lexical environment: a retained remove handle must not retain them.

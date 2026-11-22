@@ -293,6 +293,41 @@ const payByCard = Effect.fn("payByCard")(function*(page: Page.Page) {
 It finds the iframe again on every attempt, so a frame that reloads or arrives late is waited for like any
 element. Cross-site frames work the same, and frames nest: `payment.frame(payment.locator("iframe"))`.
 
+When you don't know which iframe holds an element, `page.anyFrame` searches the page's document and every frame
+under it, and acts in the one frame where the chain matches. A chain that matches in more than one frame fails
+with `StrictViolation`, `count` included. A frame locator's `anyFrame` searches that frame's own document and the
+frames under it, but not its parents, as in `payment.anyFrame.getByRole("button")`:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const pay = Effect.fn("pay")(function*(page: Page.Page) {
+  yield* page.anyFrame.getByRole("button", { name: "Pay" }).click()
+  // Only the checkout frame and the frames inside it
+  const checkout = page.frame(page.locator("iframe#checkout"))
+  yield* checkout.anyFrame.getByRole("button", { name: "Confirm" }).click()
+})
+```
+
+A frame handle holds one frame itself, through its own navigations, until it is removed from the page. `resolve`
+gives the frame a frame locator's iframe holds now, and `page.frameById` takes an id from `page.frames`, which also
+reaches a frame no locator can, such as one in a closed shadow root. The handle navigates and evaluates in its frame:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const openReceipt = Effect.fn("openReceipt")(function*(page: Page.Page) {
+  const frame = yield* page.frame(page.locator("iframe#payment")).resolve
+  yield* frame.goto("https://pay.example.com/receipt", { waitUntil: "load" })
+  return yield* frame.evaluateInMainWorld(() => document.title)
+})
+```
+
+Its `status` is `Attached`, with the frame's URL and document, or `Detached`. Stock WebKit doesn't report a child
+frame's readiness, so there a frame's `goto` can only wait for `"commit"`.
+
 ## Counting matches
 
 An action or read needs exactly one match: several fail it at once with

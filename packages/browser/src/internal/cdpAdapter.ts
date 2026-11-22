@@ -121,10 +121,18 @@ export const capabilities = (
       ]),
       entry("bodies", "supported"),
       entry("console", "supported"),
+      entry("console.arguments", "supported"),
       entry("console.source", "supported"),
+      entry("console.method", "partial", [
+        "`console.timeLog` reads as `log`, since Chromium sends it as a plain message",
+        "`console.countReset`, `timeLog`, and `timeEnd` of a counter or timer that doesn't exist read as `warn`, since " +
+        "Chromium sends them as a warning",
+        "`console.countReset` of a counter that exists writes no message, since Chromium sends none for it"
+      ]),
       entry("prompts", "supported"),
       entry("prompts.kind", "supported"),
       entry("navigation.sameDocument", "supported"),
+      entry("frames.readiness", "supported"),
       entry("navigation.traverse", "supported"),
       entry("frames.contentFrame", "supported"),
       entry("screenshot.format", "supported"),
@@ -224,6 +232,7 @@ export const capabilities = (
       ]),
       entry("capability.axTree", "supported"),
       entry("capability.screencast", "supported"),
+      entry("capability.overlay", "supported", ["drawn in the page, so screenshots show it too"]),
       entry(
         "capability.video",
         videoWriter ? "supported" : "unsupported",
@@ -396,6 +405,7 @@ export const connect: (
       reload: (id, options) => Navigation.reload(state, id, options),
       traverse: (id, delta) => Navigation.traverse(state, id, delta),
       realm: (document, world) => Evaluation.realm(state, document, world),
+      settled: (id) => Evaluation.settled(state, id),
       evaluate: (realm, call) => Evaluation.evaluate(state, realm, call),
       releaseHandles: (list) => Evaluation.releaseHandles(state, list),
       textInsertion: "native",

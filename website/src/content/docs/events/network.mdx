@@ -14,6 +14,8 @@ causes to check what the server said, and decode its body with a Schema to get t
 - Each redirect hop has its own request and response.
 - Both are Schemas, with Effect's `Headers` and `HttpMethod`.
 - [`NetworkRequest.failure`](/docs/events/request-failures) reads why a request's transfer failed.
+- [`NetworkRequestEnd`](/docs/events/request-ends) reports when a request finishes or fails, and waits for one
+  request's end.
 - `data:` and `blob:` URLs are not network requests: the browser answers them without the network, so they have no request
   or response events.
 
@@ -161,6 +163,27 @@ const shellWorksOffline = Effect.fn("shellWorksOffline")(function*(page: Page.Pa
     const { servedBy } = yield* shell
     return servedBy === "serviceWorker" || servedBy === "cacheOrServiceWorker"
   }))
+})
+```
+
+## Server address and TLS
+
+A response's `serverAddress` is the IP address and port of the server that answered, and its `securityDetails`
+the TLS connection and certificate of an HTTPS response: `protocol`, `subjectName`, `issuer`, and the
+certificate's `validFrom` and `validTo`, in seconds since the epoch. Each is an `Option`. `securityDetails` is
+`None` for plain HTTP. Chromium reports all of them. WebKit reports the certificate without its issuer and with no
+TLS version, and no server address, since it says those only as the response ends; a
+[HAR](/docs/tools/recordings) has them. A WebKit redirect hop has no TLS details or address, in a HAR either. Firefox reports neither:
+
+```ts
+import { NetworkResponse, Page } from "@usestrider/browser"
+import { Effect, Option } from "effect"
+
+const certificateExpiry = Effect.fn("certificateExpiry")(function*(page: Page.Page) {
+  const document = yield* NetworkResponse.next(page, { url: "https://example.com/" })
+  yield* page.goto("https://example.com/")
+  const { securityDetails } = yield* document
+  return Option.flatMap(securityDetails, (details) => details.validTo)
 })
 ```
 

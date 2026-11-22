@@ -1,7 +1,13 @@
 {
-  "status": "missing",
-  "api": [],
-  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toHaveAccessibleErrorMessage",
+      "url": "/docs/api/browser/Expect#toHaveAccessibleErrorMessage"
+    }
+  ],
+  "notes": "Retries exactly one match, also under not. Reads aria-errormessage while aria-invalid is anything but blank or exactly false (ASCII case-insensitive), or native validation fails; hidden referenced elements contribute. Strings normalize whitespace; ignoreCase overrides regex flags. Failures retain observed messages or match counts.",
   "capabilities": [],
   "id": "option-locatorassertions-tohaveaccessibleerrormessage-ignorecase",
   "upstream": [

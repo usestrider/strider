@@ -126,6 +126,12 @@ export * as FileInput from "./FileInput.ts"
 export * as FilePath from "./FilePath.ts"
 
 /**
+ * @stability unstable
+ * @since 0.1.0
+ */
+export * as Frame from "./Frame.ts"
+
+/**
  * @stability experimental
  * @since 0.1.0
  */
@@ -190,6 +196,12 @@ export * as NetworkConnection from "./NetworkConnection.ts"
  * @since 0.1.0
  */
 export * as NetworkRequest from "./NetworkRequest.ts"
+
+/**
+ * @stability unstable
+ * @since 0.1.0
+ */
+export * as NetworkRequestEnd from "./NetworkRequestEnd.ts"
 
 /**
  * @stability unstable

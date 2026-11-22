@@ -1,7 +1,13 @@
 {
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding public option for this contract.",
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toContainText",
+      "url": "/docs/api/browser/Expect#toContainText"
+    }
+  ],
+  "notes": "useInnerText reads an HTML element's rendered innerText instead of its text content, with whitespace collapsed alike; it depends on layout, so browsers can differ.",
   "capabilities": [],
   "id": "option-locatorassertions-tocontaintext-useinnertext",
   "upstream": [

@@ -1524,6 +1524,41 @@ export const conformance = (backend: Backend) =>
             )
           }), timeout)
 
+        it.effect("renders a console message's objects as previews of their values", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            const { page } = yield* newPage(world)
+            yield* goto(world, page, `${world.site.origin}/console-previews`)
+            const texts = (yield* world.facts.when("ConsoleMessage", (fact) =>
+              fact.message.text.startsWith("worker")))
+              .message.text
+            const all = world.facts.all("ConsoleMessage").map((fact) =>
+              fact.message.text
+            )
+            assert.deepStrictEqual(all.slice(0, 2), [
+              "[1, 2, 3] {a: 1} Window",
+              "{toString: Function, valueOf: Function}"
+            ])
+            // BiDi serializes an array's holes as `undefined`, so Firefox can't tell one from the other
+            assert.strictEqual(
+              all[2],
+              world.adapter.info.protocol === "bidi"
+                ? "[undefined, 1, undefined, undefined, 2]"
+                : "[empty, 1, empty x 2, 2]"
+            )
+            assert.strictEqual(all[3], "[Array(2), Object] Map(1) {'k' => 1} Set(1) {1} null undefined -0 1n str")
+            assert.strictEqual(all[4], "div#d #document")
+            // An Error reads as its browser describes it, which may include its stack
+            assert.match(all[5]!, /^an error Error: boom/)
+            // A format takes the arguments it names, and the rest follow it. Firefox applies the format itself and
+            // sends the text around an object `%o` took as arguments of their own, which join with a space
+            assert.deepStrictEqual(all.slice(6, 8), [
+              world.adapter.info.protocol === "bidi" ? "{a: 1}  and 5 [2]" : "{a: 1} and 5 [2]",
+              "styled {a: 1}"
+            ])
+            assert.strictEqual(texts, "worker {a: 1}")
+          }), timeout)
+
         it.effect("captures overridden viewports and full pages beyond the native view", () =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
@@ -1612,9 +1647,7 @@ export const conformance = (backend: Backend) =>
                 yield* frames.pipe(
                   Stream.take(6),
                   Stream.runForEach((frame) =>
-                    Effect.sync(() =>
-                      seen[key]!.push([frame.width, frame.height])
-                    )
+                    Effect.sync(() => seen[key]!.push([frame.width, frame.height]))
                   ),
                   Effect.timeout("3 seconds"),
                   Effect.ignore
@@ -1831,9 +1864,7 @@ export const conformance = (backend: Backend) =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
             const { context, page } = yield* newPage(world)
-            const directory = (yield* Effect.promise(() =>
-              import("node:os")
-            )).tmpdir() +
+            const directory = (yield* Effect.promise(() => import("node:os"))).tmpdir() +
               `/strider-downloads-${process.pid}`
             const declared = world.adapter.declare({ _tag: "UserContext", context }, {
               _tag: "Downloads",
@@ -1980,7 +2011,8 @@ export const conformance = (backend: Backend) =>
               fact.subject._tag === "Prompt")
             assert.deepInclude(opened.subject, { kind: "beforeunload" })
             yield* world.adapter.resolve(opened.obligation, { _tag: "Accept", promptText: Option.none() })
-            const removed = yield* world.facts.when("NavigableRemoved", (fact) => fact.navigable === page)
+            const removed = yield* world.facts.when("NavigableRemoved", (fact) =>
+              fact.navigable === page)
             assert.deepStrictEqual(removed.reason, new Target.PageClosed({ by: "command" }))
           }), timeout)
 

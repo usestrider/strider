@@ -89,7 +89,9 @@ export const take = (
     const response = answer.response
     if (response._tag !== "Snapshot") return { _tag: "Response", response } as const
     // The steps a ref in the root's document begins with: the frames the locator entered
-    const boundary = steps === null ? -1 : steps.findLastIndex((step) => step._tag === "Frame")
+    const boundary = steps === null
+      ? -1
+      : steps.findLastIndex((step) => step._tag === "Frame" || step._tag === "AnyFrame")
     const prefix = steps === null ? [] : steps.slice(0, boundary + 1)
     const table: Table = new Map()
     let frames = 0
