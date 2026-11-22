@@ -15,5 +15,5 @@ launchedDefaultContext(
     WebKit.layer({ executablePath: webkitgtk.executable, defaultContext }).pipe(
       Layer.provide(Layer.mergeAll(NodeServices.layer, socketConnector, display))
     ),
-  []
+  ["acceptInsecureCerts"]
 )

@@ -370,6 +370,8 @@ export const connect: (
       const created = yield* Session.new_({
         capabilities: {
           alwaysMatch: {
+            // The session's setting is its default context's; a context it creates states its own
+            ...(options.acceptInsecureCerts === true ? { acceptInsecureCerts: true } : {}),
             // A session's prompt settings are the whole browser's: an attached one leaves the user's file choosers
             // alone
             unhandledPromptBehavior: {

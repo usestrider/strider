@@ -341,6 +341,8 @@ export const connect: (
       Option.isSome(contextIds) ? contextIds.value.defaultBrowserContextId : undefined,
       true
     )
+    // Each of its pages gets the certificate override, which ends with the connection, as a launched browser does
+    if (options.acceptInsecureCerts === true) defaultEntry.ignoreCertificateErrors = true
     state.contexts.set(state.defaultContext, defaultEntry)
     if (defaultEntry.browserContextId !== undefined) {
       state.contextsByCdp.set(defaultEntry.browserContextId, defaultEntry)

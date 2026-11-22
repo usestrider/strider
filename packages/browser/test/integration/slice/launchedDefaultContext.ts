@@ -130,7 +130,9 @@ export const launchedDefaultContext = (
             assert.strictEqual(yield* supports(option), site.sampled.includes(option), option)
           }
           const context = yield* (yield* Browser.Browser).defaultContext.control
-          const [startup] = yield* context.pages.waitFor((pages) => pages.length > 0)
+          const [startup] = yield* context.pages.waitFor((pages) =>
+            pages.length > 0
+          )
           const opened = yield* context.newPage
           for (const each of [startup!, opened]) {
             assert.strictEqual(yield* load(each, `${site.origin}/`), "hello")
@@ -147,14 +149,20 @@ export const launchedDefaultContext = (
           }
           // A context of its own keeps the browser's defaults
           const other = yield* Browser.newPage()
-          if (site.sampled.includes("bypassCSP")) assert.strictEqual(yield* load(other, `${site.origin}/csp`), "blocked")
-          if (site.sampled.includes("acceptInsecureCerts")) assert.isUndefined(yield* load(other, `${site.secure}/`))
+          if (site.sampled.includes("bypassCSP")) {
+            assert.strictEqual(yield* load(other, `${site.origin}/csp`), "blocked")
+          }
+          if (site.sampled.includes("acceptInsecureCerts")) {
+            assert.isUndefined(yield* load(other, `${site.secure}/`))
+          }
         }).pipe(Effect.scoped), timeout)
 
       it.effect("writes the default context's downloads to the directory it names", () =>
         Effect.gen(function*() {
           const site = yield* Site
-          if (!site.sampled.includes("downloads")) return
+          if (!site.sampled.includes("downloads")) {
+            return
+          }
           const context = yield* (yield* Browser.Browser).defaultContext.control
           const page = yield* context.newPage
           yield* page.goto(`${site.origin}/`)
@@ -164,7 +172,12 @@ export const launchedDefaultContext = (
           yield* file.finished
           const written = fs.readdirSync(site.downloads)
           assert.isAbove(written.length, 0)
-          assert.include(written.map((each) => fs.readFileSync(path.join(site.downloads, each), "utf8")), "hello, download")
+          assert.include(
+            written.map((each) =>
+              fs.readFileSync(path.join(site.downloads, each), "utf8")
+            ),
+            "hello, download"
+          )
         }).pipe(Effect.scoped), timeout)
     })
 

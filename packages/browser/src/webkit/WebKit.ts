@@ -20,6 +20,7 @@ import * as Layer from "effect/Layer"
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import type * as Socket from "effect/socket/Socket"
 import type * as Browser from "../Browser.ts"
+import type * as Deadline from "../Deadline.ts"
 import * as BrowserImpl from "../internal/browser.ts"
 import * as Connect from "../internal/connect.ts"
 import * as LaunchSettings from "../internal/launchOptions.ts"
@@ -28,6 +29,7 @@ import * as WebKitAutomation from "../internal/webkitAutomation.ts"
 import * as WebKitVideo from "../internal/webkitVideo.ts"
 import type * as SocketConnector from "../protocol/SocketConnector.ts"
 import type * as Url from "../Url.ts"
+import type * as UserContext from "../UserContext.ts"
 
 /**
  * WebKit launch settings, including explicitly enabled PNG-polled video.
@@ -208,16 +210,18 @@ export const layer = (
   options: LaunchOptions
 ): Layer.Layer<
   Browser.Browser,
-  Browser.BrowserError,
+  Browser.BrowserError | UserContext.UserContextError | Deadline.Timeout,
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | SocketConnector.SocketConnector
 > =>
-  BrowserImpl.layer((sink) =>
+  BrowserImpl.layerLaunched("WebKit", LaunchSettings.launchedDefaultContext(options), (sink) =>
     Effect.gen(function*() {
       const video = yield* WebKitVideo.settings(options.video)
-      const group = yield* WebKitAutomation.start(LaunchSettings.settings(options))
+      // The default context's process accepts insecure certificates from its session's start
+      const group = yield* WebKitAutomation.start(LaunchSettings.settings(options), {
+        acceptInsecureCerts: options.defaultContext?.acceptInsecureCerts
+      })
       return yield* WebKitAdapter.connect(group.transport, { sink, ownership: "launched", automation: group, video })
-    })
-  )
+    }))
 
 /**
  * Launches the MiniBrowser as `layer` does, requiring Linux and readable child procfs, with options read from
@@ -257,7 +261,7 @@ export const layerConfig = (
   options: Config.Wrap<LaunchOptions>
 ): Layer.Layer<
   Browser.Browser,
-  Browser.BrowserError | Config.ConfigError,
+  Browser.BrowserError | UserContext.UserContextError | Deadline.Timeout | Config.ConfigError,
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | SocketConnector.SocketConnector
 > => Layer.unwrap(Effect.map(Config.unwrap(options), layer))
 

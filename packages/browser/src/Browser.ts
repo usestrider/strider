@@ -383,6 +383,33 @@ export interface LaunchOptions {
   /**
    * The browser's flags and preferences, as an inspectable value. WebKit takes neither.
    *
+   * **Details**
+   *
+   * The profile is every flag and preference the launch adds of its own, besides headless mode, the debugging
+   * connection, and the profile directory. To launch without them, use `LaunchProfile.stock`; to leave out only
+   * some, pass a `LaunchProfile` whose `args` or `prefs` are filtered.
+   *
+   * **Example** (Launching without one of the automation profile's switches)
+   *
+   * ```ts import.meta.vitest
+   * import { NodeServices } from "@effect/platform-node"
+   * import { LaunchProfile } from "@usestrider/browser"
+   * import { Chromium } from "@usestrider/browser/chromium"
+   * import { Layer } from "effect"
+   *
+   * const profile = new LaunchProfile.LaunchProfile({
+   *   ...LaunchProfile.automation,
+   *   args: LaunchProfile.automation.args.filter((arg) =>
+   *     !arg.startsWith("--disable-extensions")
+   *   )
+   * })
+   *
+   * const ChromiumLive = Chromium.layer({ executablePath: "/usr/bin/chromium", profile })
+   *   .pipe(
+   *     Layer.provide(NodeServices.layer)
+   *   )
+   * ```
+   *
    * @default LaunchProfile.automation
    */
   readonly profile?: LaunchProfile.LaunchProfile | undefined
@@ -410,6 +437,52 @@ export interface LaunchOptions {
    * @default false
    */
   readonly coreDumps?: boolean | undefined
+  /**
+   * Options for the browser's default context, the one its startup page opens in, as `newContext` takes them. They
+   * apply to the startup page and to every page opened in the default context later, for as long as the layer
+   * lasts.
+   *
+   * **Details**
+   *
+   * The default context belongs to the browser, so closing the layer releases what these options set but never
+   * removes the context. Its startup page then works as a context's page does: dialogs no handler takes are
+   * dismissed, and downloads go to a temporary directory unless `downloads` says otherwise.
+   *
+   * **Gotchas**
+   *
+   * Some options can only be set when a context is created. The launch sets `acceptInsecureCerts` itself, for the
+   * default context alone. `proxy`, `clientCertificates`, `requestTiming` and `requestSizes` fail with
+   * `Unsupported` before the browser starts, and `storageStateTracking` with `InvalidInput`; set them on a context
+   * of your own instead. An option the backend lacks, such as `bypassCSP` on
+   * Firefox, fails the launch as it fails `newContext`.
+   *
+   * **Example** (Launching with credentials and a downloads directory for the default context)
+   *
+   * ```ts import.meta.vitest
+   * import { NodeServices } from "@effect/platform-node"
+   * import { Browser } from "@usestrider/browser"
+   * import { Chromium } from "@usestrider/browser/chromium"
+   * import { Effect, Layer, Redacted } from "effect"
+   *
+   * const ChromiumLive = Chromium.layer({
+   *   executablePath: "/usr/bin/chromium",
+   *   defaultContext: {
+   *     httpCredentials: { username: "admin", password: Redacted.make("secret") },
+   *     downloads: { directory: "/tmp/downloads" }
+   *   }
+   * }).pipe(Layer.provide(NodeServices.layer))
+   *
+   * const program = Effect.scoped(Effect.gen(function*() {
+   *   const browser = yield* Browser.Browser
+   *   const context = yield* browser.defaultContext.control
+   *   const [page] = yield* context.pages.waitFor((pages) => pages.length > 0)
+   *   yield* page!.goto("https://intranet.example.com")
+   * })).pipe(Effect.provide(ChromiumLive))
+   * ```
+   *
+   * @default none, so the default context keeps the browser's own settings
+   */
+  readonly defaultContext?: UserContext.Options | undefined
 }
 
 /**
