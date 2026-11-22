@@ -118,8 +118,8 @@ const documentsOf = (
 /**
  * Runs `self` with the animations of every document of the page stopped (the engine's `animationsStop`), and
  * resumes them however it exits. Stopping them can add frames, as one an end event's handler attaches, and the
- * page reports them before the browser's events about them arrive, so each stopped document answers with its
- * child frame count, and preparation waits, within the operation's deadline, until the page's state holds that
+ * page reports them before the browser's events about them arrive, so each stopped document answers with the
+ * count of its child frames with animations to stop (a frame still loading has none), and preparation waits, within the operation's deadline, until the page's state holds that
  * many frames with a document under each stopped document's frame, stopping each document new to it, before
  * `self` runs. A document that has gone has nothing to resume, and a resumption that fails, or that the page
  * doesn't answer within 5 seconds, leaves the capture's own result as it is.

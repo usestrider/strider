@@ -259,8 +259,8 @@ export type ControlScreenshotOptions = ScreenshotOptions & {
    * **Gotchas**
    *
    * The capture waits, within its deadline, until the browser has reported a document for each of the page's
-   * frames, so it stops the animations of a frame an end event's handler adds. On Chromium and WebKit, a frame
-   * still loading holds the capture until its document commits.
+   * frames that has animations to stop, or whose document is from another origin, so it stops the animations of a
+   * frame an end event's handler adds. A frame still loading has none, and doesn't hold the capture.
    *
    * Playing the animations again after the capture is best effort: it can add up to 5 seconds to the screenshot, as
    * every frame's resumption runs at once, and a frame that doesn't answer is left with its animations stopped.

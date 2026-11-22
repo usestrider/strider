@@ -498,7 +498,10 @@ export const Response = Schema.Union([
   Schema.TaggedStruct("Final", { final: Final }),
   Schema.TaggedStruct("Guarded", { blocked: Schema.NullOr(Schema.String) }),
   Schema.TaggedStruct("Overlaid", {}),
-  /** The document's child frames, `window.length`, as it answers `animationsStop` or `animationsResume`. */
+  /**
+   * The document's child frames whose documents have animations to stop, as it answers `animationsStop`: each
+   * frame it can't read, and each it can read with animations in it or a frame under it.
+   */
   Schema.TaggedStruct("Animations", { frames: Schema.Number }),
   Schema.TaggedStruct("Inserted", { inserted: Schema.Boolean }),
   /** The focused element is the `index`th of the document's frames, in the order a `"iframe, frame"` query finds them. */
@@ -4630,6 +4633,42 @@ export function engine(render: (root: SnapNode) => string) {
     visit(document)
     return found
   }
+  /** Whether the root, or an open shadow root under it, has animations. */
+  const rootAnimated = (root: Document | ShadowRoot): boolean => {
+    if (root.getAnimations().length > 0) return true
+    const walker = (root.ownerDocument ?? root as Document).createTreeWalker(root, NodeFilter.SHOW_ELEMENT)
+    for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+      const shadow = (node as Element).shadowRoot
+      if (shadow !== null && rootAnimated(shadow)) return true
+    }
+    return false
+  }
+  /**
+   * Whether a frame's document has animations to stop: a document the frame can't read, as a cross-origin one,
+   * which has committed; or one it can read with animations, in it or in a frame under it. A frame still loading
+   * shows its initial `about:blank`, which it can read and which has none, so it isn't waited for.
+   */
+  const frameToStop = (frame: Window): boolean => {
+    let child: Document
+    try {
+      child = frame.document
+    } catch {
+      return true
+    }
+    if (rootAnimated(child)) return true
+    for (let index = 0; index < frame.length; index++) {
+      if (frameToStop(frame[index]!)) return true
+    }
+    return false
+  }
+  /** The document's child frames whose documents have animations to stop. */
+  const framesToStop = (): number => {
+    let count = 0
+    for (let index = 0; index < window.length; index++) {
+      if (frameToStop(window[index]!)) count++
+    }
+    return count
+  }
   const stopAnimations = async (token: string): Promise<Response> => {
     animationsStopped ??= { tokens: new Set(), cancelled: new Set(), roots: new Map() }
     animationsStopped.tokens.add(token)
@@ -4639,7 +4678,7 @@ export function engine(render: (root: SnapNode) => string) {
     // attached since has no listener yet, and its animations' start events stop at it
     do await new Promise((resolve) => requestAnimationFrame(resolve))
     while (stopAllAnimations())
-    return { _tag: "Animations", frames: window.length }
+    return { _tag: "Animations", frames: framesToStop() }
   }
   const resumeAnimations = (token: string): Response => {
     const stopped = animationsStopped
