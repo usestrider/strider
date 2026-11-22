@@ -451,7 +451,7 @@ export interface LaunchOptions {
    * **Gotchas**
    *
    * Some options can only be set when a context is created. The launch sets `acceptInsecureCerts` itself, for the
-   * default context alone. `proxy`, `clientCertificates`, `requestTiming` and `requestSizes` fail with
+   * default context alone. `proxy`, `clientCertificates`, `requestTiming`, and `requestSizes` fail with
    * `Unsupported` before the browser starts, and `storageStateTracking` with `InvalidInput`; set them on a context
    * of your own instead. An option the backend lacks, such as `bypassCSP` on
    * Firefox, fails the launch as it fails `newContext`.

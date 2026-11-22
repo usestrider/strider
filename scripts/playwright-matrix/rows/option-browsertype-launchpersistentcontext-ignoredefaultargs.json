@@ -1,12 +1,24 @@
 {
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding public option for this contract.",
-  "capabilities": [],
+  "status": "different",
+  "api": [
+    {
+      "module": "LaunchProfile",
+      "symbol": "LaunchProfile",
+      "url": "/docs/api/browser/LaunchProfile#LaunchProfile"
+    }
+  ],
+  "notes": "No separate option: the launch profile states every argument a launch adds, so LaunchProfile.stock, or a profile with some args filtered out, leaves them out.",
   "id": "option-browsertype-launchpersistentcontext-ignoredefaultargs",
   "upstream": [
     "method:BrowserType.launchPersistentContext"
   ],
   "option": "ignoreDefaultArgs",
+  "capabilities": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "configure-a-launchs-default-context-at-launch-borrowed-and-never-owned",
+    "quote": "A separate `ignoreDefaultArgs` was rejected too: the launch profile already states every",
+    "revision": "8753d844442c9c4c7f7cefc28ea1b90029f7b4ba"
+  },
   "requirements": []
 }
