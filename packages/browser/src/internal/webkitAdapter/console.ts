@@ -51,11 +51,11 @@ const channelCategories: Readonly<Record<string, ConsoleMessage.Category>> = {
   storage: "storage"
 }
 
-/** Who wrote a message: the page with a `console` call, or the browser on one of its own channels. */
-const sourceOf = (channel: Console.ChannelSource): ConsoleMessage.Source =>
-  channel === "console-api" ? { _tag: "Page" } : {
+/** Who wrote a message: the page with the `console` method it called, or the browser on one of its own channels. */
+const sourceOf = (message: Console.ConsoleMessage): ConsoleMessage.Source =>
+  message.source === "console-api" ? { _tag: "Page", method: Kit.consoleMethod(message.type, message.level) } : {
     _tag: "Browser",
-    category: Object.hasOwn(channelCategories, channel) ? channelCategories[channel]! : "other"
+    category: Object.hasOwn(channelCategories, message.source) ? channelCategories[message.source]! : "other"
   }
 
 const consoleMessage = (
@@ -93,7 +93,7 @@ const consoleMessage = (
       origin: realm.document !== undefined
         ? { _tag: "Page", page: target.page.id }
         : { _tag: "Worker", realm: realm.id },
-      source: sourceOf(message.source),
+      source: sourceOf(message),
       timestamp: EpochTime.fromSeconds(timestamp),
       at: Adapter.now()
     })

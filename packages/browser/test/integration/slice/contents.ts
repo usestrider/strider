@@ -42,7 +42,7 @@ import * as Runtime from "../../../src/internal/runtime.ts"
 import * as Protocol from "../../../src/protocol/Protocol.ts"
 import { pngRegion } from "../../pngRegion.ts"
 import { site } from "../adapter/harness.ts"
-import { fullySupports, supports } from "./capabilities.ts"
+import { consoleMethodReads, fullySupports, status, supports } from "./capabilities.ts"
 import { consoleCalls } from "./consoleCalls.ts"
 import { overlays } from "./overlays.ts"
 import { scriptTags } from "./scriptTags.ts"
@@ -534,6 +534,79 @@ export const contents = (
           assert.strictEqual((yield* ConsoleMessage.history(page)).entries.at(-1)?.text, "after reload")
         }), timeout)
 
+      it.effect("reports the console method a page or a dedicated worker called", () =>
+        Effect.gen(function*() {
+          const page = yield* SharedContext.newPage
+          const { origin } = yield* site
+          // Each call writes one message on the Console Standard, but `time`, which writes none
+          const calls = [
+            "console.log('log')",
+            "console.debug('debug')",
+            "console.info('info')",
+            "console.warn('warn')",
+            "console.error('error')",
+            "console.dir({a: 1})",
+            "console.dirxml('dirxml')",
+            "console.table([1])",
+            "console.trace('trace')",
+            "console.group('group')",
+            "console.groupEnd()",
+            "console.groupCollapsed('groupCollapsed')",
+            "console.groupEnd()",
+            "console.assert(false, 'assert')",
+            "console.count('count')",
+            "console.time('time')",
+            "console.timeLog('time')",
+            "console.timeEnd('time')"
+          ].join(";")
+          const standard: ReadonlyArray<ConsoleMessage.Method> = [
+            "log",
+            "debug",
+            "info",
+            "warn",
+            "error",
+            "dir",
+            "dirxml",
+            "table",
+            "trace",
+            "group",
+            "groupEnd",
+            "groupCollapsed",
+            "groupEnd",
+            "assert",
+            "count",
+            "timeLog",
+            "timeEnd",
+            "log"
+          ]
+          // The backend's table says `partial` exactly where it reads some method as another
+          const reads = consoleMethodReads[name] ?? {}
+          assert.strictEqual(
+            yield* status("console.method"),
+            Object.keys(reads).length > 0 ? "partial" : "supported",
+            "console.method"
+          )
+          const expected = standard.flatMap((method) => {
+            const read = Object.hasOwn(reads, method) ? reads[method] : method
+            return read === null || read === undefined ? [] : [read]
+          })
+          const methods = (entries: ReadonlyArray<ConsoleMessage.ConsoleMessage>) =>
+            entries.map((entry) => entry.source._tag === "Page" ? entry.source.method : entry.source.category)
+          const done = yield* ConsoleMessage.next(page, { text: "page done" })
+          yield* page.goto(fixtureUrl(origin, `<script>${calls};console.log('page done')</script>`))
+          yield* done.pipe(Deadline.within("5 seconds"))
+          const fromPage = (yield* ConsoleMessage.history(page)).entries
+          assert.deepStrictEqual(methods(fromPage), expected, "from the page")
+          const workerDone = yield* ConsoleMessage.next(page, { text: "worker done" })
+          yield* page.evaluateInMainWorld(
+            (source) => void new Worker(URL.createObjectURL(new Blob([source]))),
+            `${calls};console.log('worker done');self.close()`
+          )
+          yield* workerDone.pipe(Deadline.within("5 seconds"))
+          const fromWorker = (yield* ConsoleMessage.history(page)).entries.slice(fromPage.length)
+          assert.deepStrictEqual(methods(fromWorker), expected, "from a dedicated worker")
+        }), timeout)
+
       it.effect("setContent settles when the page silences console.debug", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -564,7 +637,10 @@ export const contents = (
             "__striderDocumentOpened",
             "after marker text"
           ])
-          assert.deepStrictEqual(messages.map((entry) => entry.source), [{ _tag: "Page" }, { _tag: "Page" }])
+          assert.deepStrictEqual(messages.map((entry) => entry.source), [{ _tag: "Page", method: "log" }, {
+            _tag: "Page",
+            method: "log"
+          }])
         }), timeout)
 
       it.effect("reports repeated browser console entries on stock WebKit", () =>
@@ -613,9 +689,9 @@ export const contents = (
           assert.match(entries[1]!, /Content Security Policy/i)
           assert.strictEqual(entries[2], "after blocked style")
           assert.deepStrictEqual(messages.map((entry) => entry.source), [
-            { _tag: "Page" },
+            { _tag: "Page", method: "log" },
             { _tag: "Browser", category: "security" },
-            { _tag: "Page" }
+            { _tag: "Page", method: "log" }
           ])
         }), timeout)
 

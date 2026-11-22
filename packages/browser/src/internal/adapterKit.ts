@@ -39,7 +39,7 @@ import * as FiberSet from "effect/FiberSet"
 import * as Headers from "effect/http/Headers"
 import * as Option from "effect/Option"
 import type * as Scope from "effect/Scope"
-import type * as ConsoleMessage from "../ConsoleMessage.ts"
+import * as ConsoleMessage from "../ConsoleMessage.ts"
 import * as NetworkRequest from "../NetworkRequest.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
 import * as Protocol from "../protocol/Protocol.ts"
@@ -552,6 +552,38 @@ export const consoleLevel = (type: string): ConsoleMessage.Level =>
     : type === "debug"
     ? "debug"
     : "log"
+
+const consoleMethods = new Set<string>(ConsoleMessage.Method.literals)
+
+/** The console method of each wire's name that isn't the Console Standard's. */
+const consoleRenames: Readonly<Record<string, ConsoleMessage.Method>> = {
+  warning: "warn",
+  startGroup: "group",
+  startGroupCollapsed: "groupCollapsed",
+  endGroup: "groupEnd",
+  // WebKit reports `timeLog` and `timeEnd` alike
+  timing: "timeEnd"
+}
+
+/** The method that writes at a level: what a message reads as when its wire names no method of its own. */
+const levelMethods: Readonly<Record<ConsoleMessage.Level, ConsoleMessage.Method>> = {
+  debug: "debug",
+  log: "log",
+  info: "info",
+  warning: "warn",
+  error: "error"
+}
+
+/**
+ * The console method a page called, from the type or method its wire names (CDP's `warning`, WebKit's `timing`), or,
+ * where that names none, as WebKit's `log` doesn't for `console.warn`, from the level it wrote at.
+ */
+export const consoleMethod = (type: string | undefined, level: string = type ?? "log"): ConsoleMessage.Method =>
+  type !== undefined && Object.hasOwn(consoleRenames, type)
+    ? consoleRenames[type]!
+    : type !== undefined && type !== "log" && consoleMethods.has(type)
+    ? type as ConsoleMessage.Method
+    : levelMethods[consoleLevel(level)]
 
 /** A console argument as CDP and WebKit describe one: a `Runtime.RemoteObject`. */
 export type RemoteObject = ConsolePreview.Remote

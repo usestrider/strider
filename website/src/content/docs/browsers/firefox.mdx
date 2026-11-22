@@ -157,6 +157,10 @@ or a CORS failure as a script error, so it arrives as an [`UncaughtException`](/
 every console message's [`source`](/docs/events/console) is `Page`. The capability
 `console.source` is `unsupported` here.
 
+**`console.groupEnd` and `console.clear` write no message.** Firefox sends nothing for them, so neither is in the
+console's [history](/docs/events/console). A counter or timer that doesn't exist keeps its method, at level `log`
+rather than `warning`. The capability `console.method` is `partial` here.
+
 **Typing is key by key.** [Keyboard layouts](/docs/pages/actions#keys) send no AltGr or dead keys, and the page
 sees a US key's `code`. [`insertText`](/docs/pages/actions#the-keyboard-and-the-mouse) and `fill` send no key
 events to insert text, but the `beforeinput` before the text is Strider's own, since Firefox fires none: its

@@ -292,7 +292,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
             location,
             origin,
             // The browser's own messages come as `javascript` entries, which read as uncaught exceptions
-            source: { _tag: "Page" },
+            source: { _tag: "Page", method: Kit.consoleMethod("method" in params ? params.method : undefined) },
             timestamp: EpochTime.fromMillis(params.timestamp),
             at: Adapter.now()
           })
