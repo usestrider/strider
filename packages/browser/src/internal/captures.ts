@@ -13,6 +13,7 @@ import * as Page from "../Page.ts"
 import * as Reason from "../Reason.ts"
 import type * as Target from "../Target.ts"
 import type * as Adapter from "./adapter.ts"
+import * as BrowserClock from "./browserClock.ts"
 import * as LocatorImpl from "./locator.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
@@ -125,12 +126,14 @@ const drawMasks = (
         page,
         { op: "mask", steps: locator.steps, color, token },
         record.id,
-        record.budget.at
+        record.budget.at,
+        // Owned before the request can draw, so a capture cut short before the reply still removes its boxes
+        (document) => documents.add(document)
       ).pipe(Effect.mapError(failed(operation, record)))
       const response = answer.response
-      if (response._tag === "Masked") {
-        if (response.count > 0) documents.add(answer.routed.document)
-        return
+      if (response._tag === "Masked") return
+      if (response._tag === "InvalidColor") {
+        return yield* Effect.fail(invalid(operation, record.id, "maskColor", "a CSS color", `${color} isn't one`))
       }
       if (response._tag === "NoMatch" || response._tag === "StaleRef") return
       return yield* Effect.fail(
@@ -144,7 +147,10 @@ const drawMasks = (
       )
     }), { discard: true })
 
-/** Removes a capture's masks from every document it drew them in; a document that went took them with it. */
+/**
+ * Removes a capture's masks from every document it may have drawn them in; a document that went took them with
+ * it. One that doesn't answer within 5 seconds keeps its boxes, and the capture's own result stays as it is.
+ */
 const removeMasks = (
   runtime: Runtime.Runtime,
   page: Model.PageEntry,
@@ -154,7 +160,13 @@ const removeMasks = (
 ): Effect.Effect<void> =>
   Effect.forEach(
     documents,
-    (document) => Effect.ignore(Runtime.sendToDocument(runtime, page, document, { op: "unmask", token }, id)),
+    (document) =>
+      Runtime.sendToDocument(runtime, page, document, { op: "unmask", token }, id).pipe(
+        // Interruptible inside the release, so the bound can end it
+        Effect.interruptible,
+        BrowserClock.timeoutOption(5000),
+        Effect.ignore
+      ),
     { discard: true, concurrency: "unbounded" }
   ).pipe(
     // Removing them is cleanup, which no operation's deadline ends

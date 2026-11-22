@@ -502,6 +502,8 @@ export const Response = Schema.Union([
   Schema.TaggedStruct("Overlaid", {}),
   /** How many elements a `mask` covered, or 0 for `unmask`. */
   Schema.TaggedStruct("Masked", { count: Schema.Number }),
+  /** A `mask` whose color isn't a CSS color: nothing was drawn. */
+  Schema.TaggedStruct("InvalidColor", {}),
   Schema.TaggedStruct("Inserted", { inserted: Schema.Boolean }),
   /** The focused element is the `index`th of the document's frames, in the order a `"iframe, frame"` query finds them. */
   Schema.TaggedStruct("InFrame", { index: Schema.Number }),
@@ -879,11 +881,17 @@ export function engine(render: (root: SnapNode) => string) {
     setAttribute: method(Element.prototype, "setAttribute"),
     attachShadow: method(Element.prototype, "attachShadow"),
     style: getter(HTMLElement.prototype, "style"),
-    setProperty: method(CSSStyleDeclaration.prototype, "setProperty")
+    setProperty: method(CSSStyleDeclaration.prototype, "setProperty"),
+    getPropertyValue: method(CSSStyleDeclaration.prototype, "getPropertyValue")
   }
   const MASK_HOST = "all:initial;position:absolute;left:0;top:0;width:0;height:0;overflow:visible;" +
     "z-index:2147483647;pointer-events:none;display:block"
   const mask = (request: Extract<Request, { op: "mask" }>): Response => {
+    // CSS drops a value it can't parse, which would draw an unseen box, so the color is checked by reading it back
+    // from a detached probe before anything is drawn
+    const probe = dom.createElement(document, "div") as HTMLElement
+    maskDom.setProperty(maskDom.style(probe), "background-color", request.color)
+    if (maskDom.getPropertyValue(maskDom.style(probe), "background-color") === "") return { _tag: "InvalidColor" }
     const found = resolve(request.steps)
     const root = dom.documentElement(document)
     if (found.length === 0 || root === null) return { _tag: "Masked", count: 0 }
@@ -909,8 +917,7 @@ export function engine(render: (root: SnapNode) => string) {
         `position:absolute;left:${rect.x - origin.x}px;top:${rect.y - origin.y}px;width:${rect.width}px;` +
           `height:${rect.height}px;pointer-events:none`
       )
-      // Set on its own, so a color that doesn't parse leaves the box's place as it is
-      maskDom.setProperty(maskDom.style(box), "background", request.color)
+      maskDom.setProperty(maskDom.style(box), "background-color", request.color)
       maskDom.appendChild(maskRoot, box)
       boxes.push(box)
     }

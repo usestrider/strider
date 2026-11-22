@@ -83,7 +83,7 @@ export const annotateWith = (page: Model.PageEntry, annotate: Annotate | undefin
 }
 
 export const ordinary: Dispatch = {
-  action: Runtime.sendRouted,
+  action: (runtime, page, request, id, at) => Runtime.sendRouted(runtime, page, request, id, at),
   expect: Runtime.send,
   beforeCheck: Effect.void,
   url: (page, expected) => ExpectImpl.watchURL(page, expected)

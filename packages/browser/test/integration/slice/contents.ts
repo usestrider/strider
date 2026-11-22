@@ -3269,9 +3269,7 @@ export const contents = (
               })
               assert.deepStrictEqual(yield* listed, ["plain"])
               yield* page.goto(`${origin}/app/page`)
-              const token = (yield* jar.list).find((cookie) =>
-                cookie.name === "token"
-              )
+              const token = (yield* jar.list).find((cookie) => cookie.name === "token")
               assert.isDefined(token)
               assert.strictEqual(Redacted.value(token.value), "secret")
               assert.strictEqual(token.path, "/app")
