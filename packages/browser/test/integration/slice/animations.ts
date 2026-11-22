@@ -141,7 +141,10 @@ export const animations = <R>(it: ReturnType<typeof SharedContext.guard<R>>) => 
         frame.src = "/slow-page"
         document.body.append(frame)
       })
+      // The slow page takes a second to answer; a capture that waited for its frame would take at least that
+      const started = Date.now()
       const png = yield* page.screenshot({ animations: "disabled" }).pipe(Deadline.within("3 seconds"))
+      assert.isBelow(Date.now() - started, 500)
       assert.isTrue(pixelsAt(png, 10, 10, isRed))
     }))
 
