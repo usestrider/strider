@@ -3,9 +3,15 @@
   "upstream": [
     "method:Response.serverAddr"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "NetworkResponse is a response-event value; it does not provide this terminal/timing/security or related-object operation.",
+  "status": "has",
+  "api": [
+    {
+      "module": "NetworkResponse",
+      "symbol": "NetworkResponse",
+      "url": "/docs/api/browser/NetworkResponse#NetworkResponse"
+    }
+  ],
+  "notes": "The response's `serverAddress` field, an Option of `{ ip, port }`, rather than a method resolving with null. Chromium reports it with the response; WebKit only as the hop ends, so a HAR has it but the response doesn't; Firefox reports none.",
   "capabilities": [],
   "audit": {
     "sources": [

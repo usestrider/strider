@@ -62,6 +62,8 @@ const setup = Effect.fnUntraced(function*(protocol: "cdp" | "bidi" | "webkit" = 
         status: status as NetworkResponse.StatusCode,
         statusText: "",
         httpVersion: Option.none(),
+        serverAddress: Option.none(),
+        securityDetails: Option.none(),
         headers: Headers.empty,
         servedBy: "network",
         at: request.at

@@ -3,9 +3,15 @@
   "upstream": [
     "method:Response.securityDetails"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "NetworkResponse is a response-event value; it does not provide this terminal/timing/security or related-object operation.",
+  "status": "has",
+  "api": [
+    {
+      "module": "NetworkResponse",
+      "symbol": "NetworkResponse",
+      "url": "/docs/api/browser/NetworkResponse#NetworkResponse"
+    }
+  ],
+  "notes": "The response's `securityDetails` field, an Option of the TLS protocol, subject, issuer and validity (each an Option), rather than a method resolving with null. None for plain HTTP; WebKit has no issuer and gives the TLS version only in the HAR; Firefox reports none.",
   "capabilities": [],
   "audit": {
     "sources": [

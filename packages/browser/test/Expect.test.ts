@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import { TestClock } from "effect/testing"
+import { runInNewContext } from "node:vm"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as BrowserImpl from "../src/internal/browser.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
@@ -333,4 +334,13 @@ describe("Expect.that last", () => {
       assert.notDeepInclude(values, { error: "a check was still running at the deadline" })
       assert.deepStrictEqual(Option.map(error.last, (entry) => entry.value), Option.some(reads))
     }))
+})
+
+describe("Expect URL call forms", () => {
+  it.effect("accepts a regular expression from another realm in data-first form", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      const expected: RegExp = runInNewContext("/^about:blank$/")
+      yield* Expect.toHaveURL(page, expected)
+    })).pipe(Effect.provide(Browser.layerTest(""))))
 })

@@ -106,6 +106,8 @@ class Captured<B> extends Inspectable.Class
   readonly status: NetworkResponse.StatusCode
   readonly statusText: string
   readonly httpVersion: Option.Option<string>
+  readonly serverAddress: Option.Option<NetworkResponse.ServerAddress>
+  readonly securityDetails: Option.Option<NetworkResponse.SecurityDetails>
   readonly headers: Headers.Headers
   readonly servedBy: NetworkResponse.ServedBy
   readonly at: MonotonicInstant.MonotonicInstant
@@ -125,6 +127,8 @@ class Captured<B> extends Inspectable.Class
     this.status = response.status
     this.statusText = response.statusText
     this.httpVersion = response.httpVersion
+    this.serverAddress = response.serverAddress
+    this.securityDetails = response.securityDetails
     this.headers = response.headers
     this.servedBy = response.servedBy
     this.at = response.at

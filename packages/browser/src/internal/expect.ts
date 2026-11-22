@@ -53,6 +53,33 @@ export const matcher = (expected: string | RegExp, exact: boolean): Engine.TextM
     ? { _tag: "String", value: expected, exact }
     : { _tag: "RegExp", source: expected.source, flags: expected.flags }
 
+/**
+ * A matcher whose case `ignoreCase` decides when given: a string compares without case, and a regular
+ * expression's `i` flag is set or cleared. Left out, a string matches case and a regular expression keeps its flags.
+ */
+export const casedMatcher = (
+  expected: string | RegExp,
+  exact: boolean,
+  ignoreCase: boolean | undefined
+): Engine.TextMatcher =>
+  typeof expected === "string"
+    ? { _tag: "String", value: expected, exact, ...(ignoreCase === true ? { ignoreCase } : {}) }
+    : {
+      _tag: "RegExp",
+      source: expected.source,
+      flags: ignoreCase === undefined ? expected.flags : expected.flags.replace(/i/g, "") + (ignoreCase ? "i" : "")
+    }
+
+/** What a condition adds for `ignoreCase` when it is given. */
+const caseShown = (ignoreCase: boolean | undefined) =>
+  ignoreCase === undefined ? "" : ignoreCase ? " ignoring case" : " matching case"
+
+/** The options of the text expectations. */
+export interface TextOptions {
+  readonly ignoreCase?: boolean | undefined
+  readonly useInnerText?: boolean | undefined
+}
+
 /** Export classification follows the failure's identity, including catches and rethrows outside its operation. */
 export type EvidenceKind = "URL" | "Title" | "Value" | "Other" | "SourceURL" | "SourceTitle"
 
@@ -138,7 +165,7 @@ const explain = (subject: InPage, id: Diagnostics.OperationId): Effect.Effect<Ex
     Operation.apart("Expect.explain", Duration.millis(explainBudget)),
     Effect.map((response): Explained => {
       if (response._tag !== "Explained" || response.matched) return none
-      const boundary = subject.steps.findLastIndex((step) => step._tag === "Frame")
+      const boundary = subject.steps.findLastIndex((step) => step._tag === "Frame" || step._tag === "AnyFrame")
       const frames = subject.steps.slice(0, boundary + 1)
       const last = subject.steps.slice(boundary + 1)
       return {
@@ -405,38 +432,53 @@ export const polling = Operation.fn("Expect.that")(
 )
 
 /** The page's URL is expected to match: checked on each change of it. */
-export const toHaveURL = (page: Page.ReadonlyPage, expected: string | RegExp) =>
-  Effect.suspend(() => Handles.page(page).entry.execution.url(page, expected))
+export const toHaveURL = (page: Page.ReadonlyPage, expected: string | RegExp, options?: URLOptions | undefined) =>
+  Effect.suspend(() => Handles.page(page).entry.execution.url(page, expected, options))
+
+/** The options of `toHaveURL`. */
+export interface URLOptions {
+  readonly ignoreCase?: boolean | undefined
+}
 
 /** The unchanged model-only URL watcher used by ordinary dispatch and suppressed callbacks. */
-export const watchURL = (page: Page.ReadonlyPage, expected: string | RegExp) =>
-  watching(
+export const watchURL = (page: Page.ReadonlyPage, expected: string | RegExp, options?: URLOptions | undefined) => {
+  const url = casedMatcher(expected, true, options?.ignoreCase)
+  return watching(
     page.url,
-    (url: string) =>
-      typeof expected === "string" ? url === expected : new RegExp(expected.source, expected.flags).test(url),
+    (actual: string) =>
+      url._tag === "RegExp"
+        ? new RegExp(url.source, url.flags).test(actual)
+        : url.ignoreCase === true
+        ? actual.toLowerCase() === url.value.toLowerCase()
+        : actual === url.value,
     "toHaveURL",
     `page ${page.id}`,
-    `to have the URL ${show(expected)}`,
+    `to have the URL ${show(expected)}${caseShown(options?.ignoreCase)}`,
     { "browser.page.id": page.id }
   )
+}
 
 /** Page-bound URL assertions on opted-in pages use the cooperative check/retry boundary. */
 export const handlerURL = (
   page: Page.ReadonlyPage,
   expected: string | RegExp,
+  options: URLOptions | undefined,
   execute: (
     request: Engine.CooperativeURLRequest,
     record: Operation.Record
   ) => Effect.Effect<Engine.Response, Execution.Failure>
 ) => {
   const { entry, runtime } = Handles.page(page)
-  const expectation: Engine.CooperativeURLRequest["expectation"] = { _tag: "URL", expected: matcher(expected, true) }
+  const expectation: Engine.CooperativeURLRequest["expectation"] = {
+    _tag: "URL",
+    expected: casedMatcher(expected, true, options?.ignoreCase)
+  }
   // Reading the URL is an observe operation, including on a formerly borrowed handle.
   return expectUsing(
     { runtime, page: entry, grant: Option.none(), steps: [], description: `page ${page.id}` },
     expectation,
     "toHaveURL",
-    `to have the URL ${show(expected)}`,
+    `to have the URL ${show(expected)}${caseShown(options?.ignoreCase)}`,
     (cap, record) => execute({ op: "expect", steps: [], expectation, cap }, record)
   )
 }
@@ -481,18 +523,32 @@ export const toBeFocused = stateOf("Focused")("toBeFocused", "to have focus")
 export const toBeEmpty = stateOf("Empty")("toBeEmpty", "to be empty")
 export const toBeEditable = stateOf("Editable")("toBeEditable", "to be editable")
 
-export const toHaveText = (
-  locator: Locator.ReadonlyLocator,
-  expected: string | RegExp | ReadonlyArray<string | RegExp>
+/** A text expectation's entries, and how its condition names them and its options. */
+const textExpectation = (
+  expected: string | RegExp | ReadonlyArray<string | RegExp>,
+  exact: boolean,
+  options: TextOptions | undefined
 ) => {
   const list = Array.isArray(expected)
   const all = (list ? expected : [expected]) as ReadonlyArray<string | RegExp>
-  return expectLocator(
-    locator,
-    { _tag: "Text", expected: all.map((each) => matcher(each, true)), list },
-    "toHaveText",
-    `to have the text ${list ? `[${all.map(show).join(", ")}]` : show(all[0]!)}`
-  )
+  const useInnerText = options?.useInnerText ?? false
+  return {
+    expected: all.map((each) => casedMatcher(each, exact, options?.ignoreCase)),
+    list,
+    useInnerText,
+    shown: `${list ? `[${all.map(show).join(", ")}]` : show(all[0]!)}${caseShown(options?.ignoreCase)}${
+      useInnerText ? " in its rendered text" : ""
+    }`
+  }
+}
+
+export const toHaveText = (
+  locator: Locator.ReadonlyLocator,
+  expected: string | RegExp | ReadonlyArray<string | RegExp>,
+  options?: TextOptions | undefined
+) => {
+  const { shown, ...text } = textExpectation(expected, true, options)
+  return expectLocator(locator, { _tag: "Text", ...text }, "toHaveText", `to have the text ${shown}`)
 }
 
 export const toHaveClass = (
@@ -509,13 +565,14 @@ export const toHaveClass = (
   )
 }
 
-export const toContainText = (locator: Locator.ReadonlyLocator, expected: string | RegExp) =>
-  expectLocator(
-    locator,
-    { _tag: "ContainsText", expected: matcher(expected, false) },
-    "toContainText",
-    `to contain the text ${show(expected)}`
-  )
+export const toContainText = (
+  locator: Locator.ReadonlyLocator,
+  expected: string | RegExp | ReadonlyArray<string | RegExp>,
+  options?: TextOptions | undefined
+) => {
+  const { shown, ...text } = textExpectation(expected, false, options)
+  return expectLocator(locator, { _tag: "ContainsText", ...text }, "toContainText", `to contain the text ${shown}`)
+}
 
 export const toHaveValue = (locator: Locator.ReadonlyLocator, expected: string | RegExp) =>
   expectLocator(
@@ -541,12 +598,23 @@ export const toHaveRole = (locator: Locator.ReadonlyLocator, expected: string) =
     `to have the role ${show(expected)}`
   )
 
-export const toHaveAttribute = (locator: Locator.ReadonlyLocator, name: string, expected?: string | RegExp) =>
+export const toHaveAttribute = (
+  locator: Locator.ReadonlyLocator,
+  name: string,
+  expected?: string | RegExp | undefined,
+  options?: { readonly ignoreCase?: boolean | undefined } | undefined
+) =>
   expectLocator(
     locator,
-    { _tag: "Attribute", name, expected: expected === undefined ? null : matcher(expected, true) },
+    {
+      _tag: "Attribute",
+      name,
+      expected: expected === undefined ? null : casedMatcher(expected, true, options?.ignoreCase)
+    },
     "toHaveAttribute",
-    `to have the attribute ${name}${expected === undefined ? "" : ` ${show(expected)}`}`
+    `to have the attribute ${name}${
+      expected === undefined ? "" : ` ${show(expected)}${caseShown(options?.ignoreCase)}`
+    }`
   )
 
 export const toHaveCount = (locator: Locator.ReadonlyLocator, count: number) =>
@@ -593,13 +661,9 @@ export const toBeInViewport = (
 }
 /** An accessible text's matcher: `ignoreCase`, when given, replaces a regular expression's `i` flag. */
 const accessibleText = (expected: string | RegExp, ignoreCase: boolean | undefined) => ({
-  expected: typeof expected === "string" ? matcher(expected, true) : {
-    _tag: "RegExp" as const,
-    source: expected.source,
-    flags: ignoreCase === undefined ? expected.flags : expected.flags.replace(/i/g, "") + (ignoreCase ? "i" : "")
-  },
+  expected: typeof expected === "string" ? matcher(expected, true) : casedMatcher(expected, true, ignoreCase),
   ignoreCase: ignoreCase === true,
-  shown: `${show(expected)}${ignoreCase === undefined ? "" : ignoreCase ? " ignoring case" : " matching case"}`
+  shown: `${show(expected)}${caseShown(ignoreCase)}`
 })
 
 /** Accessible names use the shared engine only when this expectation is requested. */

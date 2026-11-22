@@ -19,7 +19,9 @@
  *   on the way.
  * - **Text** is an element's text content in the flat tree (a shadow host's shadow tree, a slot's assigned
  *   nodes), skipping `script`, `style`, `noscript` and `template`, with a button-like `input`'s value, and
- *   whitespace collapsed and trimmed. Not `innerText`, which depends on layout and differs between engines.
+ *   whitespace collapsed and trimmed. Not `innerText`, which depends on layout and differs between engines;
+ *   `toHaveText` and `toContainText` read an HTML element's `innerText` only when asked to (`useInnerText`), and
+ *   collapse its whitespace the same way.
  * - **`getByText`** matches the smallest element that says it: its text matches and no child element's does.
  *   The document's `head` isn't searched.
  * - **`getByRole`** takes the first role token the engine knows from `role`, or else the implicit role under
@@ -34,9 +36,17 @@
 
 import * as Schema from "effect/Schema"
 
-/** How a query matches text. */
+/**
+ * How a query matches text. An expectation's string compares without case when it has `ignoreCase`; a regular
+ * expression carries its case in its flags.
+ */
 export type TextMatcher =
-  | { readonly _tag: "String"; readonly value: string; readonly exact: boolean }
+  | {
+    readonly _tag: "String"
+    readonly value: string
+    readonly exact: boolean
+    readonly ignoreCase?: boolean | undefined
+  }
   | { readonly _tag: "RegExp"; readonly source: string; readonly flags: string }
 
 /** One step of a locator, applied to the matches of the steps before it. */
@@ -81,6 +91,12 @@ export type Step =
    * the iframe's document. L1 splits steps at each one before resolution; validation receives the complete query.
    */
   | { readonly _tag: "Frame" }
+  /**
+   * A search across frames: the steps after it, up to the next frame boundary, resolve in whichever one document
+   * of the current one and the frames under it, at any depth, they match in. L1 resolves it before the engine
+   * sees the steps.
+   */
+  | { readonly _tag: "AnyFrame" }
   /**
    * A snapshot's ref: the one node it was given to, in the document and engine that gave
    * it, never another. L1 checks the document; the engine its generation and the node.
@@ -190,8 +206,16 @@ export type Expectation =
   | { readonly _tag: "Focused" }
   | { readonly _tag: "Editable" }
   | { readonly _tag: "Empty" }
-  /** The whole text of the one match, or with `list`, of each match in order. */
-  | { readonly _tag: "Text"; readonly expected: ReadonlyArray<TextMatcher>; readonly list: boolean }
+  /**
+   * The whole text of the one match, or with `list`, of each match in order; with `useInnerText`, the rendered
+   * `innerText` instead of the text content.
+   */
+  | {
+    readonly _tag: "Text"
+    readonly expected: ReadonlyArray<TextMatcher>
+    readonly list: boolean
+    readonly useInnerText: boolean
+  }
   | { readonly _tag: "Role"; readonly expected: string }
   | { readonly _tag: "AccessibleName"; readonly expected: TextMatcher; readonly ignoreCase: boolean }
   /** The one match's accessible description or error message matches; with `not`, it doesn't. */
@@ -203,7 +227,16 @@ export type Expectation =
   }
   /** The raw class string of one match, or each match in order. */
   | { readonly _tag: "Class"; readonly expected: ReadonlyArray<TextMatcher>; readonly list: boolean }
-  | { readonly _tag: "ContainsText"; readonly expected: TextMatcher }
+  /**
+   * The one match's text contains its entry, or with `list`, the entries are contained in a subsequence of the
+   * matches, in order; an empty list holds when nothing matches.
+   */
+  | {
+    readonly _tag: "ContainsText"
+    readonly expected: ReadonlyArray<TextMatcher>
+    readonly list: boolean
+    readonly useInnerText: boolean
+  }
   | { readonly _tag: "Value"; readonly expected: TextMatcher }
   | { readonly _tag: "Values"; readonly expected: ReadonlyArray<TextMatcher> }
   | { readonly _tag: "Attribute"; readonly name: string; readonly expected: TextMatcher | null }
@@ -334,6 +367,8 @@ export type Request =
   | { readonly op: "validationStart"; readonly token: string; readonly full: boolean }
   | { readonly op: "validationStop"; readonly token: string }
   | { readonly op: "count"; readonly steps: ReadonlyArray<Step> }
+  /** Every match's count, and the first ten described, as a strictness failure gives them, whatever their count. */
+  | { readonly op: "candidates"; readonly steps: ReadonlyArray<Step> }
   | { readonly op: "visible"; readonly steps: ReadonlyArray<Step> }
   | {
     readonly op: "act"
@@ -507,7 +542,14 @@ export const Response = Schema.Union([
      */
     provisional: Schema.optional(Schema.Boolean)
   }),
-  Schema.TaggedStruct("Strict", { candidates: Schema.Array(Candidate), count: Schema.Number }),
+  Schema.TaggedStruct("Strict", {
+    candidates: Schema.Array(Candidate),
+    count: Schema.Number,
+    /** How many of all the matches are visible, the ones past the ten described included. */
+    visible: Schema.Number,
+    /** How many frames matched, for a search across frames that matched in more than one. */
+    frames: Schema.optionalKey(Schema.Number)
+  }),
   Schema.TaggedStruct("InvalidSelector", {
     selector: Schema.String,
     message: Schema.String,
@@ -658,6 +700,7 @@ export function engine(render: (root: SnapNode) => string) {
     removeEventListener: method(EventTarget.prototype, "removeEventListener"),
     isContentEditable: getter(HTMLElement.prototype, "isContentEditable"),
     tabIndex: getter(HTMLElement.prototype, "tabIndex"),
+    innerText: getter(HTMLElement.prototype, "innerText"),
     activeElement: getter(Document.prototype, "activeElement"),
     documentElement: getter(Document.prototype, "documentElement"),
     doctype: getter(Document.prototype, "doctype"),
@@ -2068,7 +2111,7 @@ export function engine(render: (root: SnapNode) => string) {
     if (matcher._tag === "RegExp") return new RegExp(matcher.source, matcher.flags).test(text)
     const normalize = (value: string) => collapse(value.replace(/[\u200b\u00ad]/g, ""))
     return ignoreCase
-      ? normalize(text).toLocaleLowerCase() === normalize(matcher.value).toLocaleLowerCase()
+      ? normalize(text).toLowerCase() === normalize(matcher.value).toLowerCase()
       : normalize(text) === normalize(matcher.value)
   }
 
@@ -3612,12 +3655,33 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   // Expectations, waiting in the page
+  /** Two strings as an expectation compares them: whole, or contained, and without case when it asks. */
+  const compare = (text: string, value: string, whole: boolean, ignoreCase: boolean | undefined): boolean => {
+    const actual = ignoreCase === true ? text.toLowerCase() : text
+    const wanted = ignoreCase === true ? value.toLowerCase() : value
+    return whole ? actual === wanted : actual.includes(wanted)
+  }
+
   const expected = (matcher: TextMatcher, text: string): boolean =>
-    matcher._tag === "RegExp" ? new RegExp(matcher.source, matcher.flags).test(text) : text === collapse(matcher.value)
+    matcher._tag === "RegExp"
+      ? new RegExp(matcher.source, matcher.flags).test(text)
+      : compare(text, collapse(matcher.value), true, matcher.ignoreCase)
+
+  /** Whether a text contains a string entry, or matches a regular expression one. */
+  const contains = (matcher: TextMatcher, text: string): boolean =>
+    matcher._tag === "RegExp"
+      ? new RegExp(matcher.source, matcher.flags).test(text)
+      : compare(text, collapse(matcher.value), false, matcher.ignoreCase)
 
   /** A value as written, such as a class or an attribute, matched without collapsing its whitespace. */
   const rawMatches = (matcher: TextMatcher, value: string): boolean =>
-    matcher._tag === "RegExp" ? new RegExp(matcher.source, matcher.flags).test(value) : value === matcher.value
+    matcher._tag === "RegExp"
+      ? new RegExp(matcher.source, matcher.flags).test(value)
+      : compare(value, matcher.value, true, matcher.ignoreCase)
+
+  /** An element's text for `toHaveText` and `toContainText`: its rendered text when asked, collapsed alike. */
+  const expectedTextOf = (element: Element, useInnerText: boolean): string =>
+    useInnerText && element instanceof HTMLElement ? collapse(dom.innerText(element)) : textOf(element)
 
   /** Checks an expectation once: whether it holds, and what was seen. */
   const evaluate = (steps: ReadonlyArray<Step>, expectation: Expectation): { passed: boolean; observed: unknown } => {
@@ -3651,7 +3715,7 @@ export function engine(render: (root: SnapNode) => string) {
       case "Count":
         return { passed: found.length === expectation.count, observed: found.length }
       case "Text": {
-        const texts = found.map(textOf)
+        const texts = found.map((element) => expectedTextOf(element, expectation.useInnerText))
         if (expectation.list) {
           return {
             passed: texts.length === expectation.expected.length &&
@@ -3661,6 +3725,22 @@ export function engine(render: (root: SnapNode) => string) {
         }
         if (found.length !== 1) return { passed: false, observed: { matches: found.length } }
         return { passed: expected(expectation.expected[0]!, texts[0]!), observed: texts[0] }
+      }
+      case "ContainsText": {
+        const texts = found.map((element) => expectedTextOf(element, expectation.useInnerText))
+        if (expectation.list) {
+          if (expectation.expected.length === 0) return { passed: texts.length === 0, observed: texts }
+          // Each entry is contained in a later match than the entry before it
+          let next = 0
+          for (const entry of expectation.expected) {
+            while (next < texts.length && !contains(entry, texts[next]!)) next++
+            if (next === texts.length) return { passed: false, observed: texts }
+            next++
+          }
+          return { passed: true, observed: texts }
+        }
+        if (found.length !== 1) return { passed: false, observed: { matches: found.length } }
+        return { passed: contains(expectation.expected[0]!, texts[0]!), observed: texts[0] }
       }
       case "Class": {
         const texts = found.map((element) => dom.classList(element).toString())
@@ -3721,16 +3801,6 @@ export function engine(render: (root: SnapNode) => string) {
         const matches = accessibleTextMatches(text, expectation.expected, expectation.ignoreCase)
         return { passed: expectation.not ? !matches : matches, observed: text }
       }
-      case "ContainsText": {
-        const text = textOf(element)
-        const matcher = expectation.expected
-        return {
-          passed: matcher._tag === "RegExp"
-            ? new RegExp(matcher.source, matcher.flags).test(text)
-            : text.includes(collapse(matcher.value)),
-          observed: text
-        }
-      }
       case "Values": {
         const control = textSelectionTarget(element)
         if (!(control instanceof HTMLSelectElement) || !control.multiple) {
@@ -3771,14 +3841,7 @@ export function engine(render: (root: SnapNode) => string) {
       case "Attribute": {
         const value = dom.getAttribute(element, expectation.name)
         const matcher = expectation.expected
-        return {
-          passed: value !== null &&
-            (matcher === null ||
-              (matcher._tag === "RegExp"
-                ? new RegExp(matcher.source, matcher.flags).test(value)
-                : value === matcher.value)),
-          observed: value
-        }
+        return { passed: value !== null && (matcher === null || rawMatches(matcher, value)), observed: value }
       }
       default:
         return { passed: false, observed: null }
@@ -4446,9 +4509,11 @@ export function engine(render: (root: SnapNode) => string) {
     return { _tag: "Read", value: doctype + (copy as Element).outerHTML }
   }
 
+  // Every match's count and how many are visible, and the first ten described
   const strict = (found: ReadonlyArray<Element>): Response => ({
     _tag: "Strict",
     count: found.length,
+    visible: found.filter((element) => visible(element)).length,
     candidates: found.slice(0, 10).map((element) => ({ description: describe(element), visible: visible(element) }))
   })
 
@@ -4611,6 +4676,8 @@ export function engine(render: (root: SnapNode) => string) {
           )
         case "count":
           return JSON.stringify({ _tag: "Count", count: resolve(request.steps).length } satisfies Response)
+        case "candidates":
+          return JSON.stringify(strict(resolve(request.steps)))
         case "visible": {
           const found = resolve(request.steps)
           if (found.length > 1) return JSON.stringify(strict(found))

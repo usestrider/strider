@@ -90,3 +90,41 @@ export const pointerQuantization: Readonly<Record<"Chromium" | "Firefox" | "WebK
     Firefox: "round",
     WebKit: "truncate"
   }
+
+/**
+ * What each backend reports of a response's server and TLS connection. Chromium reports all of it with every
+ * response. Stock WebKit reports the certificate, without its issuer, with a response but not a redirect's, and the
+ * server's address and TLS version only as a hop finishes, which a redirect's never does: the HAR has them, the
+ * response doesn't. Firefox reports neither.
+ */
+export const responseSecurity: Readonly<
+  Record<"Chromium" | "Firefox" | "WebKit", {
+    readonly securityDetails: { readonly redirect: boolean; readonly final: boolean }
+    readonly issuer: boolean
+    readonly protocolWithResponse: boolean
+    readonly addressWithResponse: boolean
+    readonly addressInHar: { readonly redirect: boolean; readonly final: boolean }
+  }>
+> = {
+  Chromium: {
+    securityDetails: { redirect: true, final: true },
+    issuer: true,
+    protocolWithResponse: true,
+    addressWithResponse: true,
+    addressInHar: { redirect: true, final: true }
+  },
+  Firefox: {
+    securityDetails: { redirect: false, final: false },
+    issuer: false,
+    protocolWithResponse: false,
+    addressWithResponse: false,
+    addressInHar: { redirect: false, final: false }
+  },
+  WebKit: {
+    securityDetails: { redirect: false, final: true },
+    issuer: false,
+    protocolWithResponse: false,
+    addressWithResponse: false,
+    addressInHar: { redirect: false, final: true }
+  }
+}

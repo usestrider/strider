@@ -173,6 +173,10 @@ export interface Recording extends Declaration.Registration {
  *   included, and `content.compression` the bytes decoding saved, each counted as `NetworkRequest.sizes` counts
  *   them. Each is -1, or left out, where the browser doesn't report it, as Chromium reports no body count, and for
  *   a response from a cache, a service worker or a route, or one a 304 revalidated.
+ * - An entry's `serverIPAddress` and `_serverPort` are the address of the server that answered, and
+ *   `_securityDetails` an HTTPS response's TLS `protocol`, `subjectName`, `issuer`, `validFrom`, and `validTo`, in
+ *   seconds since the epoch. What the browser doesn't report is left out: Firefox reports none of them, and
+ *   WebKit no issuer, nor any of them for a redirect hop. With `detail: "minimal"`, they are all left out.
  * - A cookie with no name, which a header writes as a value with no `=`, is listed with the name `""`, and its
  *   value is redacted as any cookie's is. A `Set-Cookie`'s `Max-Age` gives its `expires`, counted from the
  *   response, ahead of its `Expires`.

@@ -80,6 +80,8 @@ describe("Scoped redirect evidence", () => {
           status: status as NetworkResponse.StatusCode,
           statusText: "",
           httpVersion: Option.none(),
+          serverAddress: Option.none(),
+          securityDetails: Option.none(),
           headers: Headers.empty,
           servedBy: "network",
           at: request.at
@@ -167,6 +169,8 @@ describe("Scoped redirect evidence", () => {
           status: 302 as NetworkResponse.StatusCode,
           statusText: "Found",
           httpVersion: Option.none(),
+          serverAddress: Option.none(),
+          securityDetails: Option.none(),
           headers: Headers.fromInput({ location: "/next" }),
           servedBy: "network",
           at: first.at
@@ -214,6 +218,8 @@ describe("Scoped redirect evidence", () => {
             status: 302 as NetworkResponse.StatusCode,
             statusText: "Found",
             httpVersion: Option.none(),
+            serverAddress: Option.none(),
+            securityDetails: Option.none(),
             headers: Headers.empty,
             servedBy: "network",
             at: first.at
@@ -272,6 +278,8 @@ describe("Scoped redirect evidence", () => {
           status: 302 as NetworkResponse.StatusCode,
           statusText: "Found",
           httpVersion: Option.none(),
+          serverAddress: Option.none(),
+          securityDetails: Option.none(),
           headers: Headers.empty,
           servedBy: "network",
           at: request.at

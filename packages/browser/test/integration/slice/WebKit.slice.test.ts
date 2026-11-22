@@ -13,6 +13,7 @@ import * as Option from "effect/Option"
 import { webkitgtk } from "../browsers.ts"
 import { socketConnector } from "../sockets.ts"
 import { useXvfb } from "../stockWebKit.ts"
+import { anyFrame } from "./anyFrame.ts"
 import { attaching } from "./attaching.ts"
 import { clientCertificates } from "./clientCertificates.ts"
 import { contents } from "./contents.ts"
@@ -25,6 +26,7 @@ import { recordings } from "./recordings.ts"
 import { requestBodies } from "./requestBodies.ts"
 import { requestSizes } from "./requestSizes.ts"
 import { requestTiming } from "./requestTiming.ts"
+import { responseSecurityCases } from "./responseSecurity.ts"
 import { screenshotBaselines } from "./screenshotBaselines.ts"
 import { sharedContextChecks } from "./sharedContextChecks.ts"
 import { slice } from "./slice.ts"
@@ -50,6 +52,7 @@ slice(name, backend, (info) => {
 events(name, backend)
 modules(name, backend)
 interaction(name, backend)
+anyFrame(name, backend)
 declarations(name, backend)
 contents(name, backend)
 tooling(name, backend)
@@ -72,3 +75,4 @@ bindings("WebKit", backend)
 clientCertificates("WebKit", backend)
 screenshotBaselines("WebKit", backend)
 sharedContextChecks("WebKit", backend)
+responseSecurityCases("WebKit", backend)

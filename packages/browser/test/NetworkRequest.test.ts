@@ -79,6 +79,8 @@ describe("NetworkRequest.failure", () => {
           status: 503 as NetworkResponse.StatusCode,
           statusText: "Unavailable",
           httpVersion: Option.none(),
+          serverAddress: Option.none(),
+          securityDetails: Option.none(),
           headers: Headers.empty,
           servedBy: "network",
           at: request.at
