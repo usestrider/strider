@@ -3,9 +3,11 @@ import { Browser } from "@usestrider/browser"
 import * as Clock from "effect/Clock"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Scope from "effect/Scope"
 import * as TestClock from "effect/testing/TestClock"
 import * as BrowserImpl from "../src/internal/browser.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
@@ -93,5 +95,45 @@ it.effect("keeps overlapping permission calls consistent with their replay", () 
       const empty = yield* context.grant([])
       yield* empty.remove
       assert.strictEqual(current(), before)
+    }).pipe(Effect.provide(layer))
+  }))
+
+it.effect("releases the permission permit when its scope closes during a send", () =>
+  Effect.gen(function*() {
+    const entered = yield* Deferred.make<void>()
+    const resume = yield* Deferred.make<void>()
+    const clock = yield* Clock.clockWith(Effect.succeed)
+    const settings = new Map<string, string>()
+    const layer = BrowserImpl.layer((sink) =>
+      Effect.map(
+        Fake.connect([], {
+          info: new Browser.Info(Fake.info),
+          capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+        })(sink),
+        (fake) => ({
+          ...fake,
+          grantPermissions: Effect.fnUntraced(function*(_context, _origin, names, setting) {
+            yield* Deferred.succeed(entered, undefined)
+            yield* Deferred.await(resume)
+            for (const name of names) settings.set(name, setting)
+          }),
+          resetPermissions: () => Effect.sync(() => settings.clear())
+        })
+      )
+    ).pipe(Layer.provideMerge(Layer.succeed(BrowserClock.CurrentClock, BrowserClock.fromClock(clock))))
+    yield* Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const owner = yield* Scope.make()
+      // Observe completion without making the test's cleanup wait on a deadlocked fiber.
+      const pending = yield* context.deny(["notifications"]).pipe(Scope.provide(owner), Effect.forkDetach)
+      yield* Deferred.await(entered)
+      yield* Scope.close(owner, Exit.void)
+      yield* Deferred.succeed(resume, undefined)
+      yield* TestClock.adjust("1 millis")
+      assert.notStrictEqual(pending.pollUnsafe(), undefined, "permission call must finish after its scope closes")
+      assert.strictEqual(settings.size, 0, "the closed scope must leave no permission behind")
+      const next = yield* context.grant([])
+      yield* next.remove
+      assert.strictEqual(settings.size, 0, "replay must not restore the closed declaration")
     }).pipe(Effect.provide(layer))
   }))
