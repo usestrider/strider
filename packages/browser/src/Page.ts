@@ -241,13 +241,31 @@ export type ScreenshotOptions = ScreenshotFormat & {
  *
  * Each locator in `mask` hides every element it matches, in its own frame, behind a box of `maskColor` over the
  * element's border box, in every area a capture takes: the viewport, the full page or an element. A locator that
- * matches nothing hides nothing and isn't an error.
+ * matches nothing hides nothing and isn't an error. A `maskColor` that isn't a CSS color fails the capture with
+ * `InvalidInput` before any box is drawn.
  *
  * **Gotchas**
  *
- * The boxes are drawn into the page for the capture and removed after it, however it ends, so a headed browser
- * shows them for that long, and the page's scripts can see the change. They don't cover what the browser draws
- * above the page, such as an open `<dialog>` or popover.
+ * The boxes are drawn into the page for the capture, so a headed browser shows them for that long, and the page's
+ * scripts can see the change. They are removed once it ends, however it ends, from each frame that answers within
+ * 5 seconds: a frame that doesn't keeps its boxes, and the capture still returns its image or its error. They
+ * don't cover what the browser draws above the page, such as an open `<dialog>` or popover.
+ *
+ * **Example** (Hiding every avatar in black)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const captureFeed = Effect.fn("captureFeed")(function*(page: Page.Page) {
+ *   const options: Page.ControlScreenshotOptions = {
+ *     area: "fullPage",
+ *     mask: [page.getByRole("img", { name: "Avatar" })],
+ *     maskColor: "black"
+ *   }
+ *   return yield* page.screenshot(options)
+ * })
+ * ```
  *
  * @stability unstable
  * @category models
@@ -261,7 +279,7 @@ export type ControlScreenshotOptions = ScreenshotOptions & {
    */
   readonly mask?: ReadonlyArray<Locator.ReadonlyLocator> | undefined
   /**
-   * The masks' color: any CSS color.
+   * The masks' color: any CSS color. Anything else fails the capture with `InvalidInput`.
    *
    * @default "#FF00FF"
    */
