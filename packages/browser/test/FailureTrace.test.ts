@@ -511,6 +511,38 @@ describe("a browser shared through layer", () => {
   }, 30_000)
 })
 
+describe("a shared browser replaced during a case", () => {
+  it("keeps a later failing test's traffic on the replacement a passing test's body launched", async () => {
+    const { spawnSync } = await import("node:child_process")
+    const directory = failures
+    const run = spawnSync("pnpm", [
+      "exec",
+      "vitest",
+      "--run",
+      "--config",
+      "packages/browser/test/fixtures/failureTrace/vitest.config.ts",
+      "replacedShared.fixture"
+    ], { cwd: new URL("../../../", import.meta.url), encoding: "utf8" })
+    expect(run.status, run.stdout + run.stderr).toBe(1)
+    const files = fixtureFiles(run.stderr)
+    const parse = (name: string) =>
+      fs.readFileSync(new URL(name, directory), "utf8").trimEnd().split("\n").map((line) => JSON.parse(line))
+    const tests = files.filter((name) => name.includes("-test"))
+    expect(tests.length).toBe(1)
+    const payloads = parse(tests[0]!).map((entry) => entry.payload)
+    expect(payloads).toContain("REPLACEMENT_SEND")
+    expect(payloads).toContain("REPLACEMENT_RECEIVE")
+    expect(payloads).not.toContain("REPLACING_TEST")
+    // Its creation is the shared context's, so the failing test's trace links to it rather than repeating it
+    const shared = parse(files.find((name) => name.includes("-shared"))!)
+    expect(shared).toContainEqual(
+      expect.objectContaining({ kind: "connection", payload: expect.stringContaining("replaced-shared") })
+    )
+    expect(shared.map((entry) => entry.payload)).not.toContain("REPLACEMENT_SEND")
+    for (const name of files) fs.unlinkSync(new URL(name, directory))
+  }, 30_000)
+})
+
 describe("shared layer lifecycle attribution", () => {
   it("separates two failures and links shared acquisition and finalization", async () => {
     const { spawnSync } = await import("node:child_process")

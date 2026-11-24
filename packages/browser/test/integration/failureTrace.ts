@@ -386,3 +386,9 @@ export const connection = (label: string): Record =>
 /** Saves an independent recorder checkpoint before a diagnostic stream can displace its bounded tail. */
 export const checkpoint = (label: string): string | undefined =>
   (globalThis as typeof globalThis & { [key]?: Sink })[key]?.checkpoint?.(label)
+
+/**
+ * Connections created until the returned function is called belong to the shared context, as a setup hook's do, even
+ * when created in a test's body: a suite's shared resource replaced during a case, which serves the cases after it.
+ */
+export const sharedAcquisition = (): () => void => () => {}
