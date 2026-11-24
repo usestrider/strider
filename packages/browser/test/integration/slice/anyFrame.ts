@@ -190,6 +190,36 @@ export const anyFrame = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer
       )
 
       it.effect(
+        "looks up a page.frame iframe's frame once in each round of a click",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { origin } = yield* site
+            const page = yield* newPage
+            yield* page.goto(fixtureUrl(origin, frame(origin, button("Pay"))))
+            const locator = page.frame(page.locator("iframe")).getByRole("button", { name: "Pay" })
+            assert.strictEqual(yield* locator.count, 1)
+            const behind = Handles.page(page)
+            const lookup = vi.spyOn(behind.runtime.model.adapter, "contentFrame")
+            const round = vi.spyOn(behind.entry.execution, "action")
+            yield* Effect.addFinalizer(() =>
+              Effect.sync(() => {
+                lookup.mockRestore()
+                round.mockRestore()
+              })
+            )
+            yield* locator.click()
+            const counted = { lookups: lookup.mock.calls.length, rounds: round.mock.calls.length }
+            lookup.mockRestore()
+            round.mockRestore()
+            assert.strictEqual(yield* page.frame(page.locator("iframe")).locator("#out").readText, "clicked")
+            // Each round routes through the iframe once; checking it still holds its frame reads that frame again
+            assert.isAbove(counted.rounds, 0)
+            assert.deepEqual(counted, { lookups: counted.rounds, rounds: counted.rounds })
+          })),
+        timeout
+      )
+
+      it.effect(
         "caps cross-frame candidate descriptions at ten while retaining the total",
         () =>
           Effect.scoped(Effect.gen(function*() {
