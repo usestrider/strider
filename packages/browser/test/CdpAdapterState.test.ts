@@ -320,6 +320,46 @@ const play = Effect.fnUntraced(function*(order: ReadonlyArray<readonly [string, 
 })
 
 describe("CdpAdapter state", () => {
+  // As Firefox did on macOS (captured over BiDi): a popup's own first load, announced only after a goto was sent to it.
+  // Chromium announces starts through the same matching, so a start for another URL mustn't take the goto's id.
+  it.effect("leaves a command's navigation to its own URL when another URL's start arrives first", () =>
+    Effect.gen(function*() {
+      const { facts, state } = yield* withPage()
+      const frame = state.frames.get("T1")!
+      Tree.commit(
+        state,
+        frame,
+        { loaderId: "initial", url: "about:blank", origin: "://" },
+        () => ({ _tag: "InitialBlank" }),
+        undefined,
+        "test"
+      )
+      const url = "http://example.test/fixture?html=Arrived"
+      const reserved = Kit.expect(state.ids, frame.expected, url)
+      const first = Tree.startNavigation(state, frame, "slow", "http://example.test/slow-page", "crossDocument", false)
+      assert.notStrictEqual(first.id, reserved)
+      const own = Tree.startNavigation(state, frame, "goto", url, "crossDocument", false)
+      assert.strictEqual(own.id, reserved)
+      const document = Tree.commit(
+        state,
+        frame,
+        { loaderId: "goto", url, origin: "http://example.test" },
+        () => ({ _tag: "Navigation", navigation: own.id }),
+        own,
+        "test"
+      )
+      Tree.endNavigation(
+        state,
+        own,
+        { _tag: "Committed", document: document.id, response: Option.none() },
+        "test"
+      )
+      yield* state.buffer.flush
+      const ends = facts.filter((fact) => fact._tag === "NavigationEnded" && fact.navigation === reserved)
+      assert.deepStrictEqual(ends.map((fact) => fact._tag === "NavigationEnded" && fact.outcome._tag), ["Committed"])
+      assert.isEmpty(frame.expected.list)
+    }))
+
   it.effect("keeps mouse capture when an unrelated frame in the same session detaches", () =>
     Effect.gen(function*() {
       const { page, state, target } = yield* withPage()
