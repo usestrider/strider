@@ -88,7 +88,9 @@ const save = (file: string, trace: TraceBuffer, scope: string, passing = false):
   }
   if (passing && file !== sharedFile) {
     const needed = new Set(
-      entries.filter((entry) => /^(engine-round-|host-|pointer-|viewport-)/.test(entry.kind)).flatMap(ownershipKeys)
+      entries.filter((entry) =>
+        /^(engine-round-|content-window-|page-call-probe|host-|pointer-|viewport-)/.test(entry.kind)
+      ).flatMap(ownershipKeys)
     )
     const local = new Set(entries.filter((entry) => entry.kind === "connection").map(connectionKey))
     const replay = shared.entries().filter((entry) =>
@@ -101,7 +103,11 @@ const save = (file: string, trace: TraceBuffer, scope: string, passing = false):
     entries.unshift(...replay)
   }
   const diagnostics = passing
-    ? entries.filter((entry) => /^(engine-round-|host-|pointer-|viewport-|overflow$|attribution$)/.test(entry.kind))
+    ? entries.filter((entry) =>
+      /^(engine-round-|content-window-|page-call-probe|host-|pointer-|viewport-|overflow$|attribution$)/.test(
+        entry.kind
+      )
+    )
     : entries
   // Connection creation alone is not evidence and must not consume the passing budget.
   if (passing && diagnostics.length === 0) return undefined
@@ -166,6 +172,9 @@ const save = (file: string, trace: TraceBuffer, scope: string, passing = false):
 }
 
 install({
+  scope() {
+    return TestRunner.getCurrentTest<RunnerTestCase | undefined>()?.id
+  },
   checkpoint(label) {
     const task = TestRunner.getCurrentTest<RunnerTestCase | undefined>()
     if (task === undefined || active.size !== 1) return undefined

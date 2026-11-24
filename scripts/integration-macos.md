@@ -136,6 +136,19 @@ probe's own commands are not traced as processes. `adapter/StallProbe.test.ts` s
 answers, with the threshold lowered, and names a `python3` child holding an exclusive `flock` on a `settings.dat` in a
 crash database the test creates.
 
+A page-call probe (`test/integration/pageCallProbe.ts`) watches every call into a Firefox page while
+`STRIDER_MACOS_CRASH_DATABASE` is set: each engine round and each `contentWindow` read that finds an iframe's frame.
+When one has gone 50 ms without a reply, it captures once for that case, in parallel and without blocking the call:
+`ps -axo pid,ppid,stat,%cpu,time,rss,etime,wchan,command` of every process on the runner; `sample <pid> 1` of each
+Firefox parent (`Contents/MacOS/firefox`) and then its descendants, its content processes, up to eight processes in
+all; `uptime` and `vm_stat`. Each command has its own timeout (5–10 s) and keeps at most 128 KiB of output. A case
+is captured at most once, a call that goes slow while a capture runs starts none, and each test process captures at
+most 24 times. The reply disarms it. The capture is written to `.data/macos-crash-reports/page-call-probe-<node
+pid>-<n>.json`, at most 512 KiB each (the process table and samples shortened evenly beyond that) and at most 64
+files per run, and as a `page-call-probe` event in the case's failure trace, with each command's first 2 KiB. The
+samples stop Firefox's processes briefly while they run, so a capture can slow the rest of the case it was taken in.
+The page-side timing that goes with it is recorded on every backend and platform (`failureTrace.ts`).
+
 The worker test and deliberate-crash test, plus both files' shared contexts, retain their ordinary bounded
 protocol/process histories on passing runs too. These four scopes are independent of the optional 16 MiB
 passing-diagnostics budget. Match native dump time/PID against these traces and the deliberate-crash marker;

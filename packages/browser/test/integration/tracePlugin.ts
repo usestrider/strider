@@ -10,7 +10,8 @@ export const instrument = (source: string, id: string) => {
   const engine = file.endsWith("/src/internal/engine.ts")
   const runtime = file.endsWith("/src/internal/runtime.ts")
   const operation = file.endsWith("/src/internal/operation.ts")
-  if (!transport && !inspector && !trace && !engine && !runtime && !operation) return
+  const bidiInput = file.endsWith("/src/internal/bidiAdapter/input.ts")
+  if (!transport && !inspector && !trace && !engine && !runtime && !operation && !bidiInput) return
   const replace = (from: string, to: string, count: number) => {
     if (source.split(from).length - 1 !== count) {
       throw new Error(`Failure trace instrumentation no longer matches ${file}: ${from}`)
@@ -18,7 +19,13 @@ export const instrument = (source: string, id: string) => {
     source = source.replaceAll(from, to)
   }
   const helper = path.join(import.meta.dirname, "failureTrace.ts")
-  source = `import { connection as __failureConnection } from ${JSON.stringify(helper)};${
+  source = `import { connection as __failureConnection, scope as __failureScope } from ${JSON.stringify(helper)};${
+    runtime || bidiInput
+      ? `import { watch as __pageCallWatch } from ${
+        JSON.stringify(path.join(import.meta.dirname, "pageCallProbe.ts"))
+      };`
+      : ""
+  }${
     transport
       ? `import { viewportTap as __viewportTap } from ${
         JSON.stringify(path.join(import.meta.dirname, "viewportProbe.ts"))
@@ -54,6 +61,38 @@ export const instrument = (source: string, id: string) => {
       "return JSON.stringify({ ...await act(request), __rendering: (request as any).__rendering })",
       1
     )
+    // Page-side timing of every engine call, on the page's epoch clock: `run` carries its own in its reply; `install`
+    // and `element`, whose results can't carry it, leave theirs in the realm for the next `run` reply to take.
+    const pageClock = "performance.timeOrigin + performance.now()"
+    const stash = (entry: string) =>
+      `{ const __k = Symbol.for("strider.trace.pageCalls"); if (globalThis[__k] === undefined) Object.defineProperty(globalThis, __k, { value: { calls: [], omitted: 0 } }); const __s = globalThis[__k]; if (__s.calls.length < 64) __s.calls.push(${entry}); else __s.omitted++; }`
+    replace(
+      "const run = async (text: string): Promise<string> => {",
+      [
+        `const run = async (text: string): Promise<string> => { const start = ${pageClock}; const reply = await __untimedRun(text); const end = ${pageClock};`,
+        "const store = (globalThis as any)[Symbol.for(\"strider.trace.pageCalls\")]; const earlier = store === undefined ? [] : store.calls.splice(0); const earlierOmitted = store === undefined ? 0 : store.omitted; if (store !== undefined) store.omitted = 0;",
+        "return reply.length > 2 && reply.startsWith(\"{\") && reply.endsWith(\"}\") ? reply.slice(0, -1) + ',\"__page\":' + JSON.stringify({ clock: \"page-epoch-ms\", start, end, earlier, earlierOmitted }) + \"}\" : reply };",
+        "const __untimedRun = async (text: string): Promise<string> => {"
+      ].join(" "),
+      1
+    )
+    replace(
+      "export const install = `function() {",
+      `export const install = \`function() { const __start = ${pageClock};`,
+      1
+    )
+    replace(
+      "  return \"installed\";",
+      `  ${stash(`{ call: "install", start: __start, end: ${pageClock} }`)} return "installed";`,
+      1
+    )
+    replace(
+      ": engine.element(request);",
+      `: (() => { const __start = ${pageClock}; const __result = engine.element(request); let __round = null; try { __round = JSON.parse(request).__rendering?.round ?? null } catch {} ${
+        stash(`{ call: "element", round: __round, start: __start, end: ${pageClock} }`)
+      } return __result })();`,
+      1
+    )
   }
   if (runtime) {
     source = "let __roundSequence = 0;" + source
@@ -61,13 +100,35 @@ export const instrument = (source: string, id: string) => {
       "call(runtime, realm, functionDeclaration, [string(encoded)], releaseResult)",
       [
         "(() => { const __trace = __failureConnection(\"engine-round\"); const parsed = JSON.parse(encoded);",
-        "const metadata = { round: ++__roundSequence, operationId: id, document, realm, op: parsed.op, cap: parsed.cap ?? null };",
-        "__trace(\"engine-round-start\", metadata);",
+        "const metadata = { round: ++__roundSequence, operationId: id, document, realm, call: functionDeclaration === Engine.element ? \"element\" : functionDeclaration === Engine.run ? \"run\" : \"other\", op: parsed.op, cap: parsed.cap ?? null };",
+        "__trace(\"engine-round-start\", { ...metadata, hostEpochMs: Date.now() });",
+        "const __stop = __pageCallWatch(runtime.backend, __failureScope(), metadata, __trace);",
         "const diagnostic = { ...metadata, events: [], omitted: 0 };",
-        "return call(runtime, realm, functionDeclaration, [string(JSON.stringify({ ...parsed, __rendering: diagnostic }))], releaseResult).pipe(Effect.tap((reply) => Effect.sync(() => {",
-        "let rendering = null; let response = null; try { const value = JSON.parse((reply as any).value.value); rendering = value.__rendering ?? null; response = { tag: value._tag, reason: value.reason ?? null, checked: value.checked ?? null } } catch {}",
-        "__trace(\"engine-round-reply\", { ...metadata, rendering, response }); }))); })()"
+        "return call(runtime, realm, functionDeclaration, [string(JSON.stringify({ ...parsed, __rendering: diagnostic }))], releaseResult).pipe(Effect.onExit(() => Effect.sync(__stop)), Effect.tap((reply) => Effect.sync(() => {",
+        "const hostEpochMs = Date.now(); let rendering = null; let response = null; let page = null; try { const value = JSON.parse((reply as any).value.value); rendering = value.__rendering ?? null; page = value.__page ?? null; response = { tag: value._tag, reason: value.reason ?? null, checked: value.checked ?? null } } catch {}",
+        "__trace(\"engine-round-reply\", { ...metadata, hostEpochMs, page, rendering, response }); }))); })()"
       ].join(" "),
+      1
+    )
+  }
+  if (bidiInput) {
+    // The `contentWindow` read answers with its window and its page-side start and end, on the page's epoch clock.
+    replace(
+      "  const document = yield* documentOf(state, node.document)\n  const reply = yield* Kit.protocol(state.send(Script.callFunction({\n    functionDeclaration: \"(element) => element.contentWindow\",",
+      [
+        "  const document = yield* documentOf(state, node.document); const __trace = __failureConnection(\"content-window\"); const __call = { call: \"contentWindow\", document: node.document, context: document.navigable.bidi }; __trace(\"content-window-start\", { ...__call, hostEpochMs: Date.now() }); const __stop = __pageCallWatch(\"firefox\", __failureScope(), __call, __trace);",
+        "  const reply = yield* Kit.protocol(state.send(Script.callFunction({",
+        "    functionDeclaration: \"(element) => { const start = performance.timeOrigin + performance.now(); const window = element.contentWindow; return [window, start, performance.timeOrigin + performance.now()] }\","
+      ].join("\n"),
+      1
+    )
+    replace(
+      "  const context = reply.type === \"success\" && reply.result.type === \"window\" ? reply.result.value.context : undefined",
+      [
+        "  __stop(); const __reply = reply as any; const __items = __reply.type === \"success\" && __reply.result.type === \"array\" ? __reply.result.value : undefined;" +
+        " const context = __items?.[0]?.type === \"window\" ? __items[0].value.context : undefined;" +
+        " __trace(\"content-window-reply\", { ...__call, hostEpochMs: Date.now(), page: { clock: \"page-epoch-ms\", start: __items?.[1]?.value ?? null, end: __items?.[2]?.value ?? null }, window: context ?? null })"
+      ].join("\n"),
       1
     )
   }

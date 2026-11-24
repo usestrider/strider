@@ -141,9 +141,18 @@ describe("integration-only source interception", () => {
       const request = JSON.parse(args[0]!)
       return Effect.succeed({
         _tag: "Value",
-        value: { type: "string", value: JSON.stringify({ _tag: "NotReady", __rendering: request.__rendering }) }
+        value: {
+          type: "string",
+          value: JSON.stringify({
+            _tag: "NotReady",
+            __rendering: request.__rendering,
+            __page: { clock: "page-epoch-ms", start: 1, end: 2, earlier: [], earlierOmitted: 0 }
+          })
+        }
       })
     }
+    const watched: Array<{ backend: unknown; scope: unknown; call: any }> = []
+    let stopped = 0
     const callInDocument = new Function(
       "Effect",
       "Option",
@@ -151,14 +160,22 @@ describe("integration-only source interception", () => {
       "call",
       "string",
       "__failureConnection",
-      "const Engine = { missing: \"missing\" }; let __roundSequence = 0;" + code + ";return callInDocument"
+      "__failureScope",
+      "__pageCallWatch",
+      "const Engine = { missing: \"missing\", run: \"run\", element: \"element\" }; let __roundSequence = 0;" + code +
+        ";return callInDocument"
     )(
       Effect,
       Option,
       () => Effect.succeed("realm-a"),
       call,
       (s: string) => s,
-      () => (kind: string, payload: any) => entries.push({ kind, payload })
+      () => (kind: string, payload: any) => entries.push({ kind, payload }),
+      () => "case-a",
+      (backend: unknown, scope: unknown, call: any) => {
+        watched.push({ backend, scope, call })
+        return () => stopped++
+      }
     )
     Effect.runSync(callInDocument({}, "document-a", "run", JSON.stringify({ op: "act", cap: 100 }), "operation-a"))
     Effect.runSync(callInDocument({}, "document-b", "run", JSON.stringify({ op: "act", cap: 50 }), "operation-b"))
@@ -169,9 +186,17 @@ describe("integration-only source interception", () => {
       document: "document-a",
       realm: "realm-a",
       operationId: "operation-a",
+      call: "run",
       cap: 100,
+      page: { clock: "page-epoch-ms", start: 1, end: 2 },
       rendering: { round: 1, events: [], omitted: 0 }
     })
+    expect(typeof replies[0].hostEpochMs).toBe("number")
+    expect(watched.map((entry) => [entry.scope, entry.call.call, entry.call.round])).toEqual([
+      ["case-a", "run", 1],
+      ["case-a", "run", 2]
+    ])
+    expect(stopped).toBe(2)
     expect(replies[1]).toMatchObject({
       round: 2,
       document: "document-b",

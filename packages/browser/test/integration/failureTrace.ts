@@ -57,6 +57,23 @@
  * The existing Node preload applies the same interception in supported children, with origin PID/local sequence;
  * the child/runtime capture exclusions below still apply. No production source or ordinary execution is instrumented.
  *
+ * Every engine call and Firefox `contentWindow` read also records when it ran in the page, on the page's epoch clock
+ * (`performance.timeOrigin + performance.now()`, milliseconds; `page-epoch-ms`), beside the host's `Date.now()` at
+ * send and reply (`hostEpochMs`). Both read the runner's wall clock, so on one machine they can be set side by side
+ * to split a slow call into the wait before it ran, its running, and the reply, to within the clocks' drift; they
+ * don't establish order closer than that. `engine-round-reply` carries `page` ({ start, end }) for a `run` round.
+ * `install` and `element` calls, whose results are a string and a node, leave theirs in the realm: at most 64, then
+ * an omitted count, taken by the next `run` reply in that realm as `page.earlier` (`element` ones with their round),
+ * so a realm with no later `run` never reports them. `content-window-start` and `content-window-reply` record the
+ * read, its document and the window's context, with `page` from the read's own answer. The page's part adds two clock
+ * reads and a string splice to each call; nothing else is sent.
+ *
+ * In hosted macOS jobs, `pageCallProbe.ts` adds a `page-call-probe` entry to a case when a call into a Firefox page
+ * has gone 50 ms without a reply: `ps` of every process, `sample` for 1 s of up to eight Firefox processes (its parents,
+ * then their content processes), `uptime` and `vm_stat`. It captures at most once a case, one capture at a time, and 24
+ * times a test process, never blocks the call, and its samples briefly stop the processes they sample;
+ * `scripts/integration-macos.md` states its bounds.
+ *
  * In hosted macOS jobs, `stallProbe.ts` adds a `stall-probe` entry to a `--remote-debugging-pipe` child's process
  * connection when its first pipe write has had no byte back for 10 s while it runs: its process tree, `sample` of
  * it and up to six descendants (first 4 KiB each here; up to 128 KiB in its file under `.data/macos-crash-reports/`),
@@ -71,7 +88,7 @@
  * and late cleanup on a pass, independent of the 16 MiB passing quota below; `scripts/integration-macos.md` says when
  * this applies.
  *
- * STRIDER_TRACE_RETAIN_PASSES=1 additionally saves host/engine diagnostic entries (plus overflow/attribution)
+ * STRIDER_TRACE_RETAIN_PASSES=1 additionally saves host/engine, `content-window-*` and `page-call-probe*` diagnostic entries (plus overflow/attribution)
  * from passing scopes for an investigation; passing raw protocol traffic is discarded, except for those scopes. Existing per-scope memory,
  * child spool and payload bounds remain in force. Passing artifacts together consume at most 16 MiB UTF-8 per test
  * file, charging the actual serialized UTF-8 bytes of headers, entries and omission markers. Empty and
@@ -374,6 +391,8 @@ export class TraceBuffer {
 interface Sink {
   checkpoint?(label: string): string | undefined
   connection(label: string): Record
+  /** The running case's ID, when there is one. */
+  scope?(): string | undefined
 }
 const key = Symbol.for("strider.integration.failureTrace")
 export const install = (sink: Sink) => {
@@ -382,6 +401,9 @@ export const install = (sink: Sink) => {
 /** Used only by the integration configuration's source instrumentation. */
 export const connection = (label: string): Record =>
   (globalThis as typeof globalThis & { [key]?: Sink })[key]?.connection(label) ?? (() => {})
+
+/** The running case's ID, which diagnostics that capture once per case key on. */
+export const scope = (): string | undefined => (globalThis as typeof globalThis & { [key]?: Sink })[key]?.scope?.()
 
 /** Saves an independent recorder checkpoint before a diagnostic stream can displace its bounded tail. */
 export const checkpoint = (label: string): string | undefined =>
