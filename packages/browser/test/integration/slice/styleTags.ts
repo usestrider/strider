@@ -119,6 +119,18 @@ export const styleTags = (name: string, backend: Layer.Layer<Browser.Browser, un
           )
         }).pipe(Effect.scoped))
 
+      it.effect("removes the insertion registry when a malformed URL fails before registration", () =>
+        Effect.gen(function*() {
+          const served = yield* site
+          const page = yield* newPage
+          yield* page.goto(`${served.origin}/fixture?html=x`)
+          const error = yield* page.addStyleTag({ url: "http://[" }).pipe(Effect.flip)
+          assert.strictEqual(error._tag, "PageError")
+          assert.isFalse(
+            yield* page.evaluateInMainWorld(() => Reflect.has(document, Symbol.for("@usestrider/browser/tags")))
+          )
+        }).pipe(Effect.scoped))
+
       it.effect("fails with ResourceFailed when the URL doesn't load", () =>
         Effect.gen(function*() {
           const served = yield* site
