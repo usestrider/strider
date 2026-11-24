@@ -210,7 +210,13 @@
  * shared spool and stay shared when collected at suite completion. Concurrent in-process observations stay shared with the
  * active test IDs. Connections created in a test body remain owned by that creator, so late messages from a passing
  * test do not enter another test's trace. Reusing a body-created connection in another test keeps that creator
- * attribution; shared resources should be acquired by setup hooks.
+ * attribution; shared resources should be acquired by setup hooks. A shared resource replaced during a case's body,
+ * as the recycled Firefox is (`slice/recycledBrowser.ts`), is created inside `sharedAcquisition`, so its connections
+ * are the shared context's like a setup hook's. Until it returns, what any connection the shared context owns
+ * carries, such as the launch handshake, is in the shared artifact; afterwards, what they carry while a single test
+ * runs is that test's, and the rest stays shared. Without it, the replacement would belong to the case that launched
+ * it, and once that case passed, its traffic in every later case would be dropped from both artifacts. It changes
+ * ownership only, not the bounds above.
  *
  * Low-level `closed` records contain an initiator and description, not the original Effect Cause or a malformed
  * WebKit frame. They precede the link's first-loss filtering: the first closure is effective, and later closure or
@@ -374,6 +380,7 @@ export class TraceBuffer {
 interface Sink {
   checkpoint?(label: string): string | undefined
   connection(label: string): Record
+  sharedAcquisition?(): () => void
 }
 const key = Symbol.for("strider.integration.failureTrace")
 export const install = (sink: Sink) => {
@@ -391,4 +398,5 @@ export const checkpoint = (label: string): string | undefined =>
  * Connections created until the returned function is called belong to the shared context, as a setup hook's do, even
  * when created in a test's body: a suite's shared resource replaced during a case, which serves the cases after it.
  */
-export const sharedAcquisition = (): () => void => () => {}
+export const sharedAcquisition = (): () => void =>
+  (globalThis as typeof globalThis & { [key]?: Sink })[key]?.sharedAcquisition?.() ?? (() => {})
