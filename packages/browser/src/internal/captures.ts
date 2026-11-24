@@ -13,6 +13,7 @@ import * as Page from "../Page.ts"
 import * as Reason from "../Reason.ts"
 import type * as Target from "../Target.ts"
 import type * as Adapter from "./adapter.ts"
+import * as BrowserClock from "./browserClock.ts"
 import * as LocatorImpl from "./locator.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
@@ -101,11 +102,85 @@ const elementBox = (
     return Option.some({ x: x + scroll.x, y: y + scroll.y, width: response.rect.width, height: response.rect.height })
   })
 
+/**
+ * Covers what each locator matches with a box of `color`, in its frame's document, adding each document drawn in
+ * to `documents`. A locator that matches nothing masks nothing: a mask isn't a target.
+ */
+const drawMasks = (
+  runtime: Runtime.Runtime,
+  page: Model.PageEntry,
+  masks: ReadonlyArray<Locator.ReadonlyLocator>,
+  color: string,
+  token: string,
+  documents: Set<Target.DocumentId>,
+  operation: string,
+  record: Operation.Record
+): Effect.Effect<void, Page.PageError | Target.TargetGone | Deadline.Timeout> =>
+  Effect.forEach(masks, (locator) =>
+    Effect.gen(function*() {
+      if (!(locator instanceof LocatorImpl.LocatorImpl) || locator.owner.page.id !== page.id) {
+        return yield* Effect.die(new Error("Page.screenshot: a mask's locator belongs to another page"))
+      }
+      const answer = yield* Runtime.sendRouted(
+        runtime,
+        page,
+        { op: "mask", steps: locator.steps, color, token },
+        record.id,
+        record.budget.at,
+        // Owned before the request can draw, so a capture cut short before the reply still removes its boxes
+        (document) => documents.add(document)
+      ).pipe(Effect.mapError(failed(operation, record)))
+      const response = answer.response
+      if (response._tag === "Masked") return
+      if (response._tag === "InvalidColor") {
+        return yield* Effect.fail(invalid(operation, record.id, "maskColor", "a CSS color", `${color} isn't one`))
+      }
+      if (response._tag === "NoMatch" || response._tag === "StaleRef") return
+      return yield* Effect.fail(
+        invalid(
+          operation,
+          record.id,
+          "mask",
+          "locators of the page",
+          `${locator.description}: the engine answered ${response._tag}`
+        )
+      )
+    }), { discard: true })
+
+/**
+ * Removes a capture's masks from every document it may have drawn them in; a document that went took them with
+ * it. One that doesn't answer within 5 seconds keeps its boxes, and the capture's own result stays as it is.
+ */
+const removeMasks = (
+  runtime: Runtime.Runtime,
+  page: Model.PageEntry,
+  token: string,
+  documents: ReadonlySet<Target.DocumentId>,
+  id: Diagnostics.OperationId
+): Effect.Effect<void> =>
+  Effect.forEach(
+    documents,
+    (document) =>
+      Runtime.sendToDocument(runtime, page, document, { op: "unmask", token }, id).pipe(
+        // Interruptible inside the release, so the bound can end it
+        Effect.interruptible,
+        BrowserClock.timeoutOption(5000),
+        Effect.ignore
+      ),
+    { discard: true, concurrency: "unbounded" }
+  ).pipe(
+    // Removing them is cleanup, which no operation's deadline ends
+    Operation.detached
+  )
+
+/** Distinguishes each capture's masks from another's drawn in the same document. */
+let masksDrawn = 0
+
 /** `page.screenshot`. */
 export const screenshot = (
   runtime: Runtime.Runtime,
   page: Model.PageEntry,
-  options: Page.ScreenshotOptions | undefined
+  options: Page.ControlScreenshotOptions | undefined
 ): Effect.Effect<Uint8Array, Page.PageError | Target.TargetGone | Deadline.Timeout> => {
   const operation = "Page.screenshot"
   const area = options?.area ?? "viewport"
@@ -149,6 +224,19 @@ export const screenshot = (
         }
         clip = box
       }
+      const masks = options?.mask ?? []
+      if (masks.length === 0) return yield* shoot(clip)
+      const token = `${id}:${++masksDrawn}`
+      return yield* Effect.acquireUseRelease(
+        Effect.sync(() => new Set<Target.DocumentId>()),
+        (documents) =>
+          drawMasks(runtime, page, masks, options?.maskColor ?? "#FF00FF", token, documents, operation, record).pipe(
+            Effect.andThen(shoot(clip))
+          ),
+        (documents) => removeMasks(runtime, page, token, documents, id)
+      )
+    })
+    const shoot = Effect.fnUntraced(function*(clip: Option.Option<Box>) {
       const captureOptions: Adapter.ScreenshotOptions = {
         format,
         quality: format === "jpeg" && quality !== undefined ? Option.some(quality) : Option.none(),

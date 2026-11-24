@@ -1038,7 +1038,8 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       options,
       selectChecks,
       { _tag: "Select", choices },
-      () => Effect.succeed("done" as const)
+      () => Effect.succeed("done" as const),
+      { result: (ready): ReadonlyArray<string> => ready.selected ?? [] }
     )
   }
   setInputFiles(files: FileInput.FileInput | ReadonlyArray<FileInput.FileInput>, options?: Locator.ActionOptions) {
@@ -1686,8 +1687,13 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     insert: Effect.Effect<void, Locator.LocatorError | Target.TargetGone | Deadline.Timeout>
   ) {
     const targets = [
-      ...routed.hops.map((hop) => ({ document: hop.document, steps: hop.steps, ancestor: true })),
-      { document: routed.document, steps: Runtime.split(this.steps).last, ancestor: false }
+      ...routed.hops.map((hop) => ({
+        document: hop.document,
+        steps: hop.steps,
+        ancestor: true,
+        identity: hop.identity
+      })),
+      { document: routed.document, steps: Runtime.split(this.steps).last, ancestor: false, identity: undefined }
     ]
     const documents = targets.map((target) => target.document)
     const call = (document: Target.DocumentId, request: Engine.Request) =>
@@ -1721,14 +1727,14 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       () =>
         Effect.gen({ self: this }, function*() {
           const guards = yield* Effect.forEach(targets, (target) =>
-            call(target.document, { op: "fillGuard", steps: target.steps, ancestor: target.ancestor }))
+            call(target.document, {
+              op: "fillGuard",
+              steps: target.steps,
+              ancestor: target.ancestor,
+              ...(target.identity === undefined ? {} : { identity: target.identity })
+            }))
           // Guards armed on iframes that no longer hold the hops' frames guard another frame: insert nothing
-          const held = yield* Runtime.holdsFrames(this.owner.runtime, routed.hops, record.id).pipe(
-            Effect.mapError((failure) =>
-              this.sendFailure(operation, failure, record)
-            )
-          )
-          if (!held) {
+          if (guards.some((guard) => guard.held === false)) {
             yield* disarm
             return { retry: { _tag: "NoMatch" } as Engine.NotReady }
           }
@@ -1834,9 +1840,11 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
           steps: hop.steps,
           scroll: checks.inViewport,
           cap: Runtime.roundCap((yield* Operation.record).left()),
-          point: checks.receivesPointer ? at : null
+          point: checks.receivesPointer ? at : null,
+          identity: hop.identity
         }, id)
-        if (Option.isNone(answer) || answer.value._tag !== "Frame") {
+        // The geometry is the hop's iframe's only while the steps find the iframe that holds its frame
+        if (Option.isNone(answer) || answer.value._tag !== "Frame" || answer.value.held !== true) {
           return { _tag: "NotReady", reason: { _tag: "NoMatch" } } as const
         }
         const frame = answer.value
@@ -1845,10 +1853,6 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         if (frame.covered !== null) return { _tag: "NotReady", reason: frame.covered } as const
         at = { x: at.x + frame.origin.x, y: at.y + frame.origin.y }
         origins[index] = frame.origin
-      }
-      // The geometry read above is the hops' iframes' only while they still hold their frames
-      if (!(yield* Runtime.holdsFrames(runtime, routed.hops, id))) {
-        return { _tag: "NotReady", reason: { _tag: "NoMatch" } } as const
       }
       const path: Array<Adapter.InputFrame["path"][number]> = []
       for (const [index, hop] of routed.hops.entries()) {
@@ -1864,8 +1868,9 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
    * input permit, the checks once more with the action's part done in the page, and `perform`, which sends the
    * input once. `perform` may ask for another round, only when a guard proved the page never saw the input. In a
    * frame, each round's point is translated into the page's viewport (`translate`), and input names the frame.
+   * It succeeds with what `extra.result` reads from the `Ready` answer of the round it performed on, or nothing.
    */
-  private act(
+  private act<A = void>(
     operation: string,
     options: Locator.ActionOptions | undefined,
     defaults: CheckSet,
@@ -1892,7 +1897,10 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       "done" | { readonly retry: Engine.NotReady },
       Locator.LocatorError | Target.TargetGone | Deadline.Timeout
     >,
-    extra: { readonly redacted?: boolean } = {}
+    extra: {
+      readonly redacted?: boolean
+      readonly result?: (ready: Extract<Engine.Response, { _tag: "Ready" }>) => A
+    } = {}
   ) {
     const owner = this.owner
     return Effect.gen({ self: this }, function*() {
@@ -2160,13 +2168,13 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
             )
             if (Option.isNone(again)) return "again" as const
             // A trial stops at the last check, holding the permit as the action would
-            if (options?.trial === true) return "done" as const
+            if (options?.trial === true) return { done: again.value.response }
             const done = yield* perform(again.value.response, {
               send: send(again.value),
               disarm,
               guardFill: (insert) => this.guardFill(operation, again.value.routed, record, insert)
             }, record)
-            if (done === "done") return "done" as const
+            if (done === "done") return { done: again.value.response }
             // The guard stopped the gesture before the page saw it: nothing happened, so check again
             record.markNotSent()
             record.observe(done.retry)
@@ -2183,7 +2191,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
             return yield* owner.page.input.withPermit(underPermit())
           })
           const outcome = yield* record.bound(permitted, () => hint())
-          if (outcome === "done") return
+          if (outcome !== "again") return extra.result === undefined ? undefined as A : extra.result(outcome.done)
         }
       })
       return yield* attempts.pipe(Effect.catchTag("Deadline", (failure) => Effect.fail(timedOut(failure.hint))))

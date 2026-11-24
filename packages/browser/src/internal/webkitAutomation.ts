@@ -613,12 +613,13 @@ const startProcess = Effect.fnUntraced(function*(
 
 /** Starts the default context's browser, and the transport of every process's pages, for the scope. */
 export const start: (
-  settings: Settings
+  settings: Settings,
+  defaultProcess?: ProcessOptions
 ) => Effect.Effect<
   Group,
   Launch.LaunchError,
   Scope.Scope | FileSystem.FileSystem | ChildProcessSpawner.ChildProcessSpawner | SocketConnector.SocketConnector
-> = Effect.fnUntraced(function*(settings: Settings) {
+> = Effect.fnUntraced(function*(settings: Settings, defaultProcess?: ProcessOptions) {
   if (settings.headless === true) {
     return yield* Launch.invalidInput({
       input: "headless",
@@ -655,7 +656,7 @@ export const start: (
     return process
   })
   // The connection lives as long as the default context's browser
-  const first = yield* launch({}, "default")
+  const first = yield* launch(defaultProcess ?? {}, "default")
   yield* Effect.addFinalizer(() => Effect.sync(() => pages.lose(scopeClosed())))
   return {
     transport: pages.transport,

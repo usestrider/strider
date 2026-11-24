@@ -41,15 +41,16 @@ absolute output directory first; it must be writable. The writer installs nothin
 
 `"100 millis"` is an explicit starting point, not a default or a responsiveness guarantee. The first screenshot
 is immediate; later captures wait the interval after capture completes, and a slow writer can hold them back.
-The actual sampling period includes screenshot latency. The variable-rate output keeps each sample until the next, so it can
+The actual sampling period includes screenshot latency. Without an [`fps`](/docs/tools/video#size-frame-rate-and-path), the output is variable-rate and
+keeps each sample until the next; with one, it repeats or drops samples to keep that rate, and ends at the stop time rounded up to a whole frame. Either way it can
 miss animations, brief errors, and other states between captures. There is no audio. Larger pages and shorter
 intervals can add more page work.
 
-The writer fits viewport changes into the initial output size, centring the image and padding with black. Navigation
+The writer fits every image into the output [size](/docs/tools/video#size-frame-rate-and-path), centring the image and padding with black. Navigation
 continues the recording. Closing its scope, page, or context ends input; a started writer has up to the [default budget](/docs/deadlines)
 (30 seconds unless set) on the browser clock to finish. Capture and writer failures fail `video.file`.
 
-Files remain in the caller's output directory after the context closes. This enables neither downloads nor
+Files remain in the caller's output directory, or at the recording's `path`, after the context closes. This enables neither downloads nor
 `Capability.Screencast`. A trace's [`screencast: "native"`](/docs/tools/recordings) selects the enabled video path.
 Supplying just a writer, or just the video options, leaves video unsupported.
 

@@ -49,6 +49,14 @@ describe("access is typed", () => {
     expect(ConsoleMessage.next(observed)).type.not.toRaiseError()
   })
 
+  it("a masked screenshot draws over the page, so masking needs control", () => {
+    expect(page.screenshot({ mask: [page.locator("#card")], maskColor: "black" })).type.not.toRaiseError()
+    expect(page.screenshot({ mask: [reader.locator("#card")] })).type.not.toRaiseError()
+    expect(reader.screenshot({ mask: [reader.locator("#card")] })).type.toRaiseError()
+    expect(reader.screenshot({ maskColor: "black" })).type.toRaiseError()
+    expect(reader.screenshot({ area: "fullPage" })).type.not.toRaiseError()
+  })
+
   it("configured viewport requires only inspect access", () => {
     expect(reader.viewportSize).type.not.toRaiseError()
     expect(observed.viewportSize).type.toRaiseError()

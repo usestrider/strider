@@ -175,7 +175,7 @@ export const declarations = (
         Effect.gen(function*() {
           const { origin } = yield* tlsSite
           const sibling = yield* Browser.newPage()
-          const rejected = yield* sibling.goto(origin).pipe(Effect.flip)
+          const rejected = yield* sibling.goto(origin, { waitUntil: "load" }).pipe(Effect.flip)
           assert(Page.isPageError(rejected) && rejected.reason._tag === "NavigationFailed")
           const options = { acceptInsecureCerts: true, eventLog: 0 }
           if (!(yield* supports("acceptInsecureCerts"))) {
@@ -488,7 +488,7 @@ export const declarations = (
         Effect.gen(function*() {
           const { origin } = yield* site
           const page = yield* SharedContext.newPage
-          yield* page.goto(`${origin}/hello`)
+          yield* page.goto(`${origin}/hello`, { waitUntil: "load" })
           for (let n = 0; n < 10; n++) {
             yield* Effect.scoped(Effect.gen(function*() {
               const route = yield* page.route(`${origin}/hello*`, () =>
@@ -1969,7 +1969,7 @@ export const declarations = (
           yield* first.context.clock.install({ mode: "controlled", at: 1000 })
           const second = yield* SharedContext.newPage
           const { origin } = yield* site
-          yield* second.goto(fixtureUrl(origin, "<p>second</p>"))
+          yield* second.goto(fixtureUrl(origin, "<p>second</p>"), { waitUntil: "load" })
           yield* first.evaluateInMainWorld(() => {
             setTimeout(() => {
               throw Object.create(null)
@@ -2128,7 +2128,7 @@ export const declarations = (
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
             yield* page.clock.install({ mode: "controlled", at: "2026-01-01T00:00:00Z" })
-            yield* page.goto(fixtureUrl(origin, "<p>clock</p>"))
+            yield* page.goto(fixtureUrl(origin, "<p>clock</p>"), { waitUntil: "load" })
             // A timer hands off through a real task, which sets a timer due within the same adjustment
             yield* page.evaluateInMainWorld(() => {
               const channel = new MessageChannel()
@@ -2154,7 +2154,7 @@ export const declarations = (
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
             yield* page.clock.install({ mode: "controlled", at: "2026-01-01T00:00:00Z" })
-            yield* page.goto(fixtureUrl(origin, "<p>clock</p>"))
+            yield* page.goto(fixtureUrl(origin, "<p>clock</p>"), { waitUntil: "load" })
             yield* page.evaluateInMainWorld(() => {
               const log: Array<string> = []
               Reflect.set(window, "__log", log)

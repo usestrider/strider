@@ -1,8 +1,16 @@
 {
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding public option for this contract.",
-  "capabilities": [],
+  "status": "has",
+  "api": [
+    {
+      "module": "Browser",
+      "symbol": "LaunchOptions",
+      "url": "/docs/api/browser/Browser#LaunchOptions"
+    }
+  ],
+  "notes": "The launch's defaultContext takes downloads: { directory }.",
+  "capabilities": [
+    "downloads"
+  ],
   "id": "option-browsertype-launchpersistentcontext-downloadspath",
   "upstream": [
     "method:BrowserType.launchPersistentContext"

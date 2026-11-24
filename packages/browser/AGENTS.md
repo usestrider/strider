@@ -58,7 +58,8 @@ waiting for a popup, a download or a file chooser, and most emulation; attached,
 - **Access is typed, and held by a scope.** A `Page.ReadonlyPage` can read but not act. A page you didn't open
   (`browser.pages`, an attached browser's tabs, a launched browser's first tab) is observed: `yield* page.inspect` or
   `yield* page.control` inside `Effect.scoped` gains access for the scope, after which the handle fails with
-  `TargetGone{AccessReleased}` and its routes are removed. Attach with `Chromium.layerConnect("http://127.0.0.1:9222")`
+  `TargetGone{AccessReleased}` and its routes are removed. A launch with `defaultContext: { … }` controls its
+  default context, first tab included, for the layer's life instead. Attach with `Chromium.layerConnect("http://127.0.0.1:9222")`
   or `Firefox.layerConnect("ws://127.0.0.1:9222")`; Firefox takes one client at a time. A WebKitGTK or WPE browser
   started with `WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:9333` attaches with `WebKit.layerAttach("http://127.0.0.1:9333")`
   for looking, not driving: no clicks or typing, so script the page with `evaluateInMainWorld`, which is also the

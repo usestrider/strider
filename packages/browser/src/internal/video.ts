@@ -16,6 +16,7 @@ import * as Adapter from "./adapter.ts"
 import * as BrowserClock from "./browserClock.ts"
 import * as Operation from "./operation.ts"
 import * as ProtocolClient from "./protocolClient.ts"
+import * as VideoOptions from "./videoOptions.ts"
 
 export interface Delivery {
   readonly frame: VideoWriter.Frame
@@ -31,7 +32,12 @@ export interface Source {
 export const record = Effect.fnUntraced(function*(
   source: Effect.Effect<Source, Adapter.AdapterError, Scope.Scope>,
   writer: VideoWriter.VideoWriter,
-  directory: string
+  directory: string,
+  /** The file's size and frame rate; without a size, the first image's fitted into 800 by 800; variable-rate when not given. */
+  output?: {
+    readonly size: Option.Option<{ readonly width: number; readonly height: number }>
+    readonly fps: Option.Option<number>
+  } | undefined
 ) {
   const clock = yield* BrowserClock.CurrentClock
   // The writer's finish is bounded so a hung writer can't hang scope close; how long it may take is the caller's.
@@ -136,7 +142,13 @@ export const record = Effect.fnUntraced(function*(
               : original
           })
         ),
-        { path, width: initial.width, height: initial.height }
+        {
+          path,
+          ...(output === undefined
+            ? { width: initial.width, height: initial.height }
+            : Option.getOrElse(output.size, () => VideoOptions.defaultSize(initial))),
+          ...(output !== undefined && Option.isSome(output.fps) ? { fps: output.fps.value } : {})
+        }
       ).pipe(
         Effect.mapError((error) => backendFailure(error.message)),
         Effect.raceFirst(

@@ -16,7 +16,7 @@ const timeout = 60_000
 const open = Effect.fnUntraced(function*() {
   const served = yield* site
   const page = yield* SharedContext.newPage
-  yield* page.goto(`${served.origin}/form`)
+  yield* page.goto(`${served.origin}/form`, { waitUntil: "load" })
   return { page, origin: served.origin }
 })
 const post = (page: Page.Page, path: string, body: string) =>
