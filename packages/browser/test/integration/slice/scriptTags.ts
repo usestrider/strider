@@ -61,6 +61,27 @@ export const scriptTags = <R>(
   // Firefox commits a navigation only once its document's body has ended, so `goto` never returns into a document
   // without a root element there
   if (name !== "Firefox") {
+    it.effect("abandons inline script insertion when waiting for the root times out", () =>
+      Effect.gen(function*() {
+        const served = yield* site
+        const page = yield* newPage
+        yield* page.goto(`${served.origin}/held-page?key=script-timeout&html=${encodeURIComponent("<body>x</body>")}`)
+        assert.isTrue(yield* page.evaluateInMainWorld(() => document.documentElement === null))
+        const exit = yield* page.addScriptTag({ source: "window.afterTimeout = true" }).pipe(
+          Deadline.within("1 second"),
+          Effect.exit
+        )
+        assert.isTrue(Exit.isFailure(exit) && Deadline.isTimeout(Cause.squash(exit.cause)))
+        // The HTML arrives only after the operation has failed, so no insertion has happened yet
+        yield* served.release("script-timeout")
+        yield* page.evaluateInMainWorld(() =>
+          document.readyState === "complete" ||
+          new Promise<boolean>((resolve) => addEventListener("load", () => resolve(true)))
+        )
+        assert.strictEqual(yield* global(page, "afterTimeout"), undefined)
+        assert.strictEqual(yield* page.evaluateInMainWorld(() => document.scripts.length), 0)
+      }).pipe(Effect.scoped))
+
     it.effect("runs inline source in a document committed before its parser made a root element", () =>
       Effect.gen(function*() {
         const served = yield* site

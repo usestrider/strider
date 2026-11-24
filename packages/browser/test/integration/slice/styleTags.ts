@@ -1,6 +1,6 @@
 /** Style injection, `addStyleTag`, into a page's or a frame's document, on every backend. */
 import { assert, describe, layer } from "@effect/vitest"
-import { type Browser, Expect } from "@usestrider/browser"
+import { type Browser, Deadline, Expect } from "@usestrider/browser"
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -48,6 +48,26 @@ export const styleTags = (name: string, backend: Layer.Layer<Browser.Browser, un
       // Firefox commits a navigation only once its document's body has ended, so `goto` never returns into a document
       // without a root element there
       if (name !== "Firefox") {
+        it.effect("abandons inline style insertion when waiting for the root times out", () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const page = yield* newPage
+            yield* page.goto(
+              `${served.origin}/held-page?key=style-timeout&html=${encodeURIComponent("<body>x</body>")}`
+            )
+            assert.isTrue(yield* page.evaluateInMainWorld(() => document.documentElement === null))
+            const exit = yield* page.addStyleTag({ source: "body { color: rgb(61, 62, 63) }" }).pipe(
+              Deadline.within("1 second"),
+              Effect.exit
+            )
+            assert.isTrue(Exit.isFailure(exit) && Deadline.isTimeout(Cause.squash(exit.cause)))
+            // The HTML arrives only after the operation has failed, so no insertion has happened yet
+            yield* served.release("style-timeout")
+            yield* page.evaluateInMainWorld(loaded)
+            assert.strictEqual(yield* page.evaluateInMainWorld(() => document.querySelectorAll("style").length), 0)
+            assert.notStrictEqual(yield* page.evaluateInMainWorld(bodyColor), "rgb(61, 62, 63)")
+          }).pipe(Effect.scoped))
+
         it.effect("adds inline source to a document committed before its parser made a root element", () =>
           Effect.gen(function*() {
             const served = yield* site
