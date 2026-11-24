@@ -1,3 +1,4 @@
+import { bindings } from "./bindings.ts"
 import { locatorHandlers } from "./locatorHandlers.ts"
 /**
  * The slices against Firefox, through the public layer: the pinned Firefox (`browsers.ts`), in the Nix
@@ -9,7 +10,9 @@ import { Firefox } from "@usestrider/browser/firefox"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import { assertPinned, firefox } from "../browsers.ts"
+import { anyFrame } from "./anyFrame.ts"
 import { attaching, firefoxAttachable } from "./attaching.ts"
+import { clientCertificates } from "./clientCertificates.ts"
 import { contents } from "./contents.ts"
 import { deadlines } from "./deadlines.ts"
 import { declarations } from "./declarations.ts"
@@ -21,9 +24,13 @@ import { recycling } from "./recycledBrowser.ts"
 import { requestBodies } from "./requestBodies.ts"
 import { requestSizes } from "./requestSizes.ts"
 import { requestTiming } from "./requestTiming.ts"
+import { responseSecurityCases } from "./responseSecurity.ts"
+import { screenshotBaselines } from "./screenshotBaselines.ts"
+import { sharedContextChecks } from "./sharedContextChecks.ts"
 import { slice } from "./slice.ts"
 import { stalledReadProbes } from "./stalledReadProbes.ts"
 import { storageReplacement } from "./storageReplacement.ts"
+import { styleTags } from "./styleTags.ts"
 import { tooling } from "./tooling.ts"
 import { toolkit } from "./toolkit.ts"
 import { webauthn } from "./webauthn.ts"
@@ -42,13 +49,23 @@ slice("Firefox", backend, (info) => assertPinned("Firefox", info.version, firefo
 events("Firefox", backend)
 modules("Firefox", backend)
 interaction("Firefox", backend)
+anyFrame("Firefox", backend)
 declarations("Firefox", backend)
 contents("Firefox", backend)
 tooling("Firefox", backend)
 recordings("Firefox", backend)
 toolkit("Firefox", backend)
 deadlines("Firefox", backend)
-attaching("Firefox", backend, Option.some(firefoxAttachable((endpoint) => Firefox.layerConnect(endpoint))))
+attaching(
+  "Firefox",
+  backend,
+  Option.some(firefoxAttachable((endpoint) => Firefox.layerConnect(endpoint))),
+  Option.some((userDataDir) =>
+    Firefox.layer({ executablePath: firefox.executable, userDataDir }).pipe(
+      Layer.provide(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor))
+    )
+  )
+)
 
 webauthn("Firefox", backend)
 
@@ -58,5 +75,12 @@ requestTiming("Firefox", backend)
 
 storageReplacement("Firefox", backend)
 requestSizes("Firefox", backend)
+sharedContextChecks("Firefox", backend)
 
 stalledReadProbes("Firefox", backend)
+styleTags("Firefox", backend)
+
+bindings("Firefox", backend)
+clientCertificates("Firefox", backend)
+screenshotBaselines("Firefox", backend)
+responseSecurityCases("Firefox", backend)

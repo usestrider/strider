@@ -14,10 +14,12 @@
  * a segment's in its placeholder. One the export can't declare so is a marked placeholder too (Q251).
  */
 import * as Schema from "effect/Schema"
+import type * as PageNavigation from "../../PageNavigation.ts"
 import * as Reason from "../../Reason.ts"
 import type * as Snapshot from "../../Snapshot.ts"
 import * as Keys from "../keys.ts"
 import * as Secrets from "../secrets.ts"
+import * as ToolkitImpl from "../toolkit.ts"
 import * as Tools from "../tools.ts"
 
 /** A popup a command opened, by its name and its opener's as the command ran. */
@@ -42,6 +44,15 @@ export type ToolStep<K extends Tools.ToolName = Tools.ToolName> = {
 }[K]
 
 /** A command the session ran, as the test repeats it, or how it came to know a page no command opened. */
+/**
+ * The options a recorded navigation's `goto` is written with: the toolkit waits for `domContentLoaded` unless told
+ * otherwise and `Page.goto` returns at commit, so the test waits as the session did.
+ */
+const waited = (waitUntil: PageNavigation.LoadState | undefined) => {
+  const resolved = waitUntil ?? ToolkitImpl.defaultWaitUntil
+  return resolved === "commit" ? "" : `, { waitUntil: ${JSON.stringify(resolved)} }`
+}
+
 export type Step =
   | {
     readonly _tag: "Viewport"
@@ -52,6 +63,8 @@ export type Step =
     readonly _tag: "NewPage"
     readonly page: string
     readonly url: string | undefined
+    /** How far its navigation waited, when it was told; the toolkit's default otherwise. */
+    readonly waitUntil?: PageNavigation.LoadState | undefined
     /** The popups it opened, such as one its page's first document opened. */
     readonly popups?: ReadonlyArray<Opened> | undefined
   }
@@ -492,7 +505,7 @@ export const render = (options: {
       const page = declare(step.page)
       body.push(`const ${page} = yield* context.newPage`)
       popups.declared()
-      if (step.url !== undefined) body.push(`yield* ${page}.goto(${revealed(step.url)})`)
+      if (step.url !== undefined) body.push(`yield* ${page}.goto(${revealed(step.url)}${waited(step.waitUntil)})`)
       popups.after()
       continue
     }
@@ -552,11 +565,13 @@ export const render = (options: {
         const opened = declare(opens!)
         body.push(`const ${opened} = yield* context.newPage`)
         popups.declared()
-        if (step.params.url !== undefined) body.push(`yield* ${opened}.goto(${revealed(step.params.url)})`)
+        if (step.params.url !== undefined) {
+          body.push(`yield* ${opened}.goto(${revealed(step.params.url)}${waited(step.params.waitUntil)})`)
+        }
         break
       }
       case "goto":
-        body.push(`yield* ${page}.goto(${revealed(step.params.url)})`)
+        body.push(`yield* ${page}.goto(${revealed(step.params.url)}${waited(step.params.waitUntil)})`)
         break
       case "back":
         body.push(`yield* ${page}.back()`)

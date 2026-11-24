@@ -1,10 +1,10 @@
 /**
  * Locators: how to find elements on a page, and the actions and reads that use them.
  *
- * A locator describes how to find elements and is resolved again on every attempt, so it never goes stale. A query
- * on a locator searches inside its matches. Reads happen once and never retry; the expectations that retry are
- * `Expect`. A ref from a snapshot is the exception: it's pinned to one node, and fails with `StaleRef` rather than
- * finding another.
+ * A locator describes how to find elements and is resolved again on every attempt, so it never goes stale. A query on a
+ * locator searches inside its matches, and `getByText` the matches themselves too. Reads happen once and never retry;
+ * the expectations that retry are `Expect`. A ref from a snapshot is the exception: it's pinned to one node, and fails
+ * with `StaleRef` rather than finding another.
  *
  * Before acting, a locator checks that its element is ready: visible, stable, enabled, and the rest of the action's
  * checks, tested in the page together on each attempt. The checks are named, can be turned off per call with
@@ -22,17 +22,21 @@ import type * as Pipeable from "effect/Pipeable"
 import * as Predicate from "effect/Predicate"
 import type * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
+import type * as Scope from "effect/Scope"
 import type * as AriaRole from "./AriaRole.ts"
 import type * as Deadline from "./Deadline.ts"
 import * as Diagnostics from "./Diagnostics.ts"
 import type * as FileInput from "./FileInput.ts"
+import type * as Frame from "./Frame.ts"
 import * as ReasonCause from "./internal/reasonCause.ts"
 import * as Steps from "./internal/steps.ts"
 import type * as JSHandle from "./JSHandle.ts"
 import type * as Keyboard from "./Keyboard.ts"
 import type * as Mouse from "./Mouse.ts"
 import * as Reason from "./Reason.ts"
+import type * as ScriptTag from "./ScriptTag.ts"
 import type * as Snapshot from "./Snapshot.ts"
+import type * as StyleTag from "./StyleTag.ts"
 import type * as Target from "./Target.ts"
 
 const TypeId = "~@usestrider/browser/Locator"
@@ -214,13 +218,15 @@ export interface RoleOptions {
 
   /**
    * The accessible name. A string matches as a case-insensitive substring unless `exact` is set; a `RegExp`
-   * is used as given.
+   * is used as given. Both sides have their whitespace collapsed first, so a non-breaking space in a name matches
+   * a space.
    *
    * @default any name
    */
   readonly name?: string | RegExp | undefined
   /**
-   * Match `name` exactly and case-sensitively.
+   * Match `name` exactly and case-sensitively. Whitespace is still collapsed on both sides, so a non-breaking space in
+   * a name matches a space.
    *
    * @default false
    */
@@ -271,11 +277,16 @@ export interface Queries<L> {
    * An element's role is the first token of its `role` attribute that Strider knows, or else its implicit
    * role under HTML-AAM, and its name is computed under accname 1.2. Elements outside the accessibility tree
    * (`aria-hidden`, `display: none`, `visibility: hidden`, the `hidden` attribute, and inert elements) aren't
-   * matched unless `includeHidden` is set. An element is inert when it or an ancestor has the `inert` attribute,
-   * or, while a modal dialog opened with `showModal()` is open, when it is outside the topmost one. The topmost
-   * modal dialog isn't inert because of its ancestors, so it and its content stay matched inside an inert subtree.
-   * The topmost is the open modal dialog that comes last in document order, open shadow roots included, which isn't
-   * always the one opened last.
+   * matched unless `includeHidden` is set, which also counts hidden descendants in their names. An element is inert
+   * when it or an ancestor has the `inert` attribute, or, while a modal dialog opened with `showModal()` is open,
+   * when it is outside the topmost one. The topmost modal dialog isn't inert because of its ancestors, so it and its
+   * content stay matched inside an inert subtree. The topmost is the open modal dialog that comes last in document
+   * order, open shadow roots included, which isn't always the one opened last.
+   *
+   * A name from content takes only the descendants whose role gives their text, as Chromium and Firefox do: text,
+   * generic and structural elements such as lists and paragraphs, and roles named from content. A nested tree
+   * item's group, or an `alert` inside a heading, adds nothing. An embedded combobox or listbox adds its selected
+   * options. Soft hyphens and zero-width spaces are dropped from a name, and non-breaking spaces are kept.
    *
    * Roles that prohibit naming, such as generic, paragraph, and code, have an empty name even with an author
    * label. Their descendants and referenced labels can still contribute to another element's name; an explicit
@@ -306,6 +317,11 @@ export interface Queries<L> {
    * isn't `innerText`, which depends on layout and differs between browsers. A string matches as a case-insensitive
    * substring, or with `exact` as the whole text, case-sensitively; a `RegExp` is tested as given. The document's
    * `head` isn't searched.
+   *
+   * Chained from a locator, it searches the locator's own element as well as the elements inside it, so
+   * `page.locator(".badge").getByText("Resolved")` finds the badge that says "Resolved". The other `getBy*` queries
+   * search only inside the locator's element. The same holds for `getByText` in a filter's `has` and `hasNot`:
+   * the element being tested counts.
    *
    * **Example** (Reading an order number)
    *
@@ -380,7 +396,16 @@ export interface Queries<L> {
    */
   getByTitle(text: string | RegExp, options?: TextOptions | undefined): L
   /**
-   * Elements whose `data-testid` attribute is `id`.
+   * Elements whose test-id attribute is `id`, or matches it when `id` is a RegExp. The attribute is `data-testid`,
+   * unless the context sets another with `UserContext.Options.testIdAttribute`.
+   *
+   * **Details**
+   *
+   * A string matches the attribute exactly, case and whitespace included. A RegExp is tested against the attribute
+   * as written, with its own flags; its `g` flag is ignored. An element without the attribute never matches.
+   *
+   * The attribute is the context's when the locator is made. A relative locator takes the attribute of the locator
+   * whose `filter` it's placed in.
    *
    * **Example** (Reading the cart badge)
    *
@@ -392,11 +417,32 @@ export interface Queries<L> {
    *   return yield* page.getByTestId("cart-count").readText
    * })
    * ```
+   *
+   * **Example** (Counting the rows of a table)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const rowCount = Effect.fn("rowCount")(function*(page: Page.ReadonlyPage) {
+   *   return yield* page.getByTestId(/^row-/).count
+   * })
+   * ```
    */
-  getByTestId(id: string): L
+  getByTestId(id: string | RegExp): L
   /**
-   * Elements matching a CSS selector. A malformed selector fails with `InvalidInput` as soon as the locator is
-   * used, without waiting.
+   * Elements matching a CSS selector, or an XPath expression built with `Locator.xpath`. A malformed selector
+   * fails with `InvalidInput` as soon as the locator is used, without waiting.
+   *
+   * **Details**
+   *
+   * A string is always CSS, which searches open shadow roots too. An XPath expression is evaluated from the
+   * document, from a page or after `frame`, or from each element matched so far when chained. Chained, a `/`
+   * that begins the expression's first step, after optional whitespace, is read from the element, so `//li` reads
+   * as `.//li` and searches inside it; a bare `/`, alone or before `|`, is left as written. Only that very start
+   * is rewritten: in `//a | //b` the second branch searches the whole document (`.//a | .//b` keeps both inside),
+   * and `(//a)[1]` stays document-relative. Other axes, such as `..` or `following-sibling::`, reach wherever
+   * they lead. See `Locator.xpath` for the rest of its rules.
    *
    * **Example** (Submitting a form found by CSS)
    *
@@ -408,8 +454,20 @@ export interface Queries<L> {
    *   yield* page.locator("form#checkout button[type=submit]").click()
    * })
    * ```
+   *
+   * **Example** (Reading the row of a list item found by XPath)
+   *
+   * ```ts import.meta.vitest
+   * import { Locator, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const secondItem = Effect.fn("secondItem")(function*(page: Page.ReadonlyPage) {
+   *   const list = page.locator("ul#basket")
+   *   return yield* list.locator(Locator.xpath("//li[normalize-space()='Two']")).readText
+   * })
+   * ```
    */
-  locator(css: string): L
+  locator(selector: string | XPath): L
 }
 
 /**
@@ -768,6 +826,13 @@ export interface ReadonlyLocator
   /**
    * Whether the one match is enabled now.
    *
+   * **Details**
+   *
+   * An element inside a button, or inside an element with the role `button`, `checkbox`, or `radio`, is enabled only
+   * when it and the nearest such control both are. The control is found through shadow roots and the slots the
+   * element is assigned to: a span inside a disabled button is disabled. Inputs, textareas, selects, and editable
+   * content are read on themselves alone. Native `disabled`, a disabled `fieldset`, and `aria-disabled` all count.
+   *
    * **Example** (Reading whether checkout is available)
    *
    * ```ts import.meta.vitest
@@ -920,7 +985,8 @@ export interface ReadonlyLocator
  * `filter({ visible: true })` excludes it, and `filter({ visible: false })` includes it. Opacity alone does
  * not make an action wait for a fade-in.
  *
- * The action's `visible` check requires CSS visibility, content visibility, and a nonempty box. Pointer actions
+ * The action's `visible` check requires CSS visibility, content visibility, and a nonempty box. An element with
+ * `display: contents` has no box, so it needs a visible child element or visible text instead. Pointer actions
  * also check that the point receives input. Non-pointer actions do not hit-test: `fill` and `clear` check enabled,
  * editable, and not inert; `focus`, `press`, and `pressSequentially` check not inert; `blur` has no checks by default; `selectOption` checks enabled;
  * `selectText` checks only visibility; `scrollIntoView` checks stability. `setInputFiles` runs no readiness checks.
@@ -1038,7 +1104,9 @@ export interface PointerOptions extends ActionOptions {
   /**
    * Where to point, from the top left of the element's padding box.
    * With no position, client rectangles are clipped by the viewport and all parent frames.
-   * With `receivesPointer` enabled, the first centre hitting the target or a descendant and its iframe in every parent is selected,
+   * With `receivesPointer` enabled, the first centre hitting the target or a descendant and its iframe in every parent is selected
+   * (for a target inside a `button`, `a`, or `role=button` or `role=link` element other than a form field or editable element,
+   * the nearest such element, found through shadow roots and slots, counts as the target, so a `pointer-events: none` label inside a button is clicked through the button),
    * allowing a later line when an earlier one is covered. Only centres are probed; if none hits, the check reports `Covered`.
    * Candidates are produced anew under the input permit.
    * Disabling `receivesPointer` uses the first geometric centre without coverage probes.
@@ -1226,8 +1294,8 @@ export interface Locator extends ReadonlyLocator {
   getByPlaceholder(text: string | RegExp, options?: TextOptions | undefined): Locator
   getByAltText(text: string | RegExp, options?: TextOptions | undefined): Locator
   getByTitle(text: string | RegExp, options?: TextOptions | undefined): Locator
-  getByTestId(id: string): Locator
-  locator(css: string): Locator
+  getByTestId(id: string | RegExp): Locator
+  locator(selector: string | XPath): Locator
   frame(iframe: ReadonlyLocator): FrameLocator
   filter(options: FilterOptions): Locator
   and(other: ReadonlyLocator): Locator
@@ -1241,6 +1309,39 @@ export interface Locator extends ReadonlyLocator {
     options?: Snapshot.Options | undefined
   ): Effect.Effect<Snapshot.Snapshot<Locator>, LocatorError | Target.TargetGone | Deadline.Timeout>
   /**
+   * Calls `fn` in the isolated world with the one match as its first argument, and returns its result as a
+   * handle in the caller's scope, for values that can't come back by value.
+   *
+   * **Details**
+   *
+   * The match is resolved now, as `evaluate` resolves it, and never waited for: no match fails with `NoMatch`,
+   * and several with `StrictViolation`. Arguments cross as they do for `evaluate`.
+   *
+   * **Gotchas**
+   *
+   * Fails with `Unsupported` on WebKit, which has no isolated worlds (`isolatedWorlds`).
+   *
+   * **Example** (Holding a canvas's drawing context)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const chartPixel = Effect.fn("chartPixel")(function*(page: Page.Page) {
+   *   const context = yield* page.locator("canvas#chart").evaluateHandle((canvas) =>
+   *     (canvas as HTMLCanvasElement).getContext("2d")!
+   *   )
+   *   return yield* context.evaluate((
+   *     drawing
+   *   ) => [...drawing.getImageData(0, 0, 1, 1).data])
+   * })
+   * ```
+   */
+  evaluateHandle<Args extends ReadonlyArray<unknown>, B>(
+    fn: (element: Element, ...args: Args) => B | Promise<B>,
+    ...args: Args
+  ): Effect.Effect<JSHandle.JSHandle<Awaited<B>>, LocatorError | Target.TargetGone | Deadline.Timeout, Scope.Scope>
+  /**
    * Clicks the one match. Checks: visible, stable, enabled, notInert, inViewport (scrolling it into view),
    * receivesPointer.
    *
@@ -1248,8 +1349,10 @@ export interface Locator extends ReadonlyLocator {
    *
    * - The click is a move to the action point, then a press and a release, carrying the keys and buttons the page
    *   holds.
-   * - The gesture is guarded: the first of its pointer, mouse, touch, and click events must land in the element. If
-   *   the page covered it between the checks and the input, the gesture is stopped before the page's handlers see
+   * - The gesture is guarded: the first of its pointer, mouse, touch, and click events must land in the element that
+   *   receives the pointer for it: its nearest enclosing `button`, `[role=button]`, `a`, or `[role=link]`, found
+   *   through shadow roots and slots, or else the element itself, which an `input`, `textarea`, `select`, or
+   *   editable element always is. If the page covered it between the checks and the input, the gesture is stopped before the page's handlers see
    *   it, and the action checks again. With `receivesPointer` disabled the gesture isn't guarded, and lands on
    *   whatever covers the element.
    * - `modifiers` are pressed before the gesture and released after it. On a backend without
@@ -1527,7 +1630,11 @@ export interface Locator extends ReadonlyLocator {
    * **Details**
    *
    * - A text input, a textarea, or a `contenteditable` element is focused and its contents selected from an
-   *   isolated world of Strider's, then the value is inserted as text, as an input method would.
+   *   isolated world of Strider's, then the value is inserted as text, as an input method would: with no key
+   *   events, a cancelable `beforeinput` and then `input`. An empty value is the exception: the selected contents
+   *   are deleted by pressing Delete. An editor that cancels the `beforeinput` and writes the
+   *   text itself is filled. Firefox's `beforeinput` here is dispatched by Strider, untrusted (`isTrusted` is
+   *   `false`), since Firefox's editing command fires none; see `Keyboard.insertText`.
    * - An input whose value isn't typed (`date`, `time`, `color`, `range`, and their kin) has it set from that
    *   world, with `input` then `change` dispatched. Equivalent browser serialization is accepted, such as
    *   lowercase color hex or omitted zero seconds. A malformed value, or a range value changed by clamping
@@ -1719,6 +1826,8 @@ export interface Locator extends ReadonlyLocator {
    *   target's, which drives pages that drag with pointer events.
    * - An HTML drag (`draggable="true"` on the element or an ancestor) needs `input.dragAndDrop`, which Chromium
    *   has; elsewhere it fails with `Unsupported` before anything is sent.
+   * - On Chromium, a native HTML drag fires `dragenter` at the target on the first move that reaches it,
+   *   `dragover` on each move after, and `dragover` then `drop` at the release.
    * - With `html: "synthetic"`, the page dispatches the drag's events itself, on every backend: `dragstart` and
    *   `drag` on the element, `dragenter` and `dragover` where the target's point is, then `drop` there if a
    *   `dragover` handler accepted it, or `dragleave`, and `dragend` on the element.
@@ -1761,6 +1870,84 @@ export interface Locator extends ReadonlyLocator {
  * @since 0.1.0
  */
 export const isLocator = (u: unknown): u is ReadonlyLocator => Predicate.hasProperty(u, TypeId)
+
+const XPathTypeId = "~@usestrider/browser/Locator/XPath"
+
+/**
+ * An XPath expression for `locator`, built with `Locator.xpath`, so it is never mistaken for CSS.
+ *
+ * **Example** (Keeping an XPath expression to reuse)
+ *
+ * ```ts import.meta.vitest
+ * import { Locator, Page } from "@usestrider/browser"
+ *
+ * const paidCell: Locator.XPath = Locator.xpath("./td[2][.='Paid']")
+ *
+ * const paidRows = (page: Page.ReadonlyPage) =>
+ *   page.locator("tr").filter({ has: Locator.relative.locator(paidCell) })
+ * ```
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export interface XPath {
+  readonly [XPathTypeId]: typeof XPathTypeId
+  /** The expression, as given. */
+  readonly expression: string
+}
+
+/**
+ * An XPath expression for `locator`: elements it selects, in document order.
+ *
+ * **Details**
+ *
+ * The expression is evaluated with the browser's `document.evaluate`, and only the element nodes it selects are
+ * kept: text and attribute nodes are skipped. A union (`a | b`) matches the elements of both, in document order.
+ * From a page, or after `frame`, the expression starts from the document; chained after another query, it starts
+ * from each element matched so far. There, a `/` that begins the first step, after optional whitespace, is read
+ * from the element, so `//li` reads as `.//li` and searches inside it; a bare `/`, alone or before `|`, is the
+ * root of the element's tree and is left as written. It has no namespace prefixes: an unprefixed name matches an
+ * HTML element.
+ *
+ * An expression that doesn't parse, uses a prefix, or selects something other than nodes, such as `count(//li)`,
+ * fails with `InvalidInput` each time the locator is used, without waiting, even when the query before it matches
+ * nothing.
+ *
+ * **Gotchas**
+ *
+ * Chained, only the very start of the expression is read from the element. In `//a | //b` the second branch
+ * searches the whole document; write `.//a | .//b` to keep both inside. Parentheses aren't looked into either, so
+ * `(//a)[1]` stays document-relative; write `(.//a)[1]` for the first one inside.
+ *
+ * XPath doesn't cross into a shadow root, so from the page it never finds an element inside one. Chained from an
+ * element that is itself inside a shadow root, it searches that shadow tree.
+ *
+ * **Example** (Finding the items that are named Two or have the id three)
+ *
+ * ```ts import.meta.vitest
+ * import { Locator, Page } from "@usestrider/browser"
+ *
+ * const items = (page: Page.ReadonlyPage) =>
+ *   page.locator(Locator.xpath("//li[normalize-space()='Two'] | //li[@id='three']"))
+ * ```
+ *
+ * **Example** (Keeping the rows whose second cell says Paid)
+ *
+ * ```ts import.meta.vitest
+ * import { Locator, Page } from "@usestrider/browser"
+ *
+ * const paidRows = (page: Page.ReadonlyPage) =>
+ *   page.locator("tr").filter({
+ *     has: Locator.relative.locator(Locator.xpath("./td[2][.='Paid']"))
+ *   })
+ * ```
+ *
+ * @stability unstable
+ * @category constructors
+ * @since 0.1.0
+ */
+export const xpath = (expression: string): XPath => ({ [XPathTypeId]: XPathTypeId, expression })
 
 const RelativeLocatorTypeId = "~@usestrider/browser/Locator/RelativeLocator"
 
@@ -1826,6 +2013,25 @@ export interface ReadonlyFrameLocator extends Queries<ReadonlyLocator> {
    */
   readonly owner: ReadonlyLocator
   /**
+   * A handle on the frame the iframe holds now. The handle keeps to that frame: when the iframe is replaced or
+   * removed, it reports `Detached`, while this frame locator finds the new iframe. It fails with `NoMatch` when no
+   * iframe matches, or the one that matches holds no document yet, and with the locator's reason, such as
+   * `StrictViolation`, when its iframe can't be entered.
+   *
+   * **Example** (Holding a frame across its navigations)
+   *
+   * ```ts import.meta.vitest
+   * import type { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const frameOf = Effect.fn("frameOf")(function*(page: Page.ReadonlyPage) {
+   *   const frame = yield* page.frame(page.locator("iframe")).resolve
+   *   return frame.id
+   * })
+   * ```
+   */
+  readonly resolve: Effect.Effect<Frame.ReadonlyFrame, LocatorError | Target.TargetGone | Deadline.Timeout>
+  /**
    * Enters a nested iframe, found by a locator built from this frame locator.
    *
    * **Gotchas**
@@ -1847,6 +2053,106 @@ export interface ReadonlyFrameLocator extends Queries<ReadonlyLocator> {
    * ```
    */
   frame(iframe: ReadonlyLocator): ReadonlyFrameLocator
+  /**
+   * Searches this frame's document and the frames under it, at any depth, but not its parents.
+   *
+   * **Example** (Finding a button somewhere inside a checkout frame)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const payLabel = Effect.fn("payLabel")(function*(page: Page.ReadonlyPage) {
+   *   const checkout = page.frame(page.locator("iframe#checkout"))
+   *   return yield* checkout.anyFrame.getByRole("button", { name: "Pay" }).readText
+   * })
+   * ```
+   */
+  readonly anyFrame: ReadonlyAnyFrameLocator
+}
+
+/**
+ * A search of a document and the frames under it, at any depth, for the frame a chain matches in: its locators
+ * act in that one frame.
+ *
+ * **Details**
+ *
+ * Each part of a chain up to the next frame boundary is tested in every document of the search, so a chain never
+ * matches across a frame boundary. When one document has matches, the operation goes on there, with the usual
+ * strictness inside it. When none has, it is the same as a frame that isn't there yet: reads fail with `NoMatch`,
+ * `count` returns 0, and actions and expectations wait. A frame with no document yet matches nothing and doesn't
+ * hold the search up.
+ *
+ * **Gotchas**
+ *
+ * - When more than one document has matches, every operation fails with `Locator.StrictViolation`, `count` and
+ *   `all` included, rather than picking one: which frame loaded first doesn't decide.
+ * - `and` and `or` take operands built from the same search; `filter({ has })` takes a relative locator, as
+ *   anywhere.
+ *
+ * **Example** (Reading a label in whichever frame holds it)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const brand = Effect.fn("brand")(function*(page: Page.ReadonlyPage) {
+ *   return yield* page.anyFrame.getByTestId("card-brand").readText
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export interface ReadonlyAnyFrameLocator extends Queries<ReadonlyLocator> {
+  /**
+   * Enters the frame an iframe this search found holds. The entered frame's own subframes aren't searched; use
+   * its `anyFrame` for that.
+   *
+   * **Example** (Entering a frame found by the search)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const total = Effect.fn("total")(function*(page: Page.ReadonlyPage) {
+   *   const checkout = page.anyFrame.frame(page.anyFrame.locator("iframe#checkout"))
+   *   return yield* checkout.getByTestId("total").readText
+   * })
+   * ```
+   */
+  frame(iframe: ReadonlyLocator): ReadonlyFrameLocator
+}
+
+/**
+ * A search across frames on a page you control, whose locators can act.
+ *
+ * **Example** (Paying in whichever frame holds the button)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const pay = Effect.fn("pay")(function*(page: Page.Page) {
+ *   yield* page.anyFrame.getByRole("button", { name: "Pay" }).click()
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export interface AnyFrameLocator extends ReadonlyAnyFrameLocator {
+  getByRole(role: AriaRole.AriaRole, options?: RoleOptions | undefined): Locator
+  getByText(text: string | RegExp, options?: TextOptions | undefined): Locator
+  getByLabel(text: string | RegExp, options?: TextOptions | undefined): Locator
+  getByPlaceholder(text: string | RegExp, options?: TextOptions | undefined): Locator
+  getByAltText(text: string | RegExp, options?: TextOptions | undefined): Locator
+  getByTitle(text: string | RegExp, options?: TextOptions | undefined): Locator
+  getByTestId(id: string | RegExp): Locator
+  locator(selector: string | XPath): Locator
+  frame(iframe: ReadonlyLocator): FrameLocator
 }
 
 /**
@@ -1876,9 +2182,71 @@ export interface FrameLocator extends ReadonlyFrameLocator {
   getByPlaceholder(text: string | RegExp, options?: TextOptions | undefined): Locator
   getByAltText(text: string | RegExp, options?: TextOptions | undefined): Locator
   getByTitle(text: string | RegExp, options?: TextOptions | undefined): Locator
-  getByTestId(id: string): Locator
-  locator(css: string): Locator
+  getByTestId(id: string | RegExp): Locator
+  locator(selector: string | XPath): Locator
   frame(iframe: ReadonlyLocator): FrameLocator
+  readonly anyFrame: AnyFrameLocator
+  readonly resolve: Effect.Effect<Frame.Frame, LocatorError | Target.TargetGone | Deadline.Timeout>
+  /**
+   * Adds a `<script>` element to the iframe's current document, returning it once it has loaded, run, or been
+   * accepted: a URL's script loads, a classic inline script runs, and an inline module is accepted without waiting
+   * for it to run.
+   *
+   * **Details**
+   *
+   * As `page.addScriptTag`, in the frame's document and main world: the frame's Content Security Policy applies,
+   * and a cross-site frame works as a same-site one. The iframe must be in the page now; this doesn't wait for it.
+   * See `ScriptTag` for what the call waits for.
+   *
+   * **Example** (A helper inside an embedded editor)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const prepareEditor = Effect.fn("prepareEditor")(function*(page: Page.Page) {
+   *   const editor = page.frame(page.locator("iframe#editor"))
+   *   yield* editor.addScriptTag({ source: "window.editorReady = true" })
+   * })
+   * ```
+   */
+  addScriptTag(
+    script: ScriptTag.Source,
+    options?: ScriptTag.Options | undefined
+  ): Effect.Effect<
+    JSHandle.JSHandle<HTMLScriptElement>,
+    LocatorError | Target.TargetGone | Deadline.Timeout,
+    Scope.Scope
+  >
+  /**
+   * Adds a stylesheet to the iframe's current document, returning its element once the stylesheet has loaded and
+   * its rules apply.
+   *
+   * **Details**
+   *
+   * As `page.addStyleTag`, in the frame's document and main world: the frame's Content Security Policy applies,
+   * and a cross-site frame works as a same-site one. The iframe must be in the page now; this doesn't wait for it.
+   * See `StyleTag` for what the call waits for.
+   *
+   * **Example** (Restyling an embedded widget)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const compactChat = Effect.fn("compactChat")(function*(page: Page.Page) {
+   *   const chat = page.frame(page.locator("iframe#chat"))
+   *   yield* chat.addStyleTag({ source: ".message { margin: 0 }" })
+   * })
+   * ```
+   */
+  addStyleTag(
+    style: StyleTag.Source
+  ): Effect.Effect<
+    JSHandle.JSHandle<HTMLStyleElement | HTMLLinkElement>,
+    LocatorError | Target.TargetGone | Deadline.Timeout,
+    Scope.Scope
+  >
 }
 
 /**
@@ -1886,8 +2254,9 @@ export interface FrameLocator extends ReadonlyFrameLocator {
  *
  * **Details**
  *
- * `candidates` describes each match. When exactly one of them is visible, `suggestions` holds the locator with
- * `.filter({ visible: true })` added, which matches it; otherwise it's empty.
+ * `count` is how many elements match, and `candidates` describes the first ten of them. When exactly one of all
+ * the matches is visible, `suggestions` holds the locator with `.filter({ visible: true })` added, which matches
+ * it; otherwise it's empty.
  *
  * @stability unstable
  * @category reasons
@@ -1895,12 +2264,14 @@ export interface FrameLocator extends ReadonlyFrameLocator {
  */
 export class StrictViolation extends Schema.Error<StrictViolation>("@usestrider/browser/Locator/StrictViolation")({
   _tag: Schema.tag("StrictViolation"),
+  /** How many elements match, which may be more than `candidates` describes. */
+  count: Schema.Number,
   candidates: Schema.Array(Schema.Struct({ description: Schema.String, visible: Schema.Boolean })),
   suggestions: Schema.Array(Schema.String),
   hint: Schema.String
 }) {
   override get message(): string {
-    return `${this.candidates.length} matches (${this.hint})`
+    return `${this.count} matches (${this.hint})`
   }
 }
 
@@ -2053,7 +2424,9 @@ export const LocatorErrorReason = Schema.Union([
   Reason.Unsupported,
   Reason.BackendFailure,
   Reason.PromptBlocking,
-  Reason.LocatorHandlerFailed
+  Reason.LocatorHandlerFailed,
+  Reason.ResourceFailed,
+  Reason.RefusedByPolicy
 ])
 
 /**

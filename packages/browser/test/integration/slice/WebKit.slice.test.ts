@@ -1,3 +1,4 @@
+import { bindings } from "./bindings.ts"
 import { locatorHandlers } from "./locatorHandlers.ts"
 /**
  * The slices against stock WebKit, through the public layer: WebKitGTK's MiniBrowser (`browsers.ts`)
@@ -12,7 +13,9 @@ import * as Option from "effect/Option"
 import { webkitgtk } from "../browsers.ts"
 import { socketConnector } from "../sockets.ts"
 import { useXvfb } from "../stockWebKit.ts"
+import { anyFrame } from "./anyFrame.ts"
 import { attaching } from "./attaching.ts"
+import { clientCertificates } from "./clientCertificates.ts"
 import { contents } from "./contents.ts"
 import { deadlines } from "./deadlines.ts"
 import { declarations } from "./declarations.ts"
@@ -23,8 +26,12 @@ import { recordings } from "./recordings.ts"
 import { requestBodies } from "./requestBodies.ts"
 import { requestSizes } from "./requestSizes.ts"
 import { requestTiming } from "./requestTiming.ts"
+import { responseSecurityCases } from "./responseSecurity.ts"
+import { screenshotBaselines } from "./screenshotBaselines.ts"
+import { sharedContextChecks } from "./sharedContextChecks.ts"
 import { slice } from "./slice.ts"
 import { storageReplacement } from "./storageReplacement.ts"
+import { styleTags } from "./styleTags.ts"
 import { tooling } from "./tooling.ts"
 import { toolkit } from "./toolkit.ts"
 import { webauthn } from "./webauthn.ts"
@@ -45,6 +52,7 @@ slice(name, backend, (info) => {
 events(name, backend)
 modules(name, backend)
 interaction(name, backend)
+anyFrame(name, backend)
 declarations(name, backend)
 contents(name, backend)
 tooling(name, backend)
@@ -61,3 +69,10 @@ requestTiming("WebKit", backend)
 
 storageReplacement("WebKit", backend)
 requestSizes("WebKit", backend)
+styleTags("WebKit", backend)
+
+bindings("WebKit", backend)
+clientCertificates("WebKit", backend)
+screenshotBaselines("WebKit", backend)
+sharedContextChecks("WebKit", backend)
+responseSecurityCases("WebKit", backend)

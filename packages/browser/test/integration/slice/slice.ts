@@ -13,6 +13,7 @@ import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import { site } from "../adapter/harness.ts"
+import { endsUnloadablePageNavigation } from "./capabilities.ts"
 import * as SharedContext from "./sharedContext.ts"
 
 const timeout = 60_000
@@ -164,6 +165,43 @@ export const slice = (
           }))
         }), timeout)
 
+      it.effect("fails at once on a URL whose scheme the browser can't navigate to", () =>
+        Effect.gen(function*() {
+          const served = yield* site
+          // `localhost:<port>/…` is a URL whose scheme is `localhost:`: no browser loads it, nor `nosuchscheme:`
+          const urls = [`${new URL(served.crossSite).host}/fixture?html=x`, "nosuchscheme:x"]
+          for (const url of urls) {
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* SharedContext.newPage
+              const failed = yield* page.goto(url).pipe(Deadline.within("1 second"), Effect.flip)
+              assert(failed._tag === "PageError", `${url}: ${String(failed)}`)
+              assert.strictEqual(failed.reason._tag, "NavigationFailed", url)
+            }))
+          }
+        }), timeout)
+
+      it.effect("fails at once a navigation the page starts to a URL whose scheme the browser can't load", () =>
+        Effect.gen(function*() {
+          const url = yield* fixture("<p>site</p>")
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(url)
+            const failed = yield* Effect.gen(function*() {
+              const next = yield* PageNavigation.next(page, { url: "nosuchscheme:x" })
+              yield* page.evaluateInMainWorld(() => {
+                location.href = "nosuchscheme:x"
+              })
+              return yield* next
+            }).pipe(Deadline.within("1 second"), Effect.flip)
+            if (endsUnloadablePageNavigation[name as keyof typeof endsUnloadablePageNavigation]) {
+              assert(failed._tag === "PageError", String(failed))
+              assert.strictEqual(failed.reason._tag, "NavigationFailed")
+            } else {
+              assert(Deadline.isTimeout(failed), String(failed))
+            }
+          }))
+        }), timeout)
+
       it.effect("commits a data: or blob: URL, and a reload of it, with no response", () =>
         Effect.gen(function*() {
           const url = yield* fixture("<p>site</p>")
@@ -196,8 +234,12 @@ export const slice = (
             const page = yield* SharedContext.newPage
             const requests = yield* NetworkRequest.stream(page)
             const collected = yield* requests.pipe(
-              Stream.map((request) => request.url),
-              Stream.takeUntil((url) => url === sentinel),
+              Stream.map((request) =>
+                request.url
+              ),
+              Stream.takeUntil((url) =>
+                url === sentinel
+              ),
               Stream.runCollect,
               Effect.forkChild
             )
@@ -395,6 +437,21 @@ root.querySelector("#inner").attachShadow({mode:"open"}).innerHTML = "<button>Ne
           assert.strictEqual((yield* page.status)._tag, "Closed")
         }), timeout)
 
+      it.effect("lists the default context first and a created context until it is removed", () =>
+        Effect.gen(function*() {
+          const browser = yield* Browser.Browser
+          const scope = yield* Scope.make()
+          const context = yield* Browser.newContext().pipe(Scope.provide(scope))
+          const listed = yield* browser.contexts
+          assert.strictEqual(listed[0], browser.defaultContext)
+          assert.isTrue(listed.includes(context))
+          yield* Scope.close(scope, Exit.void)
+          yield* context.closed
+          assert.isFalse((yield* browser.contexts).some((each) =>
+            each.id === context.id
+          ))
+        }), timeout)
+
       it.effect("opens pages in a context one after another, each closed before the next", () =>
         Effect.scoped(
           Effect.gen(function*() {
@@ -402,7 +459,7 @@ root.querySelector("#inner").attachShadow({mode:"open"}).innerHTML = "<button>Ne
             const context = yield* Browser.newContext()
             for (let index = 0; index < 3; index++) {
               const page = yield* context.newPage
-              yield* page.goto(url)
+              yield* page.goto(url, { waitUntil: "load" })
               assert.strictEqual(yield* page.locator("#out").readText, "ready")
               yield* page.close()
             }

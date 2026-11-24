@@ -11,6 +11,7 @@ import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import * as DOM from "../../cdp/DOM.ts"
+import * as Log from "../../cdp/Log.ts"
 import * as Page from "../../cdp/Page.ts"
 import * as Runtime from "../../cdp/Runtime.ts"
 import * as ConsoleMessage from "../../ConsoleMessage.ts"
@@ -21,12 +22,25 @@ import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as BrowserClock from "../browserClock.ts"
 import * as ConsoleFormat from "../consoleFormat.ts"
+import * as EpochTime from "../epochTime.ts"
 import * as Argument from "../evaluationArgument.ts"
 import * as Groups from "../objectGroups.ts"
 import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
 import * as Urls from "../urls.ts"
-import { closingOf, contextKey, documentOf, type Event, frameOf, realmEnd, realmOf, type State } from "./state.ts"
+import * as HostBridge from "./hostBridge.ts"
+import {
+  closingOf,
+  contextKey,
+  documentOf,
+  type Event,
+  frameById,
+  frameOf,
+  placement,
+  realmEnd,
+  realmOf,
+  type State
+} from "./state.ts"
 import { addRealm, removeRealm } from "./tree.ts"
 
 // ── Remote values ─────────────────────────────────────────────────────────────────────────────────────────
@@ -179,7 +193,7 @@ const requiresDecoder = (value: Adapter.RemoteValue, nested = false): boolean =>
 
 // ── Events ────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** Folds a native context; opted-in popup replay uses the same handler after installing its frame tree. */
+/** Folds a native context, as its `Runtime.executionContextCreated` event arrives in sequence. */
 export const contextCreated = (params: Runtime.ExecutionContextCreatedParams, { state, target }: Event): void => {
   if (target === undefined) return
   const context = params.context
@@ -209,6 +223,7 @@ export const contextCreated = (params: Runtime.ExecutionContextCreatedParams, { 
         context: Option.fromUndefinedOr((target.page?.context ?? state.workerContexts.get(target))?.id)
       }
     })
+    HostBridge.flush(state, target)
     return
   }
   const frame = frameOf(state, auxData.frameId)
@@ -232,7 +247,32 @@ export const contextCreated = (params: Runtime.ExecutionContextCreatedParams, { 
     origin: context.origin,
     kind: { _tag: "Window", navigable: frame.id, document: document.id, world: realm.world }
   })
+  HostBridge.flush(state, target)
 }
+
+/** The categories of the `Log.entryAdded` sources that name one; the application cache's count as `storage`. */
+const logCategories: Readonly<Record<string, ConsoleMessage.Category>> = {
+  network: "network",
+  security: "security",
+  deprecation: "deprecation",
+  intervention: "intervention",
+  violation: "violation",
+  rendering: "rendering",
+  storage: "storage",
+  appcache: "storage"
+}
+
+/**
+ * What a `Log.entryAdded` entry is about. A CORS failure comes on the `javascript` source with the `cors` category,
+ * and counts as `security`, where WebKit puts its own; the failed load it causes comes on `network`, with the same
+ * category, and stays `network`, as on WebKit.
+ */
+const categoryOf = (entry: Log.LogEntry): ConsoleMessage.Category =>
+  entry.source === "javascript" && entry.category === "cors"
+    ? "security"
+    : Object.hasOwn(logCategories, entry.source)
+    ? logCategories[entry.source]!
+    : "other"
 
 export const register = (handlers: Kit.Handlers<Event>) =>
   handlers
@@ -255,9 +295,24 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       const realm = state.realmsByContext.get(contextKey(target, params.executionContextId as number))
       if (realm === undefined) return
       const top = params.stackTrace?.callFrames[0]
+      const page = realm.frame?.page ?? realm.target.page
+      // Only where a subscriber asked for them does a message keep its arguments, each object as a handle
+      const args = page !== undefined && state.registry.consoleArguments(placement(page))
+        ? {
+          values: params.args.map((object): Adapter.RemoteValue => {
+            const value = toRemoteValue(shallow(object), (loaderId) => state.documentsByLoader.get(loaderId)?.id)
+            if (object.objectId === undefined) return value
+            const handle = state.ids.handle()
+            state.handles.set(handle, { target: realm.target, realm, objectId: object.objectId, group: undefined })
+            return withHandle(value, handle)
+          }),
+          release: (handles: ReadonlyArray<Adapter.HandleId>) => releaseHandles(state, handles)
+        }
+        : undefined
       state.buffer.emitFrom(realm, {
         _tag: "ConsoleMessage",
-        realm: realm.id,
+        realm: Option.some(realm.id),
+        args,
         message: new ConsoleMessage.ConsoleMessage({
           level: Kit.consoleLevel(params.type),
           text: ConsoleFormat.format(params.args.map(Kit.argumentOf)),
@@ -271,9 +326,61 @@ export const register = (handlers: Kit.Handlers<Event>) =>
           origin: realm.frame !== undefined
             ? { _tag: "Page", page: realm.frame.page.id }
             : { _tag: "Worker", realm: realm.id },
+          source: { _tag: "Page", method: Kit.consoleMethod(params.type) },
+          timestamp: EpochTime.fromMillis(params.timestamp),
           at: Adapter.now()
         })
       })
+    })
+    // What the browser itself writes to the console, such as a CSP violation, a blocked or failed load, or a
+    // deprecation. An entry names no execution context, so it belongs to its worker or else to its page
+    .on(Log.entryAdded, (params, { state, target }) => {
+      if (target === undefined) return
+      const entry = params.entry
+      if (entry.args !== undefined && entry.args.length > 0) {
+        const on = Protocol.on(target.session)
+        for (const arg of entry.args) {
+          if (arg.objectId !== undefined) {
+            state.buffer.later(Runtime.releaseObject({ objectId: arg.objectId }).pipe(on, Effect.ignore))
+          }
+        }
+      }
+      // A worker's own console calls come again on its page's session as `worker` entries
+      if (entry.source === "worker") return
+      // Only a worker's target has a realm of its own
+      const realm = target.realm
+      const page = target.page
+      if (realm === undefined && page === undefined) return
+      const top = entry.stackTrace?.callFrames[0]
+      // CDP's lines and columns are 0-based; a location is 1-based. An entry with no stack names only a line
+      const location = top !== undefined
+        ? Option.map(Urls.reportedOption(top.url), (url) => ({
+          url,
+          line: top.lineNumber + 1,
+          column: top.columnNumber + 1
+        }))
+        : Option.map(Urls.reportedOption(entry.url ?? ""), (url) => ({
+          url,
+          line: (entry.lineNumber ?? 0) + 1,
+          column: 1
+        }))
+      const fact: Adapter.Fact = {
+        _tag: "ConsoleMessage",
+        realm: Option.fromUndefinedOr(realm?.id),
+        message: new ConsoleMessage.ConsoleMessage({
+          level: entry.level === "verbose" ? "debug" : Kit.consoleLevel(entry.level),
+          text: entry.text,
+          location,
+          origin: realm !== undefined
+            ? { _tag: "Worker", realm: realm.id }
+            : { _tag: "Page", page: page!.id },
+          source: { _tag: "Browser", category: categoryOf(entry) },
+          timestamp: EpochTime.fromMillis(entry.timestamp),
+          at: Adapter.now()
+        })
+      }
+      if (realm === undefined) state.buffer.emit(fact)
+      else state.buffer.emitFrom(realm, fact)
     })
     .on(Runtime.exceptionThrown, (params, { state, target }) => {
       if (target === undefined) return
@@ -493,7 +600,14 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
           const handle = state.ids.handle()
           state.handles.set(handle, { target: realm.target, realm, objectId: object.objectId, group: call.group })
           if (call.group !== undefined) Groups.join(state.groups, call.group, handle)
-          return withHandle(toRemoteValue(object.deepSerializedValue ?? { type: object.type }, documentOf), handle)
+          const held = withHandle(
+            toRemoteValue(object.deepSerializedValue ?? { type: heldType(object) }, documentOf),
+            handle
+          )
+          // `idOnly` serializes no node: its description names it, for the handle's preview
+          return held.type === "node" && held.value === undefined
+            ? { ...held, value: Adapter.describedNode(object.description) }
+            : held
         }
         return toRemoteValue(serialized, documentOf)
       }
@@ -518,6 +632,35 @@ export const evaluate = Effect.fnUntraced(function*(state: State, id: L1Target.R
     )
   )
 })
+
+/**
+ * The kind of an object an `idOnly` call holds, which CDP gives as a type and a subtype (`object`, `array`), as a
+ * deep-serialized value's type (`array`).
+ */
+const heldType = (object: Runtime.RemoteObject): string => {
+  if (object.type !== "object") return object.type
+  switch (object.subtype) {
+    case "array":
+    case "node":
+    case "regexp":
+    case "date":
+    case "map":
+    case "set":
+    case "weakmap":
+    case "weakset":
+    case "error":
+    case "proxy":
+    case "promise":
+    case "typedarray":
+    case "arraybuffer":
+    case "generator":
+      return object.subtype
+    case "null":
+      return "null"
+    default:
+      return "object"
+  }
+}
 
 /** A value with the handle the caller holds on it; a primitive, which has no object id, has none to hold. */
 const withHandle = (value: Adapter.RemoteValue, handle: Adapter.HandleId): Adapter.RemoteValue => {
@@ -546,3 +689,13 @@ export const releaseHandles = (state: State, list: ReadonlyArray<Adapter.HandleI
         Effect.ignore
       )
   }, { concurrency: "unbounded", discard: true })
+
+/**
+ * A round trip on the frame's session: `Runtime.getIsolateId` changes nothing, and once its reply is in, the
+ * worker folds every event received before it, on any session of the connection.
+ */
+export const settled = Effect.fnUntraced(function*(state: State, id: L1Target.NavigableId) {
+  const frame = yield* Effect.option(frameById(state, id))
+  if (Option.isSome(frame)) yield* Effect.ignore(Runtime.getIsolateId().pipe(Protocol.on(frame.value.owner.session)))
+  yield* state.buffer.run(() => {})
+})

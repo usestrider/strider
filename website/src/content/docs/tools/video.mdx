@@ -30,6 +30,9 @@ const recordCheckout = Effect.fn("recordCheckout")(function*() {
 A [trace](/docs/tools/recordings#traces) with `screencast: "native"` records each page's video itself, wherever
 the browser can write one.
 
+To add titles, chapter cards or marks for each action to what's recorded, use
+[recording overlays](/docs/tools/recording-overlays).
+
 ## What each browser needs
 
 | Browser  | Needs                                                               | Frames                                          |
@@ -76,8 +79,9 @@ option names.
   it started at: on Chromium and WebKit, each later frame is scaled to fit it, centred, with black bars.
 - **A slow writer slows the frames, not the page.** Chromium holds its next frame until the writer takes the last
   one.
-- **The recording ends with its page.** Closing the scope, page, or context ends it; a writer then has up to five
-  seconds on the browser's clock to finish, and a writer that fails fails `file`.
+- **The recording ends with its page.** Closing the scope, page, or context ends it; a writer then has the
+  [default budget](/docs/deadlines) in force when the recording started, 30 seconds unless set, counted on the
+  browser's clock from the recording's end, to finish, and a writer that fails or runs out of time fails `file`.
 
 Chromium and WebKit recordings show the first captured picture from time zero, while keeping each captured
 frame at its original time and repeating the final picture at recording stop.

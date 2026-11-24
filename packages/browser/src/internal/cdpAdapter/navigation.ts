@@ -52,6 +52,22 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         isSameDocument(params.navigationType)
       )
     })
+    .on(Page.frameStoppedLoading, (params, { state }) => {
+      const frame = state.frames.get(params.frameId)
+      if (frame === undefined) return
+      // A frame stops loading once no navigation request is left on it, so one a newer navigation replaced has
+      // already ended. A document request aborted before any response, as for a URL whose scheme the browser
+      // won't load, then ended its navigation. A download is decided from a response, so it isn't one of these
+      for (const navigation of [...frame.navigations.values()]) {
+        if (navigation.sameDocument || navigation.failed !== "net::ERR_ABORTED" || navigation.responded) continue
+        endNavigation(
+          state,
+          navigation,
+          { _tag: "Failed", error: navigation.failed, errorDocument: Option.none() },
+          "cdp:Page.frameStoppedLoading"
+        )
+      }
+    })
     .on(Page.frameNavigated, (params, { state, target }) => {
       if (target === undefined) return
       const f = params.frame
@@ -191,9 +207,19 @@ export const navigate = Effect.fnUntraced(function*(
       url,
       frameId: frame.frameId as Page.FrameId,
       ...(Option.isSome(options.referrer) ? { referrer: options.referrer.value } : {})
-    }).pipe(Protocol.on(frame.owner.session))
+    }).pipe(
+      Protocol.on(frame.owner.session),
+      Effect.map(Option.some),
+      // An out-of-process frame navigated back into its parent's process detaches its session before the reply
+      // comes: the navigation started, and its events, on the parent's session, report the rest
+      Effect.catchIf(
+        (error) => error.reason._tag === "SessionEnded" && error.reason.why === "detached",
+        () => Effect.succeedNone
+      )
+    )
   ).pipe(Effect.tapError(() => Effect.sync(() => Kit.unexpect(frame.expected, id))))
-  if (reply.errorText !== undefined && reply.loaderId === undefined) {
+  if (Option.isNone(reply)) return id
+  if (reply.value.errorText !== undefined && reply.value.loaderId === undefined) {
     // A command that never started a navigation: its id ends at once, with the browser's reason
     yield* Kit.neverStarted(state.buffer, {
       drained: frame.owner.session.drainObserved,
@@ -201,7 +227,7 @@ export const navigate = Effect.fnUntraced(function*(
       navigable: frame.id,
       navigation: id,
       url,
-      error: reply.errorText,
+      error: reply.value.errorText,
       evidence: "cdp:Page.navigate"
     })
   }

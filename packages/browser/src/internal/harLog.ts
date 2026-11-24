@@ -98,6 +98,15 @@ export const WebSocketMessage = Schema.Struct({
   data: Schema.String
 })
 
+/** The TLS details of an HTTPS response, with those the browser didn't report left out. */
+export const SecurityDetails = Schema.Struct({
+  protocol: Schema.optionalKey(Schema.String),
+  subjectName: Schema.optionalKey(Schema.String),
+  issuer: Schema.optionalKey(Schema.String),
+  validFrom: Schema.optionalKey(Schema.Number),
+  validTo: Schema.optionalKey(Schema.Number)
+})
+
 export const Entry = Schema.Struct({
   pageref: Schema.optionalKey(Schema.String),
   startedDateTime: Schema.String,
@@ -107,6 +116,9 @@ export const Entry = Schema.Struct({
   // Its fields are optional, and an export writes none
   cache: Schema.Struct({}),
   timings: Timings,
+  serverIPAddress: Schema.optionalKey(Schema.String),
+  _serverPort: Schema.optionalKey(Schema.Number),
+  _securityDetails: Schema.optionalKey(SecurityDetails),
   _monotonicTime: Schema.optionalKey(Schema.Number),
   _resourceType: Schema.optionalKey(Schema.String),
   _frameref: Schema.optionalKey(Schema.String),

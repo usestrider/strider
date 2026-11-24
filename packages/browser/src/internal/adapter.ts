@@ -215,10 +215,17 @@ export type Fact =
     readonly _tag: "UserContextAdded"
     readonly context: UserContext.Id
     readonly isDefault: boolean
+    /** Created by this connection's `createUserContext`, rather than found. */
+    readonly created?: boolean | undefined
     readonly requestTiming?: boolean | undefined
     readonly requestSizes?: boolean | undefined
   }
   | { readonly _tag: "UserContextRemoved"; readonly context: UserContext.Id }
+  /**
+   * The connection no longer creates the context, which stays open: a failed creation whose removal couldn't be
+   * confirmed. It is listed as a context the connection observes.
+   */
+  | { readonly _tag: "UserContextReleased"; readonly context: UserContext.Id }
   | {
     readonly _tag: "PageAdded"
     readonly page: Target.NavigableId
@@ -319,6 +326,10 @@ export type Fact =
     readonly bodyBytes: Option.Option<number>
     /** The response's protocol, where the backend says it only as the response ends (WebKit). */
     readonly httpVersion?: string | undefined
+    /** The server's address, where the backend says it only as the response ends (WebKit). */
+    readonly serverAddress?: NetworkResponse.ServerAddress | undefined
+    /** The TLS version, such as `TLS 1.3`, where the backend says it only as the response ends (WebKit). */
+    readonly securityProtocol?: string | undefined
     readonly at: MonotonicInstant.MonotonicInstant
   }
   | {
@@ -384,7 +395,20 @@ export type Fact =
       | { readonly _tag: "Completed"; readonly path: Option.Option<string> }
       | { readonly _tag: "Canceled" }
   }
-  | { readonly _tag: "ConsoleMessage"; readonly realm: Target.RealmId; readonly message: ConsoleMessage.ConsoleMessage }
+  | {
+    readonly _tag: "ConsoleMessage"
+    readonly realm: Option.Option<Target.RealmId>
+    readonly message: ConsoleMessage.ConsoleMessage
+    /**
+     * The values the page passed, each object with a handle the model owns, where a `ConsoleArguments` declaration
+     * covers the message's page; absent elsewhere, and for the browser's own messages.
+     */
+    readonly args?: {
+      readonly values: ReadonlyArray<RemoteValue>
+      /** Releases the values' handles, which the model owns. */
+      readonly release: (handles: ReadonlyArray<HandleId>) => Effect.Effect<void>
+    } | undefined
+  }
   | {
     readonly _tag: "UncaughtException"
     readonly realm: Option.Option<Target.RealmId>
@@ -447,6 +471,31 @@ export type RemoteValue =
       | "window"
     readonly handle?: HandleId | undefined
   }
+
+/** The node types a protocol's description names with a `#` (`#text`), by that name. */
+const describedTypes: Readonly<Record<string, number>> = {
+  "#text": 3,
+  "#cdata-section": 4,
+  "#comment": 8,
+  "#document": 9,
+  "#document-fragment": 11
+}
+
+/**
+ * A node handle's value, from the description CDP and WebKit's inspector give a node's remote object: an element's
+ * starts with its local name, as CDP's `p#x.note` and WebKit's `<p id="x">` do, and another node's is its name
+ * (`#text`).
+ * `undefined` where the description says neither.
+ */
+export const describedNode = (
+  description: string | undefined
+): Extract<RemoteValue, { readonly type: "node" }>["value"] => {
+  if (description === undefined) return undefined
+  const named = describedTypes[description]
+  if (named !== undefined) return { nodeType: named, nodeName: description }
+  const localName = /^<?([A-Za-z][^\s#.[>]*)/.exec(description)?.[1]
+  return localName === undefined ? undefined : { nodeType: 1, localName: localName.toLowerCase() }
+}
 
 /**
  * An argument for an evaluation: a value to serialize, a handle the caller holds, or a node by its binding,
@@ -537,8 +586,8 @@ export type Override =
   | { readonly _tag: "FocusEmulation"; readonly enabled: boolean }
   | { readonly _tag: "CacheDisabled"; readonly disabled: boolean }
 
-/** Internal host transport belonging only to a WebSocket routing declaration. */
-export interface WebSocketBridge {
+/** A host transport that belongs to one declaration: a WebSocket routing or a binding. */
+export interface HostBridge {
   readonly name: string
   readonly token: string
   readonly scope: Scope.Scope
@@ -561,7 +610,7 @@ export interface WebSocketBridge {
 export type Declaration =
   | {
     readonly _tag: "InitScript"
-    readonly webSocket?: WebSocketBridge | undefined
+    readonly hostBridge?: HostBridge | undefined
     readonly source: string
     readonly world: World
     /** `environment` scripts (library shims such as the page clock) run before `user` scripts. */
@@ -604,6 +653,8 @@ export type Declaration =
     /** As on `Downloads`. */
     readonly retiring?: (() => boolean) | undefined
   }
+  /** Keeps console messages' arguments in scope as handles, which their `ConsoleMessage` facts carry. */
+  | { readonly _tag: "ConsoleArguments" }
   /**
    * Pauses the authentication challenges in scope that the backend can pause (`network.challenges`), as an `auth`
    * intercept pauses one, so the model answers a challenge no route answers, and the browser's prompt never opens.
@@ -792,8 +843,15 @@ export interface Cookie {
   readonly priority: Option.Option<"Low" | "Medium" | "High">
 }
 
-/** A normalized HTTP proxy endpoint; credentials stay redacted until protocol encoding. */
+/** A proxy endpoint's scheme. */
+export type ProxyScheme = "http" | "https" | "socks5" | "socks4"
+
+/**
+ * A normalized proxy endpoint, `server` as `host:port`; credentials stay redacted until protocol encoding. A bypass
+ * entry with a leading dot matches the domain's subdomains, not the domain itself.
+ */
 export interface ProxyOptions {
+  readonly scheme: ProxyScheme
   readonly server: string
   readonly bypass: ReadonlyArray<string>
   readonly credentials?: { readonly username: string; readonly password: Redacted.Redacted<string> } | undefined
@@ -810,6 +868,8 @@ export interface UserContextOptions {
    */
   readonly focusEmulated?: boolean | undefined
   readonly proxy: Option.Option<ProxyOptions>
+  /** The loopback port of the context's client certificate proxy, which its HTTPS traffic must go through. */
+  readonly certificateProxy?: Option.Option<number> | undefined
   readonly acceptInsecureCerts: boolean
 }
 
@@ -1039,6 +1099,11 @@ export interface AdapterConnection {
    * waited for, since a backend reports it a moment after the document commits, until the document ends.
    */
   readonly realm: (document: Target.DocumentId, world: World) => Effect.Effect<Target.RealmId, AdapterError>
+  /**
+   * A round trip on a navigable's connection: one command that changes nothing, then a wait until every event the
+   * browser sent before its reply has been folded into the model. A navigable already gone needs no command.
+   */
+  readonly settled: (navigable: Target.NavigableId) => Effect.Effect<void>
   readonly evaluate: (realm: Target.RealmId, call: EvaluationCall) => Effect.Effect<RemoteResult, AdapterError>
   /**
    * Releases handles: a group given whole in one command (CDP's and WebKit's `Runtime.releaseObjectGroup`), the
@@ -1049,6 +1114,14 @@ export interface AdapterConnection {
   readonly releaseNodes: (nodes: ReadonlyArray<NodeBinding>) => Effect.Effect<void>
 
   // Input
+  /**
+   * How the backend inserts text (`InsertText`): with the protocol's own command (CDP's `Input.insertText`), or,
+   * where the protocol has none that sends no key events, with the page's editing command, which L1 runs in the
+   * focused document (`"editingCommand"`, stock WebKit), after a `beforeinput` the engine dispatches where the
+   * browser's command fires none (`"beforeInputAndEditingCommand"`, WebDriver BiDi on Firefox). An adapter that
+   * doesn't insert natively is never sent `InsertText`.
+   */
+  readonly textInsertion: "native" | "editingCommand" | "beforeInputAndEditingCommand"
   /**
    * Sends input to a page, in its viewport's coordinates. Input aimed inside a frame names it, with the viewport
    * origin, in the page's coordinates, of it and each frame it is inside: a backend that can't deliver page

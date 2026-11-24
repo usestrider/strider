@@ -1,8 +1,16 @@
 {
-  "status": "missing",
-  "api": [],
-  "notes": "The parent capability is missing; this option is not implemented by that contract.",
-  "capabilities": [],
+  "status": "has",
+  "api": [
+    {
+      "module": "Capability",
+      "symbol": "OverlayControl",
+      "url": "/docs/api/browser/Capability#OverlayControl"
+    }
+  ],
+  "notes": "duration removes the overlay once it passes, unless its scope closes first.",
+  "capabilities": [
+    "capability.overlay"
+  ],
   "id": "option-screencast-showoverlay-duration",
   "upstream": [
     "method:Screencast.showOverlay"

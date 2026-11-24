@@ -32,6 +32,7 @@ import * as Stream from "effect/Stream"
 import { TestClock } from "effect/testing"
 import { site } from "../adapter/harness.ts"
 import { supports } from "./capabilities.ts"
+import * as SharedContext from "./sharedContext.ts"
 
 const timeout = 60_000
 
@@ -80,7 +81,8 @@ const popupsRefused = Effect.fnUntraced(function*() {
 
 export const events = (name: string, backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} events`, () => {
-    layer(backend, { excludeTestServices: true, timeout })((it) => {
+    layer(SharedContext.layer(backend), { excludeTestServices: true, timeout })((suite) => {
+      const it = SharedContext.guard(suite)
       for (const rel of ["opener", "noopener"]) {
         it.effect(`loads a routed popup from a rel="${rel}" link`, () =>
           Effect.gen(function*() {
@@ -122,7 +124,7 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
           if (yield* popupsRefused()) return
           const { url } = yield* fixture(connect)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const popups = yield* Popup.next(page)
             yield* page.getByText("Connect account").click()
@@ -187,7 +189,7 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
             opener("First", fixtureUrl(origin, "<title>First</title>")) + opener("Second", `${origin}/child?second`)
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const second = yield* Popup.next(page, { url: `${origin}/child*` })
             yield* page.getByText("First").click()
@@ -207,7 +209,7 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
           if (yield* popupsRefused()) return
           const { url } = yield* fixture(connect)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const first = yield* Popup.next(page)
             yield* page.getByText("Connect account").click()
@@ -226,7 +228,7 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
         Effect.gen(function*() {
           if (yield* popupsRefused()) return
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const started = performance.now()
             const wait = yield* Popup.next(page).pipe(Deadline.within("300 millis"))
             const error = yield* Effect.flip(wait)
@@ -242,7 +244,7 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
           const { url } = yield* fixture(connect)
           const scope = yield* Scope.make()
           const popup = yield* Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const popups = yield* Popup.next(page)
             yield* page.getByText("Connect account").click()
@@ -253,11 +255,38 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
           assert.strictEqual((yield* popup.closed)._tag, "PageClosed")
         }), timeout)
 
+      it.effect("names the page that opened a popup, until the opener closes", () =>
+        Effect.gen(function*() {
+          if (!(yield* supports("popups.opener"))) {
+            // Never None, which would claim no page opened it (QUIRKS.md, Q212)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* SharedContext.newPage
+              const error = yield* Effect.flip(Popup.opener(page))
+              assert.deepInclude(error.reason, { _tag: "Unsupported", capability: "popups.opener" })
+            }))
+            return
+          }
+          const { url } = yield* fixture(connect)
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(url)
+            assert(Option.isNone(yield* Popup.opener(page)))
+            const popups = yield* Popup.next(page)
+            yield* page.getByText("Connect account").click()
+            const popup = yield* popups
+            const opener = yield* Popup.opener(popup)
+            assert(Option.isSome(opener))
+            assert.strictEqual(opener.value.id, page.id)
+            yield* page.close()
+            assert(Option.isNone(yield* Popup.opener(popup)))
+          }))
+        }), timeout)
+
       it.effect("fails a wait with TargetGone when its page closes", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(connect)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             // A popup's wait, or a dialog's where the backend can't say which page opened a page
             const waiting = (yield* supports("popups.opener"))
@@ -274,7 +303,7 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
         Effect.gen(function*() {
           const { url } = yield* fixture(connect)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const evaluation = yield* page.evaluateInMainWorld(() => {
               ;(window as { __pending?: boolean }).__pending = true
@@ -358,7 +387,7 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
         Effect.gen(function*() {
           const { url } = yield* fixture(() => asking("confirm('Sure?')"))
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const dialogs = yield* Dialog.next(page)
             const decisions = yield* AutoResolution.next(page)
@@ -381,7 +410,7 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
         Effect.gen(function*() {
           const { url } = yield* fixture(() => asking("confirm('Sure?')"))
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const handler = yield* Dialog.handle(page, () => Effect.fail("no answer"))
             const decisions = yield* AutoResolution.next(page)
@@ -400,7 +429,7 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
             if (yield* supports("prompts.kind")) return
             const { url } = yield* fixture(() => asking("confirm('Sure?')"))
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               yield* page.goto(url)
               yield* Dialog.handle(
                 page,
@@ -419,7 +448,7 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
         Effect.gen(function*() {
           const { url } = yield* fixture(() => asking("confirm('Sure?')"))
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const accepting = yield* Dialog.handle(page, Dialog.acceptAll)
             const declining = yield* Dialog.handle(page, Dialog.dismissAll)
@@ -440,7 +469,7 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
             const { url } = yield* fixture(() => asking("(alert('one'), confirm('two'))"))
             const kinds = yield* supports("prompts.kind")
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               yield* page.goto(url)
               const dialogs = yield* Dialog.stream(page)
               const collected = yield* Stream.runCollect(dialogs).pipe(Effect.forkChild)
@@ -492,7 +521,7 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
         Effect.gen(function*() {
           const { url } = yield* fixture(() => asking("(alert('one'), alert('two'), alert('three'))"))
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const dialogs = yield* Dialog.stream(page).pipe(Subscription.withCapacity(1))
             yield* page.getByText("Ask").click()

@@ -39,6 +39,20 @@ owner. It works over the shared browser layer and with a per-effect browser laye
 Complete bound attachments before the callback ends: Vitest does not guarantee that later artifacts reach reporters. Without binding, the layer uses Vitest's global current-test lookup,
 which supports sequential tests only; concurrent callbacks can read another test's identity or attach to it.
 
+`ScreenshotBaseline.toMatch` compares a page's screenshot with a PNG baseline beside the test file, following
+Vitest's `-u`; [Screenshot baselines](https://usestrider.dev/docs/tools/screenshot-baselines) covers it.
+
+```ts
+yield * page.pipe(ScreenshotBaseline.toMatch("checkout", { maxDiffPixels: 20 }))
+```
+
+`SnapshotBaseline.toMatch` compares bytes, such as a PDF, with a baseline file the same way: a `.png` name by its
+pixels, any other byte for byte; [Snapshot baselines](https://usestrider.dev/docs/tools/snapshot-baselines) covers it.
+
+```ts
+yield * SnapshotBaseline.toMatch(yield * page.pdf(), "invoice.pdf")
+```
+
 [Tests with Vitest](https://usestrider.dev/docs/tools/testing) covers concurrent pages, attaching files to a test, and a
 fake browser for events. The source is at https://github.com/usestrider/strider.
 

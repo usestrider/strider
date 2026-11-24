@@ -23,10 +23,14 @@ const exactly = (matcher: Engine.TextMatcher) => matcher._tag === "String" && ma
  * made it.
  */
 export const describeSteps = (steps: ReadonlyArray<Engine.Step>): string => {
-  const boundary = steps.findLastIndex((step) => step._tag === "Frame")
+  const boundary = steps.findLastIndex((step) => step._tag === "Frame" || step._tag === "AnyFrame")
   if (boundary < 0) return describePlain(steps)
   const rest = describePlain(steps.slice(boundary + 1))
-  return `frame(page.${describeSteps(steps.slice(0, boundary))})${rest === "" ? "" : `.${rest}`}`
+  const after = rest === "" ? "" : `.${rest}`
+  if (steps[boundary]!._tag === "AnyFrame") {
+    return boundary === 0 ? `anyFrame${after}` : `${describeSteps(steps.slice(0, boundary))}.anyFrame${after}`
+  }
+  return `frame(page.${describeSteps(steps.slice(0, boundary))})${after}`
 }
 
 const describePlain = (steps: ReadonlyArray<Engine.Step>): string =>
@@ -54,9 +58,11 @@ const describePlain = (steps: ReadonlyArray<Engine.Step>): string =>
       case "Title":
         return `getByTitle(${quote(step.matcher)}${exactly(step.matcher)})`
       case "TestId":
-        return `getByTestId(${JSON.stringify(step.id)})`
+        return `getByTestId(${quote(step.matcher)})`
       case "Css":
         return `locator(${JSON.stringify(step.selector)})`
+      case "XPath":
+        return `locator(Locator.xpath(${JSON.stringify(step.expression)}))`
       case "Nth":
         return `nth(${step.index})`
       case "First":
@@ -79,6 +85,8 @@ const describePlain = (steps: ReadonlyArray<Engine.Step>): string =>
         return `or(page.${describeSteps(step.other)})`
       case "Frame":
         return "frame()"
+      case "AnyFrame":
+        return "anyFrame"
       case "Ref":
         return `ref(${JSON.stringify(step.ref)})`
     }
@@ -98,10 +106,17 @@ export const roleStep = (role: AriaRole.AriaRole, options: Locator.RoleOptions |
   )
 })
 
-/** The queries, as steps appended to `steps`. */
+/** `locator`'s step: a string is CSS, and `Locator.xpath` an XPath expression. */
+export const selectorStep = (selector: string | Locator.XPath): Engine.Step =>
+  typeof selector === "string"
+    ? { _tag: "Css", selector }
+    : { _tag: "XPath", expression: selector.expression }
+
+/** The queries, as steps appended to `steps`, matching test ids by the attribute `testIdAttribute` reads. */
 export const queries = <L>(
   steps: ReadonlyArray<Engine.Step>,
-  make: (steps: ReadonlyArray<Engine.Step>) => L
+  make: (steps: ReadonlyArray<Engine.Step>) => L,
+  testIdAttribute: () => string
 ): Locator.Queries<L> => ({
   getByRole: (role, options) => make([...steps, roleStep(role, options)]),
   getByText: (text, options) => make([...steps, { _tag: "Text", matcher: matcher(text, options?.exact) }]),
@@ -110,8 +125,8 @@ export const queries = <L>(
     make([...steps, { _tag: "Placeholder", matcher: matcher(text, options?.exact) }]),
   getByAltText: (text, options) => make([...steps, { _tag: "AltText", matcher: matcher(text, options?.exact) }]),
   getByTitle: (text, options) => make([...steps, { _tag: "Title", matcher: matcher(text, options?.exact) }]),
-  getByTestId: (id) => make([...steps, { _tag: "TestId", id }]),
-  locator: (css) => make([...steps, { _tag: "Css", selector: css }])
+  getByTestId: (id) => make([...steps, { _tag: "TestId", matcher: matcher(id, true), attribute: testIdAttribute() }]),
+  locator: (selector) => make([...steps, selectorStep(selector)])
 })
 
 const RelativeTypeId = "~@usestrider/browser/Locator/RelativeLocator"
@@ -121,12 +136,24 @@ export interface Relative extends Locator.RelativeLocator {
   readonly steps: ReadonlyArray<Engine.Step>
 }
 
+/**
+ * The test-id attribute of a relative locator's steps until it is placed: no context's, since a relative locator
+ * has none. The empty string is no attribute's name, so no context's setting can be it.
+ */
+const unplaced = ""
+
 const makeRelative = (steps: ReadonlyArray<Engine.Step>): Relative =>
   ({
     [RelativeTypeId]: RelativeTypeId,
     steps,
-    ...queries(steps, makeRelative)
+    ...queries(steps, makeRelative, () => unplaced)
   }) as unknown as Relative
 
 /** `Locator.relative`: the queries, starting from nothing. */
-export const relative: Locator.Queries<Locator.RelativeLocator> = queries([], makeRelative)
+export const relative: Locator.Queries<Locator.RelativeLocator> = queries([], makeRelative, () => unplaced)
+
+/** A relative locator's steps placed in a locator whose context matches test ids by `testIdAttribute`. */
+export const place = (relative: Relative, testIdAttribute: string): ReadonlyArray<Engine.Step> =>
+  relative.steps.map((step) =>
+    step._tag === "TestId" && step.attribute === unplaced ? { ...step, attribute: testIdAttribute } : step
+  )

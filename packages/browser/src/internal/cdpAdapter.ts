@@ -39,6 +39,7 @@ import * as Responses from "./cdpAdapter/responses.ts"
 import * as State from "./cdpAdapter/state.ts"
 import * as Storage from "./cdpAdapter/storage.ts"
 import * as Targets from "./cdpAdapter/targets.ts"
+import * as Tree from "./cdpAdapter/tree.ts"
 import * as WebAuthn from "./cdpAdapter/webauthn.ts"
 import * as CdpWire from "./cdpWire.ts"
 import * as Declarations from "./declarations.ts"
@@ -81,10 +82,19 @@ export const capabilities = (
       ]),
       entry("input.topLevelDesignMode", "supported"),
       entry("userContexts", "supported"),
-      entry("acceptInsecureCerts", "unsupported", ["CDP ignores certificate errors browser-wide, not per context"]),
-      entry("userContexts.proxy", "supported", [
-        "HTTP proxy endpoints for HTTP and HTTPS destinations; loopback stays direct"
+      entry("acceptInsecureCerts", "partial", [
+        "per-page certificate override on each of the context's pages; refused for a reclaimable context"
       ]),
+      entry("clientCertificates", "partial", [
+        "a loopback proxy per context for HTTPS and WebSocket over TLS; not with proxy or a reclaimable context"
+      ]),
+      entry("userContexts.proxy", "supported", [
+        "http, https and socks5 endpoints for HTTP, HTTPS and WebSocket destinations; .domain bypass matches subdomains only; loopback stays direct"
+      ]),
+      entry("userContexts.proxy.socks4", "unsupported", ["Chromium's SOCKS4 resolves names locally, not at the proxy"]),
+      entry("userContexts.proxy.https", "supported", ["the proxy's certificate must be one the browser trusts"]),
+      entry("userContexts.proxy.socksCredentials", "unsupported", ["the browser offers no SOCKS authentication"]),
+      entry("userContexts.proxy.bypassSuffix", "supported"),
       entry("userContexts.proxy.credentials", "supported", [
         "proxy challenges only; one credential submission per request"
       ]),
@@ -111,9 +121,18 @@ export const capabilities = (
       ]),
       entry("bodies", "supported"),
       entry("console", "supported"),
+      entry("console.arguments", "supported"),
+      entry("console.source", "supported"),
+      entry("console.method", "partial", [
+        "`console.timeLog` reads as `log`, since Chromium sends it as a plain message",
+        "`console.countReset`, `timeLog`, and `timeEnd` of a counter or timer that doesn't exist read as `warn`, since " +
+        "Chromium sends them as a warning",
+        "`console.countReset` of a counter that exists writes no message, since Chromium sends none for it"
+      ]),
       entry("prompts", "supported"),
       entry("prompts.kind", "supported"),
       entry("navigation.sameDocument", "supported"),
+      entry("frames.readiness", "supported"),
       entry("navigation.traverse", "supported"),
       entry("frames.contentFrame", "supported"),
       entry("screenshot.format", "supported"),
@@ -162,6 +181,7 @@ export const capabilities = (
       entry("input.insertText", "supported"),
       entry("input.pointerModifiers", "supported"),
       entry("input.fractionalPointer", "supported"),
+      entry("hitTest.shadowHostBoxes", "supported"),
       entry("input.dragAndDrop", "supported", ["Strider catches the drag Chromium starts, and finishes it"]),
       entry("webSocketFrames", "supported"),
       entry("networkConnections", "supported"),
@@ -198,6 +218,7 @@ export const capabilities = (
       entry("emulation.extraHTTPHeaders", "supported"),
       entry("emulation.touch", "supported", ["touch event handlers appear at the next document"]),
       entry("emulation.focus", "supported"),
+      entry("bypassCSP", "supported"),
       entry("screenshot.cssScale", "supported"),
       entry("screenshot.omitBackground", "supported"),
       entry("pdf.headerFooter", "supported"),
@@ -211,6 +232,7 @@ export const capabilities = (
       ]),
       entry("capability.axTree", "supported"),
       entry("capability.screencast", "supported"),
+      entry("capability.overlay", "supported", ["drawn in the page, so screenshots show it too"]),
       entry(
         "capability.video",
         videoWriter ? "supported" : "unsupported",
@@ -329,7 +351,15 @@ export const connect: (
     if (defaultEntry.browserContextId !== undefined) {
       state.contextsByCdp.set(defaultEntry.browserContextId, defaultEntry)
     }
-    yield* buffer.run(() => buffer.emit({ _tag: "UserContextAdded", context: state.defaultContext, isDefault: true }))
+    yield* buffer.run(() => {
+      buffer.emit({ _tag: "UserContextAdded", context: state.defaultContext, isDefault: true })
+      // The contexts the browser already has, empty ones too: no event announces them
+      if (Option.isSome(contextIds) && defaultEntry.browserContextId !== undefined) {
+        for (const id of contextIds.value.browserContextIds) {
+          if (id !== defaultEntry.browserContextId) Tree.contextFor(state, id)
+        }
+      }
+    })
     yield* Declare.applyDownloads(state, defaultEntry).pipe(Effect.ignore)
     yield* Target.setAutoAttach({
       autoAttach: true,
@@ -375,8 +405,10 @@ export const connect: (
       reload: (id, options) => Navigation.reload(state, id, options),
       traverse: (id, delta) => Navigation.traverse(state, id, delta),
       realm: (document, world) => Evaluation.realm(state, document, world),
+      settled: (id) => Evaluation.settled(state, id),
       evaluate: (realm, call) => Evaluation.evaluate(state, realm, call),
       releaseHandles: (list) => Evaluation.releaseHandles(state, list),
+      textInsertion: "native",
       dispatchInput: (page, events, frame, lands) => Input.dispatchInput(state, page, events, frame, lands),
       contentFrame: (node) => Input.contentFrame(state, node),
       releaseNodes: () => Effect.void,

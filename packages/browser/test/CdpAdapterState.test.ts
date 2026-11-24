@@ -37,6 +37,7 @@ import * as Targets from "../src/internal/cdpAdapter/targets.ts"
 import * as Tree from "../src/internal/cdpAdapter/tree.ts"
 import * as CdpWire from "../src/internal/cdpWire.ts"
 import * as Cleanup from "../src/internal/declarationCleanup.ts"
+import * as Handoff from "../src/internal/handoff.ts"
 import * as Ingestion from "../src/internal/ingestion.ts"
 import * as Input from "../src/internal/input.ts"
 import * as Groups from "../src/internal/objectGroups.ts"
@@ -96,10 +97,14 @@ const withPage = Effect.fnUntraced(function*(protocolSession = session, requestT
     context,
     target,
     ready: Deferred.makeUnsafe(),
+    treeRead: Deferred.makeUnsafe(),
     closing: undefined,
     closeRequested: false,
     ended: false
   }
+  // An initialized page: its initial sync has been applied
+  Deferred.doneUnsafe(page.ready, Effect.void)
+  Deferred.doneUnsafe(page.treeRead, Effect.void)
   state.pages.set(page.id, page)
   const main = Tree.newFrame({ frameId: "T1", id: page.id, page, parent: undefined, owner: target })
   state.frames.set("T1", main)
@@ -315,16 +320,78 @@ const play = Effect.fnUntraced(function*(order: ReadonlyArray<readonly [string, 
 })
 
 describe("CdpAdapter state", () => {
+  it.effect("keeps mouse capture when an unrelated frame in the same session detaches", () =>
+    Effect.gen(function*() {
+      const { page, state, target } = yield* withPage()
+      const parent = state.frames.get("T1")!
+      const owner = { ...target, targetId: "outer" }
+      const outer = Tree.addFrame(state, "outer", parent, owner)
+      owner.frame = outer
+      const inner = Tree.addFrame(state, "inner", outer, owner)
+      const captured = { target: owner, x: 30, y: 30 }
+      state.heldButtons.set(page.id, 1)
+      state.pressedIn.set(page.id, [outer])
+      state.pressedOn.set(page.id, captured)
+      Tree.removeFrame(state, inner, new Target.FrameDetached({}), "cdp:Page.frameDetached")
+      assert.strictEqual(state.pressedOn.get(page.id), captured)
+      assert.deepStrictEqual(state.pressedIn.get(page.id), [outer])
+    }))
+
+  it.effect("keeps mouse capture when the drag destination in the same session detaches", () =>
+    Effect.gen(function*() {
+      const { page, state, target } = yield* withPage()
+      const parent = state.frames.get("T1")!
+      const owner = { ...target, targetId: "outer" }
+      const outer = Tree.addFrame(state, "outer", parent, owner)
+      owner.frame = outer
+      const inner = Tree.addFrame(state, "inner", outer, owner)
+      const captured = { target: owner, x: 30, y: 30 }
+      state.heldButtons.set(page.id, 1)
+      // A drag gesture names both its source and destination documents.
+      state.pressedIn.set(page.id, [outer, inner])
+      state.pressedOn.set(page.id, captured)
+      Tree.removeFrame(state, inner, new Target.FrameDetached({}), "cdp:Page.frameDetached")
+      assert.strictEqual(state.pressedOn.get(page.id), captured)
+      assert.deepStrictEqual(state.pressedIn.get(page.id), [outer])
+    }))
+
+  it.effect("forgets the captured mouse session when its frame detaches", () =>
+    Effect.gen(function*() {
+      const { page, state, target } = yield* withPage()
+      const parent = state.frames.get("T1")!
+      const owner = { ...target, targetId: "child" }
+      const child = Tree.newFrame({ frameId: "child", id: state.ids.navigable(), page, parent, owner })
+      state.frames.set("child", child)
+      state.navigables.set(child.id, child)
+      parent.children.add(child)
+      state.pressedIn.set(page.id, [child])
+      state.pressedOn.set(page.id, { target: owner, x: 30, y: 30 })
+      Tree.removeFrame(state, child, new Target.FrameDetached({}), "cdp:Page.frameDetached")
+      assert.isFalse(state.pressedOn.has(page.id), "the detached target must receive no later mouse input")
+      assert.isFalse(state.pressedIn.get(page.id)?.includes(child) ?? false)
+    }))
+
   it.effect("forgets a page's held buttons, drag and drag interception when the page ends", () =>
     Effect.gen(function*() {
       const { page, state } = yield* withPage()
       state.heldButtons.set(page.id, 1)
-      state.drags.set(page.id, { data: { items: [], dragOperationsMask: 1 }, entered: true, stale: false })
+      state.drags.set(page.id, {
+        data: { items: [], dragOperationsMask: 1 },
+        entered: true,
+        at: undefined,
+        stale: false
+      })
       state.interceptingDrags.add(page.id)
+      state.pressedIn.set(page.id, [state.frames.get("T1")!])
+      state.pressedOn.set(page.id, { target: page.target, x: 0, y: 0 })
+      state.escapeCanceled.add(page.id)
       Tree.endPage(state, page, new Target.PageClosed({ by: "command" }), "test")
       assert.isFalse(state.heldButtons.has(page.id))
       assert.isFalse(state.drags.has(page.id))
       assert.isFalse(state.interceptingDrags.has(page.id))
+      assert.isFalse(state.pressedIn.has(page.id))
+      assert.isFalse(state.pressedOn.has(page.id))
+      assert.isFalse(state.escapeCanceled.has(page.id))
     }))
 
   it.effect("fails an operation on a page that ended as Gone, with why it ended", () =>
@@ -1282,6 +1349,306 @@ describe("CDP restoration cleanup", () => {
     )
   }
 
+  it.effect("ends a context only once its downloads have ended, which Chromium reports after the disposal's reply", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const sent: Array<string> = []
+      const mock = {
+        ...session,
+        ended: Effect.void,
+        send: (command: { readonly method: string; readonly params: { readonly behavior?: string } }) =>
+          Effect.sync(() => {
+            sent.push(
+              command.method === "Browser.setDownloadBehavior"
+                ? `${command.method} ${command.params.behavior}`
+                : command.method
+            )
+            return {}
+          })
+      } as unknown as ProtocolClient.Session
+      const { state, page, target, facts } = yield* withPage(mock)
+      const context = new State.ContextEntry(state.ids.userContext(), "scoped", false)
+      state.contexts.set(context.id, context)
+      state.contextsByCdp.set("scoped", context)
+      ;(page as { context: State.ContextEntry }).context = context
+      yield* Declare.declare(state, { _tag: "UserContext", context: context.id }, {
+        _tag: "Downloads",
+        behavior: { _tag: "Allow", directory: "/tmp/downloads" },
+        retiring: () => context.removing
+      })
+      const handlers = Contexts.register(Kit.handlers<State.Event>())
+      handlers.apply("Browser.downloadWillBegin", {
+        frameId: "T1",
+        guid: "G1",
+        url: "https://example.test/file",
+        suggestedFilename: "file"
+      }, { state, target })
+      yield* state.buffer.flush
+      sent.length = 0
+      yield* Contexts.removeUserContext(state, context.id)
+      assert.deepStrictEqual(sent, ["Browser.setDownloadBehavior deny", "Target.disposeBrowserContext"])
+      for (let i = 0; i < 10; i++) yield* Effect.yieldNow
+      assert.isTrue(state.contexts.has(context.id), "the download hasn't ended")
+      assert.notInclude(facts.map((fact) => fact._tag), "UserContextRemoved")
+      handlers.apply("Browser.downloadProgress", {
+        guid: "G1",
+        totalBytes: 15,
+        receivedBytes: 15,
+        state: "canceled"
+      }, { state, target })
+      yield* state.buffer.flush
+      yield* state.buffer.waitFor(() => state.contexts.has(context.id) ? undefined : true)
+      const tags = facts.map((fact) => fact._tag)
+      assert.isBelow(tags.indexOf("DownloadEnded"), tags.indexOf("UserContextRemoved"))
+    })))
+
+  it.effect("forgets a context's ended frames once its downloads declaration is released", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const mock = { ...session, ended: Effect.void } as unknown as ProtocolClient.Session
+      const { state, page, target } = yield* withPage(mock)
+      const context = new State.ContextEntry(state.ids.userContext(), "handed-off", false)
+      state.contexts.set(context.id, context)
+      state.contextsByCdp.set("handed-off", context)
+      ;(page as { context: State.ContextEntry }).context = context
+      const lifetime = yield* Scope.make()
+      yield* Declare.declare(state, { _tag: "UserContext", context: context.id }, {
+        _tag: "Downloads",
+        behavior: { _tag: "Allow", directory: "/tmp/downloads" }
+      }).pipe(Scope.provide(lifetime))
+      const child = Tree.addFrame(state, "child", state.frames.get("T1")!, target)
+      Tree.removeFrame(state, child, new Target.FrameDetached({}), "frame detached while downloads are allowed")
+      assert.strictEqual(state.retiredFrames.get("child"), context)
+      yield* Scope.close(lifetime, Exit.void)
+      assert.strictEqual(state.retiredFrames.size, 0)
+      assert.isUndefined(context.retiredFrames)
+      const later = Tree.addFrame(state, "later", state.frames.get("T1")!, target)
+      Tree.removeFrame(state, later, new Target.FrameDetached({}), "frame detached with no declared directory")
+      assert.strictEqual(state.retiredFrames.size, 0)
+    })))
+
+  it.effect("forgets retired frames when handoff times out waiting for the context lock", () =>
+    Effect.flatMap(Clock.Clock, (clock) =>
+      Effect.scoped(Effect.gen(function*() {
+        const sent = yield* Deferred.make<void>()
+        const reply = yield* Deferred.make<void>()
+        let hold = false
+        const mock = {
+          ...session,
+          ended: Effect.void,
+          send: (command: { readonly method: string }) =>
+            command.method === "Browser.setDownloadBehavior" && hold
+              ? Deferred.succeed(sent, undefined).pipe(Effect.andThen(Deferred.await(reply)), Effect.as({}))
+              : Effect.succeed({})
+        } as unknown as ProtocolClient.Session
+        const { state, page, target } = yield* withPage(mock)
+        const context = new State.ContextEntry(state.ids.userContext(), "handed-off", false)
+        state.contexts.set(context.id, context)
+        state.contextsByCdp.set("handed-off", context)
+        ;(page as { context: State.ContextEntry }).context = context
+        const lifetime = yield* Scope.make()
+        yield* Declare.declare(state, { _tag: "UserContext", context: context.id }, {
+          _tag: "Downloads",
+          behavior: { _tag: "Allow", directory: "/tmp/downloads" }
+        }).pipe(Scope.provide(lifetime))
+        const child = Tree.addFrame(state, "child", state.frames.get("T1")!, target)
+        Tree.removeFrame(state, child, new Target.FrameDetached({}), "frame detached before handoff")
+        assert.strictEqual(state.retiredFrames.get("child"), context)
+        hold = true
+        const applying = yield* Declare.applyDownloads(state, context).pipe(Effect.forkScoped)
+        yield* Deferred.await(sent)
+        Handoff.allow(lifetime)
+        const handingOff = yield* Handoff.handoff(lifetime).pipe(Effect.forkChild({ startImmediately: true }))
+        yield* TestClock.adjust("1 second")
+        yield* Fiber.join(handingOff)
+        assert.isTrue(Option.isNone(state.registry.downloads(context.id)), "the declaration was removed locally")
+        yield* Deferred.succeed(reply, undefined)
+        yield* Fiber.join(applying)
+        yield* state.buffer.flush
+        assert.isTrue(state.contexts.has(context.id), "handoff leaves the context open")
+        assert.strictEqual(state.retiredFrames.size, 0, "expired browser cleanup must not retain local frame history")
+        assert.isUndefined(context.retiredFrames)
+      })).pipe(Effect.provideService(BrowserClock.CurrentClock, BrowserClock.fromClock(clock)))))
+
+  it.effect("denies a retiring context's downloads before disposing it, its declaration already released", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const sent: Array<string> = []
+      const mock = {
+        ...session,
+        ended: Effect.void,
+        send: (command: { readonly method: string; readonly params: { readonly behavior?: string } }) =>
+          Effect.sync(() => {
+            sent.push(
+              command.method === "Browser.setDownloadBehavior"
+                ? `${command.method} ${command.params.behavior}`
+                : command.method
+            )
+            return {}
+          })
+      } as unknown as ProtocolClient.Session
+      const { state, page } = yield* withPage(mock)
+      const context = new State.ContextEntry(state.ids.userContext(), "retiring", false)
+      state.contexts.set(context.id, context)
+      state.contextsByCdp.set("retiring", context)
+      ;(page as { context: State.ContextEntry }).context = context
+      const lifetime = yield* Scope.make()
+      yield* Declare.declare(state, { _tag: "UserContext", context: context.id }, {
+        _tag: "Downloads",
+        behavior: { _tag: "Allow", directory: "/tmp/downloads" },
+        retiring: () => true
+      }).pipe(Scope.provide(lifetime))
+      // A context the library created releases its declarations, as retiring, before it is removed
+      yield* Scope.close(lifetime, Exit.void)
+      sent.length = 0
+      yield* Contexts.removeUserContext(state, context.id)
+      assert.deepStrictEqual(sent, ["Browser.setDownloadBehavior deny", "Target.disposeBrowserContext"])
+    })))
+
+  it.effect("attributes a late download after a retiring context releases its declarations", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { state, page, target } = yield* withPage()
+      const context = new State.ContextEntry(state.ids.userContext(), "retiring", false)
+      state.contexts.set(context.id, context)
+      state.contextsByCdp.set("retiring", context)
+      ;(page as { context: State.ContextEntry }).context = context
+      const lifetime = yield* Scope.make()
+      yield* Declare.declare(state, { _tag: "UserContext", context: context.id }, {
+        _tag: "Downloads",
+        behavior: { _tag: "Allow", directory: "/tmp/downloads" },
+        retiring: () => true
+      }).pipe(Scope.provide(lifetime))
+      yield* Scope.close(lifetime, Exit.void)
+      assert.isTrue(Option.isNone(state.registry.downloads(context.id)))
+      Tree.endPage(state, page, new Target.PageClosed({ by: "script" }), "page ended during context retirement")
+      const handlers = Contexts.register(Kit.handlers<State.Event>())
+      handlers.apply("Browser.downloadWillBegin", {
+        frameId: "T1",
+        guid: "late",
+        url: "https://example.test/file",
+        suggestedFilename: "file"
+      }, { state, target })
+      yield* state.buffer.flush
+      assert.strictEqual(state.downloads.get("late")?.context, context, "retirement still needs download attribution")
+    })))
+
+  it.effect("attributes a retired frame's download in a context created after browser-wide Allow", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const applied: Array<string | undefined> = []
+      const mock = {
+        ...session,
+        send: (command: {
+          readonly method: string
+          readonly params: { readonly behavior?: string; readonly browserContextId?: string }
+        }) =>
+          Effect.sync(() => {
+            if (command.method === "Target.createBrowserContext") return { browserContextId: "later" }
+            if (command.params.behavior === "allowAndName") applied.push(command.params.browserContextId)
+            return {}
+          })
+      } as unknown as ProtocolClient.Session
+      const { state, page, target } = yield* withPage(mock)
+      yield* Declare.declare(state, { _tag: "Browser" }, {
+        _tag: "Downloads",
+        behavior: { _tag: "Allow", directory: "/tmp/downloads" }
+      })
+      const id = yield* Contexts.createUserContext(state, { proxy: Option.none(), acceptInsecureCerts: false })
+      const context = state.contexts.get(id)!
+      assert.include(applied, "later", "the new context inherits the browser's download directory")
+      ;(page as { context: State.ContextEntry }).context = context
+      const child = Tree.addFrame(state, "child", state.frames.get("T1")!, target)
+      Tree.removeFrame(state, child, new Target.FrameDetached({}), "frame detached in the later context")
+      const handlers = Contexts.register(Kit.handlers<State.Event>())
+      handlers.apply("Browser.downloadWillBegin", {
+        frameId: "child",
+        guid: "later-download",
+        url: "https://example.test/file",
+        suggestedFilename: "file"
+      }, { state, target })
+      yield* state.buffer.flush
+      assert.strictEqual(state.downloads.get("later-download")?.context, context)
+    })))
+
+  it.effect("does not retain detached frames of an externally discovered context", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { state, page, target } = yield* withPage()
+      state.contexts.get(state.defaultContext)!.browserContextId = "default"
+      const context = Tree.contextFor(state, "external")
+      assert.isFalse(context.isDefault)
+      ;(page as { context: State.ContextEntry }).context = context
+      const parent = state.frames.get("T1")!
+      for (const frameId of ["external-child-1", "external-child-2"]) {
+        const child = Tree.addFrame(state, frameId, parent, target)
+        Tree.removeFrame(state, child, new Target.FrameDetached({}), "external page removed its iframe")
+      }
+      yield* state.buffer.flush
+      assert.strictEqual(state.frames.size, 1, "only the live main frame remains")
+      assert.strictEqual(
+        state.retiredFrames.size,
+        0,
+        "an external context has no owned removal to release this history"
+      )
+      assert.strictEqual(context.retiredFrames?.size ?? 0, 0)
+    })))
+
+  for (const closedPage of [false, true]) {
+    it.effect(`waits for a download reported after its ${closedPage ? "page closed" : "frame detached"}, before disposal`, () =>
+      Effect.scoped(Effect.gen(function*() {
+        const sent: Array<string> = []
+        const mock = {
+          ...session,
+          ended: Effect.void,
+          send: (command: { readonly method: string; readonly params: { readonly behavior?: string } }) =>
+            Effect.sync(() => {
+              sent.push(
+                command.method === "Browser.setDownloadBehavior"
+                  ? `${command.method} ${command.params.behavior}`
+                  : command.method
+              )
+              return {}
+            })
+        } as unknown as ProtocolClient.Session
+        const { state, page, target, facts } = yield* withPage(mock)
+        const context = new State.ContextEntry(state.ids.userContext(), "scoped", false)
+        state.contexts.set(context.id, context)
+        state.contextsByCdp.set("scoped", context)
+        ;(page as { context: State.ContextEntry }).context = context
+        yield* Declare.declare(state, { _tag: "UserContext", context: context.id }, {
+          _tag: "Downloads",
+          behavior: { _tag: "Allow", directory: "/tmp/downloads" },
+          retiring: () => context.removing
+        })
+        const frameId = closedPage ? "T1" : "child"
+        if (closedPage) {
+          Tree.endPage(state, page, new Target.PageClosed({ by: "script" }), "page closed before download announcement")
+        } else {
+          const child = Tree.addFrame(state, frameId, state.frames.get("T1")!, target)
+          Tree.removeFrame(state, child, new Target.FrameDetached({}), "frame detached before download announcement")
+        }
+        const handlers = Contexts.register(Kit.handlers<State.Event>())
+        handlers.apply("Browser.downloadWillBegin", {
+          frameId,
+          guid: "G1",
+          url: "https://example.test/file",
+          suggestedFilename: "file"
+        }, { state, target })
+        yield* state.buffer.flush
+        sent.length = 0
+        yield* Contexts.removeUserContext(state, context.id)
+        assert.include(sent, "Target.disposeBrowserContext")
+        for (let i = 0; i < 10; i++) yield* Effect.yieldNow
+        assert.isTrue(state.contexts.has(context.id), "the download hasn't ended")
+        assert.notInclude(facts.map((fact) => fact._tag), "UserContextRemoved")
+        handlers.apply("Browser.downloadProgress", {
+          guid: "G1",
+          totalBytes: 15,
+          receivedBytes: 15,
+          state: "canceled"
+        }, { state, target })
+        yield* state.buffer.flush
+        yield* state.buffer.waitFor(() => state.contexts.has(context.id) ? undefined : true)
+        const tags = facts.map((fact) => fact._tag)
+        assert.isBelow(tags.indexOf("DownloadEnded"), tags.indexOf("UserContextRemoved"))
+      })))
+  }
+
   const declarationSession = (sent: Array<string>, refuseDisposal = false) =>
     ({
       ...session,
@@ -1536,6 +1903,39 @@ describe("CDP restoration cleanup", () => {
       ))
       assert.deepStrictEqual(released, ["ended", "rejected"])
       assert.strictEqual(warnings.length, 1)
+    }))
+})
+
+describe("CDP cache confirmation", () => {
+  it.effect("shares an outstanding cache confirmation with another declaration of the same value", () =>
+    Effect.gen(function*() {
+      const written = yield* Deferred.make<void>()
+      const reply = yield* Deferred.make<void>()
+      const mock = {
+        ...session,
+        start: Effect.fnUntraced(function*(command: { readonly params: { readonly cacheDisabled: boolean } }) {
+          yield* Deferred.succeed(written, undefined)
+          return command.params.cacheDisabled ? Deferred.await(reply) : Effect.void
+        })
+      } as unknown as ProtocolClient.Session
+      const { state, page, target } = yield* withPage(mock)
+      state.targets.set(mock, { ...target, page })
+      const registration = Declare.declare(state, { _tag: "Page", page: page.id }, {
+        _tag: "Intercept",
+        patterns: ["*"],
+        phases: ["request"]
+      })
+      yield* Effect.gen(function*() {
+        const first = yield* registration.pipe(Effect.forkChild)
+        yield* Deferred.await(written)
+        const second = yield* registration.pipe(Effect.forkChild)
+        yield* TestClock.adjust("0 millis")
+        assert.isUndefined(first.pollUnsafe())
+        assert.isUndefined(second.pollUnsafe())
+        yield* Deferred.succeed(reply, undefined)
+        yield* Fiber.join(first)
+        yield* Fiber.join(second)
+      }).pipe(Effect.ensuring(Deferred.succeed(reply, undefined)))
     }))
 })
 
@@ -2139,6 +2539,7 @@ describe("CDP proxy and website challenge separation", () => {
             context: {
               ...page.context,
               proxy: {
+                scheme: "http" as const,
                 server: "proxy.test:8080",
                 bypass: [],
                 credentials: { username: "proxy-user", password: Redacted.make("fixture-password") }
@@ -2181,6 +2582,7 @@ for (const terminal of ["Network.loadingFinished", "Network.loadingFailed"]) {
     Effect.gen(function*() {
       const { state, page, target } = yield* withPage()
       page.context.proxy = {
+        scheme: "http",
         server: "proxy.test:8080",
         bypass: [],
         credentials: { username: "proxy-user", password: Redacted.make("fixture-password") }
@@ -3558,3 +3960,81 @@ it.effect("falls back for malformed network and paused request URLs", () =>
       assert.strictEqual(obligation.subject.request.url, "about:blank")
     } else assert.fail("expected a paused request")
   }))
+
+describe("CDP popup opener reservations", () => {
+  const setup = Effect.fnUntraced(function*() {
+    const handlers = Targets.register(Kit.handlers<State.Event>())
+    const sessions = new Map<string, ProtocolClient.Session>()
+    const localControl: ProtocolClient.FoldControl = {
+      ...control,
+      session: (key) => sessions.get(key)
+    }
+    const facts: Array<Adapter.Fact> = []
+    const buffer = yield* Kit.makeFactBuffer((fact) => Effect.sync(() => void facts.push(fact)))
+    buffer.connect(localControl)
+    const state = State.make({
+      handlers,
+      cleanupScope: yield* Effect.scope,
+      connect: { sink: () => Effect.void, ownership: "attached" },
+      ids: Kit.makeIds(),
+      buffer,
+      control: localControl,
+      root: () => session,
+      release: Responses.release
+    })
+    state.contexts.set(state.defaultContext, new State.ContextEntry(state.defaultContext, undefined, true))
+    const attach = (id: string, openerId?: string) => {
+      const child = { ...session, key: id } as ProtocolClient.Session
+      sessions.set(id, child)
+      handlers.apply("Target.attachedToTarget", {
+        sessionId: id,
+        waitingForDebugger: false,
+        targetInfo: { targetId: id, type: "page", title: "", url: "about:blank", attached: true, openerId }
+      }, { state, target: undefined })
+      return state.targetsById.get(id)!.page!
+    }
+    return { state, handlers, attach, facts }
+  })
+
+  it.effect("keeps the shared reservation until the opener attaches after one popup closes", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { state, attach, facts } = yield* setup()
+      const first = attach("P1", "O")
+      const second = attach("P2", "O")
+      const reserved = state.reservedIds.get("O")!
+      assert.deepStrictEqual(reserved.popups, new Set([first.id, second.id]))
+      Targets.ended(state, first.target.session, new Protocol.SessionEnded({ why: "targetDestroyed" }))
+      assert.deepStrictEqual(reserved.popups, new Set([second.id]))
+      const opener = attach("O")
+      assert.strictEqual(opener.id, reserved.id)
+      assert.strictEqual(state.reservedIds.size, 0)
+      yield* state.buffer.flush
+      const added = facts.find((fact) => fact._tag === "PageAdded" && fact.page === second.id)
+      assert(added?._tag === "PageAdded" && added.origin._tag !== "Created")
+      assert.deepStrictEqual(added.origin.opener, Option.some(opener.id))
+    })))
+
+  for (const end of ["detach", "crash"] as const) {
+    it.effect(`releases the shared reservation when the last popup ends by ${end}`, () =>
+      Effect.scoped(Effect.gen(function*() {
+        const { state, handlers, attach } = yield* setup()
+        const first = attach("P1", "O")
+        const second = attach("P2", "O")
+        const finish = (page: State.PageEntry) => {
+          if (end === "detach") {
+            Targets.ended(state, page.target.session, new Protocol.SessionEnded({ why: "targetDestroyed" }))
+          } else {
+            handlers.apply("Target.targetCrashed", { targetId: page.targetId, status: "crashed", errorCode: 1 }, {
+              state,
+              target: undefined
+            })
+          }
+        }
+        finish(first)
+        assert.isFalse(state.pages.has(first.id))
+        assert.deepStrictEqual(state.reservedIds.get("O")!.popups, new Set([second.id]))
+        finish(second)
+        assert.strictEqual(state.reservedIds.size, 0)
+      })))
+  }
+})

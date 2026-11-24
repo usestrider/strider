@@ -19,7 +19,9 @@
  *   on the way.
  * - **Text** is an element's text content in the flat tree (a shadow host's shadow tree, a slot's assigned
  *   nodes), skipping `script`, `style`, `noscript` and `template`, with a button-like `input`'s value, and
- *   whitespace collapsed and trimmed. Not `innerText`, which depends on layout and differs between engines.
+ *   whitespace collapsed and trimmed. Not `innerText`, which depends on layout and differs between engines;
+ *   `toHaveText` and `toContainText` read an HTML element's `innerText` only when asked to (`useInnerText`), and
+ *   collapse its whitespace the same way.
  * - **`getByText`** matches the smallest element that says it: its text matches and no child element's does.
  *   The document's `head` isn't searched.
  * - **`getByRole`** takes the first role token the engine knows from `role`, or else the implicit role under
@@ -27,14 +29,24 @@
  * - **Actions** take an initial stability sample immediately, then check at each animation frame until the
  *   checks pass or the round's cap runs out. The checks (CONCEPTS.md §8) are visible, enabled, notInert,
  *   inViewport (scrolling into view once), stable across `frames` rendering updates, and receivesPointer at
- *   the action point. The rendered check independently gates the first check on a rendering update.
+ *   the action point, which the target's nearest enclosing button or link in the flat tree, or else the target,
+ *   must receive; an `input`, `textarea`, `select`, or editable target must receive it itself. The rendered check
+ *   independently gates the first check on a rendering update.
  */
 
 import * as Schema from "effect/Schema"
 
-/** How a query matches text. */
+/**
+ * How a query matches text. An expectation's string compares without case when it has `ignoreCase`; a regular
+ * expression carries its case in its flags.
+ */
 export type TextMatcher =
-  | { readonly _tag: "String"; readonly value: string; readonly exact: boolean }
+  | {
+    readonly _tag: "String"
+    readonly value: string
+    readonly exact: boolean
+    readonly ignoreCase?: boolean | undefined
+  }
   | { readonly _tag: "RegExp"; readonly source: string; readonly flags: string }
 
 /** One step of a locator, applied to the matches of the steps before it. */
@@ -56,8 +68,11 @@ export type Step =
   | { readonly _tag: "Placeholder"; readonly matcher: TextMatcher }
   | { readonly _tag: "AltText"; readonly matcher: TextMatcher }
   | { readonly _tag: "Title"; readonly matcher: TextMatcher }
-  | { readonly _tag: "TestId"; readonly id: string }
+  /** Elements whose `attribute`, the context's test-id attribute when the locator was made, matches. */
+  | { readonly _tag: "TestId"; readonly matcher: TextMatcher; readonly attribute: string }
   | { readonly _tag: "Css"; readonly selector: string }
+  /** An XPath expression's element nodes, from the document or, chained, from each element so far. */
+  | { readonly _tag: "XPath"; readonly expression: string }
   | { readonly _tag: "Nth"; readonly index: number }
   | { readonly _tag: "First" }
   | { readonly _tag: "Last" }
@@ -76,6 +91,12 @@ export type Step =
    * the iframe's document. L1 splits steps at each one before resolution; validation receives the complete query.
    */
   | { readonly _tag: "Frame" }
+  /**
+   * A search across frames: the steps after it, up to the next frame boundary, resolve in whichever one document
+   * of the current one and the frames under it, at any depth, they match in. L1 resolves it before the engine
+   * sees the steps.
+   */
+  | { readonly _tag: "AnyFrame" }
   /**
    * A snapshot's ref: the one node it was given to, in the document and engine that gave
    * it, never another. L1 checks the document; the engine its generation and the node.
@@ -185,25 +206,72 @@ export type Expectation =
   | { readonly _tag: "Focused" }
   | { readonly _tag: "Editable" }
   | { readonly _tag: "Empty" }
-  /** The whole text of the one match, or with `list`, of each match in order. */
-  | { readonly _tag: "Text"; readonly expected: ReadonlyArray<TextMatcher>; readonly list: boolean }
+  /**
+   * The whole text of the one match, or with `list`, of each match in order; with `useInnerText`, the rendered
+   * `innerText` instead of the text content.
+   */
+  | {
+    readonly _tag: "Text"
+    readonly expected: ReadonlyArray<TextMatcher>
+    readonly list: boolean
+    readonly useInnerText: boolean
+  }
   | { readonly _tag: "Role"; readonly expected: string }
   | { readonly _tag: "AccessibleName"; readonly expected: TextMatcher; readonly ignoreCase: boolean }
+  /** The one match's accessible description or error message matches; with `not`, it doesn't. */
+  | {
+    readonly _tag: "AccessibleDescription" | "AccessibleErrorMessage"
+    readonly expected: TextMatcher
+    readonly ignoreCase: boolean
+    readonly not: boolean
+  }
   /** The raw class string of one match, or each match in order. */
   | { readonly _tag: "Class"; readonly expected: ReadonlyArray<TextMatcher>; readonly list: boolean }
-  | { readonly _tag: "ContainsText"; readonly expected: TextMatcher }
+  /**
+   * The one match's text contains its entry, or with `list`, the entries are contained in a subsequence of the
+   * matches, in order; an empty list holds when nothing matches.
+   */
+  | {
+    readonly _tag: "ContainsText"
+    readonly expected: ReadonlyArray<TextMatcher>
+    readonly list: boolean
+    readonly useInnerText: boolean
+  }
   | { readonly _tag: "Value"; readonly expected: TextMatcher }
   | { readonly _tag: "Values"; readonly expected: ReadonlyArray<TextMatcher> }
   | { readonly _tag: "Attribute"; readonly name: string; readonly expected: TextMatcher | null }
   | { readonly _tag: "Count"; readonly count: number }
   | { readonly _tag: "Title"; readonly expected: TextMatcher }
-  /** The one match's accessibility tree matches a pattern. */
-  | { readonly _tag: "Aria"; readonly pattern: Pattern }
+  /**
+   * The one match's accessibility tree, or with `document` the page's from its document node, matches a pattern;
+   * with `not`, it doesn't.
+   */
+  | { readonly _tag: "Aria"; readonly pattern: Pattern; readonly document: boolean; readonly not: boolean }
 
 /** A pattern over the accessibility tree, as `AriaPattern` builds it. */
 export type Pattern =
-  | { readonly _tag: "Node"; readonly role: string; readonly name: TextMatcher; readonly children: PatternChildren }
+  | {
+    readonly _tag: "Node"
+    readonly role: string
+    readonly name: TextMatcher
+    readonly children: PatternChildren
+    readonly states: PatternStates
+  }
   | { readonly _tag: "Text"; readonly value: TextMatcher }
+  /** A node, at the subject or at any depth beneath it, whose children match. */
+  | { readonly _tag: "Anywhere"; readonly children: PatternChildren }
+
+/** The level and states a node pattern compares; an omitted one isn't compared. */
+export interface PatternStates {
+  readonly level?: number | undefined
+  readonly checked?: boolean | "mixed" | undefined
+  readonly pressed?: boolean | "mixed" | undefined
+  readonly expanded?: boolean | undefined
+  readonly selected?: boolean | undefined
+  readonly disabled?: boolean | undefined
+  readonly invalid?: boolean | undefined
+  readonly focused?: boolean | undefined
+}
 
 /** How a pattern's children are matched. */
 export type PatternChildren =
@@ -240,6 +308,8 @@ export interface SnapNode {
     }
     | { readonly _tag: "None" }
   readonly states: ReadonlyArray<string>
+  /** A heading's, list item's, row's or tree item's level, when it has one. */
+  readonly level?: number | undefined
   readonly editable?: boolean | undefined
   readonly validationMessage: string | null
   readonly children: ReadonlyArray<SnapNode>
@@ -270,6 +340,7 @@ export const SnapNode: Schema.Codec<SnapNode> = Schema.Struct({
     Schema.TaggedStruct("None", {})
   ]),
   states: Schema.Array(Schema.String),
+  level: Schema.optional(Schema.Number),
   editable: Schema.optional(Schema.Boolean),
   validationMessage: Schema.NullOr(Schema.String),
   children: Schema.Array(Schema.suspend((): Schema.Codec<SnapNode> => SnapNode)),
@@ -296,6 +367,8 @@ export type Request =
   | { readonly op: "validationStart"; readonly token: string; readonly full: boolean }
   | { readonly op: "validationStop"; readonly token: string }
   | { readonly op: "count"; readonly steps: ReadonlyArray<Step> }
+  /** Every match's count, and the first ten described, as a strictness failure gives them, whatever their count. */
+  | { readonly op: "candidates"; readonly steps: ReadonlyArray<Step> }
   | { readonly op: "visible"; readonly steps: ReadonlyArray<Step> }
   | {
     readonly op: "act"
@@ -323,6 +396,11 @@ export type Request =
   | { readonly op: "disarm" }
   | { readonly op: "fillGuard"; readonly steps: ReadonlyArray<Step>; readonly ancestor: boolean }
   | { readonly op: "fillDisarm" }
+  /**
+   * Inserts text with the editing command in this document's focused element, after a cancelable `beforeinput`
+   * when `beforeInput` is set; answers `InFrame` when the focus is in a frame's document instead.
+   */
+  | { readonly op: "insert"; readonly text: string; readonly beforeInput: boolean }
   | { readonly op: "read"; readonly steps: ReadonlyArray<Step>; readonly read: Read }
   | {
     readonly op: "expect"
@@ -371,6 +449,32 @@ export type Request =
   | { readonly op: "rect"; readonly steps: ReadonlyArray<Step> }
   /** The document's doctype and HTML. */
   | { readonly op: "html" }
+  /** Draws the page's overlays as they now are, over the document, or removes them all when there are none. */
+  | { readonly op: "overlay"; readonly overlays: ReadonlyArray<OverlayItem>; readonly hidden: boolean }
+
+/** One overlay: the caller's HTML, or a chapter's title card, fading out once it is `leaving`. */
+export type OverlayItem =
+  | { readonly _tag: "Html"; readonly id: string; readonly html: string }
+  | {
+    readonly _tag: "Chapter"
+    readonly id: string
+    readonly title: string
+    readonly description: string | null
+    readonly leaving: boolean
+  }
+  | {
+    readonly _tag: "Action"
+    readonly id: string
+    readonly title: string
+    readonly position: string
+    readonly titleStyle: string
+    readonly point: { readonly x: number; readonly y: number } | null
+    readonly pointStyle: string | null
+    readonly box: { readonly x: number; readonly y: number; readonly width: number; readonly height: number } | null
+    readonly highlightStyle: string | null
+  }
+  /** The cursor, at the last annotated action's point: moved in place, so it glides there from where it was. */
+  | { readonly _tag: "Cursor"; readonly id: string; readonly x: number; readonly y: number }
 
 /** A candidate of an ambiguous match. */
 export const Candidate = Schema.Struct({ description: Schema.String, visible: Schema.Boolean })
@@ -415,6 +519,10 @@ export const Response = Schema.Union([
   }),
   Schema.TaggedStruct("Final", { final: Final }),
   Schema.TaggedStruct("Guarded", { blocked: Schema.NullOr(Schema.String) }),
+  Schema.TaggedStruct("Overlaid", {}),
+  Schema.TaggedStruct("Inserted", { inserted: Schema.Boolean }),
+  /** The focused element is the `index`th of the document's frames, in the order a `"iframe, frame"` query finds them. */
+  Schema.TaggedStruct("InFrame", { index: Schema.Number }),
   Schema.TaggedStruct("FillGuard", {
     blocked: Schema.NullOr(Schema.String),
     unsafe: Schema.Boolean,
@@ -434,11 +542,18 @@ export const Response = Schema.Union([
      */
     provisional: Schema.optional(Schema.Boolean)
   }),
-  Schema.TaggedStruct("Strict", { candidates: Schema.Array(Candidate), count: Schema.Number }),
+  Schema.TaggedStruct("Strict", {
+    candidates: Schema.Array(Candidate),
+    count: Schema.Number,
+    /** How many of all the matches are visible, the ones past the ten described included. */
+    visible: Schema.Number,
+    /** How many frames matched, for a search across frames that matched in more than one. */
+    frames: Schema.optionalKey(Schema.Number)
+  }),
   Schema.TaggedStruct("InvalidSelector", {
     selector: Schema.String,
     message: Schema.String,
-    kind: Schema.optionalKey(Schema.Literal("role"))
+    kind: Schema.optionalKey(Schema.Literals(["role", "xpath"]))
   }),
   Schema.TaggedStruct("Title", { title: Schema.String }),
   Schema.TaggedStruct("Roles", {
@@ -491,6 +606,7 @@ export function renderText(root: SnapNode): string {
     }
     let out = `${indent}- ${node.role.role}`
     if (node.name._tag !== "None") out += ` ${JSON.stringify(node.name.value)}`
+    if (node.level !== undefined) out += ` [level=${node.level}]`
     for (const state of node.states) out += ` [${state}]`
     if (node.validationMessage != null) out += ` [validationMessage=${JSON.stringify(node.validationMessage)}]`
     if (node.ref !== null) out += ` [ref=${node.ref}]`
@@ -584,18 +700,26 @@ export function engine(render: (root: SnapNode) => string) {
     removeEventListener: method(EventTarget.prototype, "removeEventListener"),
     isContentEditable: getter(HTMLElement.prototype, "isContentEditable"),
     tabIndex: getter(HTMLElement.prototype, "tabIndex"),
+    innerText: getter(HTMLElement.prototype, "innerText"),
     activeElement: getter(Document.prototype, "activeElement"),
     documentElement: getter(Document.prototype, "documentElement"),
     doctype: getter(Document.prototype, "doctype"),
     title: getter(Document.prototype, "title"),
     designMode: getter(Document.prototype, "designMode"),
+    execCommand: method(Document.prototype, "execCommand"),
     createRange: method(Document.prototype, "createRange"),
     getElementById: method(Document.prototype, "getElementById"),
     elementFromPoint: method(Document.prototype, "elementFromPoint"),
     elementsFromPoint: method(Document.prototype, "elementsFromPoint"),
     documentFirstElementChild: getter(Document.prototype, "firstElementChild"),
-    documentQuerySelectorAll: method(Document.prototype, "querySelectorAll")
+    documentQuerySelectorAll: method(Document.prototype, "querySelectorAll"),
+    createElement: method(Document.prototype, "createElement"),
+    evaluate: method(Document.prototype, "evaluate"),
+    snapshotLength: getter(XPathResult.prototype, "snapshotLength"),
+    snapshotItem: method(XPathResult.prototype, "snapshotItem")
   }
+  /** `document.evaluate`'s result type, read once, like the methods above, so a replaced `XPathResult` can't change it. */
+  const ORDERED_NODE_SNAPSHOT_TYPE = XPathResult.ORDERED_NODE_SNAPSHOT_TYPE
   // The labelable elements, each with its own `labels` getter
   const nativeLabels = [
     HTMLButtonElement,
@@ -629,6 +753,135 @@ export function engine(render: (root: SnapNode) => string) {
   const SKIPPED = new Set(["script", "style", "noscript", "template"])
 
   /**
+   * The element the page's overlays are drawn in, under a closed shadow root: `null` while there are none. Queries,
+   * snapshots and the document's HTML leave it out, and it ignores the pointer, so no hit test finds it.
+   */
+  let overlayHost: Element | null = null
+  let overlayRoot: ShadowRoot | null = null
+  /**
+   * What drawing overlays needs, built on a document's first `overlay` request: a page that never shows one
+   * builds none of it.
+   */
+  const makeOverlays = () => {
+    const overlayItems = new Map<string, Element>()
+    const OVERLAY_HOST = "all:initial;position:fixed;inset:0;z-index:2147483647;pointer-events:none;display:block"
+    const OVERLAY_STYLE = `*{pointer-events:none!important}` +
+      `.item{position:absolute;inset:0}` +
+      `.chapter{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;` +
+      `background:rgba(0,0,0,.4);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);color:#fff;` +
+      `font:600 40px system-ui,sans-serif;text-align:center;opacity:1;transition:opacity .2s}` +
+      `.chapter.leaving{opacity:0}.description{font-size:20px;font-weight:400;opacity:.85}` +
+      `.action-title{position:absolute;max-width:60%;padding:6px 10px;border-radius:4px;background:rgba(0,0,0,.75);` +
+      `color:#fff;font:14px system-ui,sans-serif}` +
+      `.cursor{position:absolute;left:0;top:0;width:20px;height:20px;background:rgb(20,20,20);` +
+      `clip-path:polygon(0 0,0 100%,70% 70%);transition:transform .2s}`
+    const TITLE_AT: Record<string, string> = {
+      "top-left": "top:12px;left:12px",
+      "top": "top:12px;left:50%;transform:translateX(-50%)",
+      "top-right": "top:12px;right:12px",
+      "bottom-left": "bottom:12px;left:12px",
+      "bottom": "bottom:12px;left:50%;transform:translateX(-50%)",
+      "bottom-right": "bottom:12px;right:12px"
+    }
+    const cursorStyle = (x: number, y: number) => `transform:translate(${x}px,${y}px)`
+    const actionElement = (each: Extract<OverlayItem, { _tag: "Action" }>): Element => {
+      const element = overlayElement("item")
+      if (each.box !== null && each.highlightStyle !== null) {
+        const highlight = overlayElement("highlight")
+        setAttribute(
+          highlight,
+          "style",
+          `position:absolute;left:${each.box.x}px;top:${each.box.y}px;width:${each.box.width}px;` +
+            `height:${each.box.height}px;${each.highlightStyle}`
+        )
+        appendChild(element, highlight)
+      }
+      if (each.point !== null && each.pointStyle !== null) {
+        const point = overlayElement("point")
+        setAttribute(
+          point,
+          "style",
+          `position:absolute;left:${each.point.x}px;top:${each.point.y}px;transform:translate(-50%,-50%);` +
+            each.pointStyle
+        )
+        appendChild(element, point)
+      }
+      const title = overlayElement("action-title", each.title)
+      setAttribute(title, "style", `${TITLE_AT[each.position] ?? TITLE_AT["top-right"]};${each.titleStyle}`)
+      appendChild(element, title)
+      return element
+    }
+    const innerHTMLSetter = Object.getOwnPropertyDescriptor(Element.prototype, "innerHTML")!.set!
+    const textContentSetter = Object.getOwnPropertyDescriptor(Node.prototype, "textContent")!.set!
+    const appendChild = method(Node.prototype, "appendChild")
+    const removeElement = method(Element.prototype, "remove")
+    const setAttribute = method(Element.prototype, "setAttribute")
+    const attachShadow = method(Element.prototype, "attachShadow")
+    const overlayElement = (className: string, text?: string): Element => {
+      const element = dom.createElement(document, "div")
+      setAttribute(element, "class", className)
+      if (text !== undefined) call(textContentSetter, element, [text])
+      return element
+    }
+
+    const overlay = (request: Extract<Request, { op: "overlay" }>): Response => {
+      if (request.overlays.length === 0) {
+        if (overlayHost !== null) removeElement(overlayHost)
+        overlayHost = overlayRoot = null
+        overlayItems.clear()
+        return { _tag: "Overlaid" }
+      }
+      const root = dom.documentElement(document)
+      if (root === null) return { _tag: "Overlaid" }
+      if (overlayHost === null || overlayRoot === null) {
+        overlayHost = dom.createElement(document, "strider-overlay")
+        overlayRoot = attachShadow(overlayHost, { mode: "closed" })
+        const style = dom.createElement(document, "style")
+        call(textContentSetter, style, [OVERLAY_STYLE])
+        appendChild(overlayRoot, style)
+      }
+      // Drawn again where the page removed it, last in the document so it stacks over what came before
+      if (dom.parentNode(overlayHost) !== root || dom.nextElementSibling(overlayHost) !== null) {
+        appendChild(root, overlayHost)
+      }
+      setAttribute(overlayHost, "style", request.hidden ? `${OVERLAY_HOST};display:none` : OVERLAY_HOST)
+      const wanted = new Set(request.overlays.map((each) => each.id))
+      for (const [id, element] of overlayItems) {
+        if (!wanted.has(id)) {
+          removeElement(element)
+          overlayItems.delete(id)
+        }
+      }
+      for (const each of request.overlays) {
+        let element = overlayItems.get(each.id)
+        if (element === undefined) {
+          if (each._tag === "Html") {
+            element = overlayElement("item")
+            call(innerHTMLSetter, element, [each.html])
+          } else if (each._tag === "Action") {
+            element = actionElement(each)
+          } else if (each._tag === "Cursor") {
+            element = overlayElement("cursor")
+          } else {
+            element = overlayElement("item chapter")
+            appendChild(element, overlayElement("title", each.title))
+            if (each.description !== null) appendChild(element, overlayElement("description", each.description))
+          }
+          appendChild(overlayRoot, element)
+          overlayItems.set(each.id, element)
+        }
+        if (each._tag === "Cursor") setAttribute(element, "style", cursorStyle(each.x, each.y))
+        if (each._tag === "Chapter") {
+          setAttribute(element, "class", each.leaving ? "item chapter leaving" : "item chapter")
+        }
+      }
+      return { _tag: "Overlaid" }
+    }
+    return overlay
+  }
+  let drawOverlays: ((request: Extract<Request, { op: "overlay" }>) => Response) | undefined
+
+  /**
    * Every element under `root`, in tree order, with each open shadow root's elements after its host. An element
    * root's own open shadow root counts as under it, before its light children.
    */
@@ -644,6 +897,8 @@ export function engine(render: (root: SnapNode) => string) {
         child !== null;
         child = dom.nextElementSibling(child)
       ) {
+        // The overlays' host is the library's own drawing, never part of the page a query sees
+        if (child === overlayHost) continue
         out.push(child)
         const shadow = dom.shadowRoot(child)
         if (shadow !== null) visit(shadow)
@@ -664,9 +919,16 @@ export function engine(render: (root: SnapNode) => string) {
     return root instanceof ShadowRoot ? root.host : null
   }
 
-  /** Whether `ancestor` contains `node` in the composed tree. */
-  const composedContains = (ancestor: Element, node: Element): boolean => {
-    for (let current: Element | null = node; current !== null; current = composedParent(current)) {
+  /**
+   * The parent in the flat tree: an assigned node's slot, otherwise its composed parent. Rendering, hit testing and
+   * event dispatch follow this tree, where slotted content sits under its slot rather than its host. Hit testing and
+   * pointer containment, inertness, and a `display: contents` element's visibility all walk it.
+   */
+  const flatParent = (element: Element): Element | null => dom.assignedSlot(element) ?? composedParent(element)
+
+  /** Whether `ancestor` contains `node` in the flat tree, which reaches every composed ancestor too. */
+  const flatContains = (ancestor: Element, node: Element): boolean => {
+    for (let current: Element | null = node; current !== null; current = flatParent(current)) {
       if (current === ancestor) return true
     }
     return false
@@ -702,6 +964,12 @@ export function engine(render: (root: SnapNode) => string) {
 
   // Text
   const collapse = (text: string): string => text.replace(/\s+/g, " ").trim()
+  /**
+   * accname's flat string: soft hyphens and zero-width spaces dropped, other whitespace runs collapsed to one space,
+   * non-breaking spaces kept, and the ends trimmed.
+   */
+  const flatString = (text: string): string =>
+    text.split("\u00a0").map((chunk) => chunk.replace(/[\u200b\u00ad]/g, "").replace(/\s+/g, " ")).join("\u00a0").trim()
 
   const buttonLikeInput = (element: Element): element is HTMLInputElement =>
     element instanceof HTMLInputElement && ["button", "submit", "reset"].includes(element.type)
@@ -832,6 +1100,37 @@ export function engine(render: (root: SnapNode) => string) {
     "subscript",
     "suggestion",
     "superscript",
+    "term",
+    "time"
+  ])
+
+  /**
+   * Roles that also take their name from content as a descendant of the target's own content, after w3c/aria#1821,
+   * as Chromium and Firefox do. A descendant of another role, such as a nested tree item's group, contributes nothing.
+   */
+  const NAME_FROM_CONTENT_DESCENDANT = new Set([
+    "caption",
+    "code",
+    "contentinfo",
+    "definition",
+    "deletion",
+    "emphasis",
+    "generic",
+    "insertion",
+    "list",
+    "listitem",
+    "mark",
+    "none",
+    "paragraph",
+    "presentation",
+    "region",
+    "row",
+    "rowgroup",
+    "section",
+    "strong",
+    "subscript",
+    "superscript",
+    "table",
     "term",
     "time"
   ])
@@ -1146,18 +1445,49 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   // Hidden, visible
-  /** Excluded from the accessibility tree: `aria-hidden`, inert, `display: none`, `visibility: hidden`. */
+  /**
+   * Whether a `display: contents` element shows what it holds. It has no box of its own, so it's judged by its
+   * computed `visibility` and by its nearest flat-tree ancestor with a box: that one must not be `display: none`,
+   * inside one, or skipping its content (`content-visibility: hidden`, or `auto` off screen with
+   * `contentVisibilityAuto`). With `opacityProperty`, opacity 0 hides it too: its own, a `display: contents`
+   * ancestor's on the way up, or that boxed ancestor's or one above it.
+   */
+  const contentsShown = (
+    element: Element,
+    options?: { readonly contentVisibilityAuto?: boolean; readonly opacityProperty?: boolean }
+  ): boolean => {
+    const opacityProperty = options?.opacityProperty ?? false
+    const own = getComputedStyle(element)
+    if (own.visibility !== "visible" || (opacityProperty && own.opacity === "0")) return false
+    for (let current = flatParent(element); current !== null; current = flatParent(current)) {
+      const style = getComputedStyle(current)
+      if (style.display === "contents") {
+        if (opacityProperty && style.opacity === "0") return false
+        continue
+      }
+      return style.contentVisibility !== "hidden" && dom.checkVisibility(current, {
+        contentVisibilityAuto: options?.contentVisibilityAuto ?? false,
+        opacityProperty
+      })
+    }
+    return true
+  }
+
+  /**
+   * Excluded from the accessibility tree: `aria-hidden` on it or a flat-tree ancestor, inert, `display: none` on it or an
+   * ancestor, its own `visibility: hidden`, or content an ancestor skips. A `display: contents` element keeps its
+   * semantics, so what it holds doesn't decide it.
+   */
   const hiddenFromAccessibility = (element: Element): boolean => {
-    for (let current: Element | null = element; current !== null; current = composedParent(current)) {
+    for (let current: Element | null = element; current !== null; current = flatParent(current)) {
       if (dom.getAttribute(current, "aria-hidden") === "true") return true
     }
-    return inert(element) || !dom.checkVisibility(element, { visibilityProperty: true })
+    if (inert(element)) return true
+    if (getComputedStyle(element).display === "contents") return !contentsShown(element)
+    return !dom.checkVisibility(element, { visibilityProperty: true })
   }
 
   // Inertness
-  /** The parent in the flat tree, where inertness applies: the slot an element is assigned to, or its composed parent. */
-  const flatParent = (element: Element): Element | null => dom.assignedSlot(element) ?? composedParent(element)
-
   /** What the document holds that makes anything inert, read once per call, so a page without it walks nothing. */
   let inertness: { readonly attribute: boolean; readonly modal: HTMLDialogElement | null } | undefined
   const inertnessOf = (): { readonly attribute: boolean; readonly modal: HTMLDialogElement | null } => {
@@ -1243,10 +1573,28 @@ export function engine(render: (root: SnapNode) => string) {
   /** HTML's inertness: `inert` on the element or a flat-tree ancestor, or outside the topmost open modal dialog. */
   const inert = (element: Element): boolean => inertAncestor(element) !== null || blockingModal(element) !== null
 
-  /** CONCEPTS.md §8: observations include opacity; action readiness ignores it. */
+  /** Text that takes up space on the page: non-blank, with a non-empty rect. */
+  const renderedText = (node: Text): boolean => {
+    if ((dom.nodeValue(node) ?? "").trim() === "") return false
+    const range = dom.createRange(document)
+    range.selectNodeContents(node)
+    return Array.from(range.getClientRects()).some((rect) => rect.width > 0 && rect.height > 0)
+  }
+
+  /**
+   * CONCEPTS.md §8: observations include opacity; action readiness ignores it. A `display: contents` element is
+   * rendered when one of its flat-tree children is: an element, or text it shows. A slot among them is judged as an
+   * element of its own, so the text it holds is shown or hidden by the slot's style, which that text inherits.
+   */
   const rendered = (element: Element, opacityProperty: boolean): boolean => {
     if (getComputedStyle(element).display === "contents") {
-      return flatChildElements(element).some((child) => rendered(child, opacityProperty))
+      let text = false
+      for (const child of flatChildNodes(element)) {
+        if (child instanceof Element) {
+          if (rendered(child, opacityProperty)) return true
+        } else if (child instanceof Text) text ||= renderedText(child)
+      }
+      return text && contentsShown(element, { contentVisibilityAuto: true, opacityProperty })
     }
     if (!dom.checkVisibility(element, { contentVisibilityAuto: true, opacityProperty, visibilityProperty: true })) {
       return false
@@ -1258,15 +1606,30 @@ export function engine(render: (root: SnapNode) => string) {
   const visible = (element: Element): boolean => rendered(element, true)
 
   // Accessible names (accname 1.2)
+  /**
+   * Where an element's own name came from, of the sources its description could otherwise come from, or `label`
+   * for `aria-label` or `aria-labelledby`.
+   */
+  type NameSource = "label" | "native" | "content" | "title"
+  const nameSources = new Map<Element, NameSource>()
+
   interface NameContext {
     readonly visited: Set<Element>
-    /** Inside an `aria-labelledby` traversal, which includes hidden referenced nodes. */
+    /** Inside an `aria-labelledby` traversal, so `aria-labelledby` isn't followed again. */
     readonly labelledBy: boolean
-    /** Computing another element's name, not the root's. */
-    readonly traversal: boolean
+    /** The element a reference or label traversal started from was hidden, so its hidden descendants count. */
+    readonly hiddenReference: boolean
+    /**
+     * Where the node is: the target itself, a descendant in the target's own content, or inside a reference
+     * (`aria-labelledby`, a label, a legend or a caption), where every descendant counts.
+     */
+    readonly embedded: "self" | "descendant" | "reference"
     readonly includeHidden: boolean
     readonly contribution: { fieldContent: boolean }
   }
+
+  /** What separates the ids of an ID reference list: ASCII whitespace, so a non-breaking space can be part of an id. */
+  const ID_SEPARATOR = /[\t\n\f\r ]+/
 
   const byId = (element: Element, id: string): Element | null => {
     const root = dom.getRootNode(element)
@@ -1275,23 +1638,54 @@ export function engine(render: (root: SnapNode) => string) {
       : null
   }
 
+  const RANGE_ROLES = new Set(["meter", "progressbar", "scrollbar", "slider", "spinbutton"])
   const embeddedControlRole = (role: string | null): boolean =>
-    role === "textbox" || role === "searchbox" || role === "combobox" || role === "listbox" ||
-    role === "slider" || role === "spinbutton"
+    role === "textbox" || role === "searchbox" || role === "combobox" || role === "listbox" || role === "menu" ||
+    (role !== null && RANGE_ROLES.has(role))
 
-  const embeddedValue = (element: Element, role: string | null): string => {
+  /** The elements an element contains or owns through `aria-owns`, in that order. */
+  const ownedDescendants = (element: Element): Array<Element> => {
+    const out = Array.from(dom.querySelectorAll(element, "*"))
+    for (const id of (dom.getAttribute(element, "aria-owns") ?? "").split(ID_SEPARATOR)) {
+      const owned = id === "" ? null : byId(element, id)
+      if (owned !== null) out.push(owned, ...Array.from(dom.querySelectorAll(owned, "*")))
+    }
+    return out
+  }
+
+  /** What an embedded control contributes to another element's name (accname 2E). */
+  const embeddedValue = (element: Element, role: string | null, context: NameContext): string => {
     if (element instanceof HTMLInputElement && element.type === "password") return ""
-    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
-      if (role === "slider" || role === "spinbutton") {
-        return dom.getAttribute(element, "aria-valuetext") ?? dom.getAttribute(element, "aria-valuenow") ??
-          element.value
+    if (role !== null && RANGE_ROLES.has(role)) {
+      return dom.getAttribute(element, "aria-valuetext") ?? dom.getAttribute(element, "aria-valuenow") ??
+        (element instanceof HTMLInputElement ? element.value : dom.getAttribute(element, "value") ?? "")
+    }
+    if (role === "menu") return ""
+    if (role === "combobox" || role === "listbox") {
+      if (element instanceof HTMLSelectElement) {
+        // A native select gives its chosen options' labels, or its first option's: its own, not a name of theirs
+        let chosen = Array.from(element.selectedOptions)
+        if (chosen.length === 0 && element.options.length > 0) chosen = [element.options[0]!]
+        return chosen.map((option) => {
+          const label = dom.getAttribute(option, "label") ?? ""
+          return label !== "" ? label : textOf(option)
+        }).join(" ")
       }
-      return element.value
+      const listbox = role === "combobox"
+        ? ownedDescendants(element).find((each) => roleOf(each) === "listbox")
+        : element
+      const selected = listbox === undefined ?
+        [] :
+        ownedDescendants(listbox).filter((each) =>
+          roleOf(each) === "option" && (dom.getAttribute(each, "aria-selected") ?? "").toLowerCase() === "true"
+        )
+      if (selected.length === 0 && element instanceof HTMLInputElement) return element.value
+      // An embedded control is never the target itself, so its options keep the traversal they're in: a
+      // reference's every descendant counts, and the target's own content keeps the descendant role rule
+      return selected.map((option) => nameOfElement(option, context)).join(" ")
     }
-    if (element instanceof HTMLSelectElement) {
-      return Array.from(element.selectedOptions).map((option) => textOf(option)).join(" ")
-    }
-    return dom.getAttribute(element, "aria-valuetext") ?? dom.getAttribute(element, "aria-valuenow") ?? textOf(element)
+    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) return element.value
+    return dom.textContent(element) ?? ""
   }
 
   const labelsOf = (element: Element): Array<HTMLLabelElement> => {
@@ -1300,10 +1694,94 @@ export function engine(render: (root: SnapNode) => string) {
     return list === null ? [] : Array.from(list)
   }
 
-  const pseudoContent = (element: Element, pseudo: "::before" | "::after"): string => {
-    const content = getComputedStyle(element, pseudo).content
-    const match = /^"(.*)"$/.exec(content)
-    return match === null ? "" : match[1]!
+  /**
+   * The text a computed CSS `content` value gives: its alternative text after `/` when there is one, otherwise its
+   * strings and `attr()` values joined. Anything else, such as `url()` or `counter()`, gives `undefined`, and so
+   * does any value on the element itself without alternative text.
+   */
+  const parseCssContent = (element: Element, value: string, pseudo: boolean): string | undefined => {
+    type Token = { readonly kind: "string" | "attr" | "slash" | "other"; readonly value: string }
+    const tokens: Array<Token> = []
+    // Skips a quoted string from its opening quote, returning its value and the index after it.
+    const string = (from: number): [string, number] => {
+      const quote = value[from]
+      let out = ""
+      let i = from + 1
+      while (i < value.length && value[i] !== quote) {
+        if (value[i] === "\\") {
+          const hex = /^[0-9a-fA-F]{1,6}[ \t\n]?/.exec(value.slice(i + 1))
+          if (hex !== null) {
+            out += String.fromCodePoint(Number.parseInt(hex[0].trim(), 16))
+            i += 1 + hex[0].length
+          } else {
+            out += value[i + 1] ?? ""
+            i += 2
+          }
+          continue
+        }
+        out += value[i]
+        i++
+      }
+      return [out, i + 1]
+    }
+    let i = 0
+    while (i < value.length) {
+      const c = value[i]!
+      if (/\s/.test(c)) {
+        i++
+      } else if (c === "\"" || c === "'") {
+        const [text, next] = string(i)
+        tokens.push({ kind: "string", value: text })
+        i = next
+      } else if (c === "/") {
+        tokens.push({ kind: "slash", value: c })
+        i++
+      } else {
+        const attr = /^attr\(\s*([-\w]+)\s*\)/i.exec(value.slice(i))
+        if (attr !== null) {
+          tokens.push({ kind: "attr", value: attr[1]! })
+          i += attr[0].length
+          continue
+        }
+        // Another value, such as url(…) or counter(…): up to the next space or slash outside parentheses
+        let depth = 0
+        while (i < value.length && (depth > 0 || !/[\s/]/.test(value[i]!))) {
+          if (value[i] === "\"" || value[i] === "'") {
+            i = string(i)[1]
+            continue
+          }
+          if (value[i] === "(") depth++
+          else if (value[i] === ")") depth--
+          i++
+        }
+        tokens.push({ kind: "other", value: "" })
+      }
+    }
+    const slash = tokens.findIndex((token) => token.kind === "slash")
+    if (slash === -1 && !pseudo) return undefined
+    const parts = slash === -1 ? tokens : tokens.slice(slash + 1)
+    let out = ""
+    for (const token of parts) {
+      if (token.kind === "string") out += token.value
+      else if (token.kind === "attr") out += dom.getAttribute(element, token.value) ?? ""
+      else return undefined
+    }
+    return out
+  }
+
+  /**
+   * The CSS content an element or one of its pseudo-elements contributes to a name, or `undefined` for none. A
+   * `display: none` or `visibility: hidden` pseudo-element contributes nothing, and one that isn't inline is
+   * separated by spaces.
+   */
+  const cssContent = (element: Element, pseudo?: "::before" | "::after"): string | undefined => {
+    const style = getComputedStyle(element, pseudo)
+    const value = style.content
+    if (value === "" || value === "none" || value === "normal") return undefined
+    if (style.display === "none" || style.visibility === "hidden") return undefined
+    const content = parseCssContent(element, value, pseudo !== undefined)
+    if (content === undefined || pseudo === undefined) return content
+    return style.display === "inline" || style.display === "" ? content : ` ${content} `
   }
 
   const nameOfNode = (node: Node, context: NameContext): string => {
@@ -1326,63 +1804,138 @@ export function engine(render: (root: SnapNode) => string) {
     return value
   }
 
+  /** The element whose own name `accessibleName` is computing, or `null` outside that computation. */
+  let nameRoot: Element | null = null
+
+  /**
+   * Records which of the sources HTML-AAM also reads for a description gave the root its own name, however the
+   * computation reached it, as through an `aria-labelledby` that names the root itself. Another element's
+   * sources only contribute, and aren't recorded, and neither is a name that counts hidden content, which no
+   * description reads. An `aria-labelledby` that names the root keeps the source its traversal of the root found.
+   */
+  const nameSource = (context: NameContext, element: Element, source: NameSource): void => {
+    if (element !== nameRoot || context.includeHidden) return
+    if (source !== "label" || !nameSources.has(element)) nameSources.set(element, source)
+  }
+
+  /**
+   * An element's content as name from content reads it: its `::before`, then its own CSS content, which replaces
+   * its children, or its children and the elements it owns through `aria-owns`, then its `::after`. `child` is
+   * the context its children are read in.
+   */
+  const contentOf = (element: Element, child: NameContext): string => {
+    let content = cssContent(element, "::before") ?? ""
+    const own = cssContent(element)
+    if (own !== undefined) {
+      // Content on the element itself replaces its children.
+      content += own
+    } else {
+      for (const node of flatChildNodes(element)) {
+        if (node instanceof Element && SKIPPED.has(dom.localName(node))) continue
+        const name = nameOfNode(node, child)
+        // Only an inline child runs into its neighbours; <br> always separates.
+        const inline = !(node instanceof Element) ||
+          (getComputedStyle(node).display === "inline" && dom.localName(node) !== "br")
+        content += inline ? name : ` ${name} `
+      }
+      // Elements it owns through aria-owns follow its children
+      for (const owned of (dom.getAttribute(element, "aria-owns") ?? "").split(ID_SEPARATOR)) {
+        const target = owned === "" ? null : byId(element, owned)
+        if (target === null) continue
+        const name = nameOfElement(target, child)
+        content += getComputedStyle(target).display === "inline" ? name : ` ${name} `
+      }
+    }
+    return content + (cssContent(element, "::after") ?? "")
+  }
+
   const nameOfElementValue = (element: Element, context: NameContext): string => {
     if (context.visited.has(element)) return ""
-    context.visited.add(element)
-    // 2A: hidden, unless referenced or asked for
-    if (!context.labelledBy && !(context.includeHidden && !context.traversal) && hiddenFromAccessibility(element)) {
+    // 2A: hidden, unless asked for or in a traversal from a hidden reference
+    if (!context.includeHidden && !context.hiddenReference && hiddenFromAccessibility(element)) {
+      context.visited.add(element)
       return ""
     }
     // 2B: aria-labelledby, not followed twice
     if (!context.labelledBy) {
-      const ids = (dom.getAttribute(element, "aria-labelledby") ?? "").split(/\s+/).filter((id) => id !== "")
+      const ids = (dom.getAttribute(element, "aria-labelledby") ?? "").split(ID_SEPARATOR).filter((id) => id !== "")
       const parts = ids.flatMap((id) => {
         const target = byId(element, id)
-        return target === null ? [] : [nameOfElement(target, { ...context, labelledBy: true, traversal: true })]
+        return target === null ? [] : [
+          nameOfElement(target, {
+            ...context,
+            labelledBy: true,
+            hiddenReference: hiddenFromAccessibility(target),
+            embedded: "reference"
+          })
+        ]
       })
       const joined = parts.join(" ")
-      if (joined.trim() !== "") return joined
+      if (joined.trim() !== "") {
+        nameSource(context, element, "label")
+        return joined
+      }
     }
+    // Marked only now, so an element whose aria-labelledby names itself still reaches its own aria-label
+    context.visited.add(element)
     const role = roleOf(element)
-    // 2E: an embedded control inside another element's name contributes its value
-    if (context.traversal && embeddedControlRole(role)) {
-      const value = embeddedValue(element, role)
+    // 2E: an embedded control inside another element's name contributes its value, unless it names itself
+    const id = dom.id(element)
+    const namesItself = id !== "" &&
+      (dom.getAttribute(element, "aria-labelledby") ?? "").split(ID_SEPARATOR).includes(id)
+    if (context.embedded !== "self" && !namesItself && embeddedControlRole(role)) {
+      const value = embeddedValue(element, role, context)
       if (value.trim() !== "") context.contribution.fieldContent = true
       return value
     }
     // 2C: aria-label
     const label = dom.getAttribute(element, "aria-label") ?? ""
-    if (label.trim() !== "") return label
+    if (label.trim() !== "") {
+      nameSource(context, element, "label")
+      return label
+    }
     // 2D: the host language's label
     if (role !== "none" && role !== "presentation") {
       const native = nativeName(element, context)
-      if (native.trim() !== "") return native
-    }
-    // 2F: name from content
-    if (context.traversal || (role !== null && NAME_FROM_CONTENT.has(role))) {
-      let content = pseudoContent(element, "::before")
-      for (const child of flatChildNodes(element)) {
-        if (child instanceof Element && SKIPPED.has(dom.localName(child))) continue
-        const name = nameOfNode(child, { ...context, traversal: true })
-        const inline = !(child instanceof Element) || getComputedStyle(child).display.startsWith("inline")
-        content += inline ? name : ` ${name} `
+      if (native.trim() !== "") {
+        nameSource(context, element, "native")
+        return native
       }
-      content += pseudoContent(element, "::after")
-      if (content.trim() !== "") {
-        if (provenance && !context.traversal && !context.labelledBy) namesFromContent.add(element)
-        if (inField(element)) context.contribution.fieldContent = true
+    }
+    // 2F: name from content. In the target's own content, only a descendant whose role allows it.
+    const fromContent = context.embedded === "reference" ||
+      (role !== null && NAME_FROM_CONTENT.has(role)) ||
+      (context.embedded === "descendant" && (role === null || NAME_FROM_CONTENT_DESCENDANT.has(role)))
+    if (fromContent) {
+      const child: NameContext = context.embedded === "self" ? { ...context, embedded: "descendant" } : context
+      const content = contentOf(element, child)
+      // Only the target's own name is trimmed: a descendant's whitespace separates its neighbours.
+      if (context.embedded === "self" ? content.trim() !== "" : content !== "") {
+        if (provenance && context.embedded === "self") namesFromContent.add(element)
+        nameSource(context, element, "content")
+        if (inField(element) && content.trim() !== "") context.contribution.fieldContent = true
         return content
       }
     }
-    // 2I: the tooltip, then a placeholder (HTML-AAM)
-    const title = dom.getAttribute(element, "title") ?? ""
-    if (title.trim() !== "") return title
+    // 2I: the tooltip, except on a presentational element, then a placeholder (HTML-AAM)
+    const title = role === "none" || role === "presentation" ? "" : dom.getAttribute(element, "title") ?? ""
+    if (title.trim() !== "") {
+      nameSource(context, element, "title")
+      return title
+    }
     const placeholder = dom.getAttribute(element, "placeholder") ?? ""
     if ((element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) && placeholder.trim() !== "") {
       return placeholder
     }
     return ""
   }
+
+  /** The context for a native label, legend or caption: a reference, hidden if it or an enclosing one is. */
+  const reference = (context: NameContext, element: Element): NameContext => ({
+    ...context,
+    hiddenReference: context.hiddenReference || hiddenFromAccessibility(element),
+    embedded: "reference"
+  })
 
   const nativeName = (element: Element, context: NameContext): string => {
     if (element instanceof HTMLInputElement) {
@@ -1405,7 +1958,7 @@ export function engine(render: (root: SnapNode) => string) {
     }
     const labels = labelsOf(element)
     if (labels.length > 0) {
-      return labels.map((label) => nameOfElement(label, { ...context, traversal: true })).join(" ")
+      return labels.map((label) => nameOfElement(label, reference(context, label))).join(" ")
     }
     if (element instanceof HTMLImageElement || element instanceof HTMLAreaElement) {
       const alt = dom.getAttribute(element, "alt") ?? ""
@@ -1415,15 +1968,15 @@ export function engine(render: (root: SnapNode) => string) {
     const first = (selector: string) => Array.from(dom.children(element)).find((child) => dom.matches(child, selector))
     if (element instanceof HTMLFieldSetElement) {
       const legend = first("legend")
-      return legend === undefined ? "" : nameOfElement(legend, { ...context, traversal: true })
+      return legend === undefined ? "" : nameOfElement(legend, reference(context, legend))
     }
     if (element instanceof HTMLTableElement) {
       const caption = first("caption")
-      return caption === undefined ? "" : nameOfElement(caption, { ...context, traversal: true })
+      return caption === undefined ? "" : nameOfElement(caption, reference(context, caption))
     }
     if (dom.localName(element) === "figure") {
       const caption = first("figcaption")
-      return caption === undefined ? "" : nameOfElement(caption, { ...context, traversal: true })
+      return caption === undefined ? "" : nameOfElement(caption, reference(context, caption))
     }
     if (element instanceof SVGSVGElement) {
       const title = first("title")
@@ -1438,24 +1991,134 @@ export function engine(render: (root: SnapNode) => string) {
   const namesFromFields = new Set<Element>()
   const namesFromContent = new Set<Element>()
   const nameCache = new Map<Element, string>()
+  const hiddenNameCache = new Map<Element, string>()
+  const descriptionCache = new Map<Element, string>()
+  /** An element's accessible name, as a flat string. With `includeHidden`, hidden descendants count too. */
   const accessibleName = (element: Element, includeHidden: boolean): string => {
-    const cached = nameCache.get(element)
+    const cache = includeHidden ? hiddenNameCache : nameCache
+    const cached = cache.get(element)
     if (cached !== undefined) return cached
     const contribution = { fieldContent: false }
     const role = roleOf(element)
-    // This restriction is on the root, not on descendants or references contributing to another element's name.
-    const name = role !== null && NAME_PROHIBITED.has(role) ? "" : collapse(
-      nameOfElement(element, { visited: new Set(), labelledBy: false, traversal: false, includeHidden, contribution })
-    )
+    const outer = nameRoot
+    nameRoot = element
+    let name: string
+    try {
+      // This restriction is on the root, not on descendants or references contributing to another element's name.
+      name = role !== null && NAME_PROHIBITED.has(role) ? "" : flatString(
+        nameOfElement(element, {
+          visited: new Set(),
+          labelledBy: false,
+          hiddenReference: false,
+          embedded: "self",
+          includeHidden,
+          contribution
+        })
+      )
+    } finally {
+      nameRoot = outer
+    }
     if (provenance && contribution.fieldContent) namesFromFields.add(element)
-    nameCache.set(element, name)
+    cache.set(element, name)
     return name
+  }
+
+  const referenceContext = (target: Element, includeHidden: boolean): NameContext => ({
+    visited: new Set(),
+    labelledBy: true,
+    hiddenReference: hiddenFromAccessibility(target),
+    embedded: "reference",
+    includeHidden,
+    contribution: { fieldContent: false }
+  })
+
+  /**
+   * The text of an ID reference list's elements, each computed as a reference traversal, so a hidden element
+   * named there counts with its hidden content, joined by a space; `null` when no ID names an element, so the
+   * relation counts as absent.
+   */
+  const referencedText = (element: Element, attribute: string, includeHidden: boolean): string | null => {
+    const targets = (dom.getAttribute(element, attribute) ?? "").split(ID_SEPARATOR).flatMap((id) => {
+      const target = id === "" ? null : byId(element, id)
+      return target === null ? [] : [target]
+    })
+    return targets.length === 0
+      ? null
+      : targets.map((target) => nameOfElement(target, referenceContext(target, includeHidden))).join(" ")
+  }
+
+  /**
+   * An element's accessible description, as a flat string (HTML-AAM): empty when it's hidden; else the elements
+   * `aria-describedby` names, when any exists, even if their text is empty; else `aria-description`, when
+   * present; else, when it didn't give the name, a table's caption or a button, submit or reset input's value;
+   * else a summary element's content, when `aria-label` or `aria-labelledby` gave the name; else the title, when
+   * it isn't the name.
+   */
+  const accessibleDescription = (element: Element): string => {
+    const cached = descriptionCache.get(element)
+    if (cached !== undefined) return cached
+    const compute = (): string => {
+      if (hiddenFromAccessibility(element)) return ""
+      const referenced = referencedText(element, "aria-describedby", false)
+      if (referenced !== null) return referenced
+      const attribute = dom.getAttribute(element, "aria-description")
+      if (attribute !== null) return attribute
+      accessibleName(element, false)
+      const source = nameSources.get(element)
+      // The host language's source, when the element has one and it didn't give the name, wins even when empty.
+      if (source !== "native" && source !== "content") {
+        if (element instanceof HTMLTableElement) {
+          const caption = Array.from(dom.children(element)).find((child) => dom.localName(child) === "caption")
+          if (caption !== undefined) return nameOfElement(caption, referenceContext(caption, false))
+        } else if (dom.localName(element) === "summary") {
+          if (source === "label") {
+            const context = referenceContext(element, false)
+            context.visited.add(element)
+            return contentOf(element, context)
+          }
+        } else if (buttonLikeInput(element) && dom.hasAttribute(element, "value")) {
+          return element.value
+        }
+      }
+      return source === "title" ? "" : dom.getAttribute(element, "title") ?? ""
+    }
+    const description = flatString(compute())
+    descriptionCache.set(element, description)
+    return description
+  }
+
+  /** An ASCII-case-insensitive token: ASCII letters lowercased, nothing trimmed. */
+  const asciiLowercase = (token: string): string => token.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+
+  /**
+   * An element's accessible error message: its `aria-errormessage` references while it's invalid, through an
+   * `aria-invalid` other than blank or exactly `false` in any ASCII case, or its own failed constraint validation;
+   * else empty.
+   */
+  const accessibleErrorMessage = (element: Element): string => {
+    const invalid = dom.getAttribute(element, "aria-invalid")
+    const ariaInvalid = invalid !== null && invalid.trim() !== "" && asciiLowercase(invalid) !== "false"
+    const validity = "validity" in element ? (element as { readonly validity?: ValidityState }).validity : undefined
+    if (!ariaInvalid && validity?.valid !== false) return ""
+    return flatString(referencedText(element, "aria-errormessage", false) ?? "")
+  }
+
+  /**
+   * Whether a computed accessible text matches: a regular expression tests it as computed, and a string compares
+   * whole after whitespace is collapsed and zero-width and soft hyphen characters are dropped on both sides.
+   */
+  const accessibleTextMatches = (text: string, matcher: TextMatcher, ignoreCase: boolean): boolean => {
+    if (matcher._tag === "RegExp") return new RegExp(matcher.source, matcher.flags).test(text)
+    const normalize = (value: string) => collapse(value.replace(/[\u200b\u00ad]/g, ""))
+    return ignoreCase
+      ? normalize(text).toLowerCase() === normalize(matcher.value).toLowerCase()
+      : normalize(text) === normalize(matcher.value)
   }
 
   // Queries
   interface InvalidSelector {
     readonly invalidSelector: true
-    readonly kind?: "role" | undefined
+    readonly kind?: "role" | "xpath" | undefined
     readonly selector: string
     readonly message: string
   }
@@ -1508,7 +2171,9 @@ export function engine(render: (root: SnapNode) => string) {
 
   const labelTexts = (element: Element): Array<string> => {
     const texts: Array<string> = []
-    for (const id of (dom.getAttribute(element, "aria-labelledby") ?? "").split(/\s+/).filter((id) => id !== "")) {
+    for (
+      const id of (dom.getAttribute(element, "aria-labelledby") ?? "").split(ID_SEPARATOR).filter((id) => id !== "")
+    ) {
       const target = byId(element, id)
       if (target !== null) texts.push(textOf(target))
     }
@@ -1533,8 +2198,57 @@ export function engine(render: (root: SnapNode) => string) {
   const documentElements = (): Array<Element> =>
     treeScope === null ? elementsUnder(document) : (treeScope.elements ??= elementsUnder(document))
 
+  /**
+   * An expression's element nodes from `context`, in document order: text, attribute and document nodes are
+   * skipped. It throws an invalid selector when the expression doesn't parse, uses a namespace prefix or doesn't
+   * give a node set.
+   */
+  const evaluateXPath = (context: Node, source: string, expression: string): Array<Element> => {
+    let result: XPathResult
+    try {
+      result = dom.evaluate(document, source, context, null, ORDERED_NODE_SNAPSHOT_TYPE, null)
+    } catch (error) {
+      throw {
+        invalidSelector: true,
+        kind: "xpath",
+        selector: expression,
+        message: error instanceof Error ? error.message : String(error)
+      } satisfies InvalidSelector
+    }
+    const found: Array<Element> = []
+    for (let index = 0, length = dom.snapshotLength(result); index < length; index++) {
+      const node = dom.snapshotItem(result, index)
+      if (node !== null && dom.nodeType(node) === Node.ELEMENT_NODE) found.push(node as Element)
+    }
+    return found
+  }
+
+  /**
+   * A `/` that starts a chained expression's first step: Playwright's rule, so `/li` reads as `./li` and `//li` as
+   * `.//li` from the element. Only the start is rewritten, so a union's later branch, as `//b` in `//a | //b`, keeps
+   * its absolute path. A bare `/`, alone or before `|`, is the root of the element's tree and is left as written.
+   */
+  const LEADING_STEP = /^(\s*)(?=\/)(?!\/\s*(?:\||$))/
+
+  /**
+   * An XPath step's matches from `scope`: from the document as written, and from an element with its leading `/`
+   * read from the element, so chaining searches inside as CSS does.
+   */
+  const xpathQuery = (scope: Document | Element, expression: string): Array<Element> =>
+    evaluateXPath(scope, scope === document ? expression : expression.replace(LEADING_STEP, "$1."), expression)
+
+  /**
+   * The detached element XPath is checked from: an empty tree, so the check searches nothing (an element, since
+   * Firefox refuses a text node as the context node).
+   */
+  let xpathProbe: Element | undefined
+
   /** The candidates of one query under `scope`, in tree order. */
   const query = (scope: Document | Element, step: Step): Array<Element> => {
+    if (step._tag === "XPath") {
+      const found = xpathQuery(scope, step.expression)
+      return overlayHost === null ? found : found.filter((element) => element !== overlayHost)
+    }
     const under = scope === document ? documentElements() : elementsUnder(scope)
     switch (step._tag) {
       case "Css": {
@@ -1566,8 +2280,9 @@ export function engine(render: (root: SnapNode) => string) {
       }
       case "Text": {
         // A slot is transparent here as in the flat tree: what it renders, its assigned nodes or its fallback
-        // content, is its parent's text, so the slot itself is never the smallest element that says it.
-        const candidates = under.filter((element) =>
+        // content, is its parent's text, so the slot itself is never the smallest element that says it. An
+        // element scope is a candidate itself, ahead of its descendants: the text it says may be its own.
+        const candidates = (scope instanceof Element ? [scope, ...under] : under).filter((element) =>
           !(element instanceof HTMLSlotElement) && !inHead(element) && !SKIPPED.has(dom.localName(element))
         )
         const says = (element: Element) => matches(step.matcher, textOf(element))
@@ -1576,7 +2291,7 @@ export function engine(render: (root: SnapNode) => string) {
       case "Role":
         return under.filter((element) =>
           roleOf(element) === step.role && (step.includeHidden || !hiddenFromAccessibility(element)) &&
-          (step.name === null || matches(step.name, accessibleName(element, step.includeHidden))) &&
+          (step.name === null || matches(step.name, collapse(accessibleName(element, step.includeHidden)))) &&
           (step.level === undefined || levelOf(element) === step.level) &&
           (step.checked === undefined || checkedState(element).state === step.checked) &&
           (step.pressed === undefined || pressedOf(element) === step.pressed) &&
@@ -1604,7 +2319,11 @@ export function engine(render: (root: SnapNode) => string) {
       case "Title":
         return under.filter((element) => attributeMatches(element, "title", step.matcher))
       case "TestId":
-        return under.filter((element) => dom.getAttribute(element, "data-testid") === step.id)
+        return under.filter((element) => {
+          // The value as written: a test id isn't text, so its whitespace isn't collapsed.
+          const value = dom.getAttribute(element, step.attribute)
+          return value !== null && rawMatches(step.matcher, value)
+        })
       default:
         return []
     }
@@ -1640,6 +2359,11 @@ export function engine(render: (root: SnapNode) => string) {
           }
           break
         }
+        case "XPath":
+          // Checked as written on every resolve, from a detached element, so an empty scope still fails and no
+          // document is searched to do it. A valid expression stays valid with its leading step read from an element.
+          evaluateXPath(xpathProbe ??= dom.createElement(document, "div"), step.expression, step.expression)
+          break
         case "Filter":
           if (step.has !== null) validateSteps(step.has)
           if (step.hasNot !== null) validateSteps(step.hasNot)
@@ -1729,8 +2453,9 @@ export function engine(render: (root: SnapNode) => string) {
     return out
   }
 
+  /** `aria-disabled` on the element or a flat-tree ancestor, so a slotted element inherits its slot's. */
   const ariaDisabled = (element: Element): boolean => {
-    for (let current: Element | null = element; current !== null; current = composedParent(current)) {
+    for (let current: Element | null = element; current !== null; current = flatParent(current)) {
       if (dom.getAttribute(current, "aria-disabled") === "true") return true
     }
     return false
@@ -1820,7 +2545,8 @@ export function engine(render: (root: SnapNode) => string) {
     }
     const role = roleOf(element)
     if (role === null || !CHECKABLE_ROLES.has(role)) return { state: null, checked: null }
-    const token = dom.getAttribute(element, "aria-checked")?.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+    const attribute = dom.getAttribute(element, "aria-checked")
+    const token = attribute === null ? undefined : asciiLowercase(attribute)
     if (token === "true") return { state: true, checked: true }
     if (token === "false") return { state: false, checked: false }
     if (token === "mixed") {
@@ -1931,11 +2657,36 @@ export function engine(render: (root: SnapNode) => string) {
     return label
   }
 
-  const textSelectionTarget = (element: Element): Element => {
-    let target = element
-    if (!dom.matches(target, "input, textarea, select") && !contentEditable(target)) {
-      target = dom.closest(target, "button, [role=button], [role=checkbox], [role=radio]") ?? target
+  const CONTROL = "button, [role=button], [role=checkbox], [role=radio]"
+
+  const standsForItself = (element: Element): boolean =>
+    dom.matches(element, "input, textarea, select") || contentEditable(element)
+
+  // Selection takes the text of the control an element is in, found among its DOM ancestors. Fields and editable
+  // content stand for themselves.
+  const enclosingControl = (element: Element): Element =>
+    standsForItself(element) ? element : dom.closest(element, CONTROL) ?? element
+
+  // The browser delivers no click to a disabled button's subtree on the flat tree, so Enabled climbs it: through
+  // assigned slots and out of shadow roots. Fields and editable content stand for themselves.
+  const flatEnclosingControl = (element: Element): Element => {
+    if (standsForItself(element)) return element
+    for (
+      let current: Element | null = element;
+      current !== null;
+      current = dom.assignedSlot(current) ?? composedParent(current)
+    ) {
+      if (dom.matches(current, CONTROL)) return current
     }
+    return element
+  }
+
+  // Enabled as a user sees it: an element is enabled only when it and its enclosing control both are, so a span inside
+  // a disabled button is disabled, and a disabled option stays disabled whatever encloses its select
+  const enabledControl = (element: Element): boolean => enabled(element) && enabled(flatEnclosingControl(element))
+
+  const textSelectionTarget = (element: Element): Element => {
+    let target = enclosingControl(element)
     if (
       !dom.matches(
         target,
@@ -1964,7 +2715,7 @@ export function engine(render: (root: SnapNode) => string) {
     for (
       let ancestor: Element | null = element;
       ancestor !== null && ancestor !== label;
-      ancestor = dom.assignedSlot(ancestor) ?? composedParent(ancestor)
+      ancestor = flatParent(ancestor)
     ) {
       if (interactiveLabelDescendant(ancestor)) return null
     }
@@ -1987,6 +2738,22 @@ export function engine(render: (root: SnapNode) => string) {
       ? element.value
       : null
 
+  /**
+   * The element that must receive the pointer for an action on `element`: its nearest enclosing button or link in
+   * the flat tree, through shadow roots and slots, itself included, since the browser hands a click on a
+   * pointer-events: none descendant to it. A form field or an editable element must receive the pointer itself.
+   */
+  const pointerRecipient = (element: Element): Element => {
+    if (
+      dom.matches(element, "input, textarea, select") ||
+      (element instanceof HTMLElement && dom.isContentEditable(element))
+    ) return element
+    for (let current: Element | null = element; current !== null; current = flatParent(current)) {
+      if (dom.matches(current, "button, [role=button], a, [role=link]")) return current
+    }
+    return element
+  }
+
   const missed = (element: Element, hit: Element | null): NotReady =>
     getComputedStyle(element).pointerEvents === "none"
       ? { _tag: "NoPointerEvents", element: describe(element) }
@@ -2001,7 +2768,7 @@ export function engine(render: (root: SnapNode) => string) {
       const dialog = modal ??
         documentElements().find((d) =>
           dom.matches(d, "[role=dialog][aria-modal=true],[role=alertdialog][aria-modal=true]") &&
-          !composedContains(d, element) && inertAncestor(d) === null && visible(d)
+          !flatContains(d, element) && inertAncestor(d) === null && visible(d)
         )
       return { _tag: "Inert", by: describe(by), dialog: dialog && describe(dialog) }
     }
@@ -2045,7 +2812,7 @@ export function engine(render: (root: SnapNode) => string) {
         if (seen.has(root)) continue
         seen.add(root)
         for (const hit of root instanceof Document ? dom.elementsFromPoint(root, x, y) : root.elementsFromPoint(x, y)) {
-          if (composedContains(element, hit)) return true
+          if (flatContains(element, hit)) return true
           const shadow = dom.shadowRoot(hit)
           if (shadow !== null) roots.push(shadow)
         }
@@ -2063,7 +2830,7 @@ export function engine(render: (root: SnapNode) => string) {
     onCancel?: (cancel: () => void) => void
   ): Promise<boolean | null> | null => {
     let margin = 0
-    for (let ancestor = composedParent(element); ancestor !== null; ancestor = composedParent(ancestor)) {
+    for (let ancestor = flatParent(element); ancestor !== null; ancestor = flatParent(ancestor)) {
       const style = getComputedStyle(ancestor)
       if (
         (/^(auto|scroll|hidden)$/.test(style.overflowX) && dom.scrollWidth(ancestor) > dom.clientWidth(ancestor)) ||
@@ -2136,7 +2903,7 @@ export function engine(render: (root: SnapNode) => string) {
         first ??= point
         if (!receivesPointer) return [point]
         const hit = hitTarget(point.x, point.y)
-        if (hit !== null && composedContains(element, hit)) {
+        if (hit !== null && flatContains(pointerRecipient(element), hit)) {
           if (clip === undefined) return [point]
           points.push(point)
         }
@@ -2151,13 +2918,21 @@ export function engine(render: (root: SnapNode) => string) {
     }]
   }
 
-  /** What the pointer would hit at a point, through open shadow roots. */
+  /**
+   * What the pointer would hit at a point, through open shadow roots. Each root's answer counts only when it belongs
+   * to that root. A root can answer with its own host or an enclosing one, for slotted text, whose DOM parent is a
+   * host (Chromium does), or for the host's own box or pseudo-element covering its contents. The topmost element of
+   * the root's paint stack then decides: the hit descends to it when it belongs to the root, and otherwise stops at
+   * the host, which covers. Each step descends into a deeper root, so the walk ends.
+   */
   const hitTarget = (x: number, y: number): Element | null => {
     let hit = dom.elementFromPoint(document, x, y)
     let shadow: ShadowRoot | null
     while (hit !== null && (shadow = dom.shadowRoot(hit)) !== null) {
-      const inner = shadow.elementFromPoint(x, y)
-      if (inner === null || inner === hit) break
+      const root = shadow
+      const answer = root.elementFromPoint(x, y)
+      const inner = answer !== null && dom.getRootNode(answer) === root ? answer : root.elementsFromPoint(x, y)[0]
+      if (inner === undefined || dom.getRootNode(inner) !== root) break
       hit = inner
     }
     return hit
@@ -2239,7 +3014,7 @@ export function engine(render: (root: SnapNode) => string) {
     return blocked
   }
 
-  /** Arms a guard on `element`: the gesture's first trusted event must land in it, or the gesture is stopped. */
+  /** Arms a guard on `element`, the pointer's recipient: the gesture's first trusted event must land in it, or the gesture is stopped. */
   const arm = (element: Element) => {
     disarm()
     let decided = false
@@ -2248,7 +3023,7 @@ export function engine(render: (root: SnapNode) => string) {
       if (!decided) {
         decided = true
         const target = event.composedPath()[0]
-        if (!(target instanceof Element) || !composedContains(element, target)) {
+        if (!(target instanceof Element) || !flatContains(element, target)) {
           current.blocked = target instanceof Element ? describe(target) : "nothing at that point"
         }
       }
@@ -2268,8 +3043,16 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   // Native insertion is a separate protocol command. In a design-mode document a timer can refocus a
-  // form control after selection, so validate at the cancellable native event, before its default mutation.
-  let fillGuard: { remove: () => void; blocked: string | null; unsafe: boolean; accepted: boolean } | null = null
+  // form control after selection, so validate at the cancellable native event, before its default mutation, or,
+  // where the engine inserts the text itself, at the insertion, before it dispatches anything (`insert`).
+  let fillGuard: {
+    remove: () => void
+    blocked: string | null
+    unsafe: boolean
+    accepted: boolean
+    inserting: boolean
+    check: () => string | null
+  } | null = null
   const fillDisarm = () => {
     const current = fillGuard
     fillGuard = null
@@ -2293,7 +3076,14 @@ export function engine(render: (root: SnapNode) => string) {
       blocked: null as string | null,
       unsafe: false,
       accepted: false,
-      inserting: false
+      inserting: false,
+      // At an insertion the engine makes itself: an ancestor's focus must still be on the guarded frame, as the
+      // trusted events a native insertion sends would show it
+      check: (): string | null => {
+        if (!ancestor) return blocker()
+        const active = deepActive()
+        return active === element ? null : active === null ? "another document" : describe(active)
+      }
     }
     const blocker = (): string | null => {
       // Ancestors should receive no insertion event: correct input reaches the target document instead.
@@ -2334,7 +3124,7 @@ export function engine(render: (root: SnapNode) => string) {
       const elsewhere = ancestor ?
         (recipient instanceof Element ? describe(recipient) : "another document")
         : recipient instanceof Element && element !== null &&
-            !composedContains(recipient, element) && !composedContains(element, recipient)
+            !flatContains(recipient, element) && !flatContains(element, recipient)
         ? describe(recipient) :
         null
       const blocked = current.blocked ?? elsewhere ?? blocker()
@@ -2366,6 +3156,45 @@ export function engine(render: (root: SnapNode) => string) {
     if (current.blocked === null) { for (const type of types) addEventListener(type, handler, true) }
     fillGuard = current
     return { _tag: "FillGuard" as const, blocked: current.blocked, unsafe: false, accepted: false }
+  }
+
+  /**
+   * Inserts text where the focus is, with the document's editing command, which sends no key events: the
+   * engine's own `execCommand`, taken from `Document.prototype` at install, so a page's replacement isn't called.
+   * Where the browser's command dispatches no `beforeinput` (Firefox), `beforeInput` dispatches it first, as the
+   * other browsers do, and a page that cancels it gets nothing inserted. An armed fill guard checks the target here,
+   * before anything is dispatched.
+   */
+  const insert = (text: string, beforeInput: boolean): Response => {
+    const active = deepActive()
+    const guard = fillGuard
+    // An armed guard, in an ancestor document too, decides before anything goes further or is dispatched
+    const blocked = (): boolean => {
+      if (guard === null) return false
+      guard.blocked ??= guard.check()
+      return guard.blocked !== null
+    }
+    if (blocked()) return { _tag: "Inserted", inserted: false }
+    if (active instanceof HTMLIFrameElement || active instanceof HTMLFrameElement) {
+      return { _tag: "InFrame", index: resolve([{ _tag: "Css", selector: "iframe, frame" }]).indexOf(active) }
+    }
+    if (beforeInput && active !== null) {
+      const event = new InputEvent("beforeinput", {
+        inputType: "insertText",
+        data: text,
+        bubbles: true,
+        cancelable: true,
+        composed: true
+      })
+      if (!dom.dispatchEvent(active, event)) return { _tag: "Inserted", inserted: false }
+      // Its handlers may have moved the focus or the selection
+      if (blocked()) return { _tag: "Inserted", inserted: false }
+    }
+    if (guard !== null) {
+      guard.accepted = true
+      guard.inserting = true
+    }
+    return { _tag: "Inserted", inserted: dom.execCommand(document, "insertText", false, text) }
   }
 
   // Actions
@@ -2494,8 +3323,8 @@ export function engine(render: (root: SnapNode) => string) {
       else if (checks.visible && !rendered(element, false)) reason = { _tag: "NotVisible" }
       else if (
         checks.enabled && (
-          !enabled(element) || (action._tag === "Point" && action.checked === true &&
-            !enabled(checkableForAction(element) ?? element))
+          !enabledControl(element) || (action._tag === "Point" && action.checked === true &&
+            !enabledControl(checkableForAction(element) ?? element))
         )
       ) reason = { _tag: "Disabled" }
       else if (checks.editable && readOnly(element)) reason = { _tag: "ReadOnly" }
@@ -2528,7 +3357,7 @@ export function engine(render: (root: SnapNode) => string) {
         if (point === null) reason = { _tag: "OutsideViewport" }
         else if (checks.receivesPointer) {
           const hit = hitTarget(point.x, point.y)
-          if (hit === null || !composedContains(element, hit)) reason = missed(element, hit)
+          if (hit === null || !flatContains(pointerRecipient(element), hit)) reason = missed(element, hit)
         }
       }
       if (reason === null && element !== undefined && action._tag === "Select") {
@@ -2670,7 +3499,7 @@ export function engine(render: (root: SnapNode) => string) {
         for (let current: Element | null = element; current !== null; current = composedParent(current)) {
           if (dom.getAttribute(current, "draggable") === "true") draggable = true
         }
-        if (apply && action.guard) arm(element)
+        if (apply && action.guard) arm(pointerRecipient(element))
         return { ...answer, point, draggable }
       }
       case "Checked":
@@ -2803,7 +3632,7 @@ export function engine(render: (root: SnapNode) => string) {
       case "Editable":
         return { _tag: "Read", value: editableKind(element) && enabled(element) && !readOnly(element) }
       case "Enabled":
-        return { _tag: "Read", value: enabled(element) }
+        return { _tag: "Read", value: enabledControl(element) }
       case "Checked": {
         const control = request.read.followLabel ? checkableForAction(element) : element
         const checked = control === null ? null : checkedOf(control)
@@ -2826,11 +3655,33 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   // Expectations, waiting in the page
-  const expected = (matcher: TextMatcher, text: string): boolean =>
-    matcher._tag === "RegExp" ? new RegExp(matcher.source, matcher.flags).test(text) : text === collapse(matcher.value)
+  /** Two strings as an expectation compares them: whole, or contained, and without case when it asks. */
+  const compare = (text: string, value: string, whole: boolean, ignoreCase: boolean | undefined): boolean => {
+    const actual = ignoreCase === true ? text.toLowerCase() : text
+    const wanted = ignoreCase === true ? value.toLowerCase() : value
+    return whole ? actual === wanted : actual.includes(wanted)
+  }
 
-  const classMatches = (matcher: TextMatcher, value: string): boolean =>
-    matcher._tag === "RegExp" ? new RegExp(matcher.source, matcher.flags).test(value) : value === matcher.value
+  const expected = (matcher: TextMatcher, text: string): boolean =>
+    matcher._tag === "RegExp"
+      ? new RegExp(matcher.source, matcher.flags).test(text)
+      : compare(text, collapse(matcher.value), true, matcher.ignoreCase)
+
+  /** Whether a text contains a string entry, or matches a regular expression one. */
+  const contains = (matcher: TextMatcher, text: string): boolean =>
+    matcher._tag === "RegExp"
+      ? new RegExp(matcher.source, matcher.flags).test(text)
+      : compare(text, collapse(matcher.value), false, matcher.ignoreCase)
+
+  /** A value as written, such as a class or an attribute, matched without collapsing its whitespace. */
+  const rawMatches = (matcher: TextMatcher, value: string): boolean =>
+    matcher._tag === "RegExp"
+      ? new RegExp(matcher.source, matcher.flags).test(value)
+      : compare(value, matcher.value, true, matcher.ignoreCase)
+
+  /** An element's text for `toHaveText` and `toContainText`: its rendered text when asked, collapsed alike. */
+  const expectedTextOf = (element: Element, useInnerText: boolean): string =>
+    useInnerText && element instanceof HTMLElement ? collapse(dom.innerText(element)) : textOf(element)
 
   /** Checks an expectation once: whether it holds, and what was seen. */
   const evaluate = (steps: ReadonlyArray<Step>, expectation: Expectation): { passed: boolean; observed: unknown } => {
@@ -2838,6 +3689,11 @@ export function engine(render: (root: SnapNode) => string) {
     if (expectation._tag === "Title") {
       const title = collapse(dom.title(document))
       return { passed: expected(expectation.expected, title), observed: title }
+    }
+    if (expectation._tag === "Aria" && expectation.document) {
+      const root = documentNode({ interactivity: false, depth: null })
+      const matches = matchPattern(expectation.pattern, root)
+      return { passed: expectation.not ? !matches : matches, observed: render(root) }
     }
     const found = resolve(steps)
     switch (expectation._tag) {
@@ -2859,7 +3715,7 @@ export function engine(render: (root: SnapNode) => string) {
       case "Count":
         return { passed: found.length === expectation.count, observed: found.length }
       case "Text": {
-        const texts = found.map(textOf)
+        const texts = found.map((element) => expectedTextOf(element, expectation.useInnerText))
         if (expectation.list) {
           return {
             passed: texts.length === expectation.expected.length &&
@@ -2870,17 +3726,33 @@ export function engine(render: (root: SnapNode) => string) {
         if (found.length !== 1) return { passed: false, observed: { matches: found.length } }
         return { passed: expected(expectation.expected[0]!, texts[0]!), observed: texts[0] }
       }
+      case "ContainsText": {
+        const texts = found.map((element) => expectedTextOf(element, expectation.useInnerText))
+        if (expectation.list) {
+          if (expectation.expected.length === 0) return { passed: texts.length === 0, observed: texts }
+          // Each entry is contained in a later match than the entry before it
+          let next = 0
+          for (const entry of expectation.expected) {
+            while (next < texts.length && !contains(entry, texts[next]!)) next++
+            if (next === texts.length) return { passed: false, observed: texts }
+            next++
+          }
+          return { passed: true, observed: texts }
+        }
+        if (found.length !== 1) return { passed: false, observed: { matches: found.length } }
+        return { passed: contains(expectation.expected[0]!, texts[0]!), observed: texts[0] }
+      }
       case "Class": {
         const texts = found.map((element) => dom.classList(element).toString())
         if (expectation.list) {
           return {
             passed: texts.length === expectation.expected.length &&
-              texts.every((text, index) => classMatches(expectation.expected[index]!, text)),
+              texts.every((text, index) => rawMatches(expectation.expected[index]!, text)),
             observed: texts
           }
         }
         if (found.length !== 1) return { passed: false, observed: { matches: found.length } }
-        return { passed: classMatches(expectation.expected[0]!, texts[0]!), observed: texts[0] }
+        return { passed: rawMatches(expectation.expected[0]!, texts[0]!), observed: texts[0] }
       }
       default:
         break
@@ -2889,9 +3761,9 @@ export function engine(render: (root: SnapNode) => string) {
     const element = found[0]!
     switch (expectation._tag) {
       case "Enabled":
-        return { passed: enabled(element), observed: enabled(element) ? "enabled" : "disabled" }
+        return { passed: enabledControl(element), observed: enabledControl(element) ? "enabled" : "disabled" }
       case "Disabled":
-        return { passed: !enabled(element), observed: enabled(element) ? "enabled" : "disabled" }
+        return { passed: !enabledControl(element), observed: enabledControl(element) ? "enabled" : "disabled" }
       case "Checked": {
         const checked = checkedOf(element)
         return {
@@ -2918,29 +3790,16 @@ export function engine(render: (root: SnapNode) => string) {
         return { passed: role === expectation.expected, observed: role }
       }
       case "AccessibleName": {
-        // Resolving an includeHidden role locator may have cached a name with different visibility rules.
-        nameCache.delete(element)
         const name = accessibleName(element, false)
-        const matcher = expectation.expected
-        const normalize = (text: string) => collapse(text.replace(/[\u200b\u00ad]/g, ""))
-        return {
-          passed: matcher._tag === "RegExp"
-            ? new RegExp(matcher.source, matcher.flags).test(name)
-            : expectation.ignoreCase
-            ? normalize(name).toLocaleLowerCase() === normalize(matcher.value).toLocaleLowerCase()
-            : normalize(name) === normalize(matcher.value),
-          observed: name
-        }
+        return { passed: accessibleTextMatches(name, expectation.expected, expectation.ignoreCase), observed: name }
       }
-      case "ContainsText": {
-        const text = textOf(element)
-        const matcher = expectation.expected
-        return {
-          passed: matcher._tag === "RegExp"
-            ? new RegExp(matcher.source, matcher.flags).test(text)
-            : text.includes(collapse(matcher.value)),
-          observed: text
-        }
+      case "AccessibleDescription":
+      case "AccessibleErrorMessage": {
+        const text = expectation._tag === "AccessibleDescription"
+          ? accessibleDescription(element)
+          : accessibleErrorMessage(element)
+        const matches = accessibleTextMatches(text, expectation.expected, expectation.ignoreCase)
+        return { passed: expectation.not ? !matches : matches, observed: text }
       }
       case "Values": {
         const control = textSelectionTarget(element)
@@ -2950,7 +3809,7 @@ export function engine(render: (root: SnapNode) => string) {
         const values = Array.from(control.selectedOptions, (option) => option.value)
         return {
           passed: values.length === expectation.expected.length &&
-            values.every((value, index) => classMatches(expectation.expected[index]!, value)),
+            values.every((value, index) => rawMatches(expectation.expected[index]!, value)),
           observed: values
         }
       }
@@ -2976,19 +3835,13 @@ export function engine(render: (root: SnapNode) => string) {
       }
       case "Aria": {
         const root = rootNode(element, { interactivity: false, depth: null })
-        return { passed: matchPattern(expectation.pattern, root), observed: render(root) }
+        const matches = matchPattern(expectation.pattern, root)
+        return { passed: expectation.not ? !matches : matches, observed: render(root) }
       }
       case "Attribute": {
         const value = dom.getAttribute(element, expectation.name)
         const matcher = expectation.expected
-        return {
-          passed: value !== null &&
-            (matcher === null ||
-              (matcher._tag === "RegExp"
-                ? new RegExp(matcher.source, matcher.flags).test(value)
-                : value === matcher.value)),
-          observed: value
-        }
+        return { passed: value !== null && (matcher === null || rawMatches(matcher, value)), observed: value }
       }
       default:
         return { passed: false, observed: null }
@@ -3185,12 +4038,16 @@ export function engine(render: (root: SnapNode) => string) {
 
   const statesOf = (element: Element, role: string | null): Array<string> => {
     const states: Array<string> = []
-    if (checkedOf(element) === true) states.push("checked")
+    const checked = checkedState(element).state
+    if (checked === "mixed") states.push("checked=mixed")
+    else if (checked === true) states.push("checked")
     if (expandedOf(element) === true) states.push("expanded")
     if (selectedOf(element) === true) states.push("selected")
     if ((INTERACTIVE.has(role ?? "") || dom.matches(element, ":disabled")) && !enabled(element)) states.push("disabled")
     if (deepActive() === element) states.push("focused")
-    if (pressedOf(element) === true) states.push("pressed")
+    const pressed = pressedOf(element)
+    if (pressed === "mixed") states.push("pressed=mixed")
+    else if (pressed === true) states.push("pressed")
     if (validationMessageOf(element) !== null) states.push("invalid")
     return states
   }
@@ -3210,10 +4067,11 @@ export function engine(render: (root: SnapNode) => string) {
     const evidence: Array<string> = []
     if (element instanceof HTMLInputElement && element.type === "password") evidence.push("password")
     const parent = composedParent(element)
-    // `cursor` is inherited: only the element that sets it counts
+    // `cursor` is inherited, in the flat tree: only the element that sets it counts
+    const inheritsFrom = flatParent(element)
     if (
       getComputedStyle(element).cursor === "pointer" &&
-      (parent === null || getComputedStyle(parent).cursor !== "pointer")
+      (inheritsFrom === null || getComputedStyle(inheritsFrom).cursor !== "pointer")
     ) evidence.push("cursorPointer")
     if (dom.hasAttribute(element, "tabindex") && element instanceof HTMLElement && dom.tabIndex(element) >= 0) {
       evidence.push("tabindex")
@@ -3239,7 +4097,7 @@ export function engine(render: (root: SnapNode) => string) {
     return field
   }
 
-  // Naming follows assigned slots and shadow hosts without changing action/selector ancestry.
+  // The flat-tree parent of any node, text included, as `flatParent` is an element's: field ancestry follows it.
   const fieldParent = (node: Node): Node | null => {
     const slot = node instanceof Element ? dom.assignedSlot(node) : node instanceof Text ? node.assignedSlot : null
     if (slot !== null) return slot
@@ -3293,6 +4151,9 @@ export function engine(render: (root: SnapNode) => string) {
     rawText.clear()
     roleCache.clear()
     nameCache.clear()
+    hiddenNameCache.clear()
+    nameSources.clear()
+    descriptionCache.clear()
     inertness = undefined
     inertAncestors.clear()
     insideModal.clear()
@@ -3307,7 +4168,8 @@ export function engine(render: (root: SnapNode) => string) {
 
   /** An inferred node's name: its accessible name, or where one can be read from. */
   const inferredName = (element: Element): SnapNode["name"] => {
-    const accessible = accessibleName(element, false)
+    // A snapshot is text to read, so its names show a non-breaking space as a space
+    const accessible = collapse(accessibleName(element, false))
     if (accessible !== "") {
       return {
         _tag: "Accessible",
@@ -3369,7 +4231,7 @@ export function engine(render: (root: SnapNode) => string) {
     const out: Array<SnapNode> = []
     let pending = ""
     const flush = () => {
-      const text = collapse(pending)
+      const text = collapse(pending.replace(/[\u200b\u00ad]/g, ""))
       pending = ""
       if (text !== "") out.push(textNode(text))
     }
@@ -3378,7 +4240,7 @@ export function engine(render: (root: SnapNode) => string) {
         if (textShown) pending += dom.textContent(node) ?? ""
         return
       }
-      if (!(node instanceof Element) || SKIPPED.has(dom.localName(node))) return
+      if (!(node instanceof Element) || SKIPPED.has(dom.localName(node)) || node === overlayHost) return
       if (dom.getAttribute(node, "aria-hidden") === "true") return
       if (inert(node)) {
         // An inert ancestor of the topmost modal dialog adds nothing of its own, but the dialog escapes it
@@ -3390,16 +4252,23 @@ export function engine(render: (root: SnapNode) => string) {
       const display = getComputedStyle(node).display
       if (display === "none") return
       if (display !== "contents" && !dom.checkVisibility(node)) return
-      const shown = display === "contents" || dom.checkVisibility(node, { visibilityProperty: true })
+      const shown = display === "contents"
+        ? contentsShown(node)
+        : dom.checkVisibility(node, { visibilityProperty: true })
       const made = shown ? elementNode(node, level, walk) : null
       if (made === null) {
+        if (shown) pending += cssContent(node, "::before") ?? ""
         for (const child of flatChildNodes(node)) visit(child, shown)
+        if (shown) pending += cssContent(node, "::after") ?? ""
         return
       }
       flush()
       out.push(made)
     }
+    // Pseudo-element content is part of the text, as it is of a name
+    if (parent instanceof Element) pending += cssContent(parent, "::before") ?? ""
     for (const child of flatChildNodes(parent)) visit(child, true)
+    if (parent instanceof Element) pending += cssContent(parent, "::after") ?? ""
     flush()
     return out
   }
@@ -3435,7 +4304,8 @@ export function engine(render: (root: SnapNode) => string) {
     walk: Walk,
     frame: boolean
   ): SnapNode => {
-    const accessible = accessibleName(element, false)
+    // A snapshot is text to read, so its names show a non-breaking space as a space
+    const accessible = collapse(accessibleName(element, false))
     const field = provenance && fieldOf(element)
     const name: SnapNode["name"] = role._tag === "Inferred" && !role.evidence.includes("password")
       ? inferredName(element)
@@ -3447,17 +4317,21 @@ export function engine(render: (root: SnapNode) => string) {
         ...(field && namesFromContent.has(element) ? { from: "text" as const } : {}),
         ...(namesFromFields.has(element) ? { fieldContent: true } : {})
       }
+    // Only a role that takes a level has one, so an h2 with role="tab" has none
+    const level_ = role._tag === "Aria" && LEVEL_ROLES.has(role.role) ? levelOf(element) : 0
     let children = frame || (walk.depth !== null && level >= walk.depth) ? [] : childrenOf(element, level + 1, walk)
     // Text that only repeats the node's name isn't a node of its own
     if (
       name._tag !== "None" && children.length === 1 && children[0]!.role._tag === "Aria" &&
-      children[0]!.role.role === "text" && children[0]!.name._tag !== "None" && children[0]!.name.value === name.value
+      children[0]!.role.role === "text" && children[0]!.name._tag !== "None" &&
+      children[0]!.name.value === collapse(name.value)
     ) children = []
     return {
       ref: refFor(element),
       role,
       name,
       states: statesOf(element, role._tag === "Aria" ? role.role : null),
+      ...(level_ > 0 ? { level: level_ } : {}),
       ...(field ? { editable: true } : {}),
       validationMessage: validationMessageOf(element),
       children,
@@ -3498,7 +4372,7 @@ export function engine(render: (root: SnapNode) => string) {
     const value = name._tag === "None" ? "" : name.value
     return matcher._tag === "RegExp"
       ? new RegExp(matcher.source, matcher.flags).test(value)
-      : value === collapse(matcher.value)
+      : collapse(value) === collapse(matcher.value)
   }
 
   /** Whether a node matches a pattern: its role and name, and its children as the pattern states. */
@@ -3506,10 +4380,34 @@ export function engine(render: (root: SnapNode) => string) {
     if (pattern._tag === "Text") {
       return node.role._tag === "Aria" && node.role.role === "text" && nameMatches(pattern.value, node.name)
     }
+    if (pattern._tag === "Anywhere") return matchAnywhere(pattern.children, node)
     if (node.role._tag !== "Aria" || node.role.role !== pattern.role || !nameMatches(pattern.name, node.name)) {
       return false
     }
-    const children = pattern.children
+    return statesMatch(pattern.states, node) && matchChildren(pattern.children, node)
+  }
+
+  /** Whether a node has the level and states a pattern states. */
+  const statesMatch = (states: PatternStates, node: SnapNode): boolean => {
+    if (states.level !== undefined && node.level !== states.level) return false
+    const has = (state: string) => node.states.includes(state)
+    const checked = has("checked") ? true : has("checked=mixed") ? "mixed" : false
+    const pressed = has("pressed") ? true : has("pressed=mixed") ? "mixed" : false
+    if (states.checked !== undefined && states.checked !== checked) return false
+    if (states.pressed !== undefined && states.pressed !== pressed) return false
+    for (const state of ["expanded", "selected", "disabled", "invalid", "focused"] as const) {
+      const expected = states[state]
+      if (expected !== undefined && has(state) !== expected) return false
+    }
+    return true
+  }
+
+  /** Whether the node, or any node beneath it, has children that match. */
+  const matchAnywhere = (children: PatternChildren, node: SnapNode): boolean =>
+    matchChildren(children, node) || node.children.some((child) => matchAnywhere(children, child))
+
+  /** Whether a node's children match as a pattern states. */
+  const matchChildren = (children: PatternChildren, node: SnapNode): boolean => {
     switch (children._tag) {
       case "Unchecked":
         return true
@@ -3563,7 +4461,7 @@ export function engine(render: (root: SnapNode) => string) {
       for (const element of elementsUnder(anchor ?? document)) {
         if (roleOf(element) !== last.role || hiddenFromAccessibility(element)) continue
         const name = accessibleName(element, false)
-        const lower = name.toLowerCase()
+        const lower = collapse(name).toLowerCase()
         if (name === "" || suggestions.some((each) => each.name === name)) continue
         if (lower.includes(wanted) || wanted.includes(lower) || distance(lower, wanted) <= 2) {
           suggestions.push({ role: last.role, name })
@@ -3590,12 +4488,32 @@ export function engine(render: (root: SnapNode) => string) {
     const type = dom.doctype(document)
     const doctype = type === null ? "" : new XMLSerializer().serializeToString(type)
     const root = dom.documentElement(document)
-    return { _tag: "Read", value: doctype + (root === null ? "" : dom.outerHTML(root)) }
+    if (root === null) return { _tag: "Read", value: doctype }
+    if (overlayHost === null || !dom.contains(root, overlayHost)) {
+      return { _tag: "Read", value: doctype + dom.outerHTML(root) }
+    }
+    // The overlays' host leaves the page's HTML by node, wherever the page moved it: the document element is
+    // copied into a document with no browsing context, where nothing upgrades, loads or observes, and the host's
+    // copy, found by its path of child indices, is removed before serializing. The page's tree is never touched
+    const path: Array<number> = []
+    for (let node: Node = overlayHost; node !== root;) {
+      const parent = dom.parentNode(node)!
+      path.unshift(Array.prototype.indexOf.call(dom.childNodes(parent), node))
+      node = parent
+    }
+    const inert = document.implementation.createHTMLDocument("")
+    const copy = inert.importNode(root, true)
+    let twin: Node = copy
+    for (const index of path) twin = twin.childNodes[index]!
+    twin.parentNode!.removeChild(twin)
+    return { _tag: "Read", value: doctype + (copy as Element).outerHTML }
   }
 
+  // Every match's count and how many are visible, and the first ten described
   const strict = (found: ReadonlyArray<Element>): Response => ({
     _tag: "Strict",
     count: found.length,
+    visible: found.filter((element) => visible(element)).length,
     candidates: found.slice(0, 10).map((element) => ({ description: describe(element), visible: visible(element) }))
   })
 
@@ -3718,11 +4636,14 @@ export function engine(render: (root: SnapNode) => string) {
       rawText.clear()
       roleCache.clear()
       nameCache.clear()
+      hiddenNameCache.clear()
+      nameSources.clear()
+      descriptionCache.clear()
       inertness = undefined
       inertAncestors.clear()
       insideModal.clear()
       escaped = undefined
-      const name = full ? accessibleName(element, true) : ""
+      const name = full ? accessibleName(element, hiddenFromAccessibility(element)) : ""
       found.set(
         element,
         `${roleOf(element)}${name === "" ? "" : ` ${JSON.stringify(name)}`} validationMessage=${
@@ -3755,6 +4676,8 @@ export function engine(render: (root: SnapNode) => string) {
           )
         case "count":
           return JSON.stringify({ _tag: "Count", count: resolve(request.steps).length } satisfies Response)
+        case "candidates":
+          return JSON.stringify(strict(resolve(request.steps)))
         case "visible": {
           const found = resolve(request.steps)
           if (found.length > 1) return JSON.stringify(strict(found))
@@ -3772,6 +4695,8 @@ export function engine(render: (root: SnapNode) => string) {
           return JSON.stringify(armFill(request.steps, request.ancestor) satisfies Response)
         case "fillDisarm":
           return JSON.stringify(fillDisarm() satisfies Response)
+        case "insert":
+          return JSON.stringify(insert(request.text, request.beforeInput) satisfies Response)
         case "disarm":
           return JSON.stringify({ _tag: "Guarded", blocked: disarm() } satisfies Response)
         case "read":
@@ -3793,13 +4718,16 @@ export function engine(render: (root: SnapNode) => string) {
           return JSON.stringify(rect(request.steps))
         case "html":
           return JSON.stringify(html())
+        case "overlay":
+          return JSON.stringify((drawOverlays ??= makeOverlays())(request))
         case "role":
           return JSON.stringify(
             {
               _tag: "Roles",
               roles: resolve(request.steps).map((element) => ({
                 role: roleOf(element),
-                name: accessibleName(element, true)
+                // A hidden element's name counts its hidden content; a shown one's, what a reader gets
+                name: accessibleName(element, hiddenFromAccessibility(element))
               }))
             } satisfies Response
           )
@@ -3829,7 +4757,7 @@ export function engine(render: (root: SnapNode) => string) {
     actionFrameTimeout,
     evaluate,
     sampleViewport,
-    matchesValue: classMatches,
+    matchesValue: rawMatches,
     clearTreeCaches,
     failureResponse,
     now,

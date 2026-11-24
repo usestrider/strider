@@ -1,0 +1,105 @@
+---
+title: Console messages
+description: What the page and the browser write to the console, and which of them wrote it.
+order: 2.5
+---
+
+A page's console messages are events, with the
+[`next`, `stream`, and `history`](/docs/events/events#next-stream-and-history) every event module has, filtered by
+`level` and `text`. Each one's `source` says who wrote it: `Page` for the page's own `console` calls, in the page or its
+workers, or `Browser` for what the browser writes there itself, with a `category` such as `security` for a Content
+Security Policy violation or `network` for a resource that failed to load. A test can check that a page broke no
+policy without matching on the text:
+
+```ts
+import { ConsoleMessage, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const securityMessages = Effect.fn("securityMessages")(
+  function*(page: Page.ObservedPage) {
+    const messages = yield* ConsoleMessage.history(page)
+    return messages.entries.filter((message) =>
+      message.source._tag === "Browser" && message.source.category === "security"
+    )
+  }
+)
+```
+
+The categories are one set for every browser, listed in
+[`ConsoleMessage.Category`](/docs/api/browser/ConsoleMessage#Category); what a browser sends that fits none is
+`other`. Firefox sends the browser's own messages as script errors, so they arrive as
+[uncaught exceptions](/docs/api/browser/UncaughtException) and every console message there is `Page`. WebKit
+does the same with "Fetch API cannot load … due to access control checks".
+
+A `Page` source also says which `console` method the page called, by the Console Standard's name, such as `warn`,
+`trace`, `group`, or `timeEnd`, listed in [`ConsoleMessage.Method`](/docs/api/browser/ConsoleMessage#Method). A
+message's `level` is coarser: `console.trace` and `console.log` both write at `log`.
+
+```ts
+import { ConsoleMessage, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const traces = Effect.fn("traces")(function*(page: Page.ObservedPage) {
+  const messages = yield* ConsoleMessage.history(page)
+  return messages.entries
+    .filter((message) =>
+      message.source._tag === "Page" && message.source.method === "trace"
+    )
+    .map((message) => message.text)
+})
+```
+
+Browsers send some methods alike, or not at all: Chromium's `timeLog` reads as `log`, and WebKit's as `timeEnd`, and
+WebKit's `count` as `debug`. Firefox sends nothing for `groupEnd` or `clear`. A missing timer or counter reads as
+`warn` on Chromium, and a missing counter on WebKit, while Firefox keeps the method at level `log`. No browser sends
+anything for `time`, `profile`, or `profileEnd`. The capability `console.method` says so, and each
+[browser's page](/docs/browsers/chromium) gives the details.
+
+Each message's `timestamp` is when the browser logged it, by its own wall clock, as a `DateTime.Utc` to the
+millisecond, on every browser. It's the clock of the machine the browser runs on, which a page's clock doesn't move,
+so a test running on the same machine can compare it with `Date.now()`:
+
+```ts
+import { ConsoleMessage, Page } from "@usestrider/browser"
+import { DateTime, Effect } from "effect"
+
+const errorDelay = Effect.fn("errorDelay")(function*(page: Page.Page) {
+  const error = yield* ConsoleMessage.next(page, { level: "error" })
+  const started = DateTime.makeUnsafe(Date.now())
+  yield* page.goto("https://app.example.com")
+  const message = yield* error
+  return DateTime.distance(started, message.timestamp)
+})
+```
+
+## Text
+
+A message's `text` is the call's arguments with their format specifiers applied, each object as a preview of its
+value, as the browser's developer tools print it: `console.log([1, 2, 3], {a: 1}, window)` reads
+`[1, 2, 3] {a: 1} Window` on every browser. An `Error` reads as its browser describes it, and a function, a symbol,
+a date, or an instance of a class can read differently from one browser to another, so match a message on the text
+the page wrote rather than on how such a value reads.
+
+## Arguments
+
+`nextCall` and `streamCalls` subscribe to calls: each message with handles to the values the page passed, which
+[`read`](/docs/api/browser/JSHandle#JSHandle.read) gives by value and `evaluate` runs a function on. A page or context
+keeps console arguments only while it has a subscription to calls, and the handles end with the subscription's
+scope. Since a handle can run code in the page's own scripts, subscribing to calls takes a `Page` or a `UserContext`,
+which control gives, not an observed one:
+
+```ts
+import { ConsoleMessage, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const loggedOrder = Effect.fn("loggedOrder")(function*(page: Page.Page) {
+  const logged = yield* ConsoleMessage.nextCall(page, { text: "order" })
+  yield* page.getByRole("button", { name: "Place order" }).click()
+  const call = yield* logged
+  return yield* call.args[1]!.read
+})
+```
+
+Each subscriber owns its own handles, so releasing one leaves another's working. On Firefox an argument holds its
+value as the browser serialized it at the call, and a node is the page's own; the `console.arguments` capability says
+so, and where a backend keeps no arguments, subscribing fails with `Unsupported`.

@@ -1,6 +1,6 @@
 /** Overlay handling through public actions and waiting assertions on every backend. */
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser, Expect, FileInput } from "@usestrider/browser"
+import { Browser, Deadline, Expect, FileInput } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
 import { site } from "../adapter/harness.ts"
@@ -55,6 +55,31 @@ export const locatorHandlers = (name: string, backend: Layer.Layer<Browser.Brows
             (failure as unknown as { handlerFailure: { error: unknown } }).handlerFailure.error,
             sentinel
           )
+        }).pipe(Effect.scoped))
+
+      it.effect("runs a handler before each JavaScript property check", () =>
+        Effect.gen(function*() {
+          const served = yield* site
+          const page = yield* newPage
+          yield* page.goto(
+            `${served.origin}/fixture?html=${
+              encodeURIComponent("<div id=\"overlay\">Overlay</div><div id=\"target\"></div>")
+            }`
+          )
+          let calls = 0
+          yield* page.addLocatorHandler(page.locator("#overlay"), () =>
+            Effect.gen(function*() {
+              calls++
+              yield* page.evaluateInMainWorld(() => {
+                Object.assign(document.querySelector("#target")!, { ready: { by: "handler" } })
+                document.querySelector<HTMLElement>("#overlay")!.hidden = true
+              })
+            }))
+          yield* page.locator("#target").pipe(
+            Expect.toHaveJSProperty("ready", { by: "handler" }),
+            Deadline.within("2 seconds")
+          )
+          assert.strictEqual(calls, 1)
         }).pipe(Effect.scoped))
 
       it.effect("retries an action after an overlay appears and lets a handler navigate", () =>
@@ -181,6 +206,14 @@ export const locatorHandlers = (name: string, backend: Layer.Layer<Browser.Brows
             }), { times: 1, noWaitAfter: true })
           yield* Expect.toHaveURL(page, /#done$/)
           assert.strictEqual(calls, 2)
+          // The check in the page applies ignoreCase too
+          yield* Expect.toHaveURL(page, /#DONE$/, { ignoreCase: true })
+          const cased = yield* Expect.toHaveURL(page, /#DONE$/, { ignoreCase: false }).pipe(
+            Deadline.within("200 millis"),
+            Effect.flip
+          )
+          assert(Expect.isExpectationFailed(cased), String(cased))
+          assert.strictEqual(cased.condition, "to have the URL /#DONE$/ matching case")
         }).pipe(Effect.scoped))
 
       it.effect("supports an always-visible trigger once without disappearance waiting", () =>

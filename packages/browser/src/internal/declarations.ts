@@ -84,7 +84,7 @@ export interface Registry {
     {
       readonly world: Adapter.World
       readonly source: string
-      readonly webSockets?: ReadonlyArray<Adapter.WebSocketBridge> | undefined
+      readonly hostBridges?: ReadonlyArray<Adapter.HostBridge> | undefined
     }
   >
   /** The intercept patterns in force, per phase. */
@@ -98,6 +98,8 @@ export interface Registry {
     context: UserContext.Id
   ) => Option.Option<Extract<Adapter.Declaration, { _tag: "Downloads" }>["behavior"]>
   readonly fileChooser: (placement: Placement) => boolean
+  /** Whether a placement's console messages carry their arguments as handles. */
+  readonly consoleArguments: (placement: Placement) => boolean
   /** Whether a placement's authentication challenges are paused, whatever its intercepts. */
   readonly challenges: (placement: Placement) => boolean
   /**
@@ -181,7 +183,7 @@ export const make = (): Registry => {
       const scripts = scriptsOf(placement)
       const bundles = new Map<
         string,
-        { world: Adapter.World; sources: Array<string>; webSockets?: Array<Adapter.WebSocketBridge> }
+        { world: Adapter.World; sources: Array<string>; hostBridges?: Array<Adapter.HostBridge> }
       >()
       for (const entry of scripts) {
         const key = worldKey(entry.declaration.world)
@@ -191,7 +193,7 @@ export const make = (): Registry => {
           bundles.set(key, bundle)
         }
         bundle.sources.push(wrap(entry.id, entry.declaration.source, entry.declaration.after))
-        if (entry.declaration.webSocket !== undefined) (bundle.webSockets ??= []).push(entry.declaration.webSocket)
+        if (entry.declaration.hostBridge !== undefined) (bundle.hostBridges ??= []).push(entry.declaration.hostBridge)
       }
       return new Map(
         [...bundles].map((
@@ -199,7 +201,7 @@ export const make = (): Registry => {
         ) => [key, {
           world: bundle.world,
           source: block(bundle.sources),
-          ...(bundle.webSockets === undefined ? {} : { webSockets: bundle.webSockets })
+          ...(bundle.hostBridges === undefined ? {} : { hostBridges: bundle.hostBridges })
         }])
       )
     },
@@ -224,7 +226,8 @@ export const make = (): Registry => {
       return winner?.declaration._tag === "Downloads" ? Option.some(winner.declaration.behavior) : Option.none()
     },
     fileChooser: (placement) => inScope(placement).some((entry) => entry.declaration._tag === "FileChooser"),
-    challenges: (placement) => inScope(placement).some((entry) => entry.declaration._tag === "Challenges")
+    challenges: (placement) => inScope(placement).some((entry) => entry.declaration._tag === "Challenges"),
+    consoleArguments: (placement) => inScope(placement).some((entry) => entry.declaration._tag === "ConsoleArguments")
   }
   return registry
 }

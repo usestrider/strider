@@ -1,6 +1,6 @@
 /** Runtime validation for JavaScript callers that bypass Locator's TypeScript contract. */
 import { assert, describe, it } from "@effect/vitest"
-import { Browser, Deadline, Locator, Target } from "@usestrider/browser"
+import { Browser, Deadline, Locator, Target, UserContext } from "@usestrider/browser"
 import * as Cache from "effect/Cache"
 import * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
@@ -16,6 +16,7 @@ import { vi } from "vitest"
 import * as Adapter from "../src/internal/adapter.ts"
 import * as BrowserImpl from "../src/internal/browser.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
+import * as ClaimHooks from "../src/internal/claimHooks.ts"
 import * as Engine from "../src/internal/engine.ts"
 import * as Fake from "../src/internal/fake.ts"
 import * as Handles from "../src/internal/handles.ts"
@@ -196,6 +197,18 @@ describe("Locator.fill", () => {
         assert.strictEqual(error.reason._tag, "InvalidInput")
       }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
   }
+})
+
+describe("Locator.toString", () => {
+  it.effect("prints the chain as written", () =>
+    Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      assert.strictEqual(
+        String(page.getByRole("button", { name: "Save" }).first),
+        `Locator(page.getByRole("button", { name: "Save" }).first)`
+      )
+      assert.strictEqual(String(page.locator("#x").nth(2)), `Locator(page.locator("#x").nth(2))`)
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
 })
 
 describe("Locator.selectText", () => {
@@ -1449,3 +1462,194 @@ it.effect("evaluateAll does not move an empty snapshot to a document committed a
       )
     }).pipe(Effect.scoped, Effect.provide(layer))
   }))
+
+/** An engine call the browser never answers: the action's Timeout says so, whichever round it was in. */
+describe("an action whose engine call is unanswered at the deadline", () => {
+  for (const held of ["first", "underPermit"] as const) {
+    it.effect(
+      held === "first"
+        ? "keeps the adapter's hint when the first round's call is unanswered"
+        : "keeps the adapter's hint when the round under the input permit is unanswered",
+      () =>
+        Effect.gen(function*() {
+          const clock = BrowserClock.fromClock(yield* Effect.service(Clock.Clock))
+          const sent = yield* Deferred.make<void>()
+          let rounds = 0
+          const layer = BrowserImpl.layer((sink) =>
+            Fake.connect([], {
+              info: new Browser.Info(Fake.info),
+              capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+            })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
+              ...adapter,
+              realm: () => Effect.succeed("held-realm" as Target.RealmId),
+              evaluate: Effect.fnUntraced(function*(_realm, call) {
+                if (call.functionDeclaration === Engine.install) {
+                  return { _tag: "Value", value: { type: "string", value: "installed" } } as const
+                }
+                rounds++
+                if (held === "first" || rounds === 2) {
+                  yield* Deferred.succeed(sent, undefined)
+                  // The reply comes after the deadline, if at all
+                  return yield* Effect.never
+                }
+                return {
+                  _tag: "Value",
+                  value: {
+                    type: "string",
+                    value: JSON.stringify({
+                      _tag: "Ready",
+                      element: "<input>",
+                      scrolled: false,
+                      point: { x: 1, y: 1 },
+                      draggable: false,
+                      checked: null,
+                      fill: null
+                    })
+                  }
+                } as const
+              })
+            })))
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            // Hover's rounds check without applying, so no input is sent before the held call
+            const target = page.locator("#target")
+            const pending = yield* (held === "first" ? target.focus() : target.hover()).pipe(
+              Deadline.within("300 millis"),
+              Effect.flip,
+              Effect.forkChild
+            )
+            yield* Deferred.await(sent)
+            yield* TestClock.adjust("300 millis")
+            const error = yield* Fiber.join(pending)
+            assert(Deadline.isTimeout(error), String(error))
+            assert.strictEqual(error.operation, held === "first" ? "Locator.focus" : "Locator.hover")
+            assert.deepStrictEqual(error.diagnostics.dispatch, { _tag: "NotSent" })
+            assert.strictEqual(rounds, held === "first" ? 1 : 2)
+            assert.deepStrictEqual(
+              error.hint,
+              Option.some("The browser didn't answer the call into the page before the deadline")
+            )
+          })).pipe(Effect.provide(layer), Effect.provideService(BrowserClock.CurrentClock, clock))
+        }).pipe(Effect.scoped)
+    )
+  }
+})
+
+describe("UserContext.Options.testIdAttribute", () => {
+  const x = { _tag: "String", value: "x", exact: true }
+  const testIds = (locator: Locator.ReadonlyLocator): ReadonlyArray<unknown> => {
+    const found: Array<unknown> = []
+    const visit = (steps: ReadonlyArray<Engine.Step>) => {
+      for (const step of steps) {
+        if (step._tag === "TestId") found.push(step)
+        if (step._tag === "Filter") {
+          if (step.has !== null) visit(step.has)
+          if (step.hasNot !== null) visit(step.hasNot)
+        }
+      }
+    }
+    visit((locator as LocatorImpl).steps)
+    return found
+  }
+
+  for (
+    const name of [
+      "",
+      "data qa",
+      "data\"qa",
+      "data'qa",
+      "data>qa",
+      "data/qa",
+      "data=qa",
+      "data\u0007qa",
+      "data\u{1FFFE}qa",
+      "data\u{10FFFF}qa"
+    ]
+  ) {
+    it.effect(`refuses ${JSON.stringify(name)} with InvalidInput before creating a context`, () =>
+      Effect.gen(function*() {
+        const error = yield* Browser.newContext({ testIdAttribute: name }).pipe(Effect.flip)
+        assert(UserContext.isUserContextError(error))
+        assert(error.reason._tag === "InvalidInput")
+        assert.strictEqual(error.reason.input, "testIdAttribute")
+      }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+  }
+
+  it.effect("takes the test-id attribute of the program that recovers a context, and keeps it when omitted", () =>
+    Effect.gen(function*() {
+      const browser = yield* Browser.Browser
+      const context = yield* Browser.newContext({ testIdAttribute: "data-qa" })
+      const page = yield* context.newPage
+      const before = page.getByTestId("x")
+      const hooks = ClaimHooks.get(browser)
+      yield* hooks.context({ testIdAttribute: "data-test" }, { context: context.id })
+      assert.deepStrictEqual(testIds(page.getByTestId("x")), [{ _tag: "TestId", matcher: x, attribute: "data-test" }])
+      assert.deepStrictEqual(testIds(before), [{ _tag: "TestId", matcher: x, attribute: "data-qa" }])
+      yield* hooks.context({}, { context: context.id })
+      assert.deepStrictEqual(testIds(page.getByTestId("x")), [{ _tag: "TestId", matcher: x, attribute: "data-test" }])
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+
+  it.effect("carries the context's attribute in RegExp getByTestId steps, page-level and relative", () =>
+    Effect.gen(function*() {
+      const configured = yield* (yield* Browser.newContext({ testIdAttribute: "data-qa" })).newPage
+      const pattern = { _tag: "RegExp", source: "^row-", flags: "i" }
+      const qa = { _tag: "TestId", matcher: pattern, attribute: "data-qa" }
+      assert.deepStrictEqual(testIds(configured.getByTestId(/^row-/i)), [qa])
+      assert.deepStrictEqual(
+        testIds(configured.locator("li").filter({ has: Locator.relative.getByTestId(/^row-/i) })),
+        [qa]
+      )
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+
+  it.effect("fixes the context's attribute in every getByTestId step, relative ones where they're placed", () =>
+    Effect.gen(function*() {
+      const configured = yield* (yield* Browser.newContext({ testIdAttribute: "data-qa" })).newPage
+      const sibling = yield* (yield* Browser.newContext()).newPage
+      const qa = { _tag: "TestId", matcher: x, attribute: "data-qa" }
+      const standard = { _tag: "TestId", matcher: x, attribute: "data-testid" }
+      assert.deepStrictEqual(testIds(configured.getByTestId("x")), [qa])
+      assert.deepStrictEqual(testIds(configured.locator("main").getByTestId("x")), [qa])
+      assert.deepStrictEqual(testIds(configured.frame(configured.locator("iframe")).getByTestId("x")), [qa])
+      assert.deepStrictEqual(testIds(sibling.getByTestId("x")), [standard])
+      const relative = Locator.relative.getByTestId("x")
+      assert.deepStrictEqual(
+        testIds(configured.locator("li").filter({ has: relative, hasNot: relative })),
+        [qa, qa]
+      )
+      assert.deepStrictEqual(testIds(sibling.locator("li").filter({ has: relative })), [standard])
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+})
+
+describe("Page.anyFrame", () => {
+  it.effect("prints the search where the chain starts it", () =>
+    Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      assert.strictEqual(String(page.anyFrame.locator("#x")), `Locator(page.anyFrame.locator("#x"))`)
+      assert.strictEqual(
+        String(page.frame(page.locator("iframe")).anyFrame.getByRole("button")),
+        `Locator(page.frame(page.locator("iframe")).anyFrame.getByRole("button"))`
+      )
+      assert.strictEqual(
+        String(page.anyFrame.frame(page.anyFrame.locator("#checkout")).locator("a")),
+        `Locator(page.frame(page.anyFrame.locator("#checkout")).locator("a"))`
+      )
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+
+  it.effect("takes operands from the same search, and refuses one from outside it or from another", () =>
+    Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      const search = page.anyFrame
+      const pay = search.getByRole("button", { name: "Pay" })
+      // Built from the same search: accepted
+      pay.or(search.locator("#pay"))
+      pay.and(search.locator("button"))
+      // From outside the search
+      assert.throws(() => pay.or(page.locator("#pay")), /another frame/)
+      assert.throws(() => pay.and(page.frame(page.locator("iframe")).locator("button")), /another frame/)
+      // Starting a search of its own, below a frame
+      assert.throws(() => pay.or(page.frame(page.locator("iframe")).anyFrame.locator("#pay")), /another frame/)
+      // An iframe for `frame` comes from the search too
+      assert.throws(() => search.frame(page.locator("iframe")), /isn't in this frame/)
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+})

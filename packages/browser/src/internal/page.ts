@@ -30,16 +30,20 @@ import type * as Deadline from "../Deadline.ts"
 import type * as Diagnostics from "../Diagnostics.ts"
 import type * as JSHandle from "../JSHandle.ts"
 import type * as Locator from "../Locator.ts"
+import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import * as Page from "../Page.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
 import * as Reason from "../Reason.ts"
 import type * as Route from "../Route.ts"
+import type * as ScriptTag from "../ScriptTag.ts"
 import type * as Snapshot from "../Snapshot.ts"
+import type * as StyleTag from "../StyleTag.ts"
 import * as Target from "../Target.ts"
 import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
+import * as Bindings from "./bindings.ts"
 import * as BrowserClock from "./browserClock.ts"
 import * as Capabilities from "./capabilities.ts"
 import * as Captures from "./captures.ts"
@@ -48,6 +52,7 @@ import * as Devices from "./devices.ts"
 import * as Emulation from "./emulation.ts"
 import * as Evaluation from "./evaluation.ts"
 import * as ExpectSource from "./expectSource.ts"
+import * as FrameImpl from "./frame.ts"
 import * as FunctionSource from "./functionSource.ts"
 import * as Guarded from "./guarded.ts"
 import * as Handles from "./handles.ts"
@@ -62,6 +67,7 @@ import * as Routes from "./routes.ts"
 import * as Runtime from "./runtime.ts"
 import * as Snapshots from "./snapshot.ts"
 import * as Storage from "./storage.ts"
+import * as Tags from "./tags.ts"
 import * as Urls from "./urls.ts"
 import * as Watchable from "./watchable.ts"
 
@@ -177,6 +183,190 @@ export const observed = (owner: ObservedOwner): Page.ObservedPage => {
   return page
 }
 
+/** The realm an evaluation runs in, and the document it was found in, where known. */
+export interface Realm {
+  readonly realm: Target.RealmId
+  readonly document: Option.Option<Target.DocumentId>
+}
+
+/**
+ * What runs a navigation or an evaluation in one navigable of a page: the page's own, or one of its frames. `ended`
+ * fails once the navigable is gone, and `error` makes the operation's own error from a reason.
+ */
+export interface Driven<E> {
+  readonly runtime: Runtime.Runtime
+  readonly entry: Model.PageEntry
+  readonly navigable: Target.NavigableId
+  readonly ended: Effect.Effect<never, Target.TargetGone>
+  readonly error: (operation: string, reason: Page.PageErrorReason, id: Diagnostics.OperationId) => E
+  readonly attributes: Readonly<Record<string, string>>
+  /**
+   * The realm of a world in the navigable's current document, with that document where the navigable says which
+   * it was, for `gone`.
+   */
+  readonly realm: (
+    world: Adapter.World,
+    id: Diagnostics.OperationId,
+    at: MonotonicInstant.MonotonicInstant
+  ) => Effect.Effect<Realm, Evaluation.Failure>
+  /** What a deadline before the call says the navigable had: "page" or "frame". */
+  readonly noun: string
+  /** Run first: whether the handle's access still holds. */
+  readonly check: Effect.Effect<void, Target.TargetGone | E>
+  /**
+   * What a realm's end means for this navigable, when an evaluation fails because its realm went away: a frame's
+   * removal, rather than its document's. `document` is the one this call's realm was found in. Absent for a page,
+   * whose realm errors stand as they are.
+   */
+  readonly gone?:
+    | ((
+      error: Target.TargetGone,
+      document: Option.Option<Target.DocumentId>
+    ) => Effect.Effect<Target.TargetGone, Deadline.Timeout>)
+    | undefined
+}
+
+/** Waits for a navigation the adapter started, then for `waitUntil` on the document it committed. */
+export const navigateIn = <E>(
+  target: Driven<E>,
+  operation: string,
+  url: Option.Option<Url.Url>,
+  start: (
+    id: Diagnostics.OperationId
+  ) => Effect.Effect<Option.Option<PageNavigation.Id>, Target.TargetGone | E | Deadline.Timeout>,
+  waitUntil: PageNavigation.LoadState,
+  accept: ReadonlyArray<"download" | "noContent"> = [],
+  reached: (
+    result: PageNavigation.PageNavigation,
+    id: Diagnostics.OperationId
+  ) => Effect.Effect<void, Target.TargetGone> = () => Effect.void
+) => {
+  const model = target.runtime.model
+  return Effect.gen(function*() {
+    yield* target.check
+    const record = yield* Operation.record
+    const id = record.id
+    const budget = record.budget
+    // The command that starts it is bounded too: a browser that never answers it can't keep the caller waiting
+    record.markSent()
+    const started = yield* record.bound(
+      start(id),
+      () => Option.some("The browser didn't answer the navigation before the deadline; it may have started")
+    )
+    if (Option.isNone(started)) return Option.none<PageNavigation.PageNavigation>()
+    record.markConfirmed()
+    const navigation = yield* model.navigation(started.value)
+    const outcome = yield* record.bound(
+      Deferred.await(navigation.outcome),
+      () => Option.some("The navigation had no outcome before the deadline")
+    ).pipe(Effect.ensuring(model.forget(started.value)))
+    // Where it ended: the document's URL, which a same-document navigation set, or where it was going
+    const document = "document" in outcome ? model.document(outcome.document) : Option.none()
+    const at = Option.isSome(document)
+      ? (yield* document.value.state.get).url
+      : Option.getOrElse(url, () => Urls.reported(""))
+    const result = yield* Navigation.settle(
+      model,
+      operation,
+      started.value,
+      target.entry.id,
+      target.navigable,
+      url,
+      at,
+      outcome,
+      id,
+      accept
+    ).pipe(Effect.mapError((error) => target.error(operation, error.reason, id)))
+    if (!(yield* Navigated.reached(model, result, waitUntil, Option.some(budget.at)))) {
+      return yield* Effect.fail(record.timeout(Option.some(`The document committed but didn't reach ${waitUntil}`)))
+    }
+    yield* reached(result, id)
+    return Option.some(result)
+  }).pipe(
+    Effect.raceFirst(target.ended),
+    Operation.named(operation, {
+      attributes: {
+        ...target.attributes,
+        "browser.navigation.wait_until": waitUntil,
+        ...(Option.isSome(url) ? { "url.full": url.value } : {})
+      }
+    })
+  )
+}
+
+/**
+ * Calls a function in a world of the navigable's current document: the caller's isolated world, or the main world
+ * with user activation inside `Page.withUserGesture`.
+ */
+export const evaluateIn = <E, B, R>(
+  target: Driven<E>,
+  operation: string,
+  world: Adapter.World,
+  fn: Function,
+  args: ReadonlyArray<unknown>,
+  result: "value" | "handle",
+  then: (realm: Target.RealmId, value: Adapter.RemoteValue) => Effect.Effect<B, Evaluation.Failure, R>
+): Effect.Effect<B, E | Target.TargetGone | Deadline.Timeout, R> =>
+  Effect.gen(function*() {
+    const runtime = target.runtime
+    yield* target.check
+    const record = yield* Operation.record
+    const id = record.id
+    const budget = record.budget
+    const gesture = world._tag === "Main" && (yield* Effect.service(Page.UserGesture))
+    // This call's document, for what its realm's end means
+    let document = Option.none<Target.DocumentId>()
+    return yield* Effect.gen(function*() {
+      const found = yield* target.realm(world, id, budget.at)
+      const realm = found.realm
+      document = found.document
+      const values = yield* Evaluation.toLocal(args, realm)
+      const group = yield* Evaluation.groupFor(runtime, realm, result)
+      // The call is on its way: a deadline after it can't say the function didn't run
+      const value = yield* Evaluation.call(runtime, {
+        dispatch: record,
+        realm,
+        functionDeclaration: FunctionSource.declaration(fn),
+        arguments: values,
+        result,
+        group,
+        userActivation: gesture,
+        page: Option.some(target.entry),
+        at: budget.at,
+        id
+      })
+      return yield* then(realm, value)
+    }).pipe(
+      Effect.mapError((failure) =>
+        failure._tag === "Gone"
+          ? failure.error
+          : failure._tag === "Deadline"
+          ? record.timeout(Option.some(
+            record.dispatch._tag === "MayHaveBeenSent"
+              ? `The ${target.noun} didn't answer before the deadline; the function may still be running`
+              : `The ${target.noun} had no document to evaluate in before the deadline`
+          ))
+          : target.error(operation, failure.reason, id)
+      ),
+      (self) => {
+        const gone = target.gone
+        return gone === undefined ? self : Effect.catchIf(
+          self,
+          (error): error is Target.TargetGone => Target.isTargetGone(error),
+          (error) => Effect.flatMap(gone(error, document), Effect.fail)
+        )
+      },
+      Effect.annotateSpans({ "browser.evaluation.user_gesture": gesture })
+    )
+  }).pipe(
+    Operation.named(operation, {
+      attributes: {
+        ...target.attributes,
+        "browser.evaluation.world": world._tag === "Main" ? "main" : world.name
+      }
+    })
+  )
+
 export const make = (owner: PageOwner): Page.Page => {
   const { runtime, entry } = owner
   const model = runtime.model
@@ -198,126 +388,28 @@ export const make = (owner: PageOwner): Page.Page => {
     return mapped._tag !== "Reason" ? mapped.error : pageError(operation, mapped.reason, id)
   }
 
-  /** Waits for a navigation the adapter started, then for `waitUntil` on the document it committed. */
-  const navigate = (
-    operation: string,
-    url: Option.Option<Url.Url>,
-    start: (
-      id: Diagnostics.OperationId
-    ) => Effect.Effect<Option.Option<PageNavigation.Id>, Target.TargetGone | Page.PageError | Deadline.Timeout>,
-    waitUntil: PageNavigation.LoadState,
-    accept: ReadonlyArray<"download" | "noContent"> = []
-  ) =>
-    Effect.gen(function*() {
-      const record = yield* Operation.record
-      const id = record.id
-      const budget = record.budget
-      // The command that starts it is bounded too: a browser that never answers it can't keep the caller waiting
-      record.markSent()
-      const started = yield* record.bound(
-        start(id),
-        () => Option.some("The browser didn't answer the navigation before the deadline; it may have started")
-      )
-      if (Option.isNone(started)) return Option.none<PageNavigation.PageNavigation>()
-      record.markConfirmed()
-      const navigation = yield* model.navigation(started.value)
-      const outcome = yield* record.bound(
-        Deferred.await(navigation.outcome),
-        () => Option.some("The navigation had no outcome before the deadline")
-      ).pipe(Effect.ensuring(model.forget(started.value)))
-      // Where it ended: the document's URL, which a same-document navigation set, or where it was going
-      const document = "document" in outcome ? model.document(outcome.document) : Option.none()
-      const at = Option.isSome(document)
-        ? (yield* document.value.state.get).url
-        : Option.getOrElse(url, () => Urls.reported(""))
-      const result = yield* Navigation.settle(
-        model,
-        operation,
-        started.value,
-        entry.id,
-        url,
-        at,
-        outcome,
-        id,
-        accept
-      )
-      if (!(yield* Navigated.reached(model, result, waitUntil, Option.some(budget.at)))) {
-        return yield* Effect.fail(record.timeout(Option.some(`The document committed but didn't reach ${waitUntil}`)))
-      }
-      return Option.some(result)
-    }).pipe(
-      Effect.raceFirst(Runtime.pageEnded(entry)),
-      Operation.named(operation, {
-        attributes: {
-          "browser.page.id": entry.id,
-          "browser.navigation.wait_until": waitUntil,
-          ...(Option.isSome(url) ? { "url.full": url.value } : {})
-        }
-      })
-    )
-
-  /**
-   * Calls a function in a world of the page's current document: the caller's isolated
-   * world, or the main world with user activation inside `Page.withUserGesture`.
-   */
-  const evaluation = <B, R>(
-    operation: string,
-    world: Adapter.World,
-    fn: Function,
-    args: ReadonlyArray<unknown>,
-    result: "value" | "handle",
-    then: (realm: Target.RealmId, value: Adapter.RemoteValue) => Effect.Effect<B, Evaluation.Failure, R>
-  ): Effect.Effect<B, Page.PageError | Target.TargetGone | Deadline.Timeout, R> =>
-    Effect.gen(function*() {
-      const record = yield* Operation.record
-      const id = record.id
-      const budget = record.budget
-      const gesture = world._tag === "Main" && (yield* Effect.service(Page.UserGesture))
-      return yield* Effect.gen(function*() {
-        const realm = yield* Evaluation.pageRealm(runtime, entry, world, id, budget.at)
-        const values = yield* Evaluation.toLocal(args, realm)
-        const group = yield* Evaluation.groupFor(runtime, realm, result)
-        // The call is on its way: a deadline after it can't say the function didn't run
-        const value = yield* Evaluation.call(runtime, {
-          dispatch: record,
-          realm,
-          functionDeclaration: FunctionSource.declaration(fn),
-          arguments: values,
-          result,
-          group,
-          userActivation: gesture,
-          page: Option.some(entry),
-          at: budget.at,
-          id
-        })
-        return yield* then(realm, value)
-      }).pipe(
-        Effect.mapError((failure) =>
-          failure._tag === "Gone"
-            ? failure.error
-            : failure._tag === "Deadline"
-            ? record.timeout(Option.some(
-              record.dispatch._tag === "MayHaveBeenSent"
-                ? "The page didn't answer before the deadline; the function may still be running"
-                : "The page had no document to evaluate in before the deadline"
-            ))
-            : pageError(operation, failure.reason, id)
-        ),
-        Effect.annotateSpans({ "browser.evaluation.user_gesture": gesture })
-      )
-    }).pipe(
-      Operation.named(operation, {
-        attributes: {
-          "browser.page.id": entry.id,
-          "browser.evaluation.world": world._tag === "Main" ? "main" : world.name
-        }
-      })
-    )
+  /** The page's own navigable, where its navigations and evaluations run. */
+  const self: Driven<Page.PageError> = {
+    runtime,
+    entry,
+    navigable: entry.id,
+    ended: Runtime.pageEnded(entry),
+    error: pageError,
+    attributes: { "browser.page.id": entry.id },
+    realm: (world, id, at) =>
+      Effect.map(Evaluation.pageRealm(runtime, entry, world, id, at), (realm) => ({ realm, document: Option.none() })),
+    noun: "page",
+    check: Effect.void
+  }
 
   const page: Page.Page = {
     ...observeMembers(owner),
     ...queries,
     frame: (iframe) => LocatorImpl.pageFrame({ runtime, page: entry, grant: owner.grant }, iframe),
+    get anyFrame() {
+      return LocatorImpl.anyFrameLocator({ runtime, page: entry, grant: owner.grant }, [])
+    },
+    frameById: (id) => FrameImpl.byId({ runtime, page: entry, grant: owner.grant }, id),
     get viewportSize() {
       return Effect.gen(function*() {
         const record = yield* Operation.record
@@ -390,7 +482,8 @@ export const make = (owner: PageOwner): Page.Page => {
     localStorage: Storage.originStorage(runtime, entry, "local"),
     sessionStorage: Storage.originStorage(runtime, entry, "session"),
     evaluate: <Args extends ReadonlyArray<unknown>, A>(fn: (...args: Args) => A | Promise<A>, ...args: Args) =>
-      evaluation(
+      evaluateIn(
+        self,
         "Page.evaluate",
         Evaluation.isolatedWorld,
         fn,
@@ -417,7 +510,8 @@ export const make = (owner: PageOwner): Page.Page => {
         ))
       }
       const parsed = result.success
-      return navigate(
+      return navigateIn(
+        self,
         "Page.goto",
         Option.some(Urls.reported(parsed.href)),
         (id) =>
@@ -573,7 +667,8 @@ export const make = (owner: PageOwner): Page.Page => {
         })
       ),
     reload: (options) =>
-      navigate(
+      navigateIn(
+        self,
         "Page.reload",
         Option.none(),
         (id) =>
@@ -583,14 +678,16 @@ export const make = (owner: PageOwner): Page.Page => {
         options?.waitUntil ?? "commit"
       ).pipe(Effect.map(Option.getOrThrow)),
     back: (options) =>
-      navigate(
+      navigateIn(
+        self,
         "Page.back",
         Option.none(),
         (id) => adapter.traverse(entry.id, -1).pipe(Effect.mapError((error) => failure("Page.back", id, error))),
         options?.waitUntil ?? "commit"
       ),
     forward: (options) =>
-      navigate(
+      navigateIn(
+        self,
         "Page.forward",
         Option.none(),
         (id) => adapter.traverse(entry.id, 1).pipe(Effect.mapError((error) => failure("Page.forward", id, error))),
@@ -600,7 +697,8 @@ export const make = (owner: PageOwner): Page.Page => {
       fn: (...args: Args) => A | Promise<A>,
       ...args: Args
     ) =>
-      evaluation(
+      evaluateIn(
+        self,
         "Page.evaluateInMainWorld",
         { _tag: "Main" },
         fn,
@@ -612,9 +710,23 @@ export const make = (owner: PageOwner): Page.Page => {
         Page.PageError | Target.TargetGone | Deadline.Timeout
       >,
     evaluateHandle: <Args extends ReadonlyArray<unknown>, A>(fn: (...args: Args) => A | Promise<A>, ...args: Args) =>
-      evaluation(
+      evaluateIn(
+        self,
         "Page.evaluateHandle",
         Evaluation.isolatedWorld,
+        fn,
+        args,
+        "handle",
+        (realm, value) => Evaluation.own<Awaited<A>>(runtime, realm, value, Option.some(entry))
+      ),
+    evaluateHandleInMainWorld: <Args extends ReadonlyArray<unknown>, A>(
+      fn: (...args: Args) => A | Promise<A>,
+      ...args: Args
+    ) =>
+      evaluateIn(
+        self,
+        "Page.evaluateHandleInMainWorld",
+        { _tag: "Main" },
         fn,
         args,
         "handle",
@@ -650,8 +762,42 @@ export const make = (owner: PageOwner): Page.Page => {
       )) as Page.Page["route"],
     addLocatorHandler: (locator, handler, options) =>
       LocatorHandlers.add({ runtime, page: entry, grant: owner.grant }, locator, handler, options),
+    exposeBinding: (name, schemas, handler) =>
+      Bindings.expose(runtime, entry.contextEntry, entry, name, schemas, handler),
     addInitScript: (script, options) =>
       InitScripts.add({ runtime, scope: declared, operation: "Page.addInitScript" }, entry.context, script, options),
+    addScriptTag: Effect.fnUntraced(
+      function*(script: ScriptTag.Source, options?: ScriptTag.Options | undefined) {
+        const record = yield* Operation.record
+        return yield* Effect.gen(function*() {
+          const spec = yield* Effect.mapError(
+            Tags.script(runtime, script, options),
+            (reason): Tags.Failure => ({ _tag: "Reason", reason })
+          )
+          const realm = yield* Evaluation.pageRealm(runtime, entry, { _tag: "Main" }, record.id, record.budget.at)
+          return yield* Tags.insert<HTMLScriptElement>(runtime, realm, entry, spec, record)
+        }).pipe(
+          Effect.mapError(Tags.fail(record, (reason) => pageError("Page.addScriptTag", reason, record.id)))
+        )
+      },
+      Operation.named("Page.addScriptTag", { attributes: { "browser.page.id": entry.id } })
+    ),
+    addStyleTag: Effect.fnUntraced(
+      function*(style: StyleTag.Source) {
+        const record = yield* Operation.record
+        return yield* Effect.gen(function*() {
+          const spec = yield* Effect.mapError(Tags.style(runtime, style), (reason): Tags.Failure => ({
+            _tag: "Reason",
+            reason
+          }))
+          const realm = yield* Evaluation.pageRealm(runtime, entry, { _tag: "Main" }, record.id, record.budget.at)
+          return yield* Tags.insert<HTMLStyleElement | HTMLLinkElement>(runtime, realm, entry, spec, record)
+        }).pipe(
+          Effect.mapError(Tags.fail(record, (reason) => pageError("Page.addStyleTag", reason, record.id)))
+        )
+      },
+      Operation.named("Page.addStyleTag", { attributes: { "browser.page.id": entry.id } })
+    ),
     emulate: (settings) => Emulation.emulate({ runtime, scope: declared, operation: "Page.emulate" }, settings),
     activate: Effect.gen(function*() {
       const { id } = yield* Operation.record

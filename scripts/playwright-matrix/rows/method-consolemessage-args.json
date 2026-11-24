@@ -3,9 +3,33 @@
   "upstream": [
     "method:ConsoleMessage.args"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding public Strider capability for this member.",
+  "status": "has",
+  "api": [
+    {
+      "module": "ConsoleMessage",
+      "symbol": "nextCall",
+      "url": "/docs/api/browser/ConsoleMessage#nextCall"
+    },
+    {
+      "module": "ConsoleMessage",
+      "symbol": "streamCalls",
+      "url": "/docs/api/browser/ConsoleMessage#streamCalls"
+    },
+    {
+      "module": "ConsoleMessage",
+      "symbol": "Call",
+      "url": "/docs/api/browser/ConsoleMessage#Call"
+    }
+  ],
+  "notes": "A subscription to calls gives each message with its arguments as handles; the console.arguments capability is partial on Firefox, where an argument is its value as serialized at the call.",
   "capabilities": [],
-  "requirements": []
+  "requirements": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/ConsoleMessage.ts",
+      "packages/browser/src/internal/consoleMessage.ts",
+      "packages/browser/src/internal/consoleArguments.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; arguments are handles owned by the subscription's scope, opted into per page or context."
+  }
 }

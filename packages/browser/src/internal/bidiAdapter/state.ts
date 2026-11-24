@@ -9,6 +9,7 @@
 import * as Deferred from "effect/Deferred"
 import type * as Effect from "effect/Effect"
 import type * as Scope from "effect/Scope"
+import * as Semaphore from "effect/Semaphore"
 import type * as BrowserBidi from "../../bidi-protocol/Browser.ts"
 import type * as BrowsingContext from "../../bidi-protocol/BrowsingContext.ts"
 import type * as Network from "../../bidi-protocol/Network.ts"
@@ -60,14 +61,21 @@ export interface NavigableEntry extends Kit.NavigableNode<NavigableEntry> {
    * them, including a same-name sandbox that arrives before the main realm.
    */
   readonly pendingRealms: Array<RealmEntry>
-  /** The traversal eligible to observe a restoration, from command issuance until invalidation. */
+  /**
+   * The traversal eligible to observe a restoration, from command issuance until its own navigation ends or it is
+   * cancelled.
+   */
   restoring: {
     readonly navigation: PageNavigation.Id
     readonly arrived: (realm: RealmEntry) => void
     /** Only events received before this reply may claim the same-document traversal. */
     readonly sameDocumentThrough?: number | undefined
   } | undefined
-  /** An invalidated traversal may still produce a realm; only an observed commit resets this ambiguity. */
+  /**
+   * Set when a pending restoration is cancelled or its own navigation ends any way but in the same document, since that
+   * traversal may still produce a realm, such as a failed navigation's error page; one that ended in the same document
+   * leaves it unset. Only an observed commit resets this ambiguity.
+   */
   restorationAmbiguous: boolean
   /** Traversal commands awaiting replies or their observation drain, including invalidated owners. */
   readonly traversalCommands: Set<PageNavigation.Id>
@@ -228,7 +236,23 @@ export interface State extends Kit.Ending {
   readonly contexts: Map<UserContext.Id, ContextEntry>
   readonly contextsByBidi: Map<string, ContextEntry>
   readonly navigables: Map<string, NavigableEntry>
+  /**
+   * The context, and its origin and size, that a page's pointer input naming no frame went to when a button was
+   * pressed, until every button is up; the mouse input between goes there too, while it lasts.
+   */
+  readonly mouseCapture: Map<L1Target.NavigableId, import("./input.ts").PointerTarget>
+  /** The same for a touch, from its start until it ends or is canceled. */
+  readonly touchCapture: Map<L1Target.NavigableId, import("./input.ts").PointerTarget>
   readonly navigablesById: Map<L1Target.NavigableId, NavigableEntry>
+  /**
+   * Navigable ids given out before their navigable is known: an attached browser can list a popup before the page
+   * or frame that opened it, so the popup names its opener by the id that page or frame then takes, held while a
+   * popup that names it is open.
+   */
+  readonly reservedIds: Map<
+    string,
+    { readonly id: L1Target.NavigableId; readonly popups: Set<L1Target.NavigableId> }
+  >
   /** Why each page that ended did, for an operation that names it after. */
   readonly endedPages: Map<L1Target.NavigableId, L1Target.CloseReason>
   readonly documents: Map<L1Target.DocumentId, DocumentEntry>
@@ -252,6 +276,11 @@ export interface State extends Kit.Ending {
   readonly requestCollectors: Map<Adapter.RegistrationId, Network.Collector>
   /** Permissions granted, by context, as `[origin, name]` JSON: BiDi has no reset, so they are set back. */
   readonly granted: Map<UserContext.Id, Set<string>>
+  /**
+   * The preload scripts whose removal Firefox never answered, so may still be registered: each reconciliation sends
+   * their removal again.
+   */
+  unconfirmedPreloads: ReadonlyArray<Script.PreloadScript>
   /** The preload scripts registered, in order. */
   preloads: ReadonlyArray<
     {
@@ -262,6 +291,12 @@ export interface State extends Kit.Ending {
   >
   /** Contexts reported now existed before the connection: they are adopted. */
   adopting: boolean
+  /**
+   * The cache behavior last set: the session's, and each page's where it differs from it, by browsing context.
+   * Setting the session's clears every page's. Its lock keeps one change at a time, each reading the registry
+   * once the one before it has been sent.
+   */
+  readonly cache: { bypass: boolean; readonly pages: Map<string, boolean>; readonly lock: Semaphore.Semaphore }
 }
 
 /** A connection's empty state, with its default context mapped to BiDi's `"default"`. */
@@ -295,6 +330,9 @@ export const make = (options: {
     contextsByBidi: new Map([[defaultContext.bidi, defaultContext]]),
     navigables: new Map(),
     navigablesById: new Map(),
+    reservedIds: new Map(),
+    mouseCapture: new Map(),
+    touchCapture: new Map(),
     endedPages: new Map(),
     documents: new Map(),
     realms: new Map(),
@@ -319,7 +357,9 @@ export const make = (options: {
     requestCollectors: new Map(),
     granted: new Map(),
     preloads: [],
-    adopting: true
+    unconfirmedPreloads: [],
+    adopting: true,
+    cache: { bypass: false, pages: new Map(), lock: Semaphore.makeUnsafe(1) }
   }
   return state
 }

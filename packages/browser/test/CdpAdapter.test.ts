@@ -31,161 +31,523 @@ import { makeBrowser, type Sent } from "./utils/FakeBrowser.ts"
 import { onTestClock, withProtocolScheduler } from "./utils/ProtocolScheduler.ts"
 
 describe("CDP paused page initialization", () => {
-  for (const rejected of [false, true]) {
-    it.effect(`writes declarations before resume and handles the first request before renderer replies${rejected ? " when a declaration fails" : ""}`, () =>
-      Effect.gen(function*() {
-        const browser = yield* makeBrowser
-        const ready = yield* Deferred.make<void>()
-        const paused = yield* Deferred.make<void>()
-        const facts: Array<Adapter.Fact> = []
-        const commands: Array<Sent> = []
-        const held: Array<Sent> = []
-        let resumed = false
-        const reply = (command: Sent) =>
-          browser.receive({
-            id: command.id,
-            sessionId: command.sessionId,
-            ...(rejected && command.method === "Page.addScriptToEvaluateOnNewDocument" &&
-                command.params?.worldName === "isolated"
-              ? { error: { code: -32000, message: "script installation rejected" } }
-              : {
-                result: command.method === "Browser.getVersion"
-                  ? {
-                    protocolVersion: "1.3",
-                    product: "Chrome/155.0.8059.79",
-                    revision: "test",
-                    userAgent: "HeadlessChrome",
-                    jsVersion: "test"
-                  }
-                  : command.method === "Target.getBrowserContexts" ?
-                  { browserContextIds: [] }
-                  : command.method === "Page.getFrameTree" ?
-                  {
-                    frameTree: {
-                      frame: {
-                        id: "T1",
-                        loaderId: "initial",
-                        url: "about:blank",
-                        securityOrigin: "://",
-                        mimeType: "text/html"
+  for (
+    const [rejected, bridged] of [[false, false], [true, false], [false, true]] as const
+  ) {
+    it.effect(
+      `writes declarations before resume and handles the first request before renderer replies${
+        rejected ? " when a declaration fails" : ""
+      }${bridged ? " with a script WebSocket route" : ""}`,
+      () =>
+        Effect.gen(function*() {
+          const browser = yield* makeBrowser
+          const ready = yield* Deferred.make<void>()
+          const paused = yield* Deferred.make<void>()
+          const facts: Array<Adapter.Fact> = []
+          const commands: Array<Sent> = []
+          const held: Array<Sent> = []
+          let resumed = false
+          const reply = (command: Sent) =>
+            browser.receive({
+              id: command.id,
+              sessionId: command.sessionId,
+              ...(rejected && command.method === "Page.addScriptToEvaluateOnNewDocument" &&
+                  command.params?.worldName === "isolated"
+                ? { error: { code: -32000, message: "script installation rejected" } }
+                : {
+                  result: command.method === "Browser.getVersion"
+                    ? {
+                      protocolVersion: "1.3",
+                      product: "Chrome/155.0.8059.79",
+                      revision: "test",
+                      userAgent: "HeadlessChrome",
+                      jsVersion: "test"
+                    }
+                    : command.method === "Target.getBrowserContexts" ?
+                    { browserContextIds: [] }
+                    : command.method === "Page.getFrameTree" ?
+                    {
+                      frameTree: {
+                        frame: {
+                          id: "T1",
+                          loaderId: "initial",
+                          url: "about:blank",
+                          securityOrigin: "://",
+                          mimeType: "text/html"
+                        }
                       }
                     }
+                    : command.method === "Page.addScriptToEvaluateOnNewDocument" ?
+                    { identifier: `script-${command.id}` }
+                    : command.method === "Page.getLayoutMetrics"
+                    ? metrics
+                    : {}
+                })
+            })
+          yield* Effect.gen(function*() {
+            while (true) {
+              const command = yield* browser.next
+              commands.push(command)
+              if (!resumed && command.sessionId === "S1" && command.method !== "Runtime.runIfWaitingForDebugger") {
+                held.push(command)
+                continue
+              }
+              if (command.method === "Runtime.runIfWaitingForDebugger") {
+                if (bridged) {
+                  yield* browser.receive({
+                    sessionId: "S1",
+                    method: "Runtime.executionContextCreated",
+                    params: {
+                      context: {
+                        id: 1,
+                        origin: "://",
+                        name: "",
+                        uniqueId: "main-1",
+                        auxData: { isDefault: true, type: "default", frameId: "T1" }
+                      }
+                    }
+                  })
+                }
+                yield* browser.receive({
+                  sessionId: "S1",
+                  method: "Fetch.requestPaused",
+                  params: {
+                    requestId: "fetch-1",
+                    frameId: "T1",
+                    resourceType: "Document",
+                    request: {
+                      url: "https://target.test/",
+                      method: "GET",
+                      headers: {},
+                      initialPriority: "High",
+                      referrerPolicy: "strict-origin-when-cross-origin"
+                    }
                   }
-                  : command.method === "Page.addScriptToEvaluateOnNewDocument" ?
-                  { identifier: `script-${command.id}` }
-                  : command.method === "Page.getLayoutMetrics"
-                  ? metrics
-                  : {}
-              })
-          })
-        yield* Effect.gen(function*() {
-          while (true) {
-            const command = yield* browser.next
-            commands.push(command)
-            if (!resumed && command.sessionId === "S1" && command.method !== "Runtime.runIfWaitingForDebugger") {
-              held.push(command)
-              continue
+                })
+                // The browser cannot create the renderer to answer these commands until its route can run.
+                yield* Deferred.await(paused)
+                resumed = true
+                for (const pending of held.splice(0).reverse()) yield* reply(pending)
+              }
+              yield* reply(command)
             }
-            if (command.method === "Runtime.runIfWaitingForDebugger") {
-              yield* browser.receive({
-                sessionId: "S1",
-                method: "Fetch.requestPaused",
-                params: {
-                  requestId: "fetch-1",
-                  frameId: "T1",
-                  resourceType: "Document",
-                  request: {
-                    url: "https://target.test/",
-                    method: "GET",
-                    headers: {},
-                    initialPriority: "High",
-                    referrerPolicy: "strict-origin-when-cross-origin"
+          }).pipe(Effect.forkScoped)
+          const adapter = yield* CdpAdapter.connect(browser.transport, {
+            ownership: "launched",
+            sink: Effect.fnUntraced(function*(fact) {
+              facts.push(fact)
+              if (fact._tag === "ObligationOpened") yield* Deferred.succeed(paused, undefined)
+              if (fact._tag === "PageReady" || fact._tag === "PageInitializationFailed") {
+                yield* Deferred.succeed(ready, undefined)
+              }
+            })
+          })
+          const context = { _tag: "UserContext", context: adapter.defaultContext } as const
+          const scripts = yield* Scope.make()
+          yield* Effect.addFinalizer(() => Scope.close(scripts, Exit.void))
+          for (const world of [{ _tag: "Main" }, { _tag: "Isolated", name: "isolated" }] as const) {
+            yield* adapter.declare(context, {
+              _tag: "InitScript",
+              source: "self.initialized = true",
+              world,
+              phase: "user",
+              workers: false,
+              timing: "beforeAuthorScript",
+              after: []
+            }).pipe(Scope.provide(scripts))
+          }
+          if (bridged) {
+            // A context's script WebSocket route: its bridge's binding and capture script go out before the resume too.
+            yield* adapter.declare(context, {
+              _tag: "InitScript",
+              hostBridge: {
+                name: "__striderWebSocket",
+                token: "token",
+                scope: scripts,
+                captured: () => Effect.void,
+                receive: () => false,
+                ended: () => {},
+                failed: () => {}
+              },
+              source: "self.bridged = true",
+              world: { _tag: "Main" },
+              phase: "environment",
+              workers: false,
+              timing: "beforeAuthorScript",
+              after: []
+            }).pipe(Scope.provide(scripts))
+          }
+          yield* adapter.declare(context, {
+            _tag: "Intercept",
+            patterns: ["https://target.test/**"],
+            phases: ["request"]
+          })
+          yield* adapter.declare(context, { _tag: "Override", override: { _tag: "Locale", locale: "fr-FR" } })
+          yield* adapter.declare(context, {
+            _tag: "Override",
+            override: {
+              _tag: "Viewport",
+              width: 400,
+              height: 300,
+              deviceScaleFactor: 1,
+              mobile: false
+            }
+          })
+          yield* browser.receive({
+            method: "Target.attachedToTarget",
+            params: {
+              sessionId: "S1",
+              targetInfo: { targetId: "T1", type: "page", title: "", url: "", attached: true },
+              waitingForDebugger: true
+            }
+          })
+          yield* Deferred.await(ready)
+          const sent = commands.filter((command) => command.sessionId === "S1").map((command) => command.method)
+          assert.strictEqual(sent.at(-1), "Runtime.runIfWaitingForDebugger")
+          assert.strictEqual(sent.filter((method) => method === "Runtime.runIfWaitingForDebugger").length, 1)
+          for (
+            const method of [
+              "Log.enable",
+              "Page.addScriptToEvaluateOnNewDocument",
+              "Fetch.enable",
+              "Emulation.setLocaleOverride",
+              "Emulation.setUserAgentOverride",
+              "Emulation.setDeviceMetricsOverride",
+              ...(bridged ? ["Runtime.addBinding"] : [])
+            ]
+          ) {
+            assert.include(sent, method)
+          }
+          assert.isBelow(sent.indexOf("Page.getFrameTree"), sent.indexOf("Runtime.enable"))
+          // The capture script calls the bridge's binding, so the binding exists before any script is installed.
+          if (bridged) {
+            assert.isBelow(sent.indexOf("Runtime.addBinding"), sent.indexOf("Page.addScriptToEvaluateOnNewDocument"))
+          }
+          // A page that doesn't attach at about:blank is not measured before resume: its renderer may exist only
+          // once its first request is routed
+          assert.notInclude(sent, "Page.getLayoutMetrics")
+          assert.notInclude(sent, "Page.createIsolatedWorld")
+          assert.isBelow(
+            sent.indexOf("Emulation.setDeviceMetricsOverride"),
+            sent.indexOf("Runtime.runIfWaitingForDebugger")
+          )
+          assert.include(facts.map((fact) => fact._tag), rejected ? "PageInitializationFailed" : "PageReady")
+          const firstScript = commands.find((command) => command.method === "Page.addScriptToEvaluateOnNewDocument")!
+          yield* Scope.close(scripts, Exit.void).pipe(Effect.provideService(Cleanup.Confirm, true))
+          assert.isTrue(commands.some((command) =>
+            command.method === "Page.removeScriptToEvaluateOnNewDocument" &&
+            command.params?.identifier === `script-${firstScript.id}`
+          ))
+          // Tear down the connection before declarations release, so no renderer replies are needed by cleanup.
+          yield* browser.lose("test complete")
+        }).pipe(Effect.scoped)
+    )
+  }
+
+  it.effect("holds a paused page's script permit until the gate's identifiers arrive", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const ready = yield* Deferred.make<void>()
+      const resumeSeen = yield* Deferred.make<void>()
+      const commands: Array<Sent> = []
+      const held: Array<Sent> = []
+      let resumed = false
+      const reply = (command: Sent) =>
+        browser.receive({
+          id: command.id,
+          sessionId: command.sessionId,
+          result: command.method === "Browser.getVersion"
+            ? {
+              protocolVersion: "1.3",
+              product: "Chrome/155.0.8059.79",
+              revision: "test",
+              userAgent: "HeadlessChrome",
+              jsVersion: "test"
+            }
+            : command.method === "Target.getBrowserContexts"
+            ? { browserContextIds: [] }
+            : command.method === "Page.getFrameTree"
+            ? {
+              frameTree: {
+                frame: {
+                  id: "T1",
+                  loaderId: "initial",
+                  url: "about:blank",
+                  securityOrigin: "://",
+                  mimeType: "text/html"
+                }
+              }
+            }
+            : command.method === "Page.addScriptToEvaluateOnNewDocument"
+            ? { identifier: `script-${command.id}` }
+            : {}
+        })
+      yield* Effect.gen(function*() {
+        while (true) {
+          const command = yield* browser.next
+          commands.push(command)
+          if (!resumed && command.sessionId === "S1" && command.method !== "Runtime.runIfWaitingForDebugger") {
+            held.push(command)
+            continue
+          }
+          if (command.method === "Runtime.runIfWaitingForDebugger") {
+            // An overlapping declaration starts while the gate's replies, and so its script identifiers, are held
+            yield* Deferred.succeed(resumeSeen, undefined)
+            yield* Effect.yieldNow
+            resumed = true
+            for (const pending of held.splice(0)) yield* reply(pending)
+          }
+          yield* reply(command)
+        }
+      }).pipe(Effect.forkScoped)
+      const adapter = yield* CdpAdapter.connect(browser.transport, {
+        ownership: "launched",
+        sink: (fact) =>
+          fact._tag === "PageReady" || fact._tag === "PageInitializationFailed"
+            ? Deferred.succeed(ready, undefined).pipe(Effect.asVoid)
+            : Effect.void
+      })
+      const context = { _tag: "UserContext", context: adapter.defaultContext } as const
+      const scripts = yield* Scope.make()
+      yield* Effect.addFinalizer(() => Scope.close(scripts, Exit.void))
+      const initScript = (source: string, world: Adapter.World) =>
+        adapter.declare(context, {
+          _tag: "InitScript",
+          source,
+          world,
+          phase: "user",
+          workers: false,
+          timing: "beforeAuthorScript",
+          after: []
+        }).pipe(Scope.provide(scripts))
+      yield* initScript("self.initialized = true", { _tag: "Main" })
+      yield* initScript("self.isolated = true", { _tag: "Isolated", name: "isolated" })
+      // The bridge's binding and capture script are queued under the same permit
+      yield* adapter.declare(context, {
+        _tag: "InitScript",
+        hostBridge: {
+          name: "__striderWebSocket",
+          token: "token",
+          scope: scripts,
+          captured: () => Effect.void,
+          receive: () => false,
+          ended: () => {},
+          failed: () => {}
+        },
+        source: "self.bridged = true",
+        world: { _tag: "Main" },
+        phase: "environment",
+        workers: false,
+        timing: "beforeAuthorScript",
+        after: []
+      }).pipe(Scope.provide(scripts))
+      const overlapping = yield* Deferred.await(resumeSeen).pipe(
+        Effect.andThen(initScript("self.overlapping = true", { _tag: "Main" })),
+        Effect.forkScoped
+      )
+      yield* browser.receive({
+        method: "Target.attachedToTarget",
+        params: {
+          sessionId: "S1",
+          targetInfo: { targetId: "T1", type: "page", title: "", url: "", attached: true },
+          waitingForDebugger: true
+        }
+      })
+      yield* Deferred.await(ready)
+      yield* Fiber.join(overlapping)
+      const onPage = commands.filter((command) => command.sessionId === "S1")
+      // The overlapping declaration writes only once it holds the permit, and its first write replaces a script
+      // the gate installed. Everything before that is the gate's initial setup, which ends with the one resume.
+      const replacing = onPage.findIndex((command) => command.method === "Page.removeScriptToEvaluateOnNewDocument")
+      assert.isAbove(replacing, 0)
+      const initial = onPage.slice(0, replacing).map((command) => command.method)
+      assert.strictEqual(initial.at(-1), "Runtime.runIfWaitingForDebugger")
+      assert.strictEqual(
+        onPage.filter((command) => command.method === "Runtime.runIfWaitingForDebugger").length,
+        1
+      )
+      const installed = (from: number, to: number) =>
+        onPage.slice(from, to).filter((command) => command.method === "Page.addScriptToEvaluateOnNewDocument")
+      const gateScripts = installed(0, replacing)
+      assert.deepStrictEqual(gateScripts.map((command) => command.params?.worldName), [undefined, "isolated"])
+      assert.include(initial, "Runtime.addBinding")
+      // The overlapping write removes the identifiers the gate recorded, rather than leaving its scripts installed
+      const removed = (from: number) =>
+        onPage.slice(from).filter((command) => command.method === "Page.removeScriptToEvaluateOnNewDocument")
+          .map((command) => command.params?.identifier)
+      assert.includeMembers(removed(replacing), gateScripts.map((command) => `script-${command.id}`))
+      // Closing the scripts' scope removes the identifiers installed last, by commands sent after the close
+      const latest = new Map(
+        installed(replacing, onPage.length).map((command) => [command.params?.worldName, command] as const)
+      )
+      assert.strictEqual(latest.size, 2)
+      const closedAt = onPage.length
+      yield* Scope.close(scripts, Exit.void).pipe(Effect.provideService(Cleanup.Confirm, true))
+      const afterClose = commands.filter((command) => command.sessionId === "S1").slice(closedAt)
+      const removedAfterClose = afterClose.filter((command) =>
+        command.method === "Page.removeScriptToEvaluateOnNewDocument"
+      ).map((command) => command.params?.identifier)
+      assert.includeMembers(removedAfterClose, [...latest.values()].map((command) => `script-${command.id}`))
+      yield* browser.lose("test complete")
+    }).pipe(Effect.scoped))
+})
+
+describe("CDP paused page viewport baseline", () => {
+  for (
+    const { reading, width, height, mobile, own, name } of [
+      // Readings are [innerWidth, innerHeight, screen.width, screen.height]
+      {
+        reading: [800, 600, 800, 600],
+        width: 400,
+        height: 300,
+        mobile: false,
+        own: true,
+        name: "confirms its restore"
+      },
+      {
+        reading: [400, 300, 800, 600],
+        width: 400,
+        height: 300,
+        mobile: false,
+        own: false,
+        name: "leaves a reading whose size equals the override unknown"
+      },
+      // A late reading on the headless shell, under a 400x700 mobile override without viewport metadata: the
+      // layout is 980x1715, and the screen is the override's.
+      {
+        reading: [980, 1715, 400, 700],
+        width: 400,
+        height: 700,
+        mobile: true,
+        own: false,
+        name: "leaves a mobile-emulated reading whose screen equals the override unknown"
+      },
+      // A late reading on the headless shell, under a 1280x900 desktop override: the size is the override's, and
+      // the screen the page's own.
+      {
+        reading: [1280, 900, 800, 600],
+        width: 1280,
+        height: 900,
+        mobile: false,
+        own: false,
+        name: "leaves a desktop reading whose size equals the override unknown, whatever its screen"
+      }
+    ] as const
+  ) {
+    it.effect(
+      `queues a paused page's size reading without awaiting it, and ${name}`,
+      () =>
+        Effect.gen(function*() {
+          const browser = yield* makeBrowser
+          const ready = yield* Deferred.make<void>()
+          const commands: Array<Sent> = []
+          // The gate's reading, whose reply is held until the test releases it
+          const held = yield* Deferred.make<Sent>()
+          const isReading = (command: Sent) =>
+            command.method === "Runtime.evaluate" &&
+            command.params?.expression === "[innerWidth, innerHeight, screen.width, screen.height]" &&
+            command.params?.contextId === undefined
+          const reply = (command: Sent) =>
+            browser.receive({
+              id: command.id,
+              sessionId: command.sessionId,
+              result: command.method === "Browser.getVersion"
+                ? {
+                  protocolVersion: "1.3",
+                  product: "Chrome/155.0.8059.79",
+                  revision: "test",
+                  userAgent: "HeadlessChrome",
+                  jsVersion: "test"
+                }
+                : command.method === "Target.getBrowserContexts" ?
+                { browserContextIds: [] }
+                : command.method === "Page.getFrameTree" ?
+                {
+                  frameTree: {
+                    frame: {
+                      id: "T1",
+                      loaderId: "initial",
+                      url: "about:blank",
+                      securityOrigin: "://",
+                      mimeType: "text/html"
+                    }
                   }
                 }
-              })
-              // The browser cannot create the renderer to answer these commands until its route can run.
-              yield* Deferred.await(paused)
-              resumed = true
-              for (const pending of held.splice(0).reverse()) yield* reply(pending)
+                : command.method === "Page.createIsolatedWorld" ?
+                { executionContextId: 7 }
+                : isReading(command) ?
+                { result: { type: "object", value: reading } }
+                : command.method === "Runtime.evaluate" ?
+                { result: { type: "object", value: [800, 600] } }
+                : {}
+            })
+          yield* Effect.gen(function*() {
+            while (true) {
+              const command = yield* browser.next
+              commands.push(command)
+              if (isReading(command)) yield* Deferred.succeed(held, command)
+              else yield* reply(command)
             }
-            yield* reply(command)
-          }
-        }).pipe(Effect.forkScoped)
-        const adapter = yield* CdpAdapter.connect(browser.transport, {
-          ownership: "launched",
-          sink: Effect.fnUntraced(function*(fact) {
-            facts.push(fact)
-            if (fact._tag === "ObligationOpened") yield* Deferred.succeed(paused, undefined)
-            if (fact._tag === "PageReady" || fact._tag === "PageInitializationFailed") {
-              yield* Deferred.succeed(ready, undefined)
+          }).pipe(Effect.forkScoped)
+          const warnings: Array<unknown> = []
+          const loggers = yield* Logger.CurrentLoggers
+          const logger = Logger.make((entry) => {
+            if (entry.logLevel === "Warn") {
+              warnings.push(Array.isArray(entry.message) ? entry.message[0] : entry.message)
+            }
+            for (const existing of loggers) existing.log(entry)
+          })
+          const adapter = yield* CdpAdapter.connect(browser.transport, {
+            ownership: "launched",
+            sink: Effect.fnUntraced(function*(fact) {
+              if (fact._tag === "PageReady" || fact._tag === "PageInitializationFailed") {
+                yield* Deferred.succeed(ready, undefined)
+              }
+            })
+          })
+          const declared = yield* Scope.make()
+          yield* adapter.declare({ _tag: "UserContext", context: adapter.defaultContext }, {
+            _tag: "Override",
+            override: { _tag: "Viewport", width, height, deviceScaleFactor: 1, mobile }
+          }).pipe(Scope.provide(declared))
+          yield* browser.receive({
+            method: "Target.attachedToTarget",
+            params: {
+              sessionId: "S1",
+              targetInfo: { targetId: "T1", type: "page", title: "", url: "about:blank", attached: true },
+              waitingForDebugger: true
             }
           })
-        })
-        const context = { _tag: "UserContext", context: adapter.defaultContext } as const
-        const scripts = yield* Scope.make()
-        yield* Effect.addFinalizer(() => Scope.close(scripts, Exit.void))
-        for (const world of [{ _tag: "Main" }, { _tag: "Isolated", name: "isolated" }] as const) {
-          yield* adapter.declare(context, {
-            _tag: "InitScript",
-            source: "self.initialized = true",
-            world,
-            phase: "user",
-            workers: false,
-            timing: "beforeAuthorScript",
-            after: []
-          }).pipe(Scope.provide(scripts))
-        }
-        yield* adapter.declare(context, {
-          _tag: "Intercept",
-          patterns: ["https://target.test/**"],
-          phases: ["request"]
-        })
-        yield* adapter.declare(context, { _tag: "Override", override: { _tag: "Locale", locale: "fr-FR" } })
-        yield* adapter.declare(context, {
-          _tag: "Override",
-          override: {
-            _tag: "Viewport",
-            width: 400,
-            height: 300,
-            deviceScaleFactor: 1,
-            mobile: false
+          // The override and the resume are written while the reading's reply is outstanding
+          const measurement = yield* Deferred.await(held)
+          while (!commands.some((command) => command.method === "Runtime.runIfWaitingForDebugger")) {
+            yield* Effect.yieldNow
           }
-        })
-        yield* browser.receive({
-          method: "Target.attachedToTarget",
-          params: {
-            sessionId: "S1",
-            targetInfo: { targetId: "T1", type: "page", title: "", url: "", attached: true },
-            waitingForDebugger: true
-          }
-        })
-        yield* Deferred.await(ready)
-        const sent = commands.filter((command) => command.sessionId === "S1").map((command) => command.method)
-        assert.strictEqual(sent.at(-1), "Runtime.runIfWaitingForDebugger")
-        assert.strictEqual(sent.filter((method) => method === "Runtime.runIfWaitingForDebugger").length, 1)
-        for (
-          const method of [
-            "Page.addScriptToEvaluateOnNewDocument",
-            "Fetch.enable",
-            "Emulation.setLocaleOverride",
-            "Emulation.setUserAgentOverride",
-            "Emulation.setDeviceMetricsOverride"
-          ]
-        ) {
-          assert.include(sent, method)
-        }
-        assert.isBelow(sent.indexOf("Page.getFrameTree"), sent.indexOf("Runtime.enable"))
-        assert.isBelow(sent.indexOf("Page.getLayoutMetrics"), sent.indexOf("Emulation.setDeviceMetricsOverride"))
-        assert.include(facts.map((fact) => fact._tag), rejected ? "PageInitializationFailed" : "PageReady")
-        const firstScript = commands.find((command) => command.method === "Page.addScriptToEvaluateOnNewDocument")!
-        yield* Scope.close(scripts, Exit.void).pipe(Effect.provideService(Cleanup.Confirm, true))
-        assert.isTrue(commands.some((command) =>
-          command.method === "Page.removeScriptToEvaluateOnNewDocument" &&
-          command.params?.identifier === `script-${firstScript.id}`
-        ))
-        // Tear down the connection before declarations release, so no renderer replies are needed by cleanup.
-        yield* browser.lose("test complete")
-      }).pipe(Effect.scoped))
+          const methods = commands.filter((command) => command.sessionId === "S1").map((command) => command.method)
+          const at = methods.indexOf("Runtime.evaluate")
+          assert.isBelow(at, methods.indexOf("Emulation.setDeviceMetricsOverride"))
+          assert.notInclude(methods, "Page.getLayoutMetrics")
+          assert.notInclude(methods, "Page.createIsolatedWorld")
+          yield* reply(measurement)
+          yield* Deferred.await(ready)
+          // Releasing the viewport confirms the recorded size, or warns at once that it is unknown
+          const release = Scope.close(declared, Exit.void).pipe(
+            Effect.provideService(Cleanup.Confirm, true),
+            Effect.provideService(Logger.CurrentLoggers, new Set([logger]))
+          )
+          // The failing mobile case must expose its attempted wait without spending the full cleanup budget.
+          yield* mobile ? release.pipe(Deadline.withDefaultBudget("100 millis")) : release
+          assert.include(
+            commands.map((command) => command.method),
+            "Emulation.clearDeviceMetricsOverride"
+          )
+          assert.deepStrictEqual(
+            warnings,
+            own ? [] : ["CDP viewport restoration could not be verified: original dimensions are unknown"]
+          )
+          yield* browser.lose("test complete")
+        }).pipe(Effect.scoped)
+    )
   }
 })
 
@@ -684,6 +1046,74 @@ describe("CDP locale declaration release", () => {
         assert.deepStrictEqual(
           commands.filter((command) => command.method === "Emulation.setUserAgentOverride").at(-1)?.params,
           { userAgent: "HeadlessChrome" }
+        )
+      })
+    ))
+
+  it.effect("writes a declaration to a page in its initial sync only once the frame tree has replied", () =>
+    withProtocolScheduler((drain) =>
+      Effect.gen(function*() {
+        const browser = yield* makeBrowser
+        const heldTree = yield* Deferred.make<Sent>()
+        const ready = yield* Deferred.make<void>()
+        const commands: Array<Sent> = []
+        const reply = (command: Sent, result: object = {}) =>
+          browser.receive({ id: command.id, sessionId: command.sessionId, result })
+        const tree = {
+          frameTree: {
+            frame: { id: "T1", loaderId: "initial", url: "about:blank", securityOrigin: "://", mimeType: "text/html" }
+          }
+        }
+        yield* Effect.gen(function*() {
+          while (true) {
+            const command = yield* browser.next
+            commands.push(command)
+            if (command.method === "Page.getFrameTree" && command.sessionId === "S1") {
+              yield* Deferred.succeed(heldTree, command)
+              continue
+            }
+            const result = command.method === "Browser.getVersion"
+              ? {
+                protocolVersion: "1.3",
+                product: "Chrome/155.0.8059.79",
+                revision: "test",
+                userAgent: "HeadlessChrome",
+                jsVersion: "test"
+              }
+              : command.method === "Target.getBrowserContexts"
+              ? { browserContextIds: [] }
+              : {}
+            yield* reply(command, result)
+          }
+        }).pipe(Effect.forkScoped)
+        const adapter = yield* CdpAdapter.connect(browser.transport, {
+          ownership: "attached",
+          sink: (fact) =>
+            fact._tag === "PageReady" ? Deferred.succeed(ready, undefined).pipe(Effect.asVoid) : Effect.void
+        })
+        yield* browser.receive({
+          method: "Target.attachedToTarget",
+          params: {
+            sessionId: "S1",
+            targetInfo: { targetId: "T1", type: "page", title: "", url: "about:blank", attached: true },
+            waitingForDebugger: false
+          }
+        })
+        const held = yield* Deferred.await(heldTree)
+        const installing = yield* adapter.declare({ _tag: "UserContext", context: adapter.defaultContext }, {
+          _tag: "Override",
+          override: { _tag: "Locale", locale: "fr-FR" }
+        }).pipe(Effect.forkScoped)
+        yield* drain
+        // Events received before the tree's reply are discarded, so nothing may cause one yet
+        assert.isFalse(commands.some((command) => command.method === "Emulation.setLocaleOverride"))
+        yield* reply(held, tree)
+        yield* Fiber.join(installing)
+        yield* Deferred.await(ready)
+        assert.isTrue(
+          commands.some((command) =>
+            command.method === "Emulation.setLocaleOverride" && command.params?.locale === "fr-FR"
+          )
         )
       })
     ))
@@ -2257,13 +2687,13 @@ describe("Chromium video writer lifetime", () => {
         yield* TestClock.adjust("1 second")
         yield* drain
         const closedPromptly = closing.pollUnsafe() !== undefined
-        yield* TestClock.adjust("5 seconds")
+        yield* TestClock.adjust("30 seconds")
         yield* Fiber.join(closing)
-        assert(closedPromptly, "closing a frameless recording must not wait out the five-second finish budget")
+        assert(closedPromptly, "closing a frameless recording must not wait out the writer's finish budget")
         assert.strictEqual(writes, 0)
         const error = yield* Effect.flip(video.file)
         assert(Capability.isCapabilityError(error))
-        assert.notMatch(error.message, /did not finish within 5 seconds/)
+        assert.notMatch(error.message, /did not finish within/)
       })
     ).pipe(onTestClock))
 
@@ -2330,7 +2760,7 @@ describe("Chromium video writer lifetime", () => {
           }
           yield* drain
           if (mode === "blocked") {
-            yield* TestClock.adjust("5 seconds")
+            yield* TestClock.adjust("30 seconds")
             yield* drain
           }
           const settled = file.pollUnsafe() !== undefined
@@ -2341,7 +2771,7 @@ describe("Chromium video writer lifetime", () => {
           const releasedAtFile = released
           const closing = yield* Effect.forkScoped(Scope.close(recordingScope, Exit.void))
           yield* drain
-          yield* TestClock.adjust("5 seconds")
+          yield* TestClock.adjust("30 seconds")
           yield* Fiber.join(closing)
           assert.isTrue(settled, "source termination must settle file without closing the caller scope")
           const outcome = yield* Fiber.join(file)
@@ -2369,7 +2799,7 @@ describe("Chromium video writer lifetime", () => {
       ).pipe(onTestClock))
   }
 
-  it.effect("bounds an unresponsive writer finish by five seconds on the browser clock", () =>
+  it.effect("bounds an unresponsive writer finish by the default budget read when video is acquired", () =>
     withProtocolScheduler((drain) =>
       Effect.gen(function*() {
         const started = yield* Deferred.make<void>()
@@ -2382,16 +2812,20 @@ describe("Chromium video writer lifetime", () => {
         })
         const page = yield* h.page.control
         const scope = yield* Scope.make()
-        const video = yield* page.capability(Capability.Video).pipe(Scope.provide(scope))
+        const video = yield* page.capability(Capability.Video).pipe(
+          Scope.provide(scope),
+          Deadline.withDefaultBudget("2 seconds")
+        )
         yield* frame(h, 53)
         yield* Deferred.await(started)
         const closing = yield* Effect.forkScoped(Scope.close(scope, Exit.void))
         yield* drain
-        yield* TestClock.adjust("5 seconds")
+        yield* TestClock.adjust("2 seconds")
         yield* Fiber.join(closing)
         const error = yield* Effect.flip(video.file)
         assert(Capability.isCapabilityError(error))
         assert.strictEqual(error.reason._tag, "BackendFailure")
+        assert.match(error.message, /did not finish within 2s/)
       })
     ).pipe(onTestClock))
 })
@@ -3337,4 +3771,426 @@ describe("CDP owned Chromium shutdown", () => {
         }).pipe(onTestClock)
       ))
   }
+})
+
+/**
+ * A page whose init scripts the fake keeps as Chromium does: it carries out each command as it arrives, and holds
+ * only the reply to the methods the test names, as when a reply comes after the deadline.
+ */
+const initScriptPage = Effect.fnUntraced(function*() {
+  const browser = yield* makeBrowser
+  const ready = yield* Deferred.make<void>()
+  const live = new Map<string, string>()
+  const holding = new Set<string>()
+  const held = yield* Queue.unbounded<Effect.Effect<void>>()
+  const rejected: Array<string> = []
+  let nextIdentifier = 0
+  const answer = (command: Sent): object => {
+    if (command.method === "Page.addScriptToEvaluateOnNewDocument") {
+      const identifier = `script-${++nextIdentifier}`
+      live.set(identifier, command.params?.source as string)
+      return { result: { identifier } }
+    }
+    if (command.method === "Page.removeScriptToEvaluateOnNewDocument") {
+      const identifier = command.params?.identifier as string
+      if (live.delete(identifier)) return { result: {} }
+      rejected.push(identifier)
+      return { error: { code: -32000, message: "Script not found" } }
+    }
+    return {
+      result: command.method === "Browser.getVersion"
+        ? {
+          protocolVersion: "1.3",
+          product: "Chrome/155.0.8059.79",
+          revision: "test",
+          userAgent: "HeadlessChrome",
+          jsVersion: "test"
+        }
+        : command.method === "Target.getBrowserContexts"
+        ? { browserContextIds: [] }
+        : command.method === "Page.getFrameTree"
+        ? {
+          frameTree: {
+            frame: { id: "T1", loaderId: "initial", url: "about:blank", securityOrigin: "://", mimeType: "text/html" }
+          }
+        }
+        : command.method === "Page.getLayoutMetrics"
+        ? metrics
+        : command.method === "Runtime.evaluate"
+        ? { result: { type: "undefined" } }
+        : {}
+    }
+  }
+  yield* Effect.gen(function*() {
+    while (true) {
+      const command = yield* browser.next
+      const reply = browser.receive({ id: command.id, sessionId: command.sessionId, ...answer(command) })
+      if (holding.has(command.method)) {
+        holding.delete(command.method)
+        yield* Queue.offer(held, reply)
+        continue
+      }
+      yield* reply
+    }
+  }).pipe(Effect.forkScoped)
+  const services = yield* Layer.build(BrowserImpl.layer((sink) =>
+    CdpAdapter.connect(browser.transport, {
+      ownership: "attached",
+      sink: Effect.fnUntraced(function*(fact) {
+        yield* sink(fact)
+        if (fact._tag === "PageReady") yield* Deferred.succeed(ready, undefined)
+      })
+    })
+  ))
+  yield* browser.receive({
+    method: "Target.attachedToTarget",
+    params: {
+      sessionId: "S1",
+      targetInfo: { targetId: "T1", type: "page", title: "", url: "about:blank", attached: true },
+      waitingForDebugger: false
+    }
+  })
+  yield* Deferred.await(ready)
+  const service = Context.get(services, Browser.Browser)
+  const observed = (yield* service.pages.waitFor((pages) => pages.length > 0))[0]!
+  const page = yield* observed.control
+  return {
+    page,
+    live,
+    /** The identifiers whose removal was rejected because Chromium no longer had them. */
+    rejected,
+    /** Holds the reply to the next command of this method; the returned effect waits for it and returns the reply. */
+    hold: (method: string) => Effect.sync(() => holding.add(method)).pipe(Effect.as(Queue.take(held)))
+  }
+})
+
+describe("Chromium init-script writes cut short by a deadline", () => {
+  it.effect("keeps the next declaration working after a remove whose reply came after the deadline", () =>
+    Effect.gen(function*() {
+      const h = yield* initScriptPage()
+      yield* h.page.addInitScript({ source: "self.first = true" })
+      const remove = yield* h.hold("Page.removeScriptToEvaluateOnNewDocument")
+      const replacing = yield* Effect.forkScoped(
+        h.page.addInitScript({ source: "self.second = true" }).pipe(Deadline.within("1 second"), Effect.flip)
+      )
+      const reply = yield* remove
+      yield* TestClock.adjust("1 second")
+      assert(Deadline.isTimeout(yield* Fiber.join(replacing)))
+      // Chromium has carried out the remove; only its reply comes after the deadline.
+      yield* reply
+      yield* TestClock.adjust("0 millis")
+      const next = yield* Effect.exit(h.page.addInitScript({ source: "self.third = true" }))
+      assert(Exit.isSuccess(next), `the next declaration failed: ${Exit.isFailure(next) ? String(next.cause) : ""}`)
+      assert.deepStrictEqual(h.rejected, [], "a script was removed twice")
+    }).pipe(onTestClock))
+
+  it.effect("keeps the next declaration working after a remove whose reply also misses CommandTimeout", () =>
+    Effect.gen(function*() {
+      const h = yield* initScriptPage()
+      yield* h.page.addInitScript({ source: "self.first = true" })
+      const remove = yield* h.hold("Page.removeScriptToEvaluateOnNewDocument")
+      const replacing = yield* Effect.forkScoped(
+        h.page.addInitScript({ source: "self.second = true" }).pipe(
+          Protocol.withCommandTimeout("10 millis"),
+          Effect.exit
+        )
+      )
+      const reply = yield* remove
+      // Wait for the independent write's real command timer, not the operation's test clock.
+      assert(Exit.isFailure(yield* Fiber.join(replacing)))
+      // Chromium removed the script; its reply comes after the command wait ended.
+      yield* reply
+      yield* TestClock.adjust("0 millis")
+      const next = yield* Effect.exit(h.page.addInitScript({ source: "self.third = true" }))
+      assert(Exit.isSuccess(next), `the next declaration failed: ${Exit.isFailure(next) ? String(next.cause) : ""}`)
+      // Nothing told Strider the removal took effect, so the next write asked again, and Chromium's answer settled it.
+      assert.deepStrictEqual(h.rejected, ["script-1"], "the unanswered removal was not asked again exactly once")
+      yield* h.page.addInitScript({ source: "self.fourth = true" })
+      assert.deepStrictEqual(h.rejected, ["script-1"], "a settled removal was sent again")
+    }).pipe(onTestClock))
+
+  it.effect("removes on release the script an add whose reply came after the deadline installed", () =>
+    Effect.gen(function*() {
+      const h = yield* initScriptPage()
+      const scope = yield* Scope.make()
+      const add = yield* h.hold("Page.addScriptToEvaluateOnNewDocument")
+      const adding = yield* Effect.forkScoped(
+        h.page.addInitScript({ source: "self.cutShort = true" }).pipe(
+          Deadline.within("1 second"),
+          Scope.provide(scope),
+          Effect.flip
+        )
+      )
+      const reply = yield* add
+      yield* TestClock.adjust("1 second")
+      assert(Deadline.isTimeout(yield* Fiber.join(adding)))
+      // Chromium has installed the script; only its reply comes after the deadline.
+      yield* reply
+      yield* TestClock.adjust("0 millis")
+      yield* Scope.close(scope, Exit.void)
+      // A later write on the target waits for any earlier one, so once it returns the record has settled.
+      yield* h.page.addInitScript({ source: "self.later = true" })
+      yield* TestClock.adjust("0 millis")
+      const installed = [...h.live].filter(([, source]) => source.includes("self.cutShort"))
+      assert.deepStrictEqual(installed, [], "the script the timed-out add installed is still in Chromium")
+      assert.deepStrictEqual(h.rejected, [], "a script was removed twice")
+    }).pipe(onTestClock))
+})
+
+describe("CDP WebSocket bridge", () => {
+  it.effect("delivers a binding call that arrived while its target's session was held, once the sync folds its realm", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const received = yield* Deferred.make<string>()
+      const bridgeScope = yield* Scope.make()
+      yield* Effect.addFinalizer(() => Scope.close(bridgeScope, Exit.void))
+      const bridge: Adapter.HostBridge = {
+        name: "__striderWebSocketTest",
+        token: "token",
+        scope: bridgeScope,
+        captured: () => Effect.void,
+        receive: (realm) => {
+          Deferred.doneUnsafe(received, Effect.succeed(realm))
+          return true
+        },
+        ended: () => {},
+        failed: () => {}
+      }
+      const ready = yield* Deferred.make<void>()
+      yield* Effect.gen(function*() {
+        while (true) {
+          const command = yield* browser.next
+          if (command.sessionId === "S1" && command.method === "Runtime.addBinding") {
+            // The realm and a call through the binding arrive while the session's sync is still running, and
+            // nothing arrives for the session after it
+            yield* browser.receive({
+              sessionId: "S1",
+              method: "Runtime.executionContextCreated",
+              params: {
+                context: {
+                  id: 1,
+                  uniqueId: "context-1",
+                  origin: "https://target.test",
+                  name: "",
+                  auxData: { frameId: "T1", isDefault: true, type: "default" }
+                }
+              }
+            })
+            yield* browser.receive({
+              sessionId: "S1",
+              method: "Runtime.bindingCalled",
+              params: { name: bridge.name, payload: "{}", executionContextId: 1 }
+            })
+          }
+          yield* browser.receive({
+            id: command.id,
+            sessionId: command.sessionId,
+            result: command.method === "Browser.getVersion"
+              ? {
+                protocolVersion: "1.3",
+                product: "Chrome/155.0.8059.79",
+                revision: "test",
+                userAgent: "HeadlessChrome",
+                jsVersion: "test"
+              }
+              : command.method === "Target.getBrowserContexts"
+              ? { browserContextIds: [] }
+              : command.method === "Page.getFrameTree"
+              ? {
+                frameTree: {
+                  frame: {
+                    id: "T1",
+                    loaderId: "initial",
+                    url: "https://target.test/",
+                    securityOrigin: "https://target.test",
+                    mimeType: "text/html"
+                  }
+                }
+              }
+              : command.method === "Page.addScriptToEvaluateOnNewDocument"
+              ? { identifier: `script-${command.id}` }
+              : {}
+          })
+        }
+      }).pipe(Effect.forkScoped)
+      const adapter = yield* CdpAdapter.connect(browser.transport, {
+        ownership: "launched",
+        sink: (fact) =>
+          fact._tag === "PageReady" || fact._tag === "PageInitializationFailed"
+            ? Deferred.succeed(ready, undefined).pipe(Effect.asVoid)
+            : Effect.void
+      })
+      yield* adapter.declare({ _tag: "UserContext", context: adapter.defaultContext }, {
+        _tag: "InitScript",
+        hostBridge: bridge,
+        source: "",
+        world: { _tag: "Main" },
+        phase: "user",
+        workers: false,
+        timing: "beforeAuthorScript",
+        after: []
+      })
+      yield* browser.receive({
+        method: "Target.attachedToTarget",
+        params: {
+          sessionId: "S1",
+          targetInfo: { targetId: "T1", type: "page", title: "", url: "https://target.test/", attached: true },
+          waitingForDebugger: false
+        }
+      })
+      yield* Deferred.await(ready)
+      const realm = yield* Deferred.await(received).pipe(Effect.timeoutOption("1 second"), TestClock.withLive)
+      assert.isTrue(Option.isSome(realm), "the parked binding call must reach the bridge")
+      yield* browser.lose("test complete")
+    }).pipe(Effect.scoped))
+})
+
+describe("CDP context publication", () => {
+  const lateCreation = Effect.fnUntraced(
+    function*(refuseDisposal: boolean, stallDisposalWrite = false, stallRelease = false) {
+      const wire = yield* makeBrowser
+      const queued = yield* Deferred.make<void>()
+      const deliver = yield* Deferred.make<void>()
+      const finished = yield* Deferred.make<void>()
+      const releasing = yield* Deferred.make<void>()
+      const resumeRelease = yield* Deferred.make<void>()
+      const disposalWriting = yield* Deferred.make<void>()
+      const resumeDisposalWrite = yield* Deferred.make<void>()
+      let initializationFailure: Adapter.AdapterError | undefined
+      const sent: Array<string> = []
+      let createdId: Adapter.Fact & { readonly _tag: "UserContextAdded" } | undefined
+      yield* Effect.gen(function*() {
+        while (true) {
+          const command = yield* wire.next
+          sent.push(command.method)
+          // The new context's initialization fails
+          if (
+            command.method === "Browser.setDownloadBehavior" &&
+            (command.params as { browserContextId?: string } | undefined)?.browserContextId === "late-context"
+          ) {
+            yield* wire.receive({ id: command.id, error: { code: -32000, message: "refused in the test" } })
+            continue
+          }
+          if (refuseDisposal && command.method === "Target.disposeBrowserContext") {
+            yield* wire.receive({ id: command.id, error: { code: -32000, message: "refused in the test" } })
+            continue
+          }
+          yield* wire.receive({
+            id: command.id,
+            sessionId: command.sessionId,
+            result: command.method === "Browser.getVersion"
+              ? {
+                protocolVersion: "1.3",
+                product: "Chrome/155.0.8059.79",
+                revision: "test",
+                userAgent: "HeadlessChrome",
+                jsVersion: "test"
+              }
+              : command.method === "Target.getBrowserContexts"
+              ? { browserContextIds: [] }
+              : command.method === "Target.createBrowserContext"
+              ? { browserContextId: "late-context" }
+              : {}
+          })
+        }
+      }).pipe(Effect.forkScoped)
+      const services = yield* Layer.build(BrowserImpl.layer((sink) =>
+        CdpAdapter.connect({
+          ...wire.transport,
+          send: (message) => {
+            const command = JSON.parse(message) as Sent
+            return stallDisposalWrite && command.method === "Target.disposeBrowserContext"
+              ? Deferred.succeed(disposalWriting, undefined).pipe(
+                Effect.andThen(Deferred.await(resumeDisposalWrite)),
+                Effect.andThen(wire.transport.send(message))
+              )
+              : wire.transport.send(message)
+          }
+        }, {
+          ownership: "attached",
+          sink: Effect.fnUntraced(function*(fact) {
+            if (fact._tag === "UserContextAdded" && fact.created) {
+              createdId = fact
+              // Hold delivery in the fold worker across the caller's deadline.
+              yield* Deferred.succeed(queued, undefined)
+              yield* Deferred.await(deliver)
+            }
+            if (stallRelease && fact._tag === "UserContextReleased") {
+              yield* Deferred.succeed(releasing, undefined)
+              yield* Deferred.await(resumeRelease)
+            }
+            yield* sink(fact)
+          })
+        }).pipe(Effect.map((adapter) => ({
+          ...adapter,
+          createUserContext: (options: Adapter.UserContextOptions) =>
+            adapter.createUserContext(options).pipe(
+              Effect.tapError((error) =>
+                Effect.sync(() => {
+                  initializationFailure = error
+                })
+              ),
+              Effect.ensuring(Deferred.succeed(finished, undefined))
+            )
+        })))
+      ))
+      const browser = Context.get(services, Browser.Browser)
+      const creating = yield* browser.newContext().pipe(
+        Deadline.within("100 millis"),
+        Effect.exit,
+        Effect.forkChild({ startImmediately: true })
+      )
+      yield* Deferred.await(queued)
+      yield* TestClock.adjust("100 millis")
+      assert.isTrue(Exit.isFailure(yield* Fiber.join(creating)))
+      assert.strictEqual((yield* browser.contexts).length, 1)
+      yield* Deferred.succeed(deliver, undefined)
+      if (stallRelease) {
+        yield* Deferred.await(releasing)
+        yield* TestClock.adjust("5 seconds")
+        const endedWithinBudget = yield* Deferred.isDone(finished)
+        yield* Deferred.succeed(resumeRelease, undefined)
+        yield* Deferred.await(finished)
+        assert.isTrue(endedWithinBudget, "release notification must not extend rollback beyond its budget")
+      }
+      if (stallDisposalWrite) {
+        yield* Deferred.await(disposalWriting)
+        yield* TestClock.adjust("5 seconds")
+        const endedWithinBudget = yield* Deferred.isDone(finished)
+        // Drain even a failing implementation so the regression never leaves an uninterruptible writer behind.
+        yield* Deferred.succeed(resumeDisposalWrite, undefined)
+        yield* Deferred.await(finished)
+        assert.isTrue(endedWithinBudget, "rollback must stop waiting for a transport write at its five-second budget")
+      }
+      // Its initialization fails, and the creation removes the context under a budget of its own
+      yield* Deferred.await(finished)
+      assert.isDefined(initializationFailure, "CDP initialization must fail after the expired deadline")
+      assert.isDefined(createdId)
+      if (!stallDisposalWrite) assert.include(sent, "Target.disposeBrowserContext")
+      // A refused removal's release is delivered in the connection's scope, after the creation ends
+      const listed = refuseDisposal
+        ? yield* browser.contexts.waitFor((list) => list.length === 2)
+        : yield* browser.contexts
+      return { listed, context: createdId!.context }
+    },
+    onTestClock
+  )
+
+  it.effect("bounds rollback when release fact delivery stalls", () => lateCreation(true, false, true))
+
+  it.effect("bounds rollback when its disposal transport write stalls", () => lateCreation(false, true))
+
+  it.effect("removes a context whose fact arrives after caller timeout and whose initialization fails", () =>
+    Effect.gen(function*() {
+      const { listed } = yield* lateCreation(false)
+      assert.strictEqual(listed.length, 1, "the failed creation's context is removed")
+    }))
+
+  it.effect("lists that context as observed when the browser refuses its removal", () =>
+    Effect.gen(function*() {
+      const { listed, context } = yield* lateCreation(true)
+      assert.strictEqual(listed.length, 2, "the late context must not stay hidden")
+      assert.strictEqual(listed[1]!.id, context)
+      assert.isFalse("newPage" in listed[1]!)
+    }))
 })

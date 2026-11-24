@@ -100,6 +100,7 @@ export interface Runtime {
   readonly settle: (
     operation: string,
     navigation: PageNavigation.Id,
+    page: Target.NavigableId,
     frame: Target.NavigableId,
     url: Option.Option<Url.Url>,
     at: Url.Url,
@@ -254,7 +255,11 @@ export interface Routed {
   readonly hops: ReadonlyArray<Hop>
 }
 
-/** A locator's steps split at each frame boundary: each iframe's steps, outermost first, then the rest. */
+/**
+ * A locator's steps split at each frame boundary: each iframe's steps, outermost first, then the rest. A part a
+ * search across frames resolves begins with its `AnyFrame` step, except the rest, which goes without it and is
+ * `searched`.
+ */
 export const split = (steps: ReadonlyArray<Engine.Step>) => {
   const frames: Array<ReadonlyArray<Engine.Step>> = []
   let current: Array<Engine.Step> = []
@@ -266,7 +271,8 @@ export const split = (steps: ReadonlyArray<Engine.Step>) => {
       current.push(step)
     }
   }
-  return { frames, last: current }
+  const searched = current[0]?._tag === "AnyFrame"
+  return { frames, last: searched ? current.slice(1) : current, searched }
 }
 
 /** A request's steps; none for a request about the document itself. */
@@ -449,6 +455,141 @@ export const elementIn = (
     }))
   )
 
+/** Sends `request` to the engine in `document`: `None` when its realm has gone. */
+const askIn = (
+  runtime: Runtime,
+  document: Target.DocumentId,
+  request: Engine.Request,
+  id: Diagnostics.OperationId
+): Effect.Effect<Option.Option<Engine.Response>, SendFailure> =>
+  callInDocument(runtime, document, Engine.run, JSON.stringify(request), id).pipe(
+    Effect.flatMap((value) =>
+      Option.isSome(value) && value.value.type === "string"
+        ? Effect.asSome(decode(value.value.value))
+        : Effect.succeedNone
+    )
+  )
+
+/** Every iframe or frame element of a document's, in tree order, as the engine finds them. */
+const frameElements: ReadonlyArray<Engine.Step> = [{ _tag: "Css", selector: "iframe, frame" }]
+
+/** Whether `steps` find, in `document`, the element that holds `frame` now: `None` when the document has gone. */
+const holds = (
+  runtime: Runtime,
+  document: Target.DocumentId,
+  steps: ReadonlyArray<Engine.Step>,
+  frame: Target.NavigableId,
+  id: Diagnostics.OperationId
+): Effect.Effect<boolean, SendFailure> =>
+  Effect.gen(function*() {
+    const element = yield* elementIn(runtime, document, steps, { scroll: false }, id)
+    if (Option.isNone(element) || element.value._tag !== "Found") return false
+    const held = yield* runtime.model.adapter.contentFrame(element.value.node).pipe(
+      Effect.catch((error) =>
+        isMoved(error) ? Effect.succeedNone : Effect.fail(fromAdapter(error, id, runtime.backend))
+      )
+    )
+    return Option.isSome(held) && held.value === frame
+  })
+
+/**
+ * Whether each hop's steps still find the iframe that holds the hop's frame. A hop names its iframe by steps, which
+ * may find another iframe once the document changes, as when a sibling before it is removed; a round whose hops no
+ * longer hold their frames goes again rather than act through another frame's geometry.
+ */
+export const holdsFrames = (
+  runtime: Runtime,
+  hops: ReadonlyArray<Hop>,
+  id: Diagnostics.OperationId
+): Effect.Effect<boolean, SendFailure> =>
+  Effect.gen(function*() {
+    for (const hop of hops) {
+      if (!(yield* holds(runtime, hop.document, hop.steps, hop.frame, id))) return false
+    }
+    return true
+  })
+
+/**
+ * The documents of the frames under `document`, at any depth, each with the iframes entered on the way to it. A
+ * frame with no document yet, or one that goes while it's listed, has none, and isn't waited for.
+ */
+const descendants = (
+  runtime: Runtime,
+  document: Target.DocumentId,
+  id: Diagnostics.OperationId,
+  hops: ReadonlyArray<Hop> = []
+): Effect.Effect<Array<{ readonly document: Target.DocumentId; readonly hops: ReadonlyArray<Hop> }>, SendFailure> =>
+  Effect.gen(function*() {
+    const counted = yield* askIn(runtime, document, { op: "count", steps: frameElements }, id)
+    if (Option.isNone(counted) || counted.value._tag !== "Count") return []
+    const found: Array<{ readonly document: Target.DocumentId; readonly hops: ReadonlyArray<Hop> }> = []
+    for (let index = 0; index < counted.value.count; index++) {
+      const steps: ReadonlyArray<Engine.Step> = [...frameElements, { _tag: "Nth", index }]
+      const element = yield* elementIn(runtime, document, steps, { scroll: false }, id)
+      if (Option.isNone(element) || element.value._tag !== "Found") continue
+      const frame = yield* runtime.model.adapter.contentFrame(element.value.node).pipe(
+        Effect.catch((error) =>
+          isMoved(error) ? Effect.succeedNone : Effect.fail(fromAdapter(error, id, runtime.backend))
+        )
+      )
+      if (Option.isNone(frame)) continue
+      const child = yield* runtime.model.documentOf(frame.value)
+      if (Option.isNone(child)) continue
+      const path = [...hops, { document, steps, frame: frame.value }]
+      found.push({ document: child.value, hops: path }, ...yield* descendants(runtime, child.value, id, path))
+    }
+    return found
+  })
+
+/** Where a search across frames goes: the one document `steps` match in, none, or the engine's answer. */
+type Search =
+  | { readonly _tag: "One"; readonly document: Target.DocumentId; readonly hops: ReadonlyArray<Hop> }
+  | { readonly _tag: "None" }
+  | { readonly _tag: "Answer"; readonly response: Engine.Response }
+
+/**
+ * Tests `steps` in `document` and in the document of each frame under it: they go on in the one with matches, and
+ * more than one is a strictness failure, whichever loaded first. A frame with no document yet is skipped. Steps that begin with a snapshot's ref go to the ref's own document, when it is one of these.
+ */
+const search = (
+  runtime: Runtime,
+  document: Target.DocumentId,
+  steps: ReadonlyArray<Engine.Step>,
+  id: Diagnostics.OperationId
+): Effect.Effect<Search, SendFailure> =>
+  Effect.gen(function*() {
+    const documents = [{ document, hops: [] as ReadonlyArray<Hop> }, ...yield* descendants(runtime, document, id)]
+    const enter = (each: (typeof documents)[number]): Search => ({ _tag: "One", ...each })
+    const first = steps[0]
+    if (first !== undefined && first._tag === "Ref") {
+      const owner = documents.find((each) => each.document === first.document)
+      return owner === undefined
+        ? { _tag: "Answer", response: { _tag: "StaleRef", why: "Replaced" } }
+        : enter(owner)
+    }
+    const matched: Array<{ readonly each: (typeof documents)[number]; readonly response: Engine.Response }> = []
+    for (const each of documents) {
+      const found = yield* askIn(runtime, each.document, { op: "candidates", steps }, id)
+      if (Option.isNone(found)) continue
+      if (found.value._tag !== "Strict") return { _tag: "Answer", response: found.value }
+      if (found.value.count > 0) matched.push({ each, response: found.value })
+    }
+    if (matched.length === 0) return { _tag: "None" }
+    if (matched.length === 1) return enter(matched[0]!.each)
+    const answers = matched.map((match) => match.response as Extract<Engine.Response, { _tag: "Strict" }>)
+    return {
+      _tag: "Answer",
+      response: {
+        _tag: "Strict",
+        count: answers.reduce((total, each) => total + each.count, 0),
+        visible: answers.reduce((total, each) => total + each.visible, 0),
+        frames: answers.length,
+        // A sample, as in one document: the first ten, in frame order
+        candidates: answers.flatMap((each) => each.candidates).slice(0, 10)
+      }
+    }
+  })
+
 /** Where a locator's frames lead now: the document of its last frame, or why it can't be reached yet. */
 type Route =
   | { readonly _tag: "Entered"; readonly routed: Routed }
@@ -468,7 +609,23 @@ const route = (
   Effect.gen(function*() {
     let document = top
     const hops: Array<Hop> = []
-    for (const steps of frames) {
+    const { last, searched } = split(validationSteps)
+    const parts = [...frames, ...(searched ? [[{ _tag: "AnyFrame" } as const, ...last]] : [])]
+    for (const [index, part] of parts.entries()) {
+      let steps = part
+      if (part[0]?._tag === "AnyFrame") {
+        steps = part.slice(1)
+        const found = yield* search(runtime, document, steps, id)
+        if (found._tag !== "One") {
+          const routed = { document, hops }
+          return Option.some<Route>(
+            found._tag === "None" ? { _tag: "Missing", routed } : { _tag: "Answer", routed, response: found.response }
+          )
+        }
+        hops.push(...found.hops)
+        document = found.document
+      }
+      if (index === frames.length) break
       const stale = replaced(document, steps)
       if (Option.isSome(stale)) {
         return Option.some<Route>({ _tag: "Answer", routed: { document, hops }, response: stale.value })
@@ -541,6 +698,33 @@ const routing = <A, E = never, R = never>(
     }
   })
 
+/**
+ * The frame a frame locator's steps enter now: its iframe's frame, once the frame has a document; `Missing` when no
+ * iframe matches, or it holds no frame or document yet, and the engine's answer for an iframe it can't enter.
+ */
+export const frameAt = (
+  runtime: Runtime,
+  page: Model.PageEntry,
+  steps: ReadonlyArray<Engine.Step>,
+  id: Diagnostics.OperationId,
+  at: MonotonicInstant.MonotonicInstant
+): Effect.Effect<
+  | { readonly _tag: "Entered"; readonly frame: Target.NavigableId }
+  | { readonly _tag: "Missing" }
+  | { readonly _tag: "Answer"; readonly response: Engine.Response },
+  SendFailure
+> =>
+  routing(runtime, page, steps, false, id, at, (route) => {
+    const last = route.routed.hops.at(-1)
+    return Effect.succeed(Option.some(
+      route._tag === "Answer"
+        ? { _tag: "Answer" as const, response: route.response }
+        : route._tag === "Entered" && last !== undefined
+        ? { _tag: "Entered" as const, frame: last.frame }
+        : { _tag: "Missing" as const }
+    ))
+  })
+
 /** What the engine answered, and where. */
 export interface Answer {
   readonly response: Engine.Response
@@ -604,6 +788,7 @@ const prepareRound = Effect.fnUntraced(function*(
       }
       clip = answer.value.viewport
     }
+    if (!(yield* holdsFrames(runtime, routed.hops, id))) return { _tag: "Moved" } as const
   }
   return { _tag: "Prepared", clip } as const
 })
@@ -929,12 +1114,17 @@ export const sendToDocument = (
   page: Model.PageEntry,
   document: Target.DocumentId,
   request: Engine.Request,
-  id: Diagnostics.OperationId
+  id: Diagnostics.OperationId,
+  /**
+   * Whether a request whose realm went after it was sent may be sent again, as `None`. A request that may have
+   * changed the page, such as an insertion, isn't: it fails instead.
+   */
+  replay = true
 ): Effect.Effect<Option.Option<Engine.Response>, SendFailure> =>
   Effect.raceFirst(
     Effect.suspend(() =>
       Option.isSome(runtime.model.document(document))
-        ? callInDocument(runtime, document, Engine.run, JSON.stringify(request), id).pipe(
+        ? callInDocument(runtime, document, Engine.run, JSON.stringify(request), id, undefined, replay).pipe(
           Effect.flatMap((value) =>
             Option.isSome(value) && value.value.type === "string"
               ? Effect.asSome(decode(value.value.value))
@@ -945,6 +1135,66 @@ export const sendToDocument = (
     ),
     promptBlocked(page)
   )
+
+/** The text of input that is one `InsertText` alone, for a backend that inserts it through the engine. */
+export const insertsInPage = (
+  runtime: Runtime,
+  events: ReadonlyArray<Adapter.InputEvent>
+): Option.Option<{ readonly text: string; readonly beforeInput: boolean }> => {
+  const insertion = runtime.model.adapter.textInsertion
+  const event = events[0]
+  return insertion === "native" || events.length !== 1 || event?._tag !== "InsertText"
+    ? Option.none()
+    : Option.some({ text: event.text, beforeInput: insertion === "beforeInputAndEditingCommand" })
+}
+
+/**
+ * Inserts text through the page's editing command, in the document that has focus, the deepest across frames,
+ * for a backend whose protocol has no command to insert text (`Adapter.textInsertion`). With `beforeInput`, the
+ * engine first dispatches the cancelable `beforeinput` the browser leaves out of the command, and inserts nothing
+ * when the page cancels it.
+ */
+export const insertText = (
+  runtime: Runtime,
+  page: Model.PageEntry,
+  text: string,
+  beforeInput: boolean,
+  id: Diagnostics.OperationId
+): Effect.Effect<void, SendFailure> =>
+  Effect.gen(function*() {
+    const { at } = yield* Operation.budget
+    let document = (yield* openState(page, id)).document.id
+    // Each round goes one frame deeper; a document that ends before its request is sent starts the walk again
+    // from the top, until the operation's deadline
+    while (true) {
+      if ((yield* BrowserClock.left(at)) <= 0) return yield* Effect.fail<SendFailure>({ _tag: "Deadline" })
+      // Never sent again: once sent, the page may have handled the input, so a realm lost after that fails
+      const answer = yield* sendToDocument(runtime, page, document, { op: "insert", text, beforeInput }, id, false)
+      if (Option.isNone(answer)) {
+        yield* Effect.yieldNow
+        document = (yield* openState(page, id)).document.id
+        continue
+      }
+      if (answer.value._tag !== "InFrame") return
+      const found = yield* elementIn(
+        runtime,
+        document,
+        [
+          { _tag: "Css", selector: "iframe, frame" },
+          { _tag: "Nth", index: answer.value.index }
+        ],
+        null,
+        id
+      )
+      if (Option.isNone(found) || found.value._tag !== "Found") return
+      const frame = yield* runtime.model.adapter.contentFrame(found.value.node).pipe(
+        Effect.mapError((error) => fromAdapter(error, id, runtime.backend))
+      )
+      const next = Option.isNone(frame) ? Option.none() : yield* runtime.model.documentOf(frame.value)
+      if (Option.isNone(next)) return
+      document = next.value
+    }
+  })
 
 /**
  * Idempotent engine cleanup in its original document, including while a dialog is open. Unlike a read, release

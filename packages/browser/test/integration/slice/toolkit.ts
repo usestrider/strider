@@ -20,14 +20,18 @@ import * as Handles from "../../../src/internal/handles.ts"
 import * as Runtime from "../../../src/internal/runtime.ts"
 import { site } from "../adapter/harness.ts"
 import { supports } from "./capabilities.ts"
+import * as SharedContext from "./sharedContext.ts"
 
 const timeout = 60_000
 
-// A sign-in form, a console error, a missing resource, a popup, a dialog and a fetch a route can answer
+// A sign-in form, a console error, a missing resource, a popup, a dialog and a fetch a route can answer. The
+// fields are in a form and name their autocomplete, or Chromium writes hints about them to the console.
 const app = `<title>shop</title>
-<label>Email <input id="email"></label>
-<label>Password <input id="password" type="password"></label>
-<button id="go">Sign in</button>
+<form>
+<label>Email <input id="email" autocomplete="username"></label>
+<label>Password <input id="password" type="password" autocomplete="current-password"></label>
+<button id="go" type="button">Sign in</button>
+</form>
 <p id="out">signed out</p>
 <button onclick="window.open('/child')">Open</button>
 <button onclick="document.getElementById('asked').textContent = String(confirm('Sure?'))">Ask</button>
@@ -58,18 +62,22 @@ const call = (tools: Tools, name: BrowserToolkit.ToolName, params: Record<string
 
 export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} toolkit`, () => {
-    layer(backend, { excludeTestServices: true, timeout })((it) => {
+    layer(SharedContext.layer(backend), { excludeTestServices: true, timeout })((suite) => {
+      const it = SharedContext.guard(suite)
       it.effect(
         "fills password refs and diffs password designation changes",
         () =>
           Effect.scoped(Effect.gen(function*() {
             const served = yield* site
-            const page = yield* Browser.newPage()
-            yield* page.goto(`${served.origin}/fixture?html=${
-              encodeURIComponent(
-                "<span>Nearby label</span><input type=\"password\"><input type=\"password\" disabled><input type=\"password\" readonly>"
-              )
-            }`)
+            const page = yield* SharedContext.newPage
+            yield* page.goto(
+              `${served.origin}/fixture?html=${
+                encodeURIComponent(
+                  "<span>Nearby label</span><input type=\"password\"><input type=\"password\" disabled><input type=\"password\" readonly>"
+                )
+              }`,
+              { waitUntil: "load" }
+            )
             const before = yield* page.snapshot()
             const fields = [...before.refs.values()].filter((node) =>
               node.role._tag === "Inferred" && node.role.evidence.includes("password")
@@ -106,14 +114,17 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
         () =>
           Effect.scoped(Effect.gen(function*() {
             const served = yield* site
-            const page = yield* Browser.newPage()
-            yield* page.goto(`${served.origin}/fixture?html=${
-              encodeURIComponent(
-                "<label>Code <input id=\"code\" type=\"password\" role=\"textbox\" value=\"private-explicit\"></label>" +
-                  "<button aria-labelledby=\"code\">Show</button>" +
-                  "<input id=\"plain\" role=\"textbox\" value=\"ordinary-embedded\"><button aria-labelledby=\"plain\">Plain</button>"
-              )
-            }`)
+            const page = yield* SharedContext.newPage
+            yield* page.goto(
+              `${served.origin}/fixture?html=${
+                encodeURIComponent(
+                  "<label>Code <input id=\"code\" type=\"password\" role=\"textbox\" value=\"private-explicit\"></label>" +
+                    "<button aria-labelledby=\"code\">Show</button>" +
+                    "<input id=\"plain\" role=\"textbox\" value=\"ordinary-embedded\"><button aria-labelledby=\"plain\">Plain</button>"
+                )
+              }`,
+              { waitUntil: "load" }
+            )
             const snapshot = yield* page.snapshot()
             assert.include(snapshot.text, "button \"ordinary-embedded\"")
             assert.strictEqual(yield* page.getByRole("textbox", { name: "Code", exact: true }).count, 1)
@@ -136,14 +147,15 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           () =>
             Effect.scoped(Effect.gen(function*() {
               const served = yield* site
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               yield* page.goto(
                 `${served.origin}/fixture?html=${
                   encodeURIComponent(
                     `<input type="password" ${attributes}>` +
                       (source === "label" ? "<label for=\"labeled-secret\">Secret hint</label>" : "")
                   )
-                }`
+                }`,
+                { waitUntil: "load" }
               )
               const snapshot = yield* page.snapshot()
               const [field] = [...snapshot.refs.values()].filter((node) =>
@@ -210,8 +222,8 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           () =>
             Effect.scoped(Effect.gen(function*() {
               const served = yield* site
-              const page = yield* Browser.newPage()
-              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(fixture)}`)
+              const page = yield* SharedContext.newPage
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(fixture)}`, { waitUntil: "load" })
               const snapshot = yield* page.snapshot()
               const fields = [...snapshot.refs.values()].filter((node) =>
                 node.role._tag === "Inferred" && node.role.evidence.includes("password")
@@ -248,12 +260,15 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           () =>
             Effect.scoped(Effect.gen(function*() {
               const served = yield* site
-              const page = yield* Browser.newPage()
-              yield* page.goto(`${served.origin}/fixture?html=${
-                encodeURIComponent(
-                  `<input type="password" ${attribute}><input type="password" ${attribute}>`
-                )
-              }`)
+              const page = yield* SharedContext.newPage
+              yield* page.goto(
+                `${served.origin}/fixture?html=${
+                  encodeURIComponent(
+                    `<input type="password" ${attribute}><input type="password" ${attribute}>`
+                  )
+                }`,
+                { waitUntil: "load" }
+              )
               const snapshot = yield* page.snapshot()
               for (const [ref, node] of snapshot.refs) {
                 if (node.role._tag !== "Inferred" || !node.role.evidence.includes("password")) continue
@@ -289,7 +304,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           () =>
             Effect.scoped(Effect.gen(function*() {
               const served = yield* site
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               const field = "<label>Shared secret<input type=password></label>"
               const frame = `<iframe srcdoc='${field}'></iframe>`
               const html = layout === "two sibling frames" ? frame + frame : field + frame
@@ -332,7 +347,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           () =>
             Effect.scoped(Effect.gen(function*() {
               const served = yield* site
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               const fields = "<label>Shared secret<input data-target=secret type=password></label>".repeat(count)
               yield* page.goto(
                 `${served.origin}/fixture?html=${encodeURIComponent(`<iframe srcdoc='${fields}'></iframe>`)}`
@@ -367,7 +382,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           () =>
             Effect.scoped(Effect.gen(function*() {
               const served = yield* site
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               const fields = "<input data-target=secret type=password>".repeat(count)
               yield* page.goto(`${served.origin}/fixture?html=${
                 encodeURIComponent(
@@ -405,7 +420,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
         () =>
           Effect.scoped(Effect.gen(function*() {
             const served = yield* site
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const frames = (first: string, second: string) =>
               `${served.origin}/fixture?html=${
                 encodeURIComponent(`<iframe srcdoc='${first}'></iframe><iframe srcdoc='${second}'></iframe>`)
@@ -437,7 +452,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
         () =>
           Effect.scoped(Effect.gen(function*() {
             const served = yield* site
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const frame = (index: number) => `<iframe srcdoc='<input data-frame=${index} type=password>'></iframe>`
             yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(frame(0) + frame(1))}`)
             for (const index of [0, 1]) {
@@ -463,7 +478,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
         () =>
           Effect.scoped(Effect.gen(function*() {
             const served = yield* site
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const inner = "<input data-frame=nested type=password>"
             const outer = `<input data-frame=outer type=password><iframe srcdoc="${inner}"></iframe>`
             const html = `<iframe srcdoc='${outer}'></iframe>`
@@ -490,7 +505,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
         () =>
           Effect.scoped(Effect.gen(function*() {
             const served = yield* site
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const html = "<iframe srcdoc='<input type=password>'></iframe>"
             yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
             yield* Expect.toHaveCount(page.frame(page.locator("iframe")).locator("input"), 1)
@@ -533,15 +548,17 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
         () =>
           Effect.scoped(Effect.gen(function*() {
             const served = yield* site
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const field = "<label>Late secret<input type=\"password\"></label>"
-            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(field)}`)
+            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(field)}`, { waitUntil: "load" })
             const snapshot = yield* page.snapshot()
             const [node] = [...snapshot.refs.values()].filter((each) =>
               each.role._tag === "Inferred" && each.role.evidence.includes("password")
             )
             const query = ExportTest.locatorOf("page", Option.getOrThrow(node!.ref), snapshot)
-            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent("<main>Next step</main>")}`)
+            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent("<main>Next step</main>")}`, {
+              waitUntil: "load"
+            })
             let first = true
             const replay = {
               pipe: (resolve: (page: unknown) => unknown) =>
@@ -577,7 +594,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
         () =>
           Effect.scoped(Effect.gen(function*() {
             const served = yield* site
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(
               `${served.origin}/fixture?html=${
                 encodeURIComponent("<iframe srcdoc='<label>Framed secret<input type=password></label>'></iframe>")
@@ -600,7 +617,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
         () =>
           Effect.scoped(Effect.gen(function*() {
             const served = yield* site
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const html =
               "<div id=\"app\" inert><textarea>private-field-value</textarea><button id=\"go\">Pay</button></div>"
             yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
@@ -628,7 +645,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               `<div style="position:relative"><label for="ack">I understand</label><button type="button" role="checkbox" aria-checked="false" id="ack" onclick="this.setAttribute('aria-checked', String(this.getAttribute('aria-checked') !== 'true'))"></button><input type="checkbox" aria-hidden="true" tabindex="-1" style="position:absolute;pointer-events:none;opacity:0;margin:0;transform:translateX(-100%)"></div>`
             const url = `${served.origin}/fixture?html=${encodeURIComponent(html)}`
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               const tools = yield* BrowserToolkit.make({
                 context: page.context,
                 secrets: {},
@@ -661,7 +678,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               `<div id="app" inert><button>Pay</button></div><div role="dialog" aria-modal="true" aria-label="Choose a hospital"><p>Pick one</p></div>`
             const url = `${served.origin}/fixture?html=${encodeURIComponent(html)}`
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               const tools = yield* BrowserToolkit.make({
                 context: page.context,
                 secrets: {},
@@ -688,7 +705,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             const served = yield* site
             const url = `${served.origin}/fixture?html=${encodeURIComponent(app)}`
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               const tools = yield* BrowserToolkit.make({
                 context: page.context,
                 secrets: { password: Redacted.make("hunter2") },
@@ -745,8 +762,31 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               // A dialog decided by a declared handler, and a route that answers a fetch
               const handler = yield* call(tools, "dialog", { page: "shop", decision: "dismiss" })
               assert.strictEqual(handler.value.outcome.registration, "r1")
-              yield* call(tools, "click", { page: "shop", target: `text="Ask"` })
-              yield* call(tools, "expect", { page: "shop", target: "css=#asked", state: "visible", text: "false" })
+              const asked = yield* call(tools, "click", { page: "shop", target: `text="Ask"` })
+              const answered = yield* call(tools, "expect", {
+                page: "shop",
+                target: "css=#asked",
+                state: "visible",
+                text: "false"
+              })
+              // One decision line, naming the registration; an earlier result may have brought the dialog's open
+              // line first, and a later one its decision
+              const dialogLines: Array<string> = [...asked.value.sinceLast, ...answered.value.sinceLast]
+                .filter((line: string) => line.startsWith("dialog"))
+              for (let turn = 0; turn < 50 && !dialogLines.some((line) => line.includes(" by ")); turn++) {
+                yield* Effect.sleep("20 millis")
+                const read = yield* call(tools, "pages", {})
+                dialogLines.push(...read.value.sinceLast.filter((line: string) => line.startsWith("dialog")))
+              }
+              const decided = dialogLines.filter((line) => line.includes(" by "))
+              assert.lengthOf(decided, 1, dialogLines.join("\n"))
+              assert.match(decided[0]!, /^dialog \w+( "Sure\?")? on shop dismissed by r1$/)
+              const openLines = dialogLines.filter((line) => !line.includes(" by "))
+              assert.isAtMost(openLines.length, 1, dialogLines.join("\n"))
+              if (openLines.length === 1) {
+                assert.match(openLines[0]!, /^dialog \w+( "Sure\?")? on shop, open$/)
+                assert.isBelow(dialogLines.indexOf(openLines[0]!), dialogLines.indexOf(decided[0]!))
+              }
               yield* call(tools, "route", {
                 page: "shop",
                 pattern: "**/api/status",
@@ -787,7 +827,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             const url = `${served.origin}/fixture?html=${encodeURIComponent(app)}`
             const browser = yield* Browser.Browser
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               const tools = yield* BrowserToolkit.make({
                 context: page.context,
                 secrets: {},
@@ -810,15 +850,28 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                 state: "visible",
                 text: "wrong password"
               })
+              // Chromium and stock WebKit write the failed load to the console too; Firefox doesn't
+              const expected = [
+                "console error on shop: signed in, with a warning",
+                ...(name === "Firefox"
+                  ? []
+                  : [
+                    "console error on shop: Failed to load resource: the server responded with a status of 404 (Not Found)"
+                  ])
+              ]
               let errors: ReadonlyArray<string> = []
               let failed: ReadonlyArray<string> = []
-              for (let attempt = 0; attempt < 50 && (errors.length === 0 || failed.length === 0); attempt++) {
+              for (
+                let attempt = 0;
+                attempt < 50 && (errors.length < expected.length || failed.length === 0);
+                attempt++
+              ) {
                 errors =
                   (yield* call(tools, "history", { page: "shop", kind: "console", level: "error" })).value.outcome
                 failed = (yield* call(tools, "history", { page: "shop", kind: "network", failed: true })).value.outcome
-                if (errors.length === 0 || failed.length === 0) yield* Effect.sleep("100 millis")
+                if (errors.length < expected.length || failed.length === 0) yield* Effect.sleep("100 millis")
               }
-              assert.deepStrictEqual(errors, ["console error on shop: signed in, with a warning"])
+              assert.deepStrictEqual(errors, expected)
               assert.isTrue(failed.some((line: string) => /^404 .*\/missing$/.test(line)), failed.join(", "))
               const warnings = yield* call(tools, "history", { page: "shop", kind: "console", level: "warning" })
               assert.deepStrictEqual(warnings.value.outcome, [])
@@ -855,11 +908,11 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           Effect.gen(function*() {
             const served = yield* site
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               const html = `<form onsubmit="event.preventDefault(); document.body.dataset.submitted='yes'">
 <label>Choice <select required><option value="">Choose</option><option>Ready</option></select></label>
 <button>Send</button></form>`
-              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`, { waitUntil: "load" })
               const tools = yield* BrowserToolkit.make({
                 context: page.context,
                 secrets: {},
@@ -896,10 +949,10 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           Effect.gen(function*() {
             const served = yield* site
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               const html = `<input id="field" aria-label="private-label" value="private-value">
 <button onclick="field.checkValidity();field.reportValidity()">Check</button><button>Quiet</button>`
-              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`, { waitUntil: "load" })
               yield* page.evaluateInMainWorld(() => {
                 ;(document.getElementById("field") as HTMLInputElement).setCustomValidity("private-message")
               })
@@ -936,7 +989,7 @@ export const toolkit = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           Effect.gen(function*() {
             const served = yield* site
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               const html =
                 `<div id="open"></div><div id="closed"></div><iframe srcdoc='<input required aria-label="Frame">'></iframe>
 <button onclick="openField.checkValidity();closedField.checkValidity();document.querySelector('iframe').contentDocument.querySelector('input').checkValidity()">Check</button>
@@ -947,7 +1000,7 @@ for (const mode of ["open", "closed"]) {
   window[mode + "Field"] = root.querySelector("input")
 }
 </script>`
-              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+              yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`, { waitUntil: "load" })
               yield* page.evaluateInMainWorld(async () => {
                 const frame = document.querySelector("iframe")!
                 if (frame.contentDocument?.querySelector("input") === null) {
@@ -976,7 +1029,7 @@ for (const mode of ["open", "closed"]) {
           Effect.gen(function*() {
             const served = yield* site
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent("<button>Quiet</button>")}`)
               const { runtime, entry } = Handles.page(page)
               const document = yield* runtime.model.documentOf(entry.id)
@@ -1036,7 +1089,7 @@ for (const mode of ["open", "closed"]) {
             const served = yield* site
             yield* Effect.scoped(Effect.gen(function*() {
               const own = yield* Effect.scope
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               yield* page.goto(
                 `${served.origin}/fixture?html=${
                   encodeURIComponent("<input id=\"field\" required><button>Quiet</button>")
@@ -1154,14 +1207,14 @@ for (const mode of ["open", "closed"]) {
         () =>
           Effect.scoped(Effect.gen(function*() {
             const served = yield* site
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             const html = `<input id="field"><script>
               window.keys = []
               document.addEventListener("keydown", (event) => {
                 window.keys.push(event.key + ":" + event.metaKey + ":" + (event.target.id || event.target.localName))
               })
             </script>`
-            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`, { waitUntil: "load" })
             const tools = yield* BrowserToolkit.make({
               context: page.context,
               secrets: {},
@@ -1190,7 +1243,7 @@ for (const mode of ["open", "closed"]) {
           Effect.gen(function*() {
             const served = yield* site
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               const html = `<button onclick="alert('Stop')">Ask</button>`
               yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
               const { runtime, entry } = Handles.page(page)
@@ -1243,7 +1296,7 @@ for (const mode of ["open", "closed"]) {
           Effect.gen(function*() {
             const served = yield* site
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               const html = "<label>Mail <input id=\"mail\" type=\"email\"></label>"
               yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
               const message = "private \"quoted\" ] [ref=fake] \\ trailing\nprivate tail"
@@ -1294,13 +1347,14 @@ for (const mode of ["open", "closed"]) {
         () =>
           Effect.scoped(Effect.gen(function*() {
             const served = yield* site
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(
               `${served.origin}/fixture?html=${
                 encodeURIComponent(
                   "<h2><span contenteditable>private-mode</span></h2><iframe srcdoc=\"<h2><span contenteditable>private-frame</span></h2>\"></iframe>"
                 )
-              }`
+              }`,
+              { waitUntil: "load" }
             )
             for (
               const capture of [
@@ -1336,8 +1390,8 @@ for (const mode of ["open", "closed"]) {
           const served = yield* site
           const url = `${served.origin}/fixture?html=${encodeURIComponent(app)}`
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
-            yield* page.goto(url)
+            const page = yield* SharedContext.newPage
+            yield* page.goto(url, { waitUntil: "load" })
             yield* page.getByRole("button", { name: "Sign in" }).click()
             const strict = yield* BrowserToolkit.make({
               context: page.context,
@@ -1347,8 +1401,17 @@ for (const mode of ["open", "closed"]) {
             const screenshot = yield* call(strict, "screenshot", { page: "p1" })
             assert.isTrue(screenshot.failed)
             assert.strictEqual(screenshot.value.error, "NotPermitted")
-            const history = yield* call(strict, "history", { page: "p1", kind: "console" })
-            assert.deepStrictEqual(history.value.outcome, ["console error (text not sent)"])
+            // The script's error, and on Chromium and stock WebKit the browser's for the missing resource, each
+            // without its text
+            const expected = name === "Firefox"
+              ? ["console error (text not sent)"]
+              : ["console error (text not sent)", "console error (text not sent)"]
+            let history: ReadonlyArray<string> = []
+            for (let attempt = 0; attempt < 50 && history.length < expected.length; attempt++) {
+              history = (yield* call(strict, "history", { page: "p1", kind: "console" })).value.outcome
+              if (history.length < expected.length) yield* Effect.sleep("100 millis")
+            }
+            assert.deepStrictEqual(history, expected)
             const local = yield* BrowserToolkit.make({
               context: page.context,
               secrets: {},

@@ -10,16 +10,19 @@ import * as L1Target from "../../Target.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as Urls from "../urls.ts"
+import * as HostBridge from "./hostBridge.ts"
 import { releaseDocument } from "./responses.ts"
 import {
   ContextEntry,
   contextKey,
   type DocumentEntry,
   type FrameEntry,
+  keepEndedFramesIfDeclared,
   type NavigationEntry,
   pageCredentialsScope,
   type PageEntry,
   type RealmEntry,
+  retireFrame,
   type State,
   type TargetEntry
 } from "./state.ts"
@@ -76,6 +79,7 @@ export const adoptPending = (state: State, frame: FrameEntry, document: Document
       origin: realm.origin,
       kind: { _tag: "Window", navigable: frame.id, document: document.id, world: realm.world }
     })
+    HostBridge.flush(state, realm.target)
   }
 }
 
@@ -94,6 +98,20 @@ export const removeFrame = (state: State, frame: FrameEntry, reason: L1Target.Cl
     }
     state.frames.delete(frame.frameId)
     state.navigables.delete(frame.id)
+    // A held mouse kept by a frame that is gone goes back to the page, and the frame starts no drag
+    const pressed = state.pressedIn.get(frame.page.id)
+    if (pressed?.includes(frame)) {
+      const left = pressed.filter((each) => each !== frame)
+      state.pressedIn.set(frame.page.id, left)
+      // The session keeps the mouse while a frame the press went to is still on it
+      if (
+        state.pressedOn.get(frame.page.id)?.target === frame.owner && frame.owner !== frame.page.target &&
+        !left.some((each) => each.owner === frame.owner)
+      ) {
+        state.pressedOn.delete(frame.page.id)
+      }
+    }
+    retireFrame(state, frame.page.context, frame.frameId)
     if (frame.document !== undefined) {
       for (const realm of frame.document.realms) removeRealm(state, realm, reason)
       state.documents.delete(frame.document.id)
@@ -102,7 +120,17 @@ export const removeFrame = (state: State, frame: FrameEntry, reason: L1Target.Cl
   })
 
 /** Ends a page: its frames, its obligations, its input state, and a wait for it to be ready. */
+/** Releases the ids an ended popup held for an opener that never attached; safe to run again. */
+const releaseReserved = (state: State, popup: L1Target.NavigableId) => {
+  for (const [targetId, reserved] of state.reservedIds) {
+    reserved.popups.delete(popup)
+    if (reserved.popups.size === 0) state.reservedIds.delete(targetId)
+  }
+}
+
 export const endPage = (state: State, page: PageEntry, reason: L1Target.CloseReason, evidence: string) => {
+  // Every page ends here, by detach or by either crash event, so a popup's hold on its opener's id ends with it
+  releaseReserved(state, page.id)
   if (page.ended) return
   page.ended = true
   state.endedPages.set(page.id, reason)
@@ -114,6 +142,10 @@ export const endPage = (state: State, page: PageEntry, reason: L1Target.CloseRea
   state.credentialsAttempted.delete(pageCredentialsScope(page))
   state.pages.delete(page.id)
   state.heldButtons.delete(page.id)
+  state.touchCapture.delete(page.id)
+  state.pressedIn.delete(page.id)
+  state.pressedOn.delete(page.id)
+  state.escapeCanceled.delete(page.id)
   state.drags.delete(page.id)
   state.interceptingDrags.delete(page.id)
   for (const [id, obligation] of state.obligations) {
@@ -123,6 +155,7 @@ export const endPage = (state: State, page: PageEntry, reason: L1Target.CloseRea
     }
   }
   Deferred.doneUnsafe(page.ready, Effect.fail(Kit.gone({ _tag: "Page", id: page.id }, reason)))
+  Deferred.doneUnsafe(page.treeRead, Effect.void)
 }
 
 // ── Documents and navigations ─────────────────────────────────────────────────────────────────────────────
@@ -194,6 +227,7 @@ export const startNavigation = (
     traversal: type === "traversal",
     documentHop: undefined,
     status: undefined,
+    responded: false,
     failed: undefined,
     ended: false
   }
@@ -261,6 +295,7 @@ export const contextFor = (state: State, browserContextId: string | undefined): 
   const entry = new ContextEntry(state.ids.userContext(), browserContextId, false)
   state.contexts.set(entry.id, entry)
   state.contextsByCdp.set(browserContextId, entry)
+  keepEndedFramesIfDeclared(state, entry)
   state.buffer.emit({ _tag: "UserContextAdded", context: entry.id, isDefault: false })
   return entry
 }

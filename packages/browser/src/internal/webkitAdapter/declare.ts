@@ -5,6 +5,7 @@
  */
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import * as Semaphore from "effect/Semaphore"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as Protocol from "../../protocol/Protocol.ts"
 import * as Network from "../../webkit-stock-protocol/Network.ts"
@@ -14,9 +15,9 @@ import * as Kit from "../adapterKit.ts"
 import * as Declarations from "../declarations.ts"
 import { pageHandleOf, processOfContext, resizeWindow } from "./automation.ts"
 import { overrideCapability } from "./capabilities.ts"
+import * as HostBridge from "./hostBridge.ts"
 import { type PageEntry, placement, type State, type TargetEntry } from "./state.ts"
 import * as Viewport from "./viewport.ts"
-import * as WebSocketBridge from "./webSocketBridge.ts"
 
 // ── Mapping ───────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -117,11 +118,16 @@ const applyTargetOverride = (
   }
 }
 
-const applyBootstrap = Effect.fnUntraced(function*(state: State, target: TargetEntry) {
+// One application at a time per target reads the registry and sends its bundle, so an older bundle never lands
+// after a newer one
+const applyBootstrap = (state: State, target: TargetEntry) =>
+  (target.bootstrapLock ??= Semaphore.makeUnsafe(1)).withPermits(1)(writeBootstrap(state, target))
+
+const writeBootstrap = Effect.fnUntraced(function*(state: State, target: TargetEntry) {
   const bundles = state.registry.bundles(placement(target.page))
   const main = bundles.get(Declarations.worldKey({ _tag: "Main" }))
-  if (main?.webSockets !== undefined) {
-    yield* WebSocketBridge.prepare(state, target, main.webSockets)
+  if (main?.hostBridges !== undefined) {
+    yield* HostBridge.prepare(state, target, main.hostBridges)
   }
   return yield* Page.setBootstrapScript(main === undefined ? {} : { source: main.source }).pipe(
     Protocol.on(target.session)
@@ -213,6 +219,7 @@ const applyDeclaration = (
     case "FileChooser":
     case "Downloads":
     case "Challenges":
+    case "ConsoleArguments":
     // WebKit keeps response bodies on its own, so there is nothing to collect
     case "BodyCollection":
       return Effect.void
@@ -232,14 +239,6 @@ export const declare = Effect.fnUntraced(
     if (declaration._tag === "Override") {
       // Refused, under its capability, where the table says stock WebKit can't apply it, never ignored
       const override = declaration.override
-      if (override._tag === "BypassCsp") {
-        return yield* Effect.fail(
-          Kit.unsupported(
-            "override.BypassCsp",
-            "stock WebKit's inspector can't set a page's Content Security Policy aside"
-          )
-        )
-      }
       const capability = overrideCapability(override)
       const entry = capability === undefined
         ? undefined

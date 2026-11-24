@@ -3,13 +3,19 @@
   "upstream": [
     "method:Frame.evaluateHandle"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No public frame-locator evaluation-handle operation. Page.evaluateHandle addresses the top-level page; element by-value evaluation inside a frame is a different contract.",
+  "status": "has",
+  "api": [
+    {
+      "module": "Frame",
+      "symbol": "Frame.evaluateHandle",
+      "url": "/docs/api/browser/Frame#Frame.evaluateHandle"
+    }
+  ],
+  "notes": "The handle is in the isolated world, as Page.evaluateHandle's is; stock WebKit has no isolated worlds, so it fails with Unsupported there.",
   "capabilities": [],
   "audit": {
     "sources": [
-      "packages/browser/src/Page.ts"
+      "packages/browser/src/Frame.ts"
     ],
     "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
   },

@@ -7,6 +7,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { assert, describe, layer } from "@effect/vitest"
 import * as Cause from "effect/Cause"
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
@@ -623,9 +624,13 @@ export const conformance = (backend: Backend) =>
                 modifiers: none,
                 autoRepeat: false
               },
-              { _tag: "InsertText", text: "éllo" }
+              // An adapter that doesn't insert text natively is never sent it: L1 inserts through the engine
+              ...(world.adapter.textInsertion === "native" ? [{ _tag: "InsertText" as const, text: "éllo" }] : [])
             ])
-            assert.strictEqual(yield* evaluate(world, page, "() => document.querySelector('#t').value"), "héllo")
+            assert.strictEqual(
+              yield* evaluate(world, page, "() => document.querySelector('#t').value"),
+              world.adapter.textInsertion === "native" ? "héllo" : "h"
+            )
           }), timeout)
 
         it.effect("carries the buttons held through a drag, and sends Enter as Enter", () =>
@@ -964,6 +969,247 @@ export const conformance = (backend: Backend) =>
             )
             yield* clicked.pipe(Effect.retry({ times: 30, schedule: Schedule.spaced("100 millis") }))
           }), timeout)
+
+        it.effect(
+          "sends input that names no frame into a cross-site frame that has not drawn its first frame yet",
+          () =>
+            Effect.gen(function*() {
+              const world = yield* setup(backend)
+              const { page } = yield* newPage(world)
+              const fixture = (origin: string, html: string) =>
+                `${origin}/fixture?html=${encodeURIComponent(html)}`
+              // The child says it has loaded, then holds its main thread for a second, so it draws nothing
+              // until after the input below has been sent
+              const child =
+                `<body style="margin:0"><button style="position:absolute;left:10px;top:10px;width:60px;height:30px" onclick="parent.postMessage('clicked', '*')">x</button><script>parent.postMessage('loaded', '*'); const end = performance.now() + 1000; while (performance.now() < end) {}</script></body>`
+              yield* goto(
+                world,
+                page,
+                fixture(
+                  world.site.origin,
+                  `<body style="margin:0"><script>window.got = []; addEventListener('message', (e) => got.push(e.data))</script><iframe id="cross" src="${
+                    fixture(world.site.crossSite, child)
+                  }" style="position:absolute;left:100px;top:50px;width:200px;height:100px;border:5px solid red;padding:3px"></iframe></body>`
+                )
+              )
+              const realm = yield* mainRealm(world, page)
+              const loaded = yield* world.adapter.evaluate(realm, {
+                functionDeclaration:
+                  "() => window.got.includes('loaded') || new Promise((resolve) => addEventListener('message', (e) => { if (e.data === 'loaded') resolve(true) }))",
+                arguments: [],
+                awaitPromise: true,
+                result: "value",
+                userActivation: false
+              })
+              assert(loaded._tag === "Value" && json(loaded.value) === true)
+              // Pointer input that names no frame, one event a call, as page.mouse sends it
+              const none = { alt: false, control: false, meta: false, shift: false }
+              const x = 100 + 5 + 3 + 40
+              const y = 50 + 5 + 3 + 25
+              yield* world.adapter.dispatchInput(page, [
+                { _tag: "Mouse", type: "move", x, y, button: "none", clickCount: 0, modifiers: none, buttons: 0 }
+              ])
+              yield* world.adapter.dispatchInput(page, [
+                { _tag: "Mouse", type: "down", x, y, button: "left", clickCount: 1, modifiers: none, buttons: 1 }
+              ])
+              yield* world.adapter.dispatchInput(page, [
+                { _tag: "Mouse", type: "up", x, y, button: "left", clickCount: 1, modifiers: none, buttons: 0 }
+              ])
+              const clicked = Effect.flatMap(
+                world.adapter.evaluate(realm, {
+                  functionDeclaration: "() => window.got.includes('clicked')",
+                  arguments: [],
+                  awaitPromise: false,
+                  result: "value",
+                  userActivation: false
+                }),
+                (result) =>
+                  result._tag === "Value" && json(result.value) === true
+                    ? Effect.void
+                    : Effect.fail("iframe button clicked message was not received")
+              )
+              yield* clicked.pipe(Effect.retry({ times: 30, schedule: Schedule.spaced("100 millis") }))
+            }),
+          timeout
+        )
+
+        // One page, two cross-site frames: a press in the first, which then detaches, and a press in the
+        // second, which then navigates; after each, the release and the next click go to the page under the point
+        it.effect("continues frameless input after the pressed frame detaches or navigates", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            const { page } = yield* newPage(world)
+            const fixture = (origin: string, html: string) =>
+              `${origin}/fixture?html=${encodeURIComponent(html)}`
+            const child = (name: string) =>
+              `<body style="margin:0;height:100vh"><script>addEventListener('mousedown',()=>parent.postMessage('${name} down','*'));parent.postMessage('${name} loaded','*')</script></body>`
+            const frame = (id: string, top: number) =>
+              `<iframe id="${id}" src="${
+                fixture(world.site.crossSite, child(id))
+              }" style="position:absolute;left:100px;top:${top}px;width:200px;height:100px;border:0"></iframe>`
+            yield* goto(
+              world,
+              page,
+              fixture(
+                world.site.origin,
+                `<body style="margin:0"><script>window.got=[];addEventListener('message',e=>got.push(e.data))</script><button style="position:absolute;left:10px;top:10px;width:50px;height:30px" onclick="window.clicked=true">parent</button>${
+                  frame("gone", 50)
+                }${frame("moved", 200)}</body>`
+              )
+            )
+            const message = (data: string) =>
+              evaluate(
+                world,
+                page,
+                `() => got.includes('${data}') || new Promise(r=>addEventListener('message',e=>{if(e.data==='${data}')r(true)}))`
+              )
+            yield* message("gone loaded")
+            yield* message("moved loaded")
+            const none = { alt: false, control: false, meta: false, shift: false }
+            const send = (type: "move" | "down" | "up", x: number, y: number, buttons: number) =>
+              world.adapter.dispatchInput(page, [{
+                _tag: "Mouse",
+                type,
+                x,
+                y,
+                button: type === "move" ? "none" : "left",
+                clickCount: 1,
+                modifiers: none,
+                buttons
+              }])
+            const releaseAndClickParent = Effect.gen(function*() {
+              yield* send("move", 20, 20, 1)
+              yield* send("up", 20, 20, 0)
+              yield* send("down", 20, 20, 1)
+              yield* send("up", 20, 20, 0)
+              assert.isTrue(
+                yield* evaluate(
+                  world,
+                  page,
+                  "() => { const ok = window.clicked === true; window.clicked = false; return ok }"
+                )
+              )
+            })
+            // The pressed frame detaches
+            yield* send("move", 150, 80, 0)
+            yield* send("down", 150, 80, 1)
+            yield* message("gone down")
+            yield* evaluate(world, page, "() => { gone.remove(); return true }")
+            yield* world.facts.when("NavigableRemoved", (fact) =>
+              fact.navigable !== page)
+            yield* releaseAndClickParent
+            // The pressed frame navigates
+            yield* send("move", 150, 230, 0)
+            yield* send("down", 150, 230, 1)
+            yield* message("moved down")
+            const next = fixture(world.site.origin, `<script>parent.postMessage('navigated','*')</script>`)
+            yield* evaluate(world, page, `() => { moved.src = ${JSON.stringify(next)}; return true }`)
+            yield* message("navigated")
+            yield* releaseAndClickParent
+          }), timeout)
+
+        it.effect(
+          "keeps a frameless release with the pressed cross-site frame in a shadow root but routes wheels by their point",
+          () =>
+            Effect.gen(function*() {
+              const world = yield* setup(backend)
+              const { page } = yield* newPage(world)
+              const fixture = (origin: string, html: string) =>
+                `${origin}/fixture?html=${encodeURIComponent(html)}`
+              const child =
+                `<body style="margin:0;height:100vh"><script>addEventListener('mousedown', () => parent.postMessage('down', '*')); addEventListener('mouseup', () => parent.postMessage('up', '*')); addEventListener('wheel', (e) => { e.preventDefault(); parent.postMessage('child wheel', '*') }, { passive: false }); parent.postMessage('loaded', '*')</script></body>`
+              yield* goto(
+                world,
+                page,
+                fixture(
+                  world.site.origin,
+                  `<body style="margin:0"><div id="host"></div><script>window.got = []; addEventListener('message', (e) => got.push(e.data)); addEventListener('mouseup', () => got.push('parent up')); addEventListener('wheel', (e) => { e.preventDefault(); got.push('parent wheel') }, { passive: false }); document.querySelector('#host').attachShadow({ mode: 'open' }).innerHTML = ${
+                    JSON.stringify(
+                      `<iframe src="${
+                        fixture(world.site.crossSite, child)
+                      }" style="position:absolute;left:100px;top:50px;width:200px;height:100px;border:0"></iframe>`
+                    ).replaceAll("<", "\\x3c")
+                  }</script></body>`
+                )
+              )
+              const realm = yield* mainRealm(world, page)
+              const loaded = yield* world.adapter.evaluate(realm, {
+                functionDeclaration:
+                  "() => window.got.includes('loaded') || new Promise((resolve) => addEventListener('message', (e) => { if (e.data === 'loaded') resolve(true) }))",
+                arguments: [],
+                awaitPromise: true,
+                result: "value",
+                userActivation: false
+              })
+              assert(loaded._tag === "Value" && json(loaded.value) === true)
+              const none = { alt: false, control: false, meta: false, shift: false }
+              const send = (event: Adapter.InputEvent) =>
+                world.adapter.dispatchInput(page, [event])
+              yield* send({
+                _tag: "Mouse",
+                type: "move",
+                x: 150,
+                y: 80,
+                button: "none",
+                clickCount: 0,
+                modifiers: none,
+                buttons: 0
+              })
+              yield* send({
+                _tag: "Mouse",
+                type: "down",
+                x: 150,
+                y: 80,
+                button: "left",
+                clickCount: 1,
+                modifiers: none,
+                buttons: 1
+              })
+              // Wheels follow their point without changing where the held button is released.
+              yield* send({ _tag: "Wheel", x: 150, y: 80, deltaX: 0, deltaY: 10, modifiers: none })
+              yield* send({
+                _tag: "Mouse",
+                type: "move",
+                x: 20,
+                y: 20,
+                button: "none",
+                clickCount: 0,
+                modifiers: none,
+                buttons: 1
+              })
+              yield* send({ _tag: "Wheel", x: 20, y: 20, deltaX: 0, deltaY: 10, modifiers: none })
+              yield* send({
+                _tag: "Mouse",
+                type: "up",
+                x: 20,
+                y: 20,
+                button: "left",
+                clickCount: 1,
+                modifiers: none,
+                buttons: 0
+              })
+              const got = Effect.flatMap(
+                world.adapter.evaluate(realm, {
+                  functionDeclaration:
+                    "() => got.filter(x => !x.endsWith('wheel')).join(',') + '|' + got.filter(x => x.endsWith('wheel')).sort().join(',')",
+                  arguments: [],
+                  awaitPromise: false,
+                  result: "value",
+                  userActivation: false
+                }),
+                (result) =>
+                  result._tag === "Value" && json(result.value) === "loaded,down,up|child wheel,parent wheel"
+                    ? Effect.void
+                    : Effect.fail(
+                      `unexpected release or wheel recipients: ${
+                        result._tag === "Value" ? JSON.stringify(json(result.value)) : result.text
+                      }`
+                    )
+              )
+              yield* got.pipe(Effect.retry({ times: 30, schedule: Schedule.spaced("100 millis") }))
+            }),
+          timeout
+        )
 
         it.effect(
           "sends input to a transparent element in a cross-site frame that paints nothing but holds a painted frame",
@@ -1382,9 +1628,13 @@ export const conformance = (backend: Backend) =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
             const { page } = yield* newPage(world)
+            const before = Date.now()
             yield* goto(world, page, `${world.site.origin}/console`)
             const hello = yield* world.facts.when("ConsoleMessage", (fact) =>
               fact.message.text === "hello 42")
+            // The browser's wall-clock time when it logged the message, which runs on this machine's clock
+            assert.isAtLeast(DateTime.toEpochMillis(hello.message.timestamp), before)
+            assert.isAtMost(DateTime.toEpochMillis(hello.message.timestamp), Date.now())
             assert.strictEqual(hello.message.level, "log")
             assert.deepStrictEqual(hello.message.origin, { _tag: "Page", page })
             // 1-based, as stack traces print it: the page is one line
@@ -1398,6 +1648,56 @@ export const conformance = (backend: Backend) =>
             yield* evaluate(world, page, "() => { setTimeout(() => { throw 'a string' }) }")
             const raw = yield* world.facts.when("UncaughtException", (fact) => fact.exception.message === "a string")
             assert.strictEqual(raw.exception.name, "Error")
+            // A message logged again is its own message, at its own time, though stock WebKit reports it as a repeat
+            // of the first
+            yield* evaluate(
+              world,
+              page,
+              `() => { for (let i = 0; i < 2; i++) { console.log("again"); const end = Date.now() + 5; while (Date.now() < end); } }`
+            )
+            const first = yield* world.facts.when("ConsoleMessage", (fact) =>
+              fact.message.text === "again")
+            const second = yield* world.facts.when("ConsoleMessage", (fact) =>
+              fact.message.text === "again" && fact !== first)
+            assert.isAbove(
+              DateTime.toEpochMillis(second.message.timestamp),
+              DateTime.toEpochMillis(first.message.timestamp)
+            )
+          }), timeout)
+
+        it.effect("renders a console message's objects as previews of their values", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            const { page } = yield* newPage(world)
+            yield* goto(world, page, `${world.site.origin}/console-previews`)
+            const texts = (yield* world.facts.when("ConsoleMessage", (fact) =>
+              fact.message.text.startsWith("worker")))
+              .message.text
+            const all = world.facts.all("ConsoleMessage").map((fact) =>
+              fact.message.text
+            )
+            assert.deepStrictEqual(all.slice(0, 2), [
+              "[1, 2, 3] {a: 1} Window",
+              "{toString: Function, valueOf: Function}"
+            ])
+            // BiDi serializes an array's holes as `undefined`, so Firefox can't tell one from the other
+            assert.strictEqual(
+              all[2],
+              world.adapter.info.protocol === "bidi"
+                ? "[undefined, 1, undefined, undefined, 2]"
+                : "[empty, 1, empty x 2, 2]"
+            )
+            assert.strictEqual(all[3], "[Array(2), Object] Map(1) {'k' => 1} Set(1) {1} null undefined -0 1n str")
+            assert.strictEqual(all[4], "div#d #document")
+            // An Error reads as its browser describes it, which may include its stack
+            assert.match(all[5]!, /^an error Error: boom/)
+            // A format takes the arguments it names, and the rest follow it. Firefox applies the format itself and
+            // sends the text around an object `%o` took as arguments of their own, which join with a space
+            assert.deepStrictEqual(all.slice(6, 8), [
+              world.adapter.info.protocol === "bidi" ? "{a: 1}  and 5 [2]" : "{a: 1} and 5 [2]",
+              "styled {a: 1}"
+            ])
+            assert.strictEqual(texts, "worker {a: 1}")
           }), timeout)
 
         it.effect("captures overridden viewports and full pages beyond the native view", () =>
@@ -1487,7 +1787,9 @@ export const conformance = (backend: Backend) =>
                 const frames = yield* world.adapter.screencast(page)
                 yield* frames.pipe(
                   Stream.take(6),
-                  Stream.runForEach((frame) => Effect.sync(() => seen[key]!.push([frame.width, frame.height]))),
+                  Stream.runForEach((frame) =>
+                    Effect.sync(() => seen[key]!.push([frame.width, frame.height]))
+                  ),
                   Effect.timeout("3 seconds"),
                   Effect.ignore
                 )
@@ -1703,9 +2005,7 @@ export const conformance = (backend: Backend) =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
             const { context, page } = yield* newPage(world)
-            const directory = (yield* Effect.promise(() =>
-              import("node:os")
-            )).tmpdir() +
+            const directory = (yield* Effect.promise(() => import("node:os"))).tmpdir() +
               `/strider-downloads-${process.pid}`
             const declared = world.adapter.declare({ _tag: "UserContext", context }, {
               _tag: "Downloads",
@@ -1733,6 +2033,7 @@ export const conformance = (backend: Backend) =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
             const { context, page } = yield* newPage(world)
+            const before = Date.now()
             yield* goto(world, page, `${world.site.origin}/worker`)
             const realm = yield* world.facts.when("RealmAdded", (fact) => fact.kind._tag === "Worker")
             assert(realm.kind._tag === "Worker")
@@ -1740,11 +2041,13 @@ export const conformance = (backend: Backend) =>
             // A dedicated worker belongs to its page, and so to its context
             assert.deepStrictEqual([realm.kind.page, realm.kind.context], [Option.some(page), Option.some(context)])
             const message = yield* world.facts.when("ConsoleMessage", (fact) => fact.message.text === "from the worker")
+            assert.isAtLeast(DateTime.toEpochMillis(message.message.timestamp), before)
+            assert.isAtMost(DateTime.toEpochMillis(message.message.timestamp), Date.now())
             // Firefox 158 attributes a dedicated worker's console to its owner, the window realm (recorded 2026-10-20)
             const owner = realm.kind.worker._tag === "Dedicated"
               ? Option.getOrUndefined(realm.kind.worker.owner)
               : undefined
-            assert.include([realm.realm, owner], message.realm)
+            assert.include([realm.realm, owner], Option.getOrUndefined(message.realm))
           }), timeout)
 
         it.effect("reports a WebSocket's frames", () =>

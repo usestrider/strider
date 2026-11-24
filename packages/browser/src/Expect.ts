@@ -3,7 +3,8 @@
  *
  * A locator's expectation waits in the page: it checks once, then again on each change the page makes (a DOM
  * mutation, an `input`, `change`, or focus event, an animation frame), so there is no polling interval and no change
- * is missed between checks. `toHaveURL` checks the page's URL on each change. `Expect.that` checks a `Watchable` on
+ * is missed between checks. `toHaveJSProperty` is the exception: a property assignment is no change the page
+ * reports, so it reads the property again every `CheckInterval`. `toHaveURL` checks the page's URL on each change. `Expect.that` checks a `Watchable` on
  * each change, and runs any other effect again every `CheckInterval`. Everything runs on the real clock, within the
  * deadline. To collect several failures, use `Effect.validate` or `Effect.all(…, { mode: "result" })`.
  *
@@ -20,14 +21,14 @@ import * as Effect from "effect/Effect"
 import { dual } from "effect/Function"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
-import type * as AriaPattern from "./AriaPattern.ts"
+import * as AriaPattern from "./AriaPattern.ts"
 import type * as Condition from "./Condition.ts"
 import type * as Deadline from "./Deadline.ts"
 import * as Diagnostics from "./Diagnostics.ts"
 import * as ConditionImpl from "./internal/condition.ts"
 import * as ExpectImpl from "./internal/expect.ts"
 import * as Locator from "./Locator.ts"
-import type * as Page from "./Page.ts"
+import * as Page from "./Page.ts"
 import * as Reason from "./Reason.ts"
 import type * as Target from "./Target.ts"
 import * as Watchable from "./Watchable.ts"
@@ -192,6 +193,13 @@ export const toBeHidden: Matcher<Locator.ReadonlyLocator> = (locator) => ExpectI
 /**
  * Expects the one match to be enabled.
  *
+ * **Details**
+ *
+ * An element inside a button, or inside an element with the role `button`, `checkbox`, or `radio`, is enabled only
+ * when it and the nearest such control both are. The control is found through shadow roots and the slots the
+ * element is assigned to: a span inside a disabled button is disabled. Inputs, textareas, selects, and editable
+ * content are read on themselves alone. Native `disabled`, a disabled `fieldset`, and `aria-disabled` all count.
+ *
  * **Example** (Checking that a complete form can be submitted)
  *
  * ```ts import.meta.vitest
@@ -212,6 +220,13 @@ export const toBeEnabled: Matcher<Locator.ReadonlyLocator> = (locator) => Expect
 
 /**
  * Expects the one match to be disabled.
+ *
+ * **Details**
+ *
+ * An element inside a button, or inside an element with the role `button`, `checkbox`, or `radio`, is enabled only
+ * when it and the nearest such control both are. The control is found through shadow roots and the slots the
+ * element is assigned to: a span inside a disabled button is disabled. Inputs, textareas, selects, and editable
+ * content are read on themselves alone. Native `disabled`, a disabled `fieldset`, and `aria-disabled` all count.
  *
  * **Example** (Checking that a sold-out item can't be added)
  *
@@ -329,7 +344,16 @@ export const toBeEditable: Matcher<Locator.ReadonlyLocator> = (locator) => Expec
  * **Details**
  *
  * A string must equal the whole text, case-sensitively, after whitespace is collapsed; a `RegExp` is tested as
- * given.
+ * given. `ignoreCase: true` compares strings without case and sets a regular expression's `i` flag;
+ * `ignoreCase: false` clears it; left out, regular expressions keep their flags. Case is folded without regard to
+ * the browser's locale. The text is the element's text content, which includes hidden descendants;
+ * `useInnerText: true` reads its rendered `innerText` instead, and the text content still for an element that
+ * isn't an HTML element, such as an SVG one.
+ *
+ * **Gotchas**
+ *
+ * `innerText` depends on layout and CSS, such as `display: none` and `text-transform`, and browsers compute it
+ * differently in places, so the same page can give different text in each.
  *
  * **Example** (Checking the cart's items in order)
  *
@@ -349,20 +373,62 @@ export const toBeEditable: Matcher<Locator.ReadonlyLocator> = (locator) => Expec
  */
 export const toHaveText: DualMatcher<
   Locator.ReadonlyLocator,
-  [expected: string | RegExp | ReadonlyArray<string | RegExp>]
+  [expected: string | RegExp | ReadonlyArray<string | RegExp>, options?: TextOptions | undefined]
 > = dual(
-  2,
-  (locator: Locator.ReadonlyLocator, expected: string | RegExp | ReadonlyArray<string | RegExp>) =>
-    ExpectImpl.toHaveText(locator, expected)
+  (args) => Locator.isLocator(args[0]),
+  (
+    locator: Locator.ReadonlyLocator,
+    expected: string | RegExp | ReadonlyArray<string | RegExp>,
+    options?: TextOptions | undefined
+  ) => ExpectImpl.toHaveText(locator, expected, options)
 )
+
+/**
+ * The options of `toHaveText` and `toContainText`: whether to ignore case, and whether to read the rendered text.
+ *
+ * **Example** (Matching a heading's rendered text in any case)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const options: Expect.TextOptions = { ignoreCase: true, useInnerText: true }
+ *
+ * const checkHeading = Effect.fn("checkHeading")(function*(page: Page.ReadonlyPage) {
+ *   yield* page.getByRole("heading").pipe(Expect.toHaveText("order placed", options))
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export interface TextOptions {
+  /**
+   * Compares strings without case, and sets a regular expression's `i` flag; `false` clears it. Case is folded
+   * without regard to the browser's locale, as the `i` flag folds it.
+   *
+   * @default undefined: strings match case, and regular expressions keep their flags
+   */
+  readonly ignoreCase?: boolean | undefined
+  /**
+   * Reads each element's rendered `innerText` instead of its text content, with whitespace collapsed alike. An
+   * element that isn't an HTML element, such as an SVG one, has no `innerText`, so its text content is read.
+   *
+   * @default false
+   */
+  readonly useInnerText?: boolean | undefined
+}
 
 /**
  * Expects the one match's accessible name to match `expected`, retrying until the deadline.
  *
  * **Details**
  *
- * Strings match the whole name after whitespace is collapsed. Regular expressions test the computed name.
- * `ignoreCase` overrides a regular expression's `i` flag when supplied; otherwise strings are case-sensitive
+ * Strings match the whole name after whitespace is collapsed on both sides, so a non-breaking space matches a
+ * space. Regular expressions test the computed name, which keeps non-breaking spaces.
+ * `ignoreCase` overrides a regular expression's `i` flag when supplied, and folds a string's case without regard
+ * to the browser's locale; otherwise strings are case-sensitive
  * and regular expressions keep their flags. Hidden elements have an empty name; hidden labels can name a
  * visible element. Roles that prohibit naming, such as generic, paragraph, and code, have an empty name;
  * their content can still contribute to another element's name. An explicit nameable role can override the
@@ -396,6 +462,110 @@ export const toHaveAccessibleName: DualMatcher<
     expected: string | RegExp,
     options?: { readonly ignoreCase?: boolean | undefined } | undefined
   ) => ExpectImpl.toHaveAccessibleName(locator, expected, options)
+)
+
+/**
+ * Expects the one match's accessible description to match `expected`, retrying until the deadline.
+ *
+ * **Details**
+ *
+ * The description comes from the first of these that applies, even when its text is empty: the elements
+ * `aria-describedby` names, joined by a space, when at least one of its IDs names an element; `aria-description`,
+ * when present; a table's caption or a button, submit, or reset input's `value`, when that didn't give the element
+ * its name; a `summary` element's content, when `aria-label` or `aria-labelledby` gave it its name; and the `title`
+ * attribute, when it isn't the element's name. An element named there counts even when it's hidden, with its
+ * hidden content; a hidden element itself has an empty description. Strings and regular expressions match as in `toHaveAccessibleName`, and so does
+ * `ignoreCase`. `not` negates only the comparison: missing or multiple matches keep retrying and fail with their
+ * match count, with or without it.
+ *
+ * **Example** (Checking a field's hint)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const checkHint = Effect.fn("checkHint")(function*(page: Page.ReadonlyPage) {
+ *   const password = page.getByLabel("Password")
+ *   yield* password.pipe(Expect.toHaveAccessibleDescription("At least 12 characters"))
+ *   yield* Expect.toHaveAccessibleDescription(password, /characters/, {
+ *     ignoreCase: true
+ *   })
+ *   yield* password.pipe(Expect.toHaveAccessibleDescription("", { not: true }))
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category matchers
+ * @since 0.1.0
+ */
+export const toHaveAccessibleDescription: DualMatcher<
+  Locator.ReadonlyLocator,
+  [
+    expected: string | RegExp,
+    options?: {
+      /** Compares without regard to case, replacing a regular expression's `i` flag. @default undefined */
+      readonly ignoreCase?: boolean | undefined
+      /** Negates the comparison; still requires exactly one match. @default false */
+      readonly not?: boolean | undefined
+    } | undefined
+  ]
+> = dual(
+  (args) => Locator.isLocator(args[0]),
+  (
+    locator: Locator.ReadonlyLocator,
+    expected: string | RegExp,
+    options?: { readonly ignoreCase?: boolean | undefined; readonly not?: boolean | undefined } | undefined
+  ) => ExpectImpl.toHaveAccessibleDescription(locator, expected, options)
+)
+
+/**
+ * Expects the one match's accessible error message to match `expected`, retrying until the deadline.
+ *
+ * **Details**
+ *
+ * The error message is the text of the elements `aria-errormessage` names, joined by a space, while the element is
+ * invalid: its `aria-invalid` is set to anything but a blank value or exactly `false` (in any case), or the browser's
+ * own validation finds its value invalid, as a `required` field left empty or an email field holding no address.
+ * Otherwise it's empty. An element named there counts even when it's hidden. Strings and regular expressions
+ * match as in `toHaveAccessibleName`, and so does `ignoreCase`. `not` negates only the comparison: missing or
+ * multiple matches keep retrying and fail with their match count, with or without it.
+ *
+ * **Example** (Checking a field's error)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const checkError = Effect.fn("checkError")(function*(page: Page.Page) {
+ *   const email = page.getByLabel("Email")
+ *   yield* email.fill("not an address")
+ *   yield* email.pipe(Expect.toHaveAccessibleErrorMessage("Enter a valid email address"))
+ *   yield* Expect.toHaveAccessibleErrorMessage(email, /valid email/, { ignoreCase: true })
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category matchers
+ * @since 0.1.0
+ */
+export const toHaveAccessibleErrorMessage: DualMatcher<
+  Locator.ReadonlyLocator,
+  [
+    expected: string | RegExp,
+    options?: {
+      /** Compares without regard to case, replacing a regular expression's `i` flag. @default undefined */
+      readonly ignoreCase?: boolean | undefined
+      /** Negates the comparison; still requires exactly one match. @default false */
+      readonly not?: boolean | undefined
+    } | undefined
+  ]
+> = dual(
+  (args) => Locator.isLocator(args[0]),
+  (
+    locator: Locator.ReadonlyLocator,
+    expected: string | RegExp,
+    options?: { readonly ignoreCase?: boolean | undefined; readonly not?: boolean | undefined } | undefined
+  ) => ExpectImpl.toHaveAccessibleErrorMessage(locator, expected, options)
 )
 
 /**
@@ -434,8 +604,19 @@ export const toHaveClass: DualMatcher<
 )
 
 /**
- * Expects the text of the one match to contain `expected`. A string is matched case-sensitively, after whitespace
- * is collapsed.
+ * Expects the text of the one match to contain `expected`, or, given a list, the entries to be contained in
+ * matches in the same order, each entry in a later match than the one before.
+ *
+ * **Details**
+ *
+ * A string is matched case-sensitively, after whitespace is collapsed; a `RegExp` is tested as given.
+ * `ignoreCase` and `useInnerText` work as in `toHaveText`. A list needs no entry for every match: `["a", "c"]`
+ * passes for matches whose texts are `a`, `b`, and `c`, but not for `c`, `b`, and `a`. An empty list passes only
+ * when nothing matches.
+ *
+ * **Gotchas**
+ *
+ * With `useInnerText`, the text depends on layout and can differ between browsers, as in `toHaveText`.
  *
  * **Example** (Waiting for a save to be confirmed)
  *
@@ -452,9 +633,16 @@ export const toHaveClass: DualMatcher<
  * @category matchers
  * @since 0.1.0
  */
-export const toContainText: DualMatcher<Locator.ReadonlyLocator, [expected: string | RegExp]> = dual(
-  2,
-  (locator: Locator.ReadonlyLocator, expected: string | RegExp) => ExpectImpl.toContainText(locator, expected)
+export const toContainText: DualMatcher<
+  Locator.ReadonlyLocator,
+  [expected: string | RegExp | ReadonlyArray<string | RegExp>, options?: TextOptions | undefined]
+> = dual(
+  (args) => Locator.isLocator(args[0]),
+  (
+    locator: Locator.ReadonlyLocator,
+    expected: string | RegExp | ReadonlyArray<string | RegExp>,
+    options?: TextOptions | undefined
+  ) => ExpectImpl.toContainText(locator, expected, options)
 )
 
 /**
@@ -548,6 +736,12 @@ export const toHaveRole: DualMatcher<Locator.ReadonlyLocator, [expected: string]
 /**
  * Expects the one match to have the attribute, with a matching value when one is given.
  *
+ * **Details**
+ *
+ * A string must equal the whole value as written; a `RegExp` is tested as given. `ignoreCase: true` compares the
+ * value without case and sets a regular expression's `i` flag; `ignoreCase: false` clears it. Case is folded
+ * without regard to the browser's locale.
+ *
  * **Example** (Checking that a menu opened)
  *
  * ```ts import.meta.vitest
@@ -567,11 +761,22 @@ export const toHaveRole: DualMatcher<Locator.ReadonlyLocator, [expected: string]
  */
 export const toHaveAttribute: DualMatcher<
   Locator.ReadonlyLocator,
-  [name: string, expected?: string | RegExp | undefined]
+  [
+    name: string,
+    expected?: string | RegExp | undefined,
+    options?: {
+      /** Compares the value without regard to case, replacing a regular expression's `i` flag. @default undefined */
+      readonly ignoreCase?: boolean | undefined
+    } | undefined
+  ]
 > = dual(
   (args) => Locator.isLocator(args[0]),
-  (locator: Locator.ReadonlyLocator, name: string, expected?: string | RegExp) =>
-    ExpectImpl.toHaveAttribute(locator, name, expected)
+  (
+    locator: Locator.ReadonlyLocator,
+    name: string,
+    expected?: string | RegExp | undefined,
+    options?: { readonly ignoreCase?: boolean | undefined } | undefined
+  ) => ExpectImpl.toHaveAttribute(locator, name, expected, options)
 )
 
 /**
@@ -620,6 +825,68 @@ export const toHaveCSS: DualMatcher<
 )
 
 /**
+ * Expects a JavaScript property of the one match to deeply equal a value, read where the page's own scripts set it.
+ *
+ * **When to use**
+ *
+ * Use to check state a page keeps on an element rather than in its markup: a DOM property such as `checked`, or
+ * a value a script assigned, such as `element.model = { … }`.
+ *
+ * **Details**
+ *
+ * `path` is a property name or a dotted path into nested objects (`"model.user.name"`). A step through a value that
+ * isn't an object, or that lacks the key, reads `undefined`. Each check reads the path in the page's own JavaScript
+ * world and returns the value by value, then compares it with `expected`: Dates by time, regular expressions by
+ * source and flags, arrays, Maps and Sets by their entries, plain objects by their own enumerable keys, and `NaN`
+ * equals `NaN`. Missing and multiple matches, a value that can't be returned by value, and a mismatch are checked
+ * again until the deadline, and exactly one element must match, including with `not: true`. Failure history records
+ * the value read, or the match count when there is no single element.
+ *
+ * A property assignment is no change the page reports, so instead of waiting on page events the matcher reads the
+ * property again every `CheckInterval` (100 ms unless set with `withCheckInterval`).
+ *
+ * **Gotchas**
+ *
+ * - The read runs among the page's own scripts, so a getter the page defined runs and can see it; that is why it
+ *   needs a `Locator` and refuses a `ReadonlyLocator`.
+ * - A key that contains a dot can't be named in `path`.
+ * - `CheckInterval` sets how often the read runs, and so how often a getter of the page's on the path runs.
+ *
+ * **Example** (Checking state a script set)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const subscribed = Effect.fn("subscribed")(function*(page: Page.Page) {
+ *   yield* page.getByRole("checkbox", { name: "Subscribe" }).pipe(
+ *     Expect.toHaveJSProperty("checked", true)
+ *   )
+ *   yield* page.locator("#profile").pipe(Expect.toHaveJSProperty("model.plan", "pro"))
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category matchers
+ * @since 0.1.0
+ */
+export const toHaveJSProperty: DualMatcher<
+  Locator.Locator,
+  [
+    path: string,
+    expected: unknown,
+    options?: {
+      /** Negates the value comparison; still requires exactly one match. @default false */
+      readonly not?: boolean | undefined
+    } | undefined
+  ]
+> = dual(
+  (args) => Locator.isLocator(args[0]),
+  (locator: Locator.Locator, path: string, expected: unknown, options?: { readonly not?: boolean | undefined }) =>
+    ExpectImpl.toHaveJSProperty(locator, path, expected, options)
+)
+
+/**
  * Expects exactly `count` matches.
  *
  * **Example** (Checking how many results a search gave)
@@ -643,12 +910,24 @@ export const toHaveCount: DualMatcher<Locator.ReadonlyLocator, [count: number]> 
 )
 
 /**
- * Expects the one match's accessibility tree to match a pattern.
+ * Expects the accessibility tree of a locator's one match, or of a page, to match a pattern.
+ *
+ * **Details**
+ *
+ * A locator's pattern is matched against its match's node; a page's against its `document` node, named by the
+ * page's title, in the main frame. Both are the roots `snapshot({ sources: "aria" })` returns. Use
+ * `AriaPattern.anywhere` to match a node at any depth beneath the subject.
+ *
+ * Neither form sees an iframe's contents: the tree it matches stops at each `iframe` node, unlike a snapshot, which
+ * includes them. To match inside a frame, locate the subject through `page.frame`.
+ *
+ * With `not: true`, it waits until the subject doesn't match. A locator's missing and multiple matches retry until
+ * exactly one matches, with `not` too. A failure's last observed value is the subject's tree as text.
  *
  * **Gotchas**
  *
- * A pattern's children are the node's direct children, so links in a list sit under `list` and `listitem` nodes:
- * match the list, or locate it, rather than the navigation around it.
+ * A node pattern's children are the node's direct children, so links in a list sit under `list` and `listitem`
+ * nodes: match the list, locate it, or use `AriaPattern.anywhere`, rather than the navigation around it.
  *
  * **Example** (Checking the navigation for an Orders link)
  *
@@ -667,17 +946,82 @@ export const toHaveCount: DualMatcher<Locator.ReadonlyLocator, [count: number]> 
  *   ))
  * ```
  *
+ * **Example** (Checking a page for a heading at any depth)
+ *
+ * ```ts import.meta.vitest
+ * import { AriaPattern, Expect, Page } from "@usestrider/browser"
+ *
+ * const hasHeading = (page: Page.ReadonlyPage) =>
+ *   page.pipe(Expect.toMatchAria(
+ *     AriaPattern.anywhere(
+ *       AriaPattern.including(
+ *         AriaPattern.node("heading", "Orders", AriaPattern.unchecked)
+ *       )
+ *     )
+ *   ))
+ * ```
+ *
+ * **Example** (Checking a form inside an iframe)
+ *
+ * ```ts import.meta.vitest
+ * import { AriaPattern, Expect, Page } from "@usestrider/browser"
+ *
+ * const paymentForm = (page: Page.ReadonlyPage) =>
+ *   page.frame(page.locator("#payment")).getByRole("form").pipe(Expect.toMatchAria(
+ *     AriaPattern.anywhere(
+ *       AriaPattern.including(
+ *         AriaPattern.node("textbox", "Card number", AriaPattern.unchecked)
+ *       )
+ *     )
+ *   ))
+ * ```
+ *
+ * **Example** (Waiting for a dialog's error to go)
+ *
+ * ```ts import.meta.vitest
+ * import { AriaPattern, Expect, Page } from "@usestrider/browser"
+ *
+ * const errorGone = (page: Page.ReadonlyPage) =>
+ *   page.getByRole("dialog").pipe(Expect.toMatchAria(
+ *     AriaPattern.anywhere(
+ *       AriaPattern.including(
+ *         AriaPattern.node("alert", "", AriaPattern.unchecked)
+ *       )
+ *     ),
+ *     { not: true }
+ *   ))
+ * ```
+ *
  * @stability unstable
  * @category matchers
  * @since 0.1.0
  */
-export const toMatchAria: DualMatcher<Locator.ReadonlyLocator, [pattern: AriaPattern.AriaPattern]> = dual(
-  2,
-  (locator: Locator.ReadonlyLocator, pattern: AriaPattern.AriaPattern) => ExpectImpl.toMatchAria(locator, pattern)
+export const toMatchAria: DualMatcher<
+  Locator.ReadonlyLocator | Page.ReadonlyPage,
+  [
+    pattern: AriaPattern.AriaPattern,
+    options?: {
+      /** Waits until the subject doesn't match instead. @default false */
+      readonly not?: boolean | undefined
+    } | undefined
+  ]
+> = dual(
+  (args) => !AriaPattern.isAriaPattern(args[0]),
+  (
+    subject: Locator.ReadonlyLocator | Page.ReadonlyPage,
+    pattern: AriaPattern.AriaPattern,
+    options?: { readonly not?: boolean | undefined }
+  ) => ExpectImpl.toMatchAria(subject, pattern, options)
 )
 
 /**
  * Expects the page's URL to match. A string must equal the whole URL; use a `RegExp` to match part of it.
+ *
+ * **Details**
+ *
+ * `ignoreCase: true` compares a string without case and sets a regular expression's `i` flag;
+ * `ignoreCase: false` clears it; left out, a string matches case and a regular expression keeps its flags. Case is
+ * folded without regard to the browser's locale.
  *
  * **Example** (Landing on the account page after signing in)
  *
@@ -695,9 +1039,22 @@ export const toMatchAria: DualMatcher<Locator.ReadonlyLocator, [pattern: AriaPat
  * @category matchers
  * @since 0.1.0
  */
-export const toHaveURL: DualMatcher<Page.ReadonlyPage, [expected: string | RegExp]> = dual(
-  2,
-  (page: Page.ReadonlyPage, expected: string | RegExp) => ExpectImpl.toHaveURL(page, expected)
+export const toHaveURL: DualMatcher<
+  Page.ReadonlyPage,
+  [
+    expected: string | RegExp,
+    options?: {
+      /** Compares without regard to case, replacing a regular expression's `i` flag. @default undefined */
+      readonly ignoreCase?: boolean | undefined
+    } | undefined
+  ]
+> = dual(
+  (args) => Page.isPage(args[0]),
+  (
+    page: Page.ReadonlyPage,
+    expected: string | RegExp,
+    options?: { readonly ignoreCase?: boolean | undefined } | undefined
+  ) => ExpectImpl.toHaveURL(page, expected, options)
 )
 
 /**
@@ -766,7 +1123,8 @@ export const that = <A, E, R>(
     : ExpectImpl.polling(subject, condition)
 
 /**
- * Reference to how often `Expect.that` runs a subject that isn't a `Watchable` again; 100 ms unless set.
+ * Reference to how often `Expect.that` runs a subject that isn't a `Watchable` again, and how often
+ * `toHaveJSProperty` reads its property again, which runs any getter of the page's on its path; 100 ms unless set.
  *
  * @stability unstable
  * @category references
@@ -778,7 +1136,7 @@ export const CheckInterval: Context.Reference<Duration.Duration> = Context.Refer
 )
 
 /**
- * Sets `CheckInterval` for every `Expect.that` inside an effect.
+ * Sets `CheckInterval` for every `Expect.that` and `toHaveJSProperty` inside an effect.
  *
  * **Example** (Polling saved state less often)
  *

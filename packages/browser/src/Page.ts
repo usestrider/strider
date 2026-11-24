@@ -8,8 +8,9 @@
  *
  * Access is granted for a `Scope`: `inspect` and `control` are the only ways up, and no type guard narrows a page's
  * access. A subtype never changes what an inherited member does: `evaluate` runs in the isolated world whatever
- * the page's access, and only `evaluateInMainWorld`, on a `Page`, runs among the page's own scripts. WebKit has no
- * isolated worlds: there, reads run in the page's own world, and `evaluate` fails with `Unsupported`.
+ * the page's access, and only `evaluateInMainWorld` on a `Page`, and `Expect.toHaveJSProperty` on a `Locator`, run
+ * among the page's own scripts. WebKit has no isolated worlds: there, reads run in the page's own world, and
+ * `evaluate` fails with `Unsupported`.
  *
  * @stability unstable
  * @since 0.1.0
@@ -24,6 +25,7 @@ import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as AriaRole from "./AriaRole.ts"
+import type * as Binding from "./Binding.ts"
 import type * as BrowserWorker from "./BrowserWorker.ts"
 import type * as Capability from "./Capability.ts"
 import type * as Deadline from "./Deadline.ts"
@@ -31,6 +33,7 @@ import type * as Declaration from "./Declaration.ts"
 import * as Diagnostics from "./Diagnostics.ts"
 import * as Dialog from "./Dialog.ts"
 import type * as Emulation from "./Emulation.ts"
+import type * as Frame from "./Frame.ts"
 import type * as InitScript from "./InitScript.ts"
 import * as ReasonCause from "./internal/reasonCause.ts"
 import type * as RoutePhaseDiagnostic from "./internal/routePhaseDiagnostic.ts"
@@ -44,7 +47,9 @@ import * as PageNavigation from "./PageNavigation.ts"
 import type * as Pixels from "./Pixels.ts"
 import * as Reason from "./Reason.ts"
 import type * as Route from "./Route.ts"
+import type * as ScriptTag from "./ScriptTag.ts"
 import type * as Snapshot from "./Snapshot.ts"
+import type * as StyleTag from "./StyleTag.ts"
 import * as Target from "./Target.ts"
 import * as Url from "./Url.ts"
 import type * as UserContext from "./UserContext.ts"
@@ -592,6 +597,50 @@ export interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.Read
    */
   frame(iframe: Locator.ReadonlyLocator): Locator.ReadonlyFrameLocator
   /**
+   * Searches the page's document and every frame under it, at any depth, for the one frame a chain matches in.
+   *
+   * **Gotchas**
+   *
+   * - A chain that matches in more than one frame fails with `Locator.StrictViolation`, `count` included.
+   *
+   * **Example** (Clicking a button without naming its iframe)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const cardBrand = Effect.fn("cardBrand")(function*(page: Page.ReadonlyPage) {
+   *   return yield* page.anyFrame.getByTestId("card-brand").readText
+   * })
+   * ```
+   */
+  readonly anyFrame: Locator.ReadonlyAnyFrameLocator
+  /**
+   * A handle on one of the page's frames, by its id in `page.frames`, the page's own id included. It reaches a
+   * frame no locator can, such as one inside a closed shadow root, and fails with `InvalidInput` when the page has
+   * no frame with that id now.
+   *
+   * **Example** (Reading each frame's title)
+   *
+   * ```ts import.meta.vitest
+   * import type { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const titles = Effect.fn("titles")(function*(page: Page.ReadonlyPage) {
+   *   const tree = yield* page.frames
+   *   return yield* Effect.forEach(
+   *     tree.children,
+   *     (child) =>
+   *       Effect.flatMap(
+   *         page.frameById(child.id),
+   *         (frame) => frame.evaluate(() => document.title)
+   *       )
+   *   )
+   * })
+   * ```
+   */
+  frameById(id: Target.NavigableId): Effect.Effect<Frame.ReadonlyFrame, PageError | Target.TargetGone>
+  /**
    * The document's title, read now.
    *
    * **Example** (Checking the page's title)
@@ -798,9 +847,11 @@ export interface Page extends ReadonlyPage {
   getByPlaceholder(text: string | RegExp, options?: Locator.TextOptions | undefined): Locator.Locator
   getByAltText(text: string | RegExp, options?: Locator.TextOptions | undefined): Locator.Locator
   getByTitle(text: string | RegExp, options?: Locator.TextOptions | undefined): Locator.Locator
-  getByTestId(id: string): Locator.Locator
-  locator(css: string): Locator.Locator
+  getByTestId(id: string | RegExp): Locator.Locator
+  locator(selector: string | Locator.XPath): Locator.Locator
   frame(iframe: Locator.ReadonlyLocator): Locator.FrameLocator
+  readonly anyFrame: Locator.AnyFrameLocator
+  frameById(id: Target.NavigableId): Effect.Effect<Frame.Frame, PageError | Target.TargetGone>
   snapshot(
     options?: Snapshot.Options | undefined
   ): Effect.Effect<Snapshot.Snapshot<Locator.Locator>, PageError | Target.TargetGone | Deadline.Timeout>
@@ -999,6 +1050,40 @@ export interface Page extends ReadonlyPage {
     ...args: Args
   ): Effect.Effect<JSHandle.JSHandle<Awaited<A>>, PageError | Target.TargetGone | Deadline.Timeout, Scope.Scope>
   /**
+   * Calls `fn` in the page's own world and returns its result as a handle, for what only the page's scripts can
+   * reach, such as an object a global holds.
+   *
+   * **Details**
+   *
+   * Arguments cross as they do for `evaluateInMainWorld`. The handle lives in the page's own world, so it crosses
+   * only into calls there: passing it to `evaluate`, which runs in the isolated world, fails with
+   * `NotSerializable`, except on WebKit, where `evaluate` itself fails with `Unsupported` first, since WebKit has no
+   * isolated worlds. Unlike `evaluateHandle`, it works on WebKit too.
+   *
+   * **Gotchas**
+   *
+   * Page scripts can see and tamper with what runs here. Prefer `evaluateHandle` unless you need the page's
+   * globals.
+   *
+   * **Example** (Holding the page's store)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const cartSize = Effect.fn("cartSize")(function*(page: Page.Page) {
+   *   const store = yield* page.evaluateHandleInMainWorld(() =>
+   *     Reflect.get(window, "store") as { readonly cart: ReadonlyArray<string> }
+   *   )
+   *   return yield* store.evaluate((value) => value.cart.length)
+   * })
+   * ```
+   */
+  evaluateHandleInMainWorld<Args extends ReadonlyArray<unknown>, A>(
+    fn: (...args: Args) => A | Promise<A>,
+    ...args: Args
+  ): Effect.Effect<JSHandle.JSHandle<Awaited<A>>, PageError | Target.TargetGone | Deadline.Timeout, Scope.Scope>
+  /**
    * The page's keyboard.
    */
   readonly keyboard: Keyboard.Keyboard
@@ -1016,6 +1101,9 @@ export interface Page extends ReadonlyPage {
    * **Details**
    *
    * - The route is in force for requests that start after this declaration returns.
+   * - While a `"request"` or `"response"` route is in force, the requests of the page's documents, frames, and
+   *   dedicated workers bypass the browser's HTTP cache, so a request the route continues reaches the server.
+   *   The cache is used again once the last such route is removed; an `"auth"` route leaves it alone.
    * - The page's routes are asked before its context's, the most recent first; `Route.fallthrough` passes the
    *   request to the next.
    * - `options.phase` (`"request"`, `"response"`, or `"auth"`) decides what the handler is given and may decide.
@@ -1026,6 +1114,10 @@ export interface Page extends ReadonlyPage {
    *
    * On Chromium, a request already underway without response interception may not pick up a later response
    * route, even before its headers arrive. A response that does pause selects the current routes by precedence.
+   *
+   * On Chromium, the cache setting is confirmed before this returns, except while a navigation is under way in
+   * the page: then it is sent before this returns, and the new document has it from its commit. On Firefox, a
+   * dedicated worker's requests still use the cache.
    *
    * On Chromium, a route that matches a cross-origin request also sees its CORS preflight, an `OPTIONS`
    * request, which Firefox and WebKit don't show. WebKit pauses only a redirect's first hop.
@@ -1110,6 +1202,40 @@ export interface Page extends ReadonlyPage {
     } | undefined
   ): Effect.Effect<Declaration.Registration, PageError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
   /**
+   * Exposes a host function that this page's frames call as `window[name](...)`, while the registration lives.
+   *
+   * **Details**
+   *
+   * In the page, the function returns a promise. Its arguments cross by value, as `evaluateInMainWorld`'s do, and are decoded
+   * by `arguments`; the handler's value is encoded by `result` and resolves the promise. A decoding failure or a failed handler rejects
+   * it with an `Error` carrying the message; a defect or an interruption rejects it with a fixed message and is
+   * logged. The function is in the main world of documents already open and of every document after, before their
+   * own scripts, and not in workers. Removing it deletes it from open documents and rejects the calls still
+   * waiting. A name the page or its context already exposes fails with `NameTaken`.
+   * A document holds at most 4096 waiting calls per binding; the next one rejects. The name must be ASCII letters, digits, `_` or `$`, not starting with a digit (`/^[A-Za-z_$][\w$]*$/`), or the call fails with `InvalidInput`.
+   *
+   * **Example** (Reading a value the test holds)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect, Schema } from "effect"
+   *
+   * const exposeAnswer = Effect.fn("exposeAnswer")(function*(page: Page.Page) {
+   *   yield* page.exposeBinding(
+   *     "answer",
+   *     { arguments: Schema.Tuple([Schema.String]), result: Schema.Number },
+   *     ([question]) => Effect.succeed(question.length)
+   *   )
+   *   yield* page.evaluateInMainWorld(() => (window as any).answer("why?"))
+   * })
+   * ```
+   */
+  exposeBinding<A extends ReadonlyArray<unknown>, B, E, R>(
+    name: string,
+    schemas: Binding.Schemas<A, B>,
+    handler: Binding.Handler<NoInfer<A>, NoInfer<B>, E, R>
+  ): Effect.Effect<Binding.Registration, Binding.BindingError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
+  /**
    * Runs a script in every new document of this page, before its own scripts, while the registration lives.
    *
    * **Details**
@@ -1138,6 +1264,72 @@ export interface Page extends ReadonlyPage {
   ): Effect.Effect<
     InitScript.InitScript,
     Declaration.DeclarationError | Target.TargetGone | Deadline.Timeout,
+    Scope.Scope
+  >
+  /**
+   * Adds a `<script>` element to the page's current document, returning it once it has loaded, run, or been
+   * accepted: a URL's script loads, a classic inline script runs, and an inline module is accepted without waiting
+   * for it to run.
+   *
+   * **When to use**
+   *
+   * Use to run a library or helper among the page's own scripts in the document that's already loaded; use
+   * `addInitScript` for code that must run in every new document, before the page's scripts.
+   *
+   * **Details**
+   *
+   * The element is added from the page's main world, so the page's Content Security Policy applies: a script it
+   * refuses fails with `RefusedByPolicy`, and a URL that doesn't load with `ResourceFailed`. See `ScriptTag` for
+   * what the call waits for. The handle is the element, released with the scope.
+   *
+   * **Example** (Loading a library from a URL)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const withLodash = Effect.fn("withLodash")(function*(page: Page.Page) {
+   *   yield* page.addScriptTag({ url: "https://cdn.example.com/lodash.min.js" })
+   *   return yield* page.evaluateInMainWorld(() => typeof Reflect.get(window, "_"))
+   * })
+   * ```
+   */
+  addScriptTag(
+    script: ScriptTag.Source,
+    options?: ScriptTag.Options | undefined
+  ): Effect.Effect<
+    JSHandle.JSHandle<HTMLScriptElement>,
+    PageError | Target.TargetGone | Deadline.Timeout,
+    Scope.Scope
+  >
+  /**
+   * Adds a stylesheet to the page's current document, from CSS source, a URL, or a file, returning its element
+   * once the stylesheet has loaded and its rules apply.
+   *
+   * **Details**
+   *
+   * The element is added from the page's main world, so the page's Content Security Policy applies: a stylesheet
+   * it refuses fails with `RefusedByPolicy`, and a URL that doesn't load with `ResourceFailed`. See `StyleTag` for
+   * the forms and what the call waits for. The handle is the element, released with the scope; the element stays in
+   * the document.
+   *
+   * **Example** (Hiding a cookie banner before a screenshot)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const hideBanner = Effect.fn("hideBanner")(function*(page: Page.Page) {
+   *   yield* page.addStyleTag({ source: "#cookie-banner { display: none }" })
+   *   return yield* page.screenshot()
+   * })
+   * ```
+   */
+  addStyleTag(
+    style: StyleTag.Source
+  ): Effect.Effect<
+    JSHandle.JSHandle<HTMLStyleElement | HTMLLinkElement>,
+    PageError | Target.TargetGone | Deadline.Timeout,
     Scope.Scope
   >
   /**
@@ -1412,7 +1604,9 @@ export const PageErrorReason = Schema.Union([
   Reason.Unsupported,
   Reason.BackendFailure,
   Reason.ViewportMismatch,
-  Reason.PromptBlocking
+  Reason.PromptBlocking,
+  Reason.ResourceFailed,
+  Reason.RefusedByPolicy
 ])
 
 /**

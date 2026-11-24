@@ -167,6 +167,9 @@ export type Name = typeof Name.Type
  * **Details**
  *
  * Pressed, expanded, and selected appear only when their role-filter reader returns true.
+ * `checked=mixed` replaces `checked` for an indeterminate checkbox or `aria-checked="mixed"`, and `pressed=mixed`
+ * replaces `pressed` for a button with `aria-pressed="mixed"`. Each comes from its own state, so a node can carry
+ * both, and text renders each as it is named: `[checked=mixed]`, `[pressed=mixed]`.
  * ARIA keywords are ASCII case-insensitive without trimming; unsupported roles contribute no marker.
  * Native option selection and details open state take precedence over ARIA attributes.
  * Open details carries expanded even with its ordinary group role; group expanded filters remain invalid.
@@ -177,7 +180,17 @@ export type Name = typeof Name.Type
  * @category schemas
  * @since 0.1.0
  */
-export const State = Schema.Literals(["checked", "expanded", "selected", "disabled", "focused", "pressed", "invalid"])
+export const State = Schema.Literals([
+  "checked",
+  "checked=mixed",
+  "expanded",
+  "selected",
+  "disabled",
+  "focused",
+  "pressed",
+  "pressed=mixed",
+  "invalid"
+])
 
 /**
  * A state a node can be in, such as `checked` or `disabled`.
@@ -201,6 +214,9 @@ export type State = typeof State.Type
  * collects it; ordinary library and full capture omit it. Older snapshot nodes without this property still decode.
  * Text rendering does not print this signal.
  *
+ * Headings, and list items, rows and tree items with `aria-level`, carry their `level`, which text renders as
+ * `[level=2]`; other nodes omit it.
+ *
  * Native controls that participate in constraint validation carry `invalid` and their browser-provided
  * `validationMessage` when invalid. Other nodes carry `None`. Inspection reads current state without
  * triggering validation events or changing focus. Invalidity does not prove a submission was attempted.
@@ -214,6 +230,8 @@ export interface Node {
   readonly role: Role
   readonly name: Name
   readonly states: ReadonlySet<State>
+  /** The node's level, such as 2 for an `h2`; absent when it has none. */
+  readonly level?: number | undefined
   /** Whether this node takes field input, independent of role and read-only or disabled state. Collected for redacted capture; absent when not collected or not a field. */
   readonly editable?: boolean | undefined
   readonly validationMessage: Option.Option<string>
@@ -232,6 +250,8 @@ export interface NodeEncoded {
   readonly role: Node["role"]
   readonly name: Node["name"]
   readonly states: Node["states"]
+  /** The node's level, such as 2 for an `h2`; absent when it has none. */
+  readonly level?: number | undefined
   /** Whether this node takes field input, independent of role and read-only or disabled state. Collected for redacted capture; absent when not collected or not a field. */
   readonly editable?: boolean | undefined
   readonly validationMessage: Option.Option<string>
@@ -250,6 +270,7 @@ export const Node: Schema.Codec<Node, NodeEncoded> = Schema.Struct({
   role: Role,
   name: Name,
   states: Schema.ReadonlySet(State),
+  level: Schema.optional(Schema.Number),
   editable: Schema.optional(Schema.Boolean),
   validationMessage: Schema.Option(Schema.String),
   children: Schema.Array(Schema.suspend((): Schema.Codec<Node, NodeEncoded> => Node))

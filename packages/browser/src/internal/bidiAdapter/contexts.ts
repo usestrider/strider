@@ -10,15 +10,17 @@ import * as Redacted from "effect/Redacted"
 import * as BrowserBidi from "../../bidi-protocol/Browser.ts"
 import * as BrowsingContext from "../../bidi-protocol/BrowsingContext.ts"
 import * as Network from "../../bidi-protocol/Network.ts"
+import * as Script from "../../bidi-protocol/Script.ts"
 import type * as Download from "../../Download.ts"
 import * as Protocol from "../../protocol/Protocol.ts"
 import * as L1Target from "../../Target.ts"
 import type * as UserContext from "../../UserContext.ts"
 import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as Proxy from "../proxy.ts"
 import * as Urls from "../urls.ts"
 import * as Cleanup from "./cleanup.ts"
-import { applyKind, recoverViewport } from "./declare.ts"
+import { applyCache, applyKind, recoverViewport } from "./declare.ts"
 import {
   closingReason,
   type ContextEntry,
@@ -26,6 +28,7 @@ import {
   type DownloadEntry,
   type Event,
   navigableById,
+  type NavigableEntry,
   navigableOf,
   type State
 } from "./state.ts"
@@ -36,7 +39,13 @@ import { addNavigable, endNavigation, removeNavigable } from "./tree.ts"
 export const register = (handlers: Kit.Handlers<Event>) =>
   handlers
     .on(BrowsingContext.contextCreated, (params, { state }) => {
-      addNavigable(state, params, state.adopting)
+      const known = state.navigables.has(params.context)
+      const navigable = addNavigable(state, params, state.adopting)
+      // A page the session's cache setting doesn't suit, as one in a context without routes while another
+      // context's bypass the cache, gets its own once the fold has delivered it
+      if (!known && navigable !== undefined && navigable.parent === undefined) {
+        state.buffer.later(applyCache(state))
+      }
     })
     .on(BrowsingContext.contextDestroyed, (params, { state }) => {
       const navigable = state.navigables.get(params.context)
@@ -90,12 +99,67 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       }
     })
 
+/**
+ * Ends a child frame whose window realm ended with no new one, if Firefox no longer lists it. This stands in for
+ * the `browsingContext.contextDestroyed` that Firefox 158 loses when a removed cross-site iframe's process is gone
+ * before its discard handler reads the process's type; it comes out once the pinned Firefox has Mozilla's fix.
+ *
+ * The realm's end and the frame's discard reach the browser's process from two processes, so a tree read on the
+ * realm's end alone can still list the frame. The parent frame's process sends the discard right after the message
+ * that ends the frame's window, on its one channel: its reply to a command sent once the realm ended comes after
+ * the discard, which takes the frame out of the tree at once. A frame the tree still lists is kept.
+ */
+export const confirmFrameRemoval = (state: State, navigable: NavigableEntry) => {
+  const parent = navigable.parent
+  // A page that starts closing meanwhile ends the frame with its own reason
+  const awaitsRealm = () =>
+    !navigable.removed && closingReason(state, navigable.page) === undefined &&
+    !Array.from(navigable.document?.realms ?? []).some((realm) => realm.world._tag === "Main" && !realm.ended) &&
+    !navigable.pendingRealms.some((realm) => realm.world._tag === "Main" && !realm.ended)
+  if (parent === undefined || !awaitsRealm()) return Effect.void
+  return Effect.gen(function*() {
+    // A failure, such as a parent frame that is gone and whose end covers this one, keeps the frame
+    yield* state.send(Script.evaluate({
+      expression: "0",
+      target: { context: parent.bidi, sandbox: "__strider_utility__" },
+      awaitPromise: false,
+      resultOwnership: "none"
+    }))
+    yield* state.root().drainObserved
+    if (!awaitsRealm()) return
+    const tree = yield* state.send(BrowsingContext.getTree({ root: parent.bidi, maxDepth: 1 }))
+    const listed = tree.contexts.some((info) => (info.children ?? []).some((child) => child.context === navigable.bidi))
+    if (listed) return
+    yield* state.buffer.run(() => {
+      if (awaitsRealm()) {
+        removeNavigable(state, navigable, new L1Target.FrameDetached({}), "bidi:browsingContext.getTree")
+      }
+    })
+  })
+}
+
 // ── Operations ────────────────────────────────────────────────────────────────────────────────────────────
 
 export const createUserContext = Effect.fnUntraced(function*(state: State, options: Adapter.UserContextOptions) {
   let settle = (_retain: boolean): void => {}
+  const certificateProxy = Option.getOrUndefined(options.certificateProxy ?? Option.none())
+  if (certificateProxy !== undefined && state.options.ownership !== "launched") {
+    return yield* Effect.fail(
+      Kit.unsupported(
+        "clientCertificates",
+        "Client certificates need a Firefox Strider launched, whose profile lets a context's proxy carry loopback"
+      )
+    )
+  }
   if (Option.isSome(options.proxy)) {
-    const { server, credentials } = options.proxy.value
+    const { credentials, scheme } = options.proxy.value
+    if (scheme === "https") {
+      return yield* Effect.fail(
+        Kit.unsupported("userContexts.proxy.https", "Firefox's BiDi proxy settings have no TLS connection to the proxy")
+      )
+    }
+    // socks5://h:p and http://h:p are different endpoints, with different credentials
+    const server = Proxy.endpoint(options.proxy.value)
     if (credentials !== undefined && state.options.ownership !== "launched") {
       return yield* Effect.fail(
         Kit.unsupported(
@@ -139,14 +203,35 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
       // Keep ownership of a successful create reply until setup has installed its rollback path.
       const { userContext } = yield* Kit.protocol(
         state.send(BrowserBidi.createUserContext({
-          ...(options.acceptInsecureCerts ? { acceptInsecureCerts: true } : {}),
+          // A client certificate context accepts its proxy's own certificate; the proxy checks the site's
+          ...(options.acceptInsecureCerts || certificateProxy !== undefined ? { acceptInsecureCerts: true } : {}),
           ...(Option.isSome(options.proxy)
             ? {
+              // Launched profiles let proxies carry loopback; it stays direct here
+              proxy: options.proxy.value.scheme === "http"
+                ? {
+                  proxyType: "manual",
+                  httpProxy: options.proxy.value.server,
+                  sslProxy: options.proxy.value.server,
+                  noProxy: [...new Set([...Proxy.loopback, ...options.proxy.value.bypass])]
+                }
+                : {
+                  // Firefox's SOCKS4 sends names for the proxy to resolve (SOCKS4a)
+                  proxyType: "manual",
+                  socksProxy: options.proxy.value.server,
+                  socksVersion: options.proxy.value.scheme === "socks4" ? 4 : 5,
+                  noProxy: [...new Set([...Proxy.loopback, ...options.proxy.value.bypass])]
+                }
+            }
+            : certificateProxy !== undefined
+            ? {
+              // Firefox refuses a PAC proxy for a user context, and sends TLS straight to an sslProxy given alone,
+              // so all of the context's traffic goes to the certificate proxy, which forwards plain HTTP as it is
               proxy: {
                 proxyType: "manual",
-                httpProxy: options.proxy.value.server,
-                sslProxy: options.proxy.value.server,
-                noProxy: [...options.proxy.value.bypass]
+                httpProxy: `127.0.0.1:${certificateProxy}`,
+                sslProxy: `127.0.0.1:${certificateProxy}`,
+                noProxy: []
               }
             }
             : {})
@@ -180,6 +265,7 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
           _tag: "UserContextAdded",
           context: entry.id,
           isDefault: false,
+          created: true,
           ...(options.requestTiming ? { requestTiming: true } : {}),
           ...(options.requestSizes ? { requestSizes: true } : {})
         })
@@ -198,11 +284,22 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
         restore,
         Effect.onError(() =>
           Cleanup.report(
-            Cleanup.bounded(removeUserContext(state, entry.id)).pipe(Effect.tap(() =>
-              Effect.sync(() => {
-                settle(entry.proxyUsed === true || state.contexts.has(entry.id))
-              })
-            )),
+            Cleanup.bounded(removeUserContext(state, entry.id)).pipe(
+              Effect.tap(() =>
+                Effect.sync(() => {
+                  settle(entry.proxyUsed === true || state.contexts.has(entry.id))
+                })
+              ),
+              // Unremoved, the context is released: listed as one the connection observes, delivered in the
+              // connection's scope so the rollback's budget doesn't wait on the fold
+              Effect.tapError(() =>
+                Effect.sync(() =>
+                  state.buffer.start(
+                    state.buffer.run(() => state.buffer.emit({ _tag: "UserContextReleased", context: entry.id }))
+                  )
+                )
+              )
+            ),
             `BiDi context ${entry.id} initialization rollback could not confirm removal`
           )
         )
@@ -277,6 +374,8 @@ export const createPage = Effect.fnUntraced(function*(state: State, id: UserCont
   if (navigable === undefined) {
     return yield* Effect.fail(Kit.gone({ _tag: "Browser" }, new L1Target.Vanished({})))
   }
+  // Its cache setting is in place before the caller's first navigation
+  yield* Kit.protocol(applyCache(state))
   return navigable.id
 })
 

@@ -27,6 +27,7 @@ import { pipeArguments } from "effect/Pipeable"
 import * as Redacted from "effect/Redacted"
 import * as Scope from "effect/Scope"
 import * as SubscriptionRef from "effect/SubscriptionRef"
+import * as Binding from "../Binding.ts"
 import type * as Browser from "../Browser.ts"
 import * as CookieJar from "../CookieJar.ts"
 import * as Deadline from "../Deadline.ts"
@@ -44,8 +45,10 @@ import * as UserContext from "../UserContext.ts"
 import * as WebSocketRoute from "../WebSocketRoute.ts"
 import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
+import * as Bindings from "./bindings.ts"
 import * as BrowserService from "./browserService.ts"
 import * as ClaimHooks from "./claimHooks.ts"
+import * as ClientCertificates from "./clientCertificates.ts"
 import * as Clock from "./clock.ts"
 import * as ConnectionImpl from "./connection.ts"
 import * as Cleanup from "./declarationCleanup.ts"
@@ -75,6 +78,13 @@ const UserContextTypeId = "~@usestrider/browser/UserContext"
 
 const contextError = (operation: string, reason: UserContext.UserContextErrorReason, id: Diagnostics.OperationId) =>
   new UserContext.UserContextError({ operation, reason, diagnostics: Operation.diagnostics(id) })
+
+/**
+ * Whether `name` is an HTML attribute name: one or more characters, none of them whitespace, a control, a
+ * noncharacter (U+FDD0 to U+FDEF, and the last two code points of each of the 17 planes), `"`, `'`, `>`, `/`, or `=`.
+ */
+const isAttributeName = (name: unknown): name is string =>
+  typeof name === "string" && /^[^\s"'>/=\p{Cc}\p{Noncharacter_Code_Point}]+$/u.test(name)
 
 /** A declaration's failure, as a context's: the reasons a context has, else a backend failure. */
 // A context's own setup failing: a target that went is the setup's failure too, as BackendFailure
@@ -202,6 +212,7 @@ const makeContext = (
         (options?.phase ?? "request") as P
       )) as UserContext.UserContext["route"],
     routeWebSocket: (pattern, handler, options) => WebSocketRoutes.register(runtime, entry, handler, pattern, options),
+    exposeBinding: (name, schemas, handler) => Bindings.expose(runtime, entry, undefined, name, schemas, handler),
     addInitScript: (script, options) =>
       InitScripts.add({ runtime, scope: declared, operation: "UserContext.addInitScript" }, entry.id, script, options),
     emulate: (settings) => Emulation.emulate({ runtime, scope: declared, operation: "UserContext.emulate" }, settings),
@@ -357,6 +368,14 @@ const makeDeniedContext = (
           diagnostics: Operation.diagnostics(id())
         })
       ),
+    exposeBinding: (name: string) =>
+      Effect.fail(
+        new Binding.BindingError({
+          name,
+          reason: notPermitted("UserContext.exposeBinding"),
+          diagnostics: Operation.diagnostics(id())
+        })
+      ),
     addInitScript: () => declaration("UserContext.addInitScript"),
     emulate: () => declaration("UserContext.emulate"),
     grant: () => declaration("UserContext.grant")
@@ -386,6 +405,8 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
   const handles = new WeakMap<Model.PageEntry, Page.Page>()
   const observedHandles = new WeakMap<Model.PageEntry, Page.ObservedPage>()
   const denied = new WeakMap<Model.ContextEntry, UserContext.UserContext>()
+  // The observed handle of each context the connection lists but didn't create
+  const observedContexts = new WeakMap<Model.ContextEntry, UserContext.ObservedUserContext>()
 
   /** Whether the connection controls a page for its whole life: it created the page, or the page's context. */
   const lifelong = (entry: Model.PageEntry) =>
@@ -514,9 +535,17 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
     path: yield* Effect.serviceOption(Path.Path),
     engineRealms: yield* Runtime.makeEngineRealms(model),
     timelines: Clock.makeTimelines(),
-    settle: (operation, navigation, frame, url, at, outcome, id) =>
-      Navigation.settle(model, operation, navigation, frame, url, at, outcome, id)
+    settle: (operation, navigation, page, frame, url, at, outcome, id) =>
+      Navigation.settle(model, operation, navigation, page, frame, url, at, outcome, id)
   }
+
+  /** Ends a context setup: lists the context it made, as its handle or, if setup failed, as observed. */
+  const settled = (awaiting: { entry?: Model.ContextEntry }) =>
+    Effect.suspend(() => {
+      if (awaiting.entry?.awaitingHandle !== true) return Effect.void
+      awaiting.entry.awaitingHandle = false
+      return model.touchContexts
+    })
 
   const setupContext = (
     options?: UserContext.Options,
@@ -525,8 +554,10 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       readonly ownership: { committed: boolean }
       readonly adopt?: boolean
     }
-  ): Effect.Effect<UserContext.UserContext, UserContext.UserContextError | Deadline.Timeout, Scope.Scope> =>
-    Effect.gen(function*() {
+  ): Effect.Effect<UserContext.UserContext, UserContext.UserContextError | Deadline.Timeout, Scope.Scope> => {
+    // The context this setup creates: listed once setup ends, as its handle or, if setup failed, as observed
+    const awaiting: { entry?: Model.ContextEntry } = {}
+    return Effect.gen(function*() {
       const operation = mode !== undefined && "context" in mode ? "UserContext.reclaim" : "Browser.newContext"
       const { id } = yield* Operation.record
       const proxy = options?.proxy === undefined ? Option.none<Adapter.ProxyOptions>() : Option.some(
@@ -580,6 +611,18 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
           id
         ))
       }
+      const testIdAttribute = options?.testIdAttribute
+      if (testIdAttribute !== undefined && !isAttributeName(testIdAttribute)) {
+        return yield* Effect.fail(contextError(
+          operation,
+          new Reason.InvalidInput({
+            input: "testIdAttribute",
+            expected: "an HTML attribute name, such as \"data-qa\"",
+            hint: "Use a non-empty name without whitespace, quotes, \">\", \"/\", \"=\", or control characters"
+          }),
+          id
+        ))
+      }
       const credentials = options?.httpCredentials
       if (
         credentials !== undefined && (typeof credentials.username !== "string" ||
@@ -613,6 +656,31 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
           ))
         }
         credentialOrigin = url.origin
+      }
+      const certificates = options?.clientCertificates
+      let preparedCertificates: ClientCertificates.Prepared | undefined
+      if (certificates !== undefined) {
+        const refusal = mode !== undefined
+          ? "Client certificates need a context Strider creates and owns, which a reclaimable context isn't"
+          : options?.proxy !== undefined
+          ? "Client certificates can't be combined with proxy yet"
+          : undefined
+        if (refusal !== undefined) {
+          return yield* Effect.fail(contextError(
+            operation,
+            new Reason.Unsupported({ capability: "clientCertificates", backend: adapter.info.product, hint: refusal }),
+            id
+          ))
+        }
+        const prepared = ClientCertificates.prepare(certificates)
+        if (prepared instanceof ClientCertificates.Invalid) {
+          return yield* Effect.fail(contextError(
+            operation,
+            new Reason.InvalidInput({ input: "clientCertificates", expected: prepared.expected, hint: prepared.hint }),
+            id
+          ))
+        }
+        preparedCertificates = prepared
       }
       if (mode !== undefined && "context" in mode && options?.storageStateTracking === true) {
         return yield* Effect.fail(
@@ -677,6 +745,19 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
           id
         ))
       }
+      // Refused before the context exists, so a backend that can't bypass a policy creates nothing
+      if (options?.bypassCSP === true && !reports("bypassCSP")) {
+        return yield* Effect.fail(contextError(
+          operation,
+          new Reason.Unsupported({
+            capability: "bypassCSP",
+            backend: runtime.backend,
+            hint: capabilities.find((entry) => entry.name === "bypassCSP")?.limitations.join("; ") ||
+              "This backend can't set a page's Content Security Policy aside"
+          }),
+          id
+        ))
+      }
       const reportsDownloads = reports("downloads")
       const asked = options?.downloads ?? (!adopt && reportsDownloads ? "temporary" : "none")
       if (typeof asked === "object" && !/^(\/|[A-Za-z]:[\\/])/.test(asked.directory)) {
@@ -721,12 +802,31 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         made = downloads.value
         yield* ledger.add({ _tag: "Directory", path: downloads.value })
       }
+      // A context's client certificate proxy outlives the context, which this scope removes first
+      const certificateProxy = preparedCertificates === undefined
+        ? Option.none<number>()
+        : Option.some(
+          (yield* ClientCertificates.serve(preparedCertificates, {
+            acceptInsecureCerts: options?.acceptInsecureCerts ?? false
+          }).pipe(Effect.mapError((error) =>
+            contextError(
+              operation,
+              new Reason.BackendFailure({
+                kind: "Rejected",
+                method: "ClientCertificates.serve",
+                hint: `Couldn't start the context's client certificate proxy: ${error.message}`
+              }),
+              id
+            )
+          ))).port
+        )
       // Removed when the scope closes, waiting for its end under a budget of its own (`Model.remove`)
       const entry = yield* Effect.acquireRelease(
         (mode !== undefined && "context" in mode
           ? Effect.succeed(mode.context)
           : adapter.createUserContext({
             proxy,
+            certificateProxy,
             acceptInsecureCerts: options?.acceptInsecureCerts ?? false,
             reclaimable,
             focusEmulated: options?.focus === "emulated",
@@ -734,7 +834,11 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
             requestSizes: options?.requestSizes
           })).pipe(
             Effect.catch(failed),
-            Effect.flatMap(model.context)
+            Effect.flatMap((id) =>
+              mode !== undefined && "context" in mode ? model.context(id) : model.createdContext(id)
+            ),
+            // Set as the entry is acquired, so setup's end lists it even if setup is interrupted right after
+            Effect.tap((entry) => Effect.sync(() => void (awaiting.entry = entry)))
           ),
         (entry) =>
           (!committed() || (reclaimable && Handoff.leavesOpen(ownerScope)) ? Effect.void : model.remove(entry)).pipe(
@@ -762,7 +866,8 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         reclaimable,
         policy: adopt ? Option.none() : Option.some(options?.dialogs ?? "dismiss"),
         eventLog: options?.eventLog ?? settings.eventLog,
-        keyboardLayout: options?.keyboardLayout ?? settings.keyboardLayout
+        keyboardLayout: options?.keyboardLayout ?? settings.keyboardLayout,
+        testIdAttribute: options?.testIdAttribute ?? settings.testIdAttribute
       })
       const scope: Adapter.DeclarationScope = { _tag: "UserContext", context: created }
       // Set by the first of this scope's finalizers to run, below the declarations, ahead of their releases: the
@@ -818,16 +923,22 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         yield* Effect.annotateCurrentSpan("browser.context.downloads", downloads.value)
       }
       // The options that are declarations, held for the context's life, before its first page
-      if (options?.emulation !== undefined || options?.focus === "emulated") {
+      if (options?.emulation !== undefined || options?.focus === "emulated" || options?.bypassCSP === true) {
         const fields = Emulation.fields(options.emulation ?? {})
         if (!Array.isArray(fields)) {
           return yield* Effect.fail(contextError(operation, fields as Reason.InvalidInput, id))
         }
         yield* Emulation.declare(
           { runtime, scope, operation, retiring: () => retiring },
-          options.focus === "emulated"
-            ? [...fields, { capability: "emulation.focus", override: { _tag: "FocusEmulation", enabled: true } }]
-            : fields,
+          [
+            ...fields,
+            ...(options.focus === "emulated"
+              ? [{ capability: "emulation.focus", override: { _tag: "FocusEmulation", enabled: true } } as const]
+              : []),
+            ...(options.bypassCSP === true
+              ? [{ capability: "bypassCSP", override: { _tag: "BypassCsp", enabled: true } } as const]
+              : [])
+          ],
           id
         ).pipe(Effect.mapError((error) =>
           Deadline.isTimeout(error)
@@ -873,7 +984,11 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       }
       if (ownership === undefined) Handoff.ownContext(entry, ownerScope)
       return context
-    }).pipe(Operation.named(mode !== undefined && "context" in mode ? "UserContext.reclaim" : "Browser.newContext"))
+    }).pipe(
+      Effect.ensuring(Effect.suspend(() => settled(awaiting))),
+      Operation.named(mode !== undefined && "context" in mode ? "UserContext.reclaim" : "Browser.newContext")
+    )
+  }
 
   // Setup is interruptible; ownership, registrations and delivery share a single commit region.
   const recover = <A>(
@@ -911,6 +1026,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
   })
 
   const defaultEntry = yield* model.context(adapter.defaultContext)
+  const defaultContext = makeObservedContext(runtime, defaultEntry, upgradeContext(defaultEntry))
   const browser: Browser.Browser = {
     [BrowserTypeId]: BrowserTypeId,
     info: adapter.info,
@@ -943,7 +1059,35 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       target: { _tag: "Browser" },
       operation: "Browser.pages.waitFor"
     }),
-    defaultContext: makeObservedContext(runtime, defaultEntry, upgradeContext(defaultEntry))
+    defaultContext,
+    contexts: Watchable.make({
+      ref: model.contexts,
+      project: (entries) => {
+        const listed: Array<UserContext.ObservedUserContext> = [defaultContext]
+        for (const entry of entries) {
+          if (entry === defaultEntry) continue
+          const created = contexts.get(entry.id)
+          if (created !== undefined) {
+            listed.push(created)
+            continue
+          }
+          const known = observedContexts.get(entry)
+          if (known !== undefined) {
+            listed.push(known)
+            continue
+          }
+          // One this connection is creating is listed once `newContext` has its handle
+          if (entry.awaitingHandle === true) continue
+          const context = makeObservedContext(runtime, entry, upgradeContext(entry))
+          observedContexts.set(entry, context)
+          listed.push(context)
+        }
+        return Option.some(listed)
+      },
+      ended: () => Option.none(),
+      target: { _tag: "Browser" },
+      operation: "Browser.contexts.waitFor"
+    })
   }
   ClaimHooks.register(browser, { runtime, context: newContext, recover })
   return browser

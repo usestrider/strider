@@ -98,6 +98,79 @@ export const ServedBy = Schema.Literals([
 export type ServedBy = typeof ServedBy.Type
 
 /**
+ * The address of the server a response came from: its IP address and port.
+ *
+ * **Details**
+ *
+ * An IPv6 address is written without brackets, such as `::1`.
+ *
+ * **Example** (Checking which server answered)
+ *
+ * ```ts import.meta.vitest
+ * import { NetworkResponse, Page } from "@usestrider/browser"
+ * import { Effect, Option } from "effect"
+ *
+ * const answeredBy = Effect.fn("answeredBy")(function*(page: Page.Page) {
+ *   const document = yield* NetworkResponse.next(page, { url: "https://example.com/" })
+ *   yield* page.goto("https://example.com/")
+ *   const { serverAddress } = yield* document
+ *   return Option.map(serverAddress, ({ ip, port }) => `${ip}:${port}`)
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export class ServerAddress extends Schema.Class<ServerAddress>("@usestrider/browser/NetworkResponse/ServerAddress")({
+  ip: Schema.String,
+  port: Schema.Int
+}) {}
+
+/**
+ * The TLS connection and server certificate an HTTPS response came over.
+ *
+ * **Details**
+ *
+ * - `protocol` is the TLS version, such as `TLS 1.3`. WebKit reports it only when the response ends, so it's `None`
+ *   there; a HAR's `_securityDetails` has it.
+ * - `subjectName` is the certificate's subject, its common name, such as `example.com`.
+ * - `issuer` is the certificate's issuer, its common name. WebKit doesn't report it, so it's `None` there.
+ * - `validFrom` and `validTo` bound the certificate's validity, in seconds since the Unix epoch.
+ *
+ * Each is `None` where the browser doesn't report it.
+ *
+ * **Example** (Reading a certificate's expiry)
+ *
+ * ```ts import.meta.vitest
+ * import { NetworkResponse, Page } from "@usestrider/browser"
+ * import { Effect, Option } from "effect"
+ *
+ * const daysLeft = Effect.fn("daysLeft")(function*(page: Page.Page) {
+ *   const document = yield* NetworkResponse.next(page, { url: "https://example.com/" })
+ *   yield* page.goto("https://example.com/")
+ *   const { securityDetails } = yield* document
+ *   return Option.flatMap(securityDetails, (details) => details.validTo).pipe(
+ *     Option.map((validTo) => Math.floor((validTo * 1000 - Date.now()) / 86_400_000))
+ *   )
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export class SecurityDetails extends Schema.Class<SecurityDetails>(
+  "@usestrider/browser/NetworkResponse/SecurityDetails"
+)({
+  protocol: Schema.Option(Schema.String),
+  subjectName: Schema.Option(Schema.String),
+  issuer: Schema.Option(Schema.String),
+  validFrom: Schema.Option(Schema.Number),
+  validTo: Schema.Option(Schema.Number)
+}) {}
+
+/**
  * The status and headers of one redirect hop's response.
  *
  * **Details**
@@ -106,6 +179,33 @@ export type ServedBy = typeof ServedBy.Type
  * - `statusText` is the status line's reason phrase as the browser reports it, empty for HTTP/2 and later.
  * - `httpVersion` is the protocol as the browser names it, such as `http/1.1` or `h2`. It's `None` where the
  *   browser doesn't report it with the response, as WebKit doesn't: it reports it only when the response ends.
+ * - `serverAddress` is the IP address and port of the server that answered. It's `None` where the browser doesn't
+ *   report it with the response: WebKit reports it only when the response ends, and Firefox not at all.
+ * - `securityDetails` is the TLS connection and certificate of an HTTPS response. It's `None` for plain HTTP, and
+ *   where the browser doesn't report them: Firefox never does, and WebKit not for a redirect hop. WebKit's have no
+ *   `protocol`, which it reports only when the response ends.
+ *
+ * **Gotchas**
+ *
+ * - Code that builds or decodes a `NetworkResponse` itself supplies every field, `serverAddress` and
+ *   `securityDetails` included, as `Option.none()` where they aren't known.
+ *
+ * **Example** (Checking that a page came over TLS 1.3)
+ *
+ * ```ts import.meta.vitest
+ * import { NetworkResponse, Page } from "@usestrider/browser"
+ * import { Effect, Option } from "effect"
+ *
+ * const usesTls13 = Effect.fn("usesTls13")(function*(page: Page.Page) {
+ *   const document = yield* NetworkResponse.next(page, { url: "https://example.com/" })
+ *   yield* page.goto("https://example.com/")
+ *   const response = yield* document
+ *   return Option.exists(
+ *     Option.flatMap(response.securityDetails, (details) => details.protocol),
+ *     (protocol) => protocol === "TLS 1.3"
+ *   )
+ * })
+ * ```
  *
  * @stability unstable
  * @category models
@@ -117,6 +217,8 @@ export class NetworkResponse extends Schema.Class<NetworkResponse>("@usestrider/
   status: StatusCode,
   statusText: Schema.String,
   httpVersion: Schema.Option(Schema.String),
+  serverAddress: Schema.Option(ServerAddress),
+  securityDetails: Schema.Option(SecurityDetails),
   headers: Schema.Headers,
   servedBy: ServedBy,
   at: MonotonicInstant.MonotonicInstant
@@ -377,6 +479,13 @@ export const stream: {
 /**
  * Reads the responses the target's event log kept (`UserContext.Options.eventLog`), without their bodies; never
  * waits.
+ *
+ * **Details**
+ *
+ * An operation returns only after the events the browser sent before answering it have been handled, so what
+ * it caused is here once it returns, as far as the browser reported it by then and the log still keeps it.
+ * The exception is a target whose state is still being read, as when it has just attached or its events
+ * overflowed: its events reach the log once that read completes.
  *
  * **Example** (Listing the failed responses so far)
  *

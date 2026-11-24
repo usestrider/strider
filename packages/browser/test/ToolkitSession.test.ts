@@ -3,7 +3,7 @@
  * and the digest calls a page by the name it has as each line is noted.
  */
 import { assert, describe, it } from "@effect/vitest"
-import { Browser, Snapshot, Target } from "@usestrider/browser"
+import { Browser, Declaration, Dialog, Snapshot, Target } from "@usestrider/browser"
 import { CapturePolicy } from "@usestrider/browser/ai"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -469,6 +469,7 @@ describe("Session's digest", () => {
           Effect.sync(() =>
             Events.publish(channel, {
               navigation: Schema.decodeUnknownSync(PageNavigation.Id)(id),
+              page: page.id,
               frame: page.id,
               url: navigation.url,
               outcome: { _tag: "Committed" as const, document: navigation.document, response: Option.none() }
@@ -496,6 +497,7 @@ describe("Session's digest", () => {
         Effect.sync(() =>
           Events.publish(channel, {
             navigation: id(value),
+            page: page.id,
             frame: page.id,
             url,
             outcome: { _tag: "Committed" as const, document, response: Option.none() }
@@ -548,6 +550,7 @@ describe("Session's digest", () => {
           Effect.sync(() =>
             Events.publish(channel, {
               navigation: id(value),
+              page: page.id,
               frame: page.id,
               url,
               outcome: { _tag: "Committed" as const, document, response: Option.none() }
@@ -610,6 +613,7 @@ describe("Session's digest", () => {
       yield* TestClock.adjust("1 millis")
       Events.publish(Handles.page(page).entry.events.navigation, {
         navigation: id,
+        page: page.id,
         frame: page.id,
         url,
         outcome: { _tag: "Committed" as const, document, response: Option.none() }
@@ -656,6 +660,7 @@ describe("Session's digest", () => {
       const page = Option.getOrThrow(session.named("main"))
       Events.publish(Handles.page(page).entry.events.navigation, {
         navigation: id,
+        page: page.id,
         frame: page.id,
         url,
         outcome: { _tag: "Committed", document, response: Option.none() }
@@ -720,11 +725,87 @@ describe("Session's digest", () => {
       assert.includeMembers(lines, [
         "store navigated to https://example.test/cart",
         "popup p2 opened from store",
-        "dialog alert on store",
+        "dialog alert on store dismissed by policy",
         "store closed: PageClosed"
       ])
       assert.isFalse(lines.some((line) => /\b(p1|shop)\b/.test(line)), lines.join("\n"))
     }).pipe(Effect.scoped, Effect.provide(Browser.layerTest("-popup-dialog(alert)-|"))))
+})
+
+describe("Session's digest, dialogs", () => {
+  // One line for each dialog, naming what decided it: a registration by its handle, or the context's policy
+  const dialogLines = Effect.fnUntraced(function*(session: ToolkitImpl.Session) {
+    yield* TestClock.adjust("20 millis")
+    const lines: Array<string> = []
+    for (let turn = 0; turn < 20; turn++) {
+      yield* Effect.yieldNow
+      lines.push(...(yield* sinceLast(session)))
+    }
+    return lines.filter((line) => line.startsWith("dialog"))
+  })
+
+  it.effect("names the dialog registration that decided a dialog, in one line", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const page = yield* context.newPage
+      const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+      yield* session.name(page, "main")
+      yield* session.toolkit.handle("dialog", { page: "main", decision: "accept" }).pipe(
+        Effect.flatMap(Stream.runDrain)
+      )
+      assert.deepStrictEqual(yield* dialogLines(session), ["dialog confirm on main accepted by r1"])
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest("-dialog(confirm)"))))
+
+  it.effect("keeps the registration name when it is removed after choosing a decision", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const page = yield* context.newPage
+      const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+      yield* session.name(page, "main")
+      yield* session.toolkit.handle("dialog", { page: "main", decision: "accept" }).pipe(
+        Effect.flatMap(Stream.runDrain)
+      )
+      const registration = Handles.page(page).entry.state.getUnsafe().promptHandlers.at(-1)!
+        .registration as Declaration.HandlerRegistration
+      const removed = yield* registration.handled.waitFor((count) => count === 1).pipe(
+        Effect.andThen(session.remove("r1")),
+        Effect.forkChild
+      )
+      const lines = yield* dialogLines(session)
+      yield* Fiber.join(removed)
+      assert.deepStrictEqual(lines, ["dialog confirm on main accepted by r1"])
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest("-dialog(confirm)"))))
+
+  it.effect("reports a dialog the policy decided in one line", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const page = yield* context.newPage
+      const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+      yield* session.name(page, "main")
+      assert.deepStrictEqual(yield* dialogLines(session), ["dialog confirm on main dismissed by policy"])
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest("-dialog(confirm)"))))
+
+  it.effect("says a handler decided a dialog when no registration of the session did", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const page = yield* context.newPage
+      const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+      yield* session.name(page, "main")
+      yield* Dialog.handle(page, Dialog.acceptAll)
+      assert.deepStrictEqual(yield* dialogLines(session), ["dialog confirm on main accepted by a handler"])
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest("-dialog(confirm)"))))
+
+  it.effect("reports a dialog still open when a result takes it, and its decision as a line of its own", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const page = yield* context.newPage
+      const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+      yield* session.name(page, "main")
+      yield* Dialog.handle(page, (pending) => Effect.andThen(Effect.sleep("100 millis"), Dialog.dismissAll(pending)))
+      assert.deepStrictEqual(yield* dialogLines(session), ["dialog confirm on main, open"])
+      yield* TestClock.adjust("100 millis")
+      assert.deepStrictEqual(yield* dialogLines(session), ["dialog confirm on main dismissed by a handler"])
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest("-dialog(confirm)"))))
 })
 
 describe("Session.open", () => {
@@ -766,6 +847,7 @@ describe("Session press refusals", () => {
         const url = Schema.decodeUnknownSync(Url.Url)(`https://example.test/${key}`)
         Events.publish(Handles.page(page).entry.events.navigation, {
           navigation: Schema.decodeUnknownSync(PageNavigation.Id)(key),
+          page: page.id,
           frame: page.id,
           url,
           outcome: {
@@ -829,4 +911,117 @@ describe("Session press refusals", () => {
       }
       assert.strictEqual(prefixes[1], prefixes[0])
     }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+})
+
+/** A snapshot of a document holding the buttons named, each with a ref of its own. */
+const snapshotOf = (document: string, ...buttons: ReadonlyArray<string>) =>
+  new Snapshots.SnapshotImpl({
+    document: Schema.decodeUnknownSync(Target.DocumentId)(document),
+    generation: Schema.decodeUnknownSync(Snapshot.Generation)(1),
+    root: {
+      ref: Option.none(),
+      role: { _tag: "Aria", role: "document" },
+      name: { _tag: "None" },
+      states: new Set(),
+      validationMessage: Option.none(),
+      children: buttons.map((button, index) => ({
+        ref: Option.some(Schema.decodeUnknownSync(Snapshot.RefId)(`e${index + 1}`)),
+        role: { _tag: "Aria" as const, role: "button" },
+        name: { _tag: "Accessible" as const, value: button },
+        states: new Set(),
+        validationMessage: Option.none(),
+        children: []
+      }))
+    } as any,
+    text: document
+  })
+
+const found = (session: ToolkitImpl.Session, query: string) =>
+  Effect.map(
+    Effect.flatMap(session.toolkit.handle("find", { page: "main", query }), Stream.runLast),
+    (last) =>
+      (Option.getOrThrow(last).result as { readonly outcome: ReadonlyArray<{ readonly name: string }> })
+        .outcome.map((each) => each.name)
+  )
+
+describe("Session's find", () => {
+  it.effect("reads the page again after a find that came back empty, and keeps that as the latest", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+      const { page } = yield* session.open({ name: "main" })
+      let current = snapshotOf("document")
+      Object.defineProperty(page, "snapshot", { value: () => Effect.sync(() => current) })
+      assert.deepStrictEqual(yield* found(session, "Confirm"), [])
+      current = snapshotOf("document", "Confirm")
+      assert.deepStrictEqual(yield* found(session, "Confirm"), ["Confirm"])
+      assert.strictEqual(Option.getOrThrow(session.latest("main")), current)
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+
+  it.effect("after goto to another page, searches the new page, not the previous page's snapshot", () =>
+    Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+      const { page } = yield* session.open({ name: "main" })
+      const pages: Record<string, Snapshots.SnapshotImpl> = {
+        "https://example.test/one": snapshotOf("one", "First"),
+        "https://example.test/two": snapshotOf("two", "Second")
+      }
+      let at = "https://example.test/one"
+      Object.defineProperty(page, "snapshot", { value: () => Effect.sync(() => pages[at]!) })
+      Object.defineProperty(page, "goto", {
+        value: (url: string) =>
+          Effect.sync(() => {
+            at = url
+            return {
+              _tag: "Committed" as const,
+              id: Schema.decodeUnknownSync(PageNavigation.Id)(url),
+              frame: page.id,
+              url: Schema.decodeUnknownSync(Url.Url)(url),
+              document: Schema.decodeUnknownSync(Target.DocumentId)(url),
+              response: Option.none()
+            }
+          })
+      })
+      assert.deepStrictEqual(yield* found(session, "First"), ["First"])
+      yield* session.toolkit.handle("goto", { page: "main", url: "https://example.test/two" }).pipe(
+        Effect.flatMap(Stream.runDrain)
+      )
+      assert.deepStrictEqual(yield* found(session, "Second"), ["Second"])
+      assert.deepStrictEqual(yield* found(session, "First"), [])
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+})
+
+describe("Session's navigations", () => {
+  for (
+    const [given, expected] of [[undefined, "domContentLoaded"], ["commit", "commit"], ["load", "load"]] as const
+  ) {
+    it.effect(`goto waits for ${expected} when waitUntil is ${given ?? "not given"}`, () =>
+      Effect.gen(function*() {
+        const context = yield* Browser.newContext()
+        const session = yield* ToolkitImpl.makeSession({ context, secrets: {}, capture: CapturePolicy.local })
+        const { page } = yield* session.open({ name: "main" })
+        const asked: Array<unknown> = []
+        Object.defineProperty(page, "goto", {
+          value: (url: string, options?: { readonly waitUntil?: string }) =>
+            Effect.sync(() => {
+              asked.push(options?.waitUntil)
+              return {
+                _tag: "Committed" as const,
+                id: Schema.decodeUnknownSync(PageNavigation.Id)("own"),
+                frame: page.id,
+                url: Schema.decodeUnknownSync(Url.Url)(url),
+                document: Schema.decodeUnknownSync(Target.DocumentId)("document"),
+                response: Option.none()
+              }
+            })
+        })
+        yield* session.toolkit.handle("goto", {
+          page: "main",
+          url: "https://example.test/",
+          ...(given === undefined ? {} : { waitUntil: given })
+        } as any).pipe(Effect.flatMap(Stream.runDrain))
+        assert.deepStrictEqual(asked, [expected])
+      }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+  }
 })

@@ -14,10 +14,46 @@ import type { ContextEntry, DocumentEntry, NavigableEntry, NavigationEntry, Real
 
 // ── Ending things ─────────────────────────────────────────────────────────────────────────────────────────
 
-/** Releases only the reservation owned by the pending restoration. */
+/**
+ * The id a navigable not yet known will take, so a popup listed before its opener can name it, held for as long as
+ * a popup that names it is open.
+ */
+const reserveId = (state: State, context: string, popup: L1Target.NavigableId): L1Target.NavigableId => {
+  const known = state.reservedIds.get(context)
+  if (known !== undefined) {
+    known.popups.add(popup)
+    return known.id
+  }
+  const id = state.ids.navigable()
+  state.reservedIds.set(context, { id, popups: new Set([popup]) })
+  return id
+}
+
+/** Releases the ids a removed popup held for an opener that never came. */
+const releaseReserved = (state: State, popup: L1Target.NavigableId) => {
+  for (const [context, reserved] of state.reservedIds) {
+    reserved.popups.delete(popup)
+    if (reserved.popups.size === 0) state.reservedIds.delete(context)
+  }
+}
+
+/**
+ * Cancels the pending restoration: releases only the reservation it owns, and marks the navigable ambiguous, since
+ * the cancelled traversal may still produce a realm that a later traversal could not tell from its own.
+ */
 export const cancelRestoration = (navigable: NavigableEntry) => {
   if (navigable.restoring === undefined) return
   navigable.restorationAmbiguous = true
+  finishRestoration(navigable)
+}
+
+/**
+ * Releases the pending restoration's reservation without marking the navigable ambiguous: for a restoration whose
+ * own navigation ended in the same document, which has no realm left to produce. Every other ending cancels it, since
+ * a failed navigation's error page may still commit.
+ */
+const finishRestoration = (navigable: NavigableEntry) => {
+  if (navigable.restoring === undefined) return
   Kit.unexpect(navigable.expected, navigable.restoring.navigation)
   navigable.restoring = undefined
 }
@@ -43,7 +79,10 @@ export const endNavigation = (
   evidence: string
 ) =>
   Kit.endNavigation(state.buffer, navigation, outcome, evidence, (navigation) => {
-    if (navigation.navigable.restoring?.navigation === navigation.id) cancelRestoration(navigation.navigable)
+    if (navigation.navigable.restoring?.navigation === navigation.id) {
+      if (outcome._tag === "SameDocument") finishRestoration(navigation.navigable)
+      else cancelRestoration(navigation.navigable)
+    }
     if (outcome._tag === "Failed" && Option.isNone(outcome.errorDocument)) {
       navigation.navigable.failedNavigation = {
         id: navigation.id,
@@ -97,6 +136,8 @@ export const removeNavigable = (
     navigable.navigations.clear()
     state.navigables.delete(navigable.bidi)
     state.navigablesById.delete(navigable.id)
+    state.mouseCapture.delete(navigable.id)
+    state.touchCapture.delete(navigable.id)
     if (navigable.document !== undefined) {
       for (const realm of Array.from(navigable.document.realms)) removeRealm(state, realm, reason)
       state.documents.delete(navigable.document.id)
@@ -106,6 +147,7 @@ export const removeNavigable = (
       if (realm.navigable === navigable) removeRealm(state, realm, reason)
     }
     if (navigable.parent !== undefined) return
+    releaseReserved(state, navigable.id)
     state.endedPages.set(navigable.id, reason)
     for (const [id, obligation] of state.obligations) {
       if (obligation._tag !== "PausedRequest" && state.navigables.get(obligation.context) === undefined) {
@@ -269,9 +311,11 @@ export const addNavigable = (state: State, info: {
   if (info.parent !== null && info.parent !== undefined && parent === undefined) return undefined
   const context = contextFor(state, info.userContext)
   context.proxyUsed = true
+  const reserved = state.reservedIds.get(info.context)
+  state.reservedIds.delete(info.context)
   const navigable: NavigableEntry = {
     bidi: info.context,
-    id: state.ids.navigable(),
+    id: reserved?.id ?? state.ids.navigable(),
     parent,
     children: new Set(),
     context,
@@ -298,8 +342,11 @@ export const addNavigable = (state: State, info: {
   state.navigables.set(info.context, navigable)
   state.navigablesById.set(navigable.id, navigable)
   if (parent === undefined) {
-    const opener = info.originalOpener === null ? undefined : state.navigables.get(info.originalOpener)
-    const openerId = Option.fromUndefinedOr(opener?.page.id)
+    const openerId = info.originalOpener === null
+      ? Option.none<L1Target.NavigableId>()
+      : Option.some(
+        state.navigables.get(info.originalOpener)?.page.id ?? reserveId(state, info.originalOpener, navigable.id)
+      )
     state.buffer.emit({
       _tag: "PageAdded",
       page: navigable.id,
@@ -338,7 +385,23 @@ export const reconcile = (state: State, tree: BrowsingContext.GetTreeResult) => 
     addNavigable(state, info, true)
     for (const child of info.children ?? []) visit(child)
   }
-  for (const info of tree.contexts) visit(info)
+  // The tree each context is in, so a popup listed before the page or frame that opened it is added after that
+  // page's tree, and names its page
+  const trees = new Map<string, BrowsingContext.Info>()
+  const index = (info: BrowsingContext.Info, top: BrowsingContext.Info) => {
+    trees.set(info.context, top)
+    for (const child of info.children ?? []) index(child, top)
+  }
+  for (const info of tree.contexts) index(info, info)
+  const ordered = new Set<BrowsingContext.Info>()
+  const visitTree = (top: BrowsingContext.Info) => {
+    if (ordered.has(top)) return
+    ordered.add(top)
+    const opener = top.originalOpener === null ? undefined : trees.get(top.originalOpener)
+    if (opener !== undefined) visitTree(opener)
+    visit(top)
+  }
+  for (const info of tree.contexts) visitTree(info)
   for (const navigable of Array.from(state.navigables.values())) {
     if (navigable.parent === undefined && !seen.has(navigable.bidi)) {
       removeNavigable(state, navigable, new L1Target.ModelUnavailable({}), "bidi:browsingContext.getTree")

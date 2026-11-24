@@ -192,8 +192,10 @@ export const connect: (
         "stock WebKit's inspector reports a traversal under the old document's URL, with no realm (QUIRKS.md, Q215)"
       ),
       realm: (document, world) => Evaluation.realmFor(state, document, world),
+      settled: (id) => Evaluation.settled(state, id),
       evaluate: (realm, call) => Evaluation.evaluate(state, realm, call),
       releaseHandles: (list) => Evaluation.releaseHandles(state, list),
+      textInsertion: "native",
       dispatchInput: refuse("input.native", "stock WebKit's inspector protocol has no Input domain"),
       resolve: (obligation, decision) => Obligations.resolve(state, obligation, decision),
       declare: (scope, declaration) => Declare.declare(state, scope, declaration),
@@ -248,6 +250,7 @@ export const connect: (
       closePage: (id, options) => Automation.closePageLaunched(state, id, options),
       activatePage: (id) => Automation.activatePageLaunched(state, id),
       navigate: (id, url, options) => Automation.navigateLaunched(state, id, url, options),
+      textInsertion: "editingCommand",
       dispatchInput: (page, events) => Input.dispatchInputLaunched(state, page, events),
       cookies: (context) => Storage.cookiesLaunched(state, context),
       setCookies: (context, list) => Storage.setCookiesLaunched(state, context, list),

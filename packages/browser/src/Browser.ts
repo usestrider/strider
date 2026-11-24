@@ -218,6 +218,38 @@ export interface Browser {
    * The browser's default context; fixed, because it exists for the whole connection.
    */
   readonly defaultContext: UserContext.ObservedUserContext
+  /**
+   * Every context of the browser, kept up to date as contexts open and close: the default context first, then the
+   * others in the order they were added. A context this connection created is the `UserContext` that `newContext`
+   * returned. Any other is an observed context, the same one each time, whose `control` gives access for a scope.
+   * The list holds contexts only; each context's `pages` lists its pages.
+   *
+   * **Details**
+   *
+   * Connecting to a running browser lists the contexts it already has, even empty ones, on Chromium and Firefox.
+   * On stock WebKit, a context someone else created is listed once a page opens in it.
+   *
+   * **Gotchas**
+   *
+   * No browser announces a context another client creates after this connection is made: it is listed once a page
+   * opens in it. On Chromium, a context another client removes stays listed until the connection ends, though its
+   * pages close.
+   *
+   * **Example** (Counting the contexts)
+   *
+   * ```ts import.meta.vitest
+   * import { Browser } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const count = Effect.gen(function*() {
+   *   const browser = yield* Browser.Browser
+   *   yield* Browser.newContext()
+   *   const contexts = yield* browser.contexts
+   *   return contexts.length
+   * })
+   * ```
+   */
+  readonly contexts: Watchable.Watchable<ReadonlyArray<UserContext.ObservedUserContext>>
 }
 
 /**
@@ -323,6 +355,22 @@ export interface LaunchOptions {
   /**
    * Run without a visible window. WebKit has no headless mode, so `true` fails there with `InvalidInput`.
    *
+   * **Details**
+   *
+   * A headless browser has no pointing device of its own, so a headless launch of Chromium or Firefox tells its
+   * pages it has a fine pointer that can hover: they match `(hover: hover)` and `(pointer: fine)`, as they would
+   * with a mouse. This holds whatever the profile. A launch with a window reports the machine's own devices.
+   *
+   * **Gotchas**
+   *
+   * On Chromium, an argument of your own that sets `--blink-settings` replaces the launch's, and on Firefox a
+   * profile that sets `ui.primaryPointerCapabilities` or `ui.allPointerCapabilities` keeps its value. On Chromium, a
+   * context that emulates a mobile device with touch matches `(hover: none)` and `(pointer: coarse)` instead.
+   *
+   * In a `userDataDir` you keep, Firefox saves the preferences a launch writes, these two pointer preferences
+   * included, into the directory's `prefs.js`, so a later launch in that directory keeps them, a launch with a
+   * window too.
+   *
    * @default true, except on WebKit, which opens a window
    */
   readonly headless?: boolean | undefined
@@ -343,6 +391,12 @@ export interface LaunchOptions {
    * share one. On WebKit, it's the default context's only. Closing `Chromium.layer` or `Firefox.layer` closes the
    * browser it launched cleanly to preserve recent writes to this profile, stopping it if it does not exit within
    * five seconds.
+   *
+   * **Gotchas**
+   *
+   * Firefox saves the preferences a launch writes, from its launch profile and, when headless, the pointer
+   * preferences `ui.primaryPointerCapabilities` and `ui.allPointerCapabilities`, into this directory's `prefs.js`. A
+   * later launch in the same directory keeps them, even one that doesn't write them, such as a launch with a window.
    *
    * @default a temporary profile, deleted after the browser exits
    */

@@ -21,6 +21,7 @@ import * as Scope from "effect/Scope"
 import type * as Semaphore from "effect/Semaphore"
 import type * as BrowserWorker from "../BrowserWorker.ts"
 import type * as ConsoleMessage from "../ConsoleMessage.ts"
+import type * as Declaration from "../Declaration.ts"
 import type * as Download from "../Download.ts"
 import type * as Keyboard from "../Keyboard.ts"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
@@ -28,6 +29,7 @@ import type * as NetworkConnection from "../NetworkConnection.ts"
 import type * as NetworkRequest from "../NetworkRequest.ts"
 import type * as NetworkResponse from "../NetworkResponse.ts"
 import type * as Page from "../Page.ts"
+import type * as PageLifecycle from "../PageLifecycle.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
 import * as Target from "../Target.ts"
 import type * as UncaughtException from "../UncaughtException.ts"
@@ -35,6 +37,7 @@ import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
 import type * as Adapter from "./adapter.ts"
 import * as BoundedAdapter from "./boundedAdapter.ts"
+import * as ConsoleArguments from "./consoleArguments.ts"
 import type * as Events from "./events.ts"
 import * as Fold from "./fold.ts"
 import type * as Input from "./input.ts"
@@ -98,8 +101,19 @@ export type AutoResolutionEvent =
     readonly at: MonotonicInstant.MonotonicInstant
   }
 
+/** A dialog a handler decided, once the browser applied its decision. */
+export interface HandledPromptEvent {
+  readonly prompt: PromptEvent
+  readonly decision: Adapter.Decision
+  /** The registration whose handler decided it. */
+  readonly registration: Declaration.Registration
+  readonly at: MonotonicInstant.MonotonicInstant
+}
+
 /** A registered handler, as the model asks it: `Dialog.handle` or `FileChooser.handle`. */
 export interface Handler<A> {
+  /** The registration `handle` returned for it. */
+  readonly registration: Declaration.Registration
   /**
    * Asks the handler, in its own scope, with its own budget: `None` when it failed, was interrupted or ran
    * out of time, so the policy decides.
@@ -128,6 +142,8 @@ export interface RouteEntry {
 /** A navigation of a page, when it ended. */
 export interface NavigationEvent {
   readonly navigation: PageNavigation.Id
+  /** The page it happened in. */
+  readonly page: Target.NavigableId
   /** The navigable it happened in: the page's own id, or a frame's. */
   readonly frame: Target.NavigableId
   /** Where it ended: the committed document's URL, or the one a same-document navigation set; else where it was going. */
@@ -146,6 +162,10 @@ export type HopEnd =
     readonly at: MonotonicInstant.MonotonicInstant
     /** The protocol, where the backend says it only now (WebKit). */
     readonly httpVersion: Option.Option<string>
+    /** The server's address, where the backend says it only now (WebKit). */
+    readonly serverAddress: Option.Option<NetworkResponse.ServerAddress>
+    /** The TLS version, where the backend says it only now (WebKit). */
+    readonly securityProtocol: Option.Option<string>
   }
   | {
     readonly _tag: "Failed"
@@ -189,6 +209,12 @@ export interface ResponseEvent {
   readonly hop: HopEntry
 }
 
+/** A hop's end as the browser reported it: never `Forgotten`, nor a failure connection teardown made up. */
+export interface RequestEndEvent {
+  readonly hop: HopEntry
+  readonly end: Exclude<HopEnd, { readonly _tag: "Forgotten" }>
+}
+
 /** A download's progress, and where the browser wrote it once it completed. */
 export interface DownloadState {
   readonly status: Download.Status
@@ -230,11 +256,15 @@ export interface ConnectionEntry {
 export interface PageEvents {
   readonly popup: Events.Channel<PopupEvent>
   readonly dialog: Events.Channel<PromptEvent>
+  /** Dialogs a handler decided; the policy's decisions are `autoResolution`'s. */
+  readonly handledDialog: Events.Channel<HandledPromptEvent>
   readonly fileChooser: Events.Channel<FileChooserEvent>
   readonly autoResolution: Events.Channel<AutoResolutionEvent>
   readonly navigation: Events.Channel<NavigationEvent>
+  readonly lifecycle: Events.Channel<PageLifecycle.PageLifecycle>
   readonly request: Events.Channel<NetworkRequest.NetworkRequest>
   readonly response: Events.Channel<ResponseEvent>
+  readonly requestEnd: Events.Channel<RequestEndEvent>
   readonly console: Events.Channel<ConsoleMessage.ConsoleMessage>
   readonly exception: Events.Channel<UncaughtException.UncaughtException>
   readonly download: Events.Channel<DownloadEntry>
@@ -245,8 +275,11 @@ export interface PageEvents {
 /** The events of a context: the kinds its modules take a context for. */
 export interface ContextEvents {
   readonly autoResolution: Events.Channel<AutoResolutionEvent>
+  readonly navigation: Events.Channel<NavigationEvent>
+  readonly lifecycle: Events.Channel<PageLifecycle.PageLifecycle>
   readonly request: Events.Channel<NetworkRequest.NetworkRequest>
   readonly response: Events.Channel<ResponseEvent>
+  readonly requestEnd: Events.Channel<RequestEndEvent>
   readonly console: Events.Channel<ConsoleMessage.ConsoleMessage>
   readonly exception: Events.Channel<UncaughtException.UncaughtException>
   readonly download: Events.Channel<DownloadEntry>
@@ -305,6 +338,17 @@ export interface PageEntry {
    */
   readonly inputState: Input.State
   readonly events: PageEvents
+  /**
+   * The id of the page, or of the frame, the backend says opened this one, which can name a page or frame the model
+   * doesn't have yet; `None` when it names none.
+   */
+  readonly openerId: Option.Option<Target.NavigableId>
+  /**
+   * The opener's page, once the model has it, or the page of the frame that opened this one: an adopted page can
+   * be listed before its opener, so this is set when the opener's page or frame is added, and kept after it ends,
+   * so a crashed opener stays readable.
+   */
+  opener: PageEntry | undefined
 }
 
 /** A context's settings, from the options it was created with (`UserContext.Options`). */
@@ -322,6 +366,8 @@ export interface ContextSettings {
   readonly eventLog: number
   /** The layout its pages' keyboards type with (`UserContext.Options.keyboardLayout`). */
   readonly keyboardLayout: Keyboard.Layout
+  /** The attribute its pages' `getByTestId` matches (`UserContext.Options.testIdAttribute`). */
+  readonly testIdAttribute: string
 }
 
 /** Permissions granted to a context, for an origin or every one, until the grant's scope closes. */
@@ -349,6 +395,8 @@ export interface StorageSourceObserver {
 }
 
 export interface ContextEntry {
+  /** Created by this connection and not yet handed out: `browser.contexts` leaves it out until it has its handle. */
+  awaitingHandle?: boolean | undefined
   storageReplacing?: boolean | undefined
   storageSources?: StorageSourceObserver | undefined
   timings?: Map<NetworkRequest.HopId, NetworkRequest.Timing> | undefined
@@ -396,11 +444,17 @@ export interface Model {
   readonly scope: Scope.Scope
   /** The adapter, its calls bounded by the operation they run in (`boundedAdapter.ts`). */
   readonly adapter: BoundedAdapter.Bounded
+  /** The console arguments kept for subscriptions to calls, and their claims. */
+  readonly consoleArguments: ConsoleArguments.Table
 
   // ── Reads: entities by id, and the state they hold ──
 
   /** Every page of the browser, in the order they were added. */
   readonly pages: Readable<ReadonlyArray<PageEntry>>
+  /** Every context of the browser, in the order they were added, until it is removed or the connection is lost. */
+  readonly contexts: Readable<ReadonlyArray<ContextEntry>>
+  /** Announces `contexts` again, unchanged, once a context has its handle. */
+  readonly touchContexts: Effect.Effect<void>
   /** A page the model keeps, by id. */
   readonly page: (id: Target.NavigableId) => Option.Option<PageEntry>
   /** A document the model keeps, by id, until it ends. */
@@ -418,6 +472,11 @@ export interface Model {
 
   /** A context's entry, made now if its fact hasn't arrived yet, as when its creation's reply comes first. */
   readonly context: (id: UserContext.Id) => Effect.Effect<ContextEntry>
+  /**
+   * A context this connection's `createUserContext` just made: when the reply comes before the browser's report, the
+   * entry is made here, marked as awaiting its handle, as the report would have made it.
+   */
+  readonly createdContext: (id: UserContext.Id) => Effect.Effect<ContextEntry>
   /** Sets a context's settings, as the library creates it. */
   readonly configure: (context: ContextEntry, settings: ContextSettings) => Effect.Effect<void>
   /** Observes storage sources only within the requesting context's scope. */
@@ -482,7 +541,8 @@ export const maxHops = Fold.maxHops
 export const make = Effect.fnUntraced(function*() {
   const modelScope = yield* Effect.scope
   const ownership = yield* Ownership.make()
-  const fold = yield* Fold.make({ release: ownership.release })
+  const consoleArguments = ConsoleArguments.make()
+  const fold = yield* Fold.make({ release: ownership.release, consoleArguments })
   // Runs after the browser's own finalizers, which close it, and after the watcher of its connection is gone: what
   // is still open, such as a context or page held past the browser's scope, ends with the browser
   yield* Effect.addFinalizer(() => fold.loseConnection(new Target.BrowserClosed({})))
@@ -493,7 +553,15 @@ export const make = Effect.fnUntraced(function*() {
   const attach = (connected: Adapter.AdapterConnection): Effect.Effect<Model, never, Scope.Scope> =>
     Effect.gen(function*() {
       attached = connected
-      const bounded = BoundedAdapter.make(connected)
+      const bounded = BoundedAdapter.make({
+        ...connected,
+        // A removal that fails releases a context still being created, such as one a late cleanup removes after
+        // its creator's deadline: it is listed as observed rather than hidden
+        removeUserContext: (id) =>
+          connected.removeUserContext(id).pipe(
+            Effect.onError(() => fold.sink({ _tag: "UserContextReleased", context: id }))
+          )
+      })
       yield* ownership.attach(connected, bounded.claims)
       yield* connected.closed.pipe(
         Effect.andThen(fold.loseConnection(new Target.ConnectionLost({}))),
@@ -507,7 +575,10 @@ export const make = Effect.fnUntraced(function*() {
       const model: Model = {
         scope: modelScope,
         adapter: bounded,
+        consoleArguments,
         pages: fold.pages,
+        contexts: fold.contexts,
+        touchContexts: fold.touchContexts,
         page: fold.page,
         document: fold.document,
         documentOf: fold.documentOf,
@@ -515,6 +586,7 @@ export const make = Effect.fnUntraced(function*() {
         hop: fold.hop,
         lost: fold.lost,
         context: (id) => fold.context(id, false),
+        createdContext: (id) => fold.context(id, false, true),
         configure: fold.configure,
         observeStorageSources: fold.observeStorageSources,
         navigation: fold.navigation,

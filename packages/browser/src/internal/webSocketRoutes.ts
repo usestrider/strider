@@ -651,7 +651,7 @@ export const register = <E, R>(
         } else if (envelope.type === "fault") yield* terminate(connection, envelope.reason ?? "routing failed")
       }
     )
-    const bridge: Adapter.WebSocketBridge = {
+    const bridge: Adapter.HostBridge = {
       name,
       token,
       scope: bridgeScope,
@@ -849,7 +849,7 @@ export const register = <E, R>(
         workers: options.workers ?? false,
         timing: options.timing ?? "beforeAuthorScript",
         after: [],
-        webSocket: bridge
+        hostBridge: bridge
       }).pipe(Scope.provide(bridgeScope), Effect.mapError(mapped))
       // Install into already loaded documents as well as future ones. Existing sockets remain native.
       const current = yield* entry.state.get

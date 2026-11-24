@@ -19,7 +19,7 @@ import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as TestClock from "effect/testing/TestClock"
-import type * as BrowsingContext from "../src/bidi-protocol/BrowsingContext.ts"
+import * as BrowsingContext from "../src/bidi-protocol/BrowsingContext.ts"
 import * as Script from "../src/bidi-protocol/Script.ts"
 import * as Deadline from "../src/Deadline.ts"
 import type * as Adapter from "../src/internal/adapter.ts"
@@ -28,12 +28,12 @@ import * as Capture from "../src/internal/bidiAdapter/capture.ts"
 import * as Contexts from "../src/internal/bidiAdapter/contexts.ts"
 import * as Declare from "../src/internal/bidiAdapter/declare.ts"
 import * as Evaluation from "../src/internal/bidiAdapter/evaluation.ts"
+import * as HostBridge from "../src/internal/bidiAdapter/hostBridge.ts"
 import * as Navigation from "../src/internal/bidiAdapter/navigation.ts"
 import * as Network from "../src/internal/bidiAdapter/network.ts"
 import * as Obligations from "../src/internal/bidiAdapter/obligations.ts"
 import * as State from "../src/internal/bidiAdapter/state.ts"
 import * as Tree from "../src/internal/bidiAdapter/tree.ts"
-import * as WebSocketBridge from "../src/internal/bidiAdapter/webSocketBridge.ts"
 import * as BidiWire from "../src/internal/bidiWire.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as Fold from "../src/internal/fold.ts"
@@ -473,6 +473,41 @@ describe("BidiAdapter state", () => {
         assert.notStrictEqual(starts[0]!.initiatedAs, "traversal")
         assert.isEmpty(page.expected.list)
         assert.isUndefined(page.restoring)
+      }))
+  }
+
+  for (const event of ["historyUpdated", "fragmentNavigated"] as const) {
+    it.effect(`correlates two consecutive same-document traversals through ${event}`, () =>
+      Effect.gen(function*() {
+        const urls = ["about:blank#first", "about:blank#second"]
+        let step = 0
+        const { facts, page, state } = yield* withPage({
+          // Each traversal's own event arrives before its reply, as Firefox sends them.
+          "browsingContext.traverseHistory": Effect.sync(() => {
+            handlers.apply(
+              `browsingContext.${event}`,
+              { context: page.bidi, url: urls[step++]!, timestamp: step },
+              { state }
+            )
+            return {}
+          })
+        })
+        const handlers = Navigation.register(Kit.handlers<State.Event>())
+        const first = yield* Navigation.traverse(state, page.id, -1)
+        const second = yield* Navigation.traverse(state, page.id, -1)
+        yield* state.buffer.flush
+        assert(Option.isSome(first) && Option.isSome(second))
+        for (const [index, traversal] of [first.value, second.value].entries()) {
+          const ends = facts.filter((fact) => fact._tag === "NavigationEnded" && fact.navigation === traversal)
+          assert.lengthOf(ends, 1, `traversal ${index + 1} ended under its own id`)
+          assert.deepStrictEqual(ends[0]!._tag === "NavigationEnded" && ends[0]!.outcome, {
+            _tag: "SameDocument",
+            document: page.document!.id,
+            via: event === "fragmentNavigated" ? "fragment" : "historyApi"
+          })
+        }
+        assert.strictEqual(page.document!.url, urls[1])
+        assert.isEmpty(page.expected.list)
       }))
   }
 
@@ -1319,6 +1354,55 @@ describe("BidiAdapter state", () => {
         facts.filter((fact) => fact._tag === "NavigationStarted" && fact.navigation === navigation.value),
         0,
         "the second traversal must not claim a realm the announced one may own"
+      )
+    }))
+
+  it.effect("does not give a failed traversal's pending error realm to the next traversal", () =>
+    Effect.gen(function*() {
+      // Synthetic ordering: failure can precede an error document's realm and commit. A second command
+      // does not establish that a pending realm belongs to it rather than that failed navigation.
+      const url = "http://failed.example/"
+      const errorUrl = "about:neterror?e=dnsNotFound&u=http%3A//failed.example/"
+      let calls = 0
+      const { facts, page, state } = yield* withPage({
+        "browsingContext.traverseHistory": Effect.sync(() => {
+          if (calls++ === 0) {
+            handlers.apply("browsingContext.navigationStarted", {
+              context: page.bidi,
+              navigation: "failed",
+              url,
+              timestamp: 1
+            }, { state })
+            handlers.apply("browsingContext.navigationFailed", {
+              context: page.bidi,
+              navigation: "failed",
+              url,
+              timestamp: 2
+            }, { state })
+          } else {
+            handlers.apply("script.realmCreated", {
+              realm: "error-realm",
+              context: page.bidi,
+              type: "window",
+              origin: "null"
+            }, { state })
+          }
+          return {}
+        }),
+        "script.evaluate": { type: "success", realm: "error-realm", result: { type: "string", value: errorUrl } }
+      })
+      const handlers = Evaluation.register(Navigation.register(Kit.handlers<State.Event>()))
+      const first = yield* Navigation.traverse(state, page.id, -1)
+      const second = yield* Navigation.traverse(state, page.id, -1)
+      assert(Option.isSome(first) && Option.isSome(second))
+      yield* state.buffer.flush
+      const failed = facts.filter((fact) => fact._tag === "NavigationEnded" && fact.navigation === first.value)
+      assert.lengthOf(failed, 1)
+      assert(failed[0]!._tag === "NavigationEnded" && failed[0]!.outcome._tag === "Failed")
+      assert.lengthOf(
+        facts.filter((fact) => fact._tag === "NavigationEnded" && fact.navigation === second.value),
+        0,
+        "a failed navigation's error realm cannot prove the next traversal committed"
       )
     }))
 
@@ -3597,6 +3681,7 @@ it.effect("removes a context's proxy auth interceptor and attempts, retaining on
     })
     const id = yield* Contexts.createUserContext(state, {
       proxy: Option.some({
+        scheme: "http",
         server: "proxy.test:8080",
         bypass: [],
         credentials: { username: "user", password: Redacted.make("fixture-password") }
@@ -3615,7 +3700,7 @@ it.effect("removes a context's proxy auth interceptor and attempts, retaining on
         (command.params as { intercept: string }).intercept === "proxy-intercept"
       )
     )
-    assert.isTrue(state.proxyBindings.has("proxy.test:8080"))
+    assert.isTrue(state.proxyBindings.has("http://proxy.test:8080"))
     State.releaseProxy(state)
     assert.strictEqual(state.proxyBindings.size, 0)
   }))
@@ -3638,6 +3723,7 @@ it.effect("releases a Firefox proxy credential binding when its context is never
     const create = (password: string) =>
       Contexts.createUserContext(state, {
         proxy: Option.some({
+          scheme: "http",
           server: "proxy.test:8080",
           bypass: [],
           credentials: { username: "user", password: Redacted.make(password) }
@@ -3668,6 +3754,7 @@ for (const configured of [true, false]) {
       const { state, page, commands, facts } = yield* withPage()
       if (configured) {
         page.context.proxy = {
+          scheme: "http",
           server: "proxy.test:8080",
           bypass: [],
           credentials: { username: "proxy-user", password: Redacted.make("proxy-password") }
@@ -3775,6 +3862,7 @@ for (
     Effect.gen(function*() {
       const { state, page, commands, facts } = yield* withPage()
       page.context.proxy = {
+        scheme: "http",
         server: "proxy.test:8080",
         bypass: [],
         credentials: { username: "proxy-user", password: Redacted.make("proxy-secret") }
@@ -3839,6 +3927,7 @@ for (
 describe("Firefox proxy reservation lifetime", () => {
   const options = (password: string): Adapter.UserContextOptions => ({
     proxy: Option.some({
+      scheme: "http",
       server: "proxy.test:8080",
       bypass: [],
       credentials: { username: "user", password: Redacted.make(password) }
@@ -3991,6 +4080,7 @@ for (const kind of ["InvalidArgument", "Encode", "Decode", "Unrecognized"] as co
       const create = (password: string) =>
         Contexts.createUserContext(state, {
           proxy: Option.some({
+            scheme: "http",
             server: "proxy.test:8080",
             bypass: [],
             credentials: { username: "user", password: Redacted.make(password) }
@@ -4690,7 +4780,7 @@ it.effect("passes a closing page's reason to the WebSocket bridge after the real
     state = fixture.state
     const received = yield* Deferred.make<void>()
     const ended = yield* Deferred.make<Target.CloseReason | undefined>()
-    const bridge: Adapter.WebSocketBridge = {
+    const bridge: Adapter.HostBridge = {
       name: "test-channel",
       token: "test-token",
       scope: yield* Effect.scope,
@@ -4704,7 +4794,7 @@ it.effect("passes a closing page's reason to the WebSocket bridge after the real
       },
       failed: () => {}
     }
-    const preparing = yield* WebSocketBridge.prepare(state, { _tag: "Browser" }, bridge).pipe(Effect.forkChild)
+    const preparing = yield* HostBridge.prepare(state, { _tag: "Browser" }, bridge).pipe(Effect.forkChild)
     const command = yield* browser.next
     yield* browser.receive({
       type: "success",
@@ -4732,3 +4822,418 @@ it.effect("passes a closing page's reason to the WebSocket bridge after the real
     assert.isFalse(state.realms.has(fixture.realm.bidi))
     assert.deepStrictEqual(reason, new Target.PageClosed({ by: "command" }))
   }))
+
+it.effect("does not retain a preload removed before its reply timed out", () =>
+  Effect.gen(function*() {
+    const clock = yield* Clock.Clock
+    const browser = yield* makeBrowser
+    const client = yield* ProtocolClient.make(browser.transport, BidiWire.wire, { replyClock: clock })
+    const { state } = yield* withPage({}, {}, client.root)
+    const native = new Set<string>()
+    const removed = yield* Deferred.make<void>()
+    let serial = 0
+    let hold = false
+    yield* Effect.gen(function*() {
+      while (true) {
+        const command = yield* browser.next
+        if (command.method === "script.addPreloadScript") {
+          const script = `P${++serial}`
+          native.add(script)
+          yield* browser.receive({ type: "success", id: command.id, result: { script } })
+        } else if (command.method === "script.removePreloadScript") {
+          const existed = native.delete(command.params?.script as string)
+          if (hold) {
+            hold = false
+            yield* Deferred.succeed(removed, undefined)
+            continue
+          }
+          yield* browser.receive(
+            existed
+              ? { type: "success", id: command.id, result: {} }
+              : { type: "error", id: command.id, error: "no such script", message: "Script not found" }
+          )
+        }
+      }
+    }).pipe(Effect.forkScoped)
+    yield* Declare.declare(state, { _tag: "Browser" }, preload("first"))
+    hold = true
+    const replacing = yield* Declare.declare(state, { _tag: "Browser" }, preload("second")).pipe(Effect.forkChild)
+    yield* Deferred.await(removed)
+    yield* TestClock.adjust("5 seconds")
+    yield* Fiber.join(replacing)
+    assert.deepStrictEqual(state.preloads.map(({ script }) => script).sort(), [...native].sort())
+    // The next reconciliation asks again, and Firefox's "no such script" settles the removal.
+    yield* Declare.declare(state, { _tag: "Browser" }, preload("third"))
+    assert.deepStrictEqual(state.preloads.map(({ script }) => script).sort(), [...native].sort())
+    assert.deepStrictEqual(state.unconfirmedPreloads, [])
+  }).pipe(Effect.provideServiceEffect(BrowserClock.CurrentClock, Effect.map(Clock.Clock, BrowserClock.fromClock))))
+
+describe("BiDi frame removal without contextDestroyed", () => {
+  const evaluated = { type: "success", realm: "PR", result: { type: "number", value: 0 } }
+  const tree = (children: ReadonlyArray<string>) => ({
+    contexts: [{
+      context: "C1",
+      url: "http://127.0.0.1/",
+      userContext: "default",
+      originalOpener: null,
+      clientWindow: "W1",
+      parent: null,
+      children: children.map((context) => ({
+        context,
+        url: "http://localhost/child",
+        userContext: "default",
+        originalOpener: null,
+        clientWindow: "W1",
+        children: null
+      }))
+    }]
+  })
+  // Lets the probe the fold started run to its end
+  const settle = Effect.forEach(Array.from({ length: 20 }), () => Effect.yieldNow, { discard: true })
+
+  // The recorded failure: a cross-site iframe is removed, its window and sandbox realms end, and Firefox's
+  // `browsingContext.contextDestroyed` for it never comes
+  const withFrame = Effect.fnUntraced(function*(
+    replies: Readonly<Record<string, unknown>>,
+    failures: Readonly<Record<string, () => Protocol.ProtocolError>> = {}
+  ) {
+    const setup = yield* withPage(replies, failures)
+    const frame = Tree.addNavigable(setup.state, {
+      context: "F1" as BrowsingContext.BrowsingContext,
+      parent: "C1" as BrowsingContext.BrowsingContext,
+      userContext: "default",
+      originalOpener: null,
+      url: "about:blank"
+    }, false)!
+    const handlers = Contexts.register(Evaluation.register(Kit.handlers<State.Event>()))
+    const created = (realm: string, sandbox?: string) =>
+      handlers.apply("script.realmCreated", {
+        realm,
+        context: frame.bidi,
+        type: "window",
+        origin: "http://localhost",
+        sandbox
+      }, { state: setup.state })
+    created("FR")
+    created("FS", "__strider_utility__")
+    yield* setup.state.buffer.flush
+    const destroyRealms = Effect.fnUntraced(function*() {
+      handlers.apply("script.realmDestroyed", { realm: "FR" }, { state: setup.state })
+      handlers.apply("script.realmDestroyed", { realm: "FS" }, { state: setup.state })
+      yield* setup.state.buffer.flush
+    })
+    const removed = () => setup.facts.filter((fact) => fact._tag === "NavigableRemoved" && fact.navigable === frame.id)
+    return { ...setup, frame, handlers, destroyRealms, removed }
+  })
+
+  it.effect("ends the frame when the tree after its parent's reply no longer lists it", () =>
+    Effect.gen(function*() {
+      const { commands, destroyRealms, frame, removed, state } = yield* withFrame({
+        "script.evaluate": evaluated,
+        "browsingContext.getTree": tree([])
+      })
+      yield* destroyRealms()
+      yield* settle
+      assert.deepStrictEqual(commands.map((command) => command.method), [
+        "script.evaluate",
+        "browsingContext.getTree"
+      ])
+      assert.deepStrictEqual(commands[0]!.params, {
+        expression: "0",
+        target: { context: "C1", sandbox: "__strider_utility__" },
+        awaitPromise: false,
+        resultOwnership: "none"
+      })
+      assert.deepStrictEqual(commands[1]!.params, { root: "C1", maxDepth: 1 })
+      assert.isTrue(frame.removed)
+      assert.isFalse(state.navigables.has(frame.bidi))
+      const ends = removed()
+      assert.strictEqual(ends.length, 1)
+      assert.instanceOf((ends[0] as Extract<Adapter.Fact, { _tag: "NavigableRemoved" }>).reason, Target.FrameDetached)
+    }))
+
+  it.effect("keeps the frame, asking once, while the tree still lists it", () =>
+    Effect.gen(function*() {
+      const { commands, destroyRealms, frame, removed } = yield* withFrame({
+        "script.evaluate": evaluated,
+        "browsingContext.getTree": tree(["F1"])
+      })
+      yield* destroyRealms()
+      yield* settle
+      assert.deepStrictEqual(commands.map((command) => command.method), [
+        "script.evaluate",
+        "browsingContext.getTree"
+      ])
+      assert.isFalse(frame.removed)
+      assert.isEmpty(removed())
+    }))
+
+  it.effect("asks nothing for a frame whose next window realm has already arrived", () =>
+    Effect.gen(function*() {
+      const { commands, frame, handlers, state } = yield* withFrame({
+        "script.evaluate": evaluated,
+        "browsingContext.getTree": tree([])
+      })
+      handlers.apply("script.realmCreated", {
+        realm: "FR2",
+        context: frame.bidi,
+        type: "window",
+        origin: "http://localhost"
+      }, { state })
+      handlers.apply("script.realmDestroyed", { realm: "FR" }, { state })
+      yield* state.buffer.flush
+      yield* settle
+      assert.isEmpty(commands)
+      assert.isFalse(frame.removed)
+    }))
+
+  it.effect("asks for no tree when its parent can't answer", () =>
+    Effect.gen(function*() {
+      const { commands, destroyRealms, frame, removed } = yield* withFrame({
+        "browsingContext.getTree": tree([])
+      }, {
+        "script.evaluate": () =>
+          new Protocol.ProtocolError({
+            reason: new Protocol.Rejected({
+              method: "script.evaluate",
+              reason: "NoSuchFrame",
+              code: "no such frame",
+              description: "Browsing context with id C1 not found"
+            })
+          })
+      })
+      yield* destroyRealms()
+      yield* settle
+      assert.deepStrictEqual(commands.map((command) => command.method), ["script.evaluate"])
+      assert.isFalse(frame.removed)
+      assert.isEmpty(removed())
+    }))
+
+  it.effect("waits for the parent reply and observed events before reading the tree", () =>
+    Effect.gen(function*() {
+      const reply = yield* Deferred.make<unknown>()
+      const drained = yield* Deferred.make<void>()
+      let draining = false
+      const { commands, destroyRealms, frame, state } = yield* withFrame({
+        "script.evaluate": Deferred.await(reply),
+        "browsingContext.getTree": tree([])
+      })
+      Object.assign(state.root(), {
+        drainObserved: Effect.sync(() => {
+          draining = true
+        }).pipe(Effect.andThen(Deferred.await(drained)))
+      })
+      yield* destroyRealms()
+      yield* settle
+      assert.strictEqual(commands.length, 1)
+      assert.isFalse(draining)
+      yield* Deferred.succeed(reply, evaluated)
+      yield* settle
+      assert.isTrue(draining)
+      assert.strictEqual(commands.length, 1)
+      assert.isFalse(frame.removed)
+      yield* Deferred.succeed(drained, undefined)
+      yield* settle
+      assert.strictEqual(commands.length, 2)
+      assert.isTrue(frame.removed)
+    }))
+
+  for (const method of ["script.evaluate", "browsingContext.getTree"] as const) {
+    it.effect(`keeps the frame without logging when ${method} fails`, () => {
+      const messages: Array<unknown> = []
+      return Effect.gen(function*() {
+        const { commands, destroyRealms, frame, removed } = yield* withFrame({
+          "script.evaluate": evaluated,
+          "browsingContext.getTree": tree([])
+        }, {
+          [method]: () =>
+            new Protocol.ProtocolError({
+              reason: new Protocol.Rejected({
+                method,
+                reason: "Unrecognized",
+                code: "unknown error",
+                description: "The browser could not complete the command"
+              })
+            })
+        })
+        yield* destroyRealms()
+        yield* settle
+        assert.strictEqual(commands.length, method === "script.evaluate" ? 1 : 2)
+        assert.isFalse(frame.removed)
+        assert.isEmpty(removed())
+        assert.isEmpty(messages)
+      }).pipe(Effect.provideService(
+        Logger.CurrentLoggers,
+        new Set([Logger.make((entry) => messages.push(entry.message))])
+      ))
+    })
+  }
+
+  for (const phase of ["parent reply", "tree reply"] as const) {
+    it.effect(`keeps the frame when its page starts closing before the ${phase}`, () =>
+      Effect.gen(function*() {
+        const reply = yield* Deferred.make<unknown>()
+        const { commands, destroyRealms, frame, page, removed } = yield* withFrame({
+          "script.evaluate": phase === "parent reply" ? Deferred.await(reply) : evaluated,
+          "browsingContext.getTree": phase === "tree reply" ? Deferred.await(reply) : tree([])
+        })
+        yield* destroyRealms()
+        yield* settle
+        assert.strictEqual(commands.length, phase === "parent reply" ? 1 : 2)
+        page.closeRequested = true
+        yield* Deferred.succeed(reply, phase === "parent reply" ? evaluated : tree([]))
+        yield* settle
+        assert.isFalse(frame.removed, "the page's teardown must supply the frame's close reason")
+        assert.isEmpty(removed())
+        assert.strictEqual(commands.length, phase === "parent reply" ? 1 : 2)
+      }))
+  }
+
+  for (const order of ["before the probe", "after the probe"] as const) {
+    it.effect(`ends the frame once when contextDestroyed also comes ${order}`, () =>
+      Effect.gen(function*() {
+        const { destroyRealms, frame, handlers, removed, state } = yield* withFrame({
+          "script.evaluate": evaluated,
+          "browsingContext.getTree": tree([])
+        })
+        const destroyed = () =>
+          handlers.apply("browsingContext.contextDestroyed", {
+            context: "F1",
+            url: "http://localhost/child",
+            userContext: "default",
+            originalOpener: null,
+            clientWindow: "W1",
+            parent: "C1",
+            children: null
+          }, { state })
+        if (order === "before the probe") {
+          handlers.apply("script.realmDestroyed", { realm: "FR" }, { state })
+          destroyed()
+          yield* state.buffer.flush
+          yield* settle
+        } else {
+          yield* destroyRealms()
+          yield* settle
+          destroyed()
+          yield* state.buffer.flush
+        }
+        assert.isTrue(frame.removed)
+        assert.strictEqual(removed().length, 1)
+      }))
+  }
+})
+
+it.effect("keeps proxy credential bindings separate by scheme at the same host and port", () =>
+  Effect.gen(function*() {
+    let next = 0
+    const { state } = yield* withPage({
+      "browser.createUserContext": () => Effect.succeed({ userContext: `proxy-${next++}` }),
+      "network.addIntercept": { intercept: "proxy-intercept" }
+    })
+    for (const scheme of ["http", "socks5", "socks4"] as const) {
+      yield* Contexts.createUserContext(state, {
+        proxy: Option.some({
+          scheme,
+          server: "proxy.test:8080",
+          bypass: [],
+          ...(scheme === "http"
+            ? { credentials: { username: "user", password: Redacted.make("fixture-password") } }
+            : {})
+        }),
+        acceptInsecureCerts: false
+      })
+    }
+    assert.deepStrictEqual([...state.proxyBindings.keys()], [
+      "http://proxy.test:8080",
+      "socks5://proxy.test:8080",
+      "socks4://proxy.test:8080"
+    ])
+  }))
+
+describe("BiDi adopted popup openers", () => {
+  it.effect("links surviving popups when their shared opener frame arrives after one popup ends", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { state, page, facts } = yield* withPage()
+      const fold = yield* Fold.make({ release: () => Effect.void })
+      let cursor = 0
+      const pump = Effect.fnUntraced(function*() {
+        yield* state.buffer.flush
+        while (cursor < facts.length) yield* fold.sink(facts[cursor++]!)
+      })
+      const popups = ["P1", "P2", "P3"].map((context) =>
+        Tree.addNavigable(state, {
+          context: context as BrowsingContext.BrowsingContext,
+          userContext: "default",
+          originalOpener: "F1",
+          url: "about:blank"
+        }, true)!
+      )
+      yield* pump()
+      const entries = popups.map((popup) => Option.getOrThrow(fold.page(popup.id)))
+      for (const entry of entries) assert.strictEqual(entry.opener, undefined)
+      const reserved = state.reservedIds.get("F1")!
+      Tree.removeNavigable(state, popups[0]!, new Target.PageClosed({ by: "command" }), "test")
+      yield* pump()
+      assert.deepStrictEqual(reserved.popups, new Set(popups.slice(1).map((popup) => popup.id)))
+      const frame = Tree.addNavigable(state, {
+        context: "F1" as BrowsingContext.BrowsingContext,
+        parent: "C1",
+        userContext: "default",
+        originalOpener: null,
+        url: "about:blank"
+      }, true)!
+      yield* pump()
+      assert.strictEqual(frame.id, reserved.id)
+      assert.strictEqual(state.reservedIds.size, 0)
+      const opener = Option.getOrThrow(fold.page(page.id))
+      assert.strictEqual(entries[0]!.opener, undefined)
+      for (const entry of entries.slice(1)) assert.strictEqual(entry.opener, opener)
+    })))
+
+  it.effect("resolves an iframe opener to its page when the popup is listed first", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { state, page, facts } = yield* withPage()
+      const info = (context: string, originalOpener: string | null, children: Array<unknown> = []) => ({
+        context,
+        originalOpener,
+        children,
+        parent: null,
+        userContext: "default",
+        clientWindow: "W1",
+        url: "about:blank"
+      })
+      // A getTree result may list the popup before the tree containing its original opener.
+      const frame = { ...info("F1", null), parent: "C1" }
+      Tree.reconcile(
+        state,
+        Schema.decodeUnknownSync(BrowsingContext.GetTreeResult)({
+          contexts: [info("P1", "F1"), info("C1", null, [frame])]
+        })
+      )
+      yield* state.buffer.flush
+      const popup = state.navigables.get("P1")!
+      const added = facts.find((fact) => fact._tag === "PageAdded" && fact.page === popup.id)
+      assert(added?._tag === "PageAdded")
+      assert.strictEqual(added.origin._tag, "Adopted")
+      assert(added.origin._tag === "Adopted")
+      assert.deepStrictEqual(added.origin.opener, Option.some(page.id))
+    })))
+
+  it.effect("releases an unresolved opener reservation when its last popup is removed", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { state } = yield* withPage()
+      const popup = Tree.addNavigable(state, {
+        context: "P1" as BrowsingContext.BrowsingContext,
+        originalOpener: "already-closed",
+        userContext: "default",
+        url: "about:blank"
+      }, true)!
+      Tree.removeNavigable(
+        state,
+        popup,
+        new Target.PageClosed({ by: "command" }),
+        "bidi:browsingContext.contextDestroyed"
+      )
+      assert.strictEqual(state.reservedIds.size, 0)
+    })))
+})

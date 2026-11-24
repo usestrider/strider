@@ -39,8 +39,9 @@ that replaces the built-ins it uses can change what queries find.
 | `getByPlaceholder(text)`             | inputs whose placeholder matches                               |
 | `getByAltText(text)`                 | images and areas whose alt text matches                        |
 | `getByTitle(text)`                   | elements whose `title` matches                                 |
-| `getByTestId(id)`                    | elements whose `data-testid` is `id`                           |
+| `getByTestId(id)`                    | elements whose test-id attribute is `id`, or matches it        |
 | `locator(css)`                       | elements matching a CSS selector                               |
+| `locator(Locator.xpath(expression))` | elements an XPath expression selects                           |
 
 Prefer `getByRole`: roles and names are what assistive technology sees, and they survive changes to markup and
 classes. An accessible name is what a screen reader announces for an element: a button's text, a field's label, or
@@ -50,11 +51,73 @@ its `aria-label`. They're computed by [HTML-AAM](https://www.w3.org/TR/html-aam-
 A malformed CSS selector fails with [`InvalidInput`](/docs/errors#three-kinds-of-failure) when used, without
 waiting.
 
+## Test ids
+
+A test id is an attribute that marks an element for tests, `data-testid` by default. A context's
+`testIdAttribute` option names another, such as `data-qa`, for every page in it; other contexts keep their own. A
+program that reclaims a context names its own attribute the same way, and a locator keeps the attribute it was made
+with. A relative locator in `filter({ has })` uses the attribute of the locator it filters:
+
+```ts
+import { Browser, Locator } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const checkout = Effect.fn("checkout")(function*() {
+  const context = yield* Browser.newContext({ testIdAttribute: "data-qa" })
+  const page = yield* context.newPage
+  yield* page.goto("https://shop.example/cart")
+  // Finds <li data-qa="item"> holding a <button data-qa="remove">
+  yield* page.getByTestId("item")
+    .filter({ has: Locator.relative.getByTestId("remove") })
+    .first.click()
+})
+```
+
+A name that isn't an HTML attribute name fails with [`InvalidInput`](/docs/errors#three-kinds-of-failure) before the
+context is created.
+
+## XPath
+
+`Locator.xpath` wraps an XPath expression so `locator` reads it as XPath rather than CSS. It keeps the elements the
+expression selects, in document order, and skips text and attribute nodes. From a page it starts at the document.
+Chained after another query, it starts at each match, and a `/` that begins the first step, after optional
+whitespace, searches inside it, so `//li` reads as `.//li`. A bare `/`, alone or before `|`, is left as written.
+Only that very start is read that way: in `//a | //b` the second branch searches the whole page, so write
+`.//a | .//b` to keep both inside, and `(//a)[1]` stays document-relative too. Other axes, such as `..`, reach
+wherever they lead:
+
+```ts
+import { Locator, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const readOrder = Effect.fn("readOrder")(function*(page: Page.ReadonlyPage) {
+  const items = page.locator(
+    Locator.xpath("//li[normalize-space()='Two'] | //li[@id='three']")
+  )
+  const inBasket = page.locator("ul#basket").locator(Locator.xpath("//li")) // only the basket's items
+  const basket = page.getByText("Two").locator(Locator.xpath("..")) // the item's list
+  const paid = page.locator("tr").filter({
+    has: Locator.relative.locator(Locator.xpath("./td[2][.='Paid']"))
+  })
+  return [
+    yield* items.count,
+    yield* inBasket.count,
+    yield* basket.count,
+    yield* paid.count
+  ]
+})
+```
+
+XPath doesn't cross into a shadow root, though chained from an element inside one it searches that shadow tree.
+Names take no namespace prefix. An expression that doesn't parse, uses a
+prefix, or doesn't select nodes, such as `count(//li)`, fails with `InvalidInput` when used, without waiting.
+
 ## Matching text
 
 A string matches as a case-insensitive substring, so `name: "Save"` also finds "Save draft". `exact: true` matches
-the whole text, case-sensitively, and a `RegExp` is tested as given. A role's hidden elements match only with
-`includeHidden: true`:
+the whole text, case-sensitively, and a `RegExp` is tested as given. A test id isn't text: a string matches the
+test-id attribute exactly, and a `RegExp` is tested against the attribute as written. A role's hidden elements match
+only with `includeHidden: true`:
 
 ```ts
 import { Expect, Page } from "@usestrider/browser"
@@ -69,6 +132,8 @@ const saveCart = Effect.fn("saveCart")(function*(page: Page.Page) {
   yield* save.click()
   const items = page.getByText(/^\d+ items?$/) // "1 item", "12 items"
   yield* items.pipe(Expect.toBeVisible)
+  const rows = page.getByTestId(/^row-/) // "row-1", "row-2"
+  yield* rows.pipe(Expect.toHaveCount(2))
   const cookies = page.getByRole("dialog", {
     name: "Cookie settings",
     includeHidden: true // even while hidden
@@ -123,6 +188,9 @@ const openOrders = Effect.fn("openOrders")(function*(page: Page.Page) {
   yield* orders.click()
 })
 ```
+
+`getByText` searches the previous matches themselves too, so `page.locator(".badge").getByText("Resolved")` finds the
+badge that says it.
 
 `filter` keeps matches by `hasText`, `hasNotText`, `visible`, or what they contain, `has` and `hasNot`.
 
@@ -224,6 +292,41 @@ const payByCard = Effect.fn("payByCard")(function*(page: Page.Page) {
 
 It finds the iframe again on every attempt, so a frame that reloads or arrives late is waited for like any
 element. Cross-site frames work the same, and frames nest: `payment.frame(payment.locator("iframe"))`.
+
+When you don't know which iframe holds an element, `page.anyFrame` searches the page's document and every frame
+under it, and acts in the one frame where the chain matches. A chain that matches in more than one frame fails
+with `StrictViolation`, `count` included. A frame locator's `anyFrame` searches that frame's own document and the
+frames under it, but not its parents, as in `payment.anyFrame.getByRole("button")`:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const pay = Effect.fn("pay")(function*(page: Page.Page) {
+  yield* page.anyFrame.getByRole("button", { name: "Pay" }).click()
+  // Only the checkout frame and the frames inside it
+  const checkout = page.frame(page.locator("iframe#checkout"))
+  yield* checkout.anyFrame.getByRole("button", { name: "Confirm" }).click()
+})
+```
+
+A frame handle holds one frame itself, through its own navigations, until it is removed from the page. `resolve`
+gives the frame a frame locator's iframe holds now, and `page.frameById` takes an id from `page.frames`, which also
+reaches a frame no locator can, such as one in a closed shadow root. The handle navigates and evaluates in its frame:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const openReceipt = Effect.fn("openReceipt")(function*(page: Page.Page) {
+  const frame = yield* page.frame(page.locator("iframe#payment")).resolve
+  yield* frame.goto("https://pay.example.com/receipt", { waitUntil: "load" })
+  return yield* frame.evaluateInMainWorld(() => document.title)
+})
+```
+
+Its `status` is `Attached`, with the frame's URL and document, or `Detached`. Stock WebKit doesn't report a child
+frame's readiness, so there a frame's `goto` can only wait for `"commit"`.
 
 ## Counting matches
 

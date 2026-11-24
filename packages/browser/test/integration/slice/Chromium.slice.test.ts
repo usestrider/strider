@@ -1,3 +1,4 @@
+import { bindings } from "./bindings.ts"
 import { locatorHandlers } from "./locatorHandlers.ts"
 /**
  * The slices against Chromium, through the public layer: the pinned Chromium (`browsers.ts`), in the Nix
@@ -8,7 +9,9 @@ import { Chromium } from "@usestrider/browser/chromium"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import { assertPinned, chromium } from "../browsers.ts"
+import { anyFrame } from "./anyFrame.ts"
 import { attaching, chromiumAttachable } from "./attaching.ts"
+import { clientCertificates } from "./clientCertificates.ts"
 import { contents } from "./contents.ts"
 import { deadlines } from "./deadlines.ts"
 import { declarations } from "./declarations.ts"
@@ -19,9 +22,13 @@ import { recordings } from "./recordings.ts"
 import { requestBodies } from "./requestBodies.ts"
 import { requestSizes } from "./requestSizes.ts"
 import { requestTiming } from "./requestTiming.ts"
+import { responseSecurityCases } from "./responseSecurity.ts"
+import { screenshotBaselines } from "./screenshotBaselines.ts"
+import { sharedContextChecks } from "./sharedContextChecks.ts"
 import { slice } from "./slice.ts"
 import { stalledReadProbes } from "./stalledReadProbes.ts"
 import { storageReplacement } from "./storageReplacement.ts"
+import { styleTags } from "./styleTags.ts"
 import { tooling } from "./tooling.ts"
 import { toolkit } from "./toolkit.ts"
 import { webauthn } from "./webauthn.ts"
@@ -32,13 +39,21 @@ slice("Chromium", backend, (info) => assertPinned("Chromium", info.version, chro
 events("Chromium", backend)
 modules("Chromium", backend)
 interaction("Chromium", backend)
+anyFrame("Chromium", backend)
 declarations("Chromium", backend)
 contents("Chromium", backend)
 tooling("Chromium", backend)
 recordings("Chromium", backend)
 toolkit("Chromium", backend)
 deadlines("Chromium", backend)
-attaching("Chromium", backend, Option.some(chromiumAttachable((endpoint) => Chromium.layerConnect(endpoint))))
+attaching(
+  "Chromium",
+  backend,
+  Option.some(chromiumAttachable((endpoint) => Chromium.layerConnect(endpoint))),
+  Option.some((userDataDir) =>
+    Chromium.layer({ executablePath: chromium.executable, userDataDir }).pipe(Layer.provide(NodeServices.layer))
+  )
+)
 
 webauthn("Chromium", backend)
 
@@ -48,5 +63,12 @@ requestTiming("Chromium", backend)
 
 storageReplacement("Chromium", backend)
 requestSizes("Chromium", backend)
+sharedContextChecks("Chromium", backend)
 
 stalledReadProbes("Chromium", backend)
+styleTags("Chromium", backend)
+
+bindings("Chromium", backend)
+clientCertificates("Chromium", backend)
+screenshotBaselines("Chromium", backend)
+responseSecurityCases("Chromium", backend)

@@ -3,13 +3,19 @@
   "upstream": [
     "method:Frame.waitForLoadState"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding retained Frame operation. Page.frames exposes the observed tree and page.frame enters by iframe locator; these do not implement this contract.",
+  "status": "has",
+  "api": [
+    {
+      "module": "Frame",
+      "symbol": "ObservedFrame.status",
+      "url": "/docs/api/browser/Frame#ObservedFrame.status"
+    }
+  ],
+  "notes": "Waiting on the frame's status for a document readiness is its load-state wait. Stock WebKit doesn't report a child frame's readiness (frames.readiness is partial), so a child frame's document stays loading there.",
   "capabilities": [],
   "audit": {
     "sources": [
-      "packages/browser/src/Page.ts"
+      "packages/browser/src/Frame.ts"
     ],
     "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
   },

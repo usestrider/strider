@@ -18,6 +18,7 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Stream from "effect/Stream"
+import * as Tracer from "effect/Tracer"
 import * as BidiAdapter from "../../src/internal/bidiAdapter.ts"
 import * as BidiWire from "../../src/internal/bidiWire.ts"
 import * as BrowserImpl from "../../src/internal/browser.ts"
@@ -33,32 +34,52 @@ const timeout = 60_000
 describe("Firefox over WebDriver BiDi", () => {
   layer(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor), { excludeTestServices: true })(
     (it) => {
-      it.effect("drives a tab through the generated commands", () =>
-        Effect.gen(function*() {
-          const { transport: launched } = yield* FirefoxLauncher.launch({ executablePath: executable })
-          const transport = record(launched, BidiWire.wire, fixtures.bidi)
-          const bidi = yield* BidiConnection.make(transport)
-          const on = Protocol.on(bidi.session)
-          const session = yield* Session.new_({ capabilities: {} }).pipe(on)
-          assert.strictEqual(session.capabilities.browserName, "firefox")
-          assertPinned("Firefox", String(session.capabilities.browserVersion), firefox.version)
-          yield* Session.subscribe({ events: ["browsingContext"] }).pipe(on)
-          // The first correction: Firefox's contextCreated has no hasPlannedNavigation
-          const created = yield* bidi.session.subscribe(BrowsingContext.contextCreated)
-          const { context } = yield* BrowsingContext.create({ type: "tab" }).pipe(on)
-          const event = yield* Stream.runHead(created)
-          assert(event._tag === "Some")
-          assert.strictEqual(event.value.context, context)
-          yield* BrowsingContext.navigate({ context, url: "data:text/html,<title>Strider</title>", wait: "complete" })
-            .pipe(on)
-          const title = yield* Script.evaluate({
-            expression: "document.title",
-            target: { context },
-            awaitPromise: false
-          }).pipe(on)
-          assert(title.type === "success")
-          assert.deepStrictEqual(title.result, { type: "string", value: "Strider" })
-        }), timeout)
+      it.effect(
+        "drives a tab through the generated commands, from a launch whose span records its pointer",
+        () =>
+          Effect.gen(function*() {
+            const spans: Array<Tracer.NativeSpan> = []
+            const tracer = Tracer.make({
+              span(options) {
+                const span = new Tracer.NativeSpan(options)
+                spans.push(span)
+                return span
+              }
+            })
+            const { transport: launched } = yield* FirefoxLauncher.launch({ executablePath: executable }).pipe(
+              Effect.withTracer(tracer)
+            )
+            // The headless pointer preferences, which give a page a fine pointer with hover
+            const launch = spans.find((span) => span.name === "Firefox.launch")
+            assert(launch !== undefined)
+            const attributes = JSON.stringify(Object.fromEntries(launch.attributes))
+            assert.include(attributes, "ui.primaryPointerCapabilities")
+            assert.include(attributes, "ui.allPointerCapabilities")
+            const transport = record(launched, BidiWire.wire, fixtures.bidi)
+            const bidi = yield* BidiConnection.make(transport)
+            const on = Protocol.on(bidi.session)
+            const session = yield* Session.new_({ capabilities: {} }).pipe(on)
+            assert.strictEqual(session.capabilities.browserName, "firefox")
+            assertPinned("Firefox", String(session.capabilities.browserVersion), firefox.version)
+            yield* Session.subscribe({ events: ["browsingContext"] }).pipe(on)
+            // The first correction: Firefox's contextCreated has no hasPlannedNavigation
+            const created = yield* bidi.session.subscribe(BrowsingContext.contextCreated)
+            const { context } = yield* BrowsingContext.create({ type: "tab" }).pipe(on)
+            const event = yield* Stream.runHead(created)
+            assert(event._tag === "Some")
+            assert.strictEqual(event.value.context, context)
+            yield* BrowsingContext.navigate({ context, url: "data:text/html,<title>Strider</title>", wait: "complete" })
+              .pipe(on)
+            const title = yield* Script.evaluate({
+              expression: "document.title",
+              target: { context },
+              awaitPromise: false
+            }).pipe(on)
+            assert(title.type === "success")
+            assert.deepStrictEqual(title.result, { type: "string", value: "Strider" })
+          }),
+        timeout
+      )
 
       it.effect(
         "reports no default-context top-level context in the window of a page opened in a visible window",
@@ -142,6 +163,7 @@ describe("Firefox over WebDriver BiDi", () => {
           const cases: ReadonlyArray<readonly [string, object]> = [
             ["Nope.nothing", {}],
             ["browsingContext.reload", { context, ignoreCache: true }],
+            ["browsingContext.navigate", { context, url: "nosuchscheme:x" }],
             ["browsingContext.navigate", { context }],
             ["browsingContext.navigate", { context: "nope", url: "about:blank" }],
             ["script.callFunction", {

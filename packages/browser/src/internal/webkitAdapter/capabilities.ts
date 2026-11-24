@@ -43,8 +43,18 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
       ]),
       entry("acceptInsecureCerts", "unsupported", ["an attached process cannot be reconfigured"]),
       entry("userContexts.proxy", "unsupported", ["an attached process cannot be reconfigured"]),
+      entry("clientCertificates", "unsupported", ["stock WebKit takes a proxy only at launch"]),
       entry("userContexts.proxy.credentials", "unsupported", ["stock WebKit does not support proxy credentials"]),
+      entry("userContexts.proxy.socks4", "unsupported", ["an attached process cannot be reconfigured"]),
+      entry("userContexts.proxy.https", "unsupported", ["the TLS connection to the proxy can't be verified"]),
+      entry("userContexts.proxy.socksCredentials", "unsupported", [
+        "proxy credentials would enter the process environment"
+      ]),
+      entry("userContexts.proxy.bypassSuffix", "unsupported", [
+        "the proxy resolver matches a domain with its subdomains, never its subdomains alone"
+      ]),
       entry("boundingBox.frameTransforms", "supported"),
+      entry("hitTest.shadowHostBoxes", "supported"),
       entry("isolatedWorlds", "unsupported", [
         "stock WebKit's inspector makes no worlds, so Strider's engine runs in the page's own"
       ]),
@@ -78,7 +88,21 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
       entry("interception.abortReason", "unsupported", ["WebKit reports every reason as \"Blocked by Web Inspector\""]),
       entry("interception.redirects", "partial", ["only a redirect's first hop pauses"]),
       entry("bodies", "supported"),
-      entry("console", "supported", ["a message with only primitive arguments is attributed to the main frame"]),
+      entry("console", "supported", [
+        "a message with only primitive arguments is attributed to the main frame"
+      ]),
+      entry("console.arguments", "supported"),
+      entry("console.source", "partial", [
+        "the browser's \"Fetch API cannot load … due to access control checks\" arrives as an uncaught exception, " +
+        "with no source: WebKit sends it on its `javascript` channel at level `error`, which Strider reads as an " +
+        "uncaught exception"
+      ]),
+      entry("console.method", "partial", [
+        "`console.timeLog` reads as `timeEnd`, since WebKit sends both as one `timing` message",
+        "`console.count` reads as `debug`, since WebKit sends it as a plain message at level `debug`",
+        "`console.countReset` of a counter that doesn't exist reads as `warn`, since WebKit sends it as a warning",
+        "`console.countReset` of a counter that exists writes no message, since WebKit sends none for it"
+      ]),
       entry("prompts", "unsupported", [
         "stock WebKit's inspector has no Dialog domain: a dialog blocks the page unreported"
       ]),
@@ -174,11 +198,15 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
         "emulation.touch",
         "emulation.focus"
       ].map((name) => entry(name, "unsupported", [noEmulation])),
+      entry("bypassCSP", "unsupported", ["stock WebKit's inspector can't set a page's Content Security Policy aside"]),
       entry("snapshot.clickListeners", "unsupported", ["WebKit can't list event listeners"]),
       entry("capability.virtualAuthenticator", "unsupported", [
         "Stock WebKit Automation refuses credential management; inspector has no WebAuthn domain"
       ]),
       entry("capability.axTree", "unsupported", ["WebKit reads accessibility one node at a time"]),
+      entry("capability.overlay", "supported", [
+        "drawn in the page, so screenshots show it too; polled video can miss one shown for less than its interval"
+      ]),
       entry("capability.screencast", "unsupported", ["stock WebKit's inspector has no Screencast domain"]),
       entry(
         "capability.video",
@@ -220,6 +248,8 @@ export const overrideCapability = (override: Adapter.Override): string | undefin
       return "emulation.touch"
     case "FocusEmulation":
       return "emulation.focus"
+    case "BypassCsp":
+      return "bypassCSP"
     default:
       return undefined
   }
@@ -245,14 +275,17 @@ export const launchedCapabilities = (info: Browser.Info, video = false) => {
     acceptInsecureCerts: ["supported", ["native capability in the context-owned process"]],
     userContexts: ["supported", ["each context is a browser process of its own"]],
     "userContexts.proxy": ["supported", [
-      "isolated process environment; HTTP proxy endpoints only; loopback stays direct"
+      "isolated process environment; http, socks5 and socks4 endpoints; loopback stays direct"
     ]],
+    "userContexts.proxy.socks4": ["supported", ["names are resolved at the proxy (SOCKS4a)"]],
     "pauseOnStart.popups": ["unsupported", [
       "a page a page opens is found when the browser lists it, and isn't paused"
     ]],
     "input.topLevelDesignMode": ["supported", []],
     "input.native": ["supported", ["Automation's simulated input, which the page trusts"]],
-    "input.insertText": ["supported", []],
+    "input.insertText": ["supported", [
+      "Automation inserts text only by key, so Strider inserts it with the page's editing command, which fires a trusted beforeinput and input and no key events"
+    ]],
     "input.keyboardLayout": ["unsupported", [
       "Automation types characters and named keys, not a layout's physical keys"
     ]],

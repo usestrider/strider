@@ -9,6 +9,7 @@ import * as Deferred from "effect/Deferred"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as PlatformError from "effect/PlatformError"
@@ -16,6 +17,7 @@ import * as Queue from "effect/Queue"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as TestClock from "effect/testing/TestClock"
+import * as Deadline from "../src/Deadline.ts"
 import * as Adapter from "../src/internal/adapter.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as Video from "../src/internal/video.ts"
@@ -325,7 +327,7 @@ describe("Shared video lifetime", () => {
       assert.strictEqual(yield* Effect.flip(file), failure)
     }))
 
-  it.effect("bounds pending frames and gives a blocked writer five browser-clock seconds after end", () =>
+  it.effect("bounds pending frames and gives a blocked writer the default budget on the browser clock after end", () =>
     Effect.gen(function*() {
       const clock = BrowserClock.fromClock(yield* Clock.Clock)
       const ended = yield* Deferred.make<void>()
@@ -355,10 +357,32 @@ describe("Shared video lifetime", () => {
       yield* TestClock.adjust("1 second")
       assert.strictEqual(produced, 1, "no unbounded PNG capture queue behind a blocked writer")
       yield* Deferred.succeed(ended, undefined)
-      yield* TestClock.adjust("5 seconds")
+      yield* TestClock.adjust("30 seconds")
       const error = yield* Effect.flip(file)
-      assert.match(error.message, /did not finish within 5 seconds/)
+      assert.match(error.message, /did not finish within 30s/)
       assert.isTrue(released)
+    }))
+
+  it.effect("bounds a blocked writer's finish by the default budget read when recording starts", () =>
+    Effect.gen(function*() {
+      const clock = BrowserClock.fromClock(yield* Clock.Clock)
+      const ended = yield* Deferred.make<void>()
+      const started = yield* Deferred.make<void>()
+      const file = yield* Video.record(
+        Effect.succeed({ frames: Stream.concat(Stream.make(image), Stream.never), ended: Deferred.await(ended) }),
+        { write: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)) },
+        "/tmp"
+      ).pipe(Effect.provideService(BrowserClock.CurrentClock, clock), Deadline.withDefaultBudget("2 seconds"))
+      // The file is awaited outside the budget's scope: the one read at acquisition still bounds it.
+      const waiting = yield* Effect.forkChild(Effect.flip(file))
+      yield* Deferred.await(started)
+      yield* TestClock.adjust("5 seconds")
+      assert.isUndefined(waiting.pollUnsafe(), "the budget is counted from the recording's end")
+      yield* Deferred.succeed(ended, undefined)
+      yield* TestClock.adjust("1999 millis")
+      assert.isUndefined(waiting.pollUnsafe(), "the writer keeps its whole budget")
+      yield* TestClock.adjust("1 millis")
+      assert.match((yield* Fiber.join(waiting)).message, /did not finish within 2s/)
     }))
 
   it.effect("backpressures the real first delivery after its zero-time copy and bounds termination", () =>
@@ -395,10 +419,36 @@ describe("Shared video lifetime", () => {
       const producedWhileBlocked = produced
       const acknowledgedWhileBlocked = acknowledgements
       yield* Deferred.succeed(ended, undefined)
-      yield* TestClock.adjust("5 seconds")
-      assert.match((yield* Effect.flip(file)).message, /did not finish within 5 seconds/)
+      yield* TestClock.adjust("30 seconds")
+      assert.match((yield* Effect.flip(file)).message, /did not finish within 30s/)
       assert.strictEqual(producedWhileBlocked, 1)
       assert.strictEqual(acknowledgedWhileBlocked, 0, "taking the synthetic copy must not acknowledge the source")
+    }))
+
+  it.effect("lets a writer still finishing ten browser-clock seconds after end give its path", () =>
+    Effect.gen(function*() {
+      const clock = BrowserClock.fromClock(yield* Clock.Clock)
+      const ended = yield* Deferred.make<void>()
+      const received = yield* Deferred.make<void>()
+      const file = yield* Video.record(
+        Effect.succeed({
+          frames: Stream.concat(Stream.make(image), Stream.never),
+          ended: Deferred.await(ended)
+        }),
+        {
+          write: (frames, destination) =>
+            frames.pipe(
+              Stream.runForEach(() => Deferred.succeed(received, undefined)),
+              Effect.andThen(Effect.sleep("10 seconds")),
+              Effect.as(destination.path)
+            )
+        },
+        "/tmp"
+      ).pipe(Effect.provideService(BrowserClock.CurrentClock, clock))
+      yield* Deferred.await(received)
+      yield* Deferred.succeed(ended, undefined)
+      yield* TestClock.adjust("10 seconds")
+      assert.match(yield* file, /^\/tmp\/strider-.*\.webm$/)
     }))
 
   it.effect("propagates writer failure and releases the capture source", () =>

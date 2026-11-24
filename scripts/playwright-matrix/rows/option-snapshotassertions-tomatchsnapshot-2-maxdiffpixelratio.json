@@ -1,12 +1,26 @@
 {
-  "status": "missing",
-  "api": [],
-  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "status": "has",
+  "api": [
+    {
+      "module": "SnapshotBaseline",
+      "symbol": "toMatch",
+      "url": "/docs/api/vitest/SnapshotBaseline#toMatch",
+      "package": "vitest"
+    }
+  ],
+  "notes": "maxDiffPixelRatio option of SnapshotBaseline.toMatch, for a .png name.",
   "capabilities": [],
   "id": "option-snapshotassertions-tomatchsnapshot-2-maxdiffpixelratio",
   "upstream": [
     "method:SnapshotAssertions.toMatchSnapshot#2"
   ],
   "option": "maxDiffPixelRatio",
-  "requirements": []
+  "requirements": [],
+  "audit": {
+    "sources": [
+      "packages/vitest/src/SnapshotBaseline.ts",
+      "packages/vitest/src/internal/baseline.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; comparison by extension, keying, update modes and failure files checked against the upstream contract."
+  }
 }

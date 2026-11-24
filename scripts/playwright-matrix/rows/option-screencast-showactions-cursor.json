@@ -1,8 +1,16 @@
 {
-  "status": "missing",
-  "api": [],
-  "notes": "The parent capability is missing; this option is not implemented by that contract.",
-  "capabilities": [],
+  "status": "has",
+  "api": [
+    {
+      "module": "Capability",
+      "symbol": "OverlayControl",
+      "url": "/docs/api/browser/Capability#OverlayControl"
+    }
+  ],
+  "notes": "cursor takes pointer or none, pointer by default.",
+  "capabilities": [
+    "capability.overlay"
+  ],
   "id": "option-screencast-showactions-cursor",
   "upstream": [
     "method:Screencast.showActions"
@@ -12,11 +20,11 @@
   "valueCoverage": [
     {
       "value": "none",
-      "status": "missing"
+      "status": "has"
     },
     {
       "value": "pointer",
-      "status": "missing"
+      "status": "has"
     }
   ]
 }

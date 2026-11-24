@@ -3,13 +3,20 @@
   "upstream": [
     "event:BrowserContext.requestFinished"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding UserContext operation/event. Its public API provides pages/workers, cookies, clock, storage export, routes, scripts, scoped emulation and grants; it does not implement this contract.",
+  "status": "has",
+  "api": [
+    {
+      "module": "NetworkRequestEnd",
+      "symbol": "stream",
+      "url": "/docs/api/browser/NetworkRequestEnd#stream"
+    }
+  ],
+  "notes": "Subscribe before the triggering action. Events are scoped streams and next-event effects; filter `end: \"finished\"` for `Finished`; an HTTP error status finishes. A context subscription includes pages opened after it. Requests in flight when their owner or the connection closes publish no end.",
   "capabilities": [],
   "audit": {
     "sources": [
-      "packages/browser/src/UserContext.ts"
+      "packages/browser/src/NetworkRequestEnd.ts",
+      "packages/browser/src/internal/networkRequestEnd.ts"
     ],
     "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
   },

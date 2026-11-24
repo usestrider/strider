@@ -3,9 +3,15 @@
   "upstream": [
     "method:LocatorAssertions.toHaveAccessibleDescription"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding public Strider capability for this member.",
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toHaveAccessibleDescription",
+      "url": "/docs/api/browser/Expect#toHaveAccessibleDescription"
+    }
+  ],
+  "notes": "Retries exactly one match, also under not. Reads the first present source, even when empty: aria-describedby (when an ID resolves), aria-description, a table caption, summary content or button input value that isn't the name, then a title that isn't the name; hidden referenced elements contribute and hidden elements have empty descriptions. Strings normalize whitespace; ignoreCase overrides regex flags. Failures retain observed descriptions or match counts.",
   "capabilities": [],
   "requirements": []
 }

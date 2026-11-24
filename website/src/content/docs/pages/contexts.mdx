@@ -31,6 +31,57 @@ const twoTabs = Effect.fn("twoTabs")(function*() {
 
 A context and its pages close with the scope that made them, popups included.
 
+`browser.contexts` lists the browser's contexts, kept up to date as they open and close: the default context first,
+then the others in the order they were added. A context you made is listed as the handle `newContext` returned:
+
+```ts
+import { Browser } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const listed = Effect.fn("listed")(function*() {
+  const browser = yield* Browser.Browser
+  const context = yield* Browser.newContext()
+  const contexts = yield* browser.contexts
+  return contexts.includes(context)
+}, Effect.scoped)
+```
+
+A context someone else made, such as one in a browser you attached to, is listed as an observed context, whose
+`control` gives access for a scope, as the default context's does. A context another client makes after you
+connect is listed once a page opens in it. On Chromium, a context another client removes stays listed until you
+disconnect, though its pages close.
+
+## Events across a context
+
+`PageNavigation` and `PageLifecycle` take a context as well as a page, for the events of every page in it, including
+pages opened after you subscribe, and each of their events names its page. This makes two independent waits before
+the click: one for whichever page of the context loads the receipt, and one for the first page of the context to
+close, which need not be the same page:
+
+```ts
+import { Page, PageLifecycle, PageNavigation, UserContext } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const printReceipt = Effect.fn("printReceipt")(
+  function*(context: UserContext.UserContext, page: Page.Page) {
+    const receipt = yield* PageNavigation.next(context, {
+      url: "**/receipt",
+      waitUntil: "load"
+    })
+    const closed = yield* PageLifecycle.next(context, { events: "Closed" })
+    yield* page.getByRole("button", { name: "Print receipt" }).click()
+    const opened = yield* receipt
+    const gone = yield* closed
+    return { opened: opened.page, closed: gone.page }
+  }
+)
+```
+
+[`PageLifecycle`](/docs/events/kinds#frames-loads-and-closes) reports frames added and removed, loads, and closes;
+console messages, requests, responses, uncaught exceptions, downloads, workers, and connections take a context too,
+with [modules of their own](/docs/events/events#event-modules), while `Popup`, `Dialog`, and `FileChooser` take only a
+page. A context's subscription and a page's each get an event once.
+
 ## Settings for a context's life
 
 Options to `newContext` or `newPage` hold for the context's life. They apply before its first page loads, so what
@@ -74,6 +125,7 @@ It does not measure the window or document layout, and is available with inspect
 | `dialogs`        | what happens to a dialog no [handler](/docs/events/kinds#dialogs-and-file-choosers) decides: `"dismiss"` (the default), `"accept"`, `"leaveOpen"` |
 | [`downloads`](/docs/events/kinds#downloads) | a temporary directory (the default), `"deny"`, or `{ directory }`; on WebKit, which has no downloads, any value fails |
 | [`focus`](/docs/tools/testing#concurrent-pages) | `"emulated"` makes every page behave as if focused, not on Firefox or WebKit; otherwise only one has focus, and `toBeFocused` fails on the rest |
+| `bypassCSP`      | `true` lets pages run the inline scripts, `eval`, and added scripts their Content Security Policy forbids, in every frame; Chromium only |
 | [`keyboardLayout`](/docs/pages/actions#keys) | the layout typing uses: `us` (the default), `uk`, `de`, `fr`, `es`, `it`           |
 | `eventLog`       | how many past events of each kind [`history`](/docs/events/events#history) keeps, for each page and for the context; 100 unless set |
 
@@ -100,10 +152,44 @@ const localHttps = Effect.fn("localHttps")(function*() {
 }, Effect.scoped)
 ```
 
-Certificate checks remain enabled by default and in sibling contexts. Firefox and launched stock WebKit support
-this option; Chromium refuses `true` with `Unsupported` because its override affects the whole browser. Attached
-stock WebKit cannot create contexts. `Browser.newPage` accepts the same option. It is fixed at creation:
-`UserContext.reclaim` refuses either explicit value and preserves the existing setting when omitted.
+Certificate checks remain enabled by default and in sibling contexts. Chromium, Firefox, and launched stock WebKit
+support this option; on Chromium every page of the context ignores certificate errors, and a reclaimable context
+refuses `true` with `Unsupported`. Attached stock WebKit cannot create contexts. `Browser.newPage` accepts the same
+option. It is fixed at creation: `UserContext.reclaim` refuses either explicit value and preserves the existing
+setting when omitted.
+
+A site that asks for a TLS client certificate gets one from `clientCertificates`: each entry names an HTTPS origin
+and gives a PEM certificate with its key, or a PFX archive with its passphrase. The key, archive, and passphrase are
+`Redacted`:
+
+```ts
+import { Browser } from "@usestrider/browser"
+import { Effect, FileSystem, Redacted } from "effect"
+
+const internalSite = Effect.fn("internalSite")(function*() {
+  const fs = yield* FileSystem.FileSystem
+  const context = yield* Browser.newContext({
+    clientCertificates: [{
+      origin: "https://internal.example.com",
+      pfx: Redacted.make(yield* fs.readFile("client.pfx")),
+      passphrase: Redacted.make("archive passphrase")
+    }]
+  })
+  const page = yield* context.newPage
+  yield* page.goto("https://internal.example.com")
+}, Effect.scoped)
+```
+
+The origin matches scheme, hostname, and effective port, and a certificate that can't be loaded fails with
+`InvalidInput` when the context is created. The context's HTTPS traffic goes through a proxy Strider runs on
+127.0.0.1 for that context alone, which presents the certificate and checks the site's own certificate against
+Node's trusted certificates, unless `acceptInsecureCerts` is set. Chromium and a Firefox Strider launched support
+it; stock WebKit, a Firefox Strider connected to, a reclaimable context, and a context with `proxy` refuse it with
+`Unsupported`.
+
+Pages in such a context connect to sites over HTTP/1.1, since the proxy doesn't offer HTTP/2. On Chromium, the
+context's service workers don't accept the proxy's certificate, so their own HTTPS requests may fail; the same
+holds for a service worker's requests to an untrusted site under `acceptInsecureCerts`.
 
 ## Settings for a while
 

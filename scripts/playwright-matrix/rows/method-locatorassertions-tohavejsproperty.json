@@ -3,9 +3,15 @@
   "upstream": [
     "method:LocatorAssertions.toHaveJSProperty"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding public Strider capability for this member.",
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toHaveJSProperty",
+      "url": "/docs/api/browser/Expect#toHaveJSProperty"
+    }
+  ],
+  "notes": "Reads a property name or dotted path in the page's main world and compares it by deep equality (Dates by time, RegExps by source and flags, arrays, Maps and Sets by entries, NaN equal to NaN). Negate with { not: true }; use Deadline.within for timeouts. Missing and multiple matches retry until exactly one matches, including under negation; Playwright rejects multiple matches immediately. Takes a full Locator, not a ReadonlyLocator, since page getters run during the read.",
   "capabilities": [],
   "requirements": []
 }

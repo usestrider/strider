@@ -24,6 +24,7 @@ import * as Predicate from "effect/Predicate"
 import type * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
+import type * as Binding from "./Binding.ts"
 import type * as BrowserWorker from "./BrowserWorker.ts"
 import type * as CookieJar from "./CookieJar.ts"
 import type * as Deadline from "./Deadline.ts"
@@ -294,6 +295,17 @@ export interface UserContext extends ObservedUserContext {
    * already underway without response interception may miss a later response route. Existing response pauses
    * select the current routes by precedence.
    *
+   * While a `"request"` or `"response"` route is in force, the requests of the context's documents, frames, and
+   * dedicated workers bypass the browser's HTTP cache, so a request the route continues reaches the server. The
+   * cache is used again once the last such route is removed; an `"auth"` route leaves it alone.
+   *
+   * **Gotchas**
+   *
+   * On Chromium, the cache setting is confirmed before this returns, except on a page a navigation is under way
+   * in: there it is sent before this returns, and the new document has it from its commit. On Firefox, a
+   * dedicated worker's requests still use the cache, and a popup another context opens while this route is in
+   * force may send its first requests past the cache too, before it gets its own context's setting.
+   *
    * The phase defaults to `"request"`. Response-only handlers require `{ phase: "response" }`, and
    * authentication handlers require `{ phase: "auth" }`. When options may omit the phase, the handler must
    * also handle `"request"`; union phases require a handler compatible with every possible phase.
@@ -366,6 +378,40 @@ export interface UserContext extends ObservedUserContext {
     WebSocketRoute.WebSocketRouteError | Target.TargetGone | Deadline.Timeout,
     Scope.Scope | R
   >
+  /**
+   * Exposes a host function that every page of this context, its popups and its frames, call as `window[name](...)`, while the registration lives.
+   *
+   * **Details**
+   *
+   * In the page, the function returns a promise. Its arguments cross by value, as `evaluateInMainWorld`'s do, and are decoded
+   * by `arguments`; the handler's value is encoded by `result` and resolves the promise. A decoding failure or a failed handler rejects
+   * it with an `Error` carrying the message; a defect or an interruption rejects it with a fixed message and is
+   * logged. The function is in the main world of documents already open and of every document after, before their
+   * own scripts, and not in workers. Removing it deletes it from open documents and rejects the calls still
+   * waiting. A name the page or its context already exposes fails with `NameTaken`. On WebKit, a new popup may run its first scripts before the binding arrives.
+   * A document holds at most 4096 waiting calls per binding; the next one rejects. The name must be ASCII letters, digits, `_` or `$`, not starting with a digit (`/^[A-Za-z_$][\w$]*$/`), or the call fails with `InvalidInput`.
+   *
+   * **Example** (Reading a value the test holds)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect, Schema } from "effect"
+   *
+   * const exposeAnswer = Effect.fn("exposeAnswer")(function*(page: Page.Page) {
+   *   yield* page.context.exposeBinding(
+   *     "answer",
+   *     { arguments: Schema.Tuple([Schema.String]), result: Schema.Number },
+   *     ([question]) => Effect.succeed(question.length)
+   *   )
+   *   yield* page.evaluateInMainWorld(() => (window as any).answer("why?"))
+   * })
+   * ```
+   */
+  exposeBinding<A extends ReadonlyArray<unknown>, B, E, R>(
+    name: string,
+    schemas: Binding.Schemas<A, B>,
+    handler: Binding.Handler<NoInfer<A>, NoInfer<B>, E, R>
+  ): Effect.Effect<Binding.Registration, Binding.BindingError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R>
   /**
    * Runs a script in every new document of every page while the registration lives.
    *
@@ -482,10 +528,16 @@ export interface Options {
    *
    * **Details**
    *
-   * Firefox and launched stock WebKit support this when creating a context. Chromium refuses `true` with
-   * `Unsupported` because its certificate override affects the whole browser. Attached stock WebKit cannot
-   * create contexts. Reclaiming an existing context refuses either explicit value: this setting can only
-   * be chosen at creation. Omitting it preserves the existing context's setting.
+   * Chromium, Firefox, and launched stock WebKit support this when creating a context. On Chromium each of the
+   * context's pages, popups included, ignores certificate errors before it loads anything, and a reclaimable
+   * context refuses `true` with `Unsupported`. Attached stock WebKit cannot create contexts. Reclaiming an
+   * existing context refuses either explicit value: this setting can only be chosen at creation. Omitting it
+   * preserves the existing context's setting.
+   *
+   * **Gotchas**
+   *
+   * On Chromium the override is sent to the context's pages, not to its service workers, so a service worker's
+   * own requests may still fail on a certificate error.
    *
    * **Example** (A local HTTPS test site)
    *
@@ -503,6 +555,65 @@ export interface Options {
    * @default false for new contexts
    */
   readonly acceptInsecureCerts?: boolean | undefined
+
+  /**
+   * Presents TLS client certificates to the HTTPS sites whose origins they name, in this context alone.
+   *
+   * **Details**
+   *
+   * Each entry gives a PEM `cert` with its `key`, or a `pfx` archive, with a `passphrase` when the key is
+   * encrypted. `origin` must be an HTTPS origin, and matches scheme, hostname, and effective port, so a
+   * certificate for `https://example.com` is not sent to `https://example.com:8443`. The key, archive and
+   * passphrase are `Redacted`, and never appear in errors or traces. Every entry is loaded when the context is
+   * created, so an unreadable file or a wrong passphrase fails with `InvalidInput` then.
+   *
+   * The context's HTTPS and WebSocket-over-TLS traffic, local sites included, goes through a proxy Strider runs
+   * on 127.0.0.1 for that context, which closes with it. The proxy connects to each site itself, presents the
+   * matching certificate when the site asks for one, and checks the site's certificate against Node's trusted
+   * certificates, unless `acceptInsecureCerts` is true. When the site can't be reached or isn't trusted, the
+   * proxy closes the browser's connection, and the request fails as a connection error. On Firefox the
+   * context's plain HTTP goes through the proxy too, which forwards it unchanged. A context without this option
+   * starts no proxy.
+   *
+   * **Gotchas**
+   *
+   * Chromium and a Firefox Strider launched support this. A Firefox Strider connected to, stock WebKit, a
+   * reclaimable context, and a context that also sets `proxy` refuse it with `Unsupported`. Pages connect to
+   * the site over HTTP/1.1.
+   * On Chromium the proxy's certificate is accepted by the context's pages, not its service workers, so a
+   * service worker's own HTTPS requests in the context may fail.
+   *
+   * **Example** (A site that requires a client certificate)
+   *
+   * ```ts import.meta.vitest
+   * import { Browser } from "@usestrider/browser"
+   * import { Effect, FileSystem, Redacted } from "effect"
+   *
+   * const open = Effect.fn("open")(function*() {
+   *   const fs = yield* FileSystem.FileSystem
+   *   const context = yield* Browser.newContext({
+   *     clientCertificates: [{
+   *       origin: "https://internal.example.com",
+   *       cert: yield* fs.readFile("client.pem"),
+   *       key: Redacted.make(yield* fs.readFile("client-key.pem"))
+   *     }]
+   *   })
+   *   const page = yield* context.newPage
+   *   yield* page.goto("https://internal.example.com")
+   * })
+   * ```
+   *
+   * @default no client certificates, and no proxy
+   */
+  readonly clientCertificates?:
+    | ReadonlyArray<{
+      readonly origin: string
+      readonly cert?: Uint8Array | undefined
+      readonly key?: Redacted.Redacted<Uint8Array> | undefined
+      readonly pfx?: Redacted.Redacted<Uint8Array> | undefined
+      readonly passphrase?: Redacted.Redacted<string> | undefined
+    }>
+    | undefined
 
   /**
    * Answers website authentication challenges with these credentials. User auth routes run first;
@@ -536,13 +647,15 @@ export interface Options {
   } | undefined
 
   /**
-   * Routes this context's HTTP and HTTPS traffic through an HTTP proxy. `server` is an HTTP URL or
-   * `host:port`, without credentials, path, query, or fragment. An omitted port is 80.
+   * Routes this context's HTTP, HTTPS, and WebSocket traffic through a proxy. `server` is an `http://`,
+   * `https://`, `socks5://`, or `socks4://` URL, or `host:port` for HTTP, without credentials, path, query, or
+   * fragment. An omitted port is 80 for HTTP, 443 for HTTPS, and 1080 for SOCKS.
    *
    * **Details**
    *
    * `bypass` lists hostnames or IP addresses to connect to directly, without URLs, ports, wildcards, or CIDR.
-   * Host matching follows the browser's native proxy rules, which may also exclude subdomains. Loopback
+   * A hostname matches that host; `.example.com` matches the subdomains of `example.com`, not `example.com`
+   * itself. Launched stock WebKit refuses the leading-dot form, and also bypasses a hostname's subdomains. Loopback
    * destinations (`localhost`, `127.0.0.1`, and `::1`) remain direct on every backend.
    * Credentials answer proxy challenges once per request; website authentication still uses auth routes.
    * Stock WebKit supports proxies only when launched, and refuses credentials with `Unsupported`.
@@ -551,7 +664,10 @@ export interface Options {
    * life. Conflicting pending creations are refused. A confirmed creation rejection or unused setup
    * rollback releases only that creation's reservation; an uncertain outcome keeps it. Conflicting settings fail
    * with `Unsupported`, even after a successfully created context closes.
-   * SOCKS and HTTPS proxy endpoints are refused with `Unsupported`.
+   * A SOCKS proxy resolves the destination's name. Chromium refuses `socks4://`, whose names it would resolve
+   * itself; Firefox and stock WebKit speak SOCKS4a. Only Chromium connects to an `https://` proxy, which needs a
+   * certificate the browser trusts. A SOCKS proxy takes no credentials. Each refusal is `Unsupported` naming its
+   * capability.
    *
    * **Example** (An authenticated proxy)
    *
@@ -617,6 +733,31 @@ export interface Options {
    */
   readonly focus?: "system" | "emulated" | undefined
   /**
+   * Lets the context's pages run what their Content Security Policy forbids: inline scripts, `eval`, and the
+   * scripts and tags you add, in every document and frame, cross-site ones included. `Unsupported` on Firefox,
+   * which doesn't implement it yet, and on WebKit (`bypassCSP`).
+   *
+   * **Details**
+   *
+   * It is set for the context's life, before its first page. A context that leaves it off keeps every policy.
+   *
+   * **Example** (Running an inline script a policy forbids)
+   *
+   * ```ts import.meta.vitest
+   * import { Browser } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const program = Effect.fn("program")(function*() {
+   *   const page = yield* Browser.newPage({ bypassCSP: true })
+   *   yield* page.goto("https://example.com")
+   *   return yield* page.evaluate(() => eval("1 + 1"))
+   * })
+   * ```
+   *
+   * @default false
+   */
+  readonly bypassCSP?: boolean | undefined
+  /**
    * The keyboard layout that key presses and typing use on the context's pages: `press`, `pressSequentially`, and
    * `page.keyboard`. On Firefox a key event's `key` follows the layout, but its `code` is the one Firefox gives that
    * key on a US keyboard, and there are no AltGr or dead keys. WebKit types characters and named keys, not a
@@ -625,6 +766,31 @@ export interface Options {
    * @default "us"
    */
   readonly keyboardLayout?: Keyboard.Layout | undefined
+  /**
+   * The attribute `getByTestId` matches on the context's pages, such as `"data-qa"`. Other contexts keep their
+   * own. A program that reclaims the context (`Ledger`) sets its own attribute, and omitting it keeps the current
+   * one. A locator keeps the attribute of the context it was made in; a relative locator, which has no context,
+   * takes the one of the locator whose `filter` it's placed in. A name that isn't an HTML attribute name, such as
+   * one with whitespace, quotes, `>`, `/`, or `=`, fails with `InvalidInput` before the context is created.
+   *
+   * **Example** (Finding elements by `data-qa`)
+   *
+   * ```ts import.meta.vitest
+   * import { Browser } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const checkout = Effect.fn("checkout")(function*() {
+   *   const context = yield* Browser.newContext({ testIdAttribute: "data-qa" })
+   *   const page = yield* context.newPage
+   *   yield* page.goto("https://shop.example/cart")
+   *   // Matches <button data-qa="checkout">
+   *   yield* page.getByTestId("checkout").click()
+   * })
+   * ```
+   *
+   * @default "data-testid"
+   */
+  readonly testIdAttribute?: string | undefined
   /**
    * Events kept for `history`, per event module, for each page and for the context; 0 keeps none.
    *

@@ -29,6 +29,7 @@ import * as os from "node:os"
 import * as path from "node:path"
 import { site } from "../adapter/harness.ts"
 import { nativeFileModificationTime, supports } from "./capabilities.ts"
+import * as SharedContext from "./sharedContext.ts"
 
 const timeout = 60_000
 
@@ -79,13 +80,14 @@ const findNode = (node: Capability.AxNode, found: (node: Capability.AxNode) => b
 
 export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unknown>, attached = false) =>
   describe(`${name} tooling`, () => {
-    layer(backend, { excludeTestServices: true, timeout })((it) => {
+    layer(SharedContext.layer(backend), { excludeTestServices: true, timeout })((suite) => {
+      const it = SharedContext.guard(suite)
       it.effect("sets files made in the page, with their names, types and contents", () =>
         Effect.gen(function*() {
           const url = yield* fixture(files)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
-            yield* page.goto(url)
+            const page = yield* SharedContext.newPage
+            yield* page.goto(url, { waitUntil: "load" })
             yield* page.getByLabel("Files").setInputFiles(made)
             yield* page.getByText("a.txt:text/plain:5:hello|b.csv:text/csv:3:x,y").pipe(Expect.toBeVisible)
             // Browser-host paths cannot be combined with caller-side files
@@ -104,8 +106,8 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
         Effect.gen(function*() {
           const url = yield* fixture(files)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
-            yield* page.goto(url)
+            const page = yield* SharedContext.newPage
+            yield* page.goto(url, { waitUntil: "load" })
             // A backend that reports no chooser says so (`modules.ts` checks the refusal)
             if (!(yield* supports("fileChooser"))) return
             const handler = yield* FileChooser.handle(page, FileChooser.choose(made))
@@ -136,8 +138,8 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                   FileInput.local(path.join(directory, "unknown.strider-unknown")),
                   attached ? made[1]! : FileInput.remote(FilePath.Remote.make(path.join(directory, "b.csv")))
                 ]
-                const page = yield* Browser.newPage()
-                yield* page.goto(url)
+                const page = yield* SharedContext.newPage
+                yield* page.goto(url, { waitUntil: "load" })
                 if (chooser) {
                   const handler = yield* FileChooser.handle(page, FileChooser.choose(inputs))
                   yield* page.getByRole("button", { name: "Choose" }).click()
@@ -187,8 +189,8 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             const file = path.join(directory, "host.txt")
             fs.writeFileSync(file, "on host")
             const remote = FileInput.remote(FilePath.Remote.make(file))
-            const page = yield* Browser.newPage()
-            yield* page.goto(url)
+            const page = yield* SharedContext.newPage
+            yield* page.goto(url, { waitUntil: "load" })
             const input = page.getByLabel("Files")
             const out = page.locator("#out")
             // Host-path MIME comes from the browser; transferred files use our MIME inference.
@@ -236,7 +238,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             const file = path.join(directory, "dated.txt")
             fs.writeFileSync(file, "dated")
             fs.utimesSync(file, new Date(978307200000), new Date(978307200000))
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const nativeTime = nativeFileModificationTime[name]
             assert.isDefined(nativeTime, `${name} has a native timestamp expectation`)
@@ -273,8 +275,8 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               })
             </script>`)
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
-              yield* page.goto(url)
+              const page = yield* SharedContext.newPage
+              yield* page.goto(url, { waitUntil: "load" })
               const input = page.getByLabel("File")
               yield* input.setInputFiles(made[0]!)
               yield* page.locator("#out").pipe(Expect.toHaveText("1:1"))
@@ -301,8 +303,8 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             })
           </script>`)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
-            yield* page.goto(url)
+            const page = yield* SharedContext.newPage
+            yield* page.goto(url, { waitUntil: "load" })
             yield* page.getByLabel("File").setInputFiles(made[0]!)
             yield* page.locator("#out").pipe(Expect.toHaveText("true"))
           }))
@@ -318,8 +320,8 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             const second = path.join(directory, "second.txt")
             fs.writeFileSync(first, "first")
             fs.writeFileSync(second, "second")
-            const page = yield* Browser.newPage()
-            yield* page.goto(url)
+            const page = yield* SharedContext.newPage
+            yield* page.goto(url, { waitUntil: "load" })
             const input = page.getByLabel("Files")
             const out = page.locator("#out")
             // Both calls use the same native operation as pre-transfer absolute Local uploads.
@@ -354,8 +356,8 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
             const file = path.join(directory, "host.txt")
             fs.writeFileSync(file, "on host")
-            const page = yield* Browser.newPage()
-            yield* page.goto(url)
+            const page = yield* SharedContext.newPage
+            yield* page.goto(url, { waitUntil: "load" })
             // This unchanged adapter path was also used by absolute Local inputs before caller transfer.
             yield* page.getByLabel("Files").setInputFiles(FileInput.remote(FilePath.Remote.make(file)))
             yield* page.locator("#out").pipe(Expect.toHaveText(/^host\.txt:[^:]*:7:on host$/))
@@ -382,8 +384,8 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             }
           </script>`)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
-            yield* page.goto(url)
+            const page = yield* SharedContext.newPage
+            yield* page.goto(url, { waitUntil: "load" })
             yield* FileChooser.handle(page, FileChooser.choose(FileInput.local(import.meta.filename)))
             yield* page.getByRole("button", { name: "Choose" }).click()
             yield* page.locator("#out").pipe(Expect.toHaveText("tooling.ts:1"))
@@ -401,8 +403,8 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           </script>`)
           const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-chunks-"))
           yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
-          const page = yield* Browser.newPage()
-          yield* page.goto(url)
+          const page = yield* SharedContext.newPage
+          yield* page.goto(url, { waitUntil: "load" })
           for (const length of [0, 1, 65535, 65536, 65537, 131073]) {
             const data = Uint8Array.from({ length }, (_, index) => (index * 17 + 23) % 256)
             const file = path.join(directory, "boundary.bin")
@@ -425,8 +427,8 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               document.getElementById("out").textContent = [...event.target.files].map((file) => file.name).join(",")
             }
           </script>`)
-            const page = yield* Browser.newPage()
-            yield* page.goto(url)
+            const page = yield* SharedContext.newPage
+            yield* page.goto(url, { waitUntil: "load" })
             yield* page.getByLabel("File").setInputFiles(FileInput.bytes("one.txt", "text/plain", text("1")))
             yield* page.locator("#out").pipe(Expect.toHaveText("one.txt"))
             const refused = yield* page.getByLabel("File").setInputFiles(made).pipe(Effect.flip)
@@ -470,8 +472,8 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
                 fs.closeSync(fd)
               }
               fs.utimesSync(file, new Date(978307200000), new Date(978307200000))
-              const page = yield* Browser.newPage()
-              yield* page.goto(url)
+              const page = yield* SharedContext.newPage
+              yield* page.goto(url, { waitUntil: "load" })
               const baseline = process.memoryUsage()
               const peak = { ...baseline }
               const descendantBaselineRss = descendantRss()
@@ -516,7 +518,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           if (!(yield* supports("fileChooser"))) return
           const url = yield* fixture(files)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             for (
               const inputs of [
@@ -542,7 +544,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           const served = yield* site
           const url = yield* fixture(`<p>start</p>`)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const refused = yield* page.goto(`${served.origin}/204`).pipe(Effect.flip)
             assert(refused._tag === "PageError", String(refused))
@@ -568,8 +570,8 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               `<button>Edit</button><script>window.addEventListener("beforeunload", (e) => { e.preventDefault(); e.returnValue = "" })</script>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
-              yield* page.goto(url)
+              const page = yield* SharedContext.newPage
+              yield* page.goto(url, { waitUntil: "load" })
               // A page prompts before unloading only after the user has interacted with it
               yield* page.getByRole("button", { name: "Edit" }).click()
               if (!(yield* supports("close.runBeforeUnload"))) {
@@ -605,7 +607,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
               `<button>Edit</button><script>window.addEventListener("beforeunload", (e) => { e.preventDefault(); e.returnValue = "" })</script>`
             )
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               yield* page.goto(url)
               // A page prompts before unloading only after the user has interacted with it
               yield* page.getByRole("button", { name: "Edit" }).click()
@@ -637,7 +639,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             }"></iframe></main>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url, { waitUntil: "load" })
             const acquired = yield* page.capability(Capability.AxTree).pipe(
               Effect.flatMap((tree) => tree.read),
@@ -673,7 +675,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
         Effect.gen(function*() {
           const url = yield* fixture(`<p id="t"></p><script>setInterval(() => t.textContent = Date.now(), 50)</script>`)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const acquired = yield* page.capability(Capability.Screencast).pipe(Effect.exit)
             if (!(yield* supports("capability.screencast"))) {
@@ -706,7 +708,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             let n = 0; function paint() { t.textContent = ++n; requestAnimationFrame(paint) } paint()
           </script>`)
             yield* Effect.scoped(Effect.gen(function*() {
-              const page = yield* Browser.newPage()
+              const page = yield* SharedContext.newPage
               yield* page.goto(url)
               yield* page.emulate({ viewport: { width: 640, height: 480 } })
               const first = yield* Effect.acquireRelease(Scope.make(), (scope) => Scope.close(scope, Exit.void))
@@ -736,7 +738,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           const videoSupported = yield* supports("capability.video")
           const url = yield* fixture(`<p id="t"></p><script>setInterval(() => t.textContent = Date.now(), 50)</script>`)
           const recorded = yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             return yield* Effect.scoped(Effect.gen(function*() {
               const recording = yield* page.capability(Capability.Video)
@@ -761,7 +763,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           if (!(yield* supports("capability.video"))) return
           const url = yield* fixture(`<p id="t"></p><script>setInterval(() => t.textContent = Date.now(), 50)</script>`)
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url)
             const recording = yield* Effect.scoped(Effect.gen(function*() {
               const recording = yield* page.capability(Capability.Video)
@@ -787,7 +789,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             }
           })
           yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* Browser.newPage()
+            const page = yield* SharedContext.newPage
             yield* page.goto(url).pipe(Effect.provideService(Browser.TraceProtocolCommands, true))
             yield* page.reload()
           })).pipe(Effect.withTracer(tracer))

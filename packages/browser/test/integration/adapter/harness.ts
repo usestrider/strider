@@ -35,6 +35,8 @@ export interface Site {
   /** The same server under another site, for out-of-process frames: `http://localhost:port`. */
   readonly crossSite: string
   readonly served: ReadonlyArray<Served>
+  /** Completes once the site has been asked for `path`, its query included, now or earlier. */
+  readonly requested: (path: string) => Effect.Effect<void>
 }
 
 type Route = (request: http.IncomingMessage, response: http.ServerResponse, site: Site) => void
@@ -55,6 +57,40 @@ const routes: Record<string, Route> = {
       "content-security-policy": "script-src 'self'"
     })
     response.end(new URL(request.url ?? "/", "http://site").searchParams.get("html") ?? "")
+  },
+  // Any page, as `/fixture`, under a policy that allows only the site's own stylesheets
+  "/style-csp": (request, response) => {
+    response.writeHead(200, {
+      "content-type": "text/html; charset=utf-8",
+      "content-security-policy": "style-src 'self'"
+    })
+    response.end(new URL(request.url ?? "/", "http://site").searchParams.get("html") ?? "")
+  },
+  // Reports disallowed inline styles without blocking them.
+  "/style-report-only": (_request, response) => {
+    response.writeHead(200, {
+      "content-type": "text/html; charset=utf-8",
+      "content-security-policy-report-only": "style-src 'self'"
+    })
+    response.end("<body>x</body>")
+  },
+  // Any stylesheet: its source is the `css` parameter
+  "/style": (request, response) => {
+    response.writeHead(200, { "content-type": "text/css; charset=utf-8" })
+    response.end(new URL(request.url ?? "/", "http://site").searchParams.get("css") ?? "")
+  },
+  // Any page, as `/fixture`, under a policy that only reports scripts that aren't the site's own
+  "/csp-report-only": (request, response) => {
+    response.writeHead(200, {
+      "content-type": "text/html; charset=utf-8",
+      "content-security-policy-report-only": "script-src 'self'"
+    })
+    response.end(new URL(request.url ?? "/", "http://site").searchParams.get("html") ?? "")
+  },
+  // Any script: its source is the `js` parameter
+  "/script": (request, response) => {
+    response.writeHead(200, { "content-type": "text/javascript; charset=utf-8" })
+    response.end(new URL(request.url ?? "/", "http://site").searchParams.get("js") ?? "")
   },
   // An error page: a commit with a status of 404
   "/missing": (_request, response) => html(response, `<title>missing</title><p>No such page</p>`, 404),
@@ -100,6 +136,14 @@ const routes: Record<string, Route> = {
       `<title>frames</title><iframe src="/child"></iframe><iframe src="${site.crossSite}/child"></iframe>`
     ),
   "/child": (request, response) => html(response, `<title>child</title><p>child of ${request.headers.host}</p>`),
+  // A script `/csp` allows, which reports whether its page's policy lets it `eval`, and in a frame, posts what
+  // the page's `#inline` and `#eval` say to its parent
+  "/eval.js": (_request, response) => {
+    response.writeHead(200, { "content-type": "text/javascript" })
+    response.end(
+      `{ const result = (() => { try { return eval("'ran'") } catch { return "refused" } })(); document.getElementById("eval").textContent = result; if (parent !== window) parent.postMessage(document.getElementById("inline").textContent + "," + result, "*") }`
+    )
+  },
   "/worker.js": (_request, response) => {
     response.writeHead(200, { "content-type": "text/javascript" })
     response.end(`console.log("from the worker"); postMessage("ready")`)
@@ -126,6 +170,11 @@ const routes: Record<string, Route> = {
     html(
       response,
       `<title>console</title><script>console.log("hello", 42); console.error("bad"); setTimeout(() => { throw new TypeError("thrown here") })</script>`
+    ),
+  "/console-previews": (_request, response) =>
+    html(
+      response,
+      `<title>console previews</title><div id="d">x</div><script>console.log([1, 2, 3], {a: 1}, window); console.log({toString() { return "x" }, valueOf() { return 1 }}); { const s = []; s[1] = 1; s[4] = 2; console.log(s) } console.log([[1, [2]], {b: {c: "d"}}], new Map([["k", 1]]), new Set([1]), null, undefined, -0, 1n, "str"); console.log(document.getElementById("d"), document); console.log("an error", new Error("boom")); console.log("%o and %d", {a: 1}, 5, [2]); console.log("%cstyled", "color: red", {a: 1}); new Worker(URL.createObjectURL(new Blob(['console.log("worker", {a: 1})'])))</script>`
     ),
   "/form": (_request, response) =>
     html(
@@ -243,10 +292,22 @@ self.addEventListener("fetch", (event) => {
       response.end("document.title = \"Deferred\"")
     }, 200)
   },
+  // A page the server answers after a second, so a popup opened to it is handed over before its document commits
+  "/slow-page": (_request, response) => {
+    setTimeout(() => {
+      response.writeHead(200, { "content-type": "text/html" })
+      response.end("<title>Slow</title>")
+    }, 1000)
+  },
   // A resource that never completes, until the page closes or replaces it. No sleep-based readiness assertion.
   "/pending-image": (_request, response) => {
     response.writeHead(200, { "content-type": "image/svg+xml" })
     response.write("<svg xmlns=\"http://www.w3.org/2000/svg\">")
+  },
+  // A page that never finishes loading, until the page closes or replaces it
+  "/pending-page": (_request, response) => {
+    response.writeHead(200, { "content-type": "text/html; charset=utf-8" })
+    response.write("<!doctype html><title>pending</title>")
   },
   // A script that never completes: a deferred one holds DOMContentLoaded back while the page is interactive
   "/pending-script": (_request, response) => {
@@ -270,8 +331,10 @@ self.addEventListener("fetch", (event) => {
     )
 }
 
-// A WebSocket that echoes text frames, enough for one test.
+// A WebSocket that echoes text frames, enough for one test. A peer that ends its side without a close frame, as when
+// a proxy's tunnel is cut, ends the socket too: http.Server's sockets are half-open, so it would stay open otherwise.
 const upgrade = (request: http.IncomingMessage, socket: net.Socket) => {
+  socket.on("end", () => socket.end())
   const key = request.headers["sec-websocket-key"]
   const accept = createHash("sha1").update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest("base64")
   socket.write(
@@ -302,25 +365,47 @@ const upgrade = (request: http.IncomingMessage, socket: net.Socket) => {
 
 /** Serves the site for the scope. */
 export const site: Effect.Effect<Site, never, Scope.Scope> = Effect.acquireRelease(
-  Effect.callback<{ server: http.Server; site: Site }>((resume) => {
+  Effect.callback<{ server: http.Server; upgraded: Set<net.Socket>; site: Site }>((resume) => {
     const served: Array<Served> = []
+    const waiting = new Set<{ readonly path: string; readonly resume: () => void }>()
+    const requested = (path: string) =>
+      Effect.callback<void>((resume) => {
+        if (served.some((request) => request.path === path)) return resume(Effect.void)
+        const waiter = { path, resume: () => resume(Effect.void) }
+        waiting.add(waiter)
+        return Effect.sync(() => waiting.delete(waiter))
+      })
     let siteRef: Site
     const server = http.createServer((request, response) => {
       const url = new URL(request.url ?? "/", "http://site")
-      served.push({ method: request.method ?? "GET", path: url.pathname + url.search, headers: request.headers })
+      const path = url.pathname + url.search
+      served.push({ method: request.method ?? "GET", path, headers: request.headers })
+      for (const waiter of waiting) {
+        if (waiter.path === path) {
+          waiting.delete(waiter)
+          waiter.resume()
+        }
+      }
       const route = routes[url.pathname]
       if (route !== undefined) return route(request, response, siteRef)
       html(response, `<title>${url.pathname}</title><p>${url.pathname}</p>`)
     })
-    server.on("upgrade", upgrade)
+    // closeAllConnections() doesn't reach upgraded sockets, so the release destroys them itself
+    const upgraded = new Set<net.Socket>()
+    server.on("upgrade", (request: http.IncomingMessage, socket: net.Socket) => {
+      upgraded.add(socket)
+      socket.on("close", () => upgraded.delete(socket))
+      upgrade(request, socket)
+    })
     server.listen(0, "127.0.0.1", () => {
       const { port } = server.address() as net.AddressInfo
-      siteRef = { origin: `http://127.0.0.1:${port}`, crossSite: `http://localhost:${port}`, served }
-      resume(Effect.succeed({ server, site: siteRef }))
+      siteRef = { origin: `http://127.0.0.1:${port}`, crossSite: `http://localhost:${port}`, served, requested }
+      resume(Effect.succeed({ server, upgraded, site: siteRef }))
     })
   }),
-  ({ server }) =>
+  ({ server, upgraded }) =>
     Effect.callback<void>((resume) => {
+      for (const socket of upgraded) socket.destroy()
       server.closeAllConnections()
       server.close(() => resume(Effect.void))
     })
@@ -468,3 +553,33 @@ export const json = (value: Adapter.RemoteValue): unknown => {
       return value.type
   }
 }
+
+/** A self-signed key pair for `127.0.0.1`, which no browser trusts. */
+export const selfSigned = Effect.acquireRelease(
+  Effect.sync(() => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-proxy-tls-"))
+    const key = path.join(directory, "key.pem")
+    const cert = path.join(directory, "cert.pem")
+    execFileSync(openssl, [
+      "req",
+      "-x509",
+      "-newkey",
+      "ec",
+      "-pkeyopt",
+      "ec_paramgen_curve:prime256v1",
+      "-nodes",
+      "-keyout",
+      key,
+      "-out",
+      cert,
+      "-days",
+      "1",
+      "-subj",
+      "/CN=127.0.0.1",
+      "-addext",
+      "subjectAltName=IP:127.0.0.1"
+    ], { stdio: "ignore" })
+    return { directory, key: fs.readFileSync(key), cert: fs.readFileSync(cert) }
+  }),
+  ({ directory }) => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true }))
+)

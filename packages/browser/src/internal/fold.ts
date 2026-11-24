@@ -25,11 +25,13 @@ import type * as Download from "../Download.ts"
 import type * as NetworkConnection from "../NetworkConnection.ts"
 import type * as NetworkRequest from "../NetworkRequest.ts"
 import type * as NetworkResponse from "../NetworkResponse.ts"
+import type * as PageLifecycle from "../PageLifecycle.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
 import * as Target from "../Target.ts"
 import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as Adapter from "./adapter.ts"
+import * as ConsoleArguments from "./consoleArguments.ts"
 import * as Events from "./events.ts"
 import * as Execution from "./execution.ts"
 import * as Input from "./input.ts"
@@ -60,7 +62,8 @@ const defaultSettings: Model.ContextSettings = {
   reclaimable: false,
   policy: Option.none(),
   eventLog: defaultEventLog,
-  keyboardLayout: "us"
+  keyboardLayout: "us",
+  testIdAttribute: "data-testid"
 }
 
 /** How a target's end ends its event streams: normally when it was closed, or with `TargetGone` otherwise. */
@@ -86,6 +89,9 @@ export interface Fold {
 
   // Reads
   readonly pages: Readable.Readable<ReadonlyArray<Model.PageEntry>>
+  readonly contexts: Readable.Readable<ReadonlyArray<Model.ContextEntry>>
+  /** Announces the contexts again, unchanged, for a reader whose view of them has changed. */
+  readonly touchContexts: Effect.Effect<void>
   readonly page: (id: Target.NavigableId) => Option.Option<Model.PageEntry>
   readonly document: (id: Target.DocumentId) => Option.Option<Model.DocumentEntry>
   readonly documentOf: (navigable: Target.NavigableId) => Effect.Effect<Option.Option<Target.DocumentId>>
@@ -94,7 +100,7 @@ export interface Fold {
   readonly lost: Deferred.Deferred<void>
 
   // Commands
-  readonly context: (id: UserContext.Id, isDefault: boolean) => Effect.Effect<Model.ContextEntry>
+  readonly context: (id: UserContext.Id, isDefault: boolean, created?: boolean) => Effect.Effect<Model.ContextEntry>
   readonly configure: (context: Model.ContextEntry, settings: Model.ContextSettings) => Effect.Effect<void>
   readonly observeStorageSources: (
     context: Model.ContextEntry,
@@ -119,6 +125,8 @@ export interface Fold {
   readonly undecided: (page: Model.PageEntry, prompt: Model.PromptEvent) => Effect.Effect<void>
   /** Publishes a decision a policy or the default made, on the page's and the context's channels. */
   readonly autoResolved: (owner: Model.Owner, event: Model.AutoResolutionEvent) => Effect.Effect<void>
+  /** Publishes a handler's decision for a dialog, which the browser applied, on the page's channel. */
+  readonly handledPrompt: (page: Model.PageEntry, event: Model.HandledPromptEvent) => Effect.Effect<void>
   /**
    * Ends everything the browser held, with `reason`: when its connection is lost, or once it has closed. Does
    * nothing once something has ended it.
@@ -135,7 +143,10 @@ interface Input {
 export const make = Effect.fnUntraced(function*(options: {
   /** Releases a popup its opener's owner releases (`ownership.ts`). */
   readonly release: (page: Model.PageEntry, by: Scope.Scope) => Effect.Effect<void>
+  /** The browser's console arguments kept for subscriptions to calls (`consoleArguments.ts`); a fresh table if absent. */
+  readonly consoleArguments?: ConsoleArguments.Table | undefined
 }) {
+  const consoleArguments = options.consoleArguments ?? ConsoleArguments.make()
   const modelScope = yield* Effect.scope
 
   // ── The stream ──
@@ -192,8 +203,19 @@ export const make = Effect.fnUntraced(function*(options: {
   const pages = new Map<Target.NavigableId, Model.PageEntry>()
   // Every page of the browser, in the order they were added
   const pageList = yield* cell<ReadonlyArray<Model.PageEntry>>([])
+  // Every context of the browser, in the order they were added
+  const contextList = yield* cell<ReadonlyArray<Model.ContextEntry>>([])
   // Frames, by the page they belong to
   const frames = new Map<Target.NavigableId, Model.PageEntry>()
+  // The popups whose opener the backend named before the model had it, by the opener's id: an attached browser can
+  // list a popup before the page or frame that opened it
+  const awaitingOpener = new Map<Target.NavigableId, Set<Model.PageEntry>>()
+  const resolveOpener = (id: Target.NavigableId, opener: Model.PageEntry) => {
+    const waiting = awaitingOpener.get(id)
+    if (waiting === undefined) return
+    awaitingOpener.delete(id)
+    for (const popup of waiting) popup.opener = opener
+  }
   const documents = new Map<Target.DocumentId, Model.DocumentEntry>()
   const navigations = NetworkIndex.bounded<PageNavigation.Id, Model.NavigationEntry>(maxNavigations)
   // A page's navigations and its frames', from their start to their end: where they went, for the event
@@ -261,6 +283,9 @@ export const make = Effect.fnUntraced(function*(options: {
     if (Option.isSome(owner.context)) Events.publish(contextChannel(owner.context.value.events), value)
   }
 
+  const publishLifecycle = (page: Model.PageEntry, event: PageLifecycle.PageLifecycle) =>
+    publish(ownerOfPage(Option.some(page)), event, (events) => events.lifecycle, (events) => events.lifecycle)
+
   const updateOpen = (
     page: Model.PageEntry,
     change: (open: Extract<Model.PageStatus, { _tag: "Open" }>) => Model.PageStatus
@@ -308,6 +333,9 @@ export const make = Effect.fnUntraced(function*(options: {
     for (const frame of gone) {
       frames.delete(frame)
       page.contextEntry.storageSources?.origins.delete(frame)
+    }
+    for (const frame of list) {
+      if (gone.has(frame.id)) publishLifecycle(page, { _tag: "FrameRemoved", page: page.id, frame: frame.id })
     }
     yield* update(page.state, (state) => ({ ...state, frames: state.frames.filter((frame) => !gone.has(frame.id)) }))
     for (const document of Array.from(documents.values())) {
@@ -362,6 +390,11 @@ export const make = Effect.fnUntraced(function*(options: {
     }
     pages.delete(page.id)
     page.contextEntry.storageSources?.origins.delete(page.id)
+    if (page.opener === undefined && Option.isSome(page.openerId)) {
+      const waiting = awaitingOpener.get(page.openerId.value)
+      waiting?.delete(page)
+      if (waiting?.size === 0) awaitingOpener.delete(page.openerId.value)
+    }
     yield* update(pageList, (list) => list.filter((each) => each !== page))
     popupUrls.delete(page.id)
     const closing = new Set<Target.NavigableId>([page.id])
@@ -371,6 +404,8 @@ export const make = Effect.fnUntraced(function*(options: {
       frames.delete(frame)
       page.contextEntry.storageSources?.origins.delete(frame)
     }
+    // Its close is an event before its channels end, so a page's stream and its context's both see it
+    publishLifecycle(page, { _tag: "Closed", page: page.id, frame: page.id, reason })
     const how = endOf(reason)
     for (const channel of Object.values(page.events)) Events.end(channel as Events.Channel<unknown>, how)
     yield* update(page.state, (state): Model.PageState => ({
@@ -401,7 +436,7 @@ export const make = Effect.fnUntraced(function*(options: {
     }
   })
 
-  const ensureContext = Effect.fnUntraced(function*(id: UserContext.Id, isDefault: boolean) {
+  const ensureContext = Effect.fnUntraced(function*(id: UserContext.Id, isDefault: boolean, created = false) {
     const existing = contexts.get(id)
     if (existing !== undefined) return existing
     const target: Target.Description = { _tag: "UserContext" }
@@ -421,8 +456,11 @@ export const make = Effect.fnUntraced(function*(options: {
       closed: yield* Deferred.make<Target.CloseReason>(),
       events: {
         autoResolution: Events.make(target, cap),
+        navigation: Events.make(target, cap),
+        lifecycle: Events.make(target, cap),
         request: Events.make(target, cap),
         response: Events.make(target, cap),
+        requestEnd: Events.make(target, cap),
         console: Events.make(target, cap),
         exception: Events.make(target, cap),
         download: Events.make(target, cap),
@@ -430,7 +468,9 @@ export const make = Effect.fnUntraced(function*(options: {
         connection: Events.make(target, cap)
       }
     }
+    if (created) entry.awaitingHandle = true
     contexts.set(id, entry)
+    yield* update(contextList, (list) => [...list, entry])
     return entry
   })
 
@@ -438,6 +478,7 @@ export const make = Effect.fnUntraced(function*(options: {
     entry.timings?.clear()
     entry.sizes?.clear()
     contexts.delete(entry.id)
+    yield* update(contextList, (list) => list.filter((each) => each !== entry))
     for (const hop of hops.values()) {
       if (Option.isSome(hop.context) && hop.context.value === entry) Deferred.doneUnsafe(hop.sentKnown, Effect.void)
     }
@@ -456,11 +497,14 @@ export const make = Effect.fnUntraced(function*(options: {
     yield* Deferred.succeed(entry.closed, reason)
   })
 
-  const endHop = (id: NetworkRequest.HopId, end: Model.HopEnd) => {
+  /** Ends a hop the browser reported ending, and publishes the end once, to the hop's owner. */
+  const endHop = (id: NetworkRequest.HopId, end: Model.RequestEndEvent["end"]) => {
     const hop = hops.get(id)
     if (Option.isNone(hop)) return
-    Deferred.doneUnsafe(hop.value.end, Effect.succeed(end))
     Deferred.doneUnsafe(hop.value.sentKnown, Effect.void)
+    if (Deferred.isDoneUnsafe(hop.value.end)) return
+    Deferred.doneUnsafe(hop.value.end, Effect.succeed(end))
+    publish(hop.value, { hop: hop.value, end }, (events) => events.requestEnd, (events) => events.requestEnd)
   }
 
   /** The URL a navigation ended at, by its outcome's document; else where it was going. */
@@ -494,9 +538,16 @@ export const make = Effect.fnUntraced(function*(options: {
     Effect.gen(function*() {
       switch (fact._tag) {
         case "UserContextAdded": {
-          const entry = yield* ensureContext(fact.context, fact.isDefault)
+          const entry = yield* ensureContext(fact.context, fact.isDefault, fact.created === true)
           if (fact.requestTiming) entry.timings ??= new Map()
           if (fact.requestSizes) entry.sizes ??= new Map()
+          return
+        }
+        case "UserContextReleased": {
+          const context = contexts.get(fact.context)
+          if (context === undefined || context.awaitingHandle !== true) return
+          context.awaitingHandle = false
+          yield* update(contextList, (list) => [...list])
           return
         }
         case "UserContextRemoved": {
@@ -517,6 +568,7 @@ export const make = Effect.fnUntraced(function*(options: {
           const opener = fact.kind === "popup" && fact.origin._tag === "Opened"
             ? Option.flatMap(fact.origin.opener, (id) => Option.fromNullishOr(pages.get(id)))
             : Option.none()
+          const openerId = fact.origin._tag === "Created" ? Option.none<Target.NavigableId>() : fact.origin.opener
           // Owned with its opener, released by the scope that acquired it (CONCEPTS.md §3)
           const owner = Option.flatMap(opener, (page) => page.state.getUnsafe().owner)
           const entry: Model.PageEntry = {
@@ -541,19 +593,31 @@ export const make = Effect.fnUntraced(function*(options: {
             events: {
               popup: Events.make(target, cap),
               dialog: Events.make(target, cap),
+              handledDialog: Events.make(target, cap),
               fileChooser: Events.make(target, cap),
               autoResolution: Events.make(target, cap),
               navigation: Events.make(target, cap),
+              lifecycle: Events.make(target, cap),
               request: Events.make(target, cap),
               response: Events.make(target, cap),
+              requestEnd: Events.make(target, cap),
               console: Events.make(target, cap),
               exception: Events.make(target, cap),
               download: Events.make(target, cap),
               worker: Events.make(target, cap),
               connection: Events.make(target, cap)
-            }
+            },
+            openerId,
+            // A popup a frame opened names that frame's page
+            opener: Option.isSome(openerId) ? pages.get(openerId.value) ?? frames.get(openerId.value) : undefined
           }
           pages.set(fact.page, entry)
+          if (entry.opener === undefined && Option.isSome(openerId)) {
+            const waiting = awaitingOpener.get(openerId.value)
+            if (waiting === undefined) awaitingOpener.set(openerId.value, new Set([entry]))
+            else waiting.add(entry)
+          }
+          resolveOpener(fact.page, entry)
           // A popup is reported to its opener, when the backend names one; before the
           // context's pages change, so a caller woken by that change subscribes after it, as with every event
           if (Option.isSome(opener)) {
@@ -577,12 +641,19 @@ export const make = Effect.fnUntraced(function*(options: {
           const page = pageOf(fact.page)
           if (Option.isNone(page)) return
           frames.set(fact.frame, page.value)
+          resolveOpener(fact.frame, page.value)
           const frame: Model.FrameEntry = {
             id: fact.frame,
             parent: fact.parent,
             document: Option.none(),
             url: Urls.reported("about:blank")
           }
+          publishLifecycle(page.value, {
+            _tag: "FrameAdded",
+            page: page.value.id,
+            frame: fact.frame,
+            parent: fact.parent
+          })
           yield* update(page.value.state, (state) => ({
             ...state,
             frames: [...state.frames.filter((each) => each.id !== fact.frame), frame]
@@ -694,6 +765,19 @@ export const make = Effect.fnUntraced(function*(options: {
           const document = documents.get(fact.document)
           if (document === undefined) return
           const page = pages.get(document.navigable)
+          // The event first, then the state: `goto` returns once the state has it, and a subscription its caller
+          // makes then must not see it. A backend can report a readiness more than once; the event is the change.
+          const state = yield* document.state.get
+          const owner = page ?? frames.get(document.navigable)
+          if (state.readiness !== fact.readiness && owner !== undefined && pages.has(owner.id)) {
+            publishLifecycle(owner, {
+              _tag: fact.readiness === "interactive" ? "DomContentLoaded" : "Loaded",
+              page: owner.id,
+              frame: document.navigable,
+              document: document.id,
+              url: state.url
+            })
+          }
           if (page !== undefined) {
             yield* updateOpen(page, (open) =>
               open.document.id === fact.document
@@ -752,12 +836,18 @@ export const make = Effect.fnUntraced(function*(options: {
           if (Option.isSome(start)) {
             started.delete(fact.navigation)
             if (pages.has(start.value.page.id)) {
-              Events.publish(start.value.page.events.navigation, {
-                navigation: fact.navigation,
-                frame: start.value.frame,
-                url: endedAt(fact.outcome, start.value.url),
-                outcome: fact.outcome
-              })
+              publish(
+                ownerOfPage(Option.some(start.value.page)),
+                {
+                  navigation: fact.navigation,
+                  page: start.value.page.id,
+                  frame: start.value.frame,
+                  url: endedAt(fact.outcome, start.value.url),
+                  outcome: fact.outcome
+                },
+                (events) => events.navigation,
+                (events) => events.navigation
+              )
             }
           }
           yield* Deferred.succeed(navigation(fact.navigation).outcome, fact.outcome)
@@ -857,7 +947,9 @@ export const make = Effect.fnUntraced(function*(options: {
             transferBytes: fact.transferBytes,
             bodyBytes: fact.bodyBytes,
             at: fact.at,
-            httpVersion: Option.fromUndefinedOr(fact.httpVersion)
+            httpVersion: Option.fromUndefinedOr(fact.httpVersion),
+            serverAddress: Option.fromUndefinedOr(fact.serverAddress),
+            securityProtocol: Option.fromUndefinedOr(fact.securityProtocol)
           })
           return
         }
@@ -866,8 +958,21 @@ export const make = Effect.fnUntraced(function*(options: {
           return
         }
         case "ConsoleMessage": {
-          const owner = realmOwners.get(fact.realm) ??
-            (fact.message.origin._tag === "Page" ? ownerOfPage(pageOf(fact.message.origin.page)) : nobody)
+          const origin = fact.message.origin
+          const owner = Option.flatMap(fact.realm, (realm) => Option.fromNullishOr(realmOwners.get(realm))).pipe(
+            Option.getOrElse(() => origin._tag === "Page" ? ownerOfPage(pageOf(origin.page)) : nobody)
+          )
+          if (fact.args !== undefined && Option.isSome(fact.realm)) {
+            const channels = [
+              ...Option.toArray(owner.page).map((page) => page.events.console),
+              ...Option.toArray(owner.context).map((context) => context.events.console)
+            ]
+            // Arguments no subscription claims are released at once, apart from the fold
+            yield* ConsoleArguments.keep(consoleArguments, fact.message, fact.realm.value, fact.args, channels)
+              .pipe(
+                Effect.forkIn(modelScope)
+              )
+          }
           publish(owner, fact.message, (events) => events.console, (events) => events.console)
           return
         }
@@ -1111,13 +1216,15 @@ export const make = Effect.fnUntraced(function*(options: {
       ),
     obligations,
     pages: pageList,
+    contexts: contextList,
+    touchContexts: apply(Effect.suspend(() => update(contextList, (list) => [...list]))),
     page: (id) => Option.fromNullishOr(pages.get(id)),
     document: (id) => Option.fromNullishOr(documents.get(id)),
     documentOf,
     response: (hop) => responses.get(hop),
     hop: (hop) => hops.get(hop),
     lost,
-    context: (id, isDefault) => apply(ensureContext(id, isDefault)),
+    context: (id, isDefault, created) => apply(ensureContext(id, isDefault, created)),
     configure: (context, settings) => apply(update(context.state, (state) => ({ ...state, settings }))),
     navigation: (id) => apply(Effect.sync(() => navigation(id))),
     forget: (id) => apply(Effect.sync(() => void navigations.delete(id))),
@@ -1149,6 +1256,7 @@ export const make = Effect.fnUntraced(function*(options: {
       apply(
         Effect.sync(() => publish(owner, event, (events) => events.autoResolution, (events) => events.autoResolution))
       ),
+    handledPrompt: (page, event) => apply(Effect.sync(() => Events.publish(page.events.handledDialog, event))),
     loseConnection: (reason) => apply(loseConnection(reason))
   }
   return self

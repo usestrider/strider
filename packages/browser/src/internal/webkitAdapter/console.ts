@@ -1,7 +1,8 @@
 /**
- * The console on stock WebKit: what a page or a worker logged, and what it threw that nothing caught, which WebKit
- * reports as a console error. A message is attributed to the realm of an object it logged, else its worker's, else
- * the page's main frame's.
+ * The console on stock WebKit: what a page or a worker logged, what the browser wrote to its console itself (a CSP
+ * violation, a blocked or failed load), and what it threw that nothing caught, which WebKit reports as a console
+ * error. A message is attributed to the realm of an object it logged, else its worker's, else the page's main
+ * frame's.
  */
 import * as Option from "effect/Option"
 import * as ConsoleMessage from "../../ConsoleMessage.ts"
@@ -10,8 +11,18 @@ import * as Console from "../../webkit-stock-protocol/Console.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as ConsoleFormat from "../consoleFormat.ts"
+import * as EpochTime from "../epochTime.ts"
 import * as Urls from "../urls.ts"
-import { contextKey, type Event, type RealmEntry, type State, type TargetEntry, type WorkerEntry } from "./state.ts"
+import { consoleArguments } from "./evaluation.ts"
+import {
+  contextKey,
+  type Event,
+  placement,
+  type RealmEntry,
+  type State,
+  type TargetEntry,
+  type WorkerEntry
+} from "./state.ts"
 
 // ── Messages ──────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -32,24 +43,44 @@ const realmOfObject = (state: State, target: TargetEntry, objectId: string | und
   }
 }
 
+/** The categories of the channels that name one. */
+const channelCategories: Readonly<Record<string, ConsoleMessage.Category>> = {
+  network: "network",
+  security: "security",
+  rendering: "rendering",
+  storage: "storage"
+}
+
+/** Who wrote a message: the page with the `console` method it called, or the browser on one of its own channels. */
+const sourceOf = (message: Console.ConsoleMessage): ConsoleMessage.Source =>
+  message.source === "console-api" ? { _tag: "Page", method: Kit.consoleMethod(message.type, message.level) } : {
+    _tag: "Browser",
+    category: Object.hasOwn(channelCategories, message.source) ? channelCategories[message.source]! : "other"
+  }
+
 const consoleMessage = (
   state: State,
   message: Console.ConsoleMessage,
   target: TargetEntry,
-  worker: WorkerEntry | undefined
+  worker: WorkerEntry | undefined,
+  timestamp: number
 ) => {
   if (message.source === "javascript" && message.level === "error") {
     uncaught(state, message, target, worker)
     return
   }
-  if (message.source !== "console-api") return
   const realm = worker?.realm ??
     realmOfObject(state, target, message.parameters?.find((parameter) => parameter.objectId !== undefined)?.objectId) ??
     mainRealmOf(target)
   if (realm === undefined) return
+  // Only where a subscriber asked for them does a message keep its arguments, each object as a handle
+  const args = message.parameters !== undefined && state.registry.consoleArguments(placement(target.page))
+    ? consoleArguments(state, realm, message.parameters)
+    : undefined
   state.buffer.emit({
     _tag: "ConsoleMessage",
-    realm: realm.id,
+    realm: Option.some(realm.id),
+    args,
     message: new ConsoleMessage.ConsoleMessage({
       level: Kit.consoleLevel(message.level),
       text: message.parameters !== undefined && message.parameters.length > 0
@@ -62,6 +93,8 @@ const consoleMessage = (
       origin: realm.document !== undefined
         ? { _tag: "Page", page: target.page.id }
         : { _tag: "Worker", realm: realm.id },
+      source: sourceOf(message),
+      timestamp: EpochTime.fromSeconds(timestamp),
       at: Adapter.now()
     })
   })
@@ -112,11 +145,12 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       const holder = worker ?? target
       if (holder === undefined) return
       holder.lastConsole = params.message
-      consoleMessage(state, params.message, worker?.target ?? target!, worker)
+      consoleMessage(state, params.message, worker?.target ?? target!, worker, params.message.timestamp)
     })
-    .on(Console.messageRepeatCountUpdated, (_, { state, target, worker }) => {
+    // WebKit reports a message logged again as a repeat of the last, at the time it was logged again
+    .on(Console.messageRepeatCountUpdated, (params, { state, target, worker }) => {
       const holder = worker ?? target
       const message = holder?.lastConsole
       if (holder === undefined || message === undefined) return
-      consoleMessage(state, message, worker?.target ?? target!, worker)
+      consoleMessage(state, message, worker?.target ?? target!, worker, params.timestamp)
     })

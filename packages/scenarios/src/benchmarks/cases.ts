@@ -362,6 +362,74 @@ export const cases: ReadonlyArray<Case> = [
     },
     verify: equals("1")
   },
+  ...[false, true].map((frame): Case => ({
+    name: frame ? "mouse-click-cross-site-frame" : "mouse-click",
+    description: frame
+      ? "Click a button by its coordinates on a page with a cross-site frame, then read its counter"
+      : "Click a button by its coordinates, then read its counter",
+    fixture: frame ? "/benchmark-mouse?frame" : "/benchmark-mouse",
+    strider: Effect.fnUntraced(function*(page) {
+      yield* page.mouse.click({ x: 60, y: 25 })
+      return yield* page.locator("#count").readText
+    }),
+    playwright: async (page) => {
+      await page.mouse.click(60, 25)
+      return page.locator("#count").textContent()
+    },
+    verify: equals("1")
+  })),
+  {
+    name: "mouse-click-in-cross-site-frame",
+    description: "Click a button by its coordinates inside a cross-site frame, then read the frame's counter",
+    fixture: "/benchmark-mouse?frame=drawn",
+    // A click into a cross-site frame on the page's session reaches the page's iframe element until the browser's
+    // hit-test data includes the frame, which two animation frames in it don't guarantee. So the timed click waits
+    // until the frame has drawn and has received the pointer: Playwright's page-session moves reach it only then
+    prepareStrider: Effect.fnUntraced(function*(page) {
+      yield* page.locator("#drawn").pipe(Expect.toHaveText("drawn"))
+      yield* page.mouse.move({ x: 150, y: 100 })
+      yield* page.mouse.move({ x: 260, y: 100 })
+      yield* page.locator("#routed").pipe(Expect.toHaveText("routed"))
+    }),
+    preparePlaywright: async (page) => {
+      await page.locator("#drawn").filter({ hasText: "drawn" }).waitFor()
+      const deadline = Date.now() + 5000
+      while (await page.locator("#routed").textContent() !== "routed") {
+        if (Date.now() > deadline) throw new Error("The cross-site frame never received the pointer")
+        await page.mouse.move(150, 100)
+        await page.mouse.move(260, 100)
+      }
+    },
+    strider: Effect.fnUntraced(function*(page) {
+      yield* page.mouse.click({ x: 260, y: 25 })
+      return yield* page.frame(page.locator("#frame")).locator("#count").readText
+    }),
+    playwright: async (page) => {
+      await page.mouse.click(260, 25)
+      return page.frameLocator("#frame").locator("#count").textContent()
+    },
+    verify: equals("1")
+  },
+  {
+    name: "mouse-move-cross-site-frame",
+    description:
+      "Move the pointer in 20 steps across a page and through a cross-site frame, then read the page's counter",
+    fixture: "/benchmark-mouse?frame=drawn",
+    // The moves start once the frame has run two animation frames, which it reports itself, with no input
+    prepareStrider: (page) => page.locator("#drawn").pipe(Expect.toHaveText("drawn")),
+    preparePlaywright: (page) => page.locator("#drawn").filter({ hasText: "drawn" }).waitFor(),
+    strider: Effect.fnUntraced(function*(page) {
+      yield* page.mouse.move({ x: 150, y: 100 })
+      yield* page.mouse.move({ x: 700, y: 100 }, { steps: 20 })
+      return yield* page.locator("#count").readText
+    }),
+    playwright: async (page) => {
+      await page.mouse.move(150, 100)
+      await page.mouse.move(700, 100, { steps: 20 })
+      return page.locator("#count").textContent()
+    },
+    verify: equals("0")
+  },
   {
     name: "fill",
     description: "Fill a labeled input with default actionability, then read its value",

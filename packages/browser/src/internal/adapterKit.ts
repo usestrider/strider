@@ -39,13 +39,14 @@ import * as FiberSet from "effect/FiberSet"
 import * as Headers from "effect/http/Headers"
 import * as Option from "effect/Option"
 import type * as Scope from "effect/Scope"
-import type * as ConsoleMessage from "../ConsoleMessage.ts"
+import * as ConsoleMessage from "../ConsoleMessage.ts"
 import * as NetworkRequest from "../NetworkRequest.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
 import * as Protocol from "../protocol/Protocol.ts"
 import * as Target from "../Target.ts"
 import * as Adapter from "./adapter.ts"
 import type * as ConsoleFormat from "./consoleFormat.ts"
+import * as ConsolePreview from "./consolePreview.ts"
 import type * as ProtocolClient from "./protocolClient.ts"
 import * as Urls from "./urls.ts"
 
@@ -552,23 +553,43 @@ export const consoleLevel = (type: string): ConsoleMessage.Level =>
     ? "debug"
     : "log"
 
-/** A console argument as CDP and WebKit describe one: a `Runtime.RemoteObject`. */
-export interface RemoteObject {
-  readonly type: string
-  readonly value?: unknown
-  readonly unserializableValue?: string | undefined
-  readonly description?: string | undefined
+const consoleMethods = new Set<string>(ConsoleMessage.Method.literals)
+
+/** The console method of each wire's name that isn't the Console Standard's. */
+const consoleRenames: Readonly<Record<string, ConsoleMessage.Method>> = {
+  warning: "warn",
+  startGroup: "group",
+  startGroupCollapsed: "groupCollapsed",
+  endGroup: "groupEnd",
+  // WebKit reports `timeLog` and `timeEnd` alike
+  timing: "timeEnd"
 }
 
-/** A remote object's text, as the console prints it. */
-export const textOf = (value: RemoteObject): string =>
-  value.type === "string"
-    ? String(value.value)
-    : value.unserializableValue !== undefined
-    ? value.unserializableValue
-    : value.value !== undefined && value.type !== "object"
-    ? String(value.value)
-    : value.description ?? value.type
+/** The method that writes at a level: what a message reads as when its wire names no method of its own. */
+const levelMethods: Readonly<Record<ConsoleMessage.Level, ConsoleMessage.Method>> = {
+  debug: "debug",
+  log: "log",
+  info: "info",
+  warning: "warn",
+  error: "error"
+}
+
+/**
+ * The console method a page called, from the type or method its wire names (CDP's `warning`, WebKit's `timing`), or,
+ * where that names none, as WebKit's `log` doesn't for `console.warn`, from the level it wrote at.
+ */
+export const consoleMethod = (type: string | undefined, level: string = type ?? "log"): ConsoleMessage.Method =>
+  type !== undefined && Object.hasOwn(consoleRenames, type)
+    ? consoleRenames[type]!
+    : type !== undefined && type !== "log" && consoleMethods.has(type)
+    ? type as ConsoleMessage.Method
+    : levelMethods[consoleLevel(level)]
+
+/** A console argument as CDP and WebKit describe one: a `Runtime.RemoteObject`. */
+export type RemoteObject = ConsolePreview.Remote
+
+/** A remote object's text, as the console prints it: an object as a preview of its value. */
+export const textOf = (value: RemoteObject): string => ConsolePreview.remote(value)
 
 /** A console argument, for the Console Standard's formatter (QUIRKS.md, Q33). */
 export const argumentOf = (value: RemoteObject): ConsoleFormat.Argument => ({

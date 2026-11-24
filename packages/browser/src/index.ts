@@ -27,6 +27,12 @@ export * as AutoResolution from "./AutoResolution.ts"
  * @stability unstable
  * @since 0.1.0
  */
+export * as Binding from "./Binding.ts"
+
+/**
+ * @stability unstable
+ * @since 0.1.0
+ */
 export * as Browser from "./Browser.ts"
 
 /**
@@ -120,6 +126,12 @@ export * as FileInput from "./FileInput.ts"
 export * as FilePath from "./FilePath.ts"
 
 /**
+ * @stability unstable
+ * @since 0.1.0
+ */
+export * as Frame from "./Frame.ts"
+
+/**
  * @stability experimental
  * @since 0.1.0
  */
@@ -189,6 +201,12 @@ export * as NetworkRequest from "./NetworkRequest.ts"
  * @stability unstable
  * @since 0.1.0
  */
+export * as NetworkRequestEnd from "./NetworkRequestEnd.ts"
+
+/**
+ * @stability unstable
+ * @since 0.1.0
+ */
 export * as NetworkResponse from "./NetworkResponse.ts"
 
 /**
@@ -214,6 +232,12 @@ export * as Page from "./Page.ts"
  * @since 0.1.0
  */
 export * as PageClock from "./PageClock.ts"
+
+/**
+ * @stability unstable
+ * @since 0.1.0
+ */
+export * as PageLifecycle from "./PageLifecycle.ts"
 
 /**
  * @stability unstable
@@ -249,6 +273,12 @@ export * as Route from "./Route.ts"
  * @stability unstable
  * @since 0.1.0
  */
+export * as ScriptTag from "./ScriptTag.ts"
+
+/**
+ * @stability unstable
+ * @since 0.1.0
+ */
 export * as Snapshot from "./Snapshot.ts"
 
 /**
@@ -256,6 +286,12 @@ export * as Snapshot from "./Snapshot.ts"
  * @since 0.1.0
  */
 export * as StorageState from "./StorageState.ts"
+
+/**
+ * @stability unstable
+ * @since 0.1.0
+ */
+export * as StyleTag from "./StyleTag.ts"
 
 /**
  * @stability unstable

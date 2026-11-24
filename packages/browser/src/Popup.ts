@@ -14,6 +14,7 @@
  * @since 0.1.0
  */
 import type * as Effect from "effect/Effect"
+import type * as Option from "effect/Option"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Deadline from "./Deadline.ts"
@@ -137,6 +138,13 @@ export const stream: {
 /**
  * Reads the popups still in the page's event log; never waits.
  *
+ * **Details**
+ *
+ * An operation returns only after the events the browser sent before answering it have been handled, so what
+ * it caused is here once it returns, as far as the browser reported it by then and the log still keeps it.
+ * The exception is a target whose state is still being read, as when it has just attached or its events
+ * overflowed: its events reach the log once that read completes.
+ *
  * **Gotchas**
  *
  * On a backend without the `popups.opener` capability, such as WebKit, it fails with `SubscriptionError`, reason
@@ -169,3 +177,38 @@ export const history: {
     filter?: Filter | undefined
   ): Effect.Effect<Subscription.History<Page.ObservedPage>, Subscription.SubscriptionError>
 } = PopupImpl.history as typeof history
+
+/**
+ * The page that opened this one, as an observed page: `None` for a page no page opened, and once its opener closed.
+ *
+ * **Details**
+ *
+ * It is the same page the context's `pages` gives for the opener, so a caller who holds the opener as a `Page` can
+ * compare the two by `id`. A crashed opener is still given, and its `closed` gives `PageCrashed`. A page already
+ * open when Strider attached to its browser names its opener too.
+ *
+ * **Gotchas**
+ *
+ * On a backend without the `popups.opener` capability, such as WebKit, it fails with `PageError`, reason
+ * `Unsupported`, rather than give `None` for a popup.
+ *
+ * **Example** (Whether a page is a popup of another)
+ *
+ * ```ts import.meta.vitest
+ * import { Page, Popup } from "@usestrider/browser"
+ * import { Effect, Option } from "effect"
+ *
+ * const openedBy = Effect.fn("openedBy")(
+ *   function*(popup: Page.ObservedPage, page: Page.ObservedPage) {
+ *     const opener = yield* Popup.opener(popup)
+ *     return Option.isSome(opener) && opener.value.id === page.id
+ *   }
+ * )
+ * ```
+ *
+ * @stability unstable
+ * @category getters
+ * @since 0.1.0
+ */
+export const opener: (target: Page.ObservedPage) => Effect.Effect<Option.Option<Page.ObservedPage>, Page.PageError> =
+  PopupImpl.opener
