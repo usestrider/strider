@@ -60,6 +60,7 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
       ]),
       entry("pauseOnStart.frames", "supported", ["frames run in their page's process, which is paused"]),
       entry("pauseOnStart.workers", "supported"),
+      entry("network.serviceWorkers", "unsupported", ["service and shared workers aren't attached"]),
       entry("pauseOnStart.popups", "unsupported", [
         "a page the browser opens is found by reading the inspector's list"
       ]),

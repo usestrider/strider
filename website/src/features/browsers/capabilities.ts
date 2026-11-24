@@ -108,6 +108,7 @@ export const groups: ReadonlyArray<{ readonly label: string; readonly names: Rea
       "interception.response": "Routes at the response phase",
       "interception.auth": "Routes at an authentication challenge",
       "network.challenges": "The server's response to a challenge no route answers",
+      "network.serviceWorkers": "Context routes, emulation, and network events in service and shared workers",
       "interception.responseBody": "Reading a paused response's body",
       "interception.responseFulfill": "Fulfilling at the response phase",
       "interception.responseHeaders": "Changing a response's status and headers",

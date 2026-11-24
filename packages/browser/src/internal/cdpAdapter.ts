@@ -104,6 +104,9 @@ export const capabilities = (
       entry("pauseOnStart.workers", "supported"),
       entry("input.keyboardLayout", "supported"),
       entry("initScripts.workers", "supported", ["dedicated workers started after the script was declared"]),
+      entry("network.serviceWorkers", "partial", [
+        "a new service worker's script load isn't reported: Chromium fetches it before the worker starts"
+      ]),
       entry(
         "pauseOnStart.popups",
         ownership === "launched" ? "supported" : "unsupported",

@@ -11,7 +11,7 @@ import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as http from "node:http"
 import type * as net from "node:net"
-import { supports } from "./capabilities.ts"
+import { fullySupports, status, supports } from "./capabilities.ts"
 
 const timeout = 60_000
 
@@ -87,6 +87,12 @@ const open = Effect.fnUntraced(function*(options?: UserContext.Options) {
   return { origin, context, page }
 })
 
+/**
+ * Whether a context's declarations and network events reach its service and shared workers. Where they don't, a
+ * case checks that the worker's request went past them, to the network, as the capability table says.
+ */
+const reachesWorkers = Effect.map(status("network.serviceWorkers"), (found) => found !== "unsupported")
+
 export const serviceWorkers = (name: string, backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} service and shared workers`, () => {
     layer(backend, { excludeTestServices: true, timeout })((it) => {
@@ -96,7 +102,10 @@ export const serviceWorkers = (name: string, backend: Layer.Layer<Browser.Browse
           yield* page.goto(`${origin}/`)
           yield* register(page)
           yield* context.route(`${origin}/data`, () => Route.fulfill(HttpServerResponse.text("routed")))
-          assert.strictEqual(yield* fromServiceWorker(page, "/data"), "ok:routed")
+          assert.strictEqual(
+            yield* fromServiceWorker(page, "/data"),
+            (yield* reachesWorkers) ? "ok:routed" : "ok:network"
+          )
         }), timeout)
 
       it.effect("fails a service worker's fetch while its context is offline", () =>
@@ -110,7 +119,7 @@ export const serviceWorkers = (name: string, backend: Layer.Layer<Browser.Browse
             return
           }
           yield* context.emulate({ network: "offline" })
-          assert.match(yield* fromServiceWorker(page, "/data"), /^failed:/)
+          assert.match(yield* fromServiceWorker(page, "/data"), (yield* reachesWorkers) ? /^failed:/ : /^ok:network$/)
         }), timeout)
 
       it.effect(
@@ -128,6 +137,7 @@ export const serviceWorkers = (name: string, backend: Layer.Layer<Browser.Browse
             yield* register(page)
             const reply = yield* fromServiceWorker(page, "/headers")
             const headers = JSON.parse(reply.replace(/^ok:/, "")) as Record<string, string>
+            if (!(yield* reachesWorkers)) return assert.isUndefined(headers["x-strider-worker"])
             assert.strictEqual(headers["x-strider-worker"], "context")
             if (userAgent) assert.strictEqual(headers["user-agent"], "Strider-ServiceWorker/1")
           }),
@@ -140,11 +150,14 @@ export const serviceWorkers = (name: string, backend: Layer.Layer<Browser.Browse
           Effect.gen(function*() {
             const { context, origin, page } = yield* open()
             yield* page.goto(`${origin}/`)
+            if (!(yield* reachesWorkers)) return yield* register(page)
+            // Chromium's support is partial for the script load alone, which it fetches before the worker starts
+            const scriptReported = yield* fullySupports("network.serviceWorkers")
             const script = yield* NetworkRequest.next(context, { url: `${origin}/sw.js` })
             const imported = yield* NetworkRequest.next(context, { url: `${origin}/imported.js` })
             yield* register(page)
             assert.strictEqual((yield* imported).url, `${origin}/imported.js`)
-            assert.strictEqual((yield* script).url, `${origin}/sw.js`)
+            if (scriptReported) assert.strictEqual((yield* script).url, `${origin}/sw.js`)
           }),
         timeout
       )
@@ -154,6 +167,11 @@ export const serviceWorkers = (name: string, backend: Layer.Layer<Browser.Browse
           const { context, origin, page } = yield* open()
           yield* page.goto(`${origin}/`)
           yield* register(page)
+          // Unreported, the POST has no body to read
+          if (!(yield* reachesWorkers)) {
+            const sent = yield* fromServiceWorker(page, "/data", { method: "POST", body: "from the worker" })
+            return assert.strictEqual(sent, "ok:network")
+          }
           const posted = yield* NetworkRequest.next(context, {
             url: `${origin}/data`,
             body: (message) => message.text
@@ -174,7 +192,7 @@ export const serviceWorkers = (name: string, backend: Layer.Layer<Browser.Browse
               worker.port.postMessage("/data")
             })
           )
-          assert.strictEqual(reply, "ok:routed")
+          assert.strictEqual(reply, (yield* reachesWorkers) ? "ok:routed" : "ok:network")
         }), timeout)
     })
   })

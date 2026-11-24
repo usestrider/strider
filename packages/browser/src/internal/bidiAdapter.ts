@@ -102,6 +102,7 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       ]),
       entry("pauseOnStart.workers", "unsupported", ["preload scripts don't run in workers"]),
       entry("initScripts.workers", "unsupported", ["WebDriver BiDi's preload scripts run in documents only"]),
+      entry("network.serviceWorkers", "unsupported", ["service and shared workers aren't attached"]),
       entry("pauseOnStart.popups", "supported", [
         "nothing is paused: WebDriver BiDi applies the context's scripts and settings to each new popup itself"
       ]),

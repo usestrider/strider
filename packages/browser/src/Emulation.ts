@@ -291,7 +291,8 @@ export interface Emulation {
    * Names are case-insensitive; values must be HTTP field values. Each registration replaces the
    * map within its scope: page headers merge over context headers, with page values winning.
    * An empty page map retains context headers. Removing a registration restores the previous map. Route request overrides take precedence.
-   * Header order is not guaranteed. Unset, no extra headers are configured.
+   * Header order is not guaranteed. Unset, no extra headers are configured. A context's headers reach its
+   * service and shared workers' requests on Chromium only (`network.serviceWorkers`).
    */
   readonly extraHTTPHeaders?: Readonly<Record<string, string>> | undefined
   readonly viewport?: Viewport | undefined
@@ -304,6 +305,10 @@ export interface Emulation {
    */
   readonly geolocation?: Geolocation | "unavailable" | undefined
   readonly media?: Media | undefined
+  /**
+   * Network conditions, or `"offline"` to fail every request. A context's conditions, like its `userAgent` and
+   * `locale`, reach its service and shared workers' requests on Chromium only (`network.serviceWorkers`).
+   */
   readonly network?: NetworkConditions | "offline" | undefined
   /**
    * A CPU slowdown factor, 1 or more; CDP only.

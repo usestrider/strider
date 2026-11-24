@@ -306,6 +306,11 @@ export interface UserContext extends ObservedUserContext {
    * dedicated worker's requests still use the cache, and a popup another context opens while this route is in
    * force may send its first requests past the cache too, before it gets its own context's setting.
    *
+   * On Chromium the route also sees the requests of the context's service and shared workers, except a new
+   * service worker's script load, which the browser makes before the worker starts. Firefox and stock WebKit
+   * don't attach service or shared workers, so their requests pass every context route
+   * (`network.serviceWorkers`).
+   *
    * The phase defaults to `"request"`. Response-only handlers require `{ phase: "response" }`, and
    * authentication handlers require `{ phase: "auth" }`. When options may omit the phase, the handler must
    * also handle `"request"`; union phases require a handler compatible with every possible phase.
