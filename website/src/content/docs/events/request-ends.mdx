@@ -84,7 +84,9 @@ const exportReport = Effect.fn("exportReport")(function*(page: Page.Page) {
 ```
 
 Acquiring the wait needs the request still in the bounded request index, which keeps 1000 hops and drops completed
-ones first. Once acquired, a request that has ended keeps its end readable through the wait until the scope closes.
+ones first. On Chromium, a route handler can get its request before the browser reports it; acquiring the wait
+there keeps the request from the moment the browser reports it, and the wait first waits for that report under the
+deadline in force. Once acquired, a request that has ended keeps its end readable through the wait until the scope closes.
 A request still in flight that the index drops fails the wait with `ResponseUnavailable` (`evicted`). The wait also
 fails once the scope closes (`released`), when the page or context closes first (`targetClosed`), and for a request
 another page or context observed (`foreignTarget`).
