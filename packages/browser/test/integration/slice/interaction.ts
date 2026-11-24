@@ -7324,7 +7324,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             Effect.scoped(Effect.gen(function*() {
               const { url } = yield* fixture(() => `<button id="go" style="margin:40px">Go</button>`)
               const page = yield* newPage
-              yield* page.goto(url)
+              yield* page.goto(url, { waitUntil: "load" })
               const target = page.locator("#go")
               assert(target instanceof LocatorImpl)
               const adapter = target.owner.runtime.model.adapter

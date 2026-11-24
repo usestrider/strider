@@ -130,7 +130,7 @@ const readPage = Effect.fnUntraced(
       realms,
       top,
       read: (realm) => StorageLeft.readRealm(model.adapter.evaluate, realm),
-      navigateBack: (origin) => Effect.andThen(page.goto(`${origin}/`), realmOf(entry.id))
+      navigateBack: (origin) => Effect.andThen(page.goto(`${origin}/`, { waitUntil: "commit" }), realmOf(entry.id))
     })
     const unread = new Set(result.unread.map(StorageLeft.keyOf))
     for (const partition of pending) {

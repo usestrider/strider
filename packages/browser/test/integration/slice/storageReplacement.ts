@@ -133,7 +133,7 @@ export const storageReplacement = (name: string, backend: Layer.Layer<Browser.Br
             yield* page.goto(top(true))
             const outer = page.frame(page.locator("#outer"))
             yield* outer.frame(outer.locator("#inner")).locator("#value").pipe(Expect.toHaveText("old"))
-            yield* page.goto(origin)
+            yield* page.goto(origin, { waitUntil: "load" })
             yield* context.setStorageState(
               new StorageState.StorageState({
                 cookies: [],

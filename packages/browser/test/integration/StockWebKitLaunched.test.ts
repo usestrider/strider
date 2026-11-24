@@ -772,7 +772,7 @@ describe("Stock WebKit, launched in automation mode", () => {
           yield* Effect.scoped(Effect.gen(function*() {
             const first = yield* Browser.newPage({ emulation: { viewport: { width: 640, height: 480 } } })
             const second = yield* Browser.newPage()
-            yield* first.goto(fixtureUrl(origin, "<title>first</title>"))
+            yield* first.goto(fixtureUrl(origin, "<title>first</title>"), { waitUntil: "load" })
             yield* second.goto(fixtureUrl(origin, "<title>second</title>"), { waitUntil: "load" })
             yield* first.evaluateInMainWorld(() => {
               document.cookie = "who=first"
