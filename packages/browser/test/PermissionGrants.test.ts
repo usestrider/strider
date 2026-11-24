@@ -127,8 +127,12 @@ it.effect("releases the permission permit when its scope closes during a send", 
       // Observe completion without making the test's cleanup wait on a deadlocked fiber.
       const pending = yield* context.deny(["notifications"]).pipe(Scope.provide(owner), Effect.forkDetach)
       yield* Deferred.await(entered)
-      yield* Scope.close(owner, Exit.void)
+      // Closing the scope waits for the call to finish, so it runs beside the send it interrupts.
+      const closing = yield* Scope.close(owner, Exit.void).pipe(Effect.forkDetach)
+      yield* TestClock.adjust("1 millis")
+      assert.strictEqual(closing.pollUnsafe(), undefined, "closing the scope must wait for the call")
       yield* Deferred.succeed(resume, undefined)
+      yield* Fiber.join(closing)
       yield* TestClock.adjust("1 millis")
       assert.notStrictEqual(pending.pollUnsafe(), undefined, "permission call must finish after its scope closes")
       assert.strictEqual(settings.size, 0, "the closed scope must leave no permission behind")
