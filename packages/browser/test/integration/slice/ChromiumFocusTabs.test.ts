@@ -138,7 +138,8 @@ describe("Chromium page placement", () => {
                 encodeURIComponent(
                   "<button onclick=\"document.querySelector('#count').textContent='1'\">Increment</button><p id=count>0</p>"
                 )
-              }`
+              }`,
+              { waitUntil: "load" }
             )
             // Opened after it, so it is in front
             yield* context.newPage

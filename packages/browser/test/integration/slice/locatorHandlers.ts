@@ -100,7 +100,7 @@ export const locatorHandlers = (name: string, backend: Layer.Layer<Browser.Brows
           yield* page.addLocatorHandler(page.locator("#overlay"), () =>
             Effect.gen(function*() {
               calls++
-              yield* page.goto(destination)
+              yield* page.goto(destination, { waitUntil: "commit" })
             }))
           yield* page.locator("#target").focus()
           yield* Expect.toHaveText(page.locator("#result"), "done")

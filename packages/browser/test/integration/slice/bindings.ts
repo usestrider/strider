@@ -91,7 +91,7 @@ export const bindings = (name: string, backend: Layer.Layer<Browser.Browser, unk
               received.push(args)
               return [NaN, -0, undefined] as const
             }))
-          yield* page.goto(fixtureUrl(served.origin, "<p>ready</p>"))
+          yield* page.goto(fixtureUrl(served.origin, "<p>ready</p>"), { waitUntil: "load" })
           const back = yield* page.evaluateInMainWorld(() =>
             (window as any).echo(NaN, -0, undefined).then((result: ReadonlyArray<unknown>) => [
               Number.isNaN(result[0]),
@@ -198,7 +198,7 @@ export const bindings = (name: string, backend: Layer.Layer<Browser.Browser, unk
           const page = yield* newPage
           const gate = yield* Deferred.make<void>()
           yield* page.exposeBinding("wait", numbers, () => Deferred.await(gate).pipe(Effect.as(0)))
-          yield* page.goto(fixtureUrl(served.origin, "<p>ready</p>"))
+          yield* page.goto(fixtureUrl(served.origin, "<p>ready</p>"), { waitUntil: "load" })
           const next = yield* page.evaluateInMainWorld(() => {
             for (let i = 0; i < 4096; i++) (window as any).wait(1, 2).catch(() => {})
             return (window as any).wait(1, 2).then(
@@ -255,7 +255,7 @@ export const bindings = (name: string, backend: Layer.Layer<Browser.Browser, unk
           const served = yield* site
           const page = yield* newPage
           yield* page.exposeBinding("add", numbers, ([a, b]) => Effect.succeed(a + b))
-          yield* page.goto(fixtureUrl(served.origin, "<p>ready</p>"))
+          yield* page.goto(fixtureUrl(served.origin, "<p>ready</p>"), { waitUntil: "load" })
           const inWorker = yield* page.evaluateInMainWorld(() =>
             new Promise<string>((resolve) => {
               const worker = new Worker(

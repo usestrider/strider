@@ -44,7 +44,7 @@ export const sharedContextChecks = (name: string, backend: Layer.Layer<Browser.B
             const before = yield* shared.current
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* SharedContext.newPage
-              yield* page.goto(`${origin}/write`)
+              yield* page.goto(`${origin}/write`, { waitUntil: "load" })
               yield* page.evaluateInMainWorld(() => localStorage.setItem("redirected-origin", "left"))
               yield* page.goto(`${crossSite}/fixture`)
             }))
@@ -52,7 +52,7 @@ export const sharedContextChecks = (name: string, backend: Layer.Layer<Browser.B
             const after = yield* shared.current
             const read = yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* SharedContext.newPage
-              yield* page.goto(`${origin}/read`)
+              yield* page.goto(`${origin}/read`, { waitUntil: "load" })
               return yield* page.evaluateInMainWorld(() => {
                 const value = localStorage.getItem("redirected-origin")
                 localStorage.clear()
@@ -89,7 +89,7 @@ export const sharedContextChecks = (name: string, backend: Layer.Layer<Browser.B
               })
               yield* page.goto(fixtureUrl(crossSite, "<p>second</p>"))
             } else {
-              yield* page.goto(fixtureUrl(origin, "<p>register</p>"))
+              yield* page.goto(fixtureUrl(origin, "<p>register</p>"), { waitUntil: "load" })
               yield* page.evaluateInMainWorld(async () => {
                 await navigator.serviceWorker.register("/sw.js")
                 await navigator.serviceWorker.ready

@@ -73,7 +73,7 @@ export const anyFrame = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer
             const { origin } = yield* site
             const page = yield* newPage
             const later = frame(origin, button("Pay"))
-            yield* page.goto(fixtureUrl(origin, `<p id="out"></p>`))
+            yield* page.goto(fixtureUrl(origin, `<p id="out"></p>`), { waitUntil: "load" })
             const pay = page.anyFrame.getByRole("button", { name: "Pay" })
             assert.strictEqual(yield* pay.count, 0)
             const missing = yield* pay.readText.pipe(Effect.flip)
@@ -96,7 +96,9 @@ export const anyFrame = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer
           Effect.scoped(Effect.gen(function*() {
             const { origin } = yield* site
             const page = yield* newPage
-            yield* page.goto(fixtureUrl(origin, `${button("Pay")}${frame(origin, button("Pay") + button("Pay"))}`))
+            yield* page.goto(fixtureUrl(origin, `${button("Pay")}${frame(origin, button("Pay") + button("Pay"))}`), {
+              waitUntil: "load"
+            })
             const error = yield* page.anyFrame.getByRole("button", { name: "Pay" }).count.pipe(Effect.flip)
             assert(Locator.isLocatorError(error), String(error))
             assert.strictEqual(error.reason._tag, "StrictViolation")
@@ -200,7 +202,8 @@ export const anyFrame = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer
               fixtureUrl(
                 origin,
                 labels.slice(0, 6).map(button).join("") + frame(origin, labels.slice(6).map(button).join(""))
-              )
+              ),
+              { waitUntil: "load" }
             )
             const error = yield* page.anyFrame.getByRole("button", { name: "Pay" }).count.pipe(Effect.flip)
             assert(Locator.isLocatorError(error), String(error))
@@ -226,7 +229,9 @@ export const anyFrame = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer
             const { origin } = yield* site
             const page = yield* newPage
             const hidden = `<button hidden>Pay</button>`.repeat(10)
-            yield* page.goto(fixtureUrl(origin, `${button("Pay")}${frame(origin, hidden + button("Pay"))}`))
+            yield* page.goto(fixtureUrl(origin, `${button("Pay")}${frame(origin, hidden + button("Pay"))}`), {
+              waitUntil: "load"
+            })
             const pay = page.anyFrame.locator("button")
             const error = yield* pay.count.pipe(Effect.flip)
             assert(Locator.isLocatorError(error), String(error))
@@ -276,7 +281,8 @@ export const anyFrame = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer
                 `<iframe id="scope" src="${fixtureUrl(origin, button("Pay"))}"></iframe>${
                   frame(origin, button("Other"))
                 }`
-              )
+              ),
+              { waitUntil: "load" }
             )
             const snapshot = yield* page.frame(page.locator("#scope")).anyFrame.getByRole("button", { name: "Pay" })
               .snapshot()
@@ -300,7 +306,7 @@ export const anyFrame = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer
           Effect.scoped(Effect.gen(function*() {
             const { origin } = yield* site
             const page = yield* newPage
-            yield* page.goto(fixtureUrl(origin, frame(origin, button("Pay"))))
+            yield* page.goto(fixtureUrl(origin, frame(origin, button("Pay"))), { waitUntil: "load" })
             const snapshot = yield* page.anyFrame.getByRole("button", { name: "Pay" }).snapshot()
             const match = [...snapshot.refs].find(([, node]) => node.role.role === "button")!
             yield* snapshot.ref(match[0]).click()
@@ -313,7 +319,9 @@ export const anyFrame = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer
         Effect.scoped(Effect.gen(function*() {
           const { origin } = yield* site
           const page = yield* newPage
-          yield* page.goto(fixtureUrl(origin, `<div id="outer">${frame(origin, `<p id="inner">x</p>`)}</div>`))
+          yield* page.goto(fixtureUrl(origin, `<div id="outer">${frame(origin, `<p id="inner">x</p>`)}</div>`), {
+            waitUntil: "load"
+          })
           assert.strictEqual(yield* page.anyFrame.locator("#outer #inner").count, 0)
           assert.strictEqual(yield* page.anyFrame.locator("#inner").count, 1)
         })), timeout)

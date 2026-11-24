@@ -39,7 +39,7 @@ export const screenshotBaselines = (name: string, backend: Layer.Layer<Browser.B
         yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { recursive: true, force: true })))
         const { origin } = yield* site
         const page = yield* SharedContext.newPage
-        yield* page.goto(`${origin}/fixture?html=${encodeURIComponent(markup)}`)
+        yield* page.goto(`${origin}/fixture?html=${encodeURIComponent(markup)}`, { waitUntil: "load" })
         const settings = (update: ScreenshotBaseline.Update) =>
           Effect.provideService(ScreenshotBaseline.CurrentSettings, {
             update,
