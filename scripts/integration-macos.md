@@ -136,17 +136,15 @@ probe's own commands are not traced as processes. `adapter/StallProbe.test.ts` s
 answers, with the threshold lowered, and names a `python3` child holding an exclusive `flock` on a `settings.dat` in a
 crash database the test creates.
 
-A page-call probe (`test/integration/pageCallProbe.ts`) watches every call into a Firefox page while
-`STRIDER_MACOS_CRASH_DATABASE` is set: each engine round and each `contentWindow` read that finds an iframe's frame.
-When one has gone 50 ms without a reply, it captures once for that case, in parallel and without blocking the call:
-`ps -axo pid,ppid,stat,%cpu,time,rss,etime,wchan,command` of every process on the runner; `sample <pid> 1` of each
-Firefox parent (`Contents/MacOS/firefox`) and then of their descendants, their content processes, the busiest by
-`%CPU` first, up to eight processes in all; `uptime` and `vm_stat`. Each command has its own timeout (5–10 s) and
-keeps at most 128 KiB of output. A case is captured at most once, a call that goes slow while a capture runs starts none, and each test process captures at
-most 16 times. The reply disarms it. The capture is written to `.data/macos-crash-reports/page-call-probe-<node
-pid>-<n>.json`, at most 1.5 MiB each (the process table and samples shortened evenly beyond that) and at most 32
-files per run, and as a `page-call-probe` event in the case's failure trace, with each command's first 2 KiB. The
-samples stop Firefox's processes briefly while they run, so a capture can slow the rest of the case it was taken in.
+A page-call probe (`test/integration/pageCallProbe.ts`) snapshots the runner while `STRIDER_MACOS_CRASH_DATABASE`
+is set: `ps -axo pid,ppid,stat,%cpu,time,rss,etime,wchan,command` of every process and `uptime`, each with its own
+5 s timeout and at most 128 KiB of output. It takes one when a call into a Firefox page, an engine round or a
+`contentWindow` read that finds an iframe's frame, has gone 50 ms without a reply, in parallel and without
+blocking the call: at most one every 20 s in each test process, and none while another is running. The reply disarms
+it. It also takes one for every case that fails, on any backend, as the case finishes and before its trace is saved,
+whatever the interval. Each is written to `.data/macos-crash-reports/page-call-probe-<node pid>-<n>.json`, at most
+256 files per run, and as a `page-call-probe` entry in the case's failure trace, with each command's first 2 KiB.
+It runs no `sample` and stops no process.
 The page-side timing that goes with it is recorded on every backend and platform (`failureTrace.ts`).
 
 The worker test and deliberate-crash test, plus both files' shared contexts, retain their ordinary bounded

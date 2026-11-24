@@ -69,11 +69,10 @@
  * read, its document and the window's context, with `page` from the read's own answer. The page's part adds two clock
  * reads and a string splice to each call; nothing else is sent.
  *
- * In hosted macOS jobs, `pageCallProbe.ts` adds a `page-call-probe` entry to a case when a call into a Firefox page
- * has gone 50 ms without a reply: `ps` of every process, `sample` for 1 s of up to eight Firefox processes (its parents,
- * then their content processes, the busiest first), `uptime` and `vm_stat`. It captures at most once a case, one
- * capture at a time, and 16 times a test process, never blocks the call, and its samples briefly stop the processes they sample;
- * `scripts/integration-macos.md` states its bounds.
+ * In hosted macOS jobs, `pageCallProbe.ts` adds a `page-call-probe` entry with `ps` of every process on the runner
+ * (state, CPU, CPU time, RSS) and `uptime`: to the case in which a call into a Firefox page has gone 50 ms without a
+ * reply, at most once every 20 s in a test process, one at a time, never blocking the call; and to every case that
+ * fails, on any backend, taken as it fails, before its trace is saved. `scripts/integration-macos.md` states its bounds.
  *
  * In hosted macOS jobs, `stallProbe.ts` adds a `stall-probe` entry to a `--remote-debugging-pipe` child's process
  * connection when its first pipe write has had no byte back for 10 s while it runs: its process tree, `sample` of
@@ -392,8 +391,6 @@ export class TraceBuffer {
 interface Sink {
   checkpoint?(label: string): string | undefined
   connection(label: string): Record
-  /** The running case's ID, when there is one. */
-  scope?(): string | undefined
 }
 const key = Symbol.for("strider.integration.failureTrace")
 export const install = (sink: Sink) => {
@@ -402,9 +399,6 @@ export const install = (sink: Sink) => {
 /** Used only by the integration configuration's source instrumentation. */
 export const connection = (label: string): Record =>
   (globalThis as typeof globalThis & { [key]?: Sink })[key]?.connection(label) ?? (() => {})
-
-/** The running case's ID, which diagnostics that capture once per case key on. */
-export const scope = (): string | undefined => (globalThis as typeof globalThis & { [key]?: Sink })[key]?.scope?.()
 
 /** Saves an independent recorder checkpoint before a diagnostic stream can displace its bounded tail. */
 export const checkpoint = (label: string): string | undefined =>

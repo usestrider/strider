@@ -8,6 +8,7 @@ import type { Entry, Origin } from "./failureTrace.ts"
 import { connection } from "./failureTrace.ts"
 import { install, TraceBuffer } from "./failureTrace.ts"
 import * as FirefoxCrashReports from "./firefoxCrashReports.ts"
+import * as PageCallProbe from "./pageCallProbe.ts"
 import { summarize } from "./pointerRecipients.ts"
 import { installTransfer, TransferScope } from "./traceTransfer.ts"
 
@@ -172,9 +173,6 @@ const save = (file: string, trace: TraceBuffer, scope: string, passing = false):
 }
 
 install({
-  scope() {
-    return TestRunner.getCurrentTest<RunnerTestCase | undefined>()?.id
-  },
   checkpoint(label) {
     const task = TestRunner.getCurrentTest<RunnerTestCase | undefined>()
     if (task === undefined || active.size !== 1) return undefined
@@ -281,7 +279,7 @@ export default class FailureTraceRunner extends TestRunner {
       active.delete(task.id)
     }
   }
-  override onAfterRunTask(task: RunnerTask) {
+  override async onAfterRunTask(task: RunnerTask) {
     super.onAfterRunTask(task)
     const running = active.get(task.id)
     if (running === undefined) return
@@ -303,6 +301,18 @@ export default class FailureTraceRunner extends TestRunner {
       }
     } catch (error) {
       console.error("Couldn't keep Firefox's crash reports", error)
+    }
+    // On hosted macOS, the runner's processes and load as the case failed. A capture that fails is logged and changes
+    // neither the case's result nor its trace.
+    if (failed) {
+      try {
+        const capture = await PageCallProbe.failed(task.name)
+        if (capture !== undefined) {
+          running.trace.record("page-call-probe", "page-call-probe", JSON.stringify(PageCallProbe.summary(capture)))
+        }
+      } catch (error) {
+        console.error("Couldn't capture the runner's processes", error)
+      }
     }
     const file = failed || retainPasses || diagnosticTest(task)
       ? save(filename(task, "test"), running.trace, task.name, !failed && !diagnosticTest(task))

@@ -19,7 +19,7 @@ export const instrument = (source: string, id: string) => {
     source = source.replaceAll(from, to)
   }
   const helper = path.join(import.meta.dirname, "failureTrace.ts")
-  source = `import { connection as __failureConnection, scope as __failureScope } from ${JSON.stringify(helper)};${
+  source = `import { connection as __failureConnection } from ${JSON.stringify(helper)};${
     runtime || bidiInput
       ? `import { watch as __pageCallWatch } from ${
         JSON.stringify(path.join(import.meta.dirname, "pageCallProbe.ts"))
@@ -104,7 +104,7 @@ export const instrument = (source: string, id: string) => {
         "(() => { const __trace = __failureConnection(\"engine-round\"); const parsed = JSON.parse(encoded);",
         "const metadata = { round: ++__roundSequence, operationId: id, document, realm, call: functionDeclaration === Engine.element ? \"element\" : functionDeclaration === Engine.run ? \"run\" : \"other\", op: parsed.op, cap: parsed.cap ?? null };",
         "__trace(\"engine-round-start\", { ...metadata, hostEpochMs: Date.now() });",
-        "const __stop = __pageCallWatch(runtime.backend, __failureScope(), metadata, __trace);",
+        "const __stop = __pageCallWatch(runtime.backend, metadata, __trace);",
         "const diagnostic = { ...metadata, events: [], omitted: 0 };",
         "return call(runtime, realm, functionDeclaration, [string(JSON.stringify({ ...parsed, __rendering: diagnostic }))], releaseResult).pipe(Effect.onExit(() => Effect.sync(__stop)), Effect.tap((reply) => Effect.sync(() => {",
         "const hostEpochMs = Date.now(); let rendering = null; let response = null; let page = null; try { const value = JSON.parse((reply as any).value.value); rendering = value.__rendering ?? null; page = value.__page ?? null; response = { tag: value._tag, reason: value.reason ?? null, checked: value.checked ?? null } } catch {}",
@@ -118,7 +118,7 @@ export const instrument = (source: string, id: string) => {
     replace(
       "  const document = yield* documentOf(state, node.document)\n  const reply = yield* Kit.protocol(state.send(Script.callFunction({\n    functionDeclaration: \"(element) => element.contentWindow\",",
       [
-        "  const document = yield* documentOf(state, node.document); const __trace = __failureConnection(\"content-window\"); const __call = { call: \"contentWindow\", document: node.document, context: document.navigable.bidi }; __trace(\"content-window-start\", { ...__call, hostEpochMs: Date.now() }); const __stop = __pageCallWatch(\"firefox\", __failureScope(), __call, __trace);",
+        "  const document = yield* documentOf(state, node.document); const __trace = __failureConnection(\"content-window\"); const __call = { call: \"contentWindow\", document: node.document, context: document.navigable.bidi }; __trace(\"content-window-start\", { ...__call, hostEpochMs: Date.now() }); const __stop = __pageCallWatch(\"firefox\", __call, __trace);",
         "  const reply = yield* Kit.protocol(state.send(Script.callFunction({",
         "    functionDeclaration: \"(element) => { const start = performance.timeOrigin + performance.now(); const window = element.contentWindow; return [window, start, performance.timeOrigin + performance.now()] }\","
       ].join("\n"),

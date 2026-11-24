@@ -151,7 +151,7 @@ describe("integration-only source interception", () => {
         }
       })
     }
-    const watched: Array<{ backend: unknown; scope: unknown; call: any }> = []
+    const watched: Array<{ backend: unknown; call: any }> = []
     let stopped = 0
     const callInDocument = new Function(
       "Effect",
@@ -160,7 +160,6 @@ describe("integration-only source interception", () => {
       "call",
       "string",
       "__failureConnection",
-      "__failureScope",
       "__pageCallWatch",
       "const Engine = { missing: \"missing\", run: \"run\", element: \"element\" }; let __roundSequence = 0;" + code +
         ";return callInDocument"
@@ -171,9 +170,8 @@ describe("integration-only source interception", () => {
       call,
       (s: string) => s,
       () => (kind: string, payload: any) => entries.push({ kind, payload }),
-      () => "case-a",
-      (backend: unknown, scope: unknown, call: any) => {
-        watched.push({ backend, scope, call })
+      (backend: unknown, call: any) => {
+        watched.push({ backend, call })
         return () => stopped++
       }
     )
@@ -192,9 +190,9 @@ describe("integration-only source interception", () => {
       rendering: { round: 1, events: [], omitted: 0 }
     })
     expect(typeof replies[0].hostEpochMs).toBe("number")
-    expect(watched.map((entry) => [entry.scope, entry.call.call, entry.call.round])).toEqual([
-      ["case-a", "run", 1],
-      ["case-a", "run", 2]
+    expect(watched.map((entry) => [entry.call.call, entry.call.round])).toEqual([
+      ["run", 1],
+      ["run", 2]
     ])
     expect(stopped).toBe(2)
     expect(replies[1]).toMatchObject({
