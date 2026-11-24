@@ -175,6 +175,63 @@ Effect.gen(function*() {
     ])
   })
 
+  it("flags navigation in a shared helper before its caller reads the page", () => {
+    const sample = `
+const open = Effect.fnUntraced(function*() {
+  const page = yield* Browser.newPage()
+  yield* page.goto(url)
+  return page
+})
+describe("fixture", () => {
+  it.effect("reads the fixture", () => Effect.gen(function*() {
+    const page = yield* open()
+    yield* page.evaluateInMainWorld(() => document.body.textContent)
+  }))
+})`
+    assert.deepStrictEqual(flagged(`${integration}sample.ts`, sample), [
+      "test/integration/sample.ts:4, then evaluateInMainWorld"
+    ])
+  })
+
+  it("does not treat loading a second page as readiness of the first", () => {
+    const sample = `
+Effect.gen(function*() {
+  yield* first.goto(url)
+  yield* second.goto(otherUrl, { waitUntil: "load" })
+  yield* first.evaluateInMainWorld(() => document.body.textContent)
+})`
+    assert.deepStrictEqual(flagged(`${integration}sample.ts`, sample), [
+      "test/integration/sample.ts:3, then evaluateInMainWorld"
+    ])
+  })
+
+  it("treats an undefined waitUntil as the default commit wait", () => {
+    const sample = `
+Effect.gen(function*() {
+  yield* page.goto(url, { waitUntil: undefined })
+  yield* page.evaluateInMainWorld(() => document.body.textContent)
+})`
+    assert.deepStrictEqual(flagged(`${integration}sample.ts`, sample), [
+      "test/integration/sample.ts:3, then evaluateInMainWorld"
+    ])
+  })
+
+  it("checks frames and second pages across synchronous statements", () => {
+    const sample = `
+Effect.gen(function*() {
+  yield* frame.goto(url)
+  source = "x"
+  assert.isTrue(source.length > 0)
+  yield* frame.evaluateInMainWorld(() => document.body.textContent)
+  yield* second.goto(url)
+  yield* second.locator("p").readText
+})`
+    assert.deepStrictEqual(flagged(`${integration}sample.ts`, sample), [
+      "test/integration/sample.ts:3, then evaluateInMainWorld",
+      "test/integration/sample.ts:7, then readText"
+    ])
+  })
+
   it("finds no case that reads the page right after a bare goto", () => {
     assert.deepStrictEqual(files(integration).flatMap((path) => flagged(path)), [])
   })
