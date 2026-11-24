@@ -398,8 +398,8 @@ export type Request =
     readonly op: "fillGuard"
     readonly steps: ReadonlyArray<Step>
     readonly ancestor: boolean
-    /** For an iframe on the way: the mark its lookup left, which the guarded iframe must still hold. */
-    readonly mark?: string
+    /** For an iframe on the way: the identity its lookup answered, which the guarded iframe must still have. */
+    readonly identity?: string
   }
   | { readonly op: "fillDisarm" }
   /**
@@ -437,8 +437,8 @@ export type Request =
     readonly scroll: boolean
     readonly clip?: Clip
     readonly point: { readonly x: number; readonly y: number } | null
-    /** The mark the iframe's lookup left: the answer says whether the iframe found holds it still. */
-    readonly mark?: string
+    /** The identity the iframe's lookup answered: the answer says whether the iframe found has it still. */
+    readonly identity?: string
   }
   /**
    * The accessibility tree of the document, or of the one match's subtree, with inferred
@@ -535,7 +535,7 @@ export const Response = Schema.Union([
     blocked: Schema.NullOr(Schema.String),
     unsafe: Schema.Boolean,
     accepted: Schema.Boolean,
-    /** Given a mark, whether the iframe guarded is the one its lookup marked, holding the same frame. */
+    /** Given an identity, whether the iframe guarded has it: the same iframe, holding the same frame. */
     held: Schema.optionalKey(Schema.Boolean)
   }),
   Schema.TaggedStruct("Read", { value: Schema.NullOr(Schema.Union([Schema.String, Schema.Boolean])) }),
@@ -580,7 +580,7 @@ export const Response = Schema.Union([
     covered: Schema.NullOr(NotReady),
     /** This document's scroll offset. */
     scroll: Point,
-    /** Given a mark, whether the iframe found is the one its lookup marked, holding the same frame. */
+    /** Given an identity, whether the iframe found has it: the same iframe, holding the same frame. */
     held: Schema.optionalKey(Schema.Boolean)
   }),
   Schema.TaggedStruct("Snapshot", { root: SnapNode, generation: Schema.Number }),
@@ -3076,7 +3076,7 @@ export function engine(render: (root: SnapNode) => string) {
       accepted: current?.accepted ?? false
     }
   }
-  const armFill = (steps: ReadonlyArray<Step>, ancestor: boolean, mark: string | undefined) => {
+  const armFill = (steps: ReadonlyArray<Step>, ancestor: boolean, identity: string | undefined) => {
     fillDisarm()
     const matches = resolve(steps)
     const element = matches.length === 1 ? matches[0]! : null
@@ -3172,7 +3172,7 @@ export function engine(render: (root: SnapNode) => string) {
       blocked: current.blocked,
       unsafe: false,
       accepted: false,
-      ...(mark === undefined ? {} : { held: element !== null && holdsMark(element, mark) })
+      ...(identity === undefined ? {} : { held: element !== null && frameIdentity(element) === identity })
     }
   }
 
@@ -4535,9 +4535,9 @@ export function engine(render: (root: SnapNode) => string) {
     candidates: found.slice(0, 10).map((element) => ({ description: describe(element), visible: visible(element) }))
   })
 
-  // Frames' iframes, as their lookups found them: by the mark each lookup gave, the window the iframe held then.
-  // An iframe holds the same frame while it holds the same window, which a navigation keeps and a reinsertion
-  // replaces. Only the latest marks of each iframe are kept, enough for the actions going through it at once.
+  // Each iframe's identity with the frame it holds: one id per iframe and window, shared by every lookup and kept
+  // as long as the iframe holds that window, which a navigation keeps and a reinsertion replaces. A new window, or
+  // an engine installed again, gives a new id, so an id names one iframe holding one frame.
   const iframeWindow = getter(HTMLIFrameElement.prototype, "contentWindow")
   const frameWindow = getter(HTMLFrameElement.prototype, "contentWindow")
   const windowOf = (element: Element): WindowProxy | null =>
@@ -4546,20 +4546,18 @@ export function engine(render: (root: SnapNode) => string) {
       : element instanceof HTMLFrameElement
       ? frameWindow(element)
       : null
-  const marks = new WeakMap<Element, Map<string, WindowProxy>>()
-  const markLimit = 16
-  const markFrame = (element: Element, mark: string) => {
+  const identities = new WeakMap<Element, { readonly window: WindowProxy; readonly id: string }>()
+  const identityEpoch = Math.random().toString(36).slice(2)
+  let identityCount = 0
+  /** The iframe's identity with the window it holds now, or `null` when it holds none. */
+  const frameIdentity = (element: Element): string | null => {
     const held = windowOf(element)
-    if (held === null) return
-    const own = marks.get(element) ?? new Map<string, WindowProxy>()
-    marks.set(element, own)
-    own.set(mark, held)
-    if (own.size > markLimit) own.delete(own.keys().next().value!)
-  }
-  /** Whether `element` is the iframe a lookup marked `mark`, holding the window it held then. */
-  const holdsMark = (element: Element, mark: string): boolean => {
-    const held = marks.get(element)?.get(mark)
-    return held !== undefined && windowOf(element) === held
+    if (held === null) return null
+    const known = identities.get(element)
+    if (known !== undefined && known.window === held) return known.id
+    const id = `${identityEpoch}:${++identityCount}`
+    identities.set(element, { window: held, id })
+    return id
   }
 
   /**
@@ -4567,7 +4565,7 @@ export function engine(render: (root: SnapNode) => string) {
    * `setInputFiles`, `Locator.evaluate` and a frame's iframe need. Otherwise a `Response` as JSON text: no match,
    * several, an invalid selector, or, for an iframe, an element that isn't one.
    */
-  const element = (text: string): Element | Array<Element> | string => {
+  const element = (text: string): Element | Array<Element> | readonly [Element, string | null] | string => {
     const request = JSON.parse(text) as {
       readonly steps: ReadonlyArray<Step>
       /** The complete query, before frame routing splits it. */
@@ -4576,8 +4574,8 @@ export function engine(render: (root: SnapNode) => string) {
       readonly frame?: boolean
       /** For an iframe on an action's way: scrolled into view, so its frame renders (QUIRKS.md, Q110). */
       readonly scroll?: boolean
-      /** For an iframe: a mark that later requests check it still holds the frame it holds now. */
-      readonly mark?: string
+      /** For an iframe: answer it with its identity, `[element, identity]`, which later requests check. */
+      readonly identify?: boolean
     }
     clearTreeCaches()
     let found: Array<Element>
@@ -4610,11 +4608,10 @@ export function engine(render: (root: SnapNode) => string) {
         } satisfies Response
       )
     }
-    if (request.mark !== undefined) markFrame(one, request.mark)
     if (request.scroll === true && !inViewport(one)) {
       dom.scrollIntoView(one, { block: "center", inline: "center", behavior: "instant" })
     }
-    return one
+    return request.identify === true ? [one, frameIdentity(one)] : one
   }
 
   /** An iframe's content box origin, scrolled into view when asked, and what the pointer would hit at a point. */
@@ -4669,7 +4666,7 @@ export function engine(render: (root: SnapNode) => string) {
       scrolled,
       covered,
       scroll: { x: scrollX, y: scrollY },
-      ...(request.mark === undefined ? {} : { held: holdsMark(iframe, request.mark) })
+      ...(request.identity === undefined ? {} : { held: frameIdentity(iframe) === request.identity })
     }
   }
 
@@ -4748,7 +4745,7 @@ export function engine(render: (root: SnapNode) => string) {
         case "act":
           return JSON.stringify(await act(request))
         case "fillGuard":
-          return JSON.stringify(armFill(request.steps, request.ancestor, request.mark) satisfies Response)
+          return JSON.stringify(armFill(request.steps, request.ancestor, request.identity) satisfies Response)
         case "fillDisarm":
           return JSON.stringify(fillDisarm() satisfies Response)
         case "insert":

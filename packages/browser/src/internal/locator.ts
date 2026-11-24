@@ -1686,8 +1686,13 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     insert: Effect.Effect<void, Locator.LocatorError | Target.TargetGone | Deadline.Timeout>
   ) {
     const targets = [
-      ...routed.hops.map((hop) => ({ document: hop.document, steps: hop.steps, ancestor: true, mark: hop.mark })),
-      { document: routed.document, steps: Runtime.split(this.steps).last, ancestor: false, mark: undefined }
+      ...routed.hops.map((hop) => ({
+        document: hop.document,
+        steps: hop.steps,
+        ancestor: true,
+        identity: hop.identity
+      })),
+      { document: routed.document, steps: Runtime.split(this.steps).last, ancestor: false, identity: undefined }
     ]
     const documents = targets.map((target) => target.document)
     const call = (document: Target.DocumentId, request: Engine.Request) =>
@@ -1725,7 +1730,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
               op: "fillGuard",
               steps: target.steps,
               ancestor: target.ancestor,
-              ...(target.mark === undefined ? {} : { mark: target.mark })
+              ...(target.identity === undefined ? {} : { identity: target.identity })
             }))
           // Guards armed on iframes that no longer hold the hops' frames guard another frame: insert nothing
           if (guards.some((guard) => guard.held === false)) {
@@ -1835,7 +1840,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
           scroll: checks.inViewport,
           cap: Runtime.roundCap((yield* Operation.record).left()),
           point: checks.receivesPointer ? at : null,
-          mark: hop.mark
+          identity: hop.identity
         }, id)
         // The geometry is the hop's iframe's only while the steps find the iframe that holds its frame
         if (Option.isNone(answer) || answer.value._tag !== "Frame" || answer.value.held !== true) {

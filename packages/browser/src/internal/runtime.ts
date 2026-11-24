@@ -244,11 +244,11 @@ export interface Hop {
   /** The frame the iframe holds. */
   readonly frame: Target.NavigableId
   /**
-   * The mark the iframe's lookup left on it in the engine. A hop names its iframe by steps, which may find another
-   * iframe once the document changes, as when a sibling before it is removed: the engine's answers for the steps
-   * say whether the iframe they find still holds the mark, and so the frame.
+   * The iframe's identity in the engine, with the frame it holds, as the hop's lookup answered it. A hop names its
+   * iframe by steps, which may find another iframe once the document changes, as when a sibling before it is
+   * removed: the engine's answers for the steps say whether the iframe they find still has this identity.
    */
-  readonly mark: string
+  readonly identity: string
 }
 
 /**
@@ -422,7 +422,12 @@ const decode = (text: string): Effect.Effect<Engine.Response, SendFailure> =>
 
 /** The one match in a document, by its node binding, or the engine's answer for why there is none. */
 type Element =
-  | { readonly _tag: "Found"; readonly node: Adapter.NodeBinding }
+  | {
+    readonly _tag: "Found"
+    readonly node: Adapter.NodeBinding
+    /** Asked for, the iframe's identity with the frame it holds; `null` when it holds none. */
+    readonly identity?: string | null
+  }
   | { readonly _tag: "Response"; readonly response: Engine.Response }
 
 export const elementIn = (
@@ -432,7 +437,8 @@ export const elementIn = (
   frame: {
     readonly scroll: boolean
     readonly validationSteps?: ReadonlyArray<Engine.Step>
-    readonly mark?: string
+    /** Answer the iframe with its identity, as a frame hop keeps it. */
+    readonly identify?: boolean
   } | null,
   id: Diagnostics.OperationId
 ): Effect.Effect<Option.Option<Element>, SendFailure> =>
@@ -445,15 +451,29 @@ export const elementIn = (
       frame: frame !== null,
       scroll: frame?.scroll ?? false,
       ...(frame?.validationSteps === undefined ? {} : { validationSteps: frame.validationSteps }),
-      ...(frame?.mark === undefined ? {} : { mark: frame.mark })
+      ...(frame?.identify === true ? { identify: true } : {})
     }),
-    id
+    id,
+    frame?.identify === true ? true : undefined
   ).pipe(
     Effect.flatMap(Option.match({
       onNone: () => Effect.succeedNone,
       onSome: (value) => {
         if (value.type === "node" && value.node !== undefined) {
           return Effect.succeed(Option.some<Element>({ _tag: "Found", node: value.node }))
+        }
+        if (value.type === "array" && value.value?.length === 2) {
+          const [node, identity] = value.value
+          if (
+            node!.type === "node" && node!.node !== undefined &&
+            (identity!.type === "string" || identity!.type === "null")
+          ) {
+            return Effect.succeed(Option.some<Element>({
+              _tag: "Found",
+              node: node!.node,
+              identity: identity!.type === "string" ? identity!.value : null
+            }))
+          }
         }
         if (value.type === "string") {
           return Effect.map(
@@ -500,9 +520,10 @@ const descendants = (
     const found: Array<{ readonly document: Target.DocumentId; readonly hops: ReadonlyArray<Hop> }> = []
     for (let index = 0; index < counted.value.count; index++) {
       const steps: ReadonlyArray<Engine.Step> = [...frameElements, { _tag: "Nth", index }]
-      const mark = crypto.randomUUID()
-      const element = yield* elementIn(runtime, document, steps, { scroll: false, mark }, id)
+      const element = yield* elementIn(runtime, document, steps, { scroll: false, identify: true }, id)
       if (Option.isNone(element) || element.value._tag !== "Found") continue
+      const identity = element.value.identity
+      if (identity === undefined || identity === null) continue
       const frame = yield* runtime.model.adapter.contentFrame(element.value.node).pipe(
         Effect.catch((error) =>
           isMoved(error) ? Effect.succeedNone : Effect.fail(fromAdapter(error, id, runtime.backend))
@@ -511,7 +532,7 @@ const descendants = (
       if (Option.isNone(frame)) continue
       const child = yield* runtime.model.documentOf(frame.value)
       if (Option.isNone(child)) continue
-      const path = [...hops, { document, steps, frame: frame.value, mark }]
+      const path = [...hops, { document, steps, frame: frame.value, identity }]
       found.push({ document: child.value, hops: path }, ...yield* descendants(runtime, child.value, id, path))
     }
     return found
@@ -606,10 +627,9 @@ const route = (
       if (Option.isSome(stale)) {
         return Option.some<Route>({ _tag: "Answer", routed: { document, hops }, response: stale.value })
       }
-      const mark = crypto.randomUUID()
       const found = yield* elementIn(runtime, document, steps, {
         scroll,
-        mark,
+        identify: true,
         ...(hops.length === 0 ? { validationSteps } : {})
       }, id)
       if (Option.isNone(found)) {
@@ -634,7 +654,9 @@ const route = (
       if (Option.isNone(frame.value)) return Option.some<Route>({ _tag: "Missing", routed })
       const next = yield* runtime.model.documentOf(frame.value.value)
       if (Option.isNone(next)) return Option.some<Route>({ _tag: "Missing", routed })
-      hops.push({ document, steps, frame: frame.value.value, mark })
+      const identity = found.value.identity
+      if (identity === undefined || identity === null) return Option.some<Route>({ _tag: "Missing", routed })
+      hops.push({ document, steps, frame: frame.value.value, identity })
       document = next.value
     }
     return Option.some<Route>({ _tag: "Entered", routed: { document, hops } })
@@ -730,7 +752,7 @@ const prepareRound = Effect.fnUntraced(function*(
         scroll: request.checks.inViewport,
         cap: request.cap,
         point: null,
-        mark: hop.mark,
+        identity: hop.identity,
         ...(clip === undefined ? {} : { clip })
       }, id)
       if (Option.isNone(answer)) return { _tag: "Moved" } as const
