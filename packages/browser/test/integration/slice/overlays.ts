@@ -314,18 +314,31 @@ export const overlays = <R>(it: ReturnType<typeof SharedContext.guard<R>>) => {
         yield* go.click()
         return performance.now() - started
       })
+      // An annotated click shows the red point through its 400 ms wait, so sampling until the click ends, and at
+      // least once, sees it: this reads what is drawn, not how long the click took, which load changes
+      const unannotated = Effect.gen(function*() {
+        yield* page.evaluateInMainWorld(() => {
+          document.title = ""
+        })
+        const click = yield* go.click().pipe(Effect.forkChild)
+        let shown = false
+        do shown = yield* pixelsAt(page, 14, 14, isRed)
+        while (!shown && click.pollUnsafe() === undefined)
+        yield* Fiber.join(click)
+        assert.isFalse(shown)
+        assert.strictEqual(yield* page.title, "clicked")
+      })
       for (const handlerFirst of [true, false]) {
         const handler = yield* Scope.make()
         const actions = yield* Scope.make()
         yield* page.addLocatorHandler(page.locator("#never"), () => Effect.void).pipe(Scope.provide(handler))
-        yield* overlay.actions({ duration: "400 millis" }).pipe(Scope.provide(actions))
+        yield* overlay.actions({ duration: "400 millis", style: { point } }).pipe(Scope.provide(actions))
         assert.isAtLeast(yield* timed, 400)
         yield* Scope.close(handlerFirst ? handler : actions, Exit.void)
-        const between = yield* timed
-        if (handlerFirst) assert.isAtLeast(between, 400)
-        else assert.isBelow(between, 390)
+        if (handlerFirst) assert.isAtLeast(yield* timed, 400)
+        else yield* unannotated
         yield* Scope.close(handlerFirst ? actions : handler, Exit.void)
-        assert.isBelow(yield* timed, 390)
+        yield* unannotated
       }
     }))
 }
