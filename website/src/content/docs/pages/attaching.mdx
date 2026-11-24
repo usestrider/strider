@@ -62,7 +62,9 @@ act. A page has one of three types:
 | `Page.Page`         | also act, navigate, evaluate among the page's own scripts, and declare [routes](/docs/events/routes) |
 
 A page you opened is a `Page`; one you didn't, such as an attached browser's tab or a launched browser's first
-tab, is observed. Access lasts for the scope `inspect` or `control` is called in.
+tab, is observed. Access lasts for the scope `inspect` or `control` is called in. A launch that
+[configures its default context](/docs/pages/contexts#configuring-the-default-context-at-launch) controls that
+context and its first tab for the layer's life instead.
 [`browser.defaultContext`](/docs/pages/contexts#logging-in-once), a context you didn't make, takes `control` the
 same way.
 

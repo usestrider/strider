@@ -197,8 +197,9 @@ export interface Browser {
   ): Effect.Effect<Page.Page, Page.PageError | Target.TargetGone | Deadline.Timeout, Scope.Scope>
   /**
    * Every page of the browser, kept up to date as pages open and close. A page this connection created, or whose
-   * context it created, is a `Page`. Any other, such as a launched browser's first tab or an attached browser's
-   * tabs, is an observed page, whose `inspect` and `control` give access for a scope.
+   * context it created, is a `Page`, and so is a page of a default context the launch configured with
+   * `defaultContext`, its first tab included. Any other, such as a launched browser's first tab or an attached
+   * browser's tabs, is an observed page, whose `inspect` and `control` give access for a scope.
    *
    * **Example** (Waiting for a second tab)
    *
@@ -221,7 +222,8 @@ export interface Browser {
   /**
    * Every context of the browser, kept up to date as contexts open and close: the default context first, then the
    * others in the order they were added. A context this connection created is the `UserContext` that `newContext`
-   * returned. Any other is an observed context, the same one each time, whose `control` gives access for a scope.
+   * returned. Any other is an observed context, the same one each time, whose `control` gives access for a scope;
+   * a default context the launch configured with `defaultContext` is controlled for the layer's life instead.
    * The list holds contexts only; each context's `pages` lists its pages.
    *
    * **Details**
