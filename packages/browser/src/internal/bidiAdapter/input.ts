@@ -255,7 +255,7 @@ export const dispatchInput = Effect.fnUntraced(
     state: State,
     id: L1Target.NavigableId,
     events: ReadonlyArray<Adapter.InputEvent>,
-    frame?: { readonly frame: L1Target.NavigableId; readonly origin: { readonly x: number; readonly y: number } },
+    frame?: Adapter.InputFrame,
     lands?: ReadonlyArray<L1Target.NavigableId>
   ) {
     // Input that names neither a frame nor where its points land, as the page's devices send it; a locator names
@@ -338,7 +338,21 @@ export const dispatchInput = Effect.fnUntraced(
     // gets a move to its viewport's right edge, a point Firefox accepts and nothing in the frame covers, which fires
     // its leave, innermost first; then each context above a frame of another origin it enters gets the move at its
     // own point, outermost first, which moves its hover onto the frame's element. The page's own context is never
-    // left. A frame named by its caller is entered from the page alone, at the page's coordinates.
+    // left. The contexts above a frame its caller names come from the frame's path, as those above a frame the hit
+    // test found come from the test.
+    // The contexts from the page down to a frame its caller names, each with its origin, from the frame's path; a
+    // frame the path doesn't reach is entered from the page
+    const namedChain = (): PointerTarget => {
+      let at: PointerTarget = { navigable: navigable.page, x: 0, y: 0, width: Infinity, height: Infinity }
+      for (const step of frame?.path ?? []) {
+        const each = state.navigablesById.get(step.frame)
+        if (each === undefined || each.page !== navigable.page) continue
+        at = { navigable: each, x: step.origin.x, y: step.origin.y, width: Infinity, height: Infinity, above: at }
+      }
+      if (at.navigable === sent.navigable) return at
+      const page: PointerTarget = { navigable: navigable.page, x: 0, y: 0, width: Infinity, height: Infinity }
+      return { ...sent, above: page }
+    }
     const crossFrames = Effect.fnUntraced(function*(x: number, y: number) {
       const last = state.pointerIn.get(navigable.page.id)
       state.pointerIn.set(navigable.page.id, sent.navigable)
@@ -355,13 +369,9 @@ export const dispatchInput = Effect.fnUntraced(
         if (width !== undefined) pointer("strider-mouse", left.bidi).push({ type: "pointerMove", x: width, y: 0 })
       }
       const entered: Array<PointerTarget> = []
-      if (frameless) {
-        for (let at = sent; at.above !== undefined; at = at.above) {
-          if (from.includes(at.navigable)) break
-          if (ownOrigin(at.navigable)) entered.push(at.above)
-        }
-      } else if (sent.navigable !== navigable.page && !from.includes(sent.navigable) && ownOrigin(sent.navigable)) {
-        entered.push({ navigable: navigable.page, x: 0, y: 0, width: Infinity, height: Infinity })
+      for (let at = frameless ? sent : namedChain(); at.above !== undefined; at = at.above) {
+        if (from.includes(at.navigable)) break
+        if (ownOrigin(at.navigable)) entered.push(at.above)
       }
       for (const above of entered.reverse()) {
         pointer("strider-mouse", above.navigable.bidi).push({ type: "pointerMove", x: x - above.x, y: y - above.y })
