@@ -1,6 +1,6 @@
 /** Deterministic CDP event ordering regressions, without launching a browser. */
 import { assert, describe, it } from "@effect/vitest"
-import { Browser, Capability, Deadline, NetworkRequest, Reason, VideoWriter } from "@usestrider/browser"
+import { Browser, Capability, Deadline, NetworkRequest, Reason, Route, VideoWriter } from "@usestrider/browser"
 import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -1819,6 +1819,104 @@ describe("Chromium public sent-header waiting", () => {
       assert(Deadline.isTimeout(timeout))
       assert.strictEqual(timeout.operation, "NetworkRequest.headersSent")
       assert.strictEqual(timeout.phase, "waitingForEvent")
+    }).pipe(onTestClock))
+
+  // Chromium orders Fetch events apart from Network events: a route's response-stage pause can arrive after the
+  // request's ExtraInfo but before its Network.requestWillBeSent (Chromium 155.0.8059.79, Linux, headless).
+  it.effect("waits in a response handler whose pause arrives before the request's Network event", () =>
+    Effect.gen(function*() {
+      const { page, send, barrier } = yield* sentHeaders()
+      const url = "http://127.0.0.1:33957/json"
+      const frameId = "76F3487A52CF4F79FE4AD28961E44D32"
+      const observed = yield* Deferred.make<Option.Option<Deadline.Timeout>>()
+      const control = yield* page.control
+      yield* control.route(url, ({ request }) =>
+        Effect.gen(function*() {
+          const timeout = yield* NetworkRequest.headersSent(page, request).pipe(
+            Deadline.within("100 millis"),
+            Effect.match({ onFailure: Option.some, onSuccess: () => Option.none() })
+          )
+          yield* Deferred.succeed(observed, timeout)
+          return yield* Route.continue
+        }), { phase: "response" })
+      const requestHeaders = {
+        Accept: "*/*",
+        Referer: "http://127.0.0.1:33957/hello",
+        "User-Agent": "HeadlessChrome/155.0.0.0"
+      }
+      yield* send({
+        method: "Network.requestWillBeSentExtraInfo",
+        params: {
+          requestId: "26637.3",
+          associatedCookies: [],
+          headers: { ...requestHeaders, Host: "127.0.0.1:33957", Connection: "keep-alive" },
+          connectTiming: { requestTime: 206.996694 }
+        }
+      } as never)
+      yield* send({
+        method: "Network.responseReceivedExtraInfo",
+        params: {
+          requestId: "26637.3",
+          blockedCookies: [],
+          headers: { "content-type": "application/json", "x-test": "yes" },
+          resourceIPAddressSpace: "Loopback",
+          statusCode: 200,
+          headersText: "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\nx-test: yes\r\n\r\n",
+          cookiePartitionKeyOpaque: false,
+          exemptedCookies: []
+        }
+      } as never)
+      yield* send({
+        method: "Fetch.requestPaused",
+        params: {
+          requestId: "interception-job-3.0",
+          request: {
+            url,
+            method: "GET",
+            headers: requestHeaders,
+            initialPriority: "High",
+            referrerPolicy: "strict-origin-when-cross-origin"
+          },
+          frameId,
+          resourceType: "XHR",
+          responseStatusCode: 200,
+          responseStatusText: "OK",
+          responseHeaders: [{ name: "content-type", value: "application/json" }, { name: "x-test", value: "yes" }],
+          networkId: "26637.3"
+        }
+      } as never)
+      yield* barrier
+      yield* send({
+        method: "Network.requestWillBeSent",
+        params: {
+          requestId: "26637.3",
+          loaderId: "initial",
+          documentURL: "http://127.0.0.1:33957/hello",
+          request: {
+            url,
+            method: "GET",
+            headers: requestHeaders,
+            mixedContentType: "none",
+            initialPriority: "High",
+            referrerPolicy: "strict-origin-when-cross-origin",
+            isSameSite: true
+          },
+          timestamp: 206.995139,
+          wallTime: 1795492805.070907,
+          initiator: { type: "script" },
+          redirectHasExtraInfo: false,
+          type: "Fetch",
+          frameId,
+          hasUserGesture: false
+        }
+      } as never)
+      yield* barrier
+      yield* TestClock.adjust("100 millis")
+      // The response is still held by the handler, so the browser can't yet have said which headers it sent.
+      const timeout = yield* Deferred.await(observed)
+      assert(Option.isSome(timeout), "headersSent returned before the browser said which headers it sent")
+      assert(Deadline.isTimeout(timeout.value))
+      assert.strictEqual(timeout.value.phase, "waitingForEvent")
     }).pipe(onTestClock))
 
   for (const terminal of ["fails", "is canceled", "loses its page", "disconnects"] as const) {
