@@ -277,6 +277,36 @@ export const engine = (backend: Backend) =>
     ).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor)))
     layer(fixture, { excludeTestServices: true })(
       (it) => {
+        it.effect("stops Web Animations started by chained finish handlers during a capture", () =>
+          Effect.gen(function*() {
+            const { call, send } = yield* open(backend, "<div id=\"box\"></div>")
+            yield* call(
+              `function() {
+                const box = document.querySelector('#box')
+                const frames = [{ opacity: 0 }, { opacity: 1 }]
+                const first = box.animate(frames, { duration: 1000000 })
+                first.onfinish = () => {
+                  const second = box.animate(frames, { duration: 1000000 })
+                  second.onfinish = () => {
+                    globalThis.captureAnimation = box.animate(frames, { duration: 1000, iterations: Infinity })
+                  }
+                }
+              }`,
+              []
+            )
+            yield* send({ op: "animationsStop", token: "capture" })
+            // Let the finish events queued by preparation run while the capture still holds its token.
+            const during = yield* call(
+              `async function() {
+                await new Promise(resolve => requestAnimationFrame(resolve))
+                return globalThis.captureAnimation?.playState
+              }`,
+              []
+            )
+            yield* send({ op: "animationsResume", token: "capture" })
+            assert.deepStrictEqual(during, { _tag: "Value", value: { type: "string", value: "idle" } })
+          }))
+
         it.effect("keeps animations stopped until the last overlapping capture resumes", () =>
           Effect.gen(function*() {
             const { call, send } = yield* open(backend, "<div id=\"box\"></div>")
