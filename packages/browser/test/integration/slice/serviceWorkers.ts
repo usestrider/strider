@@ -4,7 +4,7 @@
  * events report them, a service worker's script load included.
  */
 import { assert, describe, layer } from "@effect/vitest"
-import { Browser, NetworkRequest, type Page, Route, type UserContext } from "@usestrider/browser"
+import { Browser, ConsoleMessage, NetworkRequest, type Page, Route, type UserContext } from "@usestrider/browser"
 import * as Effect from "effect/Effect"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import type * as Layer from "effect/Layer"
@@ -24,6 +24,7 @@ self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
 self.addEventListener('message', (event) => {
   const { path, init } = event.data;
+  if (path === "/console") console.log("worker arguments", { value: 42 });
   fetch(path, init).then((r) => r.text()).then((text) => 'ok:' + text, (error) => 'failed:' + error.message)
     .then((outcome) => event.ports[0].postMessage(outcome));
 });`
@@ -178,6 +179,19 @@ export const serviceWorkers = (name: string, backend: Layer.Layer<Browser.Browse
           })
           yield* fromServiceWorker(page, "/data", { method: "POST", body: "from the worker" })
           assert.deepStrictEqual((yield* posted).body, Option.some("from the worker"))
+        }), timeout)
+
+      it.effect("keeps a service worker's console arguments for a context subscription", () =>
+        Effect.gen(function*() {
+          if (!(yield* reachesWorkers)) return
+          const { context, origin, page } = yield* open()
+          yield* page.goto(`${origin}/`)
+          yield* register(page)
+          const logged = yield* ConsoleMessage.nextCall(context, { text: /worker arguments/ })
+          yield* fromServiceWorker(page, "/console")
+          const call = yield* logged
+          assert.strictEqual(call.args.length, 2)
+          assert.deepStrictEqual(yield* call.args[1]!.read, { value: 42 })
         }), timeout)
 
       it.effect("fulfills a shared worker's fetch by its context's route", () =>
