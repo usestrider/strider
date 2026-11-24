@@ -20,6 +20,7 @@ import { postData, resourceTypes } from "./mapping.ts"
 import { emitResponse, release, servedBy } from "./responses.ts"
 import {
   credentialsScope,
+  dropPending,
   type Event,
   type ExtraInfo,
   frameOf,
@@ -27,7 +28,8 @@ import {
   type RequestEntry,
   requestKey,
   type State,
-  type TargetEntry
+  type TargetEntry,
+  withdrawHop
 } from "./state.ts"
 import { endNavigation } from "./tree.ts"
 
@@ -169,7 +171,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       let request = state.requests.get(key)
       if (request === undefined && Urls.answeredLocally(params.request.url)) {
         // The browser answers it itself: no request, so the events that follow for its id find none
-        state.pendingAttribution.delete(key)
+        dropPending(state, key)
         state.earlyHeaders.delete(key)
         state.answeredLocally.add(key)
         if (state.answeredLocally.size > 500) state.answeredLocally.delete(state.answeredLocally.values().next().value!)
@@ -187,6 +189,8 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         state.buffer.emit({ _tag: "RequestFinished", hop: request.hop, ...Sizes.unknown, at: Adapter.now() })
         // The earlier hop's id stays, so a body read for it says it was a redirect (QUIRKS.md, Q39)
         request.attribution = state.pendingAttribution.get(key) ?? { target, fulfilled: false }
+        // A pause that came first named a first hop, which a redirect's hop isn't
+        withdrawHop(state, request.attribution)
         request.servedFromCache = false
         request.received = undefined
         request.requestHeaders = params.request.headers
@@ -202,7 +206,8 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       } else {
         const frame = frameOf(state, params.frameId)
         const navigation = params.type === "Document" ? state.navigations.get(params.loaderId) : undefined
-        const id = state.ids.request()
+        const pending = state.pendingAttribution.get(key)
+        const id = pending?.request ?? state.ids.request()
         request = {
           id,
           target,
@@ -215,7 +220,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
           finished: Deferred.makeUnsafe(),
           servedFromCache: false,
           network: false,
-          attribution: state.pendingAttribution.get(key) ?? { target, fulfilled: false },
+          attribution: pending ?? { target, fulfilled: false },
           resourceType: resourceTypes[params.type ?? "Other"] ?? "other",
           received: undefined,
           held: undefined,
@@ -330,7 +335,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     })
     .on(Network.loadingFinished, (params, { state, target }) => {
       if (target === undefined) return
-      state.pendingAttribution.delete(requestKey(target, params.requestId))
+      dropPending(state, requestKey(target, params.requestId))
       state.credentialsAttempted.get(credentialsScope(target))?.delete(params.requestId)
       state.answeredLocally.delete(requestKey(target, params.requestId))
       for (const [id, auth] of target.proxyAuth ?? []) {
@@ -365,7 +370,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     })
     .on(Network.loadingFailed, (params, { state, target }) => {
       if (target === undefined) return
-      state.pendingAttribution.delete(requestKey(target, params.requestId))
+      dropPending(state, requestKey(target, params.requestId))
       state.credentialsAttempted.get(credentialsScope(target))?.delete(params.requestId)
       state.answeredLocally.delete(requestKey(target, params.requestId))
       for (const [id, auth] of target.proxyAuth ?? []) {

@@ -418,6 +418,9 @@ export const toHttpClientRequest = (request: NetworkRequest): HttpClientRequest.
  *   network additions such as `Cookie`.
  * - `target` is the page or context the request was seen on.
  * - Strider keeps the last 1000 redirect hops; for an older request, this gives its event's headers.
+ * - On Chromium, a route handler can get its request before the browser has reported the request itself; this
+ *   then waits for that report too, under the same deadline, and gives the request event's headers if the browser
+ *   reports the request's end without it.
  *
  * **Gotchas**
  *
@@ -1012,6 +1015,8 @@ export const timing = (
  * In-flight model eviction fails with `ResponseUnavailable`; scope closure releases the hop and fails pending
  * and subsequent waits with `released`. Closing the target before arrival fails with `targetClosed`.
  * Only this explicit acquisition retains the hop beyond a lookup; it enables no browser instrumentation or body capture.
+ * On Chromium, a route handler can get its request before the browser has reported the request itself; it can be
+ * acquired then, and the wait first waits for that report.
  *
  * **Gotchas**
  *
@@ -1057,7 +1062,8 @@ export const response = (
  * It fails with `ResponseUnavailable`: `evicted` when the index drops the hop before it ends, `released` once the
  * scope closes, `targetClosed` when the target or the browser connection closes first, and `foreignTarget` when
  * another page or context observed the request. Only this acquisition retains the hop; it enables no browser
- * instrumentation.
+ * instrumentation. On Chromium, a route handler can get its request before the browser has reported the request
+ * itself; it can be acquired then, and the wait first waits for that report.
  *
  * **Example** (Waiting for a download request to finish loading)
  *

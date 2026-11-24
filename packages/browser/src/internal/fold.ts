@@ -97,6 +97,8 @@ export interface Fold {
   readonly documentOf: (navigable: Target.NavigableId) => Effect.Effect<Option.Option<Target.DocumentId>>
   readonly response: (hop: NetworkRequest.HopId) => Option.Option<NetworkResponse.NetworkResponse>
   readonly hop: (hop: NetworkRequest.HopId) => Option.Option<Model.HopEntry>
+  /** See `Model.Model["awaitHop"]`. */
+  readonly awaitHop: (hop: NetworkRequest.HopId) => Option.Option<Effect.Effect<Option.Option<Model.HopEntry>>>
   readonly lost: Deferred.Deferred<void>
 
   // Commands
@@ -230,6 +232,14 @@ export const make = Effect.fnUntraced(function*(options: {
     if (Option.isSome(hop.context)) hop.context.value.sizes?.delete(hop.request.hop)
     Deferred.doneUnsafe(hop.sentKnown, Effect.void)
   })
+  // Hops the adapter named before their request event, until the event comes or the adapter withdraws them
+  const issued = new Map<NetworkRequest.HopId, Deferred.Deferred<void>>()
+  const settleIssued = (hop: NetworkRequest.HopId) => {
+    const waiting = issued.get(hop)
+    if (waiting === undefined) return
+    issued.delete(hop)
+    Deferred.doneUnsafe(waiting, Effect.void)
+  }
   const realmDocuments = new Map<Target.RealmId, Target.DocumentId>()
   const realmOwners = new Map<Target.RealmId, Model.Owner>()
   const workers = new Map<Target.RealmId, Model.WorkerEntry>()
@@ -879,6 +889,18 @@ export const make = Effect.fnUntraced(function*(options: {
             context: owner.context
           })
           publish(owner, fact.request, (events) => events.request, (events) => events.request)
+          settleIssued(fact.request.hop)
+          return
+        }
+        case "HopIssued": {
+          if (Option.isSome(hops.get(fact.hop)) || issued.has(fact.hop) || Deferred.isDoneUnsafe(lost)) return
+          issued.set(fact.hop, Deferred.makeUnsafe<void>())
+          // Bounded as the hops are: past it, the oldest is given up, and its lookups find it gone
+          if (issued.size > maxHops) settleIssued(issued.keys().next().value!)
+          return
+        }
+        case "HopWithdrawn": {
+          settleIssued(fact.hop)
           return
         }
         case "HopTiming": {
@@ -1151,6 +1173,7 @@ export const make = Effect.fnUntraced(function*(options: {
 
   const loseConnection = Effect.fnUntraced(function*(reason: Target.CloseReason) {
     if (Deferred.isDoneUnsafe(lost)) return
+    for (const hop of Array.from(issued.keys())) settleIssued(hop)
     for (const page of Array.from(pages.values())) yield* endPage(page, reason)
     for (const document of Array.from(documents.keys())) yield* endDocument(document, reason)
     for (const worker of Array.from(workers.values())) yield* endWorker(worker, reason)
@@ -1223,6 +1246,14 @@ export const make = Effect.fnUntraced(function*(options: {
     documentOf,
     response: (hop) => responses.get(hop),
     hop: (hop) => hops.get(hop),
+    awaitHop: (hop) => {
+      const found = hops.get(hop)
+      if (Option.isSome(found)) return Option.some(Effect.succeed(found))
+      const waiting = issued.get(hop)
+      return waiting === undefined
+        ? Option.none()
+        : Option.some(Effect.suspend(() => Effect.map(Deferred.await(waiting), () => hops.get(hop))))
+    },
     lost,
     context: (id, isDefault, created) => apply(ensureContext(id, isDefault, created)),
     configure: (context, settings) => apply(update(context.state, (state) => ({ ...state, settings }))),

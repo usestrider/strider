@@ -246,6 +246,33 @@ export interface Attribution {
   readonly target: TargetEntry
   fulfilled: boolean
   fetchId?: string | undefined
+  /**
+   * The request id a pause gave the request before its Network event came, which that event's first hop takes,
+   * so the pause's request and the model's are one hop.
+   */
+  request?: NetworkRequest.Id | undefined
+}
+
+/** The first hop a pause named for a request whose Network event hadn't come, which the model is told of. */
+export const pendingHop = (state: State, attribution: Attribution): NetworkRequest.HopId => {
+  if (attribution.request === undefined) {
+    attribution.request = state.ids.request()
+    state.buffer.emit({ _tag: "HopIssued", hop: state.ids.hop(attribution.request, 0) })
+  }
+  return state.ids.hop(attribution.request, 0)
+}
+
+/** Withdraws the hop a pause named, when its request event won't come for it. */
+export const withdrawHop = (state: State, attribution: Attribution | undefined) => {
+  if (attribution?.request === undefined) return
+  state.buffer.emit({ _tag: "HopWithdrawn", hop: state.ids.hop(attribution.request, 0) })
+  attribution.request = undefined
+}
+
+/** Forgets a pause's attribution its request event never took, withdrawing the hop it named. */
+export const dropPending = (state: State, key: string) => {
+  withdrawHop(state, state.pendingAttribution.get(key))
+  state.pendingAttribution.delete(key)
 }
 
 export interface RequestEntry {

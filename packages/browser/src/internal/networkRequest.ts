@@ -66,9 +66,16 @@ export const headersSent = (
 ): Effect.Effect<Headers.Headers, Deadline.Timeout> =>
   Effect.gen(function*() {
     const { runtime } = Handles.target(target as Page.Page | UserContext.UserContext).behind
-    const hop = runtime.model.hop(request.hop)
-    if (Option.isNone(hop)) return request.headers
+    const awaited = runtime.model.awaitHop(request.hop)
+    if (Option.isNone(awaited)) return request.headers
     const record = yield* Operation.record
+    // A route's request can reach its handler before the browser reports the request itself
+    const hop = yield* record.bound(
+      awaited.value,
+      () => Option.some("The browser hadn't reported the request by the deadline"),
+      "waitingForEvent"
+    )
+    if (Option.isNone(hop)) return request.headers
     yield* record.bound(
       Deferred.await(hop.value.sentKnown),
       () => Option.some("The browser hadn't said which headers it sent by the deadline"),
@@ -436,6 +443,49 @@ export const sizes = (
 ): Effect.Effect<NetworkRequest.Sizes, NetworkRequest.RequestError> =>
   observation(target, request, "sizes", (context) => context.sizes, Sizes.empty)
 
+/**
+ * Holds a hop until the scope closes, `released` then. A hop the browser hasn't reported yet, as a route's request
+ * can be, is checked once the wait gets it, under the deadline of the read that waits.
+ */
+const holdHop = Effect.fnUntraced(function*(
+  found: ReturnType<typeof Handles.target>,
+  id: NetworkRequest.HopId,
+  released: Deferred.Deferred<void>,
+  unavailable: (why: NetworkRequest.ResponseUnavailable["why"]) => NetworkRequest.RequestError
+) {
+  const { model } = found.behind.runtime
+  const kept = model.hop(id)
+  if (Option.isSome(kept) && !ownsHop(found, kept.value)) return yield* Effect.fail(unavailable("foreignTarget"))
+  const awaited = model.awaitHop(id)
+  if (Option.isNone(awaited)) return yield* Effect.fail(unavailable("evicted"))
+  let held: Model.HopEntry | undefined = Option.getOrUndefined(kept)
+  yield* Effect.addFinalizer(() =>
+    Effect.sync(() => {
+      held = undefined
+      Deferred.doneUnsafe(released, Effect.void)
+    })
+  )
+  const release = Deferred.await(released).pipe(Effect.andThen(Effect.fail(unavailable("released"))))
+  return Effect.gen(function*() {
+    if (Deferred.isDoneUnsafe(released)) return yield* Effect.fail(unavailable("released"))
+    if (held !== undefined) return held
+    const record = yield* Operation.record
+    const hop = yield* record.bound(
+      Effect.raceFirst(awaited.value, release),
+      () => Option.some("The browser hadn't reported the request by the deadline"),
+      "waitingForEvent"
+    )
+    if (Option.isNone(hop)) {
+      return yield* Effect.fail(
+        unavailable(Deferred.isDoneUnsafe(found.behind.entry.closed) ? "targetClosed" : "evicted")
+      )
+    }
+    if (!ownsHop(found, hop.value)) return yield* Effect.fail(unavailable("foreignTarget"))
+    held = hop.value
+    return hop.value
+  })
+})
+
 /** Opt-in retention of one existing hop; no model or adapter work is installed. */
 export const response = (
   target: Page.ObservedPage | UserContext.ObservedUserContext,
@@ -453,23 +503,11 @@ export const response = (
         reason: new NetworkRequest.ResponseUnavailable({ why }),
         diagnostics: Operation.diagnosticsNow()
       })
-    const retained = found.behind.runtime.model.hop(request.hop)
-    if (Option.isNone(retained)) return yield* Effect.fail(unavailable("evicted"))
-    if (!ownsHop(found, retained.value)) {
-      return yield* Effect.fail(unavailable("foreignTarget"))
-    }
     const targetClosed = found.behind.entry.closed
-    let held: Model.HopEntry | undefined = retained.value
     const released = Deferred.makeUnsafe<void>()
-    yield* Effect.addFinalizer(() =>
-      Effect.sync(() => {
-        held = undefined
-        Deferred.doneUnsafe(released, Effect.void)
-      })
-    )
+    const held = yield* holdHop(found, request.hop, released, unavailable)
     return Effect.gen(function*() {
-      const hop = held
-      if (hop === undefined) return yield* Effect.fail(unavailable("released"))
+      const hop = yield* held
       const existing = (yield* hop.state.get).response
       if (Option.isSome(existing)) return existing
       const record = yield* Operation.record
@@ -521,21 +559,11 @@ export const end = (
         reason: new NetworkRequest.ResponseUnavailable({ why }),
         diagnostics: Operation.diagnosticsNow()
       })
-    const retained = model.hop(request.hop)
-    if (Option.isNone(retained)) return yield* Effect.fail(unavailable("evicted"))
-    if (!ownsHop(found, retained.value)) return yield* Effect.fail(unavailable("foreignTarget"))
     const targetClosed = found.behind.entry.closed
-    let held: Model.HopEntry | undefined = retained.value
     const released = Deferred.makeUnsafe<void>()
-    yield* Effect.addFinalizer(() =>
-      Effect.sync(() => {
-        held = undefined
-        Deferred.doneUnsafe(released, Effect.void)
-      })
-    )
+    const held = yield* holdHop(found, request.hop, released, unavailable)
     return Effect.gen(function*() {
-      const hop = held
-      if (hop === undefined) return yield* Effect.fail(unavailable("released"))
+      const hop = yield* held
       const ended = Effect.flatMap(Deferred.await(hop.end), (end) =>
         end._tag === "Forgotten" ?
           Effect.fail(unavailable("evicted"))

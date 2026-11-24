@@ -465,6 +465,12 @@ export interface Model {
   readonly response: (hop: NetworkRequest.HopId) => Option.Option<NetworkResponse.NetworkResponse>
   /** A hop the model still keeps, by id: its request, its response so far, and its end. */
   readonly hop: (hop: NetworkRequest.HopId) => Option.Option<HopEntry>
+  /**
+   * A hop the model keeps, or one the adapter named before its request event came, as a route's request can be:
+   * the wait for it, which gives the hop once its request event folds, or `None` if that event won't come. `None`
+   * when the model neither keeps the hop nor expects it.
+   */
+  readonly awaitHop: (hop: NetworkRequest.HopId) => Option.Option<Effect.Effect<Option.Option<HopEntry>>>
   /** Ends when the connection does. */
   readonly lost: Deferred.Deferred<void>
 
@@ -584,6 +590,7 @@ export const make = Effect.fnUntraced(function*() {
         documentOf: fold.documentOf,
         response: fold.response,
         hop: fold.hop,
+        awaitHop: fold.awaitHop,
         lost: fold.lost,
         context: (id) => fold.context(id, false),
         createdContext: (id) => fold.context(id, false, true),

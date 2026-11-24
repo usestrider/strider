@@ -21,9 +21,11 @@ import * as Urls from "../urls.ts"
 import { failReasons, fetchHeaders, postData, resourceTypes } from "./mapping.ts"
 import {
   credentialsScope,
+  dropPending,
   type Event,
   frameOf,
   type ObligationEntry,
+  pendingHop,
   placement,
   type RequestEntry,
   requestKey,
@@ -130,7 +132,9 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         networkId: params.networkId,
         hasBody: params.request.hasPostData === true
       })
-      const hop = request?.hop ?? state.ids.hop(state.ids.request(), 0)
+      // A pause can come before its request's Network event; the hop it names is the one that event takes
+      const hop = request?.hop ??
+        (attribution === undefined ? state.ids.hop(state.ids.request(), 0) : pendingHop(state, attribution))
       state.buffer.emit({
         _tag: "ObligationOpened",
         obligation,
@@ -419,7 +423,7 @@ export const resolve = Effect.fnUntraced(
       case "PausedRequest": {
         yield* Kit.protocol(decide(state, obligation, decision))
         if (decision._tag === "Fail" && obligation.networkId !== undefined) {
-          state.pendingAttribution.delete(requestKey(obligation.target, obligation.networkId))
+          dropPending(state, requestKey(obligation.target, obligation.networkId))
         }
         state.obligations.delete(id)
         yield* state.buffer.run(() =>
