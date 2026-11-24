@@ -131,7 +131,8 @@ interface ErrorMatcher {
   that the pointer leaves gets a `pointerMove` to its right edge, `(innerWidth, 0)`, read with one `script.callFunction`:
   BiDi's bounds check accepts that point and nothing in the frame covers it. Each context above a frame of another
   origin it enters gets the move at its own point first, outermost first, which moves its hover onto the frame's
-  element; for a frame its caller names, that is the page's context. Any other
+  element; for a frame its caller names, those contexts and their origins come from the frame's path, as for input
+  that names no frame they come from the hit test. Any other
   pointer input, such as a locator's drag between the page and a frame, goes on the page's session, in its
   coordinates. Keys and text go on the page's session, which sends them to the focused element. Nothing hit-tests the
   parent documents for input a locator sends on the frame's session: the locator's pointer check does, before anything
