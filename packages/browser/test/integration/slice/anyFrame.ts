@@ -220,6 +220,37 @@ export const anyFrame = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer
       )
 
       it.effect(
+        "completes a framed click while other callers read the same frame",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { origin } = yield* site
+            const page = yield* newPage
+            yield* page.goto(fixtureUrl(origin, frame(origin, button("Pay"))))
+            const pay = page.frame(page.locator("iframe")).getByRole("button", { name: "Pay" })
+            assert.strictEqual(yield* pay.count, 1)
+            const execution = Handles.page(page).entry.execution
+            const original = execution.action
+            const hook = vi.spyOn(execution, "action").mockImplementation((...args) =>
+              original(...args).pipe(Effect.tap((answer) => {
+                if (args[2].apply && !("_tag" in answer) && answer.response._tag === "Ready") {
+                  // Other callers can finish reads between the target check and parent geometry read.
+                  // The page stays unchanged: reading it must not invalidate an action's frame identity.
+                  return Effect.forEach(Array.from({ length: 17 }), () => pay.count, { discard: true }).pipe(
+                    Effect.orDie
+                  )
+                }
+                return Effect.void
+              }))
+            )
+            yield* Effect.addFinalizer(() => Effect.sync(() => hook.mockRestore()))
+            yield* pay.click().pipe(Deadline.within("5 seconds"))
+            hook.mockRestore()
+            assert.strictEqual(yield* page.frame(page.locator("iframe")).locator("#out").readText, "clicked")
+          })),
+        timeout
+      )
+
+      it.effect(
         "caps cross-frame candidate descriptions at ten while retaining the total",
         () =>
           Effect.scoped(Effect.gen(function*() {
