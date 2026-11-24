@@ -394,7 +394,13 @@ export type Request =
   }
   /** Removes the guard an action armed, and says whether it stopped the gesture. */
   | { readonly op: "disarm" }
-  | { readonly op: "fillGuard"; readonly steps: ReadonlyArray<Step>; readonly ancestor: boolean }
+  | {
+    readonly op: "fillGuard"
+    readonly steps: ReadonlyArray<Step>
+    readonly ancestor: boolean
+    /** For an iframe on the way: the identity its lookup answered, which the guarded iframe must still have. */
+    readonly identity?: string
+  }
   | { readonly op: "fillDisarm" }
   /**
    * Inserts text with the editing command in this document's focused element, after a cancelable `beforeinput`
@@ -431,6 +437,8 @@ export type Request =
     readonly scroll: boolean
     readonly clip?: Clip
     readonly point: { readonly x: number; readonly y: number } | null
+    /** The identity the iframe's lookup answered: the answer says whether the iframe found has it still. */
+    readonly identity?: string
   }
   /**
    * The accessibility tree of the document, or of the one match's subtree, with inferred
@@ -528,7 +536,9 @@ export const Response = Schema.Union([
   Schema.TaggedStruct("FillGuard", {
     blocked: Schema.NullOr(Schema.String),
     unsafe: Schema.Boolean,
-    accepted: Schema.Boolean
+    accepted: Schema.Boolean,
+    /** Given an identity, whether the iframe guarded has it: the same iframe, holding the same frame. */
+    held: Schema.optionalKey(Schema.Boolean)
   }),
   Schema.TaggedStruct("Read", { value: Schema.NullOr(Schema.Union([Schema.String, Schema.Boolean])) }),
   Schema.TaggedStruct("NoMatch", {}),
@@ -571,7 +581,9 @@ export const Response = Schema.Union([
     /** Why the iframe isn't hit at the point given (`Covered` or `NoPointerEvents`), or `null` when it is. */
     covered: Schema.NullOr(NotReady),
     /** This document's scroll offset. */
-    scroll: Point
+    scroll: Point,
+    /** Given an identity, whether the iframe found has it: the same iframe, holding the same frame. */
+    held: Schema.optionalKey(Schema.Boolean)
   }),
   Schema.TaggedStruct("Snapshot", { root: SnapNode, generation: Schema.Number }),
   Schema.TaggedStruct("Explained", {
@@ -3066,7 +3078,7 @@ export function engine(render: (root: SnapNode) => string) {
       accepted: current?.accepted ?? false
     }
   }
-  const armFill = (steps: ReadonlyArray<Step>, ancestor: boolean) => {
+  const armFill = (steps: ReadonlyArray<Step>, ancestor: boolean, identity: string | undefined) => {
     fillDisarm()
     const matches = resolve(steps)
     const element = matches.length === 1 ? matches[0]! : null
@@ -3157,7 +3169,13 @@ export function engine(render: (root: SnapNode) => string) {
     // whose handlers may replace the target or change readiness, before installing an insertion guard.
     if (current.blocked === null) { for (const type of types) addEventListener(type, handler, true) }
     fillGuard = current
-    return { _tag: "FillGuard" as const, blocked: current.blocked, unsafe: false, accepted: false }
+    return {
+      _tag: "FillGuard" as const,
+      blocked: current.blocked,
+      unsafe: false,
+      accepted: false,
+      ...(identity === undefined ? {} : { held: element !== null && frameIdentity(element) === identity })
+    }
   }
 
   /**
@@ -4527,12 +4545,37 @@ export function engine(render: (root: SnapNode) => string) {
     candidates: found.slice(0, 10).map((element) => ({ description: describe(element), visible: visible(element) }))
   })
 
+  // Each iframe's identity with the frame it holds: one id per iframe and window, shared by every lookup and kept
+  // as long as the iframe holds that window, which a navigation keeps and a reinsertion replaces. A new window, or
+  // an engine installed again, gives a new id, so an id names one iframe holding one frame.
+  const iframeWindow = getter(HTMLIFrameElement.prototype, "contentWindow")
+  const frameWindow = getter(HTMLFrameElement.prototype, "contentWindow")
+  const windowOf = (element: Element): WindowProxy | null =>
+    element instanceof HTMLIFrameElement
+      ? iframeWindow(element)
+      : element instanceof HTMLFrameElement
+      ? frameWindow(element)
+      : null
+  const identities = new WeakMap<Element, { readonly window: WindowProxy; readonly id: string }>()
+  const identityEpoch = Math.random().toString(36).slice(2)
+  let identityCount = 0
+  /** The iframe's identity with the window it holds now, or `null` when it holds none. */
+  const frameIdentity = (element: Element): string | null => {
+    const held = windowOf(element)
+    if (held === null) return null
+    const known = identities.get(element)
+    if (known !== undefined && known.window === held) return known.id
+    const id = `${identityEpoch}:${++identityCount}`
+    identities.set(element, { window: held, id })
+    return id
+  }
+
   /**
    * The one match itself, for an evaluation that returns it by value with its node binding: what
    * `setInputFiles`, `Locator.evaluate` and a frame's iframe need. Otherwise a `Response` as JSON text: no match,
    * several, an invalid selector, or, for an iframe, an element that isn't one.
    */
-  const element = (text: string): Element | Array<Element> | string => {
+  const element = (text: string): Element | Array<Element> | readonly [Element, string | null] | string => {
     const request = JSON.parse(text) as {
       readonly steps: ReadonlyArray<Step>
       /** The complete query, before frame routing splits it. */
@@ -4541,6 +4584,8 @@ export function engine(render: (root: SnapNode) => string) {
       readonly frame?: boolean
       /** For an iframe on an action's way: scrolled into view, so its frame renders (QUIRKS.md, Q110). */
       readonly scroll?: boolean
+      /** For an iframe: answer it with its identity, `[element, identity]`, which later requests check. */
+      readonly identify?: boolean
     }
     clearTreeCaches()
     let found: Array<Element>
@@ -4576,7 +4621,7 @@ export function engine(render: (root: SnapNode) => string) {
     if (request.scroll === true && !inViewport(one)) {
       dom.scrollIntoView(one, { block: "center", inline: "center", behavior: "instant" })
     }
-    return one
+    return request.identify === true ? [one, frameIdentity(one)] : one
   }
 
   /** An iframe's content box origin, scrolled into view when asked, and what the pointer would hit at a point. */
@@ -4624,7 +4669,15 @@ export function engine(render: (root: SnapNode) => string) {
         Math.min(bounds.bottom, rect.bottom - parseFloat(style.borderBottomWidth) - parseFloat(style.paddingBottom)) -
         origin.y
     }
-    return { _tag: "Frame", origin, viewport, scrolled, covered, scroll: { x: scrollX, y: scrollY } }
+    return {
+      _tag: "Frame",
+      origin,
+      viewport,
+      scrolled,
+      covered,
+      scroll: { x: scrollX, y: scrollY },
+      ...(request.identity === undefined ? {} : { held: frameIdentity(iframe) === request.identity })
+    }
   }
 
   // Invalid events do not bubble or cross shadow boundaries. Listen on each existing open root,
@@ -4702,7 +4755,7 @@ export function engine(render: (root: SnapNode) => string) {
         case "act":
           return JSON.stringify(await act(request))
         case "fillGuard":
-          return JSON.stringify(armFill(request.steps, request.ancestor) satisfies Response)
+          return JSON.stringify(armFill(request.steps, request.ancestor, request.identity) satisfies Response)
         case "fillDisarm":
           return JSON.stringify(fillDisarm() satisfies Response)
         case "insert":

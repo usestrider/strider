@@ -589,7 +589,7 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
                 detail: "minimal",
                 inFlightAtStop: "wait"
               })
-              yield* page.goto(`${served.origin}/fetching`)
+              yield* page.goto(`${served.origin}/fetching`, { waitUntil: "load" })
               yield* page.evaluateInMainWorld(() => (window as unknown as { fetched: Promise<string> }).fetched)
               yield* har.entries.waitFor((count) => count === 1)
               yield* har.exportHar(out)
@@ -695,7 +695,7 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* Browser.newPage()
               const har = yield* Har.record(page, { content: "embed", url: "**/*echo", inFlightAtStop: "wait" })
-              yield* page.goto(`${served.origin}/cookie`)
+              yield* page.goto(`${served.origin}/cookie`, { waitUntil: "load" })
               yield* page.evaluateInMainWorld(async () => {
                 await fetch("/echo", { method: "POST", body: "shoes" })
                 await fetch("/echo", { method: "POST", body: "hats" })

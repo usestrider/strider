@@ -49,7 +49,7 @@ describe("Shared-context digest control", () => {
             text: label,
             location: Option.none(),
             origin,
-            source: { _tag: "Page" },
+            source: { _tag: "Page", method: "error" },
             timestamp: DateTime.makeUnsafe(0),
             at: Adapter.now()
           })

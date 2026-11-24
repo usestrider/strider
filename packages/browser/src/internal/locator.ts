@@ -1687,8 +1687,13 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     insert: Effect.Effect<void, Locator.LocatorError | Target.TargetGone | Deadline.Timeout>
   ) {
     const targets = [
-      ...routed.hops.map((hop) => ({ document: hop.document, steps: hop.steps, ancestor: true })),
-      { document: routed.document, steps: Runtime.split(this.steps).last, ancestor: false }
+      ...routed.hops.map((hop) => ({
+        document: hop.document,
+        steps: hop.steps,
+        ancestor: true,
+        identity: hop.identity
+      })),
+      { document: routed.document, steps: Runtime.split(this.steps).last, ancestor: false, identity: undefined }
     ]
     const documents = targets.map((target) => target.document)
     const call = (document: Target.DocumentId, request: Engine.Request) =>
@@ -1722,14 +1727,14 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       () =>
         Effect.gen({ self: this }, function*() {
           const guards = yield* Effect.forEach(targets, (target) =>
-            call(target.document, { op: "fillGuard", steps: target.steps, ancestor: target.ancestor }))
+            call(target.document, {
+              op: "fillGuard",
+              steps: target.steps,
+              ancestor: target.ancestor,
+              ...(target.identity === undefined ? {} : { identity: target.identity })
+            }))
           // Guards armed on iframes that no longer hold the hops' frames guard another frame: insert nothing
-          const held = yield* Runtime.holdsFrames(this.owner.runtime, routed.hops, record.id).pipe(
-            Effect.mapError((failure) =>
-              this.sendFailure(operation, failure, record)
-            )
-          )
-          if (!held) {
+          if (guards.some((guard) => guard.held === false)) {
             yield* disarm
             return { retry: { _tag: "NoMatch" } as Engine.NotReady }
           }
@@ -1835,9 +1840,11 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
           steps: hop.steps,
           scroll: checks.inViewport,
           cap: Runtime.roundCap((yield* Operation.record).left()),
-          point: checks.receivesPointer ? at : null
+          point: checks.receivesPointer ? at : null,
+          identity: hop.identity
         }, id)
-        if (Option.isNone(answer) || answer.value._tag !== "Frame") {
+        // The geometry is the hop's iframe's only while the steps find the iframe that holds its frame
+        if (Option.isNone(answer) || answer.value._tag !== "Frame" || answer.value.held !== true) {
           return { _tag: "NotReady", reason: { _tag: "NoMatch" } } as const
         }
         const frame = answer.value
@@ -1846,10 +1853,6 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         if (frame.covered !== null) return { _tag: "NotReady", reason: frame.covered } as const
         at = { x: at.x + frame.origin.x, y: at.y + frame.origin.y }
         origins[index] = frame.origin
-      }
-      // The geometry read above is the hops' iframes' only while they still hold their frames
-      if (!(yield* Runtime.holdsFrames(runtime, routed.hops, id))) {
-        return { _tag: "NotReady", reason: { _tag: "NoMatch" } } as const
       }
       const path: Array<Adapter.InputFrame["path"][number]> = []
       for (const [index, hop] of routed.hops.entries()) {

@@ -7,13 +7,19 @@
   "api": [
     {
       "module": "ConsoleMessage",
+      "symbol": "Method",
+      "url": "/docs/api/browser/ConsoleMessage#Method"
+    },
+    {
+      "module": "ConsoleMessage",
       "symbol": "Level",
       "url": "/docs/api/browser/ConsoleMessage#Level"
     }
   ],
   "notes": "Structured event data; not a remote Playwright object.",
   "capabilities": [
-    "console"
+    "console",
+    "console.method"
   ],
   "requirements": []
 }
