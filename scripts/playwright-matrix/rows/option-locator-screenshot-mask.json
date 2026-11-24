@@ -4,9 +4,22 @@
     "method:Locator.screenshot"
   ],
   "option": "mask",
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding public option; the parent row does not imply option parity.",
+  "status": "has",
+  "api": [
+    {
+      "module": "Page",
+      "symbol": "ControlScreenshotOptions",
+      "url": "/docs/api/browser/Page#ControlScreenshotOptions"
+    }
+  ],
+  "notes": "An element capture is `Page.screenshot({ area: { element }, mask })`, with control access only; each locator hides every element it matches, in its own frame.",
   "capabilities": [],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Page.ts",
+      "packages/browser/src/internal/captures.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; masks are drawn in each frame's document for the capture and removed after it."
+  },
   "requirements": []
 }

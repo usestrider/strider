@@ -804,7 +804,12 @@ export const sendRouted = (
   page: Model.PageEntry,
   request: Engine.Request,
   id: Diagnostics.OperationId,
-  at: MonotonicInstant.MonotonicInstant
+  at: MonotonicInstant.MonotonicInstant,
+  /**
+   * Told the document each round's request goes to, before it is sent: a caller that must undo what the request
+   * does there, as a capture's masks, owns it from before it can run.
+   */
+  sending?: ((document: Target.DocumentId) => void) | undefined
 ): Effect.Effect<Answer, SendFailure> =>
   Effect.raceFirst(
     // An action's frames are scrolled into view on its way, so they render (QUIRKS.md, Q110)
@@ -830,6 +835,7 @@ export const sendRouted = (
         // Plain title reads need the same isolated world and replay rules, but none of the query engine.
         // Backends without isolated worlds retain the existing shared-world engine path.
         const directTitle = request.op === "title" && !(yield* makesNoWorlds(runtime))
+        sending?.(routed.document)
         const pending = directTitle
           ? callInDocument(
             runtime,
