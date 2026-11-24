@@ -423,7 +423,7 @@ export const connect: (
       pdf: (page, options) => Capture.pdf(state, page, options),
       accessibilityTree: (page) => Capture.accessibilityTree(state, page),
       screencast: (page) => Capture.screencast(state, page),
-      video: (page) => Capture.video(state, page, writer),
+      video: (page, options) => Capture.video(state, page, options, writer),
       createAuthenticator: (page) => WebAuthn.create(state, page),
       releaseAuthenticator: (ref) => WebAuthn.release(state, ref),
       authenticatorCredentials: (ref) => WebAuthn.credentials(state, ref),

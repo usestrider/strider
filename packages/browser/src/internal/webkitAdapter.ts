@@ -203,7 +203,7 @@ export const connect: (
       pdf: refuse("pdf", "WebKit has no print-to-PDF"),
       accessibilityTree: refuse("capability.axTree", "WebKit reads accessibility one node at a time"),
       screencast: refuse("capability.screencast", "stock WebKit's inspector has no Screencast domain"),
-      video: (id) => Capture.video(state, id, options.video, writer),
+      video: (id, output) => Capture.video(state, id, options.video, writer, output),
       createAuthenticator: () =>
         Effect.fail(
           Kit.unsupported("capability.virtualAuthenticator", "Native virtual authenticators require Chromium CDP")

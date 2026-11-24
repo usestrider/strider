@@ -52,19 +52,64 @@ export const Frame = Schema.Struct({
 export type Frame = typeof Frame.Type
 
 /**
- * The destination and fixed output size. Writers must output every frame at exactly these dimensions,
- * scaling to fit, centring, and padding with black. Writers must preserve frame timestamps: the last
- * picture lasts until the final frame's timestamp, which marks the recording end.
+ * The destination, fixed output size, and optional frame rate. Writers must output every frame at exactly these
+ * dimensions, scaling to fit, centring, and padding with black. Without `fps`, writers must preserve frame
+ * timestamps: the last picture lasts until the final frame's timestamp, which marks the recording end. With `fps`,
+ * the file is constant-rate at that many frames a second, each showing the latest image at or before its time, and
+ * ends at the recording end rounded up to a whole frame.
+ *
+ * **Example** (Writing a 10 fps file at 800 by 450)
+ *
+ * ```ts import.meta.vitest
+ * import { VideoWriter } from "@usestrider/browser"
+ * import { Effect, Schema, Stream } from "effect"
+ *
+ * const writeAt10 = Effect.fn("writeAt10")(
+ *   function*(frames: Stream.Stream<VideoWriter.Frame>) {
+ *     const destination = Schema.decodeUnknownSync(VideoWriter.Destination)({
+ *       path: "/tmp/run.webm",
+ *       width: 800,
+ *       height: 450,
+ *       fps: 10
+ *     })
+ *     const writer = yield* VideoWriter.VideoWriter
+ *     return yield* writer.write(frames, destination)
+ *   }
+ * )
+ * ```
  *
  * @stability unstable
  * @category schemas
  * @since 0.1.0
  */
-export const Destination = Schema.Struct({ path: Schema.String, width: Schema.Number, height: Schema.Number })
+export const Destination = Schema.Struct({
+  path: Schema.String,
+  width: Schema.Number,
+  height: Schema.Number,
+  /**
+   * The constant frame rate to write at.
+   *
+   * @default none: variable-rate, each image at its own time
+   */
+  fps: Schema.optional(Schema.Number)
+})
 
 /**
- * A file and its fixed output dimensions in device pixels. Writers fit images to this size and preserve
- * their timestamps through the final recording-end frame.
+ * A file, its fixed output dimensions in pixels, and an optional constant frame rate. Writers fit images to this
+ * size and, without a frame rate, preserve their timestamps through the final recording-end frame.
+ *
+ * **Example** (A destination for a 10 fps file)
+ *
+ * ```ts import.meta.vitest
+ * import { VideoWriter } from "@usestrider/browser"
+ *
+ * const destination: VideoWriter.Destination = {
+ *   path: "/tmp/run.webm",
+ *   width: 800,
+ *   height: 450,
+ *   fps: 10
+ * }
+ * ```
  *
  * @stability unstable
  * @category models
@@ -96,7 +141,8 @@ export class VideoWriterError extends Schema.TaggedError<VideoWriterError>()("Vi
  */
 export interface VideoWriter {
   /**
-   * Consumes timestamped images without adding a fixed frame rate, then completes with the finished file's path.
+   * Consumes timestamped images, at the destination's frame rate if it has one and otherwise at their own times,
+   * then completes with the finished file's path.
    * A slow write backpressures the source.
    *
    * **Example** (Writing frames with a provided writer)
@@ -125,6 +171,45 @@ export const VideoWriter: Context.Service<VideoWriter, VideoWriter> = Context.Se
   "@usestrider/browser/VideoWriter"
 )
 
+/**
+ * Frames at a constant rate: output slot k, at k / fps, shows the latest image at or before it. Slots run until the
+ * final image's time, the recording's end, rounded up to a whole slot, and a copy of the last image at that rounded
+ * end marks where the file stops, lasting one millisecond, as the variable-rate end marker does.
+ */
+const resample = (frames: Stream.Stream<Frame>, fps: number): Stream.Stream<Frame> =>
+  Streams.suspend(() => {
+    const slot = (k: number) => (k * 1e9) / fps
+    let next = 0
+    let latest: Frame | undefined
+    // The slots before `before`, showing `shown`, one per pull, so a long still stretch is never held at once
+    const due = (shown: Frame | undefined, before: number): Stream.Stream<Frame> => {
+      if (shown === undefined) {
+        while (slot(next) < before) next++
+        return Streams.empty
+      }
+      return Streams.unfold(undefined, () =>
+        Effect.sync(() => {
+          if (slot(next) >= before) return undefined
+          const at = slot(next)
+          next++
+          return [{ ...shown, at }, undefined] as const
+        }))
+    }
+    return frames.pipe(
+      Streams.flatMap((frame) => {
+        const shown = latest
+        latest = frame
+        return due(shown, frame.at)
+      }),
+      Streams.concat(Streams.suspend(() => {
+        const last = latest
+        if (last === undefined) return Streams.empty
+        const end = Math.max(1, next, Math.ceil((last.at * fps) / 1e9 - 1e-9))
+        return due(last, slot(end)).pipe(Streams.concat(Streams.sync(() => ({ ...last, at: slot(end) }))))
+      }))
+    )
+  })
+
 const failure = (hint: string) =>
   new VideoWriterError({
     reason: new Reason.BackendFailure({ kind: "Rejected", method: "VideoWriter.write", hint })
@@ -135,8 +220,11 @@ const failure = (hint: string) =>
  *
  * **Details**
  *
- * Requires `ChildProcessSpawner`. The output has no audio and preserves variable frame times to millisecond
- * precision; images are scaled proportionally and padded with black to the recording's original dimensions. Closing the input finishes the file.
+ * Requires `ChildProcessSpawner`. The output has no audio. Without a destination `fps` it preserves variable frame
+ * times to millisecond precision. With one it resamples to that constant rate before encoding, repeating or dropping
+ * images, and ends at the stop time rounded up to a whole frame.
+ * Images are scaled proportionally and padded with black to the destination's dimensions. Closing the input
+ * finishes the file.
  *
  * Quality is fixed: libvpx encodes in real-time mode with `-cpu-used 8`, at constrained quality (CRF 8, quantizer 0 to
  * 50) and a target of 4 Mbit/s, so small text stays legible at desktop size. The target is an average, not a cap: a
@@ -170,7 +258,10 @@ export const layerFfmpeg = (
           if (!/^(\/|[A-Za-z]:[\\/])/.test(options.path)) {
             return yield* Effect.fail(failure("ffmpeg path must be absolute"))
           }
-          const { height, path, width } = destination
+          const { fps, height, path, width } = destination
+          // ffmpeg always receives exact timestamps and passes them through; a frame rate is applied here
+          // (`resample`), so the file's end is computed rather than inferred by ffmpeg's rate conversion
+          const input = fps === undefined ? frames : resample(frames, fps)
           const process = yield* spawner.spawn(ChildProcess.make(options.path, [
             "-nostdin",
             "-loglevel",
@@ -218,7 +309,7 @@ export const layerFfmpeg = (
             Effect.forkScoped
           )
           let initialized = false
-          yield* frames.pipe(
+          yield* input.pipe(
             Streams.map((frame) => {
               const image = VideoContainer.image(frame)
               if (initialized) return image

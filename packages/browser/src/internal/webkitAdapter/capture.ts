@@ -73,7 +73,8 @@ export const video = Effect.fnUntraced(function*(
   state: State,
   id: L1Target.NavigableId,
   options: WebKitVideo.Settings | undefined,
-  writer: Option.Option<VideoWriter.VideoWriter>
+  writer: Option.Option<VideoWriter.VideoWriter>,
+  output: Adapter.VideoOptions
 ) {
   if (options === undefined || Option.isNone(writer)) {
     return yield* Effect.fail(
@@ -149,6 +150,7 @@ export const video = Effect.fnUntraced(function*(
       }))
     }),
     writer.value,
-    options.directory
+    Option.getOrElse(output.directory, () => options.directory),
+    output
   )
 })

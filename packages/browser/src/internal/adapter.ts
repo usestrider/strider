@@ -1178,11 +1178,13 @@ export interface AdapterConnection {
     page: Target.NavigableId
   ) => Effect.Effect<Stream.Stream<ScreencastFrame, AdapterError>, AdapterError, Scope.Scope>
   /**
-   * Records a page to a video file while the scope lives, where its context's downloads go: what it returns
+   * Records a page to a video file while the scope lives, in the options' directory or else where its context's
+   * downloads go (on WebKit, its video directory): what it returns
    * completes with the file's path once the scope has closed and the browser has written it (`capability.video`).
    */
   readonly video: (
-    page: Target.NavigableId
+    page: Target.NavigableId,
+    options: VideoOptions
   ) => Effect.Effect<Effect.Effect<string, AdapterError>, AdapterError, Scope.Scope>
   readonly createAuthenticator: (page: Target.NavigableId) => Effect.Effect<Authenticator, AdapterError>
   readonly releaseAuthenticator: (ref: Authenticator) => Effect.Effect<void, AdapterError>
@@ -1251,3 +1253,14 @@ export type RequestBody =
   | { readonly _tag: "Incomplete" }
   | { readonly _tag: "OverLimit" }
   | { readonly _tag: "Unavailable"; readonly why: "notCollected" | "redirect" | "unavailable" }
+
+/**
+ * How a video is recorded: its size in pixels, an optional constant frame rate, and a directory for its file. Without
+ * a size, the backend fits the viewport into 800 by 800 from what a navigation can't take away: never a page realm.
+ */
+export interface VideoOptions {
+  readonly size: Option.Option<{ readonly width: number; readonly height: number }>
+  readonly fps: Option.Option<number>
+  /** Where the file goes in place of the context's downloads directory, or the backend's own. */
+  readonly directory: Option.Option<string>
+}
