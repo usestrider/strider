@@ -419,11 +419,16 @@ export const unexpect = (expectations: Expectations, id: PageNavigation.Id): boo
   return true
 }
 
-/** The expectation a navigation the browser announced fulfils: the oldest to its URL, else the oldest. */
+/**
+ * The expectation a navigation the browser announced fulfils: the oldest to its URL, else the oldest with no URL, as a
+ * traversal's. A navigation announced with no URL takes the oldest. One announced for another URL takes none: it is
+ * another navigation, such as one the page started that the command replaces.
+ */
 export const take = (expectations: Expectations, url: string): Expected | undefined => {
   const normalized = normalize(url)
-  const index = expectations.list.findIndex((expected) => normalize(expected.url) === normalized)
-  return index >= 0 ? expectations.list.splice(index, 1)[0] : expectations.list.shift()
+  let index = expectations.list.findIndex((expected) => normalize(expected.url) === normalized)
+  if (index < 0) index = expectations.list.findIndex((expected) => expected.url === "" || url === "")
+  return index >= 0 ? expectations.list.splice(index, 1)[0] : undefined
 }
 
 /**
