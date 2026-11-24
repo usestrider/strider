@@ -350,6 +350,8 @@ export const connect: (
       Option.isSome(contextIds) ? contextIds.value.defaultBrowserContextId : undefined,
       true
     )
+    // Each of its pages gets the certificate override, which ends with the connection, as a launched browser does
+    if (options.acceptInsecureCerts === true) defaultEntry.ignoreCertificateErrors = true
     state.contexts.set(state.defaultContext, defaultEntry)
     if (defaultEntry.browserContextId !== undefined) {
       state.contextsByCdp.set(defaultEntry.browserContextId, defaultEntry)
@@ -426,7 +428,7 @@ export const connect: (
       pdf: (page, options) => Capture.pdf(state, page, options),
       accessibilityTree: (page) => Capture.accessibilityTree(state, page),
       screencast: (page) => Capture.screencast(state, page),
-      video: (page) => Capture.video(state, page, writer),
+      video: (page, options) => Capture.video(state, page, options, writer),
       createAuthenticator: (page) => WebAuthn.create(state, page),
       releaseAuthenticator: (ref) => WebAuthn.release(state, ref),
       authenticatorCredentials: (ref) => WebAuthn.credentials(state, ref),

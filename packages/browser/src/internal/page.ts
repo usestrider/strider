@@ -494,7 +494,7 @@ export const make = (owner: PageOwner): Page.Page => {
         JSHandle.Serialized<A>,
         Page.PageError | Target.TargetGone | Deadline.Timeout
       >,
-    capability: (capability) => Capabilities.acquire(runtime, entry, capability, owner.grant),
+    capability: (capability, options) => Capabilities.acquire(runtime, entry, capability, options, owner.grant),
     context: owner.context,
     goto: (url, options) => {
       const result = HttpUrl.fromString(url)

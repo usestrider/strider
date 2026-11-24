@@ -721,7 +721,7 @@ export const contents = (
               Deadline.within("5 seconds")
             )
             : Effect.void
-          yield* page.goto("https://csp.test/")
+          yield* page.goto("https://csp.test/", { waitUntil: "load" })
           yield* page.evaluateInMainWorld(() =>
             fetch("https://cors.test/data").then(() =>
               "loaded", () =>
@@ -997,7 +997,9 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           const page = yield* SharedContext.newPage
-          yield* page.goto(fixtureUrl(origin, "<ul><li id=\"three\">Three</li><li> One </li><li>  Two  </li></ul>"))
+          yield* page.goto(fixtureUrl(origin, "<ul><li id=\"three\">Three</li><li> One </li><li>  Two  </li></ul>"), {
+            waitUntil: "load"
+          })
           const items = page.locator(Locator.xpath("//li[normalize-space()='Two'] | //li[@id='three']"))
           assert.strictEqual(yield* items.count, 2)
           assert.strictEqual(yield* items.first.readText, "Three")
@@ -1008,10 +1010,13 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           const page = yield* SharedContext.newPage
-          yield* page.goto(fixtureUrl(
-            origin,
-            "<ul id=\"a\"><li>A1</li></ul><ul id=\"b\"><li>B1</li><li>B2</li></ul>"
-          ))
+          yield* page.goto(
+            fixtureUrl(
+              origin,
+              "<ul id=\"a\"><li>A1</li></ul><ul id=\"b\"><li>B1</li><li>B2</li></ul>"
+            ),
+            { waitUntil: "load" }
+          )
           assert.strictEqual(yield* page.locator(Locator.xpath("//li")).count, 3)
           assert.strictEqual(yield* page.locator("#b").locator(Locator.xpath("//li")).count, 2)
           assert.strictEqual(yield* page.locator("#b").locator(Locator.xpath("/li")).count, 2)
@@ -1025,10 +1030,13 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           const page = yield* SharedContext.newPage
-          yield* page.goto(fixtureUrl(
-            origin,
-            "<table><tr><td>Ann</td><td>Paid</td></tr><tr><td>Bob</td><td>Due</td></tr><tr><td>Paid</td><td>Cy</td></tr></table>"
-          ))
+          yield* page.goto(
+            fixtureUrl(
+              origin,
+              "<table><tr><td>Ann</td><td>Paid</td></tr><tr><td>Bob</td><td>Due</td></tr><tr><td>Paid</td><td>Cy</td></tr></table>"
+            ),
+            { waitUntil: "load" }
+          )
           const paid = page.locator("tr").filter({ has: Locator.relative.locator(Locator.xpath("./td[2][.='Paid']")) })
           assert.strictEqual(yield* paid.count, 1)
           assert.strictEqual(yield* paid.locator("td").first.readText, "Ann")
@@ -1039,7 +1047,7 @@ export const contents = (
           const { origin } = yield* site
           const page = yield* SharedContext.newPage
           const child = fixtureUrl(origin, "<p>inside</p>")
-          yield* page.goto(fixtureUrl(origin, `<p>outside</p><iframe src="${child}"></iframe>`))
+          yield* page.goto(fixtureUrl(origin, `<p>outside</p><iframe src="${child}"></iframe>`), { waitUntil: "load" })
           const inside = page.frame(page.locator("iframe")).locator(Locator.xpath("//p"))
           assert.strictEqual(yield* inside.readText, "inside")
           assert.strictEqual(yield* inside.count, 1)
@@ -1049,7 +1057,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           const page = yield* SharedContext.newPage
-          yield* page.goto(fixtureUrl(origin, "<ul><li id=\"one\">One</li><li>Two</li></ul>"))
+          yield* page.goto(fixtureUrl(origin, "<ul><li id=\"one\">One</li><li>Two</li></ul>"), { waitUntil: "load" })
           assert.strictEqual(yield* page.locator(Locator.xpath("//li/text() | //li[@id='one']")).count, 1)
           assert.strictEqual(yield* page.locator(Locator.xpath("//li/@id")).count, 0)
         }), timeout)
@@ -1058,7 +1066,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           const page = yield* SharedContext.newPage
-          yield* page.goto(fixtureUrl(origin, "<ul><li>One</li></ul>"))
+          yield* page.goto(fixtureUrl(origin, "<ul><li>One</li></ul>"), { waitUntil: "load" })
           for (const expression of ["//li[", "count(//li)", "//svg:rect"]) {
             for (
               const locator of [
@@ -1904,7 +1912,7 @@ export const contents = (
             yield* data.release
             yield* data.release
             // A new document ends the realm, and the handle with it
-            yield* page.goto(fixtureUrl(origin, `<p>next</p>`))
+            yield* page.goto(fixtureUrl(origin, `<p>next</p>`), { waitUntil: "load" })
             const gone = reasonOf(yield* Effect.exit(body.evaluate((element) => element.tagName)))
             assert.strictEqual(gone?._tag, "TargetGone")
           }))
@@ -2087,7 +2095,11 @@ export const contents = (
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
             yield* page.goto(
-              fixtureUrl(origin, `<p data-testid="row-1">a</p><p data-testid="row-2">b</p><p data-testid="total">c</p>`)
+              fixtureUrl(
+                origin,
+                `<p data-testid="row-1">a</p><p data-testid="row-2">b</p><p data-testid="total">c</p>`
+              ),
+              { waitUntil: "load" }
             )
             assert.strictEqual(yield* page.getByTestId(/^row-/).count, 2)
             assert.strictEqual(yield* page.getByTestId(/^ROW-1$/i).readText, "a")
@@ -2285,7 +2297,7 @@ export const contents = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(origin, `<p>hi</p>`))
+            yield* page.goto(fixtureUrl(origin, `<p>hi</p>`), { waitUntil: "load" })
             const active = () => navigator.userActivation.isActive
             assert.isFalse(yield* page.evaluateInMainWorld(active))
             assert.isTrue(yield* Page.withUserGesture(page.evaluateInMainWorld(active)))
@@ -2299,14 +2311,17 @@ export const contents = (
           const { crossSite, origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(
-              origin,
-              `<body style="margin:0"><iframe id="same" style="position:absolute;left:30px;top:40px;width:300px;height:200px;border:7px solid #ccc;padding:5px" src="${
-                fixtureUrl(origin, counter("Same"))
-              }"></iframe><iframe id="cross" style="position:absolute;left:400px;top:60px;width:300px;height:200px;border:3px solid #ccc" src="${
-                fixtureUrl(crossSite, counter("Cross"))
-              }"></iframe></body>`
-            ))
+            yield* page.goto(
+              fixtureUrl(
+                origin,
+                `<body style="margin:0"><iframe id="same" style="position:absolute;left:30px;top:40px;width:300px;height:200px;border:7px solid #ccc;padding:5px" src="${
+                  fixtureUrl(origin, counter("Same"))
+                }"></iframe><iframe id="cross" style="position:absolute;left:400px;top:60px;width:300px;height:200px;border:3px solid #ccc" src="${
+                  fixtureUrl(crossSite, counter("Cross"))
+                }"></iframe></body>`
+              ),
+              { waitUntil: "load" }
+            )
             for (const id of ["same", "cross"]) {
               const frame = page.frame(page.locator(`#${id}`))
               const add = frame.getByRole("button", { name: "Add" })
@@ -2755,7 +2770,7 @@ export const contents = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(origin, todos))
+            yield* page.goto(fixtureUrl(origin, todos), { waitUntil: "load" })
             yield* page.evaluateInMainWorld(() => {
               setTimeout(() =>
                 document.querySelector("h1")!.remove(), 300)
@@ -2793,7 +2808,7 @@ export const contents = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(origin, controls))
+            yield* page.goto(fixtureUrl(origin, controls), { waitUntil: "load" })
             yield* page.evaluateInMainWorld(() => {
               document.querySelector<HTMLInputElement>("#all")!.indeterminate = true
             })
@@ -2848,7 +2863,7 @@ export const contents = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(origin, controls))
+            yield* page.goto(fixtureUrl(origin, controls), { waitUntil: "load" })
             yield* page.evaluateInMainWorld(() => {
               document.querySelector<HTMLInputElement>("#all")!.indeterminate = true
             })
@@ -2944,15 +2959,18 @@ export const contents = (
           const { crossSite, origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(
-              origin,
-              `<body style="margin:0"><div style="height:1500px"></div><div id="box" style="width:120px;height:80px;background:red"></div><iframe id="frame" style="border:0;width:300px;height:200px" src="${
-                fixtureUrl(
-                  crossSite,
-                  `<body style="margin:0"><div id="inner" style="margin:20px;width:50px;height:40px;background:blue"></div></body>`
-                )
-              }"></iframe><div style="height:1000px"></div></body>`
-            ))
+            yield* page.goto(
+              fixtureUrl(
+                origin,
+                `<body style="margin:0"><div style="height:1500px"></div><div id="box" style="width:120px;height:80px;background:red"></div><iframe id="frame" style="border:0;width:300px;height:200px" src="${
+                  fixtureUrl(
+                    crossSite,
+                    `<body style="margin:0"><div id="inner" style="margin:20px;width:50px;height:40px;background:blue"></div></body>`
+                  )
+                }"></iframe><div style="height:1000px"></div></body>`
+              ),
+              { waitUntil: "load" }
+            )
             const { height, ratio, width } = yield* page.evaluateInMainWorld(() => ({
               width: innerWidth,
               height: innerHeight,
@@ -3001,7 +3019,7 @@ export const contents = (
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
             // No doctype: in quirks mode the root element is only as tall as its content (QUIRKS.md, Q114)
-            yield* page.goto(fixtureUrl(origin, `<p>hi</p>`))
+            yield* page.goto(fixtureUrl(origin, `<p>hi</p>`), { waitUntil: "load" })
             const ratio = yield* page.evaluateInMainWorld(() =>
               devicePixelRatio
             )
@@ -3017,7 +3035,7 @@ export const contents = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(origin, `<!DOCTYPE html><p>hi</p>`))
+            yield* page.goto(fixtureUrl(origin, `<!DOCTYPE html><p>hi</p>`), { waitUntil: "load" })
             const width = yield* page.evaluateInMainWorld(() =>
               innerWidth
             )
@@ -3052,6 +3070,229 @@ export const contents = (
               area: { clip: cssRect({ x: 0, y: 200, width: 20, height: 20 }) }
             })
             assert.strictEqual(firstAlpha(after), 255)
+          }))
+        }), timeout)
+
+      it.effect("removes screenshot masks when interrupted before the drawing reply arrives", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<div id="secret">private</div>`), { waitUntil: "load" })
+            const html = yield* page.readHtml
+            const target = page.locator("#secret")
+            assert(target instanceof LocatorImpl)
+            const adapter = target.owner.runtime.model.adapter
+            const original = adapter.evaluate
+            const drawn = yield* Deferred.make<void>()
+            const hook = vi.spyOn(adapter, "evaluate").mockImplementation((realm, options) => {
+              const argument = options.arguments[0]
+              const request = argument?._tag === "Value" && argument.value.type === "string"
+                ? JSON.parse(argument.value.value) as { op?: string }
+                : undefined
+              const result = original(realm, options)
+              // Run the real engine, then withhold its reply from capture bookkeeping.
+              return request?.op === "mask"
+                ? result.pipe(
+                  Effect.tap(() =>
+                    Deferred.succeed(drawn, undefined)
+                  ),
+                  Effect.andThen(Effect.never)
+                )
+                : result
+            })
+            yield* Effect.addFinalizer(() =>
+              Effect.sync(() =>
+                hook.mockRestore()
+              )
+            )
+            const pending = yield* page.screenshot({ mask: [target] }).pipe(Effect.forkChild)
+            yield* Deferred.await(drawn)
+            assert.strictEqual(yield* page.readHtml, html)
+            assert.strictEqual(yield* page.locator("strider-mask").count, 0)
+            assert.strictEqual(yield* page.locator(Locator.xpath("//strider-mask")).count, 0)
+            yield* Fiber.interrupt(pending)
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() => document.querySelectorAll("strider-mask").length),
+              0
+            )
+          }))
+        }), timeout)
+
+      it.effect("bounds screenshot mask cleanup when the document stops answering", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<div id="secret">private</div>`))
+            const target = page.locator("#secret")
+            assert(target instanceof LocatorImpl)
+            const adapter = target.owner.runtime.model.adapter
+            const original = adapter.evaluate
+            const cleaning = yield* Deferred.make<void>()
+            const release = yield* Deferred.make<void>()
+            const ended = yield* Deferred.make<void>()
+            const hook = vi.spyOn(adapter, "evaluate").mockImplementation((realm, options) => {
+              const argument = options.arguments[0]
+              const request = argument?._tag === "Value" && argument.value.type === "string"
+                ? JSON.parse(argument.value.value) as { op?: string }
+                : undefined
+              const result = original(realm, options)
+              return request?.op === "unmask"
+                ? Deferred.succeed(cleaning, undefined).pipe(
+                  Effect.andThen(Deferred.await(release)),
+                  Effect.andThen(result)
+                )
+                : result
+            })
+            yield* Effect.addFinalizer(() =>
+              Effect.sync(() =>
+                hook.mockRestore()
+              )
+            )
+            const pending = yield* page.screenshot({ mask: [target] }).pipe(
+              Deadline.within("1 second"),
+              Effect.onExit(() => Deferred.succeed(ended, undefined)),
+              Effect.forkChild
+            )
+            yield* Deferred.await(cleaning)
+            // Observe completion independently: timing out an uninterruptible finalizer would itself hang.
+            const completed = yield* Deferred.await(ended).pipe(Effect.timeoutOption("6 seconds"))
+            yield* Deferred.succeed(release, undefined)
+            yield* Fiber.await(pending)
+            assert.isTrue(Option.isSome(completed), "capture exit must bound its cleanup after the caller deadline")
+          }))
+        }), timeout)
+
+      it.effect("rejects an invalid screenshot mask color before returning an unmasked image", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<div id="secret">private</div>`))
+            const error = reasonOf(
+              yield* page.screenshot({
+                mask: [page.locator("#secret")],
+                maskColor: "not-a-css-color"
+              }).pipe(Effect.exit)
+            )
+            assert.strictEqual(error?.reason?._tag, "InvalidInput")
+          }))
+        }), timeout)
+
+      it.effect("masks every element a locator matches in the color given, and leaves the page as it was", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(
+              fixtureUrl(
+                origin,
+                `<!DOCTYPE html><body style="margin:0;background:white"><div class="card" style="margin:10px;width:40px;height:40px;background:rgb(30,170,90)"></div><div class="card" style="margin:10px;width:40px;height:40px;background:rgb(30,170,90)"></div></body>`
+              ),
+              { waitUntil: "load" }
+            )
+            const ratio = yield* page.evaluateInMainWorld(() =>
+              devicePixelRatio
+            )
+            // The color at a CSS point of a capture, from a few device pixels there
+            const at = (png: Uint8Array, x: number, y: number) => {
+              const pixels = pngRegion(png, { x: x * ratio, y: y * ratio, width: 2, height: 2 })
+              for (const value of pixels) {
+                assert.deepStrictEqual(value, pixels[0])
+              }
+              return pixels[0]
+            }
+            const html = yield* page.readHtml
+            const masked = yield* page.screenshot({ mask: [page.locator(".card"), page.locator("#none")] })
+            assert.deepStrictEqual(at(masked, 20, 20), [255, 0, 255, 255])
+            assert.deepStrictEqual(at(masked, 20, 80), [255, 0, 255, 255])
+            assert.deepStrictEqual(at(masked, 80, 20), [255, 255, 255, 255])
+            const colored = yield* page.screenshot({ mask: [page.locator(".card").first], maskColor: "rgb(0,0,255)" })
+            assert.deepStrictEqual(at(colored, 20, 20), [0, 0, 255, 255])
+            assert.deepStrictEqual(at(colored, 20, 80), [30, 170, 90, 255])
+            // A mask is gone once its capture ends: from the pixels, the HTML and the page's queries
+            assert.deepStrictEqual(at(yield* page.screenshot(), 20, 20), [30, 170, 90, 255])
+            assert.strictEqual(yield* page.readHtml, html)
+            assert.strictEqual(
+              yield* page.evaluateInMainWorld(() =>
+                document.documentElement.childElementCount
+              ),
+              2
+            )
+          }))
+        }), timeout)
+
+      it.effect("masks an element in an iframe, below the fold of a full page, and inside an element captured", () =>
+        Effect.gen(function*() {
+          const { crossSite, origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(
+              fixtureUrl(
+                origin,
+                `<!DOCTYPE html><body style="margin:0;background:white"><iframe id="frame" style="display:block;border:0;width:200px;height:100px" src="${
+                  fixtureUrl(
+                    crossSite,
+                    `<!DOCTYPE html><body style="margin:0;background:white"><div id="inner" style="margin:20px;width:40px;height:40px;background:blue"></div></body>`
+                  )
+                }"></iframe><div style="height:2000px"></div><div id="card" style="padding:20px;width:60px;background:rgb(30,170,90)"><div id="price" style="width:40px;height:40px;background:red"></div></div></body>`
+              ),
+              { waitUntil: "load" }
+            )
+            const ratio = yield* page.evaluateInMainWorld(() =>
+              devicePixelRatio
+            )
+            const at = (png: Uint8Array, x: number, y: number) => {
+              const pixels = pngRegion(png, { x: x * ratio, y: y * ratio, width: 2, height: 2 })
+              for (const value of pixels) {
+                assert.deepStrictEqual(value, pixels[0])
+              }
+              return pixels[0]
+            }
+            const inner = page.frame(page.locator("#frame")).locator("#inner")
+            yield* inner.pipe(Expect.toBeVisible)
+            const framed = yield* page.screenshot({ mask: [inner] })
+            assert.deepStrictEqual(at(framed, 30, 30), [255, 0, 255, 255])
+            assert.deepStrictEqual(at(framed, 100, 30), [255, 255, 255, 255])
+            const full = yield* page.screenshot({ area: "fullPage", mask: [page.locator("#price")] })
+            assert.deepStrictEqual(at(full, 30, 2130), [255, 0, 255, 255])
+            assert.deepStrictEqual(at(full, 90, 2130), [30, 170, 90, 255])
+            const card = yield* page.screenshot({
+              area: { element: page.locator("#card") },
+              mask: [page.locator("#price")]
+            })
+            assert.deepStrictEqual(at(card, 30, 30), [255, 0, 255, 255])
+            assert.deepStrictEqual(at(card, 5, 5), [30, 170, 90, 255])
+          }))
+        }), timeout)
+
+      it.effect("removes only its own masks when masked captures overlap", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(
+              fixtureUrl(
+                origin,
+                `<!DOCTYPE html><body style="margin:0;background:white"><div id="a" style="width:40px;height:40px;background:red"></div><div id="b" style="width:40px;height:40px;background:blue"></div></body>`
+              ),
+              { waitUntil: "load" }
+            )
+            const ratio = yield* page.evaluateInMainWorld(() =>
+              devicePixelRatio
+            )
+            const at = (png: Uint8Array, x: number, y: number) =>
+              pngRegion(png, { x: x * ratio, y: y * ratio, width: 1, height: 1 })[0]
+            const [first, second] = yield* Effect.all([
+              page.screenshot({ mask: [page.locator("#a")] }),
+              page.screenshot({ mask: [page.locator("#b")], maskColor: "rgb(0,0,0)" })
+            ], { concurrency: "unbounded" })
+            assert.deepStrictEqual(at(first, 20, 20), [255, 0, 255, 255])
+            assert.deepStrictEqual(at(second, 20, 60), [0, 0, 0, 255])
+            const after = yield* page.screenshot()
+            assert.deepStrictEqual(at(after, 20, 20), [255, 0, 0, 255])
+            assert.deepStrictEqual(at(after, 20, 60), [0, 0, 255, 255])
           }))
         }), timeout)
 
@@ -3131,9 +3372,7 @@ export const contents = (
               })
               assert.deepStrictEqual(yield* listed, ["plain"])
               yield* page.goto(`${origin}/app/page`)
-              const token = (yield* jar.list).find((cookie) =>
-                cookie.name === "token"
-              )
+              const token = (yield* jar.list).find((cookie) => cookie.name === "token")
               assert.isDefined(token)
               assert.strictEqual(Redacted.value(token.value), "secret")
               assert.strictEqual(token.path, "/app")

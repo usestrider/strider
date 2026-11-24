@@ -16,6 +16,7 @@ import type * as Layer from "effect/Layer"
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Socket from "effect/socket/Socket"
 import type * as Browser from "../Browser.ts"
+import type * as Deadline from "../Deadline.ts"
 import * as Adapter from "../internal/adapter.ts"
 import * as BrowserImpl from "../internal/browser.ts"
 import * as CdpAdapter from "../internal/cdpAdapter.ts"
@@ -26,6 +27,7 @@ import * as LaunchOptions from "../internal/launchOptions.ts"
 import * as CdpConnection from "../protocol/CdpConnection.ts"
 import * as Protocol from "../protocol/Protocol.ts"
 import type * as Url from "../Url.ts"
+import type * as UserContext from "../UserContext.ts"
 
 /**
  * Launches the Chromium, Chrome, or Edge executable at `executablePath` and provides it as `Browser`.
@@ -87,16 +89,20 @@ export const layer = (
   options: Browser.LaunchOptions
 ): Layer.Layer<
   Browser.Browser,
-  Browser.BrowserError,
+  Browser.BrowserError | UserContext.UserContextError | Deadline.Timeout,
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem
 > =>
-  BrowserImpl.layer((sink) =>
+  BrowserImpl.layerLaunched("Chromium", LaunchOptions.launchedDefaultContext(options), (sink) =>
     Effect.flatMap(
       ChromiumLauncher.launch(LaunchOptions.settings(options)),
       ({ launched, transport }) =>
-        CdpAdapter.connect(transport, { sink, ownership: "launched", exited: launched.handle.exitCode })
-    )
-  )
+        CdpAdapter.connect(transport, {
+          sink,
+          ownership: "launched",
+          exited: launched.handle.exitCode,
+          acceptInsecureCerts: options.defaultContext?.acceptInsecureCerts
+        })
+    ))
 
 /**
  * Launches Chromium, Chrome, or Edge as `layer` does, with options read from configuration, such as the
@@ -130,7 +136,7 @@ export const layerConfig = (
   options: Config.Wrap<Browser.LaunchOptions>
 ): Layer.Layer<
   Browser.Browser,
-  Browser.BrowserError | Config.ConfigError,
+  Browser.BrowserError | UserContext.UserContextError | Deadline.Timeout | Config.ConfigError,
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem
 > => LaunchOptions.fromConfig(options, layer)
 
