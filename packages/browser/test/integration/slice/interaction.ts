@@ -205,7 +205,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               `<input id="input" value="Ada Lovelace"><textarea id="area">two lines</textarea><div id="editable" contenteditable>nested <b>text</b></div><p id="plain" tabindex="0">plain <b>text</b></p><p id="unfocusable">unfocusable text</p>`
             )
             const page = yield* newPage
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             for (
               const [id, text] of [["input", "Ada Lovelace"], ["area", "two lines"], ["editable", "nested text"], [
                 "plain",
@@ -258,7 +258,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               `<label id="explicit" for="field"><span id="nested">Name</span><button id="button"><span id="buttonText">button text</span></button></label><input id="field" value="hello"><label id="implicit">Other<input id="other" value="world"></label><label id="unassociated">own text</label>`
             )
             const page = yield* newPage
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             for (
               const [label, control] of [["explicit", "field"], ["nested", "field"], ["implicit", "other"]] as const
             ) {
@@ -679,7 +679,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           Effect.scoped(Effect.gen(function*() {
             const { url } = yield* fixture(() => "<a href=\"/\">Link</a>")
             const page = yield* newPage
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             const outer = page.frame(page.locator("#absent-frame"))
             const nested = outer.frame(outer.locator("#deeper")).locator("a")
               .filter({ has: Locator.relative.getByRole("link", { pressed: false }) })
@@ -696,7 +696,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           Effect.scoped(Effect.gen(function*() {
             const { url } = yield* fixture(() => "<a href=\"/\">Link</a>")
             const page = yield* newPage
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             // Construction remains lazy, including under a scope that matches nothing.
             const invalid = page.getByRole("link", { pressed: false })
             const empty = page.locator("#missing").getByRole("link", { pressed: false })
@@ -894,7 +894,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 )
                 yield* Effect.scoped(Effect.gen(function*() {
                   const page = yield* newPage
-                  yield* page.goto(url)
+                  yield* page.goto(url, { waitUntil: "load" })
                   const target = page.locator("#target")
                   const within = Deadline.within("3 seconds")
                   if (action === "clear") {
@@ -1353,7 +1353,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             )
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* newPage
-              yield* page.goto(url)
+              yield* page.goto(url, { waitUntil: "load" })
               const frame = page.frame(page.locator("iframe"))
               const target = frame.locator("#go")
               if (mode === "disabled pointer checks") {
@@ -1692,7 +1692,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 const { url } = yield* fixture(() => `<input id="go" value="old" ${attribute}>`)
                 yield* Effect.scoped(Effect.gen(function*() {
                   const page = yield* newPage
-                  yield* page.goto(url)
+                  yield* page.goto(url, { waitUntil: "load" })
                   const locator = page.locator("#go")
                   assert(locator instanceof LocatorImpl)
                   yield* locator.isVisible
@@ -3133,7 +3133,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           const { url } = yield* fixture(() => `<input id="field">`)
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* newPage
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             const field = page.locator("#field")
             for (const value of ["123", Redacted.make("abc"), "", Redacted.make("")]) {
               yield* field.clear()
@@ -3192,7 +3192,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             const { url } = yield* fixture(() => `<input id="field" type="number" value="42">`)
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* newPage
-              yield* page.goto(url)
+              yield* page.goto(url, { waitUntil: "load" })
               const field = page.locator("#field")
               for (const value of ["123", "-12.5", ".5", "1e2", "-0", Redacted.make("7"), "", Redacted.make("")]) {
                 yield* field.fill(value)
@@ -3224,7 +3224,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           const { url } = yield* fixture(() => `<input id="field" type="number" min="10" max="20" step="3" value="13">`)
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* newPage
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             const field = page.locator("#field")
             for (const value of ["5", "25", "14.5"]) {
               yield* field.fill(value)
@@ -4587,7 +4587,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               `<select id="s"><option value="a">Ay</option><option value="off" disabled>Off</option><optgroup label="G" disabled><option value="grouped">Grouped</option></optgroup></select>`
             )
             const page = yield* newPage
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             const select = page.locator("#s")
             for (const value of ["off", "grouped"]) {
               const error = yield* select.selectOption({ value }).pipe(
@@ -4612,7 +4612,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               `<select id="s" onchange="window.changes = (window.changes ?? []).concat(this.value)"><option value="a">Ay</option><option value="off" disabled>Off</option><optgroup id="g" label="G" disabled><option value="grouped">Grouped</option></optgroup><option value="forced" disabled>Forced</option></select>`
             )
             const page = yield* newPage
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             const select = page.locator("#s")
             for (const [value, enable] of [["off", "#s [value=off]"], ["grouped", "#g"]] as const) {
               const pending = yield* select.selectOption({ value }).pipe(
@@ -6621,7 +6621,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             const { url } = yield* fixture(() => `<div id="js">JS</div><input type="checkbox" checked>`)
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* newPage
-              yield* page.goto(url)
+              yield* page.goto(url, { waitUntil: "load" })
               yield* page.evaluateInMainWorld(() => {
                 Object.assign(document.getElementById("js")!, {
                   foo: { a: 1, when: new Date(0), list: [1, "two", null] },
@@ -6667,7 +6667,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             const { url } = yield* fixture(() => `<p id="one">One</p><p>Two</p>`)
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* newPage
-              yield* page.goto(url)
+              yield* page.goto(url, { waitUntil: "load" })
               yield* page.evaluateInMainWorld(() => {
                 Object.assign(document.getElementById("one")!, { foo: { a: 1 } })
               })
@@ -6724,7 +6724,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             const { url } = yield* fixture(() => `<p>One</p><p>Two</p>`)
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* newPage
-              yield* page.goto(url)
+              yield* page.goto(url, { waitUntil: "load" })
               for (const [selector, matches] of [["#missing", 0], ["p", 2]] as const) {
                 const error = yield* page.locator(selector).pipe(
                   Expect.toHaveCSS("color", "red", { not: true }),
@@ -6914,6 +6914,79 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             assert.deepStrictEqual(error.last, Option.fromNullishOr(error.history.at(-1)))
           }))
         }), timeout)
+
+      it.effect("expects rendered text inside an iframe", () =>
+        Effect.scoped(Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<iframe srcdoc='<p>Hello <span hidden>secret </span>World</p>'></iframe>`
+          )
+          const page = yield* newPage
+          yield* page.goto(url)
+          const target = page.frame(page.locator("iframe")).locator("p")
+          yield* Expect.toHaveText(target, "Hello World", { useInnerText: true })
+          yield* target.pipe(Expect.toContainText(["o W"], { useInnerText: true }))
+        })), timeout)
+
+      it.effect(
+        "expects text, attributes and URLs ignoring case, rendered text, and contained lists",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<p id="greeting" data-state="Ready">Hello <span hidden>secret </span>World</p><ul><li>Apple pie</li><li>Banana</li><li>Cherry tart</li></ul>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              const greeting = page.locator("#greeting")
+              const fails = <E>(effect: Effect.Effect<void, E>) =>
+                effect.pipe(
+                  Deadline.within("200 millis"),
+                  Effect.flip,
+                  Effect.map((error) => {
+                    assert(Expect.isExpectationFailed(error), String(error))
+                    return error
+                  })
+                )
+              // A string compares without case; the option sets or clears a regular expression's i flag
+              yield* greeting.pipe(Expect.toHaveText("hello secret world", { ignoreCase: true }))
+              yield* greeting.pipe(Expect.toHaveText(/^HELLO/, { ignoreCase: true }))
+              yield* greeting.pipe(Expect.toContainText("SECRET", { ignoreCase: true }))
+              const cleared = yield* fails(greeting.pipe(Expect.toHaveText(/^hello/i, { ignoreCase: false })))
+              assert.strictEqual(cleared.condition, "to have the text /^hello/i matching case")
+              const cased = yield* fails(greeting.pipe(Expect.toHaveText("hello secret world")))
+              assert.strictEqual(cased.condition, `to have the text "hello secret world"`)
+              // The rendered text leaves out the hidden child that the text content keeps
+              yield* greeting.pipe(Expect.toHaveText("Hello World", { useInnerText: true }))
+              yield* greeting.pipe(Expect.toContainText(["o W"], { useInnerText: true }))
+              const content = yield* fails(greeting.pipe(Expect.toHaveText("Hello World")))
+              assert.deepStrictEqual(
+                content.last.pipe(Option.map((each) => each.value)),
+                Option.some("Hello secret World")
+              )
+              // Attribute values and URLs
+              yield* greeting.pipe(Expect.toHaveAttribute("data-state", "ready", { ignoreCase: true }))
+              yield* fails(greeting.pipe(Expect.toHaveAttribute("data-state", "ready")))
+              yield* page.pipe(Expect.toHaveURL(url.toUpperCase(), { ignoreCase: true }))
+              yield* Expect.toHaveURL(page, /^HTTPS?:\/\//, { ignoreCase: true })
+              const upper = yield* fails(page.pipe(Expect.toHaveURL(url.toUpperCase())))
+              assert.strictEqual(upper.condition, `to have the URL ${JSON.stringify(url.toUpperCase())}`)
+              // A list is contained in a subsequence of the matches, in order
+              const items = page.getByRole("listitem")
+              yield* items.pipe(Expect.toContainText(["Apple", /tart$/]))
+              yield* items.pipe(Expect.toContainText(["apple", "banana", "cherry"], { ignoreCase: true }))
+              const order = yield* fails(items.pipe(Expect.toContainText(["Cherry", "Apple"])))
+              assert.strictEqual(order.condition, `to contain the text ["Cherry", "Apple"]`)
+              assert.deepStrictEqual(
+                order.last.pipe(Option.map((each) => each.value)),
+                Option.some(["Apple pie", "Banana", "Cherry tart"])
+              )
+              yield* fails(items.pipe(Expect.toContainText(["Apple", "Apple"])))
+              yield* page.locator("#none").pipe(Expect.toContainText([]))
+              yield* fails(items.pipe(Expect.toContainText([])))
+            }))
+          }),
+        timeout
+      )
 
       it.effect(
         "expects a page's URL across a navigation, and anything with Expect.that",
@@ -7251,7 +7324,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             Effect.scoped(Effect.gen(function*() {
               const { url } = yield* fixture(() => `<button id="go" style="margin:40px">Go</button>`)
               const page = yield* newPage
-              yield* page.goto(url)
+              yield* page.goto(url, { waitUntil: "load" })
               const target = page.locator("#go")
               assert(target instanceof LocatorImpl)
               const adapter = target.owner.runtime.model.adapter

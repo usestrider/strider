@@ -35,6 +35,7 @@ import type * as Diagnostics from "../Diagnostics.ts"
 import type * as Har from "../Har.ts"
 import type * as NetworkConnection from "../NetworkConnection.ts"
 import type * as NetworkRequest from "../NetworkRequest.ts"
+import * as NetworkResponse from "../NetworkResponse.ts"
 import * as Reason from "../Reason.ts"
 import type * as Adapter from "./adapter.ts"
 import * as BrowserClock from "./browserClock.ts"
@@ -416,6 +417,17 @@ const postDataOf = (
 }
 
 /** A HAR entry for one recorded hop, and the body files it names. */
+/** HAR's `_securityDetails`, leaving out what the browser didn't report. */
+const securityDetailsOf = (details: NetworkResponse.SecurityDetails): typeof HarLog.SecurityDetails.Type => {
+  const known: Types.Mutable<typeof HarLog.SecurityDetails.Type> = {}
+  if (Option.isSome(details.protocol)) known.protocol = details.protocol.value
+  if (Option.isSome(details.subjectName)) known.subjectName = details.subjectName.value
+  if (Option.isSome(details.issuer)) known.issuer = details.issuer.value
+  if (Option.isSome(details.validFrom)) known.validFrom = details.validFrom.value
+  if (Option.isSome(details.validTo)) known.validTo = details.validTo.value
+  return known
+}
+
 export const entryOf = (
   recorded: Recorded,
   clock: Recordings.Clock,
@@ -460,6 +472,19 @@ export const entryOf = (
       () => Option.flatMap(end, (end) => end._tag === "Finished" ? end.httpVersion : Option.none())
     ),
     () => ""
+  )
+  const serverAddress = Option.orElse(
+    Option.flatMap(response, (response) => response.serverAddress),
+    () => Option.flatMap(finished, (end) => end.serverAddress)
+  )
+  // WebKit says the TLS version only as the response ends
+  const securityDetails = Option.map(
+    Option.flatMap(response, (response) => response.securityDetails),
+    (details) =>
+      Option.isSome(details.protocol) ? details : new NetworkResponse.SecurityDetails({
+        ...details,
+        protocol: Option.flatMap(finished, (end) => end.securityProtocol)
+      })
   )
   const content: Types.Mutable<typeof HarLog.Content.Type> = {
     size: Option.match(recorded.body, { onNone: () => -1, onSome: (body) => body.length }),
@@ -536,6 +561,12 @@ export const entryOf = (
     },
     cache: {},
     timings,
+    ...(!minimal && Option.isSome(serverAddress)
+      ? { serverIPAddress: serverAddress.value.ip, _serverPort: serverAddress.value.port }
+      : {}),
+    ...(!minimal && Option.isSome(securityDetails)
+      ? { _securityDetails: securityDetailsOf(securityDetails.value) }
+      : {}),
     _monotonicTime: Recordings.millis(request.at),
     _resourceType: request.resourceType,
     ...(request.initiator._tag === "Document" ? { _frameref: request.initiator.navigable } : {}),

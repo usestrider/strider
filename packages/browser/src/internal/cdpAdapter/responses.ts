@@ -21,6 +21,17 @@ export const servedBy = (request: RequestEntry, response: Network.Response): Net
     ? "cache"
     : "network"
 
+/** The server's address, where the response names one: an IPv6 address comes in brackets, which it drops. */
+const serverAddress = (response: Network.Response) =>
+  response.remoteIPAddress !== undefined && response.remoteIPAddress !== "" && response.remotePort !== undefined
+    ? Option.some(
+      new NetworkResponse.ServerAddress({
+        ip: response.remoteIPAddress.replace(/^\[(.*)\]$/, "$1"),
+        port: response.remotePort
+      })
+    )
+    : Option.none()
+
 export const emitResponse = (state: State, request: RequestEntry, response: Network.Response) => {
   if (request.navigation !== undefined && request.requestId === request.navigation.loaderId) {
     request.navigation.status = response.status
@@ -33,6 +44,18 @@ export const emitResponse = (state: State, request: RequestEntry, response: Netw
       status: Math.min(599, Math.max(100, response.status || 200)) as NetworkResponse.StatusCode,
       statusText: response.statusText,
       httpVersion: Option.fromUndefinedOr(response.protocol || undefined),
+      serverAddress: serverAddress(response),
+      securityDetails: Option.map(
+        Option.fromUndefinedOr(response.securityDetails),
+        (details) =>
+          new NetworkResponse.SecurityDetails({
+            protocol: Option.fromUndefinedOr(details.protocol || undefined),
+            subjectName: Option.fromUndefinedOr(details.subjectName || undefined),
+            issuer: Option.fromUndefinedOr(details.issuer || undefined),
+            validFrom: Option.some(details.validFrom),
+            validTo: Option.some(details.validTo)
+          })
+      ),
       // The headers as received, where `ExtraInfo` said them: the main event leaves out cookies (Q158)
       headers: Kit.headersOf(request.received ?? response.headers),
       servedBy: servedBy(request, response),

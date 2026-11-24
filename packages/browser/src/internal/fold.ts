@@ -947,7 +947,9 @@ export const make = Effect.fnUntraced(function*(options: {
             transferBytes: fact.transferBytes,
             bodyBytes: fact.bodyBytes,
             at: fact.at,
-            httpVersion: Option.fromUndefinedOr(fact.httpVersion)
+            httpVersion: Option.fromUndefinedOr(fact.httpVersion),
+            serverAddress: Option.fromUndefinedOr(fact.serverAddress),
+            securityProtocol: Option.fromUndefinedOr(fact.securityProtocol)
           })
           return
         }

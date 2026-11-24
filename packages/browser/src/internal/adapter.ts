@@ -326,6 +326,10 @@ export type Fact =
     readonly bodyBytes: Option.Option<number>
     /** The response's protocol, where the backend says it only as the response ends (WebKit). */
     readonly httpVersion?: string | undefined
+    /** The server's address, where the backend says it only as the response ends (WebKit). */
+    readonly serverAddress?: NetworkResponse.ServerAddress | undefined
+    /** The TLS version, such as `TLS 1.3`, where the backend says it only as the response ends (WebKit). */
+    readonly securityProtocol?: string | undefined
     readonly at: MonotonicInstant.MonotonicInstant
   }
   | {

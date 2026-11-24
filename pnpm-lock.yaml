@@ -229,6 +229,9 @@ importers:
       effect:
         specifier: ^4.1.2
         version: 4.1.2
+      typescript-js-api:
+        specifier: npm:typescript@~6.0.3
+        version: typescript@6.0.3
 
   packages/cli:
     dependencies:

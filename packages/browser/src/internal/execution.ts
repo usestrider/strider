@@ -20,7 +20,8 @@ export type Failure = Runtime.SendFailure | Deadline.Timeout | Target.TargetGone
 export interface Dispatch {
   readonly url: (
     page: Page.ReadonlyPage,
-    expected: string | RegExp
+    expected: string | RegExp,
+    options?: ExpectImpl.URLOptions | undefined
   ) => Effect.Effect<void, Expect.ExpectationFailed | Target.TargetGone | Deadline.Timeout>
   readonly action: (
     runtime: Runtime.Runtime,
@@ -86,5 +87,5 @@ export const ordinary: Dispatch = {
   action: (runtime, page, request, id, at) => Runtime.sendRouted(runtime, page, request, id, at),
   expect: Runtime.send,
   beforeCheck: Effect.void,
-  url: (page, expected) => ExpectImpl.watchURL(page, expected)
+  url: (page, expected, options) => ExpectImpl.watchURL(page, expected, options)
 }

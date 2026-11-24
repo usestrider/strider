@@ -239,7 +239,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             fs.writeFileSync(file, "dated")
             fs.utimesSync(file, new Date(978307200000), new Date(978307200000))
             const page = yield* SharedContext.newPage
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             const nativeTime = nativeFileModificationTime[name]
             assert.isDefined(nativeTime, `${name} has a native timestamp expectation`)
             for (const source of ["native", "local"] as const) {
