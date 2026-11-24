@@ -45,7 +45,7 @@ const openRowMenu = Effect.fn("openRowMenu")(function*(page: Page.Page, name: st
 | `dragTo(target)`              | presses on the element, moves to the target with the button held, releases |
 | [`focus()`](/docs/api/browser/Locator#Locator.focus), [`scrollIntoView()`](/docs/api/browser/Locator#Locator.scrollIntoView) | focuses it, or scrolls it into view                                        |
 
-`selectOption` succeeds with the values of the options it selected, in document order. A `<select>` without `multiple` keeps only the matching option that comes last in the document, and an empty list of choices deselects everything and gives `[]`:
+`selectOption` succeeds with the values of the options it selected that are still selected once its `input` and `change` events have run, in document order. On a `<select>` without `multiple` the action selects only the matching option that comes last in the document, and an empty list of choices deselects everything and gives `[]`. An event handler that selects another option leaves that option out, so the list can be empty:
 
 ```ts
 import { Page } from "@usestrider/browser"

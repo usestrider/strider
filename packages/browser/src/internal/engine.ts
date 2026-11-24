@@ -3598,17 +3598,18 @@ export function engine(render: (root: SnapNode) => string) {
       }
       case "Select": {
         const select = element as HTMLSelectElement
-        const options = Array.from(select.options)
-        for (const [index, option] of options.entries()) {
-          option.selected = action.choices.some((choice) => optionMatches(option, index, choice))
+        const chosen = new Set<HTMLOptionElement>()
+        for (const [index, option] of Array.from(select.options).entries()) {
+          const matches = action.choices.some((choice) => optionMatches(option, index, choice))
+          option.selected = matches
+          if (matches) chosen.add(option)
         }
         fire(select, "input")
         fire(select, "change")
-        // What the round chose and is still selected after its events: a single select keeps only the last
-        const selected = options.flatMap((option, index) =>
-          option.selected && action.choices.some((choice) => optionMatches(option, index, choice)) ?
-            [option.value] :
-            []
+        // The chosen options still selected after the events, by their current value: handlers may have changed
+        // the values and labels the choices matched, or the selection itself
+        const selected = Array.from(select.options).flatMap((option) =>
+          chosen.has(option) && option.selected ? [option.value] : []
         )
         return { ...answer, selected }
       }

@@ -1764,9 +1764,11 @@ export interface Locator extends ReadonlyLocator {
    *
    * **Details**
    *
-   * The values are those of the chosen options that are selected once `input` and `change` have run, in document
-   * order: a `<select>` without `multiple` keeps only the matching option that comes last, so it gives one value,
-   * and an empty list of choices deselects every option and gives `[]`. A `trial` selects nothing and gives `[]`.
+   * The values are those of the chosen options that are still selected once `input` and `change` have run, read
+   * as they are then, in document order. The action selects every matching option on a `<select>` with
+   * `multiple`, and only the matching option that comes last on one without it, so that gives one value; an empty
+   * list of choices deselects every option and gives `[]`. Event handlers can change what the action selected, so
+   * the list can be shorter, or empty, when one selects another option. A `trial` selects nothing and gives `[]`.
    *
    * The options are chosen from an isolated world of Strider's, with `input` and `change` dispatched as for a
    * user's choice. An option that isn't there yet is waited for, and a timeout reports it as `NoSuchOption`. Enabled
