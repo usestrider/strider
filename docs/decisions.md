@@ -1259,6 +1259,17 @@ appears. Returned refs retain their normal stale-ref guarantees if a field is re
 Rejected: inventing an implicit textbox role, which would change ordinary role queries; naming the field
 "Password", which would replace or invent an accessible name; and including its value, even under local capture.
 
+## Configure a launch's default context at launch, borrowed and never owned
+
+A launch takes `defaultContext`, the options `newContext` takes, and applies them to the default context before the
+layer gives out the `Browser`, for the connection's whole life. The context is borrowed as a reclaimed context is:
+its declarations are released when the layer closes, and the context, which the browser owns, is never removed.
+Options only creating a context sets are refused before the browser starts, except accepting insecure certificates,
+which each backend sets at launch for the default context alone. Options on `defaultContext.control` were rejected:
+control lasts only for the caller's scope, so the startup page would lose them midway, and it comes too late for the
+options a launch must set. A separate `ignoreDefaultArgs` was rejected too: the launch profile already states every
+flag a launch adds, so `LaunchProfile.stock`, or a profile with some arguments filtered out, says the same.
+
 ## Retain Chromium's startup window by default
 
 Keep the initial window in Chromium's automation profile and, by inheritance, concurrent. Skipping it saves

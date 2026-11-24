@@ -1002,6 +1002,8 @@ export interface ConnectOptions {
   readonly claimClient?: Effect.Effect<CdpConnection.CdpConnection, AdapterError, Scope.Scope> | undefined
   readonly browserIdentity?: string | undefined
   readonly ownership: "launched" | "attached"
+  /** Whether the default context accepts insecure certificates, as a launch sets for the connection's life. */
+  readonly acceptInsecureCerts?: boolean | undefined
 }
 
 /** One connected backend: what L1 asks of it. */
