@@ -6,7 +6,7 @@
  * backend can't set at launch is refused before the browser starts, so that case costs no launch.
  */
 import { assert, describe, it, layer } from "@effect/vitest"
-import { Browser, Download, type Page, UserContext } from "@usestrider/browser"
+import { Browser, Download, Expect, type Page, Popup, UserContext } from "@usestrider/browser"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -146,6 +146,21 @@ export const launchedDefaultContext = (
             if (site.sampled.includes("acceptInsecureCerts")) {
               assert.strictEqual(yield* load(each, `${site.secure}/`), "secure")
             }
+          }
+          if (yield* supports("popups.opener")) {
+            yield* opened.goto(`${site.origin}/`)
+            const popup = yield* Popup.next(opened)
+            yield* opened.evaluateInMainWorld((url) => {
+              const link = document.createElement("a")
+              link.href = url
+              link.target = "_blank"
+              link.rel = "opener"
+              link.textContent = "Secure popup"
+              document.body.append(link)
+            }, `${site.secure}/`)
+            yield* opened.getByRole("link", { name: "Secure popup" }).click()
+            const child = yield* popup
+            yield* child.pipe(Expect.toHaveTitle("secure"))
           }
           // A context of its own keeps the browser's defaults
           const other = yield* Browser.newPage()
