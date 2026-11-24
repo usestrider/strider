@@ -7,11 +7,13 @@
  * origin also goes to each origin that has one of its own. Each name is set on its own, so a name a backend rejects
  * (Firefox's list is shorter) fails naming it. Each change holds its context's one permit (`locks`) from reading
  * what's in force to recording it, and a removal from taking its declaration out to setting the rest again, so the
- * browser's settings and the declarations a later reset sets again never disagree.
+ * browser's settings and the declarations a later reset sets again never disagree. A removal is arranged before its
+ * call takes the permit and takes the permit itself, so a scope closed during a call waits for the call to end.
  */
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
+import * as Ref from "effect/Ref"
 import * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
 import type * as Deadline from "../Deadline.ts"
@@ -126,6 +128,21 @@ export const grant = (
     const lock = lockOf(entry)
     const replay = adapter.resetPermissions(context).pipe(Effect.andThen(Effect.flatMap(inForce, apply)), Effect.ignore)
     const scope = yield* Scope.fork(yield* Effect.scope)
+    // The scope the model holds the declaration in, once this call records it
+    const recorded = yield* Ref.make(Option.none<Scope.Closeable>())
+    // The removal is arranged before the permit is taken, so closing the scope never waits for the permit inside the
+    // hold that records the declaration: a scope closed during a send waits for this call to finish, then takes out
+    // what it recorded, if anything. Taking it out, resetting and setting the others again share one hold
+    yield* Scope.addFinalizer(
+      scope,
+      lock.withPermits(1)(Effect.flatMap(
+        Ref.get(recorded),
+        Option.match({
+          onNone: () => Effect.void,
+          onSome: (held) => Scope.close(held, Exit.void).pipe(Effect.andThen(replay))
+        })
+      )).pipe(Operation.detached)
+    )
     // Waiting for the permit is part of the operation, under its deadline
     yield* lock.withPermits(1)(Effect.gen(function*() {
       // A declaration for every origin overrides the settings of origins of their own for its names too
@@ -143,21 +160,20 @@ export const grant = (
           Effect.mapError((error) => mapped(error, send.reported ? send.name : undefined)),
           // What this call set goes again, with the declarations before it, under the permit this call holds:
           // cleanup, which the deadline doesn't end
-          Effect.onError(() => replay.pipe(Effect.andThen(Scope.close(scope, Exit.void)), Operation.detached))
+          Effect.onError(() => Operation.detached(replay))
         )
       }
-      // The model holds the declaration in a scope of its own, which only its removal closes, under the permit
-      // A removal takes it out, then resets and sets the others again, all under one hold of the permit; recording
-      // and arranging its removal aren't interrupted apart
+      // The model holds the declaration in a scope of its own, which only its removal closes; recording it and
+      // telling the removal where it is aren't interrupted apart
       yield* Effect.uninterruptible(Effect.gen(function*() {
-        const recorded = yield* Scope.make()
-        yield* runtime.model.grant(entry, grant).pipe(Scope.provide(recorded))
-        yield* Scope.addFinalizer(
-          scope,
-          lock.withPermits(1)(Scope.close(recorded, Exit.void).pipe(Effect.andThen(replay))).pipe(Operation.detached)
-        )
+        const held = yield* Scope.make()
+        yield* runtime.model.grant(entry, grant).pipe(Scope.provide(held))
+        yield* Ref.set(recorded, Option.some(held))
       }))
-    }))
+    })).pipe(
+      // A call that ends without recording releases its scope after the permit, which its removal then takes
+      Effect.onError(() => Operation.detached(Scope.close(scope, Exit.void)))
+    )
     return { remove: Scope.close(scope, Exit.void) } satisfies Declaration.Registration
   }).pipe(Operation.named(operation, {
     attributes: { "browser.context.id": entry.id, "browser.permissions": permissions.join(",") }
