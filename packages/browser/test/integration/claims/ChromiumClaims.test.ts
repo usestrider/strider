@@ -298,7 +298,7 @@ describe("Chromium claims", () => {
             yield* page.evaluateInMainWorld(() => {
               performance.mark("claims-before")
             })
-            yield* page.goto(`${crossSite}/after`)
+            yield* page.goto(`${crossSite}/after`, { waitUntil: "load" })
             yield* page.evaluateInMainWorld(() => {
               performance.mark("claims-after")
             })
@@ -490,7 +490,7 @@ describe("Chromium claims", () => {
                 assert.strictEqual(yield* page.evaluateInMainWorld(() => navigator.language), "fr-FR")
                 assert.strictEqual(yield* page.evaluateInMainWorld(() => sessionStorage.getItem("survivor")), "saved")
                 const fresh = yield* context.newPage
-                yield* fresh.goto(`${origin}/new-context-page`)
+                yield* fresh.goto(`${origin}/new-context-page`, { waitUntil: "load" })
                 assert.strictEqual(yield* fresh.evaluateInMainWorld(() => navigator.language), "fr-FR")
               })
             ).pipe(Effect.provide(browser.connect))
@@ -704,7 +704,7 @@ describe("Chromium claims", () => {
             yield* Effect.scoped(Effect.gen(function*() {
               const { page } = yield* api.Browser.reclaim(claim)
               yield* until(page.title, (title) => title === "settled")
-              yield* page.goto(`${origin}/after-cleanup`)
+              yield* page.goto(`${origin}/after-cleanup`, { waitUntil: "load" })
               assert.strictEqual(yield* page.evaluateInMainWorld(() => Reflect.has(window, "oldRegistration")), false)
               assert.strictEqual(yield* page.evaluateInMainWorld(async () => (await fetch("/held")).status), 200)
             })).pipe(Effect.provide(browser.connect))
@@ -1493,7 +1493,7 @@ describe("Chromium claims", () => {
                 assert.isTrue(declarations.some((d) => d._tag === "FileChooser"))
                 assert.isTrue(declarations.some((d) => d._tag === "Downloads" && d.behavior._tag === "Allow"))
                 const page = yield* context.newPage
-                yield* page.goto(`${origin}/defaults`)
+                yield* page.goto(`${origin}/defaults`, { waitUntil: "load" })
                 assert.strictEqual(
                   yield* page.evaluateInMainWorld(() => {
                     alert("dismiss by default")
@@ -1589,7 +1589,7 @@ describe("Chromium claims", () => {
                 found.pages.some((report) => report.page === page.id && report.found._tag === "Observed")
               )!
               const future = yield* context.newPage
-              yield* future.goto(`${origin}/defaults`)
+              yield* future.goto(`${origin}/defaults`, { waitUntil: "load" })
               assert.deepStrictEqual(
                 declarations,
                 [],

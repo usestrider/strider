@@ -515,7 +515,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
           const requested = `${origin}/json?token=url-test#details`
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(requested)
+            yield* page.goto(requested, { waitUntil: "load" })
             const href = yield* page.evaluateInMainWorld(() => location.href)
             assert.strictEqual(href, requested)
             assert.strictEqual(yield* page.url, href)
@@ -581,7 +581,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
           const base = `${origin}/json?token=url-test`
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(`${base}#initial`)
+            yield* page.goto(`${base}#initial`, { waitUntil: "load" })
             for (const requested of [`${base}#changed`, base]) {
               const next = yield* PageNavigation.next(page)
               if (requested === base) {
@@ -815,7 +815,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
             const redirectError1 = yield* Effect.flip(foreign.from(first))
             assert(redirectError1.reason._tag === "RedirectUnavailable")
             assert.strictEqual(redirectError1.reason.why, "foreignTarget")
-            yield* other.goto(`${origin}/redirect-repeat`)
+            yield* other.goto(`${origin}/redirect-repeat`, { waitUntil: "load" })
             const otherRequests = (yield* NetworkRequest.history(other, { url: `${origin}/redirect-repeat` })).entries
             assert.strictEqual(otherRequests.length, 3)
             const redirectError2 = yield* Effect.flip(links.from(otherRequests[0]!))
@@ -1105,7 +1105,7 @@ export const modules = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer.
           )
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             if (name === "Firefox") {
               const reads: ReadonlyArray<Effect.Effect<unknown, Subscription.SubscriptionError, Scope.Scope>> = [
                 NetworkConnection.next(page).pipe(Effect.asVoid),

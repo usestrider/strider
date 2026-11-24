@@ -31,6 +31,30 @@ The categories are one set for every browser, listed in
 [uncaught exceptions](/docs/api/browser/UncaughtException) and every console message there is `Page`. WebKit
 does the same with "Fetch API cannot load … due to access control checks".
 
+A `Page` source also says which `console` method the page called, by the Console Standard's name, such as `warn`,
+`trace`, `group`, or `timeEnd`, listed in [`ConsoleMessage.Method`](/docs/api/browser/ConsoleMessage#Method). A
+message's `level` is coarser: `console.trace` and `console.log` both write at `log`.
+
+```ts
+import { ConsoleMessage, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const traces = Effect.fn("traces")(function*(page: Page.ObservedPage) {
+  const messages = yield* ConsoleMessage.history(page)
+  return messages.entries
+    .filter((message) =>
+      message.source._tag === "Page" && message.source.method === "trace"
+    )
+    .map((message) => message.text)
+})
+```
+
+Browsers send some methods alike, or not at all: Chromium's `timeLog` reads as `log`, and WebKit's as `timeEnd`, and
+WebKit's `count` as `debug`. Firefox sends nothing for `groupEnd` or `clear`. A missing timer or counter reads as
+`warn` on Chromium, and a missing counter on WebKit, while Firefox keeps the method at level `log`. No browser sends
+anything for `time`, `profile`, or `profileEnd`. The capability `console.method` says so, and each
+[browser's page](/docs/browsers/chromium) gives the details.
+
 Each message's `timestamp` is when the browser logged it, by its own wall clock, as a `DateTime.Utc` to the
 millisecond, on every browser. It's the clock of the machine the browser runs on, which a page's clock doesn't move,
 so a test running on the same machine can compare it with `Date.now()`:
