@@ -197,7 +197,7 @@ export const anyFrame = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer
           Effect.scoped(Effect.gen(function*() {
             const { origin } = yield* site
             const page = yield* newPage
-            yield* page.goto(fixtureUrl(origin, frame(origin, button("Pay"))))
+            yield* page.goto(fixtureUrl(origin, frame(origin, button("Pay"))), { waitUntil: "load" })
             const locator = page.frame(page.locator("iframe")).getByRole("button", { name: "Pay" })
             assert.strictEqual(yield* locator.count, 1)
             const behind = Handles.page(page)
@@ -227,7 +227,7 @@ export const anyFrame = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer
           Effect.scoped(Effect.gen(function*() {
             const { origin } = yield* site
             const page = yield* newPage
-            yield* page.goto(fixtureUrl(origin, frame(origin, button("Pay"))))
+            yield* page.goto(fixtureUrl(origin, frame(origin, button("Pay"))), { waitUntil: "load" })
             const pay = page.frame(page.locator("iframe")).getByRole("button", { name: "Pay" })
             assert.strictEqual(yield* pay.count, 1)
             const execution = Handles.page(page).entry.execution
