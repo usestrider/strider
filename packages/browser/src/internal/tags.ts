@@ -28,8 +28,10 @@
  * - **Where** is the document's `<head>`, or its root element when it has none. A document the browser has committed
  *   before its parser made a root element, as one `goto` returns into while the response's body is still coming,
  *   has neither: the element waits, in the page, for the parser to add the root, since an element appended to the
- *   Document node would become its root and leave the parser no `<html>` or `<body>` to build. The operation's
- *   deadline bounds the wait.
+ *   Document node would become its root and leave the parser no `<html>` or `<body>` to build.
+ * - **An insertion the call abandons**, at its deadline or on an interruption, is ended in the page under a key the
+ *   call names: a root wait disconnects without appending, and a settling element's listeners are removed. The
+ *   pending insertions live on the document under a registered symbol only while there are any.
  * - **The outcome** is the element, or a string naming a failure: a primitive, so it leaves no remote object.
  * - **Report-only policies** dispatch violations too, with the disposition `report`; they refuse nothing.
  */
@@ -155,10 +157,13 @@ export const style = Effect.fnUntraced(function*(runtime: Runtime.Runtime, sourc
 
 /**
  * Runs in the document's main world: appends an element from a URL, an inline stylesheet, or one the browser doesn't
- * run, and settles.
+ * run, and settles. Until it settles, `abandonInsertion` with the same key ends it: a root wait never appends, and
+ * the listeners are removed.
  */
-function insertElement(spec: Spec): Promise<Element | string> {
+function insertElement(spec: Spec, key: string): Promise<Element | string> {
   return new Promise((resolve) => {
+    const pending: Map<string, () => void> = Reflect.get(document, Symbol.for("@usestrider/browser/tags")) ?? new Map()
+    Reflect.set(document, Symbol.for("@usestrider/browser/tags"), pending)
     const element = document.createElement(spec.tag)
     for (const [name, value] of spec.attributes) element.setAttribute(name, value)
     const href = spec.url === null ? null : new URL(spec.url, document.baseURI).href
@@ -174,9 +179,13 @@ function insertElement(spec: Spec): Promise<Element | string> {
     const removals: Array<() => void> = []
     let refusal: string | null = null
     const settle = (outcome: Element | string) => {
+      pending.delete(key)
+      if (pending.size === 0) Reflect.deleteProperty(document, Symbol.for("@usestrider/browser/tags"))
       for (const remove of removals.splice(0)) remove()
       resolve(outcome)
     }
+    // The call this answers has ended, so the outcome is only a primitive, leaving no remote object
+    pending.set(key, () => settle("abandoned"))
     const listen = (target: EventTarget, type: string, listener: (event: Event) => void) => {
       target.addEventListener(type, listener, true)
       removals.push(() => target.removeEventListener(type, listener, true))
@@ -213,6 +222,7 @@ function insertElement(spec: Spec): Promise<Element | string> {
       observer.disconnect()
       append(parent)
     })
+    removals.push(() => observer.disconnect())
     observer.observe(document, { childList: true })
   })
 }
@@ -227,19 +237,30 @@ interface Inline {
 
 /**
  * Runs in the document's main world: appends inline JavaScript, which runs in the append if the policy allows it,
- * once the document has a root element.
+ * once the document has a root element. While it waits for one, `abandonInsertion` with the same key ends the wait,
+ * and nothing is appended.
  */
-async function appendInline(spec: Spec): Promise<Inline> {
+async function appendInline(spec: Spec, key: string): Promise<Inline | string> {
   // Committed before the parser made a root element: the element waits for it rather than becoming the root
-  const parent = document.head ?? document.documentElement ?? await new Promise<Element>((resolve) => {
-    const observer = new MutationObserver(() => {
-      const parent = document.head ?? document.documentElement
-      if (parent === null) return
+  const parent = document.head ?? document.documentElement ?? await new Promise<Element | null>((resolve) => {
+    const pending: Map<string, () => void> = Reflect.get(document, Symbol.for("@usestrider/browser/tags")) ??
+      new Map()
+    Reflect.set(document, Symbol.for("@usestrider/browser/tags"), pending)
+    const end = (parent: Element | null) => {
+      pending.delete(key)
+      if (pending.size === 0) Reflect.deleteProperty(document, Symbol.for("@usestrider/browser/tags"))
       observer.disconnect()
       resolve(parent)
+    }
+    const observer = new MutationObserver(() => {
+      const parent = document.head ?? document.documentElement
+      if (parent !== null) end(parent)
     })
+    pending.set(key, () => end(null))
     observer.observe(document, { childList: true })
   })
+  // The call this answers has ended, so the outcome is only a primitive, leaving no remote object
+  if (parent === null) return "abandoned"
   const element = document.createElement(spec.tag)
   for (const [name, value] of spec.attributes) element.setAttribute(name, value)
   let refuse = (_: string) => {}
@@ -263,6 +284,12 @@ async function appendInline(spec: Spec): Promise<Inline> {
   element.textContent = spec.text
   parent.append(element)
   return state
+}
+
+/** Runs in the document's main world: ends the insertion under `key` that hasn't settled, if there is one. */
+function abandonInsertion(this: void, key: string) {
+  const pending: Map<string, () => void> | undefined = Reflect.get(document, Symbol.for("@usestrider/browser/tags"))
+  pending?.get(key)?.()
 }
 
 /** Runs in the document's main world: removes the listener of a wait that ended without settling. */
@@ -354,8 +381,12 @@ export const insert = <A>(
       value.type === "string"
         ? Effect.fail(outcome(value.value))
         : Evaluation.own<A>(runtime, realm, value, Option.some(page))
+    // Names the in-page insertion, so a call that ends before it settles, by its deadline or an interruption, ends it
+    const key = globalThis.crypto.randomUUID()
+    const abandonOnFailure = <B, E, R>(self: Effect.Effect<B, E, R>) =>
+      Effect.onExit(self, (exit) => Exit.isSuccess(exit) ? Effect.void : abandon(runtime, realm, key))
     if (spec.tag !== "script" || spec.url !== null || !spec.settles) {
-      return yield* settled(yield* call(insertElement, [spec], true))
+      return yield* settled(yield* call(insertElement, [spec, key], true).pipe(abandonOnFailure))
     }
     const protocol = runtime.model.adapter.info.protocol
     const matches = protocol === "bidi"
@@ -375,7 +406,7 @@ export const insert = <A>(
           (entry) => entry.value.level === "error" && refused(entry.value.text)
         )
       const state = yield* Effect.flatMap(
-        call(appendInline, [spec], true),
+        call(appendInline, [spec, key], true).pipe(abandonOnFailure),
         (value) => Evaluation.own<unknown>(runtime, realm, value, Option.none())
       )
       // The first read returns what the collection holds, overflow or not: only a page that ended fails it
@@ -391,6 +422,19 @@ export const insert = <A>(
       return yield* settled(value).pipe(Scope.provide(caller))
     }))
   })
+
+/** Ends an in-page insertion whose call ended before it settled, as by a deadline: a root wait never appends. */
+const abandon = (runtime: Runtime.Runtime, realm: Target.RealmId, key: string) =>
+  Operation.detached(
+    Effect.flatMap(Evaluation.toLocal([key], realm), (values) =>
+      runtime.model.adapter.evaluate(realm, {
+        functionDeclaration: FunctionSource.declaration(abandonInsertion),
+        arguments: values,
+        awaitPromise: false,
+        result: "value",
+        userActivation: false
+      }))
+  ).pipe(Effect.ignore)
 
 /** Removes an inline element's listener when its wait ended without settling, as by a deadline. */
 const stop = (runtime: Runtime.Runtime, realm: Target.RealmId, state: JSHandle.JSHandle<unknown>) =>
