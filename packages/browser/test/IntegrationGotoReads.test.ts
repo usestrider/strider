@@ -9,12 +9,17 @@
  * The check parses every file under `test/integration/`. A `goto` is bare when its options don't state `waitUntil`
  * as a string literal. After a bare `x.goto`, it follows the statements that run an effect until the first one that
  * uses `x`, or a name declared from it, such as a locator or a frame; that statement is a finding when it reads
- * through one of them, and statements on other pages pass by. An `Effect.gen` body that ends after the `goto`
- * hands the window to the statements after it. A function that runs later, such as a helper, whose last effect is
- * a bare `goto` is a finding at that `goto` whoever calls it, named by its first caller's read in the same file;
- * a helper meant to return at commit states `"commit"`. Expectations, which retry, and actions, which wait for
- * their element, are not reads. The check doesn't follow calls: a read inside a function the case calls, or in
- * another file, isn't seen at the call.
+ * through one of them, and statements on other pages pass by. Effects handed by name to `Effect.all` and the like
+ * read what the `const` holding them reads. An `Effect.gen` body that ends after the `goto` hands the window to the
+ * statements after it; a name declared in the body is dropped as it leaves, and the window ends there if that name
+ * is the page itself and the body doesn't return it. A function that runs later, such as a helper, whose last
+ * effect is a bare `goto` is a finding at that `goto` whoever calls it, named by its first caller's read in the
+ * same file; a helper meant to return at commit states `"commit"`. Expectations, which retry, and actions, which
+ * wait for their element, are not reads.
+ *
+ * The check doesn't follow calls: a read inside a function the case calls, or a caller in another file, isn't seen
+ * at the call. It matches names, not bindings, so a reassigned variable or a page passed through a container other
+ * than a `const` of effects isn't followed, and it reads a loop's body once, not its next iteration.
  */
 import { assert, describe, it } from "@effect/vitest"
 import { readdirSync, readFileSync } from "node:fs"
@@ -125,20 +130,41 @@ const combinator = (node: ts.Expression): boolean =>
   ts.isIdentifier(node) && ["Array", "Effect", "Option", "Promise", "Stream"].includes(node.text)
 
 /** The first read in a statement through one of the names, as its receiver or an argument; with none, any read. */
-const readThrough = (statement: ts.Statement, names: ReadonlySet<string>): string | undefined => {
+const readThrough = (node: ts.Node, names: ReadonlySet<string>): string | undefined => {
   const through = (node: ts.Expression) => {
     const name = rootOf(node)
     return name !== undefined && names.has(name)
   }
   const read = within(
-    statement,
+    node,
     (node) =>
       ts.isPropertyAccessExpression(node) && isRead(node.name.text) && !combinator(node.expression) &&
       (names.size === 0 || through(node.expression) ||
         (ts.isCallExpression(node.parent) && node.parent.expression === node && node.parent.arguments.some(through)))
   )[0]
-  return read !== undefined && ts.isPropertyAccessExpression(read) ? read.name.text : undefined
+  if (read !== undefined && ts.isPropertyAccessExpression(read)) return read.name.text
+  // Effects a combinator is handed by name, as `Effect.all(reads)`, run there: their reads are those of the
+  // `const` that holds them
+  for (const call of within(node, ts.isCallExpression) as Array<ts.CallExpression>) {
+    if (!ts.isPropertyAccessExpression(call.expression) || !combinator(call.expression.expression)) continue
+    for (const argument of call.arguments) {
+      const initializer = ts.isIdentifier(argument) ? constantOf(argument) : undefined
+      const held = initializer === undefined ? undefined : readThrough(initializer, names)
+      if (held !== undefined) return held
+    }
+  }
+  return undefined
 }
+
+/** The initializer of the last `const` of the name declared before it in the file, if any. */
+const constantOf = (name: ts.Identifier): ts.Expression | undefined =>
+  all(name.getSourceFile(), ts.isVariableDeclaration)
+    .filter((declaration) =>
+      ts.isIdentifier(declaration.name) && declaration.name.text === name.text &&
+      declaration.getEnd() <= name.getStart() && ts.isVariableDeclarationList(declaration.parent) &&
+      (declaration.parent.flags & ts.NodeFlags.Const) !== 0
+    )
+    .at(-1)?.initializer
 
 const bindingNames = (name: ts.BindingName): Array<string> =>
   ts.isIdentifier(name)
@@ -187,12 +213,13 @@ const declares = (block: ts.Block | ts.SourceFile): Array<string> =>
  * Follows the statements after a node until one that runs an effect uses one of the names, and says whether it
  * reads through them. Past the end of a block, the window goes on after the statement that holds the block, until
  * it leaves a function that runs later: the node that function returns to. A name the block declares goes out of
- * scope there, and the window ends with it, unless the block returns it, as an `Effect.gen` body that returns
- * the page, whose result is then one of the names.
+ * scope there and is dropped. When it is the navigated page itself, the window ends with it, unless the block
+ * returns it, as an `Effect.gen` body that returns the page, whose result is then the page followed.
  */
-const follow = (start: ts.Node, names: ReadonlySet<string>): Window => {
+const follow = (start: ts.Node, names: ReadonlySet<string>, receivers: ReadonlySet<string>): Window => {
   let at = holder(start)
   let live = new Set(names)
+  let followed = new Set(receivers)
   while ("statement" in at) {
     const { block, statement } = at
     for (const next of block.statements.slice(block.statements.indexOf(statement) + 1)) {
@@ -204,11 +231,14 @@ const follow = (start: ts.Node, names: ReadonlySet<string>): Window => {
     const parent = holder(block)
     const leaving = declares(block).filter((name) => live.has(name))
     if (leaving.length > 0 && "statement" in parent) {
-      const returned = block.statements.some((each) =>
-        ts.isReturnStatement(each) && each.expression !== undefined && mentions(each.expression, live)
-      )
-      if (!returned) return { ended: true }
       live = new Set([...live].filter((name) => !leaving.includes(name)))
+      if (leaving.some((name) => followed.has(name))) {
+        const returned = block.statements.some((each) =>
+          ts.isReturnStatement(each) && each.expression !== undefined && mentions(each.expression, new Set(leaving))
+        )
+        if (!returned) return { ended: true }
+        followed = live
+      }
     }
     at = parent
   }
@@ -250,7 +280,8 @@ const callerRead = (source: ts.SourceFile, name: string): string | undefined => 
     while (!ts.isVariableDeclaration(node) && !ts.isStatement(node)) node = node.parent
     if (!ts.isVariableDeclaration(node)) continue
     const scope = ts.findAncestor(node, deferred) ?? source
-    const window = follow(node, aliases(scope, bindingNames(node.name)))
+    const results = bindingNames(node.name)
+    const window = follow(node, aliases(scope, results), new Set(results))
     if ("read" in window) return window.read
   }
   return undefined
@@ -263,7 +294,8 @@ const flagged = (path: string, text = readFileSync(path, "utf8")): Array<string>
   for (const goto of all(source, bareGoto)) {
     const receiver = rootOf(goto.expression.expression)
     const scope = ts.findAncestor(goto, deferred) ?? source
-    const window = follow(goto, aliases(scope, receiver === undefined ? [] : [receiver]))
+    const receivers = new Set(receiver === undefined ? [] : [receiver])
+    const window = follow(goto, aliases(scope, receivers), receivers)
     const then = "read" in window
       ? window.read
       : "returns" in window && !isCase(window.returns)
