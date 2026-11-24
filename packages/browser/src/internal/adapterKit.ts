@@ -420,9 +420,10 @@ export const unexpect = (expectations: Expectations, id: PageNavigation.Id): boo
 }
 
 /**
- * The expectation a navigation the browser announced fulfils: the oldest to its URL, else the oldest with no URL, as a
- * traversal's. A navigation announced with no URL takes the oldest. One announced for another URL takes none: it is
- * another navigation, such as one the page started that the command replaces.
+ * The expectation a navigation the browser announced fulfils. The oldest to its URL comes first, then the oldest with
+ * no URL, as a traversal's. A navigation announced with no URL matches the same way, so an expectation with no URL
+ * wins there too, and only without one does it take the oldest of all. One announced for another URL takes none: it
+ * is another navigation, such as one the page started that the command replaces.
  */
 export const take = (expectations: Expectations, url: string): Expected | undefined => {
   const normalized = normalize(url)
