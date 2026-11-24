@@ -119,7 +119,19 @@ interface ErrorMatcher {
   origin): it reads that context's frame boxes once in an operation, in a sandbox, sends a point outside them on the
   context, and hit-tests a point inside one with one `script.callFunction` a level, through open shadow roots, sending
   to the frame's context; BiDi refuses a point outside that context's viewport, so a move outside the frame while a
-  button is held there is left out, and the release is sent at the pointer's last point in the frame. Any other
+  button is held there is left out, and the release is sent at the pointer's last point in the frame. Neither
+  browser tells a document the pointer crossed into another process's: Chromium hands `Input.dispatchMouseEvent` to
+  the widget under its point, around the input router that sends a real pointer's leave, and Firefox delivers a move
+  to the context it is sent to alone. So each adapter keeps the session or context a page's last mouse event went to,
+  and when the next goes elsewhere (after a release, since a held press keeps its routing), first tells what the
+  pointer leaves. On Chromium, each out-of-process session left gets a `mouseMoved` at (-1, -1) on its own session,
+  innermost first; the page's session gets nothing, since a move outside its viewport would fire the leave of every
+  element holding the frame and a `mouseout` as though the pointer had left the window, so the page's documents miss
+  the crossing (`input.frameBoundaries` is `partial`). On Firefox, each frame of another origin than its parent's
+  that the pointer leaves gets a `pointerMove` to its right edge, `(innerWidth, 0)`, read with one `script.callFunction`:
+  BiDi's bounds check accepts that point and nothing in the frame covers it. Each context above a frame of another
+  origin it enters gets the move at its own point first, outermost first, which moves its hover onto the frame's
+  element; for a frame its caller names, that is the page's context. Any other
   pointer input, such as a locator's drag between the page and a frame, goes on the page's session, in its
   coordinates. Keys and text go on the page's session, which sends them to the focused element. Nothing hit-tests the
   parent documents for input a locator sends on the frame's session: the locator's pointer check does, before anything

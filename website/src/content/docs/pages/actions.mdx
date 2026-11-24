@@ -45,6 +45,9 @@ const openRowMenu = Effect.fn("openRowMenu")(function*(page: Page.Page, name: st
 | `dragTo(target)`              | presses on the element, moves to the target with the button held, releases |
 | [`focus()`](/docs/api/browser/Locator#Locator.focus), [`scrollIntoView()`](/docs/api/browser/Locator#Locator.scrollIntoView) | focuses it, or scrolls it into view                                        |
 
+On Chromium, a page doesn't see the pointer move into a cross-site frame: its element keeps `:hover` and gets no
+`mouseleave` ([Chromium's differences](/docs/browsers/chromium#differences)).
+
 Select text to inspect a selection or prepare it for the next key without replacing the contents:
 
 ```ts
