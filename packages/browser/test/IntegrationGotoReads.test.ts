@@ -408,6 +408,48 @@ Effect.gen(function*() {
     ])
   })
 
+  it("keeps following an outer page when only its local locator leaves scope", () => {
+    const sample = `
+Effect.gen(function*() {
+  const page = yield* newPage
+  yield* Effect.gen(function*() {
+    const target = page.locator("p")
+    yield* target.click()
+    yield* page.goto(url)
+  })
+  yield* page.evaluateInMainWorld(() => document.body.textContent)
+})`
+    assert.deepStrictEqual(flagged(`${integration}sample.ts`, sample), [
+      "test/integration/sample.ts:7, then evaluateInMainWorld"
+    ])
+  })
+
+  it("flags one-shot reads stored before Effect.all executes them after navigation", () => {
+    const sample = `
+Effect.gen(function*() {
+  const reads = [page.locator("p").readText, page.title]
+  yield* page.goto(url)
+  yield* Effect.all(reads)
+})`
+    assert.deepStrictEqual(flagged(`${integration}sample.ts`, sample), [
+      "test/integration/sample.ts:4, then readText"
+    ])
+  })
+
+  it("checks inline Effect.all reads without treating subscription waits as reads", () => {
+    const sample = `
+Effect.gen(function*() {
+  yield* page.goto(url)
+  yield* Effect.all([page.locator("p").readText, page.title])
+  const waits = yield* Effect.forEach([1, 2], () => ConsoleMessage.next(page))
+  yield* page.goto(url)
+  yield* Effect.all(waits)
+})`
+    assert.deepStrictEqual(flagged(`${integration}sample.ts`, sample), [
+      "test/integration/sample.ts:3, then readText"
+    ])
+  })
+
   it("finds no case that reads the page right after a bare goto", () => {
     assert.deepStrictEqual(files(integration).flatMap((path) => flagged(path)), [])
   })
