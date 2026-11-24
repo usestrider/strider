@@ -204,7 +204,7 @@ export const ended = (state: State, session: ProtocolClient.Session, reason: Pro
   release(target)
   target.proxyAuth?.clear()
   for (const [key, pending] of state.pendingAttribution) {
-    if (pending.target === target) dropPending(state, key)
+    if (pending.target === target) dropPending(state, key, true)
   }
   if (target.page === undefined) state.credentialsAttempted.delete(credentialsScope(target))
   else {

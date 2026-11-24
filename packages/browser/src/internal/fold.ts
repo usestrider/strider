@@ -97,8 +97,8 @@ export interface Fold {
   readonly documentOf: (navigable: Target.NavigableId) => Effect.Effect<Option.Option<Target.DocumentId>>
   readonly response: (hop: NetworkRequest.HopId) => Option.Option<NetworkResponse.NetworkResponse>
   readonly hop: (hop: NetworkRequest.HopId) => Option.Option<Model.HopEntry>
-  /** See `Model.Model["awaitHop"]`. */
-  readonly awaitHop: (hop: NetworkRequest.HopId) => Option.Option<Effect.Effect<Option.Option<Model.HopEntry>>>
+  /** See `Model.Model["issuedHop"]`. */
+  readonly issuedHop: (hop: NetworkRequest.HopId) => Option.Option<Deferred.Deferred<Model.IssuedHop>>
   readonly lost: Deferred.Deferred<void>
 
   // Commands
@@ -233,12 +233,12 @@ export const make = Effect.fnUntraced(function*(options: {
     Deferred.doneUnsafe(hop.sentKnown, Effect.void)
   })
   // Hops the adapter named before their request event, until the event comes or the adapter withdraws them
-  const issued = new Map<NetworkRequest.HopId, Deferred.Deferred<void>>()
-  const settleIssued = (hop: NetworkRequest.HopId) => {
+  const issued = new Map<NetworkRequest.HopId, Deferred.Deferred<Model.IssuedHop>>()
+  const settleIssued = (hop: NetworkRequest.HopId, settled: Model.IssuedHop) => {
     const waiting = issued.get(hop)
     if (waiting === undefined) return
     issued.delete(hop)
-    Deferred.doneUnsafe(waiting, Effect.void)
+    Deferred.doneUnsafe(waiting, Effect.succeed(settled))
   }
   const realmDocuments = new Map<Target.RealmId, Target.DocumentId>()
   const realmOwners = new Map<Target.RealmId, Model.Owner>()
@@ -889,18 +889,21 @@ export const make = Effect.fnUntraced(function*(options: {
             context: owner.context
           })
           publish(owner, fact.request, (events) => events.request, (events) => events.request)
-          settleIssued(fact.request.hop)
+          const kept = hops.get(fact.request.hop)
+          if (Option.isSome(kept)) settleIssued(fact.request.hop, { _tag: "Reported", hop: kept.value })
           return
         }
         case "HopIssued": {
           if (Option.isSome(hops.get(fact.hop)) || issued.has(fact.hop) || Deferred.isDoneUnsafe(lost)) return
-          issued.set(fact.hop, Deferred.makeUnsafe<void>())
+          issued.set(fact.hop, Deferred.makeUnsafe<Model.IssuedHop>())
           // Bounded as the hops are: past it, the oldest is given up, and its lookups find it gone
-          if (issued.size > maxHops) settleIssued(issued.keys().next().value!)
+          if (issued.size > maxHops) {
+            settleIssued(issued.keys().next().value!, { _tag: "Withdrawn", targetClosed: false })
+          }
           return
         }
         case "HopWithdrawn": {
-          settleIssued(fact.hop)
+          settleIssued(fact.hop, { _tag: "Withdrawn", targetClosed: fact.targetClosed })
           return
         }
         case "HopTiming": {
@@ -1173,7 +1176,7 @@ export const make = Effect.fnUntraced(function*(options: {
 
   const loseConnection = Effect.fnUntraced(function*(reason: Target.CloseReason) {
     if (Deferred.isDoneUnsafe(lost)) return
-    for (const hop of Array.from(issued.keys())) settleIssued(hop)
+    for (const hop of Array.from(issued.keys())) settleIssued(hop, { _tag: "Withdrawn", targetClosed: true })
     for (const page of Array.from(pages.values())) yield* endPage(page, reason)
     for (const document of Array.from(documents.keys())) yield* endDocument(document, reason)
     for (const worker of Array.from(workers.values())) yield* endWorker(worker, reason)
@@ -1246,14 +1249,7 @@ export const make = Effect.fnUntraced(function*(options: {
     documentOf,
     response: (hop) => responses.get(hop),
     hop: (hop) => hops.get(hop),
-    awaitHop: (hop) => {
-      const found = hops.get(hop)
-      if (Option.isSome(found)) return Option.some(Effect.succeed(found))
-      const waiting = issued.get(hop)
-      return waiting === undefined
-        ? Option.none()
-        : Option.some(Effect.suspend(() => Effect.map(Deferred.await(waiting), () => hops.get(hop))))
-    },
+    issuedHop: (hop) => Option.fromUndefinedOr(issued.get(hop)),
     lost,
     context: (id, isDefault, created) => apply(ensureContext(id, isDefault, created)),
     configure: (context, settings) => apply(update(context.state, (state) => ({ ...state, settings }))),

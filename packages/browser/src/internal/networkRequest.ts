@@ -66,22 +66,28 @@ export const headersSent = (
 ): Effect.Effect<Headers.Headers, Deadline.Timeout> =>
   Effect.gen(function*() {
     const { runtime } = Handles.target(target as Page.Page | UserContext.UserContext).behind
-    const awaited = runtime.model.awaitHop(request.hop)
-    if (Option.isNone(awaited)) return request.headers
     const record = yield* Operation.record
-    // A route's request can reach its handler before the browser reports the request itself
-    const hop = yield* record.bound(
-      awaited.value,
-      () => Option.some("The browser hadn't reported the request by the deadline"),
-      "waitingForEvent"
-    )
-    if (Option.isNone(hop)) return request.headers
+    const kept = runtime.model.hop(request.hop)
+    let hop: Model.HopEntry
+    if (Option.isSome(kept)) hop = kept.value
+    else {
+      // A route's request can reach its handler before the browser reports the request itself
+      const issued = runtime.model.issuedHop(request.hop)
+      if (Option.isNone(issued)) return request.headers
+      const settled = yield* record.bound(
+        Deferred.await(issued.value),
+        () => Option.some("The browser hadn't reported the request by the deadline"),
+        "waitingForEvent"
+      )
+      if (settled._tag === "Withdrawn") return request.headers
+      hop = settled.hop
+    }
     yield* record.bound(
-      Deferred.await(hop.value.sentKnown),
+      Deferred.await(hop.sentKnown),
       () => Option.some("The browser hadn't said which headers it sent by the deadline"),
       "waitingForEvent"
     )
-    return Option.getOrElse((yield* hop.value.state.get).sent, () => request.headers)
+    return Option.getOrElse((yield* hop.state.get).sent, () => request.headers)
   }).pipe(Operation.named("NetworkRequest.headersSent", { attributes: { "browser.hop.id": request.hop } }))
 
 export const history = plain.history
@@ -445,7 +451,8 @@ export const sizes = (
 
 /**
  * Holds a hop until the scope closes, `released` then. A hop the browser hasn't reported yet, as a route's request
- * can be, is checked once the wait gets it, under the deadline of the read that waits.
+ * can be, is held from the moment its request event folds; the read that waits for that event does so under its
+ * own deadline, and checks the hop's owner once it has it.
  */
 const holdHop = Effect.fnUntraced(function*(
   found: ReturnType<typeof Handles.target>,
@@ -456,12 +463,15 @@ const holdHop = Effect.fnUntraced(function*(
   const { model } = found.behind.runtime
   const kept = model.hop(id)
   if (Option.isSome(kept) && !ownsHop(found, kept.value)) return yield* Effect.fail(unavailable("foreignTarget"))
-  const awaited = model.awaitHop(id)
-  if (Option.isNone(awaited)) return yield* Effect.fail(unavailable("evicted"))
+  const issued = Option.isSome(kept) ? undefined : Option.getOrUndefined(model.issuedHop(id))
+  if (Option.isNone(kept) && issued === undefined) return yield* Effect.fail(unavailable("evicted"))
+  // Only these hold the hop, and the scope's close clears both
   let held: Model.HopEntry | undefined = Option.getOrUndefined(kept)
+  let pending: Deferred.Deferred<Model.IssuedHop> | undefined = issued
   yield* Effect.addFinalizer(() =>
     Effect.sync(() => {
       held = undefined
+      pending = undefined
       Deferred.doneUnsafe(released, Effect.void)
     })
   )
@@ -469,20 +479,22 @@ const holdHop = Effect.fnUntraced(function*(
   return Effect.gen(function*() {
     if (Deferred.isDoneUnsafe(released)) return yield* Effect.fail(unavailable("released"))
     if (held !== undefined) return held
+    const waiting = pending
+    if (waiting === undefined) return yield* Effect.fail(unavailable("released"))
     const record = yield* Operation.record
-    const hop = yield* record.bound(
-      Effect.raceFirst(awaited.value, release),
+    const settled = yield* record.bound(
+      Effect.raceFirst(Deferred.await(waiting), release),
       () => Option.some("The browser hadn't reported the request by the deadline"),
       "waitingForEvent"
     )
-    if (Option.isNone(hop)) {
-      return yield* Effect.fail(
-        unavailable(Deferred.isDoneUnsafe(found.behind.entry.closed) ? "targetClosed" : "evicted")
-      )
+    if (settled._tag === "Withdrawn") {
+      return yield* Effect.fail(unavailable(settled.targetClosed ? "targetClosed" : "evicted"))
     }
-    if (!ownsHop(found, hop.value)) return yield* Effect.fail(unavailable("foreignTarget"))
-    held = hop.value
-    return hop.value
+    if (!ownsHop(found, settled.hop)) return yield* Effect.fail(unavailable("foreignTarget"))
+    if (Deferred.isDoneUnsafe(released)) return yield* Effect.fail(unavailable("released"))
+    held = settled.hop
+    pending = undefined
+    return settled.hop
   })
 })
 

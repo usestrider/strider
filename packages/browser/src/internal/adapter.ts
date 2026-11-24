@@ -319,8 +319,8 @@ export type Fact =
    * or its `HopWithdrawn` if the request event never comes.
    */
   | { readonly _tag: "HopIssued"; readonly hop: NetworkRequest.HopId }
-  /** A hop `HopIssued` named whose request event won't come. */
-  | { readonly _tag: "HopWithdrawn"; readonly hop: NetworkRequest.HopId }
+  /** A hop `HopIssued` named whose request event won't come: `targetClosed` when its page or target ended. */
+  | { readonly _tag: "HopWithdrawn"; readonly hop: NetworkRequest.HopId; readonly targetClosed: boolean }
   | { readonly _tag: "HopSizes"; readonly hop: NetworkRequest.HopId; readonly sizes: NetworkRequest.Sizes }
   | { readonly _tag: "HopTiming"; readonly hop: NetworkRequest.HopId; readonly timing: NetworkRequest.Timing }
   | { readonly _tag: "ResponseReceived"; readonly response: NetworkResponse.NetworkResponse }

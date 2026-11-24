@@ -262,16 +262,16 @@ export const pendingHop = (state: State, attribution: Attribution): NetworkReque
   return state.ids.hop(attribution.request, 0)
 }
 
-/** Withdraws the hop a pause named, when its request event won't come for it. */
-export const withdrawHop = (state: State, attribution: Attribution | undefined) => {
+/** Withdraws the hop a pause named, when its request event won't come for it: closed, when its target ended. */
+export const withdrawHop = (state: State, attribution: Attribution | undefined, targetClosed = false) => {
   if (attribution?.request === undefined) return
-  state.buffer.emit({ _tag: "HopWithdrawn", hop: state.ids.hop(attribution.request, 0) })
+  state.buffer.emit({ _tag: "HopWithdrawn", hop: state.ids.hop(attribution.request, 0), targetClosed })
   attribution.request = undefined
 }
 
 /** Forgets a pause's attribution its request event never took, withdrawing the hop it named. */
-export const dropPending = (state: State, key: string) => {
-  withdrawHop(state, state.pendingAttribution.get(key))
+export const dropPending = (state: State, key: string, targetClosed = false) => {
+  withdrawHop(state, state.pendingAttribution.get(key), targetClosed)
   state.pendingAttribution.delete(key)
 }
 
