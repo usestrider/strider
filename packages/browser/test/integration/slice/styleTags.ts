@@ -4,6 +4,7 @@ import { type Browser, Expect } from "@usestrider/browser"
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import type * as Layer from "effect/Layer"
 import { createHash } from "node:crypto"
 import * as fs from "node:fs/promises"
@@ -16,6 +17,10 @@ import { newPage } from "./sharedContext.ts"
 const stylesheet = (origin: string, css: string) => `${origin}/style?css=${encodeURIComponent(css)}`
 
 const bodyColor = () => getComputedStyle(document.body).color
+
+/** Whether the document's load event has fired, waiting for it. */
+const loaded = () =>
+  document.readyState === "complete" || new Promise<boolean>((resolve) => addEventListener("load", () => resolve(true)))
 
 export const styleTags = (name: string, backend: Layer.Layer<Browser.Browser, unknown>) =>
   describe(`${name} style tags`, () => {
@@ -39,6 +44,27 @@ export const styleTags = (name: string, backend: Layer.Layer<Browser.Browser, un
           assert.include(String(Cause.squash(exit.cause)), "the handle was released")
           assert.strictEqual(yield* page.evaluateInMainWorld(bodyColor), "rgb(1, 2, 3)")
         }).pipe(Effect.scoped))
+
+      // Firefox commits a navigation only once its document's body has ended, so `goto` never returns into a document
+      // without a root element there
+      if (name !== "Firefox") {
+        it.effect("adds inline source to a document committed before its parser made a root element", () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            const page = yield* newPage
+            yield* page.goto(`${served.origin}/held-page?key=style&html=${encodeURIComponent("<body>x</body>")}`)
+            // The navigation has committed, and the HTML after the doctype is still held back
+            assert.isTrue(yield* page.evaluateInMainWorld(() => document.documentElement === null))
+            const added = yield* page.addStyleTag({ source: "body { color: rgb(61, 62, 63) }" }).pipe(Effect.forkChild)
+            // A later call in the same world, so the addition has reached the page before the HTML does
+            yield* page.evaluateInMainWorld(() => null)
+            yield* served.release("style")
+            yield* Fiber.join(added)
+            yield* page.evaluateInMainWorld(loaded)
+            assert.strictEqual(yield* page.evaluateInMainWorld(() => document.documentElement?.tagName), "HTML")
+            assert.strictEqual(yield* page.evaluateInMainWorld(bodyColor), "rgb(61, 62, 63)")
+          }).pipe(Effect.scoped))
+      }
 
       it.effect("applies a stylesheet from a URL once it has loaded", () =>
         Effect.gen(function*() {

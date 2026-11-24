@@ -4,6 +4,7 @@ import { ConsoleMessage, Deadline, Locator, Page } from "@usestrider/browser"
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import { createHash } from "node:crypto"
 import * as fs from "node:fs/promises"
 import * as os from "node:os"
@@ -56,6 +57,34 @@ export const scriptTags = <R>(
       yield* page.addScriptTag({ source: "window.inline = document.currentScript.tagName" })
       assert.strictEqual(yield* global(page, "inline"), "SCRIPT")
     }).pipe(Effect.scoped))
+
+  // Firefox commits a navigation only once its document's body has ended, so `goto` never returns into a document
+  // without a root element there
+  if (name !== "Firefox") {
+    it.effect("runs inline source in a document committed before its parser made a root element", () =>
+      Effect.gen(function*() {
+        const served = yield* site
+        const page = yield* newPage
+        yield* page.goto(`${served.origin}/held-page?key=script&html=${encodeURIComponent("<body>x</body>")}`)
+        // The navigation has committed, and the HTML after the doctype is still held back
+        assert.isTrue(yield* page.evaluateInMainWorld(() => document.documentElement === null))
+        const added = yield* page.addScriptTag({ source: "window.early = document.currentScript.parentNode.nodeName" })
+          .pipe(Effect.forkChild)
+        // A later call in the same world, so the addition has reached the page before the HTML does
+        yield* page.evaluateInMainWorld(() => null)
+        yield* served.release("script")
+        yield* Fiber.join(added)
+        yield* page.evaluateInMainWorld(() =>
+          document.readyState === "complete" ||
+          new Promise<boolean>((resolve) => addEventListener("load", () => resolve(true)))
+        )
+        assert.deepStrictEqual(
+          yield* page.evaluateInMainWorld(() => [document.documentElement?.tagName, document.body?.textContent]),
+          ["HTML", "x"]
+        )
+        assert.strictEqual(yield* global(page, "early"), "HEAD")
+      }).pipe(Effect.scoped))
+  }
 
   it.effect("finds the browser's refusal entry in the console when the append returns", () =>
     Effect.gen(function*() {

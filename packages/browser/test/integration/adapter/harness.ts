@@ -37,6 +37,11 @@ export interface Site {
   readonly served: ReadonlyArray<Served>
   /** Completes once the site has been asked for `path`, its query included, now or earlier. */
   readonly requested: (path: string) => Effect.Effect<void>
+  /**
+   * Sends the HTML of `/held-page?key=…` that has been held back since its headers were sent, and ends the
+   * response. The page must have been requested.
+   */
+  readonly release: (key: string) => Effect.Effect<void>
 }
 
 type Route = (request: http.IncomingMessage, response: http.ServerResponse, site: Site) => void
@@ -375,6 +380,17 @@ export const site: Effect.Effect<Site, never, Scope.Scope> = Effect.acquireRelea
         waiting.add(waiter)
         return Effect.sync(() => waiting.delete(waiter))
       })
+    // `/held-page?key=…&html=…`: its headers, a doctype, and a comment at once, which leave the document without a
+    // root element, and its HTML only when the test releases the key. Chromium commits the navigation on the headers;
+    // WebKit only once enough of the body has arrived, which the comment's 4 KiB is; Firefox only once the body ends.
+    const held = new Map<string, () => void>()
+    const release = (key: string) =>
+      Effect.sync(() => {
+        const send = held.get(key)
+        if (send === undefined) throw new Error(`no held page for ${key}`)
+        held.delete(key)
+        send()
+      })
     let siteRef: Site
     const server = http.createServer((request, response) => {
       const url = new URL(request.url ?? "/", "http://site")
@@ -385,6 +401,12 @@ export const site: Effect.Effect<Site, never, Scope.Scope> = Effect.acquireRelea
           waiting.delete(waiter)
           waiter.resume()
         }
+      }
+      if (url.pathname === "/held-page") {
+        response.writeHead(200, { "content-type": "text/html; charset=utf-8" })
+        response.write(`<!doctype html><!--${" ".repeat(4096)}-->`)
+        held.set(url.searchParams.get("key") ?? "", () => response.end(url.searchParams.get("html") ?? ""))
+        return
       }
       const route = routes[url.pathname]
       if (route !== undefined) return route(request, response, siteRef)
@@ -399,7 +421,13 @@ export const site: Effect.Effect<Site, never, Scope.Scope> = Effect.acquireRelea
     })
     server.listen(0, "127.0.0.1", () => {
       const { port } = server.address() as net.AddressInfo
-      siteRef = { origin: `http://127.0.0.1:${port}`, crossSite: `http://localhost:${port}`, served, requested }
+      siteRef = {
+        origin: `http://127.0.0.1:${port}`,
+        crossSite: `http://localhost:${port}`,
+        served,
+        requested,
+        release
+      }
       resume(Effect.succeed({ server, upgraded, site: siteRef }))
     })
   }),
