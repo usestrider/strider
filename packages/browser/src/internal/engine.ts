@@ -519,7 +519,9 @@ export const Response = Schema.Union([
     /** For `Checked`: whether it is checked. */
     checked: Schema.NullOr(Schema.Boolean),
     /** For `Fill`: whether the value is to be typed (focused, contents selected) or was set. */
-    fill: Schema.NullOr(Schema.Literals(["type", "set", "guarded"]))
+    fill: Schema.NullOr(Schema.Literals(["type", "set", "guarded"])),
+    /** For `Select`, once applied: the values of the options it selected, in document order. */
+    selected: Schema.NullOr(Schema.Array(Schema.String))
   }),
   Schema.TaggedStruct("NotReady", {
     reason: NotReady,
@@ -3590,7 +3592,8 @@ export function engine(render: (root: SnapNode) => string) {
       point: null as { x: number; y: number } | null,
       draggable: false,
       checked: null as boolean | null,
-      fill: null as "type" | "set" | "guarded" | null
+      fill: null as "type" | "set" | "guarded" | null,
+      selected: null as ReadonlyArray<string> | null
     }
     switch (action._tag) {
       case "Point": {
@@ -3694,13 +3697,20 @@ export function engine(render: (root: SnapNode) => string) {
       }
       case "Select": {
         const select = element as HTMLSelectElement
-        const options = Array.from(select.options)
-        for (const [index, option] of options.entries()) {
-          option.selected = action.choices.some((choice) => optionMatches(option, index, choice))
+        const chosen = new Set<HTMLOptionElement>()
+        for (const [index, option] of Array.from(select.options).entries()) {
+          const matches = action.choices.some((choice) => optionMatches(option, index, choice))
+          option.selected = matches
+          if (matches) chosen.add(option)
         }
         fire(select, "input")
         fire(select, "change")
-        return answer
+        // The chosen options still selected after the events, by their current value: handlers may have changed
+        // the values and labels the choices matched, or the selection itself
+        const selected = Array.from(select.options).flatMap((option) =>
+          chosen.has(option) && option.selected ? [option.value] : []
+        )
+        return { ...answer, selected }
       }
       default:
         return answer

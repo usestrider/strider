@@ -4644,18 +4644,29 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           const { url } = yield* fixture(() =>
             `<select id="s" onchange="${
               say("'chose ' + this.value")
-            }"><option value="a">Ay</option><option value="b">Bee</option></select><input id="c" type="checkbox"><input id="stuck" type="checkbox" onclick="event.preventDefault()"><input id="f" type="file" onchange="${
+            }"><option value="a">Ay</option><option value="b">Bee</option></select><select id="m" multiple><option value="x">Ex</option><option value="y">Why</option><option value="z">Zed</option></select><input id="c" type="checkbox"><input id="stuck" type="checkbox" onclick="event.preventDefault()"><input id="f" type="file" onchange="${
               say("this.files[0].name")
-            }"><button id="go">Go</button><script>setTimeout(() => document.getElementById('s').add(new Option('Late', 'l')), 300)</script>${out}`
+            }"><button id="go">Go</button><select id="redirected" onchange="this.value = 'a'"><option value="a">Ay</option><option value="b">Bee</option></select><select id="renamed" oninput="this.options[1].value = 'renamed'"><option value="a">Ay</option><option value="b">Bee</option></select><script>setTimeout(() => document.getElementById('s').add(new Option('Late', 'l')), 300)</script>${out}`
           )
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* newPage
             yield* page.goto(url)
-            yield* page.locator("#s").selectOption({ label: "Bee" })
+            assert.deepStrictEqual(yield* page.locator("#s").selectOption({ value: "b" }, { trial: true }), [])
+            assert.strictEqual(yield* page.locator("#s").readValue, "a")
+            assert.strictEqual(yield* page.locator("#out").readText, "nothing yet")
+            assert.deepStrictEqual(yield* page.locator("#s").selectOption({ label: "Bee" }), ["b"])
             yield* page.getByText("chose b").pipe(Expect.toBeVisible)
+            // A select without multiple keeps the matching option that comes last in the document
+            assert.deepStrictEqual(yield* page.locator("#s").selectOption([{ value: "b" }, { index: 0 }]), ["b"])
             // An option that arrives later is waited for
-            yield* page.locator("#s").selectOption({ value: "l" })
+            assert.deepStrictEqual(yield* page.locator("#s").selectOption({ value: "l" }), ["l"])
             assert.strictEqual(yield* page.locator("#s").readValue, "l")
+            // A multiple select gives every value chosen, in document order, and no choices deselect all
+            assert.deepStrictEqual(
+              yield* page.locator("#m").selectOption([{ value: "z" }, { label: "Ex" }]),
+              ["x", "z"]
+            )
+            assert.deepStrictEqual(yield* page.locator("#m").selectOption([]), [])
             const notSelect = yield* page.locator("#go").selectOption({ index: 0 }).pipe(Effect.flip)
             assert(Locator.isLocatorError(notSelect) && notSelect.reason._tag === "WrongElement", String(notSelect))
             const box = page.locator("#c")
@@ -4679,6 +4690,13 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               Effect.flip
             )
             assert(Locator.isLocatorError(notFile) && notFile.reason._tag === "WrongElement", String(notFile))
+            // Only chosen options still selected after the events contribute values.
+            assert.deepStrictEqual(yield* page.locator("#redirected").selectOption({ value: "b" }), [])
+            assert.strictEqual(yield* page.locator("#redirected").readValue, "a")
+            // A chosen option remains chosen when an input handler changes its value.
+            const renamed = yield* page.locator("#renamed").selectOption({ value: "b" })
+            assert.strictEqual(yield* page.locator("#renamed").readValue, "renamed")
+            assert.deepStrictEqual(renamed, ["renamed"])
           }))
         }), timeout)
 

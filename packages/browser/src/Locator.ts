@@ -1759,9 +1759,16 @@ export interface Locator extends ReadonlyLocator {
   selectText(options?: ActionOptions | undefined): ActionEffect
 
   /**
-   * Chooses options of a `<select>`, by value, label, or index. Checks: visible, enabled.
+   * Chooses options of a `<select>`, by value, label, or index, and succeeds with the values of the options it
+   * selected. Checks: visible, enabled.
    *
    * **Details**
+   *
+   * The values are those of the chosen options that are still selected once `input` and `change` have run, read
+   * as they are then, in document order. The action selects every matching option on a `<select>` with
+   * `multiple`, and only the matching option that comes last on one without it, so that gives one value; an empty
+   * list of choices deselects every option and gives `[]`. Event handlers can change what the action selected, so
+   * the list can be shorter, or empty, when one selects another option. A `trial` selects nothing and gives `[]`.
    *
    * The options are chosen from an isolated world of Strider's, with `input` and `change` dispatched as for a
    * user's choice. An option that isn't there yet is waited for, and a timeout reports it as `NoSuchOption`. Enabled
@@ -1776,7 +1783,8 @@ export interface Locator extends ReadonlyLocator {
    * import { Effect } from "effect"
    *
    * const shipToPortugal = Effect.fn("shipToPortugal")(function*(page: Page.Page) {
-   *   yield* page.getByLabel("Country").selectOption({ label: "Portugal" })
+   *   const selected = yield* page.getByLabel("Country").selectOption({ label: "Portugal" })
+   *   yield* Effect.log(`Selected ${selected.join(", ")}`)
    * })
    * ```
    *
@@ -1785,7 +1793,7 @@ export interface Locator extends ReadonlyLocator {
   selectOption(
     choice: SelectOption | ReadonlyArray<SelectOption>,
     options?: ActionOptions | undefined
-  ): ActionEffect
+  ): Effect.Effect<ReadonlyArray<string>, LocatorError | Target.TargetGone | Deadline.Timeout>
   /**
    * Sets the files of a file input. Checks: none.
    *

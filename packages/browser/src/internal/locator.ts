@@ -1038,7 +1038,8 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       options,
       selectChecks,
       { _tag: "Select", choices },
-      () => Effect.succeed("done" as const)
+      () => Effect.succeed("done" as const),
+      { result: (ready): ReadonlyArray<string> => ready.selected ?? [] }
     )
   }
   setInputFiles(files: FileInput.FileInput | ReadonlyArray<FileInput.FileInput>, options?: Locator.ActionOptions) {
@@ -1867,8 +1868,9 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
    * input permit, the checks once more with the action's part done in the page, and `perform`, which sends the
    * input once. `perform` may ask for another round, only when a guard proved the page never saw the input. In a
    * frame, each round's point is translated into the page's viewport (`translate`), and input names the frame.
+   * It succeeds with what `extra.result` reads from the `Ready` answer of the round it performed on, or nothing.
    */
-  private act(
+  private act<A = void>(
     operation: string,
     options: Locator.ActionOptions | undefined,
     defaults: CheckSet,
@@ -1895,7 +1897,10 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
       "done" | { readonly retry: Engine.NotReady },
       Locator.LocatorError | Target.TargetGone | Deadline.Timeout
     >,
-    extra: { readonly redacted?: boolean } = {}
+    extra: {
+      readonly redacted?: boolean
+      readonly result?: (ready: Extract<Engine.Response, { _tag: "Ready" }>) => A
+    } = {}
   ) {
     const owner = this.owner
     return Effect.gen({ self: this }, function*() {
@@ -2163,13 +2168,13 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
             )
             if (Option.isNone(again)) return "again" as const
             // A trial stops at the last check, holding the permit as the action would
-            if (options?.trial === true) return "done" as const
+            if (options?.trial === true) return { done: again.value.response }
             const done = yield* perform(again.value.response, {
               send: send(again.value),
               disarm,
               guardFill: (insert) => this.guardFill(operation, again.value.routed, record, insert)
             }, record)
-            if (done === "done") return "done" as const
+            if (done === "done") return { done: again.value.response }
             // The guard stopped the gesture before the page saw it: nothing happened, so check again
             record.markNotSent()
             record.observe(done.retry)
@@ -2186,7 +2191,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
             return yield* owner.page.input.withPermit(underPermit())
           })
           const outcome = yield* record.bound(permitted, () => hint())
-          if (outcome === "done") return
+          if (outcome !== "again") return extra.result === undefined ? undefined as A : extra.result(outcome.done)
         }
       })
       return yield* attempts.pipe(Effect.catchTag("Deadline", (failure) => Effect.fail(timedOut(failure.hint))))

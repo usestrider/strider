@@ -633,7 +633,7 @@ interface Locator extends ReadonlyLocator {             // queries, chainers and
   press(key: Keyboard.Key | string, options?: PressOptions | undefined): Effect<void, LocatorError>   // modifiers
   pressSequentially(text: string | Redacted<string>, options?: TypeOptions | undefined): Effect<void, LocatorError>   // delay default 0
   dispatchEvent(type: string, options?: DispatchEventOptions | undefined): Effect<void, LocatorError> // untrusted native event; explicit eventClass (default Event), init by value
-  selectOption(choice: SelectOption | ReadonlyArray<SelectOption>, options?: ActionOptions | undefined): Effect<void, LocatorError>   // { value } | { label } | { index }: exactly one, always stated
+  selectOption(choice: SelectOption | ReadonlyArray<SelectOption>, options?: ActionOptions | undefined): Effect<ReadonlyArray<string>, LocatorError>   // { value } | { label } | { index }: exactly one, always stated; succeeds with the values of the chosen options selected after it, in document order
   setInputFiles(files: FileInput.FileInput | ReadonlyArray<FileInput.FileInput>, options?: ActionOptions | undefined): Effect<void, LocatorError>
   dragTo(target: ReadonlyLocator, options?: DragOptions | undefined): Effect<void, LocatorError>
 }
