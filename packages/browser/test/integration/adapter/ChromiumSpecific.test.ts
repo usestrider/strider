@@ -1481,42 +1481,6 @@ describe("Chromium adapter, CDP only", () => {
         timeout
       )
 
-      it.effect(
-        "leaves a cross-site frame when hovering back into its parent",
-        () =>
-          Effect.gen(function*() {
-            const served = yield* site
-            const backend = BrowserImpl.layer(Effect.fnUntraced(function*(sink) {
-              const { transport } = yield* ChromiumLauncher.launch({ executablePath: executable })
-              return yield* CdpAdapter.connect(transport, { sink, ownership: "launched" })
-            }))
-            yield* Effect.gen(function*() {
-              const page = yield* Browser.newPage()
-              const fixture = (origin: string, html: string) => `${origin}/fixture?html=${encodeURIComponent(html)}`
-              const child = fixture(
-                served.crossSite,
-                `<button onmouseenter="top.postMessage('enter','*')" onmouseleave="top.postMessage('leave','*')">Child</button>`
-              )
-              yield* page.goto(
-                fixture(
-                  served.origin,
-                  `<script>window.events=[];addEventListener('message',e=>events.push(e.data))</script><iframe style="width:300px;height:150px" src="${child}"></iframe><button id="parent">Parent</button>`
-                )
-              )
-              const frame = page.frame(page.locator("iframe"))
-              yield* frame.getByRole("button").hover()
-              yield* page.locator("#parent").hover()
-              yield* Effect.gen(function*() {
-                const events = yield* page.evaluateInMainWorld(() => (window as any).events)
-                if (JSON.stringify(events) !== JSON.stringify(["enter", "leave"])) {
-                  return yield* Effect.fail(`Expected enter, leave; received ${JSON.stringify(events)}`)
-                }
-              }).pipe(Effect.retry({ times: 10, schedule: Schedule.spaced("100 millis") }))
-            }).pipe(Effect.provide(backend))
-          }),
-        timeout
-      )
-
       for (const crossSite of [false, true]) {
         it.effect(
           `keeps click acknowledgments sequential on a page with a ${crossSite ? "cross-site" : "same-site"} frame`,

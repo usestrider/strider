@@ -821,7 +821,7 @@ export const conformance = (backend: Backend) =>
             yield* evaluate(
               world,
               page,
-              "() => new Promise((resolve) => { const done = () => got.includes('A:loaded') && got.includes('B:loaded') && resolve(true); done(); addEventListener('message', done) })"
+              "() => new Promise((resolve) => { const done = () => got.includes('A:loaded') && got.includes('B:loaded') && resolve(got.splice(0)); done(); addEventListener('message', done) })"
             )
             const none = { alt: false, control: false, meta: false, shift: false }
             const move = (x: number, y: number) =>
@@ -851,7 +851,34 @@ export const conformance = (backend: Backend) =>
                 b: yield* evaluate(world, b, "() => document.querySelector('button').matches(':hover')")
               }
             })
-            // Each crossing's events, and the hover it leaves in the parent and in each frame
+            const entry = (yield* SubscriptionRef.get(world.adapter.capabilities)).entries.find((each) =>
+              each.name === "input.frameBoundaries"
+            )
+            assert.isDefined(entry)
+            assert.notStrictEqual(entry.status, "unsupported")
+            // Where the backend can't tell the page's documents of a crossing, the frames still see it, and the
+            // parent sees nothing: its hover stays on its element, as no false leave is sent to it
+            const full = entry.status === "supported"
+            const crossed = (
+              name: string,
+              input: Effect.Effect<void, unknown>,
+              frames: ReadonlyArray<string>,
+              parent: ReadonlyArray<string>,
+              hover: ReadonlyArray<string>,
+              ab: readonly [boolean, boolean]
+            ) => ({
+              name,
+              input,
+              events: full ? [...parent, ...frames] : frames,
+              hover: full ? hover : ["parent"],
+              a: ab[0],
+              b: ab[1]
+            })
+            // Each crossing's events, and the hover it leaves in the parent and in each frame, for input that names
+            // its frame, as a locator's does, and then for input that names none, as the page's mouse sends it
+            const toA = ["parent:mouseout", "parent:mouseleave", "a:mouseover", "a:mouseenter"]
+            const toB = ["a:mouseout", "a:mouseleave", "b:mouseover", "b:mouseenter"]
+            const back = ["b:mouseout", "b:mouseleave", "parent:mouseover", "parent:mouseenter"]
             const crossings = [
               {
                 name: "to the parent's element",
@@ -861,39 +888,43 @@ export const conformance = (backend: Backend) =>
                 a: false,
                 b: false
               },
-              {
-                name: "from the parent's element into frame A",
-                input: world.adapter.dispatchInput(page, [move(150, 30)], into(a, 100)),
-                events: ["parent:mouseout", "parent:mouseleave", "a:mouseover", "a:mouseenter", "A:enter"],
-                hover: ["a"],
-                a: true,
-                b: false
-              },
-              {
-                name: "from frame A into frame B",
-                input: world.adapter.dispatchInput(page, [move(270, 30)], into(b, 220)),
-                events: ["a:mouseout", "a:mouseleave", "A:leave", "b:mouseover", "b:mouseenter", "B:enter"],
-                hover: ["b"],
-                a: false,
-                b: true
-              },
-              {
-                name: "from frame B back to the parent's element",
-                input: world.adapter.dispatchInput(page, [move(40, 30)]),
-                events: ["b:mouseout", "b:mouseleave", "B:leave", "parent:mouseover", "parent:mouseenter"],
-                hover: ["parent"],
-                a: false,
-                b: false
-              }
+              ...([true, false] as const).flatMap((named) => {
+                const how = named ? "naming its frame" : "naming no frame"
+                return [
+                  crossed(
+                    `from the parent's element into frame A, ${how}`,
+                    world.adapter.dispatchInput(page, [move(150, 30)], named ? into(a, 100) : undefined),
+                    ["A:enter"],
+                    toA,
+                    ["a"],
+                    [true, false]
+                  ),
+                  crossed(
+                    `from frame A into frame B, ${how}`,
+                    world.adapter.dispatchInput(page, [move(270, 30)], named ? into(b, 220) : undefined),
+                    ["A:leave", "B:enter"],
+                    toB,
+                    ["b"],
+                    [false, true]
+                  ),
+                  crossed(
+                    `from frame B back to the parent's element, ${how}`,
+                    world.adapter.dispatchInput(page, [move(40, 30)]),
+                    ["B:leave"],
+                    back,
+                    ["parent"],
+                    [false, false]
+                  )
+                ]
+              })
             ]
             const failures: Array<string> = []
             for (const crossing of crossings) {
               yield* crossing.input
               const seen: Array<string> = []
+              // Exactly the crossing's events, so a backend that starts sending the ones it couldn't fails here
               const settled = (current: Effect.Success<typeof state>) =>
-                crossing.events.every((event) =>
-                  seen.includes(event)
-                ) &&
+                JSON.stringify([...seen].sort()) === JSON.stringify([...crossing.events].sort()) &&
                 JSON.stringify(current.hover) === JSON.stringify(crossing.hover) && current.a === crossing.a &&
                 current.b === crossing.b
               let last = yield* state
@@ -1319,8 +1350,7 @@ export const conformance = (backend: Backend) =>
             const fulfilled = yield* evaluate(world, page, "() => fetch('/json').then((r) => r.text())").pipe(
               Effect.forkChild
             )
-            const first = yield* world.facts.when("ObligationOpened", (fact) =>
-              fact.subject._tag === "PausedRequest")
+            const first = yield* world.facts.when("ObligationOpened", (fact) => fact.subject._tag === "PausedRequest")
             assert(first.subject._tag === "PausedRequest")
             assert.strictEqual(first.subject.request.url, `${world.site.origin}/json`)
             yield* world.adapter.resolve(first.obligation, {
@@ -1655,8 +1685,7 @@ export const conformance = (backend: Backend) =>
               page,
               `() => { for (let i = 0; i < 2; i++) { console.log("again"); const end = Date.now() + 5; while (Date.now() < end); } }`
             )
-            const first = yield* world.facts.when("ConsoleMessage", (fact) =>
-              fact.message.text === "again")
+            const first = yield* world.facts.when("ConsoleMessage", (fact) => fact.message.text === "again")
             const second = yield* world.facts.when("ConsoleMessage", (fact) =>
               fact.message.text === "again" && fact !== first)
             assert.isAbove(
@@ -1670,12 +1699,9 @@ export const conformance = (backend: Backend) =>
             const world = yield* setup(backend)
             const { page } = yield* newPage(world)
             yield* goto(world, page, `${world.site.origin}/console-previews`)
-            const texts = (yield* world.facts.when("ConsoleMessage", (fact) =>
-              fact.message.text.startsWith("worker")))
+            const texts = (yield* world.facts.when("ConsoleMessage", (fact) => fact.message.text.startsWith("worker")))
               .message.text
-            const all = world.facts.all("ConsoleMessage").map((fact) =>
-              fact.message.text
-            )
+            const all = world.facts.all("ConsoleMessage").map((fact) => fact.message.text)
             assert.deepStrictEqual(all.slice(0, 2), [
               "[1, 2, 3] {a: 1} Window",
               "{toString: Function, valueOf: Function}"
@@ -1787,9 +1813,7 @@ export const conformance = (backend: Backend) =>
                 const frames = yield* world.adapter.screencast(page)
                 yield* frames.pipe(
                   Stream.take(6),
-                  Stream.runForEach((frame) =>
-                    Effect.sync(() => seen[key]!.push([frame.width, frame.height]))
-                  ),
+                  Stream.runForEach((frame) => Effect.sync(() => seen[key]!.push([frame.width, frame.height]))),
                   Effect.timeout("3 seconds"),
                   Effect.ignore
                 )
@@ -2005,7 +2029,9 @@ export const conformance = (backend: Backend) =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
             const { context, page } = yield* newPage(world)
-            const directory = (yield* Effect.promise(() => import("node:os"))).tmpdir() +
+            const directory = (yield* Effect.promise(() =>
+              import("node:os")
+            )).tmpdir() +
               `/strider-downloads-${process.pid}`
             const declared = world.adapter.declare({ _tag: "UserContext", context }, {
               _tag: "Downloads",
