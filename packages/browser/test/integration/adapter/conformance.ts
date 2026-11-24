@@ -942,6 +942,114 @@ export const conformance = (backend: Backend) =>
                 )
               }
             }
+            // Reuse A as the middle document: the nested child is cross-site relative to A, even though it
+            // shares the top page's origin. Named input supplies every ancestor's viewport origin.
+            const nestedUrl = fixture(world.site.origin, child("C").replaceAll("parent.postMessage", "top.postMessage"))
+            yield* evaluate(
+              world,
+              a,
+              `() => new Promise((resolve) => {
+              for (const type of ['mouseover', 'mouseout', 'mouseenter', 'mouseleave']) {
+                document.addEventListener(type, (e) => {
+                  if (e.target.id === 'c') top.postMessage('c:' + type, '*')
+                }, true)
+              }
+              const frame = document.createElement('iframe'); frame.id = 'c';
+              frame.style = 'position:absolute;left:50px;top:0;width:50px;height:60px;border:0';
+              frame.onload = () => resolve(true); frame.src = ${JSON.stringify(nestedUrl)};
+              document.body.append(frame)
+            })`
+            )
+            const c = yield* frameOf("C")
+            yield* evaluate(
+              world,
+              page,
+              "() => new Promise((resolve) => { const done = () => got.includes('C:loaded') && resolve(got.splice(0)); done(); addEventListener('message', done) })"
+            )
+            const nestedOrigin = { x: 150, y: 0 }
+            const nested = {
+              frame: c,
+              origin: nestedOrigin,
+              path: [{ frame: a, origin: { x: 100, y: 0 } }, { frame: c, origin: nestedOrigin }]
+            }
+            for (const named of [true, false]) {
+              const how = named ? "naming its frame" : "naming no frame"
+              for (
+                const step of [
+                  {
+                    name: "enter middle",
+                    x: 125,
+                    frame: into(a, 100),
+                    events: full ? [...toA, "A:enter"] : ["A:enter"],
+                    a: true,
+                    c: false,
+                    middle: false,
+                    hover: full ? ["a"] : ["parent"]
+                  },
+                  {
+                    name: "enter nested",
+                    x: 175,
+                    frame: nested,
+                    events: full ? ["A:leave", "c:mouseover", "c:mouseenter", "C:enter"] : ["C:enter"],
+                    a: !full,
+                    c: true,
+                    middle: full,
+                    hover: full ? ["a"] : ["parent"]
+                  },
+                  {
+                    name: "leave nested and middle",
+                    x: 40,
+                    frame: undefined,
+                    events: full
+                      ? [
+                        "C:leave",
+                        "c:mouseout",
+                        "c:mouseleave",
+                        "a:mouseout",
+                        "a:mouseleave",
+                        "parent:mouseover",
+                        "parent:mouseenter"
+                      ]
+                      : ["C:leave", "A:leave"],
+                    a: false,
+                    c: false,
+                    middle: false,
+                    hover: ["parent"]
+                  }
+                ]
+              ) {
+                yield* world.adapter.dispatchInput(page, [move(step.x, 30)], named ? step.frame : undefined)
+                const seen: Array<string> = []
+                const snapshot = Effect.gen(function*() {
+                  const current = yield* state
+                  seen.push(...current.got)
+                  return {
+                    events: [...seen].sort(),
+                    hover: current.hover,
+                    a: current.a,
+                    c: yield* evaluate(world, c, "() => document.querySelector('button').matches(':hover')"),
+                    middle: yield* evaluate(world, a, "() => document.querySelector('#c').matches(':hover')")
+                  }
+                })
+                const expected = {
+                  events: [...step.events].sort(),
+                  hover: step.hover,
+                  a: step.a,
+                  c: step.c,
+                  middle: step.middle
+                }
+                let actual = yield* snapshot
+                for (let attempt = 0; attempt < 20 && JSON.stringify(actual) !== JSON.stringify(expected); attempt++) {
+                  yield* Effect.sleep("100 millis")
+                  actual = yield* snapshot
+                }
+                if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+                  failures.push(
+                    `${step.name}, ${how}: expected ${JSON.stringify(expected)}, received ${JSON.stringify(actual)}`
+                  )
+                }
+              }
+            }
             assert.deepStrictEqual(failures, [])
           }), timeout)
 
