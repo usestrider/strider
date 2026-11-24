@@ -1920,67 +1920,143 @@ describe("Chromium public sent-header waiting", () => {
     }).pipe(onTestClock))
 
   // The same order as above: a route's request is the hop its later Network event reports, not one gone
-  it.effect("ends the request a response handler got before the request's Network event", () =>
-    Effect.gen(function*() {
-      const { page, send, barrier } = yield* sentHeaders()
-      const url = "http://127.0.0.1:33957/json"
-      const frameId = "76F3487A52CF4F79FE4AD28961E44D32"
-      const scope = yield* Scope.make()
-      const acquired = yield* Deferred.make<
-        Exit.Exit<
-          Effect.Effect<NetworkRequest.End, NetworkRequest.RequestError | Deadline.Timeout>,
-          NetworkRequest.RequestError
-        >
-      >()
-      const routed = yield* Deferred.make<NetworkRequest.NetworkRequest>()
-      const control = yield* page.control
-      yield* control.route(url, ({ request }) =>
-        Effect.gen(function*() {
-          yield* Deferred.succeed(routed, request)
-          yield* Deferred.succeed(acquired, yield* Effect.exit(Scope.provide(NetworkRequest.end(page, request), scope)))
-          return yield* Route.continue
-        }), { phase: "response" })
-      const headers = { Accept: "*/*" }
-      yield* send({
-        method: "Fetch.requestPaused",
-        params: {
-          requestId: "interception-job-3.0",
-          request: { url, method: "GET", headers, initialPriority: "High", referrerPolicy: "no-referrer" },
-          frameId,
-          resourceType: "XHR",
-          responseStatusCode: 200,
-          responseStatusText: "OK",
-          responseHeaders: [{ name: "content-type", value: "application/json" }],
-          networkId: "26637.3"
+  for (const evict of [false, true]) {
+    it.effect(`ends the request a response handler got before the request's Network event${evict ? " after index eviction" : ""}`, () =>
+      Effect.gen(function*() {
+        const { page, send, barrier } = yield* sentHeaders()
+        const url = "http://127.0.0.1:33957/json"
+        const frameId = "76F3487A52CF4F79FE4AD28961E44D32"
+        const scope = yield* Scope.make()
+        const acquired = yield* Deferred.make<
+          Exit.Exit<
+            Effect.Effect<NetworkRequest.End, NetworkRequest.RequestError | Deadline.Timeout>,
+            NetworkRequest.RequestError
+          >
+        >()
+        const routed = yield* Deferred.make<NetworkRequest.NetworkRequest>()
+        const control = yield* page.control
+        yield* control.route(url, ({ request }) =>
+          Effect.gen(function*() {
+            yield* Deferred.succeed(routed, request)
+            yield* Deferred.succeed(
+              acquired,
+              yield* Effect.exit(Scope.provide(NetworkRequest.end(page, request), scope))
+            )
+            return yield* Route.continue
+          }), { phase: "response" })
+        const headers = { Accept: "*/*" }
+        yield* send({
+          method: "Fetch.requestPaused",
+          params: {
+            requestId: "interception-job-3.0",
+            request: { url, method: "GET", headers, initialPriority: "High", referrerPolicy: "no-referrer" },
+            frameId,
+            resourceType: "XHR",
+            responseStatusCode: 200,
+            responseStatusText: "OK",
+            responseHeaders: [{ name: "content-type", value: "application/json" }],
+            networkId: "26637.3"
+          }
+        } as never)
+        yield* barrier
+        const wait = yield* Deferred.await(acquired).pipe(Effect.flatten)
+        yield* send({
+          method: "Network.requestWillBeSent",
+          params: {
+            requestId: "26637.3",
+            loaderId: "initial",
+            documentURL: "http://127.0.0.1:33957/hello",
+            request: { url, method: "GET", headers, initialPriority: "High", referrerPolicy: "no-referrer" },
+            timestamp: 206.995139,
+            wallTime: 1795492805.070907,
+            initiator: { type: "script" },
+            redirectHasExtraInfo: false,
+            type: "Fetch",
+            frameId
+          }
+        } as never)
+        yield* send({
+          method: "Network.loadingFinished",
+          params: { requestId: "26637.3", timestamp: 207.1, encodedDataLength: 0 }
+        } as never)
+        yield* barrier
+        if (evict) {
+          for (let i = 0; i < Fold.maxHops; i++) {
+            yield* send({ ...captured[0]!, params: { ...captured[0]!.params, requestId: `evict-ended-${i}` } } as never)
+          }
+          yield* barrier
         }
-      } as never)
-      yield* barrier
-      const wait = yield* Deferred.await(acquired).pipe(Effect.flatten)
-      yield* send({
-        method: "Network.requestWillBeSent",
-        params: {
-          requestId: "26637.3",
-          loaderId: "initial",
-          documentURL: "http://127.0.0.1:33957/hello",
-          request: { url, method: "GET", headers, initialPriority: "High", referrerPolicy: "no-referrer" },
-          timestamp: 206.995139,
-          wallTime: 1795492805.070907,
-          initiator: { type: "script" },
-          redirectHasExtraInfo: false,
-          type: "Fetch",
-          frameId
+        const end = yield* wait.pipe(Deadline.within("100 millis"))
+        assert.strictEqual(end._tag, "Finished")
+        assert.strictEqual(end.request.hop, (yield* Deferred.await(routed)).hop)
+        yield* Scope.close(scope, Exit.void)
+      }).pipe(onTestClock))
+  }
+
+  for (const terminal of ["release", "page", "connection"] as const) {
+    it.effect(`settles an issued hop acquisition when its ${terminal} ends`, () =>
+      Effect.gen(function*() {
+        const { browser, page, send, barrier } = yield* sentHeaders()
+        const url = "http://127.0.0.1:33957/json"
+        const frameId = "76F3487A52CF4F79FE4AD28961E44D32"
+        const scope = yield* Scope.make()
+        const acquired = yield* Deferred.make<
+          Exit.Exit<
+            Effect.Effect<NetworkRequest.End, NetworkRequest.RequestError | Deadline.Timeout>,
+            NetworkRequest.RequestError
+          >
+        >()
+        const control = yield* page.control
+        yield* control.route(url, ({ request }) =>
+          Effect.gen(function*() {
+            yield* Deferred.succeed(
+              acquired,
+              yield* Effect.exit(Scope.provide(NetworkRequest.end(page, request), scope))
+            )
+            return yield* Route.continue
+          }), { phase: "response" })
+        const headers = { Accept: "*/*" }
+        yield* send({
+          method: "Fetch.requestPaused",
+          params: {
+            requestId: "interception-job-3.0",
+            request: { url, method: "GET", headers, initialPriority: "High", referrerPolicy: "no-referrer" },
+            frameId,
+            resourceType: "XHR",
+            responseStatusCode: 200,
+            responseStatusText: "OK",
+            responseHeaders: [{ name: "content-type", value: "application/json" }],
+            networkId: "26637.3"
+          }
+        } as never)
+        yield* barrier
+        const wait = yield* Deferred.await(acquired).pipe(Effect.flatten)
+        const fiber = yield* Effect.forkScoped(Effect.flip(wait.pipe(Deadline.within("100 millis"))))
+        yield* TestClock.adjust("0 millis")
+        if (terminal === "release") yield* Scope.close(scope, Exit.void)
+        else if (terminal === "connection") {
+          yield* browser.lose("test disconnect")
+          yield* page.closed
+        } else {
+          yield* browser.receive({
+            method: "Target.detachedFromTarget",
+            params: { sessionId: "S1", targetId: frameId }
+          })
+          yield* page.closed
         }
-      } as never)
-      yield* send({
-        method: "Network.loadingFinished",
-        params: { requestId: "26637.3", timestamp: 207.1, encodedDataLength: 0 }
-      } as never)
-      yield* barrier
-      const end = yield* wait.pipe(Deadline.within("100 millis"))
-      assert.strictEqual(end._tag, "Finished")
-      assert.strictEqual(end.request.hop, (yield* Deferred.await(routed)).hop)
-      yield* Scope.close(scope, Exit.void)
-    }).pipe(onTestClock))
+        yield* TestClock.adjust("0 millis")
+        assert.isDefined(fiber.pollUnsafe(), "pending acquisition must settle without waiting for its deadline")
+        const error = yield* Fiber.join(fiber)
+        assert.strictEqual(error._tag, "RequestError")
+        if (error._tag === "RequestError") {
+          assert.strictEqual(error.reason._tag, "ResponseUnavailable")
+          if (error.reason._tag === "ResponseUnavailable") {
+            assert.strictEqual(error.reason.why, terminal === "release" ? "released" : "targetClosed")
+          }
+        }
+        yield* Scope.close(scope, Exit.void)
+      }).pipe(onTestClock))
+  }
 
   for (const terminal of ["fails", "is canceled", "loses its page", "disconnects"] as const) {
     it.effect(`settles without advancing the deadline when a request ${terminal}`, () =>
