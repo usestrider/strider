@@ -4,7 +4,9 @@
  *
  * - **Where.** The element is appended to the document's `<head>`, or to its root when it has none, from the
  *   document's main world, so it runs among the page's own scripts and the page's Content Security Policy applies
- *   to it.
+ *   to it. A document `goto` has returned into before its parser
+ *   made a root element, while the page's HTML is still arriving, has neither: the call waits for the parser to
+ *   add the root, until the operation's deadline, and appends the element there.
  * - **What the call waits for.** A script from a URL: its `load` event. A classic inline script runs inside the
  *   call. An inline module: until the browser has accepted it, not until it has run, since its top-level `await`
  *   can hold it; wait on something it sets. A `type` that isn't JavaScript or a module, such as `importmap` or a

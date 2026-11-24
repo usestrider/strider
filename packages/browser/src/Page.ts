@@ -1279,8 +1279,9 @@ export interface Page extends ReadonlyPage {
    * **Details**
    *
    * The element is added from the page's main world, so the page's Content Security Policy applies: a script it
-   * refuses fails with `RefusedByPolicy`, and a URL that doesn't load with `ResourceFailed`. See `ScriptTag` for
-   * what the call waits for. The handle is the element, released with the scope.
+   * refuses fails with `RefusedByPolicy`, and a URL that doesn't load with `ResourceFailed`. Called right after
+   * `goto`, before the page's HTML has given the document a root element, it waits for the parser to add one. See
+   * `ScriptTag` for what the call waits for. The handle is the element, released with the scope.
    *
    * **Example** (Loading a library from a URL)
    *
@@ -1309,9 +1310,10 @@ export interface Page extends ReadonlyPage {
    * **Details**
    *
    * The element is added from the page's main world, so the page's Content Security Policy applies: a stylesheet
-   * it refuses fails with `RefusedByPolicy`, and a URL that doesn't load with `ResourceFailed`. See `StyleTag` for
-   * the forms and what the call waits for. The handle is the element, released with the scope; the element stays in
-   * the document.
+   * it refuses fails with `RefusedByPolicy`, and a URL that doesn't load with `ResourceFailed`. Called right after
+   * `goto`, before the page's HTML has given the document a root element, it waits for the parser to add one. See
+   * `StyleTag` for the forms and what the call waits for. The handle is the element, released with the scope; the
+   * element stays in the document.
    *
    * **Example** (Hiding a cookie banner before a screenshot)
    *

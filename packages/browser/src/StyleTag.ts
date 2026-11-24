@@ -3,7 +3,9 @@
  * or `frameLocator.addStyleTag`.
  *
  * - **Where.** The element is appended to the document's `<head>`, or to its root when it has none, from the
- *   document's main world, so the page's Content Security Policy applies to it.
+ *   document's main world, so the page's Content Security Policy applies to it. A document `goto` has
+ *   returned into before its parser made a root element, while the page's HTML is still arriving, has neither: the
+ *   call waits for the parser to add the root, until the operation's deadline, and appends the element there.
  * - **What the call waits for.** A `<link rel="stylesheet">` from a URL: its `load` event. A `<style>` from source
  *   or a file: its `load` event too, which comes once its rules apply.
  * - **How it fails.** A URL that doesn't load fails with `ResourceFailed`; a stylesheet the page's policy refuses,

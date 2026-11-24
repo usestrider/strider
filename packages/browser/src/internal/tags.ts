@@ -25,6 +25,11 @@
  * - **A module** is accepted or refused in the append as a classic script is, and the call returns then: without
  *   changing its text nothing tells when it has run, since it has no `load` event and top-level `await` can hold
  *   it.
+ * - **Where** is the document's `<head>`, or its root element when it has none. A document the browser has committed
+ *   before its parser made a root element, as one `goto` returns into while the response's body is still coming,
+ *   has neither: the element waits, in the page, for the parser to add the root, since an element appended to the
+ *   Document node would become its root and leave the parser no `<html>` or `<body>` to build. The operation's
+ *   deadline bounds the wait.
  * - **The outcome** is the element, or a string naming a failure: a primitive, so it leaves no remote object.
  * - **Report-only policies** dispatch violations too, with the disposition `report`; they refuse nothing.
  */
@@ -195,8 +200,20 @@ function insertElement(spec: Spec): Promise<Element | string> {
     }
     if (spec.url !== null) element.setAttribute(spec.urlAttribute, spec.url)
     if (spec.text !== null) element.textContent = spec.text
-    ;(document.head ?? document.documentElement ?? document).append(element)
-    if (!spec.settles) settle(element)
+    const append = (parent: Element) => {
+      parent.append(element)
+      if (!spec.settles) settle(element)
+    }
+    const parent = document.head ?? document.documentElement
+    if (parent !== null) return append(parent)
+    // Committed before the parser made a root element: the element waits for it rather than becoming the root
+    const observer = new MutationObserver(() => {
+      const parent = document.head ?? document.documentElement
+      if (parent === null) return
+      observer.disconnect()
+      append(parent)
+    })
+    observer.observe(document, { childList: true })
   })
 }
 
@@ -208,8 +225,21 @@ interface Inline {
   readonly stop: () => void
 }
 
-/** Runs in the document's main world: appends inline JavaScript, which runs now if the policy allows it. */
-function appendInline(spec: Spec): Inline {
+/**
+ * Runs in the document's main world: appends inline JavaScript, which runs in the append if the policy allows it,
+ * once the document has a root element.
+ */
+async function appendInline(spec: Spec): Promise<Inline> {
+  // Committed before the parser made a root element: the element waits for it rather than becoming the root
+  const parent = document.head ?? document.documentElement ?? await new Promise<Element>((resolve) => {
+    const observer = new MutationObserver(() => {
+      const parent = document.head ?? document.documentElement
+      if (parent === null) return
+      observer.disconnect()
+      resolve(parent)
+    })
+    observer.observe(document, { childList: true })
+  })
   const element = document.createElement(spec.tag)
   for (const [name, value] of spec.attributes) element.setAttribute(name, value)
   let refuse = (_: string) => {}
@@ -231,7 +261,7 @@ function appendInline(spec: Spec): Inline {
   }
   document.addEventListener("securitypolicyviolation", listener, true)
   element.textContent = spec.text
-  ;(document.head ?? document.documentElement ?? document).append(element)
+  parent.append(element)
   return state
 }
 
