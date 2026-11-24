@@ -64,42 +64,6 @@ const policies = () => {
   })
 }
 
-const sh = (command: string) => {
-  try {
-    return execSync(command, { encoding: "utf8", shell: process.platform === "darwin" ? "/bin/bash" : "sh" }).trim().split("\n")
-  } catch (error) {
-    return [String(error)]
-  }
-}
-
-// A native sleep's lateness, in ms, at 30, 70 and 150 ms, five each, under a task policy prefix.
-const sleeps = (prefix: string) =>
-  sh(
-    `${prefix} perl -MTime::HiRes=time,sleep -e 'for $d (30,70,150) { @l = (); for (1..5) { $t = time; sleep($d/1000); push @l, int((time-$t)*1000-$d) } print "$d: @l\\n" }'`
-  )
-
-layer(services, { excludeTestServices: true, timeout: 120_000 })((it) => {
-  it.effect("host: timer lateness of the test process and native sleeps under task policies", () =>
-    Effect.gen(function*() {
-      const late: Record<number, Array<number>> = {}
-      for (const delay of [30, 70, 150]) {
-        late[delay] = []
-        for (let i = 0; i < 10; i++) {
-          const set = performance.now()
-          yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, delay)))
-          late[delay].push(Math.round(performance.now() - set - delay))
-        }
-      }
-      yield* log("host", "node-setTimeout", late)
-      yield* log("host", "ancestors", sh(`p=${process.pid}; while [ "$p" -gt 1 ]; do ps -o pid=,ppid=,pri=,nice=,comm= -p $p; p=$(ps -o ppid= -p $p | tr -d ' '); done`))
-      if (process.platform !== "darwin") return
-      yield* log("host", "sysctl", sh("sysctl -a 2>/dev/null | grep -iE 'coalesc|timer_' | head -40"))
-      for (const prefix of ["", "taskpolicy -c utility", "taskpolicy -c background", "taskpolicy -b", "taskpolicy -l 0 -t 0"]) {
-        yield* log("host", `sleep[${prefix || "inherited"}]`, sleeps(prefix))
-      }
-    }), 120_000)
-})
-
 for (const config of configs) {
   layer(config.layer.pipe(Layer.provide(services)), { excludeTestServices: true, timeout: 120_000 })((it) => {
     it.effect(
@@ -122,10 +86,6 @@ for (const config of configs) {
           )
           yield* log(config.name, "processes", processes())
           yield* log(config.name, "policies", policies())
-          if (process.platform === "darwin") {
-            const content = processes().find((row) => /plugin-container|Renderer/.test(row))?.trim().split(/\s+/)[0]
-            yield* log(config.name, "content-threads", sh(`ps -M -p ${content} | head -40`))
-          }
           for (const frames of [false, true]) {
             const marks = yield* page.evaluateInMainWorld(async (withFrames: boolean) => {
               const frameMarks: Array<[number, number]> = []
