@@ -42,7 +42,7 @@ const site = Effect.acquireRelease(
 
 const certificateTitle = Effect.fnUntraced(function*(context: UserContext.UserContext, url: string) {
   const page = yield* context.newPage
-  const loaded = yield* page.goto(url).pipe(Effect.exit)
+  const loaded = yield* page.goto(url, { waitUntil: "load" }).pipe(Effect.exit)
   if (Exit.isFailure(loaded)) return undefined
   return yield* page.evaluateInMainWorld(() => document.title)
 })

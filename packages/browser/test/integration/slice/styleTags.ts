@@ -26,7 +26,7 @@ export const styleTags = (name: string, backend: Layer.Layer<Browser.Browser, un
         Effect.gen(function*() {
           const served = yield* site
           const page = yield* newPage
-          yield* page.goto(`${served.origin}/fixture?html=x`)
+          yield* page.goto(`${served.origin}/fixture?html=x`, { waitUntil: "load" })
           // The handle is released with its scope, and the stylesheet stays in the document
           const element = yield* Effect.gen(function*() {
             const element = yield* page.addStyleTag({ source: "body { color: rgb(1, 2, 3) }" })
@@ -44,7 +44,7 @@ export const styleTags = (name: string, backend: Layer.Layer<Browser.Browser, un
         Effect.gen(function*() {
           const served = yield* site
           const page = yield* newPage
-          yield* page.goto(`${served.origin}/fixture?html=x`)
+          yield* page.goto(`${served.origin}/fixture?html=x`, { waitUntil: "load" })
           const element = yield* page.addStyleTag({ url: stylesheet(served.origin, "body { color: rgb(4, 5, 6) }") })
           assert.deepStrictEqual(
             yield* element.evaluate((link) => [link.tagName, link.getAttribute("rel")]),
@@ -63,7 +63,7 @@ export const styleTags = (name: string, backend: Layer.Layer<Browser.Browser, un
           )
           const file = nodePath.join(directory, "injected.css")
           yield* Effect.promise(() => fs.writeFile(file, "body { color: rgb(7, 8, 9) }"))
-          yield* page.goto(`${served.origin}/fixture?html=x`)
+          yield* page.goto(`${served.origin}/fixture?html=x`, { waitUntil: "load" })
           const element = yield* page.addStyleTag({ path: file })
           assert.strictEqual(yield* page.evaluateInMainWorld(bodyColor), "rgb(7, 8, 9)")
           assert.isTrue(
@@ -77,7 +77,7 @@ export const styleTags = (name: string, backend: Layer.Layer<Browser.Browser, un
         Effect.gen(function*() {
           const served = yield* site
           const page = yield* newPage
-          yield* page.goto(`${served.origin}/fixture?html=x`)
+          yield* page.goto(`${served.origin}/fixture?html=x`, { waitUntil: "load" })
           const url = `${served.origin}/missing`
           const error = yield* page.addStyleTag({ url }).pipe(Effect.flip)
           assert(error._tag === "PageError")
@@ -89,7 +89,7 @@ export const styleTags = (name: string, backend: Layer.Layer<Browser.Browser, un
         Effect.gen(function*() {
           const served = yield* site
           const page = yield* newPage
-          yield* page.goto(`${served.origin}/style-csp?html=x`)
+          yield* page.goto(`${served.origin}/style-csp?html=x`, { waitUntil: "load" })
           const before = yield* page.evaluateInMainWorld(bodyColor)
           // The same refusal twice in one document, and a URL whose fragment the reported URL omits
           const url = `${stylesheet(served.crossSite, "body { color: rgb(4, 5, 6) }")}#theme`
@@ -108,11 +108,14 @@ export const styleTags = (name: string, backend: Layer.Layer<Browser.Browser, un
         Effect.gen(function*() {
           const served = yield* site
           const page = yield* newPage
-          yield* page.goto(`${served.origin}/fixture?html=${
-            encodeURIComponent(
-              `<meta http-equiv="Content-Security-Policy" content="style-src ${served.origin}/style"><body>x</body>`
-            )
-          }`)
+          yield* page.goto(
+            `${served.origin}/fixture?html=${
+              encodeURIComponent(
+                `<meta http-equiv="Content-Security-Policy" content="style-src ${served.origin}/style"><body>x</body>`
+              )
+            }`,
+            { waitUntil: "load" }
+          )
           yield* page.evaluateInMainWorld((url: string) => {
             const observer = new MutationObserver((records) => {
               if (
@@ -134,7 +137,7 @@ export const styleTags = (name: string, backend: Layer.Layer<Browser.Browser, un
         Effect.gen(function*() {
           const served = yield* site
           const page = yield* newPage
-          yield* page.goto(`${served.origin}/style-report-only`)
+          yield* page.goto(`${served.origin}/style-report-only`, { waitUntil: "load" })
           yield* page.addStyleTag({ source: "body { color: rgb(41, 42, 43) }" })
           assert.strictEqual(yield* page.evaluateInMainWorld(bodyColor), "rgb(41, 42, 43)")
         }).pipe(Effect.scoped))
@@ -145,11 +148,14 @@ export const styleTags = (name: string, backend: Layer.Layer<Browser.Browser, un
           const page = yield* newPage
           const source = "body { color: rgb(51, 52, 53) }"
           const hash = createHash("sha256").update(source).digest("base64")
-          yield* page.goto(`${served.origin}/fixture?html=${
-            encodeURIComponent(
-              `<meta http-equiv="Content-Security-Policy" content="style-src 'sha256-${hash}'; script-src 'none'"><body>x</body>`
-            )
-          }`)
+          yield* page.goto(
+            `${served.origin}/fixture?html=${
+              encodeURIComponent(
+                `<meta http-equiv="Content-Security-Policy" content="style-src 'sha256-${hash}'; script-src 'none'"><body>x</body>`
+              )
+            }`,
+            { waitUntil: "load" }
+          )
           yield* page.evaluateInMainWorld(() => {
             const observer = new MutationObserver(() => {
               observer.disconnect()
@@ -181,7 +187,8 @@ export const styleTags = (name: string, backend: Layer.Layer<Browser.Browser, un
           yield* page.goto(
             `${served.origin}/fixture?html=${
               encodeURIComponent(`<iframe src="${served.crossSite}/fixture?html=frame"></iframe>`)
-            }`
+            }`,
+            { waitUntil: "load" }
           )
           const before = yield* page.evaluateInMainWorld(bodyColor)
           const frame = page.frame(page.locator("iframe"))

@@ -24,7 +24,7 @@ const red = Effect.fnUntraced(function*(page: Page.Page) {
 const opened = Effect.fnUntraced(function*(html: string) {
   const served = yield* site
   const page = yield* newPage
-  yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`)
+  yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(html)}`, { waitUntil: "load" })
   return page
 })
 
