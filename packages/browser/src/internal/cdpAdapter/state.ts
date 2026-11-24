@@ -568,6 +568,19 @@ export const frameOf = (state: State, frameId: string | undefined) =>
 /** Where a page sits, for the declarations registry. */
 export const placement = (page: PageEntry): Declarations.Placement => ({ page: page.id, context: page.context.id })
 
+/**
+ * Where a target's declarations are read: its page's, or for a service or shared worker, which has no page, its
+ * context's. A worker of no context Strider knows has none, and takes no declaration.
+ */
+export const placementOf = (state: State, target: TargetEntry): Declarations.Placement | undefined => {
+  if (target.page !== undefined) return placement(target.page)
+  const context = state.workerContexts.get(target)
+  return context === undefined ? undefined : { context: context.id }
+}
+
+/** A service or shared worker: a worker with no page, whose declarations are its context's. */
+export const pageless = (target: TargetEntry) => target.kind === "service_worker" || target.kind === "shared_worker"
+
 /** Where a context's downloads go, if a declaration allows them to a directory. */
 export const downloadDirectory = (state: State, context: UserContext.Id) => {
   const behavior = state.registry.downloads(context)

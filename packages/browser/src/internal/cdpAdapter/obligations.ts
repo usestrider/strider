@@ -24,7 +24,7 @@ import {
   type Event,
   frameOf,
   type ObligationEntry,
-  placement,
+  placementOf,
   type RequestEntry,
   requestKey,
   type State,
@@ -48,6 +48,8 @@ const pausedRequest = (
       ? { _tag: "Document", navigable: entry.frame.id, navigation: Option.fromUndefinedOr(entry.navigation?.id) }
       : target.page !== undefined
       ? { _tag: "Document", navigable: target.page.id, navigation: Option.none() }
+      : target.realm !== undefined
+      ? { _tag: "Worker", realm: target.realm.id }
       : { _tag: "Unattributed" },
     at: Adapter.now()
   })
@@ -104,7 +106,8 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       }
       // Authentication intercepts every request so the browser asks about its challenges; a request no intercept
       // of this phase wants goes on at once
-      const intercepts = target.page === undefined ? undefined : state.registry.intercepts(placement(target.page))
+      const where = placementOf(state, target)
+      const intercepts = where === undefined ? undefined : state.registry.intercepts(where)
       const wanted = intercepts === undefined ||
         (phase === "request" ? intercepts.request : intercepts.response).some((pattern) =>
           Declarations.glob(pattern).test(params.request.url)
@@ -189,7 +192,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         return
       }
       if (params.authChallenge.source === "Server" && proxy?.credentials !== undefined) {
-        const where = target.page === undefined ? undefined : placement(target.page)
+        const where = placementOf(state, target)
         const intercepts = where === undefined ? undefined : state.registry.intercepts(where)
         const covered =
           (where !== undefined && params.resourceType === "Document" && state.registry.challenges(where)) ||
