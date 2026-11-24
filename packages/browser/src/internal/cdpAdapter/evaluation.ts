@@ -37,6 +37,7 @@ import {
   frameById,
   frameOf,
   placement,
+  placementOf,
   realmEnd,
   realmOf,
   type State
@@ -295,9 +296,10 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       const realm = state.realmsByContext.get(contextKey(target, params.executionContextId as number))
       if (realm === undefined) return
       const top = params.stackTrace?.callFrames[0]
-      const page = realm.frame?.page ?? realm.target.page
-      // Only where a subscriber asked for them does a message keep its arguments, each object as a handle
-      const args = page !== undefined && state.registry.consoleArguments(placement(page))
+      // Only where a subscriber asked for them does a message keep its arguments, each object as a handle: a
+      // service or shared worker's messages where its context's subscriber did
+      const where = realm.frame !== undefined ? placement(realm.frame.page) : placementOf(state, realm.target)
+      const args = where !== undefined && state.registry.consoleArguments(where)
         ? {
           values: params.args.map((object): Adapter.RemoteValue => {
             const value = toRemoteValue(shallow(object), (loaderId) => state.documentsByLoader.get(loaderId)?.id)

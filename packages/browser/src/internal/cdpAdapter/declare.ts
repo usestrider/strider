@@ -61,26 +61,28 @@ type Send = <M extends string, P, A>(command: Protocol.Command<M, P, A>) => Effe
 const nothing = "strider-intercepts-nothing:"
 
 // Requests fail offline, and `navigator.onLine` says so. Throttling is the same command, so the two are applied
-// together
-const network = (
+// together. The two commands, one each, so a worker's gate can write both before its resume
+const networkCommands = (
   session: ProtocolClient.Session,
   offline: boolean,
   conditions: Extract<Adapter.Override, { _tag: "NetworkConditions" }> | undefined,
   on: Send = (command) => command.pipe(Protocol.on(session), Effect.asVoid)
-) => {
+): ReadonlyArray<Effect.Effect<void, Protocol.ProtocolError>> => {
   const state = {
     offline,
     latency: conditions?.latency ?? 0,
     downloadThroughput: conditions?.download ?? -1,
     uploadThroughput: conditions?.upload ?? -1
   }
-  return Effect.all([
+  return [
     Network.emulateNetworkConditionsByRule({ matchedNetworkConditions: [{ urlPattern: "", ...state }] }).pipe(
       on
     ),
     Network.overrideNetworkState(state).pipe(on)
-  ], { discard: true })
+  ]
 }
+
+const network = (...args: Parameters<typeof networkCommands>) => Effect.all(networkCommands(...args), { discard: true })
 
 const dimensions = Effect.fnUntraced(function*(target: TargetEntry) {
   const on = Protocol.on(target.session)
@@ -666,8 +668,9 @@ const workerOverride = (
 /**
  * What a service or shared worker gets before it resumes, from its context's declarations: its routes, network
  * emulation, extra headers, user agent, cache setting and body collection, so its first request, a script import
- * included, is made under them. The commands, one each, go with its other domains' and its resume, in order before
- * any reply (`workerGate`).
+ * included, is made under them. Each is one command, returned apart so the gate writes them all, with its other
+ * domains' and its resume, in order before any reply (`workerGate`): nothing here awaits the worker, which answers
+ * only once it runs.
  */
 export const configureWorker = (state: State, target: TargetEntry, on: Send): ReadonlyArray<
   Effect.Effect<void, Protocol.ProtocolError>
@@ -678,11 +681,20 @@ export const configureWorker = (state: State, target: TargetEntry, on: Send): Re
   const overrides = state.registry.overrides(where)
   const kinds = new Set(overrides.keys())
   kinds.add("CacheDisabled")
-  // Each pair is sent as one command
+  // The user agent and locale are one command, and offline and throttling one pair of commands
   if (kinds.has("Locale")) kinds.delete("UserAgent")
-  if (kinds.has("NetworkConditions")) kinds.delete("Offline")
+  const offline = overrides.get("Offline")
+  const conditions = overrides.get("NetworkConditions")
+  kinds.delete("Offline")
+  kinds.delete("NetworkConditions")
   return [
     writeIntercepts(state, target, where, context, on),
+    ...(offline === undefined && conditions === undefined ? [] : networkCommands(
+      target.session,
+      offline?._tag === "Offline" && offline.offline,
+      conditions?._tag === "NetworkConditions" ? conditions : undefined,
+      on
+    )),
     ...[...kinds].map((kind) => workerOverride(state, target, kind, overrides, on)),
     keepBodies(state, target, where, on)
   ]

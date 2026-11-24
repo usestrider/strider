@@ -307,7 +307,10 @@ export interface Emulation {
   readonly media?: Media | undefined
   /**
    * Network conditions, or `"offline"` to fail every request. A context's conditions, like its `userAgent` and
-   * `locale`, reach its service and shared workers' requests on Chromium only (`network.serviceWorkers`).
+   * `locale`, reach its service and shared workers' requests on Chromium only (`network.serviceWorkers`). Unset,
+   * requests use the browser's own network, online and unthrottled.
+   *
+   * @default undefined
    */
   readonly network?: NetworkConditions | "offline" | undefined
   /**
