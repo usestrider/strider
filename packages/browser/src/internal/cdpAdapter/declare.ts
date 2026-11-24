@@ -31,7 +31,15 @@ import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
 import * as HostBridge from "./hostBridge.ts"
 import { contextLock, downloadDirectory, forgetRetiredFrames } from "./state.ts"
-import { type ContextEntry, type PageEntry, placement, type State, type TargetEntry } from "./state.ts"
+import {
+  type ContextEntry,
+  type PageEntry,
+  pageless,
+  placement,
+  placementOf,
+  type State,
+  type TargetEntry
+} from "./state.ts"
 import { installHostBridgeGates } from "./targets.ts"
 
 /** Initial commands are written before resume; their replies and state updates finish in the gate's scope. */
@@ -53,26 +61,28 @@ type Send = <M extends string, P, A>(command: Protocol.Command<M, P, A>) => Effe
 const nothing = "strider-intercepts-nothing:"
 
 // Requests fail offline, and `navigator.onLine` says so. Throttling is the same command, so the two are applied
-// together
-const network = (
+// together. The two commands, one each, so a worker's gate can write both before its resume
+const networkCommands = (
   session: ProtocolClient.Session,
   offline: boolean,
   conditions: Extract<Adapter.Override, { _tag: "NetworkConditions" }> | undefined,
   on: Send = (command) => command.pipe(Protocol.on(session), Effect.asVoid)
-) => {
+): ReadonlyArray<Effect.Effect<void, Protocol.ProtocolError>> => {
   const state = {
     offline,
     latency: conditions?.latency ?? 0,
     downloadThroughput: conditions?.download ?? -1,
     uploadThroughput: conditions?.upload ?? -1
   }
-  return Effect.all([
+  return [
     Network.emulateNetworkConditionsByRule({ matchedNetworkConditions: [{ urlPattern: "", ...state }] }).pipe(
       on
     ),
     Network.overrideNetworkState(state).pipe(on)
-  ], { discard: true })
+  ]
 }
+
+const network = (...args: Parameters<typeof networkCommands>) => Effect.all(networkCommands(...args), { discard: true })
 
 const dimensions = Effect.fnUntraced(function*(target: TargetEntry) {
   const on = Protocol.on(target.session)
@@ -289,8 +299,9 @@ const cacheDisabled = (
 ) => {
   const override = effective.get("CacheDisabled")
   if (override?._tag === "CacheDisabled" && override.disabled) return true
-  if (target.page === undefined) return false
-  const intercepts = state.registry.intercepts(placement(target.page))
+  const where = placementOf(state, target)
+  if (where === undefined) return false
+  const intercepts = state.registry.intercepts(where)
   return intercepts.request.length > 0 || intercepts.response.length > 0
 }
 
@@ -328,7 +339,7 @@ const applyCache = (state: State, target: TargetEntry) => {
   return withOverrides(
     target,
     Effect.suspend(() => {
-      const wanted = cacheDisabled(state, target, state.registry.overrides(placement(target.page!)))
+      const wanted = cacheDisabled(state, target, state.registry.overrides(placementOf(state, target)!))
       // A declaration that wants the value an unconfirmed command sent waits for that command's reply too
       const outstanding = target.cacheConfirmation
       if (outstanding !== undefined && outstanding.disabled === wanted && target.cacheDisabled === wanted) {
@@ -470,15 +481,23 @@ const writeScripts = Effect.fnUntraced(function*(state: State, target: TargetEnt
   }
 })
 
-const applyIntercepts = Effect.fnUntraced(function*(
+const applyIntercepts = (
   state: State,
   target: TargetEntry,
   page: PageEntry,
   on: Send = (command) => command.pipe(Protocol.on(target.session), Effect.asVoid)
+) => writeIntercepts(state, target, placement(page), page.context, on)
+
+const writeIntercepts = Effect.fnUntraced(function*(
+  state: State,
+  target: TargetEntry,
+  where: Declarations.Placement,
+  context: ContextEntry,
+  on: Send
 ) {
-  const intercepts = state.registry.intercepts(placement(page))
-  const proxyAuth = page.context.proxy?.credentials !== undefined
-  const challenges = state.registry.challenges(placement(page))
+  const intercepts = state.registry.intercepts(where)
+  const proxyAuth = context.proxy?.credentials !== undefined
+  const challenges = state.registry.challenges(where)
   const key = JSON.stringify({ intercepts, challenges, proxyAuth })
   if (key === target.intercepts) return
   // A challenge is asked about only for a request intercepted as it starts: an auth pattern pauses there too, and
@@ -513,10 +532,10 @@ const applyIntercepts = Effect.fnUntraced(function*(
 const keepBodies = (
   state: State,
   target: TargetEntry,
-  page: PageEntry,
+  where: Declarations.Placement,
   on: Send = (command) => command.pipe(Protocol.on(target.session), Effect.asVoid)
 ) => {
-  const limit = state.registry.bodyLimit(placement(page), "response")
+  const limit = state.registry.bodyLimit(where, "response")
   return Option.isNone(limit)
     ? Effect.void
     : Network.configureDurableMessages({
@@ -605,11 +624,81 @@ const popupBaseline = Effect.fnUntraced(function*(
  * domains: by the rule a page's follows.
  */
 export const workerCache = (state: State, target: TargetEntry, on: Send) =>
-  Effect.suspend(() =>
-    target.page === undefined
+  Effect.suspend(() => {
+    const where = placementOf(state, target)
+    return where === undefined
       ? Effect.void
-      : sendCache(target, cacheDisabled(state, target, state.registry.overrides(placement(target.page))), on)
-  )
+      : sendCache(target, cacheDisabled(state, target, state.registry.overrides(where)), on)
+  })
+
+/**
+ * The overrides a service or shared worker takes from its context: those of its network, which it makes requests
+ * on. Its user agent and languages go through the Network domain, as a worker has no Emulation.
+ */
+const workerOverride = (
+  state: State,
+  target: TargetEntry,
+  kind: Adapter.Override["_tag"],
+  effective: ReadonlyMap<Adapter.Override["_tag"], Adapter.Override>,
+  on: Send = (command) => command.pipe(Protocol.on(target.session), Effect.asVoid)
+): Effect.Effect<void, Protocol.ProtocolError> => {
+  switch (kind) {
+    case "Offline":
+    case "NetworkConditions":
+    case "ExtraHeaders":
+    case "CacheDisabled":
+      return applyOverride(state, target, kind, effective, on)
+    case "UserAgent":
+    case "Locale": {
+      const userAgent = effective.get("UserAgent")
+      const locale = effective.get("Locale")
+      return Network.setUserAgentOverride({
+        userAgent: userAgent?._tag === "UserAgent" ? userAgent.userAgent : state.defaultUserAgent,
+        ...(userAgent?._tag === "UserAgent" && Option.isSome(userAgent.platform)
+          ? { platform: userAgent.platform.value }
+          : {}),
+        ...(locale?._tag === "Locale" ? { acceptLanguage: locale.locale } : {})
+      }).pipe(on)
+    }
+    default:
+      return Effect.void
+  }
+}
+
+/**
+ * What a service or shared worker gets before it resumes, from its context's declarations: its routes, network
+ * emulation, extra headers, user agent, cache setting and body collection, so its first request, a script import
+ * included, is made under them. Each is one command, returned apart so the gate writes them all, with its other
+ * domains' and its resume, in order before any reply (`workerGate`): nothing here awaits the worker, which answers
+ * only once it runs.
+ */
+export const configureWorker = (state: State, target: TargetEntry, on: Send): ReadonlyArray<
+  Effect.Effect<void, Protocol.ProtocolError>
+> => {
+  const where = placementOf(state, target)
+  const context = state.workerContexts.get(target)
+  if (where === undefined || context === undefined) return []
+  const overrides = state.registry.overrides(where)
+  const kinds = new Set(overrides.keys())
+  kinds.add("CacheDisabled")
+  // The user agent and locale are one command, and offline and throttling one pair of commands
+  if (kinds.has("Locale")) kinds.delete("UserAgent")
+  const offline = overrides.get("Offline")
+  const conditions = overrides.get("NetworkConditions")
+  kinds.delete("Offline")
+  kinds.delete("NetworkConditions")
+  return [
+    writeIntercepts(state, target, where, context, on),
+    ...(offline === undefined && conditions === undefined ? [] : networkCommands(
+      target.session,
+      offline?._tag === "Offline" && offline.offline,
+      conditions?._tag === "NetworkConditions" ? conditions : undefined,
+      on
+    )),
+    ...[...kinds].map((kind) => workerOverride(state, target, kind, overrides, on)),
+    keepBodies(state, target, where, on)
+  ]
+}
 
 export const configureTarget = Effect.fnUntraced(
   function*(state: State, target: TargetEntry, page: PageEntry, setup?: Setup) {
@@ -698,7 +787,7 @@ export const configureTarget = Effect.fnUntraced(
       yield* writeScripts(state, target, page, setup)
     }
     yield* applyIntercepts(state, target, page, setup?.send)
-    yield* keepBodies(state, target, page, setup?.send)
+    yield* keepBodies(state, target, placement(page), setup?.send)
     if (state.registry.fileChooser(placement(page)) && target.kind === "page") {
       const command = Page.setInterceptFileChooserDialog({ enabled: true })
       yield* setup === undefined ? command.pipe(Protocol.on(target.session)) : setup.send(command)
@@ -707,13 +796,15 @@ export const configureTarget = Effect.fnUntraced(
 )
 
 const targetsInScope = (state: State, scope: Adapter.DeclarationScope) =>
-  [...state.targets.values()].filter((target) =>
-    target.page !== undefined && !target.ended &&
-    (target.kind === "page" || target.kind === "iframe" || target.kind === "worker") &&
-    Declarations.covers(scope, placement(target.page))
-  )
+  [...state.targets.values()].filter((target) => {
+    if (target.ended || target.kind === "other") return false
+    const where = placementOf(state, target)
+    return where !== undefined && Declarations.covers(scope, where)
+  })
 
 const applyToTarget = (state: State, declaration: Adapter.Declaration, target: TargetEntry) => {
+  // A service or shared worker takes what its network needs, from its context
+  if (pageless(target)) return applyToWorker(state, declaration, target)
   const page = target.page!
   // A dedicated worker keeps a cache setting of its own, and takes no other declaration through here
   if (target.kind === "worker") {
@@ -747,10 +838,45 @@ const applyToTarget = (state: State, declaration: Adapter.Declaration, target: T
         ) :
         Effect.void
     case "BodyCollection":
-      return keepBodies(state, target, page)
+      return keepBodies(state, target, placement(page))
     // The console handler reads the registry as each message arrives
     case "Downloads":
     case "ConsoleArguments":
+      return Effect.void
+  }
+}
+
+/** A service or shared worker's interception, as its context's declarations say. */
+const workerIntercepts = (state: State, target: TargetEntry) =>
+  Effect.suspend(() => {
+    const where = placementOf(state, target)
+    const context = state.workerContexts.get(target)
+    return where === undefined || context === undefined
+      ? Effect.void
+      : writeIntercepts(state, target, where, context, (command) =>
+        command.pipe(Protocol.on(target.session), Effect.asVoid))
+  })
+
+const applyToWorker = (state: State, declaration: Adapter.Declaration, target: TargetEntry) => {
+  const where = placementOf(state, target)
+  if (where === undefined) return Effect.void
+  const on: Send = (command) => command.pipe(Protocol.on(target.session), Effect.asVoid)
+  switch (declaration._tag) {
+    case "Intercept":
+      return workerIntercepts(state, target).pipe(Effect.andThen(applyCache(state, target)))
+    case "Challenges":
+      return workerIntercepts(state, target)
+    case "Override":
+      if (declaration.override._tag === "CacheDisabled") return applyCache(state, target)
+      return withOverrides(
+        target,
+        Effect.suspend(() =>
+          workerOverride(state, target, declaration.override._tag, state.registry.overrides(where), on)
+        )
+      )
+    case "BodyCollection":
+      return keepBodies(state, target, where, on)
+    default:
       return Effect.void
   }
 }
@@ -761,8 +887,8 @@ const applyToTarget = (state: State, declaration: Adapter.Declaration, target: T
 // the renderer. A release doesn't wait at all, since what it sends causes no events the model needs.
 const applyDeclaration = (state: State, declaration: Adapter.Declaration, scope: Adapter.DeclarationScope) =>
   Effect.forEach(targetsInScope(state, scope), (target) => {
-    const read = target.page!.treeRead
-    return Deferred.isDoneUnsafe(read)
+    const read = target.page?.treeRead
+    return read === undefined || Deferred.isDoneUnsafe(read)
       ? applyToTarget(state, declaration, target)
       : Deferred.await(read).pipe(
         Effect.andThen(Effect.suspend(() => target.ended ? Effect.void : applyToTarget(state, declaration, target)))
@@ -775,7 +901,7 @@ const applyDeclaration = (state: State, declaration: Adapter.Declaration, scope:
 const releaseDeclaration = (state: State, declaration: Adapter.Declaration, scope: Adapter.DeclarationScope) =>
   Effect.forEach(targetsInScope(state, scope), (target) => {
     const applied = applyToTarget(state, declaration, target)
-    return (declaration._tag === "Override" && declaration.override._tag === "Viewport"
+    return (declaration._tag === "Override" && declaration.override._tag === "Viewport" && target.page !== undefined
       ? Effect.gen(function*() {
         const record = yield* Operation.record
         return yield* record.bound(
@@ -827,7 +953,11 @@ export const restoreContext = (state: State, context: ContextEntry) => {
       (target) =>
         // Each reset stands alone: one that fails is logged and leaves the others to run
         Effect.all([
-          target.kind === "worker" ? Effect.void : applyIntercepts(state, target, target.page!).pipe(releaseErrors),
+          target.kind === "worker"
+            ? Effect.void
+            : pageless(target)
+            ? workerIntercepts(state, target).pipe(releaseErrors)
+            : applyIntercepts(state, target, target.page!).pipe(releaseErrors),
           applyCache(state, target).pipe(releaseErrors),
           target.kind === "page"
             ? Page.setInterceptFileChooserDialog({

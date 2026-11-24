@@ -23,7 +23,7 @@ import {
   type Event,
   type ExtraInfo,
   frameOf,
-  placement,
+  placementOf,
   type RequestEntry,
   requestKey,
   type State,
@@ -41,9 +41,8 @@ const notKept = (state: State, hop: NetworkRequest.HopId) =>
 
 /** A request's body is kept as its event carried it where a body collection covers the page and it fits. */
 const sentBody = (state: State, target: TargetEntry, request: Network.Request) => {
-  const limit = target.page === undefined
-    ? Option.none<number>()
-    : state.registry.bodyLimit(placement(target.page), "request")
+  const where = placementOf(state, target)
+  const limit = where === undefined ? Option.none<number>() : state.registry.bodyLimit(where, "request")
   return {
     hasBody: request.hasPostData === true,
     carried: Option.isNone(limit)
@@ -522,8 +521,8 @@ export const captureRequestBody = Effect.fnUntraced(
     limit: number
   ): Effect.fn.Return<Adapter.RequestBody, Adapter.AdapterError> {
     const request = yield* hopOf(state, snapshot.hop)
-    const page = request.target.page
-    if (page === undefined || Option.isNone(state.registry.bodyLimit(placement(page), "request"))) {
+    const where = placementOf(state, request.target)
+    if (where === undefined || Option.isNone(state.registry.bodyLimit(where, "request"))) {
       return { _tag: "Unavailable", why: "notCollected" }
     }
     const sent = request.sentBodies[state.ids.redirectsOf(snapshot.hop)]

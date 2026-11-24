@@ -28,6 +28,7 @@ import { requestSizes } from "./requestSizes.ts"
 import { requestTiming } from "./requestTiming.ts"
 import { responseSecurityCases } from "./responseSecurity.ts"
 import { screenshotBaselines } from "./screenshotBaselines.ts"
+import { serviceWorkers } from "./serviceWorkers.ts"
 import { sharedContextChecks } from "./sharedContextChecks.ts"
 import { slice } from "./slice.ts"
 import { storageReplacement } from "./storageReplacement.ts"
@@ -76,3 +77,4 @@ clientCertificates("WebKit", backend)
 screenshotBaselines("WebKit", backend)
 sharedContextChecks("WebKit", backend)
 responseSecurityCases("WebKit", backend)
+serviceWorkers("WebKit", backend)

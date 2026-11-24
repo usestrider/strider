@@ -30,6 +30,78 @@ import captured from "./fixtures/redirect-extra-info.ts"
 import { makeBrowser, type Sent } from "./utils/FakeBrowser.ts"
 import { onTestClock, withProtocolScheduler } from "./utils/ProtocolScheduler.ts"
 
+describe("CDP paused worker initialization", () => {
+  it.effect("writes both network overrides before resuming a service worker", () =>
+    Effect.gen(function*() {
+      const browser = yield* makeBrowser
+      const resumed = yield* Deferred.make<void>()
+      const commands: Array<Sent> = []
+      const held: Array<Sent> = []
+      let running = false
+      const reply = (command: Sent) =>
+        browser.receive({
+          id: command.id,
+          sessionId: command.sessionId,
+          result: command.method === "Browser.getVersion"
+            ? {
+              protocolVersion: "1.3",
+              product: "Chrome/155.0.8059.79",
+              revision: "test",
+              userAgent: "HeadlessChrome",
+              jsVersion: "test"
+            }
+            : command.method === "Target.getBrowserContexts"
+            ? { browserContextIds: [], defaultBrowserContextId: "default" }
+            : {}
+        })
+      yield* Effect.gen(function*() {
+        while (true) {
+          const command = yield* browser.next
+          commands.push(command)
+          if (!running && command.sessionId === "SW" && command.method !== "Runtime.runIfWaitingForDebugger") {
+            held.push(command)
+            continue
+          }
+          yield* reply(command)
+          if (command.method === "Runtime.runIfWaitingForDebugger") {
+            running = true
+            yield* Deferred.succeed(resumed, undefined)
+            for (const pending of held.splice(0)) yield* reply(pending)
+          }
+        }
+      }).pipe(Effect.forkScoped)
+      const adapter = yield* CdpAdapter.connect(browser.transport, {
+        ownership: "launched",
+        sink: () => Effect.void
+      })
+      yield* adapter.declare({ _tag: "UserContext", context: adapter.defaultContext }, {
+        _tag: "Override",
+        override: { _tag: "Offline", offline: true }
+      })
+      yield* browser.receive({
+        method: "Target.attachedToTarget",
+        params: {
+          sessionId: "SW",
+          targetInfo: {
+            targetId: "worker",
+            type: "service_worker",
+            title: "",
+            url: "https://worker.test/sw.js",
+            attached: true,
+            browserContextId: "default"
+          },
+          waitingForDebugger: true
+        }
+      })
+      yield* Deferred.await(resumed)
+      const methods = commands.filter((command) => command.sessionId === "SW").map((command) => command.method)
+      const beforeResume = methods.slice(0, methods.indexOf("Runtime.runIfWaitingForDebugger"))
+      yield* browser.lose("test complete")
+      assert.include(beforeResume, "Network.emulateNetworkConditionsByRule")
+      assert.include(beforeResume, "Network.overrideNetworkState")
+    }).pipe(Effect.scoped))
+})
+
 describe("CDP paused page initialization", () => {
   for (
     const [rejected, bridged] of [[false, false], [true, false], [false, true]] as const

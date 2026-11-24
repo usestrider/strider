@@ -26,6 +26,7 @@ import { requestSizes } from "./requestSizes.ts"
 import { requestTiming } from "./requestTiming.ts"
 import { responseSecurityCases } from "./responseSecurity.ts"
 import { screenshotBaselines } from "./screenshotBaselines.ts"
+import { serviceWorkers } from "./serviceWorkers.ts"
 import { sharedContextChecks } from "./sharedContextChecks.ts"
 import { slice } from "./slice.ts"
 import { stalledReadProbes } from "./stalledReadProbes.ts"
@@ -84,3 +85,4 @@ bindings("Firefox", backend)
 clientCertificates("Firefox", backend)
 screenshotBaselines("Firefox", backend)
 responseSecurityCases("Firefox", backend)
+serviceWorkers("Firefox", backend)
