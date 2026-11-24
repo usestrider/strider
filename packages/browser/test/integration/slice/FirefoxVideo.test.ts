@@ -27,7 +27,8 @@ layer(backend, { excludeTestServices: true })((it) => {
         const browser = yield* Browser.Browser
         const page = yield* (yield* browser.pages)[0]!.control
         yield* page.goto(
-          "data:text/html,<p id='t'></p><script>setInterval(() => t.textContent = Date.now(), 50)</script>"
+          "data:text/html,<p id='t'></p><script>setInterval(() => t.textContent = Date.now(), 50)</script>",
+          { waitUntil: "load" }
         )
         const viewport = yield* page.evaluate(() => [innerWidth, innerHeight])
         assert.isBelow(viewport[0]!, 800)

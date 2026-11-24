@@ -790,7 +790,7 @@ export const tooling = (name: string, backend: Layer.Layer<Browser.Browser, unkn
             yield* page.goto(before)
             const recording = yield* Effect.scoped(Effect.gen(function*() {
               const recording = yield* page.capability(Capability.Video)
-              yield* page.goto(after)
+              yield* page.goto(after, { waitUntil: "load" })
               yield* Effect.sleep("800 millis")
               return recording
             }))
