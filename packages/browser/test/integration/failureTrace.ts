@@ -71,8 +71,8 @@
  *
  * In hosted macOS jobs, `pageCallProbe.ts` adds a `page-call-probe` entry to a case when a call into a Firefox page
  * has gone 50 ms without a reply: `ps` of every process, `sample` for 1 s of up to eight Firefox processes (its parents,
- * then their content processes), `uptime` and `vm_stat`. It captures at most once a case, one capture at a time, and 24
- * times a test process, never blocks the call, and its samples briefly stop the processes they sample;
+ * then their content processes, the busiest first), `uptime` and `vm_stat`. It captures at most once a case, one
+ * capture at a time, and 16 times a test process, never blocks the call, and its samples briefly stop the processes they sample;
  * `scripts/integration-macos.md` states its bounds.
  *
  * In hosted macOS jobs, `stallProbe.ts` adds a `stall-probe` entry to a `--remote-debugging-pipe` child's process

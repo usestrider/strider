@@ -37,15 +37,15 @@ export const limits = {
   outputBytes: 128 * 1024,
   /** A command's head kept in the trace event, each. */
   traceOutputBytes: 2 * 1024,
-  /** Processes sampled, Firefox parents first, then their descendants. */
+  /** Processes sampled: Firefox parents first, then their descendants by CPU, the busiest first. */
   sampled: 8,
   /** Seconds each `sample` runs. */
   sampleSeconds: 1,
   /** Captures each test process starts, across its cases. */
-  capturesPerProcess: 24,
+  capturesPerProcess: 16,
   /** Probe files in `.data/macos-crash-reports/`, across the run's processes, each one at most `artifactBytes`. */
-  artifacts: 64,
-  artifactBytes: 512 * 1024
+  artifacts: 32,
+  artifactBytes: 1536 * 1024
 }
 
 interface Settings {
@@ -98,13 +98,14 @@ const run = (command: string, args: ReadonlyArray<string>, timeout: number) =>
 /** Firefox's parent runs `Contents/MacOS/firefox`; its content processes are its descendants (`plugin-container`). */
 const firefoxOf = (table: string) => {
   const rows = table.split("\n").slice(1).map((line) => {
-    const [pid, ppid, ...rest] = line.trim().split(/\s+/)
-    return { pid: Number(pid), ppid: Number(ppid), command: rest.join(" ") }
+    const [pid, ppid, _stat, cpu, ...rest] = line.trim().split(/\s+/)
+    return { pid: Number(pid), ppid: Number(ppid), cpu: Number(cpu), command: rest.join(" ") }
   }).filter((row) => Number.isInteger(row.pid) && Number.isInteger(row.ppid))
   const children = new Map<number, Array<number>>()
   for (const row of rows) children.set(row.ppid, [...children.get(row.ppid) ?? [], row.pid])
   const parents = rows.filter((row) => /\/Contents\/MacOS\/firefox(\s|$)/.test(row.command))
-  return parents.map(({ pid }) => {
+  const cpu = new Map(rows.map((row) => [row.pid, row.cpu]))
+  const found = parents.map(({ pid }) => {
     const descendants: Array<number> = []
     const queue = [...children.get(pid) ?? []]
     while (queue.length > 0) {
@@ -115,6 +116,8 @@ const firefoxOf = (table: string) => {
     }
     return { pid, descendants }
   })
+  const busiest = found.flatMap((parent) => parent.descendants).sort((a, b) => (cpu.get(b) ?? 0) - (cpu.get(a) ?? 0))
+  return { found, order: [...found.map((parent) => parent.pid), ...busiest] }
 }
 
 const capture = async (call: unknown, unansweredMs: number): Promise<Capture> => {
@@ -123,8 +126,7 @@ const capture = async (call: unknown, unansweredMs: number): Promise<Capture> =>
   const vmStat = run("/usr/bin/vm_stat", [], 5_000)
   // The state and CPU columns come before the command, which is last so its spaces don't split the others.
   const processes = await run("/bin/ps", ["-axo", "pid,ppid,stat,%cpu,time,rss,etime,wchan,command"], 5_000)
-  const firefox = firefoxOf(processes.output)
-  const order = [...firefox.map((parent) => parent.pid), ...firefox.flatMap((parent) => parent.descendants)]
+  const { found: firefox, order } = firefoxOf(processes.output)
   const chosen = order.slice(0, limits.sampled)
   const samples = await Promise.all(
     chosen.map((pid) =>

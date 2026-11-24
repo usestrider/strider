@@ -140,11 +140,11 @@ A page-call probe (`test/integration/pageCallProbe.ts`) watches every call into 
 `STRIDER_MACOS_CRASH_DATABASE` is set: each engine round and each `contentWindow` read that finds an iframe's frame.
 When one has gone 50 ms without a reply, it captures once for that case, in parallel and without blocking the call:
 `ps -axo pid,ppid,stat,%cpu,time,rss,etime,wchan,command` of every process on the runner; `sample <pid> 1` of each
-Firefox parent (`Contents/MacOS/firefox`) and then its descendants, its content processes, up to eight processes in
-all; `uptime` and `vm_stat`. Each command has its own timeout (5–10 s) and keeps at most 128 KiB of output. A case
-is captured at most once, a call that goes slow while a capture runs starts none, and each test process captures at
-most 24 times. The reply disarms it. The capture is written to `.data/macos-crash-reports/page-call-probe-<node
-pid>-<n>.json`, at most 512 KiB each (the process table and samples shortened evenly beyond that) and at most 64
+Firefox parent (`Contents/MacOS/firefox`) and then of their descendants, their content processes, the busiest by
+`%CPU` first, up to eight processes in all; `uptime` and `vm_stat`. Each command has its own timeout (5–10 s) and
+keeps at most 128 KiB of output. A case is captured at most once, a call that goes slow while a capture runs starts none, and each test process captures at
+most 16 times. The reply disarms it. The capture is written to `.data/macos-crash-reports/page-call-probe-<node
+pid>-<n>.json`, at most 1.5 MiB each (the process table and samples shortened evenly beyond that) and at most 32
 files per run, and as a `page-call-probe` event in the case's failure trace, with each command's first 2 KiB. The
 samples stop Firefox's processes briefly while they run, so a capture can slow the rest of the case it was taken in.
 The page-side timing that goes with it is recorded on every backend and platform (`failureTrace.ts`).
