@@ -107,6 +107,21 @@ const goto = Effect.fnUntraced(function*(world: World, navigable: Target.Navigab
   return { navigation, outcome: ended.outcome }
 })
 
+/** Waits for a document's load to complete, so its markup is parsed and its parser scripts have run. */
+const loaded = (world: World, document: Target.DocumentId) =>
+  world.facts.when("DocumentReadiness", (fact) => fact.document === document && fact.readiness === "complete")
+
+/**
+ * Navigates, and waits for the committed document to load: for a case that reads what the document's markup or
+ * scripts make, which `goto`'s commit can come before.
+ */
+const gotoLoaded = Effect.fnUntraced(function*(world: World, navigable: Target.NavigableId, url: string) {
+  const { navigation, outcome } = yield* goto(world, navigable, url)
+  assert(outcome._tag === "Committed", `outcome ${outcome._tag}`)
+  yield* loaded(world, outcome.document)
+  return { navigation, document: outcome.document }
+})
+
 const newPage = Effect.fnUntraced(function*(world: World) {
   const context = yield* world.adapter.createUserContext({ proxy: Option.none(), acceptInsecureCerts: false })
   const page = yield* world.adapter.createPage(context)
@@ -339,7 +354,7 @@ export const conformance = (backend: Backend) =>
               (fact) => fact.response.url === `${world.site.origin}/json`
             )
             assert.strictEqual(fromRoute.response.servedBy, "route")
-            yield* goto(world, page, `${world.site.origin}/sw`)
+            yield* gotoLoaded(world, page, `${world.site.origin}/sw`)
             assert.isTrue(yield* evaluate(world, page, "() => window.controlled"), "the page is controlled")
             assert.strictEqual(
               yield* evaluate(world, page, "() => fetch('/from-sw').then((r) => r.text())"),
@@ -480,7 +495,7 @@ export const conformance = (backend: Backend) =>
               timing: "beforeAuthorScript",
               after: []
             })
-            yield* goto(world, page, `${world.site.origin}/init`)
+            yield* gotoLoaded(world, page, `${world.site.origin}/init`)
             assert.strictEqual(yield* evaluate(world, page, "() => window.seenByAuthor"), "string")
             const capabilities = yield* SubscriptionRef.get(world.adapter.capabilities)
             if (!capabilities.has("pauseOnStart.popups")) {
@@ -506,7 +521,7 @@ export const conformance = (backend: Backend) =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
             const { page } = yield* newPage(world)
-            yield* goto(world, page, `${world.site.origin}/form`)
+            yield* gotoLoaded(world, page, `${world.site.origin}/form`)
             assert.deepStrictEqual(
               yield* evaluate(
                 world,
@@ -564,7 +579,7 @@ export const conformance = (backend: Backend) =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
             const { page } = yield* newPage(world)
-            yield* goto(world, page, `${world.site.origin}/form`)
+            yield* gotoLoaded(world, page, `${world.site.origin}/form`)
             const box = (yield* evaluate(
               world,
               page,
@@ -637,7 +652,7 @@ export const conformance = (backend: Backend) =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
             const { page } = yield* newPage(world)
-            yield* goto(world, page, `${world.site.origin}/form`)
+            yield* gotoLoaded(world, page, `${world.site.origin}/form`)
             yield* evaluate(
               world,
               page,
@@ -853,7 +868,7 @@ export const conformance = (backend: Backend) =>
               // until after the input below has been sent
               const child =
                 `<body style="margin:0"><button style="position:absolute;left:10px;top:10px;width:60px;height:30px" onclick="parent.postMessage('clicked', '*')">x</button><script>parent.postMessage('loaded', '*'); const end = performance.now() + 1000; while (performance.now() < end) {}</script></body>`
-              yield* goto(
+              yield* gotoLoaded(
                 world,
                 page,
                 fixture(
@@ -918,7 +933,7 @@ export const conformance = (backend: Backend) =>
               `<iframe id="${id}" src="${
                 fixture(world.site.crossSite, child(id))
               }" style="position:absolute;left:100px;top:${top}px;width:200px;height:100px;border:0"></iframe>`
-            yield* goto(
+            yield* gotoLoaded(
               world,
               page,
               fixture(
@@ -989,7 +1004,7 @@ export const conformance = (backend: Backend) =>
                 `${origin}/fixture?html=${encodeURIComponent(html)}`
               const child =
                 `<body style="margin:0;height:100vh"><script>addEventListener('mousedown', () => parent.postMessage('down', '*')); addEventListener('mouseup', () => parent.postMessage('up', '*')); addEventListener('wheel', (e) => { e.preventDefault(); parent.postMessage('child wheel', '*') }, { passive: false }); parent.postMessage('loaded', '*')</script></body>`
-              yield* goto(
+              yield* gotoLoaded(
                 world,
                 page,
                 fixture(
@@ -1563,7 +1578,7 @@ export const conformance = (backend: Backend) =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
             const { page } = yield* newPage(world)
-            yield* goto(world, page, `${world.site.origin}/hello`)
+            yield* gotoLoaded(world, page, `${world.site.origin}/hello`)
             yield* evaluate(
               world,
               page,
@@ -1628,7 +1643,7 @@ export const conformance = (backend: Backend) =>
               return
             }
             const { page } = yield* newPage(world)
-            yield* goto(world, page, `${world.site.origin}/hello`)
+            yield* gotoLoaded(world, page, `${world.site.origin}/hello`)
             yield* evaluate(
               world,
               page,
@@ -1662,7 +1677,7 @@ export const conformance = (backend: Backend) =>
             Effect.gen(function*() {
               const world = yield* setup(backend)
               const { page } = yield* newPage(world)
-              yield* goto(world, page, `${world.site.origin}/hello`)
+              yield* gotoLoaded(world, page, `${world.site.origin}/hello`)
               const clip = (yield* evaluate(
                 world,
                 page,
@@ -1713,7 +1728,7 @@ export const conformance = (backend: Backend) =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
             const { page } = yield* newPage(world)
-            yield* goto(world, page, `${world.site.origin}/hello`)
+            yield* gotoLoaded(world, page, `${world.site.origin}/hello`)
             const height = (yield* evaluate(
               world,
               page,
@@ -1847,7 +1862,7 @@ export const conformance = (backend: Backend) =>
               return
             }
             yield* declared
-            yield* goto(world, page, `${world.site.origin}/form`)
+            yield* gotoLoaded(world, page, `${world.site.origin}/form`)
             yield* evaluate(world, page, "() => document.querySelector('#f').click()", true)
             const opened = yield* world.facts.when("ObligationOpened", (fact) =>
               fact.subject._tag === "FileChooser")
@@ -1981,7 +1996,7 @@ export const conformance = (backend: Backend) =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
             const { page } = yield* newPage(world)
-            yield* goto(world, page, `${world.site.origin}/beforeunload`)
+            yield* gotoLoaded(world, page, `${world.site.origin}/beforeunload`)
             if (!(yield* supports(world, "close.runBeforeUnload"))) {
               const error = yield* Effect.flip(world.adapter.closePage(page, { runBeforeUnload: true }))
               assert.deepInclude(error.reason, { _tag: "Unsupported", capability: "close.runBeforeUnload" })
@@ -2004,7 +2019,7 @@ export const conformance = (backend: Backend) =>
               return
             }
             const { page } = yield* newPage(world)
-            yield* goto(world, page, `${world.site.origin}/beforeunload`)
+            yield* gotoLoaded(world, page, `${world.site.origin}/beforeunload`)
             yield* activate(world, page)
             yield* world.adapter.closePage(page, { runBeforeUnload: true })
             const opened = yield* world.facts.when("ObligationOpened", (fact) =>
@@ -2023,7 +2038,7 @@ export const conformance = (backend: Backend) =>
               return
             }
             const { context, page } = yield* newPage(world)
-            yield* goto(world, page, `${world.site.origin}/beforeunload`)
+            yield* gotoLoaded(world, page, `${world.site.origin}/beforeunload`)
             yield* activate(world, page)
             yield* world.adapter.closePage(page, { runBeforeUnload: true })
             const opened = yield* world.facts.when("ObligationOpened", (fact) =>
@@ -2061,10 +2076,11 @@ export const conformance = (backend: Backend) =>
             yield* evaluate(world, opener, `() => { window.open("/beforeunload") }`, true)
             const { page } = yield* world.facts.when("PageAdded", (fact) =>
               fact.origin._tag === "Opened")
-            yield* world.facts.when("DocumentCommitted", (fact) =>
+            const committed = yield* world.facts.when("DocumentCommitted", (fact) =>
               fact.navigable === page && fact.url.endsWith("/beforeunload"))
             yield* world.facts.when("PageReady", (fact) =>
               fact.page === page)
+            yield* loaded(world, committed.document)
             yield* activate(world, page)
             yield* world.adapter.closePage(page, { runBeforeUnload: true })
             const opened = yield* world.facts.when("ObligationOpened", (fact) =>
@@ -2265,7 +2281,7 @@ export const viewportMeasurement = (backend: Backend) =>
               const world = yield* setup(backend)
               const { page } = yield* newPage(world)
               const html = `<script>let innerWidth = ${shadow}; let innerHeight = 456;</script>`
-              yield* goto(world, page, `${world.site.origin}/fixture?html=${encodeURIComponent(html)}`)
+              yield* gotoLoaded(world, page, `${world.site.origin}/fixture?html=${encodeURIComponent(html)}`)
               const original = yield* evaluate(world, page, "() => [window.innerWidth, window.innerHeight]")
               yield* Effect.scoped(world.adapter.declare({ _tag: "Page", page }, {
                 _tag: "Override",
