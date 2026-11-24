@@ -62,14 +62,16 @@ export const instrument = (source: string, id: string) => {
       1
     )
     // Page-side timing of every engine call, on the page's epoch clock: `run` carries its own in its reply; `install`
-    // and `element`, whose results can't carry it, leave theirs in the realm for the next `run` reply to take.
+    // and `element`, whose results can't carry it, leave theirs in the realm for the next `run` reply to take. Only a
+    // request the runtime sent, which carries its round, gets it: a test's own call into the engine sees its reply
+    // as is.
     const pageClock = "performance.timeOrigin + performance.now()"
     const stash = (entry: string) =>
       `{ const __k = Symbol.for("strider.trace.pageCalls"); if (globalThis[__k] === undefined) Object.defineProperty(globalThis, __k, { value: { calls: [], omitted: 0 } }); const __s = globalThis[__k]; if (__s.calls.length < 64) __s.calls.push(${entry}); else __s.omitted++; }`
     replace(
       "const run = async (text: string): Promise<string> => {",
       [
-        `const run = async (text: string): Promise<string> => { const start = ${pageClock}; const reply = await __untimedRun(text); const end = ${pageClock};`,
+        `const run = async (text: string): Promise<string> => { const start = ${pageClock}; const reply = await __untimedRun(text); const end = ${pageClock}; if (!text.includes('"__rendering":{"round":')) return reply;`,
         "const store = (globalThis as any)[Symbol.for(\"strider.trace.pageCalls\")]; const earlier = store === undefined ? [] : store.calls.splice(0); const earlierOmitted = store === undefined ? 0 : store.omitted; if (store !== undefined) store.omitted = 0;",
         "return reply.length > 2 && reply.startsWith(\"{\") && reply.endsWith(\"}\") ? reply.slice(0, -1) + ',\"__page\":' + JSON.stringify({ clock: \"page-epoch-ms\", start, end, earlier, earlierOmitted }) + \"}\" : reply };",
         "const __untimedRun = async (text: string): Promise<string> => {"

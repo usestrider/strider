@@ -61,7 +61,8 @@
  * (`performance.timeOrigin + performance.now()`, milliseconds; `page-epoch-ms`), beside the host's `Date.now()` at
  * send and reply (`hostEpochMs`). Both read the runner's wall clock, so on one machine they can be set side by side
  * to split a slow call into the wait before it ran, its running, and the reply, to within the clocks' drift; they
- * don't establish order closer than that. `engine-round-reply` carries `page` ({ start, end }) for a `run` round.
+ * don't establish order closer than that. `engine-round-reply` carries `page` ({ start, end }) for a `run` round the
+ * runtime sent; a test's own call into the engine gets its reply unchanged.
  * `install` and `element` calls, whose results are a string and a node, leave theirs in the realm: at most 64, then
  * an omitted count, taken by the next `run` reply in that realm as `page.earlier` (`element` ones with their round),
  * so a realm with no later `run` never reports them. `content-window-start` and `content-window-reply` record the
