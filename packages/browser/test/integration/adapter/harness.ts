@@ -285,6 +285,14 @@ self.addEventListener("fetch", (event) => {
       response.end(`<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>`)
     }, 500)
   },
+  // A page whose headers go out at once and whose body follows half a second later: its commit comes well before its load
+  "/slow-body": (_request, response) => {
+    response.writeHead(200, { "content-type": "text/html; charset=utf-8" })
+    response.flushHeaders()
+    setTimeout(() => {
+      response.end("<title>Slow body</title><script>window.ran = document.readyState</script>")
+    }, 500).unref()
+  },
   // A deferred parser script: interactive readiness alone is too early to observe its effect.
   "/set-content-deferred.js": (_request, response) => {
     setTimeout(() => {

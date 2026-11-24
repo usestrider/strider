@@ -77,6 +77,24 @@ export const slice = (
           }))
         }), timeout)
 
+      it.effect(
+        "returns from goto with waitUntil load only once the document has loaded, though its body comes late",
+        () =>
+          Effect.gen(function*() {
+            const served = yield* site
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* SharedContext.newPage
+              yield* page.goto(`${served.origin}/slow-body`, { waitUntil: "load" })
+              const state = yield* page.evaluateInMainWorld(() => ({
+                ran: (window as { ran?: string }).ran ?? null,
+                readyState: document.readyState
+              }))
+              assert.deepStrictEqual(state, { ran: "loading", readyState: "complete" })
+            }))
+          }),
+        timeout
+      )
+
       it.effect("waits for a disabled button to be enabled, and clicks once", () =>
         Effect.gen(function*() {
           const url = yield* fixture(
