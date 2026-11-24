@@ -205,7 +205,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               `<input id="input" value="Ada Lovelace"><textarea id="area">two lines</textarea><div id="editable" contenteditable>nested <b>text</b></div><p id="plain" tabindex="0">plain <b>text</b></p><p id="unfocusable">unfocusable text</p>`
             )
             const page = yield* newPage
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             for (
               const [id, text] of [["input", "Ada Lovelace"], ["area", "two lines"], ["editable", "nested text"], [
                 "plain",
@@ -258,7 +258,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               `<label id="explicit" for="field"><span id="nested">Name</span><button id="button"><span id="buttonText">button text</span></button></label><input id="field" value="hello"><label id="implicit">Other<input id="other" value="world"></label><label id="unassociated">own text</label>`
             )
             const page = yield* newPage
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             for (
               const [label, control] of [["explicit", "field"], ["nested", "field"], ["implicit", "other"]] as const
             ) {
@@ -679,7 +679,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           Effect.scoped(Effect.gen(function*() {
             const { url } = yield* fixture(() => "<a href=\"/\">Link</a>")
             const page = yield* newPage
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             const outer = page.frame(page.locator("#absent-frame"))
             const nested = outer.frame(outer.locator("#deeper")).locator("a")
               .filter({ has: Locator.relative.getByRole("link", { pressed: false }) })
@@ -696,7 +696,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           Effect.scoped(Effect.gen(function*() {
             const { url } = yield* fixture(() => "<a href=\"/\">Link</a>")
             const page = yield* newPage
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             // Construction remains lazy, including under a scope that matches nothing.
             const invalid = page.getByRole("link", { pressed: false })
             const empty = page.locator("#missing").getByRole("link", { pressed: false })
@@ -894,7 +894,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 )
                 yield* Effect.scoped(Effect.gen(function*() {
                   const page = yield* newPage
-                  yield* page.goto(url)
+                  yield* page.goto(url, { waitUntil: "load" })
                   const target = page.locator("#target")
                   const within = Deadline.within("3 seconds")
                   if (action === "clear") {
@@ -1353,7 +1353,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             )
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* newPage
-              yield* page.goto(url)
+              yield* page.goto(url, { waitUntil: "load" })
               const frame = page.frame(page.locator("iframe"))
               const target = frame.locator("#go")
               if (mode === "disabled pointer checks") {
@@ -1692,7 +1692,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 const { url } = yield* fixture(() => `<input id="go" value="old" ${attribute}>`)
                 yield* Effect.scoped(Effect.gen(function*() {
                   const page = yield* newPage
-                  yield* page.goto(url)
+                  yield* page.goto(url, { waitUntil: "load" })
                   const locator = page.locator("#go")
                   assert(locator instanceof LocatorImpl)
                   yield* locator.isVisible
@@ -3133,7 +3133,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           const { url } = yield* fixture(() => `<input id="field">`)
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* newPage
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             const field = page.locator("#field")
             for (const value of ["123", Redacted.make("abc"), "", Redacted.make("")]) {
               yield* field.clear()
@@ -3192,7 +3192,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             const { url } = yield* fixture(() => `<input id="field" type="number" value="42">`)
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* newPage
-              yield* page.goto(url)
+              yield* page.goto(url, { waitUntil: "load" })
               const field = page.locator("#field")
               for (const value of ["123", "-12.5", ".5", "1e2", "-0", Redacted.make("7"), "", Redacted.make("")]) {
                 yield* field.fill(value)
@@ -3224,7 +3224,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           const { url } = yield* fixture(() => `<input id="field" type="number" min="10" max="20" step="3" value="13">`)
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* newPage
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             const field = page.locator("#field")
             for (const value of ["5", "25", "14.5"]) {
               yield* field.fill(value)
@@ -4587,7 +4587,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               `<select id="s"><option value="a">Ay</option><option value="off" disabled>Off</option><optgroup label="G" disabled><option value="grouped">Grouped</option></optgroup></select>`
             )
             const page = yield* newPage
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             const select = page.locator("#s")
             for (const value of ["off", "grouped"]) {
               const error = yield* select.selectOption({ value }).pipe(
@@ -4612,7 +4612,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               `<select id="s" onchange="window.changes = (window.changes ?? []).concat(this.value)"><option value="a">Ay</option><option value="off" disabled>Off</option><optgroup id="g" label="G" disabled><option value="grouped">Grouped</option></optgroup><option value="forced" disabled>Forced</option></select>`
             )
             const page = yield* newPage
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             const select = page.locator("#s")
             for (const [value, enable] of [["off", "#s [value=off]"], ["grouped", "#g"]] as const) {
               const pending = yield* select.selectOption({ value }).pipe(
@@ -6621,7 +6621,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             const { url } = yield* fixture(() => `<div id="js">JS</div><input type="checkbox" checked>`)
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* newPage
-              yield* page.goto(url)
+              yield* page.goto(url, { waitUntil: "load" })
               yield* page.evaluateInMainWorld(() => {
                 Object.assign(document.getElementById("js")!, {
                   foo: { a: 1, when: new Date(0), list: [1, "two", null] },
@@ -6667,7 +6667,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             const { url } = yield* fixture(() => `<p id="one">One</p><p>Two</p>`)
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* newPage
-              yield* page.goto(url)
+              yield* page.goto(url, { waitUntil: "load" })
               yield* page.evaluateInMainWorld(() => {
                 Object.assign(document.getElementById("one")!, { foo: { a: 1 } })
               })
@@ -6724,7 +6724,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             const { url } = yield* fixture(() => `<p>One</p><p>Two</p>`)
             yield* Effect.scoped(Effect.gen(function*() {
               const page = yield* newPage
-              yield* page.goto(url)
+              yield* page.goto(url, { waitUntil: "load" })
               for (const [selector, matches] of [["#missing", 0], ["p", 2]] as const) {
                 const error = yield* page.locator(selector).pipe(
                   Expect.toHaveCSS("color", "red", { not: true }),

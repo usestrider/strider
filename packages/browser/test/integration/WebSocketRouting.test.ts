@@ -512,7 +512,7 @@ for (const [name, backend] of backends) {
           yield* next.goto(target)
           yield* next.locator("#out").pipe(Expect.toHaveText("first author script"))
           if (name !== "Firefox") {
-            yield* page.goto(`${served.origin}/empty`)
+            yield* page.goto(`${served.origin}/empty`, { waitUntil: "load" })
             const result = yield* page.evaluateInMainWorld(() =>
               new Promise<string>((resolve) => {
                 const code =
@@ -597,7 +597,7 @@ for (const [name, backend] of backends) {
             assert.strictEqual(admissions.filter((value) => value === "open").length, 14)
             assert.strictEqual(admissions.filter((value) => value === "closed").length, 2)
             // Navigation destroys both frame generations. All their unused credits must become usable again.
-            yield* page.goto(`${served.origin}/empty`)
+            yield* page.goto(`${served.origin}/empty`, { waitUntil: "load" })
             const result = yield* page.evaluateInMainWorld(() =>
               new Promise<string>((resolve) => {
                 const ws = new WebSocket("ws://example.invalid/socket")

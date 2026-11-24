@@ -174,7 +174,7 @@ for (const [name, backend] of backends) {
             fs.writeFileSync(file, "<!doctype html><title>file history</title>")
             const context = yield* Browser.newContext({ storageStateTracking: true })
             const page = yield* context.newPage
-            yield* page.goto(pathToFileURL(file).href)
+            yield* page.goto(pathToFileURL(file).href, { waitUntil: "load" })
             yield* page.evaluateInMainWorld(() => localStorage.setItem("file-history", "kept"))
             const openError = yield* context.setStorageState(
               new StorageState.StorageState({ cookies: [], origins: [] })
@@ -182,7 +182,7 @@ for (const [name, backend] of backends) {
             assert(openError._tag === "UserContextError" && openError.reason._tag === "Unsupported")
             yield* page.close()
             const reopened = yield* context.newPage
-            yield* reopened.goto(pathToFileURL(file).href)
+            yield* reopened.goto(pathToFileURL(file).href, { waitUntil: "load" })
             assert.equal(yield* reopened.evaluateInMainWorld(() => localStorage.getItem("file-history")), "kept")
             yield* reopened.close()
             if (policy!.status === "unsupported") {
@@ -206,7 +206,7 @@ for (const [name, backend] of backends) {
               ...(name === "Chromium" ? {} : { acceptInsecureCerts: true })
             })
             const page = yield* context.newPage
-            yield* page.goto(served.origin)
+            yield* page.goto(served.origin, { waitUntil: "load" })
             const result = yield* page.evaluateInMainWorld(async () => {
               const open = indexedDB.open("held", 1)
               const db = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -296,11 +296,11 @@ for (const [name, backend] of backends) {
             yield* page.close()
             assert.deepEqual((yield* context.exportStorageState).origins, [])
             const reopened = yield* context.newPage
-            yield* reopened.goto(served.origin)
+            yield* reopened.goto(served.origin, { waitUntil: "load" })
             assert.equal(yield* reopened.evaluateInMainWorld(() => localStorage.getItem("closed-origin")), "retained")
             const other = yield* Browser.newContext(name === "Chromium" ? undefined : { acceptInsecureCerts: true })
             const isolated = yield* other.newPage
-            yield* isolated.goto(served.origin)
+            yield* isolated.goto(served.origin, { waitUntil: "load" })
             assert.isNull(yield* isolated.evaluateInMainWorld(() => localStorage.getItem("closed-origin")))
           })),
         60000

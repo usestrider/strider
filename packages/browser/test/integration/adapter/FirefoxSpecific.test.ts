@@ -91,7 +91,7 @@ describe("Firefox adapter, BiDi only", () => {
                   assertPinned("Firefox", browser.info.version, firefox.version)
                   const context = yield* browser.defaultContext.control
                   const page = yield* context.newPage
-                  yield* page.goto(`${served.origin}/hello`)
+                  yield* page.goto(`${served.origin}/hello`, { waitUntil: "load" })
                   if (round === 0) {
                     yield* page.evaluateInMainWorld(() => {
                       document.cookie = "scope-shutdown=kept; expires=Fri, 31 Dec 9999 23:59:59 GMT; path=/"

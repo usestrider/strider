@@ -313,7 +313,7 @@ export const probeStalledRead = Effect.fnUntraced(
       "new page on the origin answers indexedDB.databases()",
       Effect.gen(function*() {
         const fresh = yield* context.newPage.pipe(Scope.provide(scope))
-        yield* fresh.goto(origin)
+        yield* fresh.goto(origin, { waitUntil: "load" })
         return yield* fresh.evaluate(async () => (await indexedDB.databases()).length)
       })
     )

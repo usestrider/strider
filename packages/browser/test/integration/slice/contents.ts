@@ -721,7 +721,7 @@ export const contents = (
               Deadline.within("5 seconds")
             )
             : Effect.void
-          yield* page.goto("https://csp.test/")
+          yield* page.goto("https://csp.test/", { waitUntil: "load" })
           yield* page.evaluateInMainWorld(() =>
             fetch("https://cors.test/data").then(() =>
               "loaded", () =>
@@ -997,7 +997,9 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           const page = yield* SharedContext.newPage
-          yield* page.goto(fixtureUrl(origin, "<ul><li id=\"three\">Three</li><li> One </li><li>  Two  </li></ul>"))
+          yield* page.goto(fixtureUrl(origin, "<ul><li id=\"three\">Three</li><li> One </li><li>  Two  </li></ul>"), {
+            waitUntil: "load"
+          })
           const items = page.locator(Locator.xpath("//li[normalize-space()='Two'] | //li[@id='three']"))
           assert.strictEqual(yield* items.count, 2)
           assert.strictEqual(yield* items.first.readText, "Three")
@@ -1008,10 +1010,13 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           const page = yield* SharedContext.newPage
-          yield* page.goto(fixtureUrl(
-            origin,
-            "<ul id=\"a\"><li>A1</li></ul><ul id=\"b\"><li>B1</li><li>B2</li></ul>"
-          ))
+          yield* page.goto(
+            fixtureUrl(
+              origin,
+              "<ul id=\"a\"><li>A1</li></ul><ul id=\"b\"><li>B1</li><li>B2</li></ul>"
+            ),
+            { waitUntil: "load" }
+          )
           assert.strictEqual(yield* page.locator(Locator.xpath("//li")).count, 3)
           assert.strictEqual(yield* page.locator("#b").locator(Locator.xpath("//li")).count, 2)
           assert.strictEqual(yield* page.locator("#b").locator(Locator.xpath("/li")).count, 2)
@@ -1025,10 +1030,13 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           const page = yield* SharedContext.newPage
-          yield* page.goto(fixtureUrl(
-            origin,
-            "<table><tr><td>Ann</td><td>Paid</td></tr><tr><td>Bob</td><td>Due</td></tr><tr><td>Paid</td><td>Cy</td></tr></table>"
-          ))
+          yield* page.goto(
+            fixtureUrl(
+              origin,
+              "<table><tr><td>Ann</td><td>Paid</td></tr><tr><td>Bob</td><td>Due</td></tr><tr><td>Paid</td><td>Cy</td></tr></table>"
+            ),
+            { waitUntil: "load" }
+          )
           const paid = page.locator("tr").filter({ has: Locator.relative.locator(Locator.xpath("./td[2][.='Paid']")) })
           assert.strictEqual(yield* paid.count, 1)
           assert.strictEqual(yield* paid.locator("td").first.readText, "Ann")
@@ -1039,7 +1047,7 @@ export const contents = (
           const { origin } = yield* site
           const page = yield* SharedContext.newPage
           const child = fixtureUrl(origin, "<p>inside</p>")
-          yield* page.goto(fixtureUrl(origin, `<p>outside</p><iframe src="${child}"></iframe>`))
+          yield* page.goto(fixtureUrl(origin, `<p>outside</p><iframe src="${child}"></iframe>`), { waitUntil: "load" })
           const inside = page.frame(page.locator("iframe")).locator(Locator.xpath("//p"))
           assert.strictEqual(yield* inside.readText, "inside")
           assert.strictEqual(yield* inside.count, 1)
@@ -1049,7 +1057,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           const page = yield* SharedContext.newPage
-          yield* page.goto(fixtureUrl(origin, "<ul><li id=\"one\">One</li><li>Two</li></ul>"))
+          yield* page.goto(fixtureUrl(origin, "<ul><li id=\"one\">One</li><li>Two</li></ul>"), { waitUntil: "load" })
           assert.strictEqual(yield* page.locator(Locator.xpath("//li/text() | //li[@id='one']")).count, 1)
           assert.strictEqual(yield* page.locator(Locator.xpath("//li/@id")).count, 0)
         }), timeout)
@@ -1058,7 +1066,7 @@ export const contents = (
         Effect.gen(function*() {
           const { origin } = yield* site
           const page = yield* SharedContext.newPage
-          yield* page.goto(fixtureUrl(origin, "<ul><li>One</li></ul>"))
+          yield* page.goto(fixtureUrl(origin, "<ul><li>One</li></ul>"), { waitUntil: "load" })
           for (const expression of ["//li[", "count(//li)", "//svg:rect"]) {
             for (
               const locator of [
@@ -1904,7 +1912,7 @@ export const contents = (
             yield* data.release
             yield* data.release
             // A new document ends the realm, and the handle with it
-            yield* page.goto(fixtureUrl(origin, `<p>next</p>`))
+            yield* page.goto(fixtureUrl(origin, `<p>next</p>`), { waitUntil: "load" })
             const gone = reasonOf(yield* Effect.exit(body.evaluate((element) => element.tagName)))
             assert.strictEqual(gone?._tag, "TargetGone")
           }))
@@ -2087,7 +2095,11 @@ export const contents = (
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
             yield* page.goto(
-              fixtureUrl(origin, `<p data-testid="row-1">a</p><p data-testid="row-2">b</p><p data-testid="total">c</p>`)
+              fixtureUrl(
+                origin,
+                `<p data-testid="row-1">a</p><p data-testid="row-2">b</p><p data-testid="total">c</p>`
+              ),
+              { waitUntil: "load" }
             )
             assert.strictEqual(yield* page.getByTestId(/^row-/).count, 2)
             assert.strictEqual(yield* page.getByTestId(/^ROW-1$/i).readText, "a")
@@ -2285,7 +2297,7 @@ export const contents = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(origin, `<p>hi</p>`))
+            yield* page.goto(fixtureUrl(origin, `<p>hi</p>`), { waitUntil: "load" })
             const active = () => navigator.userActivation.isActive
             assert.isFalse(yield* page.evaluateInMainWorld(active))
             assert.isTrue(yield* Page.withUserGesture(page.evaluateInMainWorld(active)))
@@ -2299,14 +2311,17 @@ export const contents = (
           const { crossSite, origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(
-              origin,
-              `<body style="margin:0"><iframe id="same" style="position:absolute;left:30px;top:40px;width:300px;height:200px;border:7px solid #ccc;padding:5px" src="${
-                fixtureUrl(origin, counter("Same"))
-              }"></iframe><iframe id="cross" style="position:absolute;left:400px;top:60px;width:300px;height:200px;border:3px solid #ccc" src="${
-                fixtureUrl(crossSite, counter("Cross"))
-              }"></iframe></body>`
-            ))
+            yield* page.goto(
+              fixtureUrl(
+                origin,
+                `<body style="margin:0"><iframe id="same" style="position:absolute;left:30px;top:40px;width:300px;height:200px;border:7px solid #ccc;padding:5px" src="${
+                  fixtureUrl(origin, counter("Same"))
+                }"></iframe><iframe id="cross" style="position:absolute;left:400px;top:60px;width:300px;height:200px;border:3px solid #ccc" src="${
+                  fixtureUrl(crossSite, counter("Cross"))
+                }"></iframe></body>`
+              ),
+              { waitUntil: "load" }
+            )
             for (const id of ["same", "cross"]) {
               const frame = page.frame(page.locator(`#${id}`))
               const add = frame.getByRole("button", { name: "Add" })
@@ -2755,7 +2770,7 @@ export const contents = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(origin, todos))
+            yield* page.goto(fixtureUrl(origin, todos), { waitUntil: "load" })
             yield* page.evaluateInMainWorld(() => {
               setTimeout(() =>
                 document.querySelector("h1")!.remove(), 300)
@@ -2793,7 +2808,7 @@ export const contents = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(origin, controls))
+            yield* page.goto(fixtureUrl(origin, controls), { waitUntil: "load" })
             yield* page.evaluateInMainWorld(() => {
               document.querySelector<HTMLInputElement>("#all")!.indeterminate = true
             })
@@ -2848,7 +2863,7 @@ export const contents = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(origin, controls))
+            yield* page.goto(fixtureUrl(origin, controls), { waitUntil: "load" })
             yield* page.evaluateInMainWorld(() => {
               document.querySelector<HTMLInputElement>("#all")!.indeterminate = true
             })
@@ -2944,15 +2959,18 @@ export const contents = (
           const { crossSite, origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(
-              origin,
-              `<body style="margin:0"><div style="height:1500px"></div><div id="box" style="width:120px;height:80px;background:red"></div><iframe id="frame" style="border:0;width:300px;height:200px" src="${
-                fixtureUrl(
-                  crossSite,
-                  `<body style="margin:0"><div id="inner" style="margin:20px;width:50px;height:40px;background:blue"></div></body>`
-                )
-              }"></iframe><div style="height:1000px"></div></body>`
-            ))
+            yield* page.goto(
+              fixtureUrl(
+                origin,
+                `<body style="margin:0"><div style="height:1500px"></div><div id="box" style="width:120px;height:80px;background:red"></div><iframe id="frame" style="border:0;width:300px;height:200px" src="${
+                  fixtureUrl(
+                    crossSite,
+                    `<body style="margin:0"><div id="inner" style="margin:20px;width:50px;height:40px;background:blue"></div></body>`
+                  )
+                }"></iframe><div style="height:1000px"></div></body>`
+              ),
+              { waitUntil: "load" }
+            )
             const { height, ratio, width } = yield* page.evaluateInMainWorld(() => ({
               width: innerWidth,
               height: innerHeight,
@@ -3001,7 +3019,7 @@ export const contents = (
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
             // No doctype: in quirks mode the root element is only as tall as its content (QUIRKS.md, Q114)
-            yield* page.goto(fixtureUrl(origin, `<p>hi</p>`))
+            yield* page.goto(fixtureUrl(origin, `<p>hi</p>`), { waitUntil: "load" })
             const ratio = yield* page.evaluateInMainWorld(() =>
               devicePixelRatio
             )
@@ -3017,7 +3035,7 @@ export const contents = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(origin, `<!DOCTYPE html><p>hi</p>`))
+            yield* page.goto(fixtureUrl(origin, `<!DOCTYPE html><p>hi</p>`), { waitUntil: "load" })
             const width = yield* page.evaluateInMainWorld(() =>
               innerWidth
             )

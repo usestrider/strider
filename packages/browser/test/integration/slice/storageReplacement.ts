@@ -71,7 +71,7 @@ export const storageReplacement = (name: string, backend: Layer.Layer<Browser.Br
             })
             yield* page.close()
             const live = yield* context.newPage
-            yield* live.goto(origin)
+            yield* live.goto(origin, { waitUntil: "load" })
             yield* live.evaluateInMainWorld(() => {
               sessionStorage.setItem("session", "kept")
               ;(globalThis as any).sentinel = 42
@@ -270,7 +270,7 @@ export const storageReplacement = (name: string, backend: Layer.Layer<Browser.Br
             const { origin } = yield* site
             const sibling = yield* Browser.newContext()
             const page = yield* sibling.newPage
-            yield* page.goto(origin)
+            yield* page.goto(origin, { waitUntil: "load" })
             yield* page.evaluateInMainWorld(() => {
               localStorage.setItem("initial", "kept")
               document.cookie = "initial=kept; path=/"
@@ -285,7 +285,7 @@ export const storageReplacement = (name: string, backend: Layer.Layer<Browser.Br
             })
             yield* imported.setStorageState(empty)
             const live = yield* imported.newPage
-            yield* live.goto(origin)
+            yield* live.goto(origin, { waitUntil: "load" })
             assert.isNull(yield* live.evaluateInMainWorld(() => localStorage.getItem("initial")))
             assert.lengthOf(yield* imported.cookies.list, 0)
             yield* live.route("http://unvisited.example/private/**", () =>
@@ -315,7 +315,7 @@ export const storageReplacement = (name: string, backend: Layer.Layer<Browser.Br
             assert.equal(denied.reason._tag, "NotPermitted")
             const untracked = yield* Browser.newContext()
             const page = yield* untracked.newPage
-            yield* page.goto(origin)
+            yield* page.goto(origin, { waitUntil: "load" })
             yield* page.evaluateInMainWorld(() => localStorage.setItem("kept", "1"))
             const failure = yield* replace(untracked, empty).pipe(Effect.flip)
             assert.equal(failure._tag, "UserContextError")
@@ -325,7 +325,7 @@ export const storageReplacement = (name: string, backend: Layer.Layer<Browser.Br
             if (!(yield* supports("capability.virtualAuthenticator"))) return
             const context = yield* tracked()
             const live = yield* context.newPage
-            yield* live.goto(origin)
+            yield* live.goto(origin, { waitUntil: "load" })
             yield* live.evaluateInMainWorld(() => localStorage.setItem("held", "1"))
             yield* Effect.scoped(Effect.gen(function*() {
               yield* live.capability(Capability.VirtualAuthenticator)
@@ -383,7 +383,7 @@ export const storageReplacement = (name: string, backend: Layer.Layer<Browser.Br
             const { origin } = yield* site
             const context = yield* tracked()
             const page = yield* context.newPage
-            yield* page.goto(origin)
+            yield* page.goto(origin, { waitUntil: "load" })
             yield* page.evaluateInMainWorld(() => {
               document.cookie = "blocker=kept; path=/"
               localStorage.setItem("blocker", "kept")
