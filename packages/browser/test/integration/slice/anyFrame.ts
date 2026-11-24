@@ -251,6 +251,20 @@ export const anyFrame = (name: "Chromium" | "Firefox" | "WebKit", backend: Layer
       )
 
       it.effect(
+        "fills an editable element in a cross-site frame without a preceding click",
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            const { origin, crossSite } = yield* site
+            const page = yield* newPage
+            yield* page.goto(fixtureUrl(origin, frame(crossSite, "<div contenteditable id=\"edit\">old</div>")))
+            const edit = page.frame(page.locator("iframe")).locator("#edit")
+            yield* edit.fill("new")
+            assert.strictEqual(yield* edit.readText, "new")
+          })),
+        timeout
+      )
+
+      it.effect(
         "caps cross-frame candidate descriptions at ten while retaining the total",
         () =>
           Effect.scoped(Effect.gen(function*() {
