@@ -3078,7 +3078,7 @@ export const contents = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(origin, `<div id="secret">private</div>`))
+            yield* page.goto(fixtureUrl(origin, `<div id="secret">private</div>`), { waitUntil: "load" })
             const html = yield* page.readHtml
             const target = page.locator("#secret")
             assert(target instanceof LocatorImpl)
@@ -3185,10 +3185,13 @@ export const contents = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(
-              origin,
-              `<!DOCTYPE html><body style="margin:0;background:white"><div class="card" style="margin:10px;width:40px;height:40px;background:rgb(30,170,90)"></div><div class="card" style="margin:10px;width:40px;height:40px;background:rgb(30,170,90)"></div></body>`
-            ))
+            yield* page.goto(
+              fixtureUrl(
+                origin,
+                `<!DOCTYPE html><body style="margin:0;background:white"><div class="card" style="margin:10px;width:40px;height:40px;background:rgb(30,170,90)"></div><div class="card" style="margin:10px;width:40px;height:40px;background:rgb(30,170,90)"></div></body>`
+              ),
+              { waitUntil: "load" }
+            )
             const ratio = yield* page.evaluateInMainWorld(() =>
               devicePixelRatio
             )
@@ -3225,15 +3228,18 @@ export const contents = (
           const { crossSite, origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(
-              origin,
-              `<!DOCTYPE html><body style="margin:0;background:white"><iframe id="frame" style="display:block;border:0;width:200px;height:100px" src="${
-                fixtureUrl(
-                  crossSite,
-                  `<!DOCTYPE html><body style="margin:0;background:white"><div id="inner" style="margin:20px;width:40px;height:40px;background:blue"></div></body>`
-                )
-              }"></iframe><div style="height:2000px"></div><div id="card" style="padding:20px;width:60px;background:rgb(30,170,90)"><div id="price" style="width:40px;height:40px;background:red"></div></div></body>`
-            ))
+            yield* page.goto(
+              fixtureUrl(
+                origin,
+                `<!DOCTYPE html><body style="margin:0;background:white"><iframe id="frame" style="display:block;border:0;width:200px;height:100px" src="${
+                  fixtureUrl(
+                    crossSite,
+                    `<!DOCTYPE html><body style="margin:0;background:white"><div id="inner" style="margin:20px;width:40px;height:40px;background:blue"></div></body>`
+                  )
+                }"></iframe><div style="height:2000px"></div><div id="card" style="padding:20px;width:60px;background:rgb(30,170,90)"><div id="price" style="width:40px;height:40px;background:red"></div></div></body>`
+              ),
+              { waitUntil: "load" }
+            )
             const ratio = yield* page.evaluateInMainWorld(() =>
               devicePixelRatio
             )
@@ -3266,10 +3272,13 @@ export const contents = (
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(fixtureUrl(
-              origin,
-              `<!DOCTYPE html><body style="margin:0;background:white"><div id="a" style="width:40px;height:40px;background:red"></div><div id="b" style="width:40px;height:40px;background:blue"></div></body>`
-            ))
+            yield* page.goto(
+              fixtureUrl(
+                origin,
+                `<!DOCTYPE html><body style="margin:0;background:white"><div id="a" style="width:40px;height:40px;background:red"></div><div id="b" style="width:40px;height:40px;background:blue"></div></body>`
+              ),
+              { waitUntil: "load" }
+            )
             const ratio = yield* page.evaluateInMainWorld(() =>
               devicePixelRatio
             )
