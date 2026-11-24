@@ -243,6 +243,11 @@ export interface State extends Kit.Ending {
   readonly mouseCapture: Map<L1Target.NavigableId, import("./input.ts").PointerTarget>
   /** The same for a touch, from its start until it ends or is canceled. */
   readonly touchCapture: Map<L1Target.NavigableId, import("./input.ts").PointerTarget>
+  /**
+   * The context each page's last mouse event went to, until the page ends. The next one that goes to another first
+   * moves the pointer out of each frame of another origin it leaves, and into each it enters (`crossFrames`).
+   */
+  readonly pointerIn: Map<L1Target.NavigableId, NavigableEntry>
   readonly navigablesById: Map<L1Target.NavigableId, NavigableEntry>
   /**
    * Navigable ids given out before their navigable is known: an attached browser can list a popup before the page
@@ -333,6 +338,7 @@ export const make = (options: {
     reservedIds: new Map(),
     mouseCapture: new Map(),
     touchCapture: new Map(),
+    pointerIn: new Map(),
     endedPages: new Map(),
     documents: new Map(),
     realms: new Map(),

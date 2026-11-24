@@ -75,6 +75,7 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
         "missing native phases remain unavailable; TLS timing is not exposed",
         "successful completion only; redirect end may be an observation bound"
       ]),
+      entry("input.frameBoundaries", "supported"),
       entry("input.topLevelDesignMode", "unsupported", [
         "Firefox cannot focus an input in a top-level design-mode document; native typing reaches the document body"
       ]),

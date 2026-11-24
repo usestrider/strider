@@ -81,6 +81,9 @@ export const capabilities = (
         "successful completion only; redirect end may be an observation bound"
       ]),
       entry("input.topLevelDesignMode", "supported"),
+      entry("input.frameBoundaries", "partial", [
+        "a frame in another process sees the pointer leave it; the page's documents see no leave as it enters one"
+      ]),
       entry("userContexts", "supported"),
       entry("acceptInsecureCerts", "partial", [
         "per-page certificate override on each of the context's pages; refused for a reclaimable context"

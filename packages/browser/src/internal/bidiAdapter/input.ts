@@ -21,6 +21,8 @@ export interface PointerTarget {
   readonly y: number
   readonly width: number
   readonly height: number
+  /** The context whose frame element the point was found in, for input that names no frame. */
+  readonly above?: PointerTarget | undefined
 }
 
 /**
@@ -59,7 +61,8 @@ const framelessContext = Effect.fnUntraced(function*(state: State, page: Navigab
       x: sent.x + numbers[0]!,
       y: sent.y + numbers[1]!,
       width: numbers[2]!,
-      height: numbers[3]!
+      height: numbers[3]!,
+      above: sent
     }
   }
   return sent
@@ -195,6 +198,34 @@ const captured = (
   return undefined
 }
 
+/** A context and those above it, up to its page's. */
+const contextsAbove = (navigable: NavigableEntry): ReadonlyArray<NavigableEntry> => {
+  const chain: Array<NavigableEntry> = []
+  for (let each: NavigableEntry | undefined = navigable; each !== undefined; each = each.parent) chain.push(each)
+  return chain
+}
+
+/** Whether a frame's document has another origin than its parent's, which Firefox delivers no page coordinates into. */
+const ownOrigin = (navigable: NavigableEntry): boolean =>
+  navigable.parent !== undefined && originOf(navigable) !== originOf(navigable.parent)
+
+/** The width of a context's viewport, as Firefox bounds a point sent to it, or `undefined` where it can't be read. */
+const viewportWidth = (state: State, navigable: NavigableEntry) =>
+  Kit.protocol(state.send(Script.callFunction({
+    functionDeclaration: "() => innerWidth",
+    target: { context: navigable.bidi, sandbox: "__strider_utility__" },
+    arguments: [],
+    awaitPromise: false,
+    resultOwnership: "none"
+  }))).pipe(
+    Effect.map((reply) =>
+      reply.type === "success" && reply.result.type === "number" && typeof reply.result.value === "number"
+        ? reply.result.value
+        : undefined
+    ),
+    Effect.catch(() => Effect.succeed(undefined))
+  )
+
 /** A source of actions as it is built, its actions added in order. */
 type Building =
   | {
@@ -274,12 +305,12 @@ export const dispatchInput = Effect.fnUntraced(
     const dy = () => sent.y
     // Consecutive events of one kind to one context go in one source of actions, in order
     const sources: Array<Building> = []
-    const pointer = (id: "strider-mouse" | "strider-touch") => {
+    const pointer = (id: "strider-mouse" | "strider-touch", context: BrowsingContext = sent.navigable.bidi) => {
       const last = sources.at(-1)
-      if (last?.type === "pointer" && last.id === id && last.context === sent.navigable.bidi) return last.actions
+      if (last?.type === "pointer" && last.id === id && last.context === context) return last.actions
       const actions: Array<Input.PointerSourceAction> = []
       sources.push({
-        context: sent.navigable.bidi,
+        context,
         type: "pointer",
         id,
         parameters: { pointerType: id === "strider-mouse" ? "mouse" : "touch" },
@@ -301,6 +332,41 @@ export const dispatchInput = Effect.fnUntraced(
       sources.push({ context: named.navigable.bidi, type: "key", id: "strider-keyboard", actions })
       return actions
     }
+    // Firefox delivers a move sent to a frame of another origin to that frame's document alone, and one sent to the
+    // context above it to that context's documents alone, so neither hears of the pointer crossing the frame's edge.
+    // As a page's mouse input moves on to another context, each frame of another origin the pointer leaves first
+    // gets a move to its viewport's right edge, a point Firefox accepts and nothing in the frame covers, which fires
+    // its leave, innermost first; then each context above a frame of another origin it enters gets the move at its
+    // own point, outermost first, which moves its hover onto the frame's element. The page's own context is never
+    // left. A frame named by its caller is entered from the page alone, at the page's coordinates.
+    const crossFrames = Effect.fnUntraced(function*(x: number, y: number) {
+      const last = state.pointerIn.get(navigable.page.id)
+      state.pointerIn.set(navigable.page.id, sent.navigable)
+      const from = last === undefined || last.removed || state.navigablesById.get(last.id) !== last
+        ? []
+        : contextsAbove(last)
+      if (from[0] === sent.navigable) return
+      const to = contextsAbove(sent.navigable)
+      for (const left of from) {
+        if (to.includes(left)) break
+        if (!ownOrigin(left)) continue
+        // Every action is written after the loop, so a failed read sends nothing
+        const width = yield* viewportWidth(state, left)
+        if (width !== undefined) pointer("strider-mouse", left.bidi).push({ type: "pointerMove", x: width, y: 0 })
+      }
+      const entered: Array<PointerTarget> = []
+      if (frameless) {
+        for (let at = sent; at.above !== undefined; at = at.above) {
+          if (from.includes(at.navigable)) break
+          if (ownOrigin(at.navigable)) entered.push(at.above)
+        }
+      } else if (sent.navigable !== navigable.page && !from.includes(sent.navigable) && ownOrigin(sent.navigable)) {
+        entered.push({ navigable: navigable.page, x: 0, y: 0, width: Infinity, height: Infinity })
+      }
+      for (const above of entered.reverse()) {
+        pointer("strider-mouse", above.navigable.bidi).push({ type: "pointerMove", x: x - above.x, y: y - above.y })
+      }
+    })
     for (const event of events) {
       switch (event._tag) {
         case "Mouse": {
@@ -309,6 +375,7 @@ export const dispatchInput = Effect.fnUntraced(
             if (event.buttons === 0) state.mouseCapture.delete(navigable.page.id)
             else state.mouseCapture.set(navigable.page.id, sent)
           }
+          yield* crossFrames(event.x, event.y)
           const actions = pointer("strider-mouse")
           const button = buttons[event.button] ?? 0
           if (inside(event.x, event.y)) actions.push({ type: "pointerMove", x: event.x - dx(), y: event.y - dy() })
