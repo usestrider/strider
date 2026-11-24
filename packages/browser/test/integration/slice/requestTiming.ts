@@ -278,7 +278,7 @@ export const requestTiming = (name: string, backend: Layer.Layer<Browser.Browser
               const served = yield* site
               const context = yield* Browser.newContext({ requestTiming: true })
               const page = yield* context.newPage
-              yield* page.goto(served.origin)
+              yield* page.goto(served.origin, { waitUntil: "load" })
               let previous: NetworkRequest.Timing | undefined
               for (let i = 0; i < 2; i++) {
                 const sent = yield* NetworkRequest.next(page, { url: `${served.origin}/cached-redirect` })

@@ -255,6 +255,33 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
           assert.strictEqual((yield* popup.closed)._tag, "PageClosed")
         }), timeout)
 
+      it.effect("names the page that opened a popup, until the opener closes", () =>
+        Effect.gen(function*() {
+          if (!(yield* supports("popups.opener"))) {
+            // Never None, which would claim no page opened it (QUIRKS.md, Q212)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* SharedContext.newPage
+              const error = yield* Effect.flip(Popup.opener(page))
+              assert.deepInclude(error.reason, { _tag: "Unsupported", capability: "popups.opener" })
+            }))
+            return
+          }
+          const { url } = yield* fixture(connect)
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(url)
+            assert(Option.isNone(yield* Popup.opener(page)))
+            const popups = yield* Popup.next(page)
+            yield* page.getByText("Connect account").click()
+            const popup = yield* popups
+            const opener = yield* Popup.opener(popup)
+            assert(Option.isSome(opener))
+            assert.strictEqual(opener.value.id, page.id)
+            yield* page.close()
+            assert(Option.isNone(yield* Popup.opener(popup)))
+          }))
+        }), timeout)
+
       it.effect("fails a wait with TargetGone when its page closes", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(connect)
@@ -277,7 +304,7 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
           const { url } = yield* fixture(connect)
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             const evaluation = yield* page.evaluateInMainWorld(() => {
               ;(window as { __pending?: boolean }).__pending = true
               return new Promise(() => {})
@@ -305,7 +332,7 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
             const services = yield* Layer.buildWithScope(Layer.fresh(backend), browserScope)
             const page = yield* Effect.gen(function*() {
               const page = yield* Browser.newPage()
-              yield* page.goto(url)
+              yield* page.goto(url, { waitUntil: "load" })
               return page
             }).pipe(Scope.provide(holder), Effect.provideContext(services))
             const evaluation = yield* page.evaluateInMainWorld(() => {

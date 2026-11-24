@@ -121,10 +121,18 @@ export const capabilities = (
       ]),
       entry("bodies", "supported"),
       entry("console", "supported"),
+      entry("console.arguments", "supported"),
       entry("console.source", "supported"),
+      entry("console.method", "partial", [
+        "`console.timeLog` reads as `log`, since Chromium sends it as a plain message",
+        "`console.countReset`, `timeLog`, and `timeEnd` of a counter or timer that doesn't exist read as `warn`, since " +
+        "Chromium sends them as a warning",
+        "`console.countReset` of a counter that exists writes no message, since Chromium sends none for it"
+      ]),
       entry("prompts", "supported"),
       entry("prompts.kind", "supported"),
       entry("navigation.sameDocument", "supported"),
+      entry("frames.readiness", "supported"),
       entry("navigation.traverse", "supported"),
       entry("frames.contentFrame", "supported"),
       entry("screenshot.format", "supported"),
@@ -224,6 +232,7 @@ export const capabilities = (
       ]),
       entry("capability.axTree", "supported"),
       entry("capability.screencast", "supported"),
+      entry("capability.overlay", "supported", ["drawn in the page, so screenshots show it too"]),
       entry(
         "capability.video",
         videoWriter ? "supported" : "unsupported",
@@ -338,6 +347,8 @@ export const connect: (
       Option.isSome(contextIds) ? contextIds.value.defaultBrowserContextId : undefined,
       true
     )
+    // Each of its pages gets the certificate override, which ends with the connection, as a launched browser does
+    if (options.acceptInsecureCerts === true) defaultEntry.ignoreCertificateErrors = true
     state.contexts.set(state.defaultContext, defaultEntry)
     if (defaultEntry.browserContextId !== undefined) {
       state.contextsByCdp.set(defaultEntry.browserContextId, defaultEntry)
@@ -396,6 +407,7 @@ export const connect: (
       reload: (id, options) => Navigation.reload(state, id, options),
       traverse: (id, delta) => Navigation.traverse(state, id, delta),
       realm: (document, world) => Evaluation.realm(state, document, world),
+      settled: (id) => Evaluation.settled(state, id),
       evaluate: (realm, call) => Evaluation.evaluate(state, realm, call),
       releaseHandles: (list) => Evaluation.releaseHandles(state, list),
       textInsertion: "native",
@@ -413,7 +425,7 @@ export const connect: (
       pdf: (page, options) => Capture.pdf(state, page, options),
       accessibilityTree: (page) => Capture.accessibilityTree(state, page),
       screencast: (page) => Capture.screencast(state, page),
-      video: (page) => Capture.video(state, page, writer),
+      video: (page, options) => Capture.video(state, page, options, writer),
       createAuthenticator: (page) => WebAuthn.create(state, page),
       releaseAuthenticator: (ref) => WebAuthn.release(state, ref),
       authenticatorCredentials: (ref) => WebAuthn.credentials(state, ref),

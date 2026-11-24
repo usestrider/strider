@@ -122,7 +122,9 @@ export const capabilities: ReadonlyArray<Browser.CapabilityEntry> = [
   entry("network.challenges", "unsupported", ["the timeline's requests are never paused"]),
   entry("bodies", "supported", ["every body is empty"]),
   entry("console", "unsupported", ["the timeline has no console messages"]),
+  entry("console.arguments", "unsupported", ["the timeline has no console messages"]),
   entry("console.source", "unsupported", ["the timeline has no console messages"]),
+  entry("console.method", "unsupported", ["the timeline has no console messages"]),
   entry("fileChooser", "unsupported", [noDom]),
   entry("downloads", "unsupported", ["the timeline has no downloads"]),
   entry("screenshot", "unsupported", ["nothing is painted"]),
@@ -131,6 +133,7 @@ export const capabilities: ReadonlyArray<Browser.CapabilityEntry> = [
   entry("capability.virtualAuthenticator", "unsupported", ["The test backend does not implement native WebAuthn"]),
   entry("capability.axTree", "unsupported", [noDom]),
   entry("capability.screencast", "unsupported", ["nothing is painted"]),
+  entry("capability.overlay", "unsupported", [noDom]),
   entry("capability.video", "unsupported", ["nothing is painted"])
 ]
 
@@ -285,6 +288,8 @@ export const connect = (
                     status: 200 as NetworkResponse.StatusCode,
                     statusText: "OK",
                     httpVersion: Option.some("http/1.1"),
+                    serverAddress: Option.none(),
+                    securityDetails: Option.none(),
                     headers: Headers.empty,
                     servedBy: "network",
                     at: Adapter.now()
@@ -379,6 +384,7 @@ export const connect = (
       realm: () => unsupported("engine"),
       evaluate: () => unsupported("engine"),
       releaseHandles: () => Effect.void,
+      settled: () => Effect.void,
       textInsertion: "native",
       dispatchInput: () => Effect.mapError(unsupported("input.native"), Adapter.unsent),
       contentFrame: () => unsupported("engine"),

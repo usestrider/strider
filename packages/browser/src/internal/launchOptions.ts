@@ -18,6 +18,15 @@ export const settings = (options: Browser.LaunchOptions) => ({
   coreDumps: options.coreDumps
 })
 
+/**
+ * The default context's options for a launch that sets certificate acceptance itself, as Chromium's and Firefox's
+ * do: the rest, which the default context takes for the connection's life.
+ */
+export const launchedDefaultContext = (options: Browser.LaunchOptions) =>
+  options.defaultContext === undefined
+    ? undefined
+    : { ...options.defaultContext, acceptInsecureCerts: undefined }
+
 /** A backend's `layerConfig`: its `layer`, with the options read from configuration. */
 export const fromConfig = <E, R>(
   options: Config.Wrap<Browser.LaunchOptions>,

@@ -36,7 +36,7 @@ describe("Event waits at their target's end", () => {
           text: "last words",
           location: Option.none(),
           origin: { _tag: "Page", page: id },
-          source: { _tag: "Page" },
+          source: { _tag: "Page", method: "log" },
           at: 0 as ConsoleMessage.ConsoleMessage["at"],
           timestamp: DateTime.makeUnsafe(0)
         })

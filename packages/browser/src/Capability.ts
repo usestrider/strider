@@ -8,9 +8,11 @@
  * @stability unstable
  * @since 0.1.0
  */
+import type * as Duration from "effect/Duration"
 import type * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
+import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Deadline from "./Deadline.ts"
 import * as Diagnostics from "./Diagnostics.ts"
@@ -29,18 +31,19 @@ const TypeId = "~@usestrider/browser/Capability"
  *
  * **Details**
  *
- * The access parameter defaults to `"inspect"`. A `"control"` capability needs a page you control.
+ * The access parameter defaults to `"inspect"`. A `"control"` capability needs a page you control. `Options` is
+ * what acquisition takes after the capability, as `Video`'s `VideoOptions`; `never` for one that takes none.
  *
  * @stability unstable
  * @category models
  * @since 0.1.0
  */
-export interface Capability<out H, out Access extends "inspect" | "control" = "inspect"> {
+export interface Capability<out H, out Access extends "inspect" | "control" = "inspect", in Options = never> {
   /**
    * The access needed to acquire this capability.
    */
   readonly access: Access
-  readonly [TypeId]: () => H
+  readonly [TypeId]: (options: Options) => H
   readonly name: string
 }
 
@@ -51,10 +54,16 @@ export interface Capability<out H, out Access extends "inspect" | "control" = "i
  * @category guards
  * @since 0.1.0
  */
-export const isCapability = (u: unknown): u is Capability<unknown> | Capability<unknown, "control"> =>
+export const isCapability = (
+  u: unknown
+): u is Capability<unknown, "inspect", never> | Capability<unknown, "control", never> =>
   Predicate.hasProperty(u, TypeId)
 
-const make = <H>(name: string): Capability<H> => ({ [TypeId]: () => undefined as H, name, access: "inspect" })
+const make = <H, Options = never>(name: string): Capability<H, "inspect", Options> => ({
+  [TypeId]: () => undefined as H,
+  name,
+  access: "inspect"
+})
 
 /**
  * One node of the browser's own accessibility tree, unprocessed.
@@ -142,6 +151,77 @@ export interface ScreencastControl {
 }
 
 /**
+ * How `Video` records: the file's size and frame rate, and where it goes.
+ *
+ * **Details**
+ *
+ * Chromium and WebKit make the file exactly `size`, padded black, and constant-rate at `fps`. Firefox records
+ * natively and treats `size` as a box the page fits inside with its shape kept and no padding, and `fps` as a
+ * ceiling on its frame rate, not a constant rate.
+ *
+ * **Example** (Recording a small, steady file to a path of your own)
+ *
+ * ```ts import.meta.vitest
+ * import { Capability, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const recordTo = Effect.fn("recordTo")(function*(page: Page.Page, path: string) {
+ *   const options: Capability.VideoOptions = {
+ *     size: { width: 640, height: 360 },
+ *     fps: 25,
+ *     path,
+ *     overwrite: false
+ *   }
+ *   const video = yield* Effect.scoped(Effect.gen(function*() {
+ *     const recording = yield* page.capability(Capability.Video, options)
+ *     yield* page.getByRole("button", { name: "Pay" }).click()
+ *     return recording
+ *   }))
+ *   return yield* video.file
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export interface VideoOptions {
+  /**
+   * The file's width and height in pixels, each a positive integer. On Chromium and WebKit every image is scaled to
+   * fit, centred, and padded black. On Firefox it is a box: the page is fitted inside it with its shape kept and no
+   * padding, so one side may be shorter.
+   *
+   * @default the page's viewport when the capability is acquired, scaled down (never up) to fit 800 by 800: a 1280 by
+   * 720 viewport gives 800 by 450. It is in CSS pixels, except on WebKit without an emulated viewport, where it is the
+   * first picture's size in device pixels
+   */
+  readonly size?: { readonly width: number; readonly height: number } | undefined
+  /**
+   * The file's frame rate, finite and positive: constant on Chromium and WebKit, where the file ends at the stop
+   * time rounded up to a whole frame, and a ceiling on Firefox, whose
+   * frames keep their own times and which takes whole numbers only. Without it, the file is variable-rate, and
+   * each image lasts until the next.
+   *
+   * @default none: variable-rate
+   */
+  readonly fps?: number | undefined
+  /**
+   * The absolute path of the file, in a directory that exists. With a path, video doesn't need the context's
+   * downloads directory.
+   *
+   * @default none: a new file in the context's downloads directory, or on WebKit the layer's video directory
+   */
+  readonly path?: string | undefined
+  /**
+   * Whether the recording may replace a file already at `path`. With `false`, an existing file fails acquisition
+   * with `InvalidInput`, and a file that appears there while recording fails `file`, leaving that file in place.
+   *
+   * @default true
+   */
+  readonly overwrite?: boolean | undefined
+}
+
+/**
  * A page recorded to a video file while the capability's scope lives.
  *
  * @stability unstable
@@ -189,24 +269,31 @@ export const Screencast: Capability<ScreencastControl> = make("Screencast")
  *
  * **Details**
  *
- * Firefox writes the file itself; Chromium uses a `VideoWriter` provided to its browser layer. Both write into
- * the context's downloads directory until recording ends. Temporary downloads are removed with
- * the context; set `UserContext.Options.downloads` to keep the file in a directory of yours.
- * WebKit requires explicit layer video options and a writer, and writes into the directory those options name.
- * Its initial PNG is immediate; subsequent captures wait the configured interval after completion. PNG polling
- * can miss short states and adds work to the page. Video does not enable WebKit downloads or native screencasts.
- * Chromium and opted-in WebKit keep each source frame's time, showing it until the next frame or recording end.
- * Viewport changes are scaled and padded to the initial size. Closing its scope or ending its page/session closes input and waits for a started
- * writer to finish, for up to `Deadline.DefaultBudget` (30 seconds unless set) on the browser clock, as read when
- * the capability is acquired: wrap the acquisition in `Deadline.withDefaultBudget` to give a slow encoder longer.
- * A recording that receives no image fails promptly with `BackendFailure`.
+ * `page.capability(Capability.Video, options)` takes `VideoOptions`: the file's size, a frame rate, and a path.
+ * The file is the page's viewport scaled down to fit 800 by 800 unless `size` says otherwise. On Chromium and
+ * WebKit every image is scaled to fit it, centred, and padded black, as when the viewport changes while
+ * recording, and `fps` makes the file constant-rate. Firefox writes the file itself: it fits the page inside the
+ * size with its shape kept and no padding, and takes `fps` as a ceiling. Chromium uses a `VideoWriter` provided to
+ * its browser layer. Without a `path`, both write into the context's downloads directory until recording ends.
+ * Temporary downloads are removed with the context; set `UserContext.Options.downloads`, or `path`, to keep the
+ * file. WebKit requires explicit layer video options and a writer, and writes into the directory those options
+ * name, or to `path`. Its initial PNG is immediate; subsequent captures wait the configured interval after
+ * completion. PNG polling can miss short states and adds work to the page. Video does not enable WebKit downloads
+ * or native screencasts. Without `fps`, Chromium and opted-in WebKit keep each source frame's time, showing it
+ * until the next frame or recording end. Closing its scope or ending its page/session closes input and waits
+ * for a started writer to finish, for up to `Deadline.DefaultBudget` (30 seconds unless set) on the browser
+ * clock, as read when the capability is acquired: wrap the acquisition in `Deadline.withDefaultBudget` to give a
+ * slow encoder longer. A recording that receives no image fails promptly with `BackendFailure`.
  *
  * **Gotchas**
  *
  * It fails with `Unsupported` on Chromium without a `VideoWriter`, or WebKit without both a writer and explicit
- * polled-video options. It fails on
- * Firefox too when Strider didn't launch it, or when the page's context denies downloads, because the file would
- * be out of reach.
+ * polled-video options. It fails on Firefox too when Strider didn't launch it, because the file would be out of
+ * reach, or, without a `path`, when the page's context denies downloads. Without a `path`, Chromium fails the
+ * same way when the context has no downloads directory. A `size` that isn't positive integers, an `fps` that isn't
+ * finite and positive, a relative `path`, a `path` in a directory that doesn't exist or that names a directory,
+ * and with `overwrite: false` an existing file, fail with `InvalidInput` before recording starts. Firefox fails
+ * a fractional `fps` with `Unsupported`.
  *
  * **Example** (Recording a checkout)
  *
@@ -216,7 +303,10 @@ export const Screencast: Capability<ScreencastControl> = make("Screencast")
  *
  * const recorded = Effect.fn("recorded")(function*(page: Page.Page) {
  *   const video = yield* Effect.scoped(Effect.gen(function*() {
- *     const recording = yield* page.capability(Capability.Video)
+ *     const recording = yield* page.capability(Capability.Video, {
+ *       size: { width: 800, height: 450 },
+ *       fps: 25
+ *     })
  *     yield* page.getByRole("button", { name: "Pay" }).click()
  *     return recording
  *   }))
@@ -228,7 +318,375 @@ export const Screencast: Capability<ScreencastControl> = make("Screencast")
  * @category constants
  * @since 0.1.0
  */
-export const Video: Capability<VideoRecording> = make("Video")
+export const Video: Capability<VideoRecording, "inspect", VideoOptions> = make("Video")
+
+/**
+ * Overlays drawn over a page for recordings: HTML of the caller's, and chapter title cards.
+ *
+ * **Details**
+ *
+ * Overlays are elements in the page, so they appear in screenshots and video alike, on every browser. They sit
+ * above the page, ignore the pointer, and are never matched by locators, included in snapshots or hit by an
+ * action. They stay across the page's navigations, drawn again in each document its main frame commits. WebKit's
+ * video samples the page, so it can miss an overlay shown for less than its interval.
+ *
+ * **Example** (Labeling a step of a recording)
+ *
+ * ```ts import.meta.vitest
+ * import { Capability, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const labeled = Effect.fn("labeled")(function*(page: Page.Page) {
+ *   const overlay: Capability.OverlayControl = yield* page.capability(Capability.Overlay)
+ *   yield* overlay.add(`<div style="position:fixed;top:8px;left:8px">Searching</div>`)
+ *   yield* page.getByRole("searchbox").fill("strider")
+ * }, Effect.scoped)
+ * ```
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export interface OverlayControl {
+  /**
+   * Shows `html` over the page until the caller's scope closes, or until `duration` passes, whichever is first.
+   *
+   * **Details**
+   *
+   * It returns once the overlay is in the page; the removal at `duration` happens apart from the caller. The HTML
+   * is the caller's and is inserted as it is: its `<script>` elements don't run, but its inline event handlers,
+   * such as an `onerror` attribute, do, in the page's own JavaScript world.
+   *
+   * **Example** (Labeling a recording while a step runs)
+   *
+   * ```ts import.meta.vitest
+   * import { Capability, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const labeled = Effect.fn("labeled")(function*(page: Page.Page) {
+   *   const overlay = yield* page.capability(Capability.Overlay)
+   *   yield* overlay.add(`<div style="position:fixed;top:8px;right:8px">Signing in</div>`)
+   *   yield* page.getByRole("button", { name: "Sign in" }).click()
+   * }, Effect.scoped)
+   * ```
+   */
+  add(
+    html: string,
+    options?: OverlayControl.AddOptions | undefined
+  ): Effect.Effect<void, CapabilityError | Target.TargetGone | Deadline.Timeout, Scope.Scope>
+  /**
+   * Shows a centered title card over a blurred page for `duration`, then removes it, returning once it has gone.
+   *
+   * **Details**
+   *
+   * The title and description are shown as text, never as HTML.
+   *
+   * **Gotchas**
+   *
+   * The card's wait counts against the operation's deadline: when `duration` is longer than the time the
+   * operation has left, as the default 2-second card under a 1-second deadline, `chapter` fails with `Timeout`.
+   *
+   * **Example** (Opening a chapter of a recording)
+   *
+   * ```ts import.meta.vitest
+   * import { Capability, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const checkout = Effect.fn("checkout")(function*(page: Page.Page) {
+   *   const overlay = yield* page.capability(Capability.Overlay)
+   *   yield* overlay.chapter("Checkout", { description: "Paying by card" })
+   *   yield* page.getByRole("button", { name: "Pay" }).click()
+   * }, Effect.scoped)
+   * ```
+   */
+  chapter(
+    title: string,
+    options?: OverlayControl.ChapterOptions | undefined
+  ): Effect.Effect<void, CapabilityError | Target.TargetGone | Deadline.Timeout>
+  /**
+   * Hides every overlay without removing any, until `show`.
+   *
+   * **Example** (Taking a screenshot without the overlays)
+   *
+   * ```ts import.meta.vitest
+   * import { Capability, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const plain = Effect.fn("plain")(function*(page: Page.Page) {
+   *   const overlay = yield* page.capability(Capability.Overlay)
+   *   yield* overlay.hide
+   *   const png = yield* page.screenshot()
+   *   yield* overlay.show
+   *   return png
+   * }, Effect.scoped)
+   * ```
+   */
+  readonly hide: Effect.Effect<void, CapabilityError | Target.TargetGone | Deadline.Timeout>
+  /**
+   * Shows the overlays `hide` hid.
+   *
+   * **Example** (Showing the overlays again)
+   *
+   * ```ts import.meta.vitest
+   * import { Capability, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const reveal = Effect.fn("reveal")(function*(page: Page.Page) {
+   *   const overlay = yield* page.capability(Capability.Overlay)
+   *   yield* overlay.hide
+   *   yield* overlay.show
+   * }, Effect.scoped)
+   * ```
+   */
+  readonly show: Effect.Effect<void, CapabilityError | Target.TargetGone | Deadline.Timeout>
+  /**
+   * Annotates the page's input actions until the caller's scope closes: a title naming each action and its
+   * locator, and a cursor at its point, then a wait of `duration` before the action's input.
+   *
+   * **Details**
+   *
+   * It covers the locator actions that send input: `click`, `dblclick`, `hover`, `tap`, `check`, `uncheck`,
+   * `dragTo`, `fill`, `press`, `pressSequentially`, `selectOption` and `clear`. Input sent through `page.mouse`
+   * or `page.keyboard` isn't annotated. The wait counts toward the action's deadline, and the action checks its
+   * target again after it, so the input goes where the target is then. Points are in the top-level page, also for
+   * a target in a frame. A point marker and a highlight over the target are drawn only when `style` gives them.
+   * While another call's scope is open, the latest call's options apply.
+   *
+   * **Example** (Recording a sign-in with each action shown)
+   *
+   * ```ts import.meta.vitest
+   * import { Capability, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const signIn = Effect.fn("signIn")(function*(page: Page.Page) {
+   *   const overlay = yield* page.capability(Capability.Overlay)
+   *   yield* overlay.actions({
+   *     position: "bottom",
+   *     style: { highlight: "outline: 2px solid orange" }
+   *   })
+   *   yield* page.getByLabel("Email").fill("ada@example.com")
+   *   yield* page.getByRole("button", { name: "Sign in" }).click()
+   * }, Effect.scoped)
+   * ```
+   */
+  actions(
+    options?: OverlayControl.ActionsOptions | undefined
+  ): Effect.Effect<void, CapabilityError, Scope.Scope>
+}
+
+/**
+ * Options of `OverlayControl`'s members.
+ *
+ * **Example** (Typing options before passing them)
+ *
+ * ```ts import.meta.vitest
+ * import { Capability, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const options: Capability.OverlayControl.ActionsOptions = { duration: "250 millis" }
+ * const quick = Effect.fn("quick")(function*(page: Page.Page) {
+ *   const overlay = yield* page.capability(Capability.Overlay)
+ *   yield* overlay.actions(options)
+ * }, Effect.scoped)
+ * ```
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export declare namespace OverlayControl {
+  /**
+   * Options of `add`.
+   *
+   * **Example** (Showing a note for three seconds)
+   *
+   * ```ts import.meta.vitest
+   * import { Capability, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const note: Capability.OverlayControl.AddOptions = { duration: "3 seconds" }
+   * const remind = Effect.fn("remind")(function*(page: Page.Page) {
+   *   const overlay = yield* page.capability(Capability.Overlay)
+   *   yield* overlay.add(`<p style="position:fixed;bottom:8px">Saved</p>`, note)
+   * }, Effect.scoped)
+   * ```
+   *
+   * @stability unstable
+   * @category models
+   * @since 0.1.0
+   */
+  export interface AddOptions {
+    /**
+     * How long the overlay stays, unless the caller's scope closes first.
+     *
+     * @default until the caller's scope closes
+     */
+    readonly duration?: Duration.Input | undefined
+  }
+  /**
+   * Options of `chapter`.
+   *
+   * **Example** (A short chapter with a description)
+   *
+   * ```ts import.meta.vitest
+   * import { Capability, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const card: Capability.OverlayControl.ChapterOptions = {
+   *   description: "Paying by card",
+   *   duration: "1 second"
+   * }
+   * const checkout = Effect.fn("checkout")(function*(page: Page.Page) {
+   *   const overlay = yield* page.capability(Capability.Overlay)
+   *   yield* overlay.chapter("Checkout", card)
+   * }, Effect.scoped)
+   * ```
+   *
+   * @stability unstable
+   * @category models
+   * @since 0.1.0
+   */
+  export interface ChapterOptions {
+    /**
+     * A line of text under the title.
+     *
+     * @default no description
+     */
+    readonly description?: string | undefined
+    /**
+     * How long the card is shown.
+     *
+     * @default "2 seconds"
+     */
+    readonly duration?: Duration.Input | undefined
+  }
+  /**
+   * Where an action's title is drawn.
+   *
+   * **Example** (Drawing titles at the bottom)
+   *
+   * ```ts import.meta.vitest
+   * import { Capability, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const position: Capability.OverlayControl.Position = "bottom"
+   * const captioned = Effect.fn("captioned")(function*(page: Page.Page) {
+   *   const overlay = yield* page.capability(Capability.Overlay)
+   *   yield* overlay.actions({ position })
+   * }, Effect.scoped)
+   * ```
+   *
+   * @stability unstable
+   * @category models
+   * @since 0.1.0
+   */
+  export type Position = "top-left" | "top" | "top-right" | "bottom-left" | "bottom" | "bottom-right"
+  /**
+   * Options of `actions`.
+   *
+   * **Example** (Marking each action's point without a cursor)
+   *
+   * ```ts import.meta.vitest
+   * import { Capability, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const marked: Capability.OverlayControl.ActionsOptions = {
+   *   cursor: "none",
+   *   style: { point: "width: 12px; height: 12px; border-radius: 50%; background: red" }
+   * }
+   * const showClicks = Effect.fn("showClicks")(function*(page: Page.Page) {
+   *   const overlay = yield* page.capability(Capability.Overlay)
+   *   yield* overlay.actions(marked)
+   *   yield* page.getByRole("button", { name: "Save" }).click()
+   * }, Effect.scoped)
+   * ```
+   *
+   * @stability unstable
+   * @category models
+   * @since 0.1.0
+   */
+  export interface ActionsOptions {
+    /**
+     * How long each action waits, with its annotation shown, before its input.
+     *
+     * @default "500 millis"
+     */
+    readonly duration?: Duration.Input | undefined
+    /**
+     * Where the action's title is drawn.
+     *
+     * @default "top-right"
+     */
+    readonly position?: Position | undefined
+    /**
+     * Whether a cursor is drawn at the last action's point.
+     *
+     * @default "pointer"
+     */
+    readonly cursor?: "pointer" | "none" | undefined
+    /**
+     * CSS declarations for what is drawn, each a string such as `"outline: 2px solid orange"`.
+     *
+     * @default no point marker or highlight, and the title's own style
+     */
+    readonly style?:
+      | {
+        /**
+         * CSS declarations for a mark centered on the action's point, such as its size and colour.
+         *
+         * @default no point marker
+         */
+        readonly point?: string | undefined
+        /**
+         * CSS declarations for a box over the target, such as an outline.
+         *
+         * @default no highlight
+         */
+        readonly highlight?: string | undefined
+        /**
+         * CSS declarations added to the title's own, such as its font.
+         *
+         * @default the title's own style: white 14px text on a dark box
+         */
+        readonly title?: string | undefined
+      }
+      | undefined
+  }
+}
+
+/**
+ * Overlays drawn over a page for recordings, on every backend.
+ *
+ * **Details**
+ *
+ * Requires control access. Nothing is drawn or watched until it is acquired. Overlays added through it are removed
+ * when their own scope closes, and every one when the capability's scope closes.
+ *
+ * **Example** (Opening a recording with a chapter card)
+ *
+ * ```ts import.meta.vitest
+ * import { Capability, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const recordSignIn = Effect.fn("recordSignIn")(function*(page: Page.Page) {
+ *   const video = yield* page.capability(Capability.Video)
+ *   const overlay = yield* page.capability(Capability.Overlay)
+ *   yield* overlay.chapter("Signing in")
+ *   yield* page.getByRole("button", { name: "Sign in" }).click()
+ *   return video
+ * })
+ * ```
+ *
+ * @see OverlayControl
+ * @stability unstable
+ * @category capabilities
+ * @since 0.1.0
+ */
+export const Overlay: Capability<OverlayControl, "control"> = {
+  [TypeId]: () => undefined as unknown as OverlayControl,
+  name: "Overlay",
+  access: "control"
+}
 
 /**
  * A native Chromium virtual authenticator on this page, removed when the caller's scope closes.
@@ -273,7 +731,13 @@ export const VirtualAuthenticator: Capability<WebAuthn.VirtualAuthenticator, "co
  * @category schemas
  * @since 0.1.0
  */
-export const CapabilityErrorReason = Schema.Union([Reason.NotPermitted, Reason.Unsupported, Reason.BackendFailure])
+export const CapabilityErrorReason = Schema.Union([
+  Reason.NotPermitted,
+  Reason.Unsupported,
+  Reason.BackendFailure,
+  Reason.InvalidInput,
+  Reason.PromptBlocking
+])
 
 /**
  * The reasons acquiring or using a capability can fail.

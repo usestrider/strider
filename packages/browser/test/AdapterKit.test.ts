@@ -371,3 +371,30 @@ describe("AdapterKit", () => {
     })
   })
 })
+
+describe("consoleMethod", () => {
+  it("names each wire's console method as the Console Standard does", () => {
+    // CDP's types
+    assert.strictEqual(Kit.consoleMethod("warning"), "warn")
+    assert.strictEqual(Kit.consoleMethod("startGroup"), "group")
+    assert.strictEqual(Kit.consoleMethod("startGroupCollapsed"), "groupCollapsed")
+    assert.strictEqual(Kit.consoleMethod("endGroup"), "groupEnd")
+    assert.strictEqual(Kit.consoleMethod("timeEnd"), "timeEnd")
+    assert.strictEqual(Kit.consoleMethod("count"), "count")
+    // BiDi's methods are the Standard's own
+    assert.strictEqual(Kit.consoleMethod("warn"), "warn")
+    assert.strictEqual(Kit.consoleMethod("groupEnd"), "groupEnd")
+    assert.strictEqual(Kit.consoleMethod("timeLog"), "timeLog")
+    // WebKit's `timing` is both `timeLog` and `timeEnd`
+    assert.strictEqual(Kit.consoleMethod("timing", "log"), "timeEnd")
+  })
+
+  it("reads a message whose wire names no method as its level's method", () => {
+    assert.strictEqual(Kit.consoleMethod("log", "warning"), "warn")
+    assert.strictEqual(Kit.consoleMethod("log", "error"), "error")
+    assert.strictEqual(Kit.consoleMethod(undefined, "debug"), "debug")
+    assert.strictEqual(Kit.consoleMethod("image", "info"), "info")
+    assert.strictEqual(Kit.consoleMethod("log"), "log")
+    assert.strictEqual(Kit.consoleMethod(undefined), "log")
+  })
+})

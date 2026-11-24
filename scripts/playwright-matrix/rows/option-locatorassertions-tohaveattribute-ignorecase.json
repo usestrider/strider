@@ -1,7 +1,13 @@
 {
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding public option for this contract.",
+  "status": "has",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toHaveAttribute",
+      "url": "/docs/api/browser/Expect#toHaveAttribute"
+    }
+  ],
+  "notes": "ignoreCase compares the attribute's value without case and sets or clears a regular expression's i flag.",
   "capabilities": [],
   "id": "option-locatorassertions-tohaveattribute-ignorecase",
   "upstream": [

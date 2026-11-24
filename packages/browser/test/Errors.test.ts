@@ -23,6 +23,7 @@ const ambiguous = new Locator.LocatorError({
   operation: "click",
   locator: "getByText(\"Save\")",
   reason: new Locator.StrictViolation({
+    count: 2,
     candidates: [{ description: "button \"Save\"", visible: true }, { description: "link \"Save\"", visible: true }],
     suggestions: ["getByRole('button', { name: 'Save' })"],
     hint: "try getByRole('button', { name: 'Save' })"

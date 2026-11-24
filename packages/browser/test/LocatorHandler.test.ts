@@ -116,7 +116,8 @@ const fixture = () => {
             scrolled: false,
             draggable: false,
             checked: null,
-            fill: null
+            fill: null,
+            selected: null
           }
           let response: unknown
           if (call.functionDeclaration === Engine.cooperate) {

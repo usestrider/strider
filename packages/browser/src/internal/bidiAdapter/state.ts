@@ -244,6 +244,15 @@ export interface State extends Kit.Ending {
   /** The same for a touch, from its start until it ends or is canceled. */
   readonly touchCapture: Map<L1Target.NavigableId, import("./input.ts").PointerTarget>
   readonly navigablesById: Map<L1Target.NavigableId, NavigableEntry>
+  /**
+   * Navigable ids given out before their navigable is known: an attached browser can list a popup before the page
+   * or frame that opened it, so the popup names its opener by the id that page or frame then takes, held while a
+   * popup that names it is open.
+   */
+  readonly reservedIds: Map<
+    string,
+    { readonly id: L1Target.NavigableId; readonly popups: Set<L1Target.NavigableId> }
+  >
   /** Why each page that ended did, for an operation that names it after. */
   readonly endedPages: Map<L1Target.NavigableId, L1Target.CloseReason>
   readonly documents: Map<L1Target.DocumentId, DocumentEntry>
@@ -321,6 +330,7 @@ export const make = (options: {
     contextsByBidi: new Map([[defaultContext.bidi, defaultContext]]),
     navigables: new Map(),
     navigablesById: new Map(),
+    reservedIds: new Map(),
     mouseCapture: new Map(),
     touchCapture: new Map(),
     endedPages: new Map(),

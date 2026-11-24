@@ -1,8 +1,16 @@
 {
-  "status": "missing",
-  "api": [],
-  "notes": "The parent capability is missing; this option is not implemented by that contract.",
-  "capabilities": [],
+  "status": "has",
+  "api": [
+    {
+      "module": "Capability",
+      "symbol": "OverlayControl",
+      "url": "/docs/api/browser/Capability#OverlayControl"
+    }
+  ],
+  "notes": "position takes the same six values, top-right by default.",
+  "capabilities": [
+    "capability.overlay"
+  ],
   "id": "option-screencast-showactions-position",
   "upstream": [
     "method:Screencast.showActions"
@@ -12,27 +20,27 @@
   "valueCoverage": [
     {
       "value": "bottom",
-      "status": "missing"
+      "status": "has"
     },
     {
       "value": "bottom-left",
-      "status": "missing"
+      "status": "has"
     },
     {
       "value": "bottom-right",
-      "status": "missing"
+      "status": "has"
     },
     {
       "value": "top",
-      "status": "missing"
+      "status": "has"
     },
     {
       "value": "top-left",
-      "status": "missing"
+      "status": "has"
     },
     {
       "value": "top-right",
-      "status": "missing"
+      "status": "has"
     }
   ]
 }

@@ -126,6 +126,8 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         status: Math.min(599, Math.max(100, params.response.status || 200)) as NetworkResponse.StatusCode,
         statusText: params.response.statusText,
         httpVersion: Option.fromUndefinedOr(params.response.protocol || undefined),
+        serverAddress: Option.none(),
+        securityDetails: Option.none(),
         headers: headersOf(params.response.headers),
         // BiDi says only whether the network served it: Firefox's fromCache is true for a service
         // worker's response too

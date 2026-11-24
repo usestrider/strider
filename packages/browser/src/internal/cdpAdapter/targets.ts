@@ -79,6 +79,22 @@ const newTarget = (
   return target
 }
 
+/**
+ * The id a page not yet attached will take, so a popup listed before its opener can name it, held for as long as a
+ * popup that names it is open. Chromium names a popup's opener by its page's target, even when a frame in another
+ * process opened it.
+ */
+const reserveId = (state: State, targetId: string, popup: L1Target.NavigableId): L1Target.NavigableId => {
+  const known = state.reservedIds.get(targetId)
+  if (known !== undefined) {
+    known.popups.add(popup)
+    return known.id
+  }
+  const id = state.ids.navigable()
+  state.reservedIds.set(targetId, { id, popups: new Set([popup]) })
+  return id
+}
+
 const attached = (state: State, parent: TargetEntry | undefined, params: Target.AttachedToTargetParams) => {
   const session = state.control.session(params.sessionId as string as Protocol.SessionKey)
   if (session === undefined) return
@@ -88,10 +104,15 @@ const attached = (state: State, parent: TargetEntry | undefined, params: Target.
   switch (kind) {
     case "page": {
       const context = contextFor(state, info.browserContextId)
-      const opener = info.openerId === undefined ? undefined : state.targetsById.get(info.openerId)?.page
       const target = newTarget(state, kind, info, session, undefined, undefined)
+      const reserved = state.reservedIds.get(info.targetId)
+      state.reservedIds.delete(info.targetId)
+      const id = reserved?.id ?? state.ids.navigable()
+      const openerId = info.openerId === undefined
+        ? Option.none<L1Target.NavigableId>()
+        : Option.some(state.targetsById.get(info.openerId)?.page?.id ?? reserveId(state, info.openerId, id))
       const page: PageEntry = {
-        id: state.ids.navigable(),
+        id,
         targetId: info.targetId,
         context,
         target,
@@ -111,7 +132,6 @@ const attached = (state: State, parent: TargetEntry | undefined, params: Target.
       const main = newFrame({ frameId: info.targetId, id: page.id, page, parent: undefined, owner: entry })
       state.frames.set(info.targetId, main)
       state.navigables.set(page.id, main)
-      const openerId = Option.fromUndefinedOr(opener?.id)
       state.buffer.emit({
         _tag: "PageAdded",
         page: page.id,

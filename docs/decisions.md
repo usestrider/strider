@@ -85,7 +85,8 @@ shouldn't change how a site behaves. So:
   pages where their scripts could read it.
 - The query engine is one self-contained function in our source, with no library in the page.
 
-What does run in the main world is what the caller declared, their init scripts and the page clock, and, on stock
+What does run in the main world is what the caller declared, their init scripts, the page clock and the read of
+`Expect.toHaveJSProperty`, which asks for a property the page's scripts set, and, on stock
 WebKit alone, the library's own engine and reads, because its inspector makes no other world (QUIRKS.md, Q194).
 
 **The design is checked as compiled code.** A compiler checks what prose can't:
@@ -1258,6 +1259,17 @@ appears. Returned refs retain their normal stale-ref guarantees if a field is re
 Rejected: inventing an implicit textbox role, which would change ordinary role queries; naming the field
 "Password", which would replace or invent an accessible name; and including its value, even under local capture.
 
+## Configure a launch's default context at launch, borrowed and never owned
+
+A launch takes `defaultContext`, the options `newContext` takes, and applies them to the default context before the
+layer gives out the `Browser`, for the connection's whole life. The context is borrowed as a reclaimed context is:
+its declarations are released when the layer closes, and the context, which the browser owns, is never removed.
+Options only creating a context sets are refused before the browser starts, except accepting insecure certificates,
+which each backend sets at launch for the default context alone. Options on `defaultContext.control` were rejected:
+control lasts only for the caller's scope, so the startup page would lose them midway, and it comes too late for the
+options a launch must set. A separate `ignoreDefaultArgs` was rejected too: the launch profile already states every
+flag a launch adds, so `LaunchProfile.stock`, or a profile with some arguments filtered out, says the same.
+
 ## Retain Chromium's startup window by default
 
 Keep the initial window in Chromium's automation profile and, by inheritance, concurrent. Skipping it saves
@@ -1370,11 +1382,11 @@ A capability is native or `Unsupported`: native support uses a browser channel S
 `VideoWriter` consumes timestamped JPEG or PNG images and a destination with fixed dimensions, and completes with
 the finished file. Chromium reads it optionally when connecting and advertises video only when one is provided;
 Firefox never reads it. `layerFfmpeg({ path })` requires `ChildProcessSpawner`, installs nothing, and never searches
-PATH. The video consumer keeps source timestamps relative to recording start, prepends the first picture at zero when its normalized capture time is later, and sends the last picture once more at stop time so a still ending lasts until stop. The zero-time copy gives files a picture from recording start and avoids FFmpeg end-relative seeks adding a nonzero start offset. It belongs in the core so custom writers and polled WebKit receive the same timeline. An already-zero or cached first capture needs no additional copy. Both boundary copies reuse their image without another source acknowledgement. Shifting every capture timestamp to the first capture is rejected because it loses recording-relative trace alignment; changing only the ffmpeg writer leaves other writers with different timelines. Each native Chromium stream anchors its first timestamp to local monotonic receipt time and maps subsequent browser timestamp differences, capped at each frame’s local receipt time; a missing timestamp uses local receipt time without changing the anchor. The core holds backward times at the preceding frame time, including transitions from receipt fallback, until source time catches up. This preserves later timestamps without asking ffmpeg to repair decreasing input. Initial capture/transport latency cannot be measured from these events and is included in the first-frame alignment. Capping at receipt prevents a forward browser-clock jump from extending the recording past stop. Since the anchor includes the first delivery’s latency, ordinary decreasing delivery latency can also reach the cap and shorten source intervals. A backward clock jump can flatten frames until source time catches up; heuristic re-anchoring is rejected because the events do not distinguish clock corrections from delivery latency and no threshold is required by the recording contract. Mapping browser epoch time through the client epoch is rejected because connected browsers can have different host clocks. WebKit uses its sample completion time. `layerFfmpeg` streams Matroska images with millisecond timestamps and encodes VP8 with timestamp passthrough. Fixed 25fps pacing is rejected because idle copies spend CPU and file space and delay a paint by up to 40ms. Strider fixes
-the initial output dimensions in `Destination`; the writer must output every frame at exactly those dimensions,
+PATH. The video consumer keeps source timestamps relative to recording start, prepends the first picture at zero when its normalized capture time is later, and sends the last picture once more at stop time so a still ending lasts until stop. The zero-time copy gives files a picture from recording start and avoids FFmpeg end-relative seeks adding a nonzero start offset. It belongs in the core so custom writers and polled WebKit receive the same timeline. An already-zero or cached first capture needs no additional copy. Both boundary copies reuse their image without another source acknowledgement. Shifting every capture timestamp to the first capture is rejected because it loses recording-relative trace alignment; changing only the ffmpeg writer leaves other writers with different timelines. Each native Chromium stream anchors its first timestamp to local monotonic receipt time and maps subsequent browser timestamp differences, capped at each frame’s local receipt time; a missing timestamp uses local receipt time without changing the anchor. The core holds backward times at the preceding frame time, including transitions from receipt fallback, until source time catches up. This preserves later timestamps without asking ffmpeg to repair decreasing input. Initial capture/transport latency cannot be measured from these events and is included in the first-frame alignment. Capping at receipt prevents a forward browser-clock jump from extending the recording past stop. Since the anchor includes the first delivery’s latency, ordinary decreasing delivery latency can also reach the cap and shorten source intervals. A backward clock jump can flatten frames until source time catches up; heuristic re-anchoring is rejected because the events do not distinguish clock corrections from delivery latency and no threshold is required by the recording contract. Mapping browser epoch time through the client epoch is rejected because connected browsers can have different host clocks. WebKit uses its sample completion time. `layerFfmpeg` streams Matroska images with millisecond timestamps and encodes VP8 with timestamp passthrough. Fixed 25fps pacing is rejected as the default because idle copies spend CPU and file space and delay a paint by up to 40ms; a caller who wants a constant rate opts in with `fps`, which `Destination` carries. `layerFfmpeg` resamples to it itself, each frame showing the latest image at or before its time and the file ending at stop rounded up to a whole frame; leaving the conversion to ffmpeg is rejected because its end is inferred, and was wrong for both slow and fast sources. Firefox records natively, so there `size` is a box the page fits inside with its shape kept and no padding, and `fps` a ceiling, not a constant rate: padding or re-encoding its file would emulate a native capability, which the capability rule rejects, and the docs state the difference instead. Strider fixes
+the output dimensions in `Destination`: the caller's `size`, or by default the viewport in CSS pixels at acquisition scaled down to fit 800 by 800, as Playwright does, rather than the first image's device pixels, so a file's size doesn't depend on the device scale factor or on what the first image happened to be. Without an emulated viewport it is read where a navigation can't interrupt it, Chromium's `Page.getLayoutMetrics` on the page's session and an 800 by 800 box Firefox fits the viewport inside, and on WebKit, whose window size through Automation includes its toolbar, from the first picture; measuring `innerWidth` in a page realm is rejected because a navigation started with the recording destroys the realm and fails acquisition; the writer must output every frame at exactly those dimensions,
 scaled to fit, centred, and padded black. The writer owns pixel fitting because it has the codec; Strider owns
 that policy, timestamps, acknowledgements, and lifetimes. `layerFfmpeg`'s quality is fixed rather than an option: constrained-quality VP8 (CRF 8, quantizer 0 to 50, a 4 Mbit/s average target that bursts allow exceeding) in real-time mode with `-cpu-used 8` keeps small text legible at desktop size, where libvpx's 256 kbit/s default does not; Chromium's screencast asks for JPEG quality 90, which also enlarges native trace frames. An option is rejected for now because a caller with another trade-off can provide a `VideoWriter`, and adding one later is additive. Reusable writer conformance checks decode changing and odd-sized
-inputs to verify output dimensions and padding. Its file lives in the context's downloads directory on Chromium,
+inputs to verify output dimensions and padding. Its file lives at the caller's `path`, written beside it and moved there at the end, or else in the context's downloads directory on Chromium,
 or the explicitly named output directory on WebKit. Scope closure
 or normal source termination ends input and allows `Deadline.DefaultBudget`, as read when the capability is
 acquired, on the browser clock to finish a started writer, even while the caller scope stays open. The finish stays
@@ -1555,6 +1567,16 @@ never request a feature gain no interception, injected instrumentation, per-acti
 state for it. Additions must include paired default-path benchmarks so review can assess their cost. Reject
 always-on preparation for optional features: unused capabilities must not slow existing automation.
 
+## Console arguments on a scoped subscription
+
+A console message stays a value, kept in the event log, and its arguments come only through a subscription to
+calls (`ConsoleMessage.nextCall`, `streamCalls`), which declares them for its page or context, per
+[Pay for what you use](#pay-for-what-you-use). As a message arrives, each subscription that could deliver it claims
+its arguments; delivering turns the claim into ownership in the subscription's scope, and the browser's object is
+freed once no claim or owner remains. Rejected: handles on the message itself, which the log would keep alive and
+every context would pay for; and counting owners only as subscribers take a message, which can't tell when all of
+them have passed on it.
+
 ## Client certificates through a per-context proxy
 
 No browser protocol Strider speaks sets a TLS client certificate for one context, so a context with
@@ -1622,7 +1644,8 @@ A transient duplicate during a render should settle under the same deadline as a
 the value comparison must not let an absent or ambiguous element satisfy it. This follows the existing
 single-element expectation engine. Rejected: immediate multiple-match rejection as in Playwright, which treats
 transient ambiguity differently from other unsettled expectation states, and negating cardinality together with
-the value, which could pass without observing the requested element.
+the value, which could pass without observing the requested element. The accessible description and error
+message expectations' `not` follows the same rule.
 
 ## Extra request header ownership
 
@@ -1844,6 +1867,15 @@ move: a drag of one held move shows its first `dragover` at the release or the n
 `dragOver` at the move that starts the drag, which shows the drag over the target while the button is held, was
 rejected: every drop would then end with a second `dragover`, which Playwright's and Puppeteer's drag tests both reject.
 
+## A search across frames is opt-in and strict across frames
+
+A query searches one document unless its chain asks for more with `anyFrame`, on a page or a frame locator, which
+tests each part of the chain in every document under it and goes on in the one where it matches. More than one
+matching document fails every operation, `count` and `all` included, with `StrictViolation`, as an ambiguous element
+does. Rejected: page queries that search frames by default, which would make every query's cost and meaning depend on
+the frames a page happens to embed; and taking the first frame that matches, which would depend on the order frames
+load in.
+
 ## Handles don't lead back to their browser
 
 Code reaches its browser through the `Browser` service (`yield* Browser.Browser`), and `browser.info` names the product
@@ -1891,3 +1923,13 @@ that takes an event name. Each module gives its own typed payload and its own fi
 wait names what it matches in the event's terms and its result needs no cast. Rejected: a `waitForEvent(name)` or
 `on(name)` dispatch over event names, as Playwright and Node's emitters have, whose payload and filter types follow
 from a string, and which would put every kind's lifetime and delivery rules behind one untyped entry point.
+
+## Recording overlays are page DOM
+
+Recording overlays (`Capability.Overlay`) are elements the engine draws in the page's main document, under a closed
+shadow root that its own queries, snapshots and hit tests leave out, and draws again in each document the main frame
+commits. One mechanism then serves all three browsers, and screenshots show the overlays as video does. Following
+[Pay for what you use](#pay-for-what-you-use), nothing is drawn or watched until a page acquires the capability, and
+only a page showing its actions waits before input. Compositing overlays into video frames in `VideoWriter` was
+rejected: Firefox writes its own video file, which no frame passes through, and screenshots would lack them.
+Playwright's deprecated `fontSize` option is not built; `style.title` sets the title's font like any other CSS.

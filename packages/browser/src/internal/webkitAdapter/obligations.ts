@@ -152,6 +152,8 @@ export const register = (handlers: Kit.Handlers<Event>) =>
               status: Math.min(599, Math.max(100, params.response.status || 200)) as NetworkResponse.StatusCode,
               statusText: params.response.statusText,
               httpVersion: Option.none(),
+              serverAddress: Option.none(),
+              securityDetails: Option.none(),
               headers: Kit.headersOf(params.response.headers),
               servedBy: servedBy(request, params.response),
               at: Adapter.now()

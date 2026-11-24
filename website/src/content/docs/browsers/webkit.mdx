@@ -193,7 +193,7 @@ const deleteAccount = Effect.fn("deleteAccount")(function*(page: Page.Page) {
 })
 ```
 
-**[`Popup.next`](/docs/events/kinds#popups) fails with `Unsupported`:** WebKit names no opener. Wait for the new page in the context's `pages`:
+**[`Popup.next`](/docs/events/kinds#popups) and `Popup.opener` fail with `Unsupported`:** WebKit names no opener. Wait for the new page in the context's `pages`:
 
 ```ts
 import { Expect, Page } from "@usestrider/browser"
@@ -238,6 +238,12 @@ a caller-owned directory, independently of downloads.
 checks" as a script error, so it arrives as an [`UncaughtException`](/docs/events/events#history), with no
 [`source`](/docs/events/console). Its other CORS and CSP messages are console messages from the
 browser. The capability `console.source` is `partial` here.
+
+**Two console methods read as others.** WebKit sends `console.timeLog` as it sends `timeEnd`, so its
+[`method`](/docs/events/console) is `timeEnd`, and `console.count` as a plain message at level `debug`, so its method
+is `debug`. `countReset` of a counter that doesn't exist comes as a warning, so it reads as `warn`, and of one that
+exists sends nothing; `timeLog` and `timeEnd` of a timer that doesn't exist read as `timeEnd`, at level `warning`. The
+capability `console.method` is `partial` here.
 
 **No downloads, file choosers, PDFs, or screencasts.** [`setInputFiles`](/docs/pages/actions#files) works. Screenshots are PNG.
 

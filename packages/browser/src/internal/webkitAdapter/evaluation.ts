@@ -13,6 +13,7 @@ import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Protocol from "../../protocol/Protocol.ts"
 import * as L1Target from "../../Target.ts"
+import * as Console from "../../webkit-stock-protocol/Console.ts"
 import * as Runtime from "../../webkit-stock-protocol/Runtime.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
@@ -26,10 +27,12 @@ import {
   contextKey,
   documentOf,
   type Event,
+  frameById,
   frameKey,
   type RealmEntry,
   realmOf,
-  type State
+  type State,
+  targetOf
 } from "./state.ts"
 import { originOf } from "./tree.ts"
 
@@ -410,6 +413,25 @@ export const evaluate = Effect.fnUntraced(function*(
   )
 })
 
+/** A console message's arguments, each object with a handle the model owns, and their release. */
+export const consoleArguments = (state: State, realm: RealmEntry, objects: ReadonlyArray<Runtime.RemoteObject>) => ({
+  values: objects.map((object): Adapter.RemoteValue => {
+    const type = remoteType(object)
+    if (object.objectId === undefined || object.subtype === "null") return primitive(object)
+    const handle = state.ids.handle()
+    state.handles.set(handle, { session: realm.session, realm: realm.id, objectId: object.objectId, group: undefined })
+    const document = realm.document
+    return type === "node"
+      ? {
+        type,
+        handle,
+        ...(document === undefined ? {} : { node: { document: document.id, binding: object.objectId } })
+      }
+      : { type, handle } as Adapter.RemoteValue
+  }),
+  release: (handles: ReadonlyArray<Adapter.HandleId>) => releaseHandles(state, handles)
+})
+
 /** A group given whole goes in one command, its anchors with it (QUIRKS.md, Q132). */
 export const releaseHandles = (state: State, list: ReadonlyArray<Adapter.HandleId>) =>
   Effect.forEach(Groups.release(state.groups, state.handles, list), (released) =>
@@ -435,3 +457,15 @@ export const releaseNodes = (state: State, nodes: ReadonlyArray<Adapter.NodeBind
         Effect.ignore
       )
   }, { discard: true })
+
+/**
+ * A round trip on the frame's page: `Console.getLoggingChannels` changes nothing, and once its reply is in, the
+ * worker folds every event received before it.
+ */
+export const settled = Effect.fnUntraced(function*(state: State, id: L1Target.NavigableId) {
+  const target = yield* Effect.option(Effect.flatMap(frameById(state, id), (frame) => targetOf(frame.page)))
+  if (Option.isSome(target)) {
+    yield* Effect.ignore(Console.getLoggingChannels().pipe(Protocol.on(target.value.session)))
+  }
+  yield* state.buffer.run(() => {})
+})

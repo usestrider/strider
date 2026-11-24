@@ -30,6 +30,9 @@ const recordCheckout = Effect.fn("recordCheckout")(function*() {
 A [trace](/docs/tools/recordings#traces) with `screencast: "native"` records each page's video itself, wherever
 the browser can write one.
 
+To add titles, chapter cards or marks for each action to what's recorded, use
+[recording overlays](/docs/tools/recording-overlays).
+
 ## What each browser needs
 
 | Browser  | Needs                                                               | Frames                                          |
@@ -59,21 +62,62 @@ Strider installs no ffmpeg and doesn't look for one on `PATH`. Without a writer,
 fails with `Unsupported`, naming the missing `VideoWriter`, and a trace's `screencast: "native"` records frames
 instead. Firefox never reads a writer, and an attached Firefox can't record.
 
+## Size, frame rate, and path
+
+[`VideoOptions`](/docs/api/browser/Capability#VideoOptions) come after the capability. `size` sets the file's
+width and height in pixels, `fps` its frame rate, and `path` names the file:
+
+```ts
+import { Browser, Capability } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const recordAt = Effect.fn("recordAt")(function*() {
+  const page = yield* Browser.newPage()
+  yield* page.goto("https://shop.example.com/cart")
+  const video = yield* Effect.scoped(Effect.gen(function*() {
+    const recording = yield* page.capability(Capability.Video, {
+      size: { width: 640, height: 360 },
+      fps: 25,
+      path: "/tmp/videos/checkout.webm",
+      overwrite: false
+    })
+    yield* page.getByRole("button", { name: "Pay" }).click()
+    return recording
+  }))
+  return yield* video.file
+}, Effect.scoped)
+```
+
+Without `size`, the file is the page's viewport in CSS pixels when recording starts, scaled down to fit 800 by
+800: a 1280 by 720 viewport gives 800 by 450. On WebKit without an emulated viewport, it's the first picture's size,
+in device pixels, scaled the same way. Without `fps`, the file is variable-rate.
+
+On Chromium and WebKit the file is exactly `size`, each image fitted and padded black, and constant-rate at
+`fps`: each frame shows the latest picture at or before its time, and the file ends at the stop time rounded up to
+a whole frame. Firefox records natively: `size` is a box the page fits inside with its shape kept and no padding, so one
+side may be shorter, and `fps` is a ceiling, with frames keeping their own times. Firefox takes a whole frame rate
+only.
+
+A path's directory must exist, and the path can't be a directory itself. With `overwrite: false`, a file already there fails acquisition, and one that
+appears while recording fails `file`, leaving that file alone. A size, frame rate, or path that isn't valid fails
+with `InvalidInput` before anything records.
+
 ## Where the file goes
 
-On Chromium and Firefox the file goes in the context's
-[`downloads`](/docs/pages/contexts#settings-for-a-contexts-life) directory. By default that's a temporary
-directory, removed when the context closes, so name one, as above, or read the file before the context ends. A
-context with `downloads: "deny"` can't record. WebKit has no downloads: its file goes in the directory its `video`
-option names.
+With a `path`, the file goes there, and the context needs no downloads. Otherwise, on Chromium and Firefox the
+file goes in the context's [`downloads`](/docs/pages/contexts#settings-for-a-contexts-life) directory. By default
+that's a temporary directory, removed when the context closes, so name one, as above, or read the file before the
+context ends. A context with `downloads: "deny"` can record only to a `path`. WebKit has no downloads: its file goes
+in the directory its `video` option names.
 
 ## Playback
 
 - **A still page stays on screen for as long as it was still.** Chromium sends a frame only when the page
-  repaints. The file is variable-rate: each frame keeps its time and stays on screen until the next, as on Firefox.
+  repaints. Without `fps`, the file is variable-rate: each frame keeps its time and stays on screen until the next,
+  as on Firefox.
   The last picture lasts until recording stops. WebKit keeps each polled sample until the next sample.
-- **A resize is fitted, not followed.** The recording carries on through a resize, but the file keeps the size
-  it started at: on Chromium and WebKit, each later frame is scaled to fit it, centred, with black bars.
+- **A resize is fitted, not followed.** The recording carries on through a resize, but the file keeps its size:
+  on Chromium and WebKit, every frame is scaled to fit it, centred, with black bars.
 - **A slow writer slows the frames, not the page.** Chromium holds its next frame until the writer takes the last
   one.
 - **The recording ends with its page.** Closing the scope, page, or context ends it; a writer then has the

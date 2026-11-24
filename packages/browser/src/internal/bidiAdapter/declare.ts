@@ -456,6 +456,7 @@ const releaseDeclaration = (
       case "Downloads":
         return applyDownloads(state, scope).pipe(Effect.ignore)
       case "FileChooser":
+      case "ConsoleArguments":
         return Effect.void
     }
   })
@@ -529,6 +530,8 @@ export const declare = Effect.fnUntraced(
       }
       case "Downloads":
         yield* Kit.protocol(applyDownloads(state, scope))
+        break
+      case "ConsoleArguments":
         break
       case "FileChooser":
         // File dialogs are always reported, and dismissed so none stays open (unhandledPromptBehavior.file is

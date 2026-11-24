@@ -23,10 +23,14 @@ const exactly = (matcher: Engine.TextMatcher) => matcher._tag === "String" && ma
  * made it.
  */
 export const describeSteps = (steps: ReadonlyArray<Engine.Step>): string => {
-  const boundary = steps.findLastIndex((step) => step._tag === "Frame")
+  const boundary = steps.findLastIndex((step) => step._tag === "Frame" || step._tag === "AnyFrame")
   if (boundary < 0) return describePlain(steps)
   const rest = describePlain(steps.slice(boundary + 1))
-  return `frame(page.${describeSteps(steps.slice(0, boundary))})${rest === "" ? "" : `.${rest}`}`
+  const after = rest === "" ? "" : `.${rest}`
+  if (steps[boundary]!._tag === "AnyFrame") {
+    return boundary === 0 ? `anyFrame${after}` : `${describeSteps(steps.slice(0, boundary))}.anyFrame${after}`
+  }
+  return `frame(page.${describeSteps(steps.slice(0, boundary))})${after}`
 }
 
 const describePlain = (steps: ReadonlyArray<Engine.Step>): string =>
@@ -81,6 +85,8 @@ const describePlain = (steps: ReadonlyArray<Engine.Step>): string =>
         return `or(page.${describeSteps(step.other)})`
       case "Frame":
         return "frame()"
+      case "AnyFrame":
+        return "anyFrame"
       case "Ref":
         return `ref(${JSON.stringify(step.ref)})`
     }

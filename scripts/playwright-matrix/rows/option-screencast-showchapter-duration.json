@@ -1,8 +1,16 @@
 {
-  "status": "missing",
-  "api": [],
-  "notes": "The parent capability is missing; this option is not implemented by that contract.",
-  "capabilities": [],
+  "status": "has",
+  "api": [
+    {
+      "module": "Capability",
+      "symbol": "OverlayControl",
+      "url": "/docs/api/browser/Capability#OverlayControl"
+    }
+  ],
+  "notes": "duration, 2 seconds by default.",
+  "capabilities": [
+    "capability.overlay"
+  ],
   "id": "option-screencast-showchapter-duration",
   "upstream": [
     "method:Screencast.showChapter"

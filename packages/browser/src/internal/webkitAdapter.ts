@@ -192,6 +192,7 @@ export const connect: (
         "stock WebKit's inspector reports a traversal under the old document's URL, with no realm (QUIRKS.md, Q215)"
       ),
       realm: (document, world) => Evaluation.realmFor(state, document, world),
+      settled: (id) => Evaluation.settled(state, id),
       evaluate: (realm, call) => Evaluation.evaluate(state, realm, call),
       releaseHandles: (list) => Evaluation.releaseHandles(state, list),
       textInsertion: "native",
@@ -202,7 +203,7 @@ export const connect: (
       pdf: refuse("pdf", "WebKit has no print-to-PDF"),
       accessibilityTree: refuse("capability.axTree", "WebKit reads accessibility one node at a time"),
       screencast: refuse("capability.screencast", "stock WebKit's inspector has no Screencast domain"),
-      video: (id) => Capture.video(state, id, options.video, writer),
+      video: (id, output) => Capture.video(state, id, options.video, writer, output),
       createAuthenticator: () =>
         Effect.fail(
           Kit.unsupported("capability.virtualAuthenticator", "Native virtual authenticators require Chromium CDP")

@@ -166,6 +166,27 @@ const shellWorksOffline = Effect.fn("shellWorksOffline")(function*(page: Page.Pa
 })
 ```
 
+## Server address and TLS
+
+A response's `serverAddress` is the IP address and port of the server that answered, and its `securityDetails`
+the TLS connection and certificate of an HTTPS response: `protocol`, `subjectName`, `issuer`, and the
+certificate's `validFrom` and `validTo`, in seconds since the epoch. Each is an `Option`. `securityDetails` is
+`None` for plain HTTP. Chromium reports all of them. WebKit reports the certificate without its issuer and with no
+TLS version, and no server address, since it says those only as the response ends; a
+[HAR](/docs/tools/recordings) has them. A WebKit redirect hop has no TLS details or address, in a HAR either. Firefox reports neither:
+
+```ts
+import { NetworkResponse, Page } from "@usestrider/browser"
+import { Effect, Option } from "effect"
+
+const certificateExpiry = Effect.fn("certificateExpiry")(function*(page: Page.Page) {
+  const document = yield* NetworkResponse.next(page, { url: "https://example.com/" })
+  yield* page.goto("https://example.com/")
+  const { securityDetails } = yield* document
+  return Option.flatMap(securityDetails, (details) => details.validTo)
+})
+```
+
 ## Sent headers
 
 A request event's headers are what the browser reported on sending. Chromium and WebKit leave out some the network

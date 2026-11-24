@@ -3,13 +3,24 @@
   "upstream": [
     "method:Frame.evaluate"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No general main-world frame evaluation API. A frame-scoped locator can evaluate its element in the engine world by value, but that does not expose arbitrary main-world globals or a frame handle.",
+  "status": "has",
+  "api": [
+    {
+      "module": "Frame",
+      "symbol": "ReadonlyFrame.evaluate",
+      "url": "/docs/api/browser/Frame#ReadonlyFrame.evaluate"
+    },
+    {
+      "module": "Frame",
+      "symbol": "Frame.evaluateInMainWorld",
+      "url": "/docs/api/browser/Frame#Frame.evaluateInMainWorld"
+    }
+  ],
+  "notes": "evaluate runs in an isolated world of the frame's document and evaluateInMainWorld among its own scripts, as Page's do; stock WebKit has no isolated worlds, so evaluate fails with Unsupported there.",
   "capabilities": [],
   "audit": {
     "sources": [
-      "packages/browser/src/Page.ts"
+      "packages/browser/src/Frame.ts"
     ],
     "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
   },

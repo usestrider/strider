@@ -167,6 +167,8 @@ const responseFixture = Effect.gen(function*() {
     status: 200 as NetworkResponse.StatusCode,
     statusText: "OK",
     httpVersion: Option.none(),
+    serverAddress: Option.none(),
+    securityDetails: Option.none(),
     headers: Headers.empty,
     servedBy: "network",
     at: sent.at

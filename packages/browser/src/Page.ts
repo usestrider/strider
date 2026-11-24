@@ -8,8 +8,9 @@
  *
  * Access is granted for a `Scope`: `inspect` and `control` are the only ways up, and no type guard narrows a page's
  * access. A subtype never changes what an inherited member does: `evaluate` runs in the isolated world whatever
- * the page's access, and only `evaluateInMainWorld`, on a `Page`, runs among the page's own scripts. WebKit has no
- * isolated worlds: there, reads run in the page's own world, and `evaluate` fails with `Unsupported`.
+ * the page's access, and only `evaluateInMainWorld` on a `Page`, and `Expect.toHaveJSProperty` on a `Locator`, run
+ * among the page's own scripts. WebKit has no isolated worlds: there, reads run in the page's own world, and
+ * `evaluate` fails with `Unsupported`.
  *
  * @stability unstable
  * @since 0.1.0
@@ -32,6 +33,7 @@ import type * as Declaration from "./Declaration.ts"
 import * as Diagnostics from "./Diagnostics.ts"
 import * as Dialog from "./Dialog.ts"
 import type * as Emulation from "./Emulation.ts"
+import type * as Frame from "./Frame.ts"
 import type * as InitScript from "./InitScript.ts"
 import * as ReasonCause from "./internal/reasonCause.ts"
 import type * as RoutePhaseDiagnostic from "./internal/routePhaseDiagnostic.ts"
@@ -230,6 +232,58 @@ export type ScreenshotOptions = ScreenshotFormat & {
    * @default false
    */
   readonly omitBackground?: boolean | undefined
+}
+
+/**
+ * Settings for `screenshot` on a page you control: `ScreenshotOptions`, and elements to hide behind a box.
+ *
+ * **Details**
+ *
+ * Each locator in `mask` hides every element it matches, in its own frame, behind a box of `maskColor` over the
+ * element's border box, in every area a capture takes: the viewport, the full page or an element. A locator that
+ * matches nothing hides nothing and isn't an error. A `maskColor` that isn't a CSS color fails the capture with
+ * `InvalidInput` before any box is drawn.
+ *
+ * **Gotchas**
+ *
+ * The boxes are drawn into the page for the capture, so a headed browser shows them for that long, and the page's
+ * scripts can see the change. They are removed once it ends, however it ends, from each frame that answers within
+ * 5 seconds: a frame that doesn't keeps its boxes, and the capture still returns its image or its error. They
+ * don't cover what the browser draws above the page, such as an open `<dialog>` or popover.
+ *
+ * **Example** (Hiding every avatar in black)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const captureFeed = Effect.fn("captureFeed")(function*(page: Page.Page) {
+ *   const options: Page.ControlScreenshotOptions = {
+ *     area: "fullPage",
+ *     mask: [page.getByRole("img", { name: "Avatar" })],
+ *     maskColor: "black"
+ *   }
+ *   return yield* page.screenshot(options)
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export type ControlScreenshotOptions = ScreenshotOptions & {
+  /**
+   * Elements to hide behind a box in the image.
+   *
+   * @default []
+   */
+  readonly mask?: ReadonlyArray<Locator.ReadonlyLocator> | undefined
+  /**
+   * The masks' color: any CSS color. Anything else fails the capture with `InvalidInput`.
+   *
+   * @default "#FF00FF"
+   */
+  readonly maskColor?: string | undefined
 }
 
 /**
@@ -595,6 +649,50 @@ export interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.Read
    */
   frame(iframe: Locator.ReadonlyLocator): Locator.ReadonlyFrameLocator
   /**
+   * Searches the page's document and every frame under it, at any depth, for the one frame a chain matches in.
+   *
+   * **Gotchas**
+   *
+   * - A chain that matches in more than one frame fails with `Locator.StrictViolation`, `count` included.
+   *
+   * **Example** (Clicking a button without naming its iframe)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const cardBrand = Effect.fn("cardBrand")(function*(page: Page.ReadonlyPage) {
+   *   return yield* page.anyFrame.getByTestId("card-brand").readText
+   * })
+   * ```
+   */
+  readonly anyFrame: Locator.ReadonlyAnyFrameLocator
+  /**
+   * A handle on one of the page's frames, by its id in `page.frames`, the page's own id included. It reaches a
+   * frame no locator can, such as one inside a closed shadow root, and fails with `InvalidInput` when the page has
+   * no frame with that id now.
+   *
+   * **Example** (Reading each frame's title)
+   *
+   * ```ts import.meta.vitest
+   * import type { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const titles = Effect.fn("titles")(function*(page: Page.ReadonlyPage) {
+   *   const tree = yield* page.frames
+   *   return yield* Effect.forEach(
+   *     tree.children,
+   *     (child) =>
+   *       Effect.flatMap(
+   *         page.frameById(child.id),
+   *         (frame) => frame.evaluate(() => document.title)
+   *       )
+   *   )
+   * })
+   * ```
+   */
+  frameById(id: Target.NavigableId): Effect.Effect<Frame.ReadonlyFrame, PageError | Target.TargetGone>
+  /**
    * The document's title, read now.
    *
    * **Example** (Checking the page's title)
@@ -758,8 +856,9 @@ export interface ReadonlyPage extends ObservedPage, Locator.Queries<Locator.Read
    * })
    * ```
    */
-  capability<H>(
-    capability: Capability.Capability<H>
+  capability<H, Options = never>(
+    capability: Capability.Capability<H, "inspect", Options>,
+    options?: Options | undefined
   ): Effect.Effect<H, Capability.CapabilityError | Target.TargetGone | Deadline.Timeout, Scope.Scope>
 }
 
@@ -789,7 +888,10 @@ export interface Page extends ReadonlyPage {
   /**
    * Acquires a specialized feature for the caller's scope, including features that change native page behavior.
    */
-  capability<H>(capability: Capability.Capability<H, "inspect" | "control">): Effect.Effect<
+  capability<H, Options = never>(
+    capability: Capability.Capability<H, "inspect" | "control", Options>,
+    options?: Options | undefined
+  ): Effect.Effect<
     H,
     Capability.CapabilityError | Target.TargetGone | Deadline.Timeout,
     Scope.Scope
@@ -804,9 +906,32 @@ export interface Page extends ReadonlyPage {
   getByTestId(id: string | RegExp): Locator.Locator
   locator(selector: string | Locator.XPath): Locator.Locator
   frame(iframe: Locator.ReadonlyLocator): Locator.FrameLocator
+  readonly anyFrame: Locator.AnyFrameLocator
+  frameById(id: Target.NavigableId): Effect.Effect<Frame.Frame, PageError | Target.TargetGone>
   snapshot(
     options?: Snapshot.Options | undefined
   ): Effect.Effect<Snapshot.Snapshot<Locator.Locator>, PageError | Target.TargetGone | Deadline.Timeout>
+  /**
+   * A screenshot; the viewport as PNG unless options say otherwise. With control, it can also hide elements
+   * behind a box (`mask`).
+   *
+   * **Example** (Hiding a timestamp that changes on every run)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const captureReceipt = Effect.fn("captureReceipt")(function*(page: Page.Page) {
+   *   return yield* page.screenshot({
+   *     mask: [page.getByTestId("issued-at")],
+   *     maskColor: "black"
+   *   })
+   * })
+   * ```
+   */
+  screenshot(
+    options?: ControlScreenshotOptions | undefined
+  ): Effect.Effect<Uint8Array, PageError | Target.TargetGone | Deadline.Timeout>
   readonly workers: Watchable.Watchable<ReadonlyArray<BrowserWorker.BrowserWorker>>
   readonly localStorage: OriginStorage.OriginStorage
   readonly sessionStorage: OriginStorage.OriginStorage

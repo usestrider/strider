@@ -378,6 +378,14 @@ export interface State extends Kit.Ending {
   readonly contextsByCdp: Map<string, ContextEntry>
   readonly targets: Map<ProtocolClient.Session, TargetEntry>
   readonly targetsById: Map<string, TargetEntry>
+  /**
+   * Page ids given out before their page is known: an attached browser can list a popup before its opener, so the
+   * popup names the opener by the id its opener then takes.
+   */
+  readonly reservedIds: Map<
+    string,
+    { readonly id: L1Target.NavigableId; readonly popups: Set<L1Target.NavigableId> }
+  >
   readonly pages: Map<L1Target.NavigableId, PageEntry>
   /** Why each page that ended did, for an operation that names it after. */
   readonly endedPages: Map<L1Target.NavigableId, L1Target.CloseReason>
@@ -475,6 +483,7 @@ export const make = (options: {
     contextsByCdp: new Map(),
     targets: new Map(),
     targetsById: new Map(),
+    reservedIds: new Map(),
     pages: new Map(),
     endedPages: new Map(),
     frames: new Map(),

@@ -34,20 +34,23 @@ Each matcher takes a locator, except `toHaveURL` and `toHaveTitle`, which take t
 | `toBeEnabled`, `toBeDisabled`                  | the element is enabled, or disabled                              |
 | `toBeChecked`, `toBeFocused`, `toBeEditable`   | it's checked; it has focus, through open shadow roots; it's editable |
 | `toBeInViewport(options?)` | one element intersects the viewport at the requested ratio |
-| `toHaveText(expected)`                         | its text is `expected`, or for a list, each match's in order      |
+| `toHaveText(expected, options?)`               | its text is `expected`, or for a list, each match's in order      |
 | `toHaveClass(expected)` | its full class string matches, or for a list, each element’s in order |
-| `toContainText(expected)`                      | its text contains `expected`                                     |
+| `toContainText(expected, options?)`            | its text contains `expected`, or a list's entries are in matches, in order |
 | `toBeEmpty` | the field value is empty, or other element text is only whitespace |
 | `toHaveAccessibleName(expected, options?)` | its accessible name matches; `ignoreCase` overrides regex flags |
+| `toHaveAccessibleDescription(expected, options?)` | its accessible description matches; `not` negates the comparison |
+| `toHaveAccessibleErrorMessage(expected, options?)` | its error message, empty unless it's invalid, matches; `not` negates the comparison |
 | `toHaveValue(expected)`                        | a form control's value is `expected`                             |
 | `toHaveValues(expected)` | one multiple select has the selected values in option order |
-| `toHaveAttribute(name, expected?)`             | it has the attribute, with that value if given                   |
+| `toHaveAttribute(name, expected?, options?)`   | it has the attribute, with that value if given                   |
 | `toHaveRole(expected)`                         | its computed ARIA role equals the string exactly                 |
 | `toHaveCSS(name, expected, options?)`          | its computed CSS property matches an exact string or regular expression |
+| `toHaveJSProperty(path, expected, options?)` | a JavaScript property, read in the page's own world, deeply equals `expected` |
 | `toHaveCount(n)`                               | exactly `n` elements match                                       |
 | `toMatchAria(pattern, options?)`               | its accessibility tree matches a pattern; `not` waits for it not to |
 | `toSatisfy(fn, ...args)`                       | a function you pass returns `true` on the element, in the page   |
-| `toHaveURL(expected)`, `toHaveTitle(expected)` | the page's URL or title matches                                  |
+| `toHaveURL(expected, options?)`, `toHaveTitle(expected)` | the page's URL or title matches                        |
 
 Roles can be implicit, such as a button's `button` role, or set with `role`. Role assertions compare exact,
 case-sensitive strings, so `switch` does not match `checkbox`. Plain elements such as `div` have the shared engine's
@@ -156,9 +159,32 @@ const searchHerons = Effect.fn("searchHerons")(function*(page: Page.Page) {
 })
 ```
 
+`toContainText` with a list passes when each entry is contained in a match after the one the entry before it was
+in, so it can skip matches between them. `ignoreCase` on `toHaveText`, `toContainText`, `toHaveAttribute`, and
+`toHaveURL` compares strings without case, whatever the browser's locale, and sets a regular expression's `i`
+flag, or clears it when `false`. `useInnerText` on `toHaveText` and `toContainText` reads the rendered `innerText`,
+which leaves out hidden descendants that the text content keeps; it depends on layout, so browsers can differ. An
+element that isn't HTML, such as an SVG one, has no `innerText`, so its text content is read.
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const checkResults = Effect.fn("checkResults")(function*(page: Page.ReadonlyPage) {
+  const results = page.getByRole("list", { name: "Results" }).getByRole("listitem")
+  yield* results.pipe(
+    Expect.toContainText(["grey", "great blue"], { ignoreCase: true })
+  )
+  yield* page.getByRole("status").pipe(
+    Expect.toHaveText("2 results", { useInnerText: true })
+  )
+  yield* page.pipe(Expect.toHaveURL(/q=HERON/, { ignoreCase: true }))
+})
+```
+
 Use an accessible-name expectation to check what assistive technology calls a control, including names from labels
 and ARIA references. Strings match the whole name with whitespace normalized; `ignoreCase` overrides a regular
-expression's case flag. A hidden element has an empty name, while a hidden label can still name a visible control.
+expression's case flag, and folds a string's case whatever the browser's locale. A hidden element has an empty name, while a hidden label can still name a visible control.
 Roles that prohibit naming, such as generic, paragraph, and code, have an empty name even with an ARIA label.
 Their content can still name another element, and an explicit nameable role overrides the implicit role. Role
 locators use this same name computation. Missing or multiple matches retry until the deadline and report their
@@ -173,6 +199,27 @@ const saveName = Effect.fn("saveName")(function*(page: Page.ReadonlyPage) {
   yield* Expect.toHaveAccessibleName(page.getByTestId("save"), /save/, {
     ignoreCase: true
   })
+})
+```
+
+The accessible description comes from the first of these an element has, even when its text is empty: the elements
+`aria-describedby` names, `aria-description`, a table's caption or a button input's `value` when that isn't the name,
+a `summary` element's content when `aria-label` or `aria-labelledby` gave the name, and last a `title` that isn't
+the name. The accessible error message is the text of the elements `aria-errormessage` names while the element is invalid, and empty otherwise. An element is invalid
+when its `aria-invalid` is anything but blank or `false`, or when the browser's own validation rejects its value. Both compare as names do, take `ignoreCase`, and take `not`, which negates the
+comparison but still needs exactly one match:
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const emailField = Effect.fn("emailField")(function*(page: Page.Page) {
+  const email = page.getByLabel("Email")
+  yield* email.pipe(Expect.toHaveAccessibleDescription("We never share it"))
+  yield* email.pipe(Expect.toHaveAccessibleErrorMessage(""))
+  yield* email.fill("not an address")
+  yield* email.pipe(Expect.toHaveAccessibleErrorMessage("Enter a valid email address"))
+  yield* email.pipe(Expect.toHaveAccessibleErrorMessage("", { not: true }))
 })
 ```
 
@@ -196,6 +243,32 @@ CSS expectations require exactly one match even with `not: true`. Missing or mul
 the deadline and report the match count; Playwright rejects multiple matches immediately.
 Use `Deadline.within` to bound the expectation. Without options, it compares the element's own computed style.
 
+A JavaScript property is read where the page's own scripts set it, so a value a script assigned to an element is
+seen, and the property can be a dotted path into nested objects. The value is compared by deep equality: Dates by
+time, arrays, Maps and Sets by their entries, and plain objects by their own keys. Because a getter of the page's can
+run during the read, it takes a `Locator` rather than a `ReadonlyLocator`:
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const loaded = Effect.fn("loaded")(function*(page: Page.Page) {
+  const profile = page.locator("#profile")
+  yield* profile.pipe(
+    Expect.toHaveJSProperty("model", { plan: "pro", since: new Date("2026-01-01") })
+  )
+  yield* profile.pipe(Expect.toHaveJSProperty("model.plan", "free", { not: true }))
+  yield* page.getByRole("checkbox").pipe(Expect.toHaveJSProperty("checked", true))
+})
+```
+
+Assigning a property is no change the page reports, so instead of waiting on page events it reads the property
+again every `Expect.CheckInterval`, 100 ms unless `Expect.withCheckInterval` sets it. The interval is also how
+often a getter of the page's on the path runs.
+
+Like CSS expectations, it requires exactly one match even with `not: true`, retries until the deadline, and reports
+the value read or the match count.
+
 A matcher without arguments is the function itself; one with arguments is dual:
 
 ```ts
@@ -218,7 +291,7 @@ A locator's expectation returns its first observation without waiting for change
 browser measures the element at its next rendering update, so the first observation can be the match count alone;
 the ratio follows as soon as the browser reports it. Later rounds re-check in the
 page on DOM changes, animation frames, and `input`, `change`, or focus events, for up to a second at a time until
-the deadline. A failure keeps the observations received before the deadline; a browser stall before the first
+the deadline; `toHaveJSProperty`, which reads at `Expect.CheckInterval` instead, is the exception. A failure keeps the observations received before the deadline; a browser stall before the first
 reply can leave its history empty. Replies received after the deadline cannot change the returned failure.
 
 The first failed expectation stops the rest. To see every failure, collect them with Effect:

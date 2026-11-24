@@ -18,7 +18,7 @@ await Effect.runPromise(
         emulation: { locale: "de-DE" }
       })
     const page = yield* context.newPage
-    yield* page.goto(process.argv[3]!)
+    yield* page.goto(process.argv[3]!, { waitUntil: "load" })
     yield* page.evaluateInMainWorld(() => {
       sessionStorage.setItem("survivor", "saved")
     })

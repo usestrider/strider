@@ -19,7 +19,9 @@
  *   on the way.
  * - **Text** is an element's text content in the flat tree (a shadow host's shadow tree, a slot's assigned
  *   nodes), skipping `script`, `style`, `noscript` and `template`, with a button-like `input`'s value, and
- *   whitespace collapsed and trimmed. Not `innerText`, which depends on layout and differs between engines.
+ *   whitespace collapsed and trimmed. Not `innerText`, which depends on layout and differs between engines;
+ *   `toHaveText` and `toContainText` read an HTML element's `innerText` only when asked to (`useInnerText`), and
+ *   collapse its whitespace the same way.
  * - **`getByText`** matches the smallest element that says it: its text matches and no child element's does.
  *   The document's `head` isn't searched.
  * - **`getByRole`** takes the first role token the engine knows from `role`, or else the implicit role under
@@ -34,9 +36,17 @@
 
 import * as Schema from "effect/Schema"
 
-/** How a query matches text. */
+/**
+ * How a query matches text. An expectation's string compares without case when it has `ignoreCase`; a regular
+ * expression carries its case in its flags.
+ */
 export type TextMatcher =
-  | { readonly _tag: "String"; readonly value: string; readonly exact: boolean }
+  | {
+    readonly _tag: "String"
+    readonly value: string
+    readonly exact: boolean
+    readonly ignoreCase?: boolean | undefined
+  }
   | { readonly _tag: "RegExp"; readonly source: string; readonly flags: string }
 
 /** One step of a locator, applied to the matches of the steps before it. */
@@ -81,6 +91,12 @@ export type Step =
    * the iframe's document. L1 splits steps at each one before resolution; validation receives the complete query.
    */
   | { readonly _tag: "Frame" }
+  /**
+   * A search across frames: the steps after it, up to the next frame boundary, resolve in whichever one document
+   * of the current one and the frames under it, at any depth, they match in. L1 resolves it before the engine
+   * sees the steps.
+   */
+  | { readonly _tag: "AnyFrame" }
   /**
    * A snapshot's ref: the one node it was given to, in the document and engine that gave
    * it, never another. L1 checks the document; the engine its generation and the node.
@@ -190,13 +206,37 @@ export type Expectation =
   | { readonly _tag: "Focused" }
   | { readonly _tag: "Editable" }
   | { readonly _tag: "Empty" }
-  /** The whole text of the one match, or with `list`, of each match in order. */
-  | { readonly _tag: "Text"; readonly expected: ReadonlyArray<TextMatcher>; readonly list: boolean }
+  /**
+   * The whole text of the one match, or with `list`, of each match in order; with `useInnerText`, the rendered
+   * `innerText` instead of the text content.
+   */
+  | {
+    readonly _tag: "Text"
+    readonly expected: ReadonlyArray<TextMatcher>
+    readonly list: boolean
+    readonly useInnerText: boolean
+  }
   | { readonly _tag: "Role"; readonly expected: string }
   | { readonly _tag: "AccessibleName"; readonly expected: TextMatcher; readonly ignoreCase: boolean }
+  /** The one match's accessible description or error message matches; with `not`, it doesn't. */
+  | {
+    readonly _tag: "AccessibleDescription" | "AccessibleErrorMessage"
+    readonly expected: TextMatcher
+    readonly ignoreCase: boolean
+    readonly not: boolean
+  }
   /** The raw class string of one match, or each match in order. */
   | { readonly _tag: "Class"; readonly expected: ReadonlyArray<TextMatcher>; readonly list: boolean }
-  | { readonly _tag: "ContainsText"; readonly expected: TextMatcher }
+  /**
+   * The one match's text contains its entry, or with `list`, the entries are contained in a subsequence of the
+   * matches, in order; an empty list holds when nothing matches.
+   */
+  | {
+    readonly _tag: "ContainsText"
+    readonly expected: ReadonlyArray<TextMatcher>
+    readonly list: boolean
+    readonly useInnerText: boolean
+  }
   | { readonly _tag: "Value"; readonly expected: TextMatcher }
   | { readonly _tag: "Values"; readonly expected: ReadonlyArray<TextMatcher> }
   | { readonly _tag: "Attribute"; readonly name: string; readonly expected: TextMatcher | null }
@@ -327,6 +367,8 @@ export type Request =
   | { readonly op: "validationStart"; readonly token: string; readonly full: boolean }
   | { readonly op: "validationStop"; readonly token: string }
   | { readonly op: "count"; readonly steps: ReadonlyArray<Step> }
+  /** Every match's count, and the first ten described, as a strictness failure gives them, whatever their count. */
+  | { readonly op: "candidates"; readonly steps: ReadonlyArray<Step> }
   | { readonly op: "visible"; readonly steps: ReadonlyArray<Step> }
   | {
     readonly op: "act"
@@ -352,7 +394,13 @@ export type Request =
   }
   /** Removes the guard an action armed, and says whether it stopped the gesture. */
   | { readonly op: "disarm" }
-  | { readonly op: "fillGuard"; readonly steps: ReadonlyArray<Step>; readonly ancestor: boolean }
+  | {
+    readonly op: "fillGuard"
+    readonly steps: ReadonlyArray<Step>
+    readonly ancestor: boolean
+    /** For an iframe on the way: the identity its lookup answered, which the guarded iframe must still have. */
+    readonly identity?: string
+  }
   | { readonly op: "fillDisarm" }
   /**
    * Inserts text with the editing command in this document's focused element, after a cancelable `beforeinput`
@@ -403,6 +451,8 @@ export type Request =
     readonly scroll: boolean
     readonly clip?: Clip
     readonly point: { readonly x: number; readonly y: number } | null
+    /** The identity the iframe's lookup answered: the answer says whether the iframe found has it still. */
+    readonly identity?: string
   }
   /**
    * The accessibility tree of the document, or of the one match's subtree, with inferred
@@ -421,6 +471,39 @@ export type Request =
   | { readonly op: "rect"; readonly steps: ReadonlyArray<Step> }
   /** The document's doctype and HTML. */
   | { readonly op: "html" }
+  /** Draws the page's overlays as they now are, over the document, or removes them all when there are none. */
+  | { readonly op: "overlay"; readonly overlays: ReadonlyArray<OverlayItem>; readonly hidden: boolean }
+  /**
+   * Covers every element the steps match with a box of `color` over its border box, for a capture: the boxes
+   * stay until `unmask` with the same token.
+   */
+  | { readonly op: "mask"; readonly steps: ReadonlyArray<Step>; readonly color: string; readonly token: string }
+  /** Removes the boxes `mask` drew with this token, and no others. */
+  | { readonly op: "unmask"; readonly token: string }
+
+/** One overlay: the caller's HTML, or a chapter's title card, fading out once it is `leaving`. */
+export type OverlayItem =
+  | { readonly _tag: "Html"; readonly id: string; readonly html: string }
+  | {
+    readonly _tag: "Chapter"
+    readonly id: string
+    readonly title: string
+    readonly description: string | null
+    readonly leaving: boolean
+  }
+  | {
+    readonly _tag: "Action"
+    readonly id: string
+    readonly title: string
+    readonly position: string
+    readonly titleStyle: string
+    readonly point: { readonly x: number; readonly y: number } | null
+    readonly pointStyle: string | null
+    readonly box: { readonly x: number; readonly y: number; readonly width: number; readonly height: number } | null
+    readonly highlightStyle: string | null
+  }
+  /** The cursor, at the last annotated action's point: moved in place, so it glides there from where it was. */
+  | { readonly _tag: "Cursor"; readonly id: string; readonly x: number; readonly y: number }
 
 /** A candidate of an ambiguous match. */
 export const Candidate = Schema.Struct({ description: Schema.String, visible: Schema.Boolean })
@@ -450,7 +533,9 @@ export const Response = Schema.Union([
     /** For `Checked`: whether it is checked. */
     checked: Schema.NullOr(Schema.Boolean),
     /** For `Fill`: whether the value is to be typed (focused, contents selected) or was set. */
-    fill: Schema.NullOr(Schema.Literals(["type", "set", "guarded"]))
+    fill: Schema.NullOr(Schema.Literals(["type", "set", "guarded"])),
+    /** For `Select`, once applied: the values of the options it selected, in document order. */
+    selected: Schema.NullOr(Schema.Array(Schema.String))
   }),
   Schema.TaggedStruct("NotReady", {
     reason: NotReady,
@@ -465,13 +550,20 @@ export const Response = Schema.Union([
   }),
   Schema.TaggedStruct("Final", { final: Final }),
   Schema.TaggedStruct("Guarded", { blocked: Schema.NullOr(Schema.String) }),
+  Schema.TaggedStruct("Overlaid", {}),
+  /** How many elements a `mask` covered, or 0 for `unmask`. */
+  Schema.TaggedStruct("Masked", { count: Schema.Number }),
+  /** A `mask` whose color isn't a CSS color: nothing was drawn. */
+  Schema.TaggedStruct("InvalidColor", {}),
   Schema.TaggedStruct("Inserted", { inserted: Schema.Boolean }),
   /** The focused element is the `index`th of the document's frames, in the order a `"iframe, frame"` query finds them. */
   Schema.TaggedStruct("InFrame", { index: Schema.Number }),
   Schema.TaggedStruct("FillGuard", {
     blocked: Schema.NullOr(Schema.String),
     unsafe: Schema.Boolean,
-    accepted: Schema.Boolean
+    accepted: Schema.Boolean,
+    /** Given an identity, whether the iframe guarded has it: the same iframe, holding the same frame. */
+    held: Schema.optionalKey(Schema.Boolean)
   }),
   Schema.TaggedStruct("Read", { value: Schema.NullOr(Schema.Union([Schema.String, Schema.Boolean])) }),
   Schema.TaggedStruct("NoMatch", {}),
@@ -493,7 +585,14 @@ export const Response = Schema.Union([
     /** A watch armed as this answer was made, for the next wait. */
     token: Schema.String
   }),
-  Schema.TaggedStruct("Strict", { candidates: Schema.Array(Candidate), count: Schema.Number }),
+  Schema.TaggedStruct("Strict", {
+    candidates: Schema.Array(Candidate),
+    count: Schema.Number,
+    /** How many of all the matches are visible, the ones past the ten described included. */
+    visible: Schema.Number,
+    /** How many frames matched, for a search across frames that matched in more than one. */
+    frames: Schema.optionalKey(Schema.Number)
+  }),
   Schema.TaggedStruct("InvalidSelector", {
     selector: Schema.String,
     message: Schema.String,
@@ -513,7 +612,9 @@ export const Response = Schema.Union([
     /** Why the iframe isn't hit at the point given (`Covered` or `NoPointerEvents`), or `null` when it is. */
     covered: Schema.NullOr(NotReady),
     /** This document's scroll offset. */
-    scroll: Point
+    scroll: Point,
+    /** Given an identity, whether the iframe found has it: the same iframe, holding the same frame. */
+    held: Schema.optionalKey(Schema.Boolean)
   }),
   Schema.TaggedStruct("Snapshot", { root: SnapNode, generation: Schema.Number }),
   Schema.TaggedStruct("Explained", {
@@ -644,6 +745,7 @@ export function engine(render: (root: SnapNode) => string) {
     removeEventListener: method(EventTarget.prototype, "removeEventListener"),
     isContentEditable: getter(HTMLElement.prototype, "isContentEditable"),
     tabIndex: getter(HTMLElement.prototype, "tabIndex"),
+    innerText: getter(HTMLElement.prototype, "innerText"),
     activeElement: getter(Document.prototype, "activeElement"),
     documentElement: getter(Document.prototype, "documentElement"),
     doctype: getter(Document.prototype, "doctype"),
@@ -696,6 +798,205 @@ export function engine(render: (root: SnapNode) => string) {
   const SKIPPED = new Set(["script", "style", "noscript", "template"])
 
   /**
+   * The element the page's overlays are drawn in, under a closed shadow root: `null` while there are none. Queries,
+   * snapshots and the document's HTML leave it out, and it ignores the pointer, so no hit test finds it.
+   */
+  let overlayHost: Element | null = null
+  let overlayRoot: ShadowRoot | null = null
+  /**
+   * What drawing overlays needs, built on a document's first `overlay` request: a page that never shows one
+   * builds none of it.
+   */
+  const makeOverlays = () => {
+    const overlayItems = new Map<string, Element>()
+    const OVERLAY_HOST = "all:initial;position:fixed;inset:0;z-index:2147483647;pointer-events:none;display:block"
+    const OVERLAY_STYLE = `*{pointer-events:none!important}` +
+      `.item{position:absolute;inset:0}` +
+      `.chapter{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;` +
+      `background:rgba(0,0,0,.4);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);color:#fff;` +
+      `font:600 40px system-ui,sans-serif;text-align:center;opacity:1;transition:opacity .2s}` +
+      `.chapter.leaving{opacity:0}.description{font-size:20px;font-weight:400;opacity:.85}` +
+      `.action-title{position:absolute;max-width:60%;padding:6px 10px;border-radius:4px;background:rgba(0,0,0,.75);` +
+      `color:#fff;font:14px system-ui,sans-serif}` +
+      `.cursor{position:absolute;left:0;top:0;width:20px;height:20px;background:rgb(20,20,20);` +
+      `clip-path:polygon(0 0,0 100%,70% 70%);transition:transform .2s}`
+    const TITLE_AT: Record<string, string> = {
+      "top-left": "top:12px;left:12px",
+      "top": "top:12px;left:50%;transform:translateX(-50%)",
+      "top-right": "top:12px;right:12px",
+      "bottom-left": "bottom:12px;left:12px",
+      "bottom": "bottom:12px;left:50%;transform:translateX(-50%)",
+      "bottom-right": "bottom:12px;right:12px"
+    }
+    const cursorStyle = (x: number, y: number) => `transform:translate(${x}px,${y}px)`
+    const actionElement = (each: Extract<OverlayItem, { _tag: "Action" }>): Element => {
+      const element = overlayElement("item")
+      if (each.box !== null && each.highlightStyle !== null) {
+        const highlight = overlayElement("highlight")
+        setAttribute(
+          highlight,
+          "style",
+          `position:absolute;left:${each.box.x}px;top:${each.box.y}px;width:${each.box.width}px;` +
+            `height:${each.box.height}px;${each.highlightStyle}`
+        )
+        appendChild(element, highlight)
+      }
+      if (each.point !== null && each.pointStyle !== null) {
+        const point = overlayElement("point")
+        setAttribute(
+          point,
+          "style",
+          `position:absolute;left:${each.point.x}px;top:${each.point.y}px;transform:translate(-50%,-50%);` +
+            each.pointStyle
+        )
+        appendChild(element, point)
+      }
+      const title = overlayElement("action-title", each.title)
+      setAttribute(title, "style", `${TITLE_AT[each.position] ?? TITLE_AT["top-right"]};${each.titleStyle}`)
+      appendChild(element, title)
+      return element
+    }
+    const innerHTMLSetter = Object.getOwnPropertyDescriptor(Element.prototype, "innerHTML")!.set!
+    const textContentSetter = Object.getOwnPropertyDescriptor(Node.prototype, "textContent")!.set!
+    const appendChild = method(Node.prototype, "appendChild")
+    const removeElement = method(Element.prototype, "remove")
+    const setAttribute = method(Element.prototype, "setAttribute")
+    const attachShadow = method(Element.prototype, "attachShadow")
+    const overlayElement = (className: string, text?: string): Element => {
+      const element = dom.createElement(document, "div")
+      setAttribute(element, "class", className)
+      if (text !== undefined) call(textContentSetter, element, [text])
+      return element
+    }
+
+    const overlay = (request: Extract<Request, { op: "overlay" }>): Response => {
+      if (request.overlays.length === 0) {
+        if (overlayHost !== null) removeElement(overlayHost)
+        overlayHost = overlayRoot = null
+        overlayItems.clear()
+        return { _tag: "Overlaid" }
+      }
+      const root = dom.documentElement(document)
+      if (root === null) return { _tag: "Overlaid" }
+      if (overlayHost === null || overlayRoot === null) {
+        overlayHost = dom.createElement(document, "strider-overlay")
+        overlayRoot = attachShadow(overlayHost, { mode: "closed" })
+        const style = dom.createElement(document, "style")
+        call(textContentSetter, style, [OVERLAY_STYLE])
+        appendChild(overlayRoot, style)
+      }
+      // Drawn again where the page removed it, last in the document so it stacks over what came before
+      if (dom.parentNode(overlayHost) !== root || dom.nextElementSibling(overlayHost) !== null) {
+        appendChild(root, overlayHost)
+      }
+      setAttribute(overlayHost, "style", request.hidden ? `${OVERLAY_HOST};display:none` : OVERLAY_HOST)
+      const wanted = new Set(request.overlays.map((each) => each.id))
+      for (const [id, element] of overlayItems) {
+        if (!wanted.has(id)) {
+          removeElement(element)
+          overlayItems.delete(id)
+        }
+      }
+      for (const each of request.overlays) {
+        let element = overlayItems.get(each.id)
+        if (element === undefined) {
+          if (each._tag === "Html") {
+            element = overlayElement("item")
+            call(innerHTMLSetter, element, [each.html])
+          } else if (each._tag === "Action") {
+            element = actionElement(each)
+          } else if (each._tag === "Cursor") {
+            element = overlayElement("cursor")
+          } else {
+            element = overlayElement("item chapter")
+            appendChild(element, overlayElement("title", each.title))
+            if (each.description !== null) appendChild(element, overlayElement("description", each.description))
+          }
+          appendChild(overlayRoot, element)
+          overlayItems.set(each.id, element)
+        }
+        if (each._tag === "Cursor") setAttribute(element, "style", cursorStyle(each.x, each.y))
+        if (each._tag === "Chapter") {
+          setAttribute(element, "class", each.leaving ? "item chapter leaving" : "item chapter")
+        }
+      }
+      return { _tag: "Overlaid" }
+    }
+    return overlay
+  }
+  let drawOverlays: ((request: Extract<Request, { op: "overlay" }>) => Response) | undefined
+
+  /**
+   * The element a capture's masks are drawn in, under a closed shadow root of its own: `null` while there are
+   * none. Like the overlays' host, queries, snapshots and the document's HTML leave it out, and it ignores the
+   * pointer.
+   */
+  let maskHost: Element | null = null
+  let maskRoot: ShadowRoot | null = null
+  /** Each capture's boxes, by its token, so one capture's end removes only its own. */
+  const maskBoxes = new Map<string, Array<Element>>()
+  /** Whether a node is one of the library's own drawings, which the page a query sees never includes. */
+  const drawn = (node: Node): boolean => node === overlayHost || node === maskHost
+  const maskDom = {
+    appendChild: method(Node.prototype, "appendChild"),
+    remove: method(Element.prototype, "remove"),
+    setAttribute: method(Element.prototype, "setAttribute"),
+    attachShadow: method(Element.prototype, "attachShadow"),
+    style: getter(HTMLElement.prototype, "style"),
+    setProperty: method(CSSStyleDeclaration.prototype, "setProperty"),
+    getPropertyValue: method(CSSStyleDeclaration.prototype, "getPropertyValue")
+  }
+  const MASK_HOST = "all:initial;position:absolute;left:0;top:0;width:0;height:0;overflow:visible;" +
+    "z-index:2147483647;pointer-events:none;display:block"
+  const mask = (request: Extract<Request, { op: "mask" }>): Response => {
+    // CSS drops a value it can't parse, which would draw an unseen box, so the color is checked by reading it back
+    // from a detached probe before anything is drawn
+    const probe = dom.createElement(document, "div") as HTMLElement
+    maskDom.setProperty(maskDom.style(probe), "background-color", request.color)
+    if (maskDom.getPropertyValue(maskDom.style(probe), "background-color") === "") return { _tag: "InvalidColor" }
+    const found = resolve(request.steps)
+    const root = dom.documentElement(document)
+    if (found.length === 0 || root === null) return { _tag: "Masked", count: 0 }
+    if (maskHost === null || maskRoot === null) {
+      maskHost = dom.createElement(document, "strider-mask")
+      maskRoot = maskDom.attachShadow(maskHost, { mode: "closed" })
+    }
+    // Last in the document, so it stacks over what came before
+    if (dom.parentNode(maskHost) !== root || dom.nextElementSibling(maskHost) !== null) {
+      maskDom.appendChild(root, maskHost)
+    }
+    maskDom.setAttribute(maskHost, "style", MASK_HOST)
+    // Boxes are placed from the host's own place, wherever its containing block puts it, so each stays over its
+    // element in the document, in a full-page capture and past the viewport too
+    const origin = dom.getBoundingClientRect(maskHost)
+    const boxes = maskBoxes.get(request.token) ?? []
+    for (const element of found) {
+      const rect = dom.getBoundingClientRect(element)
+      const box = dom.createElement(document, "div") as HTMLElement
+      maskDom.setAttribute(
+        box,
+        "style",
+        `position:absolute;left:${rect.x - origin.x}px;top:${rect.y - origin.y}px;width:${rect.width}px;` +
+          `height:${rect.height}px;pointer-events:none`
+      )
+      maskDom.setProperty(maskDom.style(box), "background-color", request.color)
+      maskDom.appendChild(maskRoot, box)
+      boxes.push(box)
+    }
+    maskBoxes.set(request.token, boxes)
+    return { _tag: "Masked", count: found.length }
+  }
+  const unmask = (token: string): Response => {
+    for (const box of maskBoxes.get(token) ?? []) maskDom.remove(box)
+    maskBoxes.delete(token)
+    if (maskBoxes.size === 0 && maskHost !== null) {
+      maskDom.remove(maskHost)
+      maskHost = maskRoot = null
+    }
+    return { _tag: "Masked", count: 0 }
+  }
+
+  /**
    * Every element under `root`, in tree order, with each open shadow root's elements after its host. An element
    * root's own open shadow root counts as under it, before its light children.
    */
@@ -711,6 +1012,8 @@ export function engine(render: (root: SnapNode) => string) {
         child !== null;
         child = dom.nextElementSibling(child)
       ) {
+        // The overlays' host is the library's own drawing, never part of the page a query sees
+        if (drawn(child)) continue
         out.push(child)
         const shadow = dom.shadowRoot(child)
         if (shadow !== null) visit(shadow)
@@ -1418,6 +1721,13 @@ export function engine(render: (root: SnapNode) => string) {
   const visible = (element: Element): boolean => rendered(element, true)
 
   // Accessible names (accname 1.2)
+  /**
+   * Where an element's own name came from, of the sources its description could otherwise come from, or `label`
+   * for `aria-label` or `aria-labelledby`.
+   */
+  type NameSource = "label" | "native" | "content" | "title"
+  const nameSources = new Map<Element, NameSource>()
+
   interface NameContext {
     readonly visited: Set<Element>
     /** Inside an `aria-labelledby` traversal, so `aria-labelledby` isn't followed again. */
@@ -1609,6 +1919,51 @@ export function engine(render: (root: SnapNode) => string) {
     return value
   }
 
+  /** The element whose own name `accessibleName` is computing, or `null` outside that computation. */
+  let nameRoot: Element | null = null
+
+  /**
+   * Records which of the sources HTML-AAM also reads for a description gave the root its own name, however the
+   * computation reached it, as through an `aria-labelledby` that names the root itself. Another element's
+   * sources only contribute, and aren't recorded, and neither is a name that counts hidden content, which no
+   * description reads. An `aria-labelledby` that names the root keeps the source its traversal of the root found.
+   */
+  const nameSource = (context: NameContext, element: Element, source: NameSource): void => {
+    if (element !== nameRoot || context.includeHidden) return
+    if (source !== "label" || !nameSources.has(element)) nameSources.set(element, source)
+  }
+
+  /**
+   * An element's content as name from content reads it: its `::before`, then its own CSS content, which replaces
+   * its children, or its children and the elements it owns through `aria-owns`, then its `::after`. `child` is
+   * the context its children are read in.
+   */
+  const contentOf = (element: Element, child: NameContext): string => {
+    let content = cssContent(element, "::before") ?? ""
+    const own = cssContent(element)
+    if (own !== undefined) {
+      // Content on the element itself replaces its children.
+      content += own
+    } else {
+      for (const node of flatChildNodes(element)) {
+        if (node instanceof Element && SKIPPED.has(dom.localName(node))) continue
+        const name = nameOfNode(node, child)
+        // Only an inline child runs into its neighbours; <br> always separates.
+        const inline = !(node instanceof Element) ||
+          (getComputedStyle(node).display === "inline" && dom.localName(node) !== "br")
+        content += inline ? name : ` ${name} `
+      }
+      // Elements it owns through aria-owns follow its children
+      for (const owned of (dom.getAttribute(element, "aria-owns") ?? "").split(ID_SEPARATOR)) {
+        const target = owned === "" ? null : byId(element, owned)
+        if (target === null) continue
+        const name = nameOfElement(target, child)
+        content += getComputedStyle(target).display === "inline" ? name : ` ${name} `
+      }
+    }
+    return content + (cssContent(element, "::after") ?? "")
+  }
+
   const nameOfElementValue = (element: Element, context: NameContext): string => {
     if (context.visited.has(element)) return ""
     // 2A: hidden, unless asked for or in a traversal from a hidden reference
@@ -1631,7 +1986,10 @@ export function engine(render: (root: SnapNode) => string) {
         ]
       })
       const joined = parts.join(" ")
-      if (joined.trim() !== "") return joined
+      if (joined.trim() !== "") {
+        nameSource(context, element, "label")
+        return joined
+      }
     }
     // Marked only now, so an element whose aria-labelledby names itself still reaches its own aria-label
     context.visited.add(element)
@@ -1647,11 +2005,17 @@ export function engine(render: (root: SnapNode) => string) {
     }
     // 2C: aria-label
     const label = dom.getAttribute(element, "aria-label") ?? ""
-    if (label.trim() !== "") return label
+    if (label.trim() !== "") {
+      nameSource(context, element, "label")
+      return label
+    }
     // 2D: the host language's label
     if (role !== "none" && role !== "presentation") {
       const native = nativeName(element, context)
-      if (native.trim() !== "") return native
+      if (native.trim() !== "") {
+        nameSource(context, element, "native")
+        return native
+      }
     }
     // 2F: name from content. In the target's own content, only a descendant whose role allows it.
     const fromContent = context.embedded === "reference" ||
@@ -1659,39 +2023,21 @@ export function engine(render: (root: SnapNode) => string) {
       (context.embedded === "descendant" && (role === null || NAME_FROM_CONTENT_DESCENDANT.has(role)))
     if (fromContent) {
       const child: NameContext = context.embedded === "self" ? { ...context, embedded: "descendant" } : context
-      let content = cssContent(element, "::before") ?? ""
-      const own = cssContent(element)
-      if (own !== undefined) {
-        // Content on the element itself replaces its children.
-        content += own
-      } else {
-        for (const node of flatChildNodes(element)) {
-          if (node instanceof Element && SKIPPED.has(dom.localName(node))) continue
-          const name = nameOfNode(node, child)
-          // Only an inline child runs into its neighbours; <br> always separates.
-          const inline = !(node instanceof Element) ||
-            (getComputedStyle(node).display === "inline" && dom.localName(node) !== "br")
-          content += inline ? name : ` ${name} `
-        }
-        // Elements it owns through aria-owns follow its children
-        for (const owned of (dom.getAttribute(element, "aria-owns") ?? "").split(ID_SEPARATOR)) {
-          const target = owned === "" ? null : byId(element, owned)
-          if (target === null) continue
-          const name = nameOfElement(target, child)
-          content += getComputedStyle(target).display === "inline" ? name : ` ${name} `
-        }
-      }
-      content += cssContent(element, "::after") ?? ""
+      const content = contentOf(element, child)
       // Only the target's own name is trimmed: a descendant's whitespace separates its neighbours.
       if (context.embedded === "self" ? content.trim() !== "" : content !== "") {
         if (provenance && context.embedded === "self") namesFromContent.add(element)
+        nameSource(context, element, "content")
         if (inField(element) && content.trim() !== "") context.contribution.fieldContent = true
         return content
       }
     }
     // 2I: the tooltip, except on a presentational element, then a placeholder (HTML-AAM)
     const title = role === "none" || role === "presentation" ? "" : dom.getAttribute(element, "title") ?? ""
-    if (title.trim() !== "") return title
+    if (title.trim() !== "") {
+      nameSource(context, element, "title")
+      return title
+    }
     const placeholder = dom.getAttribute(element, "placeholder") ?? ""
     if ((element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) && placeholder.trim() !== "") {
       return placeholder
@@ -1761,6 +2107,7 @@ export function engine(render: (root: SnapNode) => string) {
   const namesFromContent = new Set<Element>()
   const nameCache = new Map<Element, string>()
   const hiddenNameCache = new Map<Element, string>()
+  const descriptionCache = new Map<Element, string>()
   /** An element's accessible name, as a flat string. With `includeHidden`, hidden descendants count too. */
   const accessibleName = (element: Element, includeHidden: boolean): string => {
     const cache = includeHidden ? hiddenNameCache : nameCache
@@ -1768,20 +2115,119 @@ export function engine(render: (root: SnapNode) => string) {
     if (cached !== undefined) return cached
     const contribution = { fieldContent: false }
     const role = roleOf(element)
-    // This restriction is on the root, not on descendants or references contributing to another element's name.
-    const name = role !== null && NAME_PROHIBITED.has(role) ? "" : flatString(
-      nameOfElement(element, {
-        visited: new Set(),
-        labelledBy: false,
-        hiddenReference: false,
-        embedded: "self",
-        includeHidden,
-        contribution
-      })
-    )
+    const outer = nameRoot
+    nameRoot = element
+    let name: string
+    try {
+      // This restriction is on the root, not on descendants or references contributing to another element's name.
+      name = role !== null && NAME_PROHIBITED.has(role) ? "" : flatString(
+        nameOfElement(element, {
+          visited: new Set(),
+          labelledBy: false,
+          hiddenReference: false,
+          embedded: "self",
+          includeHidden,
+          contribution
+        })
+      )
+    } finally {
+      nameRoot = outer
+    }
     if (provenance && contribution.fieldContent) namesFromFields.add(element)
     cache.set(element, name)
     return name
+  }
+
+  const referenceContext = (target: Element, includeHidden: boolean): NameContext => ({
+    visited: new Set(),
+    labelledBy: true,
+    hiddenReference: hiddenFromAccessibility(target),
+    embedded: "reference",
+    includeHidden,
+    contribution: { fieldContent: false }
+  })
+
+  /**
+   * The text of an ID reference list's elements, each computed as a reference traversal, so a hidden element
+   * named there counts with its hidden content, joined by a space; `null` when no ID names an element, so the
+   * relation counts as absent.
+   */
+  const referencedText = (element: Element, attribute: string, includeHidden: boolean): string | null => {
+    const targets = (dom.getAttribute(element, attribute) ?? "").split(ID_SEPARATOR).flatMap((id) => {
+      const target = id === "" ? null : byId(element, id)
+      return target === null ? [] : [target]
+    })
+    return targets.length === 0
+      ? null
+      : targets.map((target) => nameOfElement(target, referenceContext(target, includeHidden))).join(" ")
+  }
+
+  /**
+   * An element's accessible description, as a flat string (HTML-AAM): empty when it's hidden; else the elements
+   * `aria-describedby` names, when any exists, even if their text is empty; else `aria-description`, when
+   * present; else, when it didn't give the name, a table's caption or a button, submit or reset input's value;
+   * else a summary element's content, when `aria-label` or `aria-labelledby` gave the name; else the title, when
+   * it isn't the name.
+   */
+  const accessibleDescription = (element: Element): string => {
+    const cached = descriptionCache.get(element)
+    if (cached !== undefined) return cached
+    const compute = (): string => {
+      if (hiddenFromAccessibility(element)) return ""
+      const referenced = referencedText(element, "aria-describedby", false)
+      if (referenced !== null) return referenced
+      const attribute = dom.getAttribute(element, "aria-description")
+      if (attribute !== null) return attribute
+      accessibleName(element, false)
+      const source = nameSources.get(element)
+      // The host language's source, when the element has one and it didn't give the name, wins even when empty.
+      if (source !== "native" && source !== "content") {
+        if (element instanceof HTMLTableElement) {
+          const caption = Array.from(dom.children(element)).find((child) => dom.localName(child) === "caption")
+          if (caption !== undefined) return nameOfElement(caption, referenceContext(caption, false))
+        } else if (dom.localName(element) === "summary") {
+          if (source === "label") {
+            const context = referenceContext(element, false)
+            context.visited.add(element)
+            return contentOf(element, context)
+          }
+        } else if (buttonLikeInput(element) && dom.hasAttribute(element, "value")) {
+          return element.value
+        }
+      }
+      return source === "title" ? "" : dom.getAttribute(element, "title") ?? ""
+    }
+    const description = flatString(compute())
+    descriptionCache.set(element, description)
+    return description
+  }
+
+  /** An ASCII-case-insensitive token: ASCII letters lowercased, nothing trimmed. */
+  const asciiLowercase = (token: string): string => token.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+
+  /**
+   * An element's accessible error message: its `aria-errormessage` references while it's invalid, through an
+   * `aria-invalid` other than blank or exactly `false` in any ASCII case, or its own failed constraint validation;
+   * else empty.
+   */
+  const accessibleErrorMessage = (element: Element): string => {
+    const invalid = dom.getAttribute(element, "aria-invalid")
+    const ariaInvalid = invalid !== null && invalid.trim() !== "" && asciiLowercase(invalid) !== "false"
+    const validity = "validity" in element ? (element as { readonly validity?: ValidityState }).validity : undefined
+    if (!ariaInvalid && validity?.valid !== false) return ""
+    return flatString(referencedText(element, "aria-errormessage", false) ?? "")
+  }
+
+  /**
+   * Whether a computed accessible text matches: a regular expression tests it as computed, and a string compares
+   * whole after whitespace is collapsed and zero-width and soft hyphen characters are dropped on both sides.
+   */
+  const accessibleTextMatches = (text: string, matcher: TextMatcher, ignoreCase: boolean): boolean => {
+    if (matcher._tag === "RegExp") return new RegExp(matcher.source, matcher.flags).test(text)
+    const normalize = (value: string) => collapse(value.replace(/[\u200b\u00ad]/g, ""))
+    return ignoreCase
+      ? normalize(text).toLowerCase() === normalize(matcher.value).toLowerCase()
+      : normalize(text) === normalize(matcher.value)
   }
 
   // Queries
@@ -1914,7 +2360,10 @@ export function engine(render: (root: SnapNode) => string) {
 
   /** The candidates of one query under `scope`, in tree order. */
   const query = (scope: Document | Element, step: Step): Array<Element> => {
-    if (step._tag === "XPath") return xpathQuery(scope, step.expression)
+    if (step._tag === "XPath") {
+      const found = xpathQuery(scope, step.expression)
+      return overlayHost === null && maskHost === null ? found : found.filter((element) => !drawn(element))
+    }
     const under = scope === document ? documentElements() : elementsUnder(scope)
     switch (step._tag) {
       case "Css": {
@@ -2211,7 +2660,8 @@ export function engine(render: (root: SnapNode) => string) {
     }
     const role = roleOf(element)
     if (role === null || !CHECKABLE_ROLES.has(role)) return { state: null, checked: null }
-    const token = dom.getAttribute(element, "aria-checked")?.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+    const attribute = dom.getAttribute(element, "aria-checked")
+    const token = attribute === null ? undefined : asciiLowercase(attribute)
     if (token === "true") return { state: true, checked: true }
     if (token === "false") return { state: false, checked: false }
     if (token === "mixed") {
@@ -2729,7 +3179,7 @@ export function engine(render: (root: SnapNode) => string) {
       accepted: current?.accepted ?? false
     }
   }
-  const armFill = (steps: ReadonlyArray<Step>, ancestor: boolean) => {
+  const armFill = (steps: ReadonlyArray<Step>, ancestor: boolean, identity: string | undefined) => {
     fillDisarm()
     const matches = resolve(steps)
     const element = matches.length === 1 ? matches[0]! : null
@@ -2820,7 +3270,13 @@ export function engine(render: (root: SnapNode) => string) {
     // whose handlers may replace the target or change readiness, before installing an insertion guard.
     if (current.blocked === null) { for (const type of types) addEventListener(type, handler, true) }
     fillGuard = current
-    return { _tag: "FillGuard" as const, blocked: current.blocked, unsafe: false, accepted: false }
+    return {
+      _tag: "FillGuard" as const,
+      blocked: current.blocked,
+      unsafe: false,
+      accepted: false,
+      ...(identity === undefined ? {} : { held: element !== null && frameIdentity(element) === identity })
+    }
   }
 
   /**
@@ -3156,7 +3612,8 @@ export function engine(render: (root: SnapNode) => string) {
       point: null as { x: number; y: number } | null,
       draggable: false,
       checked: null as boolean | null,
-      fill: null as "type" | "set" | "guarded" | null
+      fill: null as "type" | "set" | "guarded" | null,
+      selected: null as ReadonlyArray<string> | null
     }
     switch (action._tag) {
       case "Point": {
@@ -3260,13 +3717,20 @@ export function engine(render: (root: SnapNode) => string) {
       }
       case "Select": {
         const select = element as HTMLSelectElement
-        const options = Array.from(select.options)
-        for (const [index, option] of options.entries()) {
-          option.selected = action.choices.some((choice) => optionMatches(option, index, choice))
+        const chosen = new Set<HTMLOptionElement>()
+        for (const [index, option] of Array.from(select.options).entries()) {
+          const matches = action.choices.some((choice) => optionMatches(option, index, choice))
+          option.selected = matches
+          if (matches) chosen.add(option)
         }
         fire(select, "input")
         fire(select, "change")
-        return answer
+        // The chosen options still selected after the events, by their current value: handlers may have changed
+        // the values and labels the choices matched, or the selection itself
+        const selected = Array.from(select.options).flatMap((option) =>
+          chosen.has(option) && option.selected ? [option.value] : []
+        )
+        return { ...answer, selected }
       }
       default:
         return answer
@@ -3320,12 +3784,33 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   // Expectations, waiting in the page
+  /** Two strings as an expectation compares them: whole, or contained, and without case when it asks. */
+  const compare = (text: string, value: string, whole: boolean, ignoreCase: boolean | undefined): boolean => {
+    const actual = ignoreCase === true ? text.toLowerCase() : text
+    const wanted = ignoreCase === true ? value.toLowerCase() : value
+    return whole ? actual === wanted : actual.includes(wanted)
+  }
+
   const expected = (matcher: TextMatcher, text: string): boolean =>
-    matcher._tag === "RegExp" ? new RegExp(matcher.source, matcher.flags).test(text) : text === collapse(matcher.value)
+    matcher._tag === "RegExp"
+      ? new RegExp(matcher.source, matcher.flags).test(text)
+      : compare(text, collapse(matcher.value), true, matcher.ignoreCase)
+
+  /** Whether a text contains a string entry, or matches a regular expression one. */
+  const contains = (matcher: TextMatcher, text: string): boolean =>
+    matcher._tag === "RegExp"
+      ? new RegExp(matcher.source, matcher.flags).test(text)
+      : compare(text, collapse(matcher.value), false, matcher.ignoreCase)
 
   /** A value as written, such as a class or an attribute, matched without collapsing its whitespace. */
   const rawMatches = (matcher: TextMatcher, value: string): boolean =>
-    matcher._tag === "RegExp" ? new RegExp(matcher.source, matcher.flags).test(value) : value === matcher.value
+    matcher._tag === "RegExp"
+      ? new RegExp(matcher.source, matcher.flags).test(value)
+      : compare(value, matcher.value, true, matcher.ignoreCase)
+
+  /** An element's text for `toHaveText` and `toContainText`: its rendered text when asked, collapsed alike. */
+  const expectedTextOf = (element: Element, useInnerText: boolean): string =>
+    useInnerText && element instanceof HTMLElement ? collapse(dom.innerText(element)) : textOf(element)
 
   /** Checks an expectation once: whether it holds, and what was seen. */
   const evaluate = (steps: ReadonlyArray<Step>, expectation: Expectation): { passed: boolean; observed: unknown } => {
@@ -3359,7 +3844,7 @@ export function engine(render: (root: SnapNode) => string) {
       case "Count":
         return { passed: found.length === expectation.count, observed: found.length }
       case "Text": {
-        const texts = found.map(textOf)
+        const texts = found.map((element) => expectedTextOf(element, expectation.useInnerText))
         if (expectation.list) {
           return {
             passed: texts.length === expectation.expected.length &&
@@ -3369,6 +3854,22 @@ export function engine(render: (root: SnapNode) => string) {
         }
         if (found.length !== 1) return { passed: false, observed: { matches: found.length } }
         return { passed: expected(expectation.expected[0]!, texts[0]!), observed: texts[0] }
+      }
+      case "ContainsText": {
+        const texts = found.map((element) => expectedTextOf(element, expectation.useInnerText))
+        if (expectation.list) {
+          if (expectation.expected.length === 0) return { passed: texts.length === 0, observed: texts }
+          // Each entry is contained in a later match than the entry before it
+          let next = 0
+          for (const entry of expectation.expected) {
+            while (next < texts.length && !contains(entry, texts[next]!)) next++
+            if (next === texts.length) return { passed: false, observed: texts }
+            next++
+          }
+          return { passed: true, observed: texts }
+        }
+        if (found.length !== 1) return { passed: false, observed: { matches: found.length } }
+        return { passed: contains(expectation.expected[0]!, texts[0]!), observed: texts[0] }
       }
       case "Class": {
         const texts = found.map((element) => dom.classList(element).toString())
@@ -3419,26 +3920,15 @@ export function engine(render: (root: SnapNode) => string) {
       }
       case "AccessibleName": {
         const name = accessibleName(element, false)
-        const matcher = expectation.expected
-        const normalize = (text: string) => collapse(text.replace(/[\u200b\u00ad]/g, ""))
-        return {
-          passed: matcher._tag === "RegExp"
-            ? new RegExp(matcher.source, matcher.flags).test(name)
-            : expectation.ignoreCase
-            ? normalize(name).toLocaleLowerCase() === normalize(matcher.value).toLocaleLowerCase()
-            : normalize(name) === normalize(matcher.value),
-          observed: name
-        }
+        return { passed: accessibleTextMatches(name, expectation.expected, expectation.ignoreCase), observed: name }
       }
-      case "ContainsText": {
-        const text = textOf(element)
-        const matcher = expectation.expected
-        return {
-          passed: matcher._tag === "RegExp"
-            ? new RegExp(matcher.source, matcher.flags).test(text)
-            : text.includes(collapse(matcher.value)),
-          observed: text
-        }
+      case "AccessibleDescription":
+      case "AccessibleErrorMessage": {
+        const text = expectation._tag === "AccessibleDescription"
+          ? accessibleDescription(element)
+          : accessibleErrorMessage(element)
+        const matches = accessibleTextMatches(text, expectation.expected, expectation.ignoreCase)
+        return { passed: expectation.not ? !matches : matches, observed: text }
       }
       case "Values": {
         const control = textSelectionTarget(element)
@@ -3480,14 +3970,7 @@ export function engine(render: (root: SnapNode) => string) {
       case "Attribute": {
         const value = dom.getAttribute(element, expectation.name)
         const matcher = expectation.expected
-        return {
-          passed: value !== null &&
-            (matcher === null ||
-              (matcher._tag === "RegExp"
-                ? new RegExp(matcher.source, matcher.flags).test(value)
-                : value === matcher.value)),
-          observed: value
-        }
+        return { passed: value !== null && (matcher === null || rawMatches(matcher, value)), observed: value }
       }
       default:
         return { passed: false, observed: null }
@@ -3885,6 +4368,8 @@ export function engine(render: (root: SnapNode) => string) {
     roleCache.clear()
     nameCache.clear()
     hiddenNameCache.clear()
+    nameSources.clear()
+    descriptionCache.clear()
     inertness = undefined
     inertAncestors.clear()
     insideModal.clear()
@@ -3971,7 +4456,7 @@ export function engine(render: (root: SnapNode) => string) {
         if (textShown) pending += dom.textContent(node) ?? ""
         return
       }
-      if (!(node instanceof Element) || SKIPPED.has(dom.localName(node))) return
+      if (!(node instanceof Element) || SKIPPED.has(dom.localName(node)) || drawn(node)) return
       if (dom.getAttribute(node, "aria-hidden") === "true") return
       if (inert(node)) {
         // An inert ancestor of the topmost modal dialog adds nothing of its own, but the dialog escapes it
@@ -4219,21 +4704,72 @@ export function engine(render: (root: SnapNode) => string) {
     const type = dom.doctype(document)
     const doctype = type === null ? "" : new XMLSerializer().serializeToString(type)
     const root = dom.documentElement(document)
-    return { _tag: "Read", value: doctype + (root === null ? "" : dom.outerHTML(root)) }
+    if (root === null) return { _tag: "Read", value: doctype }
+    const hosts = [overlayHost, maskHost].filter((host): host is Element => host !== null && dom.contains(root, host))
+    if (hosts.length === 0) return { _tag: "Read", value: doctype + dom.outerHTML(root) }
+    // The library's hosts leave the page's HTML by node, wherever the page moved them: the document element is
+    // copied into a document with no browsing context, where nothing upgrades, loads or observes, and each host's
+    // copy, found by its path of child indices, is removed before serializing. The page's tree is never touched
+    const paths = hosts.map((host) => {
+      const path: Array<number> = []
+      for (let node: Node = host; node !== root;) {
+        const parent = dom.parentNode(node)!
+        path.unshift(Array.prototype.indexOf.call(dom.childNodes(parent), node))
+        node = parent
+      }
+      return path
+    })
+    const inert = document.implementation.createHTMLDocument("")
+    const copy = inert.importNode(root, true)
+    // Every copy is found before any is removed, so one's removal doesn't move another's path
+    const twins = paths.map((path) => {
+      let twin: Node = copy
+      for (const index of path) twin = twin.childNodes[index]!
+      return twin
+    })
+    for (const twin of twins) twin.parentNode?.removeChild(twin)
+    return { _tag: "Read", value: doctype + (copy as Element).outerHTML }
   }
 
+  // Every match's count and how many are visible, and the first ten described
   const strict = (found: ReadonlyArray<Element>): Response => ({
     _tag: "Strict",
     count: found.length,
+    visible: found.filter((element) => visible(element)).length,
     candidates: found.slice(0, 10).map((element) => ({ description: describe(element), visible: visible(element) }))
   })
+
+  // Each iframe's identity with the frame it holds: one id per iframe and window, shared by every lookup and kept
+  // as long as the iframe holds that window, which a navigation keeps and a reinsertion replaces. A new window, or
+  // an engine installed again, gives a new id, so an id names one iframe holding one frame.
+  const iframeWindow = getter(HTMLIFrameElement.prototype, "contentWindow")
+  const frameWindow = getter(HTMLFrameElement.prototype, "contentWindow")
+  const windowOf = (element: Element): WindowProxy | null =>
+    element instanceof HTMLIFrameElement
+      ? iframeWindow(element)
+      : element instanceof HTMLFrameElement
+      ? frameWindow(element)
+      : null
+  const identities = new WeakMap<Element, { readonly window: WindowProxy; readonly id: string }>()
+  const identityEpoch = Math.random().toString(36).slice(2)
+  let identityCount = 0
+  /** The iframe's identity with the window it holds now, or `null` when it holds none. */
+  const frameIdentity = (element: Element): string | null => {
+    const held = windowOf(element)
+    if (held === null) return null
+    const known = identities.get(element)
+    if (known !== undefined && known.window === held) return known.id
+    const id = `${identityEpoch}:${++identityCount}`
+    identities.set(element, { window: held, id })
+    return id
+  }
 
   /**
    * The one match itself, for an evaluation that returns it by value with its node binding: what
    * `setInputFiles`, `Locator.evaluate` and a frame's iframe need. Otherwise a `Response` as JSON text: no match,
    * several, an invalid selector, or, for an iframe, an element that isn't one.
    */
-  const element = (text: string): Element | Array<Element> | string => {
+  const element = (text: string): Element | Array<Element> | readonly [Element, string | null] | string => {
     const request = JSON.parse(text) as {
       readonly steps: ReadonlyArray<Step>
       /** The complete query, before frame routing splits it. */
@@ -4242,6 +4778,8 @@ export function engine(render: (root: SnapNode) => string) {
       readonly frame?: boolean
       /** For an iframe on an action's way: scrolled into view, so its frame renders (QUIRKS.md, Q110). */
       readonly scroll?: boolean
+      /** For an iframe: answer it with its identity, `[element, identity]`, which later requests check. */
+      readonly identify?: boolean
     }
     clearTreeCaches()
     let found: Array<Element>
@@ -4277,7 +4815,7 @@ export function engine(render: (root: SnapNode) => string) {
     if (request.scroll === true && !inViewport(one)) {
       dom.scrollIntoView(one, { block: "center", inline: "center", behavior: "instant" })
     }
-    return one
+    return request.identify === true ? [one, frameIdentity(one)] : one
   }
 
   /** An iframe's content box origin, scrolled into view when asked, and what the pointer would hit at a point. */
@@ -4325,7 +4863,15 @@ export function engine(render: (root: SnapNode) => string) {
         Math.min(bounds.bottom, rect.bottom - parseFloat(style.borderBottomWidth) - parseFloat(style.paddingBottom)) -
         origin.y
     }
-    return { _tag: "Frame", origin, viewport, scrolled, covered, scroll: { x: scrollX, y: scrollY } }
+    return {
+      _tag: "Frame",
+      origin,
+      viewport,
+      scrolled,
+      covered,
+      scroll: { x: scrollX, y: scrollY },
+      ...(request.identity === undefined ? {} : { held: frameIdentity(iframe) === request.identity })
+    }
   }
 
   // Invalid events do not bubble or cross shadow boundaries. Listen on each existing open root,
@@ -4348,6 +4894,8 @@ export function engine(render: (root: SnapNode) => string) {
       roleCache.clear()
       nameCache.clear()
       hiddenNameCache.clear()
+      nameSources.clear()
+      descriptionCache.clear()
       inertness = undefined
       inertAncestors.clear()
       insideModal.clear()
@@ -4385,6 +4933,8 @@ export function engine(render: (root: SnapNode) => string) {
           )
         case "count":
           return JSON.stringify({ _tag: "Count", count: resolve(request.steps).length } satisfies Response)
+        case "candidates":
+          return JSON.stringify(strict(resolve(request.steps)))
         case "visible": {
           const found = resolve(request.steps)
           if (found.length > 1) return JSON.stringify(strict(found))
@@ -4399,7 +4949,7 @@ export function engine(render: (root: SnapNode) => string) {
         case "act":
           return JSON.stringify(await act(request))
         case "fillGuard":
-          return JSON.stringify(armFill(request.steps, request.ancestor) satisfies Response)
+          return JSON.stringify(armFill(request.steps, request.ancestor, request.identity) satisfies Response)
         case "fillDisarm":
           return JSON.stringify(fillDisarm() satisfies Response)
         case "insert":
@@ -4429,6 +4979,12 @@ export function engine(render: (root: SnapNode) => string) {
           return JSON.stringify(rect(request.steps))
         case "html":
           return JSON.stringify(html())
+        case "overlay":
+          return JSON.stringify((drawOverlays ??= makeOverlays())(request))
+        case "mask":
+          return JSON.stringify(mask(request))
+        case "unmask":
+          return JSON.stringify(unmask(request.token))
         case "role":
           return JSON.stringify(
             {

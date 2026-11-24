@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import { TestClock } from "effect/testing"
+import { runInNewContext } from "node:vm"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as BrowserImpl from "../src/internal/browser.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
@@ -50,6 +51,8 @@ const scenario = Effect.fnUntraced(
                 ? "Detached"
                 : matcher === Expect.toBeVisible
                 ? "Visible"
+                : request.expectation._tag.startsWith("Accessible")
+                ? request.expectation._tag
                 : "AccessibleName"
             )
             caps.push(request.cap)
@@ -194,6 +197,95 @@ describe("Expect accessible-name opt-in", () => {
     }))
 })
 
+describe("Expect accessible description and error message", () => {
+  it.effect("sends each matcher's expectation with its comparison, case rule and negation", () =>
+    Effect.gen(function*() {
+      const sent: Array<Engine.Expectation> = []
+      const layer = BrowserImpl.layer((sink) =>
+        Fake.connect([], {
+          info: new Browser.Info(Fake.info),
+          capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+        })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
+          ...adapter,
+          realm: () => Effect.succeed("expect-realm" as Target.RealmId),
+          evaluate: (_realm, call) =>
+            Effect.sync(() => {
+              const install = call.functionDeclaration === Engine.install
+              if (!install) {
+                const argument = call.arguments[0]
+                assert(argument?._tag === "Value" && argument.value.type === "string")
+                const request = JSON.parse(argument.value.value) as Engine.Request
+                assert(request.op === "expect")
+                sent.push(request.expectation)
+              }
+              return {
+                _tag: "Value",
+                value: {
+                  type: "string",
+                  value: install ? "installed" : JSON.stringify({
+                    _tag: "Expected",
+                    passed: true,
+                    observed: "Described",
+                    changed: false
+                  })
+                }
+              } as const
+            })
+        })))
+      )
+      yield* Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const field = page.locator("input")
+        yield* field.pipe(Expect.toHaveAccessibleDescription("Described"))
+        yield* Expect.toHaveAccessibleDescription(field, /described/, { ignoreCase: true, not: true })
+        yield* field.pipe(Expect.toHaveAccessibleErrorMessage(/Required/i, { ignoreCase: false }))
+        yield* Expect.toHaveAccessibleErrorMessage(field, "", { not: true })
+      })).pipe(Effect.provide(layer))
+      assert.deepStrictEqual(sent, [
+        {
+          _tag: "AccessibleDescription",
+          expected: { _tag: "String", value: "Described", exact: true },
+          ignoreCase: false,
+          not: false
+        },
+        {
+          _tag: "AccessibleDescription",
+          expected: { _tag: "RegExp", source: "described", flags: "i" },
+          ignoreCase: true,
+          not: true
+        },
+        {
+          _tag: "AccessibleErrorMessage",
+          expected: { _tag: "RegExp", source: "Required", flags: "" },
+          ignoreCase: false,
+          not: false
+        },
+        {
+          _tag: "AccessibleErrorMessage",
+          expected: { _tag: "String", value: "", exact: true },
+          ignoreCase: false,
+          not: true
+        }
+      ])
+    }))
+
+  it.effect("names the matcher, its case rule and its negation in the failure", () =>
+    Effect.gen(function*() {
+      const described = yield* scenario(
+        0,
+        Expect.toHaveAccessibleDescription("Expected", { ignoreCase: true, not: true }),
+        "Expected"
+      )
+      assert.strictEqual(
+        described.error.condition,
+        "not to have the accessible description \"Expected\" ignoring case"
+      )
+      assert.deepStrictEqual(described.error.history.map((entry) => entry.value), ["Expected"])
+      const message = yield* scenario(0, Expect.toHaveAccessibleErrorMessage(/Required/), "")
+      assert.strictEqual(message.error.condition, "to have the accessible error message /Required/")
+    }))
+})
+
 describe("attachment matchers", () => {
   it("provides value matchers for attachment and detachment", () => {
     assert.strictEqual(typeof Expect.toBeAttached, "function")
@@ -242,4 +334,13 @@ describe("Expect.that last", () => {
       assert.notDeepInclude(values, { error: "a check was still running at the deadline" })
       assert.deepStrictEqual(Option.map(error.last, (entry) => entry.value), Option.some(reads))
     }))
+})
+
+describe("Expect URL call forms", () => {
+  it.effect("accepts a regular expression from another realm in data-first form", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      const expected: RegExp = runInNewContext("/^about:blank$/")
+      yield* Expect.toHaveURL(page, expected)
+    })).pipe(Effect.provide(Browser.layerTest(""))))
 })
