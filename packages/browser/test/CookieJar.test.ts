@@ -4,6 +4,7 @@ import { Browser, CookieJar, Url } from "@usestrider/browser"
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import * as TestClock from "effect/testing/TestClock"
 
 const sentOver = (host: string) =>
   Effect.scoped(Effect.gen(function*() {
@@ -34,9 +35,16 @@ describe("CookieJar.listFor", () => {
   }
 })
 
+/**
+ * Moves the test clock, which starts at the epoch, to 2026: `remove` expires a cookie at the epoch's first second,
+ * which the test backend, on the test clock, would otherwise read as the future.
+ */
+const afterEpoch = TestClock.setTime(Date.UTC(2026, 0, 1))
+
 /** The names left after `remove(match)`, from a jar of cookies on two hosts, two paths and two partitions. */
 const leftAfter = (match: CookieJar.Match) =>
   Effect.scoped(Effect.gen(function*() {
+    yield* afterEpoch
     const context = yield* Browser.newContext()
     const jar = context.cookies
     yield* jar.set({ name: "session", value: "1", scope: { url: "https://app.example.com/" } })
@@ -169,6 +177,7 @@ describe("CookieJar filter isolation", () => {
 
   it.effect("keeps cookies in partitions with different ancestor bits", () =>
     Effect.scoped(Effect.gen(function*() {
+      yield* afterEpoch
       const { cookies } = yield* Browser.newContext()
       for (const ancestor of [false, true]) {
         yield* cookies.set({

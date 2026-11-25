@@ -69,12 +69,22 @@ export const PartitionKey = Schema.Union([
   Schema.TaggedStruct("Unpartitioned", {}),
   Schema.TaggedStruct("Partitioned", {
     topLevelSite: Url.Site,
+    /**
+     * Whether a cross-site frame set the cookie; `None` reads as `false` when setting or removing one.
+     *
+     * @default false
+     */
     crossSiteAncestor: Schema.Option(Schema.Boolean)
   })
 ])
 
 /**
  * Which storage partition a cookie belongs to.
+ *
+ * **Details**
+ *
+ * A `Partitioned` key's `crossSiteAncestor` says whether a cross-site frame set the cookie. Setting or removing a
+ * cookie with it `None` reads it as `false`, so one key sets and removes the same partition.
  *
  * @stability unstable
  * @category models
@@ -167,6 +177,26 @@ export interface Input {
  * Firefox and WebKit don't say which partition a cookie is in, so there `partitionKey` fails as `Unsupported`, even
  * `Unpartitioned`.
  *
+ * **Example** (Removing an embedded widget's cookies on one site)
+ *
+ * ```ts import.meta.vitest
+ * import { CookieJar, Page, Url } from "@usestrider/browser"
+ * import { Effect, Option } from "effect"
+ *
+ * const widgetOnNews: CookieJar.Match = {
+ *   domain: "widget.example",
+ *   partitionKey: {
+ *     _tag: "Partitioned",
+ *     topLevelSite: Url.Site.make("https://news.example"),
+ *     crossSiteAncestor: Option.none()
+ *   }
+ * }
+ *
+ * const forgetWidget = Effect.fn("forgetWidget")(function*(page: Page.Page) {
+ *   yield* page.context.cookies.remove(widgetOnNews)
+ * })
+ * ```
+ *
  * @stability unstable
  * @category models
  * @since 0.1.0
@@ -192,7 +222,8 @@ export interface Match {
    */
   readonly path?: string | RegExp | undefined
   /**
-   * Remove only cookies in this partition: `Unpartitioned` matches only cookies that aren't partitioned.
+   * Remove only cookies in this partition: `Unpartitioned` matches only cookies that aren't partitioned, and a
+   * `Partitioned` key whose `crossSiteAncestor` is `None` matches it as `false`, as `set` does.
    *
    * @default every partition
    */

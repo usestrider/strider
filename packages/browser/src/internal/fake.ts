@@ -14,6 +14,7 @@
  *
  * Whitespace is ignored, and anything else fails the layer's construction as a defect, naming where.
  */
+import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Headers from "effect/http/Headers"
 import * as Option from "effect/Option"
@@ -429,16 +430,23 @@ export const connect = (
         unsupported("capability.virtualAuthenticator", "Native virtual authenticators require Chromium CDP"),
       cookies: (context) => Effect.succeed(cookies.get(context) ?? []),
       setCookies: (context, added) =>
-        Effect.sync(() => {
-          // A cookie is one per name, domain, path, and partition, and one set to expire in the past is removed
-          const partition = (cookie: Adapter.Cookie) => Option.getOrUndefined(cookie.partitionKey)?.topLevelSite
+        // Expiry is read on Effect's clock, which the timeline runs on, so under `TestClock` it moves only as the test
+        // adjusts it
+        Effect.map(Clock.currentTimeMillis, (millis) => {
+          // A cookie is one per name, domain, path, and partition, a partition's absent cross-site bit is false, as
+          // Chromium sets it, and one set to expire in the past is removed
+          const partition = (cookie: Adapter.Cookie) =>
+            Option.match(cookie.partitionKey, {
+              onNone: () => undefined,
+              onSome: (key) => `${key.topLevelSite} ${Option.getOrElse(key.crossSiteAncestor, () => false)}`
+            })
           const kept = (cookies.get(context) ?? []).filter((cookie) =>
             !added.some((each) =>
               each.name === cookie.name && each.domain === cookie.domain && each.path === cookie.path &&
               partition(each) === partition(cookie)
             )
           )
-          const now = Date.now() / 1000
+          const now = millis / 1000
           cookies.set(context, [
             ...kept,
             ...added.filter((cookie) => Option.isNone(cookie.expires) || cookie.expires.value > now)

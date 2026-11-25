@@ -185,8 +185,9 @@ const sends = (url: URL, cookie: CookieJar.Cookie, now: number) => {
 }
 
 /**
- * Whether a field of a cookie matches: any value when the match doesn't give one, a pattern by testing it, which
- * starts afresh for each cookie whatever its flags, and a string by `exact`.
+ * Whether a field of a cookie matches: any value when the match doesn't give one, a pattern by testing a copy of it
+ * without `g` or `y`, so neither the caller's `lastIndex` nor one cookie's test affects another's, and a string by
+ * `exact`.
  */
 const matches = (
   wanted: string | RegExp | undefined,
@@ -195,18 +196,22 @@ const matches = (
 ) => {
   if (wanted === undefined) return true
   if (typeof wanted === "string") return exact(wanted)
-  wanted.lastIndex = 0
-  return wanted.test(value)
+  // A sticky pattern matches only at the start, as it would from a `lastIndex` of 0
+  const source = wanted.sticky ? `^(?:${wanted.source})` : wanted.source
+  return new RegExp(source, wanted.flags.replace(/[gy]/g, "")).test(value)
 }
 
-/** Whether a cookie is in the partition a match names; a key that doesn't say `crossSiteAncestor` matches either. */
+/**
+ * Whether a cookie is in the partition a match names. An absent `crossSiteAncestor` is false on both sides, as
+ * setting a cookie reads it, so a key removes the partition it sets.
+ */
 const samePartition = (wanted: CookieJar.PartitionKey, key: Adapter.Cookie["partitionKey"]) =>
   Option.match(key, {
     onNone: () => wanted._tag === "Unpartitioned",
     onSome: (key) =>
       wanted._tag === "Partitioned" && key.topLevelSite === wanted.topLevelSite &&
-      (Option.isNone(wanted.crossSiteAncestor) ||
-        (Option.isSome(key.crossSiteAncestor) && key.crossSiteAncestor.value === wanted.crossSiteAncestor.value))
+      Option.getOrElse(key.crossSiteAncestor, () => false) ===
+        Option.getOrElse(wanted.crossSiteAncestor, () => false)
   })
 
 /** A context's cookies. */
