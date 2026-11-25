@@ -996,8 +996,8 @@ type Intercepted<P extends Phase = Phase> = {
   readonly auth: AuthPhase
 }[P]
 interface Paused {
-  readonly request: NetworkRequest.NetworkRequest        // fixed: the request as paused; NetworkRequest.toHttpClientRequest for HttpClient
-  readonly requestBody: Effect<Option<Uint8Array>, RouteError | TargetGone | Timeout>   // the body as sent, on every backend
+  readonly request: NetworkRequest.NetworkRequest        // as paused, with the routes above's fallthroughWith changes; NetworkRequest.toHttpClientRequest for HttpClient
+  readonly requestBody: Effect<Option<Uint8Array>, RouteError | TargetGone | Timeout>   // the body as sent, or as the routes above changed it; on every backend
 }
 interface RequestPhase extends Paused { readonly phase: "request" }
 interface ResponsePhase extends Paused {

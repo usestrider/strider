@@ -48,7 +48,7 @@ const asTestAccount = Effect.fn("asTestAccount")(function*(page: Page.Page) {
 | --------------------------- | ------------------------------------------------------------------------ |
 | `Route.fulfill(response)`   | answered with `response`; it never reaches the server                    |
 | `Route.continueWith(change)` | sent on, changed: a function of Effect's `HttpClientRequest`             |
-| `Route.continue`            | sent on as it is                                                         |
+| `Route.continue`            | sent on as it is, with the changes the routes above made                 |
 | [`Route.abort(reason?)`](/docs/api/browser/Route#abort) | fails, as a network error would                                          |
 | `Route.fallthrough`         | asks the next route that matches, or lets the request continue           |
 | [`Route.fallthroughWith(change)`](/docs/api/browser/Route#fallthroughWith) | asks the next route that matches its changed URL, with the request changed, or lets it continue changed |
