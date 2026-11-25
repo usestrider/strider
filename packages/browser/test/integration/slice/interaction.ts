@@ -6666,6 +6666,44 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
+      it.effect(
+        "Checks.mutation observes a DOM change made inside a JavaScript property getter",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() => `<div id="js">JS</div>`)
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url, { waitUntil: "load" })
+              yield* page.evaluateInMainWorld(() => {
+                const element = document.getElementById("js")!
+                let reads = 0
+                Object.defineProperty(element, "ready", {
+                  get() {
+                    if (++reads === 1) {
+                      element.setAttribute("data-ready", "true")
+                      return false
+                    }
+                    return true
+                  }
+                })
+                Object.defineProperty(element, "reads", { get: () => reads })
+              })
+              yield* page.locator("#js").pipe(
+                Expect.toHaveJSProperty("ready", true),
+                Expect.withChecks(Expect.Checks.mutation(page)),
+                Deadline.within("5 seconds")
+              )
+              assert.strictEqual(
+                yield* page.evaluateInMainWorld(() =>
+                  (document.getElementById("js") as unknown as { reads: number }).reads
+                ),
+                2
+              )
+            }))
+          }),
+        timeout
+      )
+
       it.effect("retries a JavaScript property until a page timer sets it", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>

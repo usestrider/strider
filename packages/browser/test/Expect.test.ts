@@ -2,9 +2,11 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Browser, Condition, Deadline, Expect, type Locator, Target } from "@usestrider/browser"
 import * as Clock from "effect/Clock"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
+import * as Scope from "effect/Scope"
 import { TestClock } from "effect/testing"
 import { runInNewContext } from "node:vm"
 import type * as Adapter from "../src/internal/adapter.ts"
@@ -426,5 +428,103 @@ describe("Expect.withChecks", () => {
       assert.deepStrictEqual(error.checks.triggeredBy, ["initial", "change"])
       assert(changes.length >= 2)
       assert(changes.every((request) => request.op === "change" && request.signals === "frames"))
+    }))
+})
+
+describe("Expect.withChecks watch ownership", () => {
+  // A browser creates its watch before the protocol delivers the evaluation's reply.
+  const setup = Effect.fnUntraced(function*(delayReply: number) {
+    const created = yield* Deferred.make<void>()
+    const active = new Set<string>()
+    let sequence = 0
+    const layer = BrowserImpl.layer((sink) =>
+      Fake.connect([], {
+        info: new Browser.Info(Fake.info),
+        capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+      })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
+        ...adapter,
+        realm: () => Effect.succeed("ownership-realm" as Target.RealmId),
+        evaluate: Effect.fnUntraced(function*(_realm, call) {
+          const answer = (value: unknown) =>
+            ({ _tag: "Value", value: { type: "string", value: JSON.stringify(value) } }) as const
+          if (call.functionDeclaration === Engine.install) return answer("installed")
+          const argument = call.arguments[0]
+          assert(argument?._tag === "Value" && argument.value.type === "string")
+          const request = JSON.parse(argument.value.value) as Engine.Request
+          if (request.op === "change") {
+            if (request.token !== null) active.delete(request.token)
+            const token = `watch-${++sequence}`
+            active.add(token)
+            if (sequence === delayReply) {
+              yield* Deferred.succeed(created, undefined)
+              return yield* Effect.never
+            }
+            return answer({ _tag: "Watching", changed: request.token !== null, token })
+          }
+          assert.strictEqual(request.op, "unwatch")
+          if (request.op === "unwatch") active.delete(request.token)
+          return answer({ _tag: "Watching", changed: false, token: "" })
+        })
+      })))
+    )
+    return { active, created, layer }
+  })
+
+  for (const outcome of ["success", "failure"] as const) {
+    it.effect(`releases an acknowledged watch on subject ${outcome}`, () =>
+      Effect.gen(function*() {
+        const { active, layer } = yield* setup(0)
+        yield* Effect.scoped(Effect.gen(function*() {
+          const page = yield* Browser.newPage()
+          const subject = outcome === "success" ? Effect.succeed(true) : Effect.fail("subject failed")
+          const result = yield* Expect.that(subject, Condition.make("true", Boolean)).pipe(
+            Expect.withChecks(Expect.Checks.mutation(page)),
+            Effect.result
+          )
+          assert.strictEqual(result._tag, outcome === "success" ? "Success" : "Failure")
+          assert.strictEqual(active.size, 0)
+        })).pipe(Effect.provide(layer))
+      }))
+  }
+
+  for (const reply of [1, 2]) {
+    it.effect(`releases the watch when interrupted before change reply ${reply} arrives`, () =>
+      Effect.gen(function*() {
+        const { active, created, layer } = yield* setup(reply)
+        yield* Effect.scoped(Effect.gen(function*() {
+          const page = yield* Browser.newPage()
+          const pending = yield* Expect.that(Effect.succeed(false), Condition.make("true", Boolean)).pipe(
+            Expect.withChecks(Expect.Checks.mutation(page)),
+            Effect.forkChild
+          )
+          yield* Deferred.await(created)
+          yield* Fiber.interrupt(pending)
+          assert.strictEqual(active.size, 0, "interruption left a page watch alive")
+        })).pipe(Effect.provide(layer))
+      }))
+  }
+
+  it.effect("refuses a released inspect handle before arming a watch or running the subject", () =>
+    Effect.gen(function*() {
+      const { active, layer } = yield* setup(0)
+      yield* Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const access = yield* Scope.make()
+        const borrowed = yield* page.inspect.pipe(Scope.provide(access))
+        yield* Scope.close(access, yield* Effect.exit(Effect.void))
+        let reads = 0
+        const result = yield* Expect.that(Effect.sync(() => ++reads), Condition.make("one", (n: number) => n === 1))
+          .pipe(
+            Expect.withChecks(Expect.Checks.mutation(borrowed)),
+            Effect.result
+          )
+        assert.strictEqual(result._tag, "Failure")
+        if (result._tag === "Failure") {
+          assert.strictEqual(result.failure._tag, "TargetGone")
+          if (result.failure._tag === "TargetGone") assert.strictEqual(result.failure.reason._tag, "AccessReleased")
+        }
+        assert.strictEqual(reads, 0)
+        assert.strictEqual(active.size, 0)
+      })).pipe(Effect.provide(layer))
     }))
 })
