@@ -1082,8 +1082,7 @@ export const declarations = (
             const out = page.locator("#out")
             yield* Expect.that(
               out.readText,
-              Condition.make("finished", (text: string) =>
-                text !== "pending")
+              Condition.make("finished", (text: string) => text !== "pending")
             )
             assert.deepStrictEqual(JSON.parse(yield* out.readText), [200, 200])
             assert.deepStrictEqual({ routed: yield* route.hits, served }, { routed: 2, served: 2 })
@@ -1098,8 +1097,7 @@ export const declarations = (
             const { origin, served } = yield* site
             yield* Effect.scoped(Effect.gen(function*() {
               const routed = yield* Browser.newContext()
-              yield* routed.route(`${origin}/cached.js*`, () =>
-                Route.continue)
+              yield* routed.route(`${origin}/cached.js*`, () => Route.continue)
               const other = yield* Browser.newContext()
               const page = yield* other.newPage
               const result = yield* run(
@@ -1108,9 +1106,7 @@ export const declarations = (
                 `const read = () => fetch('/cached.js?other').then((r) => r.status); return [await read(), await read()]`
               )
               assert.deepStrictEqual(result, [200, 200])
-              const requested = served.filter((request) =>
-                request.path === "/cached.js?other"
-              )
+              const requested = served.filter((request) => request.path === "/cached.js?other")
               assert.strictEqual(requested.length, cachesFetches[name] ? 1 : 2)
             }))
           }),

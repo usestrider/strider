@@ -13,6 +13,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as FiberSet from "effect/FiberSet"
+import * as HttpBody from "effect/http/HttpBody"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Option from "effect/Option"
@@ -101,17 +102,26 @@ const sameHeaders = (a: Readonly<Record<string, unknown>>, b: Readonly<Record<st
 }
 
 /**
- * A paused request, changed to `request`: what the routes below see, and what continuing it sends, which is only
- * what differs from the request the browser paused, so a header added doesn't resend the body. A body an earlier
- * change set is read once, and reused while later changes keep it.
+ * The paused request as a change is given it. Its body is an empty one of its own, not `HttpBody.empty`, so a
+ * change that clears the body with `HttpBody.empty` is told from one that leaves it alone.
+ */
+const unchanged = (paused: Model.PausedRequestEvent): HttpClientRequest.HttpClientRequest =>
+  HttpClientRequest.setBody(NetworkRequest.toHttpClientRequest(paused.request), new HttpBody.Empty())
+
+/**
+ * A paused request, changed by `change` on top of the changes before it: what the routes below see, and what
+ * continuing it sends, which is only what differs from the request the browser paused, so a header added doesn't
+ * resend the body. A body a change set, an empty one included, is read once, and reused while later changes keep it.
  */
 const changedTo = (
   paused: Model.PausedRequestEvent,
-  request: HttpClientRequest.HttpClientRequest,
+  change: (request: HttpClientRequest.HttpClientRequest) => HttpClientRequest.HttpClientRequest,
   previous: Model.ChangedRequest | undefined
 ): Effect.Effect<Model.ChangedRequest, Undecidable> =>
   Effect.gen(function*() {
-    const original = NetworkRequest.toHttpClientRequest(paused.request)
+    const original = unchanged(paused)
+    const base = previous?.request ?? original
+    const request = change(base)
     const url = (request: HttpClientRequest.HttpClientRequest) =>
       Effect.map(HttpClientRequest.toWeb(request), (web) => web.url).pipe(
         Effect.mapError((error) => new Undecidable({ message: `its URL doesn't parse: ${error.message}` }))
@@ -120,13 +130,17 @@ const changedTo = (
     const after = yield* url(request)
     const headers = sameHeaders(request.headers, original.headers) ? undefined : plain(request.headers)
     let body: Uint8Array | undefined
-    if (previous !== undefined && Option.isSome(previous.body) && request.body === previous.request.body) {
+    if (request.body !== base.body) {
+      if (request.body._tag === "Empty") {
+        body = new Uint8Array(0)
+      } else {
+        const web = yield* HttpClientRequest.toWeb(request).pipe(
+          Effect.mapError((error) => new Undecidable({ message: `its body can't be sent: ${error.message}` }))
+        )
+        body = yield* bytesOf(web)
+      }
+    } else if (previous !== undefined && Option.isSome(previous.body)) {
       body = previous.body.value
-    } else if (request.body._tag !== "Empty") {
-      const web = yield* HttpClientRequest.toWeb(request).pipe(
-        Effect.mapError((error) => new Undecidable({ message: `its body can't be sent: ${error.message}` }))
-      )
-      body = yield* bytesOf(web)
     }
     // A new body says what it is, unless the change set the header itself
     const contentType = "contentType" in request.body ? request.body.contentType : undefined
@@ -175,8 +189,7 @@ const toAdapter = (
           ? { _tag: "CancelAuth" }
           : changed?.decision ?? { _tag: "Continue", overrides: Option.none() }
       case "ContinueWith": {
-        const base = changed?.request ?? NetworkRequest.toHttpClientRequest(paused.request)
-        return (yield* changedTo(paused, data.change(base), changed)).decision
+        return (yield* changedTo(paused, data.change, changed)).decision
       }
       case "ContinueResponse": {
         let headers: Record<string, string> | undefined
@@ -243,8 +256,9 @@ const intercepted = (
   const failed = bodyError(owner, pattern)
   const base = {
     request: changed?.seen ?? paused.request,
+    // A body a change cleared is none, as a request without one has
     requestBody: changed !== undefined && Option.isSome(changed.body)
-      ? Effect.succeed(changed.body)
+      ? Effect.succeed(Option.filter(changed.body, (bytes) => bytes.length > 0))
       : adapter.pausedRequestBody(obligation).pipe(Effect.mapError(failed))
   }
   switch (paused.phase) {
@@ -329,8 +343,7 @@ export const register = <E, R, P extends Route.Phase>(
           return yield* failed(`its decision, ${data._tag}, isn't one for the ${paused.phase} phase`)
         }
         if (data._tag === "FallthroughWith") {
-          const base = changed?.request ?? NetworkRequest.toHttpClientRequest(paused.request)
-          const next = yield* Effect.suspend(() => changedTo(paused, data.change(base), changed)).pipe(Effect.exit)
+          const next = yield* changedTo(paused, data.change, changed).pipe(Effect.exit)
           if (Exit.isFailure(next)) return yield* failed("its change couldn't be made", next.cause)
           return { _tag: "Fallthrough", changed: next.value } as const
         }

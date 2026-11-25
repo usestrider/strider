@@ -104,11 +104,12 @@ export interface Challenge {
  */
 export interface Paused {
   /**
-   * The request as it was when paused, which doesn't change.
+   * The request as it was when paused, with the changes the routes above made with `fallthroughWith`.
    */
   readonly request: NetworkRequest.NetworkRequest
   /**
-   * The request's body as it was sent, or `None` if it has none.
+   * The request's body as it was sent, or as the routes above changed it with `fallthroughWith`; `None` if it has
+   * none.
    *
    * **Example** (Logging the orders a page places)
    *
@@ -250,7 +251,8 @@ const _continue: Effect.Effect<Decision<Phase>> = Effect.succeed(RouteDecision.m
 
 export {
   /**
-   * Lets the request continue unchanged; at the `auth` phase, the page gets the challenge's response.
+   * Lets the request continue, with the changes the routes above made with `fallthroughWith`; at the `auth` phase,
+   * the page gets the challenge's response.
    *
    * **Details**
    *

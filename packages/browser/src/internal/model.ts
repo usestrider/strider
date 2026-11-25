@@ -134,7 +134,7 @@ export interface ChangedRequest {
   readonly request: HttpClientRequest.HttpClientRequest
   /** The request as the routes below see it. */
   readonly seen: NetworkRequest.NetworkRequest
-  /** Its body, when a change set one. */
+  /** Its body, when a change set one: empty when a change cleared it. */
   readonly body: Option.Option<Uint8Array>
   /** Continuing it: only what changed from the request the browser paused. */
   readonly decision: Adapter.Decision

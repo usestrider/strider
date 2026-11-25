@@ -13,6 +13,7 @@ import {
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Headers from "effect/http/Headers"
+import * as HttpBody from "effect/http/HttpBody"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Option from "effect/Option"
@@ -114,6 +115,37 @@ describe("decision Effects", () => {
         const decision = calls[0]!
         assert(decision._tag === "Continue")
         assert.deepStrictEqual(Option.getOrThrow(decision.overrides).headers, expected)
+      })).pipe(Effect.provide(fixture.connection))
+    })
+  }
+
+  for (
+    const [label, routes, expected] of [
+      ["leaves the browser's body alone", [(request) => request], undefined],
+      ["clears the browser's body", [HttpClientRequest.setBody(HttpBody.empty)], 0],
+      ["sends a body set above", [
+        (request) => request,
+        (request) => request.pipe(HttpClientRequest.setMethod("POST"), HttpClientRequest.bodyText("set"))
+      ], 3]
+    ] as ReadonlyArray<
+      readonly [
+        string,
+        ReadonlyArray<(request: HttpClientRequest.HttpClientRequest) => HttpClientRequest.HttpClientRequest>,
+        number | undefined
+      ]
+    >
+  ) {
+    it.effect(`${label} with fallthroughWith`, () => {
+      const fixture = routed()
+      return Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        for (const change of routes) {
+          yield* page.route("https://example.com/**", () => Route.fallthroughWith(change))
+        }
+        const calls = yield* fixture.pause(page)
+        const decision = calls[0]!
+        assert(decision._tag === "Continue")
+        assert.strictEqual(Option.getOrThrow(decision.overrides).body?.length, expected)
       })).pipe(Effect.provide(fixture.connection))
     })
   }
