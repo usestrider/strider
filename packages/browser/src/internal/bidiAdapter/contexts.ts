@@ -33,12 +33,19 @@ import {
   type State
 } from "./state.ts"
 import { addNavigable, endNavigation, removeNavigable } from "./tree.ts"
+import * as Windows from "./windows.ts"
 
 // ── Events ────────────────────────────────────────────────────────────────────────────────────────────────
 
 export const register = (handlers: Kit.Handlers<Event>) =>
   handlers
     .on(BrowsingContext.contextCreated, (params, { state }) => {
+      if (Windows.hidden(state, params.context)) return
+      // It may be a blank tab whose creation hasn't answered: held until it does
+      if (!state.navigables.has(params.context) && Windows.mayBeBlank(state, params)) {
+        Windows.of(state).parked.push(params)
+        return
+      }
       const known = state.navigables.has(params.context)
       const navigable = addNavigable(state, params, state.adopting)
       // A page the session's cache setting doesn't suit, as one in a context without routes while another
@@ -48,8 +55,24 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       }
     })
     .on(BrowsingContext.contextDestroyed, (params, { state }) => {
+      const windows = Windows.of(state)
+      if (windows.blanks.has(params.context)) {
+        windows.blanks.delete(params.context)
+        const at = windows.idle.indexOf(params.context)
+        if (at !== -1) windows.idle.splice(at, 1)
+        return
+      }
       const navigable = state.navigables.get(params.context)
       if (navigable === undefined) return
+      if (windows.pages.has(params.context)) {
+        const blank = windows.pages.get(params.context)
+        windows.pages.delete(params.context)
+        // Its window, kept by its blank tab, is idle
+        if (blank !== undefined && windows.blanks.has(blank)) {
+          windows.idle.push(blank)
+          state.buffer.later(trimIdle(state))
+        }
+      }
       removeNavigable(
         state,
         navigable,
@@ -361,13 +384,62 @@ export const removeUserContext = Effect.fnUntraced(function*(state: State, id: U
   ))
 })
 
+/** Closes idle windows beyond `Windows.maxIdle`, oldest first, by closing their blank tab, the window's last. */
+const trimIdle = (state: State) =>
+  Effect.suspend(() => {
+    const windows = Windows.of(state)
+    const extra = windows.idle.splice(0, Math.max(0, windows.idle.length - Windows.maxIdle))
+    return Effect.forEach(
+      extra,
+      (blank) =>
+        Effect.ignore(state.send(BrowsingContext.close({ context: blank as BrowsingContext.BrowsingContext }))),
+      { discard: true }
+    )
+  })
+
+/**
+ * Opens a blank tab, in the default user context, in the window of `page`, so the window outlives the page. Contexts
+ * held back while it was unanswered are folded once it answers, except the blank tab itself.
+ */
+const openBlank = (state: State, page: BrowsingContext.BrowsingContext) =>
+  Effect.suspend(() => {
+    const windows = Windows.of(state)
+    windows.pending++
+    return state.send(BrowsingContext.create({ type: "tab", referenceContext: page, background: true })).pipe(
+      Effect.tap((created) => Effect.sync(() => windows.blanks.add(created.context))),
+      Effect.ensuring(Effect.sync(() => {
+        windows.pending--
+        if (windows.pending > 0) return
+        const parked = windows.parked.splice(0)
+        for (const info of parked) {
+          if (windows.blanks.has(info.context)) continue
+          const navigable = addNavigable(state, info, state.adopting)
+          if (navigable !== undefined && navigable.parent === undefined) state.buffer.later(applyCache(state))
+        }
+      }))
+    )
+  })
+
 export const createPage = Effect.fnUntraced(function*(state: State, id: UserContext.Id) {
   const context = yield* contextOf(state, id)
   // A window of its own, as Chromium's pages are (QUIRKS.md, Q70): a tab behind another renders about once a
-  // second, too seldom to act on, and a window keeps rendering whichever page came last (Q71)
+  // second, too seldom to act on, and a window keeps rendering whichever page came last (Q71). An idle window,
+  // whose page closed, is reused: the page opens as a tab in front of its blank tab, alone there but for it
+  const windows = Windows.of(state)
+  const blank = windows.idle.pop()
   const created = yield* Kit.protocol(
-    state.send(BrowsingContext.create({ type: "window", userContext: context.bidi }))
+    state.send(
+      blank === undefined
+        ? BrowsingContext.create({ type: "window", userContext: context.bidi })
+        : BrowsingContext.create({
+          type: "tab",
+          userContext: context.bidi,
+          referenceContext: blank as BrowsingContext.BrowsingContext,
+          background: false
+        })
+    )
   )
+  windows.pages.set(created.context, blank)
   // The context was announced before the reply; it is folded once this returns
   yield* state.root().drainObserved
   const navigable = state.navigables.get(created.context)
@@ -385,19 +457,30 @@ export const closePage = Effect.fnUntraced(
     const closing = options.runBeforeUnload ? undefined : new L1Target.PageClosed({ by: "command" })
     if (closing !== undefined) navigable.closing = closing
     else navigable.closeRequested = true
+    const windows = Windows.of(state)
+    // A page alone in a window Strider opened leaves the window idle for the next page, kept by a blank tab
+    const keep = windows.pages.has(navigable.bidi) && windows.pages.get(navigable.bidi) === undefined
     // The reply may wait on a beforeunload prompt, which the context's end reports
     state.buffer.start(
-      state.send(BrowsingContext.close({ context: navigable.bidi, promptUnload: options.runBeforeUnload })).pipe(
-        Effect.onError((cause) =>
-          Effect.gen(function*() {
-            if (closing === undefined) navigable.closeRequested = false
-            if (navigable.closing !== closing) return
-            navigable.closing = undefined
-            if (Option.exists(Cause.findErrorOption(cause), Cleanup.sessionEnded)) return
-            if (!navigable.removed) yield* recoverViewport(state, { _tag: "Page", page: navigable.id })
-          })
+      (keep
+        ? openBlank(state, navigable.bidi).pipe(
+          Effect.tap((created) => Effect.sync(() => windows.pages.set(navigable.bidi, created.context))),
+          Effect.ignore
         )
-      )
+        : Effect.void).pipe(
+          Effect.andThen(
+            state.send(BrowsingContext.close({ context: navigable.bidi, promptUnload: options.runBeforeUnload }))
+          ),
+          Effect.onError((cause) =>
+            Effect.gen(function*() {
+              if (closing === undefined) navigable.closeRequested = false
+              if (navigable.closing !== closing) return
+              navigable.closing = undefined
+              if (Option.exists(Cause.findErrorOption(cause), Cleanup.sessionEnded)) return
+              if (!navigable.removed) yield* recoverViewport(state, { _tag: "Page", page: navigable.id })
+            })
+          )
+        )
     )
   }
 )

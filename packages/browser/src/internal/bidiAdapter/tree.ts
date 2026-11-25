@@ -11,6 +11,7 @@ import type * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
 import * as Urls from "../urls.ts"
 import type { ContextEntry, DocumentEntry, NavigableEntry, NavigationEntry, RealmEntry, State } from "./state.ts"
+import * as Windows from "./windows.ts"
 
 // ── Ending things ─────────────────────────────────────────────────────────────────────────────────────────
 
@@ -304,6 +305,8 @@ export const addNavigable = (state: State, info: {
 }, adopted: boolean): NavigableEntry | undefined => {
   const known = state.navigables.get(info.context)
   if (known !== undefined) return known
+  // The adapter's own blank tabs, which keep idle windows for reuse, are never pages
+  if (Windows.hidden(state, info.context)) return undefined
   // Firefox names no user context for a window's context as it goes (QUIRKS.md, Q178): one that never came
   // can't be placed, and isn't adopted
   if (info.userContext === null) return undefined
