@@ -6130,6 +6130,46 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
           }))
         }), timeout)
 
+      it.effect(
+        "checks both modifier sides introduced by one press before sending input",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="i"><p id="log"></p><script>for (const type of ['keydown', 'keyup']) addEventListener(type, e => document.getElementById('log').textContent += type + ':' + e.code + ' ')</script>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url, { waitUntil: "load" })
+              const field = page.locator("#i")
+              yield* field.focus()
+              const keyboard = yield* Effect.result(page.keyboard.press("ShiftRight", { modifiers: ["Shift"] }))
+              const locator = yield* Effect.result(field.press("ShiftRight", { modifiers: ["Shift"] }))
+              if (yield* supports("input.modifierSides")) {
+                assert.strictEqual(keyboard._tag, "Success")
+                assert.strictEqual(locator._tag, "Success")
+                assert.strictEqual(
+                  (yield* page.locator("#log").readText).trim(),
+                  "keydown:ShiftLeft keydown:ShiftRight keyup:ShiftRight keyup:ShiftLeft " +
+                    "keydown:ShiftLeft keydown:ShiftRight keyup:ShiftRight keyup:ShiftLeft"
+                )
+              } else {
+                assert.deepStrictEqual(
+                  [keyboard, locator].map((result) =>
+                    result._tag === "Failure" &&
+                    (Keyboard.isKeyboardError(result.failure) || Locator.isLocatorError(result.failure)) &&
+                    result.failure.reason._tag === "Unsupported" &&
+                    result.failure.reason.capability === "input.modifierSides"
+                  ),
+                  [true, true],
+                  "both press APIs must refuse the sides introduced by modifiers"
+                )
+                assert.strictEqual(yield* page.locator("#log").readText, "")
+              }
+            }))
+          }),
+        timeout
+      )
+
       it.effect("marks a keydown for a key already held as a repeat", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
