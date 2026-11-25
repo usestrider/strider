@@ -122,6 +122,9 @@ const SharedChrome = Layer.unwrap(Effect.gen(function*() {
 ```
 
 - An HTTP endpoint is read for its WebSocket at `/json/version`. `headers` go with both requests.
+- That lookup follows the environment's proxy: `HTTP_PROXY` for an `http:` endpoint, `HTTPS_PROXY` for an `https:`
+  one through a `CONNECT` tunnel, and the lower-case names first. Hosts `NO_PROXY` lists are asked directly. The
+  WebSocket itself is connected to directly.
 - Existing tabs are observed; [`inspect` or `control`](/docs/pages/attaching#access-levels) gives access for a
   scope. The browser and its tabs stay as
   they were after the program; contexts Strider created close with the connection.

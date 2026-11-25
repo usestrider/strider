@@ -5,7 +5,7 @@ order: 5
 ---
 
 Attaching connects to a browser that a person or another program already has running, with its logins and tabs as
-they are, and leaves it running after.
+they are, and leaves it running after, unless the program [closes it](#the-connection).
 
 ## Connecting
 
@@ -117,3 +117,32 @@ const unreadInTab = Effect.fn("unreadInTab")(function*(tab: Page.ObservedPage) {
   return yield* unreadCount(yield* tab.inspect)
 })
 ```
+
+## The connection
+
+The connection to an attached browser lasts until the layer's scope closes, which disconnects and leaves the
+browser running, or until the browser goes away. `browser.closed` waits for that end and says why:
+`ConnectionLost` when the browser's process exits or the connection drops, and `BrowserClosed` when the browser was
+closed. `browser.isConnected` reads whether it still lives.
+
+`browser.close` ends the browser itself, for every client attached to it, not only this one:
+
+```ts
+import { Browser, Target } from "@usestrider/browser"
+import { Console, Effect } from "effect"
+
+const watchConnection = Effect.gen(function*() {
+  const browser = yield* Browser.Browser
+  const reason: Target.CloseReason = yield* browser.closed
+  yield* Console.log(`The browser went away: ${reason._tag}`)
+})
+
+const shutDown = Effect.gen(function*() {
+  const browser = yield* Browser.Browser
+  if (yield* browser.isConnected) yield* browser.close
+})
+```
+
+- Chromium and Firefox close; stock WebKit has no command that ends the browser, so there `close` fails with
+  [`Unsupported`](/docs/api/browser/Reason#Unsupported), naming `browser.close`.
+- `close` on a browser whose connection has already ended does nothing.

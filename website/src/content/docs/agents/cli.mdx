@@ -310,7 +310,9 @@ strider -s mine -p mail state save "$HOME/.local/state/strider/mail.state"
 saved 14 cookies and 1 origin for mail.example.com to /home/ada/.local/state/strider/mail.state, readable by you alone
 ```
 
-Stopping an attached session leaves the browser and its tabs running. `--attach` takes a Chromium's debugging
+Stopping an attached session leaves the browser and its tabs running. An HTTP endpoint is looked up through the
+environment's proxy (`HTTP_PROXY`, or `HTTPS_PROXY` for `https:`), unless `NO_PROXY` lists its host.
+`--attach` takes a Chromium's debugging
 endpoint or a WebDriver BiDi endpoint, such as Firefox's; it can't reach stock WebKit, which a program reaches with
 [`WebKit.layerAttach`](/docs/browsers/webkit#attaching).
 
