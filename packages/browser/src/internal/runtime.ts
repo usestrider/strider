@@ -313,6 +313,7 @@ const retarget = <R extends Engine.Request | Engine.CooperativeRequest>(
   switch (request.op) {
     case "act":
     case "expect":
+    case "change":
       return { ...request, steps: at, cap: missing ? Math.min(request.cap, missingCap) : request.cap }
     default:
       return { ...request, steps: at }
@@ -1213,7 +1214,7 @@ export const insertText = (
 export const releaseInDocument = (
   runtime: Runtime,
   document: Target.DocumentId,
-  request: Extract<Engine.Request, { readonly op: "validationStop" | "fillDisarm" | "expectStop" }>,
+  request: Extract<Engine.Request, { readonly op: "validationStop" | "fillDisarm" | "expectStop" | "unwatch" }>,
   id: Diagnostics.OperationId
 ): Effect.Effect<void, SendFailure> =>
   Effect.suspend(() => {

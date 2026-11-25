@@ -1802,6 +1802,51 @@ describe("BidiAdapter state", () => {
       assert.isEmpty(page.pendingTerminals)
     }))
 
+  // Captured from Firefox 158 on macOS: a popup opened on a slow page announces that first load only after a goto was
+  // sent to it, and fails it when the goto replaces it. The late start is for another URL than the goto's.
+  it.effect("leaves a command's navigation to its own URL when another URL's start arrives first", () =>
+    Effect.gen(function*() {
+      const slow = "http://example.test/slow-page"
+      const url = "http://example.test/fixture?html=Arrived"
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const { facts, page, state } = yield* withPage({
+        "browsingContext.navigate": Effect.gen(function*() {
+          yield* Deferred.succeed(entered, undefined)
+          yield* Deferred.await(release)
+          return { navigation: "goto", url }
+        })
+      })
+      const handlers = Contexts.register(Network.register(Navigation.register(Kit.handlers<State.Event>())))
+      const event = (method: string, params: unknown) => handlers.apply(method, params, { state })
+      const info = (navigation: string, timestamp: number) => ({ context: "C1", navigation, url, timestamp })
+      const running = yield* Effect.forkChild(Navigation.navigate(state, page.id, url, { referrer: Option.none() }))
+      yield* Deferred.await(entered)
+      const reserved = page.expected.list[0]!.id
+      event("browsingContext.navigationStarted", { ...info("first", 1), url: slow })
+      event("browsingContext.navigationFailed", { ...info("first", 2), url: slow })
+      event("browsingContext.navigationStarted", info("goto", 3))
+      event("browsingContext.navigationCommitted", info("goto", 4))
+      yield* Deferred.succeed(release, undefined)
+      assert.strictEqual(yield* Fiber.join(running), reserved)
+      event("browsingContext.load", info("goto", 5))
+      yield* state.buffer.flush
+      const ends = facts.filter((fact) => fact._tag === "NavigationEnded")
+      assert.deepStrictEqual(
+        ends.filter((fact) => fact.navigation === reserved).map((fact) => fact.outcome._tag),
+        ["Committed"]
+      )
+      const started = facts.filter((fact) => fact._tag === "NavigationStarted")
+      const first = started.find((fact) => fact.url === slow)!
+      assert.notStrictEqual(first.navigation, reserved)
+      assert.deepStrictEqual(
+        ends.filter((fact) => fact.navigation === first.navigation).map((fact) => fact.outcome._tag),
+        ["Failed"]
+      )
+      assert.isEmpty(page.expected.list)
+      assert.isEmpty(page.commandNavigations)
+    }))
+
   // Reduced from Firefox 158 navigating twice to the same fixture before its first load:
   // the delayed load names A before A starts, B commits, and the successful command replies with A.
   it.effect("correlates an early stale load when the replacement commits and the command replies with the first identity", () =>
@@ -2485,7 +2530,7 @@ describe("BidiAdapter state", () => {
     const scenario of [
       { name: "matches an ordinary error-page commit to its command reply id", started: false, matches: true },
       { name: "keeps a started navigation correlated through a redirected error page", started: true, matches: false },
-      { name: "keeps redirect URL fallback on navigationStarted", started: true, matches: true }
+      { name: "keeps a started navigation correlated through its own error page", started: true, matches: true }
     ]
   ) {
     it.effect(scenario.name, () =>
@@ -2502,11 +2547,12 @@ describe("BidiAdapter state", () => {
         const errorUrl = "about:neterror?e=dnsNotFound&u=" +
           encodeURIComponent(scenario.matches ? url : "http://redirect.example/")
         if (scenario.started) {
+          // The start names the URL the command asked for; a redirect shows only in the network events and the commit
           handlers.apply("browsingContext.navigationStarted", {
             context: "C1",
             navigation: "N1",
             timestamp: 1,
-            url: "http://redirect.example/"
+            url
           }, { state })
           assert.strictEqual(state.navigations.get("N1")?.id, reserved)
         }

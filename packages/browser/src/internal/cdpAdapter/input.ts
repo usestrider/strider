@@ -385,6 +385,56 @@ const captured = (
 }
 
 /**
+ * The out-of-process sessions from a session up to its page's, nearest first, the page's own excluded: each is
+ * found as the owner of the parent of the session's outermost frame.
+ */
+const sessionsAbove = (state: State, page: PageEntry, target: TargetEntry): ReadonlyArray<TargetEntry> => {
+  const chain: Array<TargetEntry> = []
+  let current: TargetEntry | undefined = target
+  while (current !== undefined && current.targetId !== page.target.targetId) {
+    const session: TargetEntry = current
+    chain.push(session)
+    current = [...state.frames.values()].find((each) =>
+      each.page === page && each.owner.targetId === session.targetId &&
+      each.parent !== undefined && each.parent.owner.targetId !== session.targetId
+    )?.parent?.owner
+  }
+  return chain
+}
+
+/**
+ * Tells each out-of-process session the pointer leaves, as a page's mouse input moves on to another session, that
+ * it has left, and records the session the input goes on. Chromium hands `Input.dispatchMouseEvent` to the widget
+ * under its point alone, never through the router that sends a real pointer's leave to the widget it left, so the
+ * frame's document would keep its hover and fire no `mouseout` or `mouseleave`. A move outside the frame's
+ * viewport, on its own session, gives it both, one for each level of nested frames the pointer leaves, innermost
+ * first. The page's own session gets no such move: one outside its viewport would fire the leave of every element
+ * holding the frame, and a `mouseout` as though the pointer had left the window, so the page's documents still miss
+ * the pointer entering an out-of-process frame and see it again only where it next lands on their own session.
+ */
+const leaveSessions = Effect.fnUntraced(function*(
+  state: State,
+  page: PageEntry,
+  to: TargetEntry,
+  modifiers: number
+) {
+  const last = state.pointerOn.get(page.id)
+  state.pointerOn.set(page.id, to)
+  if (last === undefined || last.targetId === to.targetId) return
+  const staying = new Set(sessionsAbove(state, page, to).map((each) => each.targetId))
+  for (const left of sessionsAbove(state, page, last)) {
+    if (staying.has(left.targetId)) break
+    // A session that has ended took its frame's pointer state with it
+    if (state.targets.get(left.session) !== left) continue
+    yield* Kit.protocol(
+      Input.dispatchMouseEvent({ type: "mouseMoved", x: -1, y: -1, button: "none", buttons: 0, modifiers }).pipe(
+        Protocol.on(left.session)
+      )
+    )
+  }
+})
+
+/**
  * Input in the page's coordinates goes on the page's session; pages with child frames keep sequential
  * acknowledgments. Pointer input aimed into frames of one out-of-process session goes on that session, in its own
  * coordinates (`pointerSession`). Pointer input that names no frame goes on the session under each event's point
@@ -438,6 +488,7 @@ export const dispatchInput = Effect.fnUntraced(
       // Keep cleanup installed until the release write completes, including the boundary after the press.
       // The protocol marks that write before restoring interruption for replies: once written, cancellation
       // must only abandon the reply, since another release would deliver an extra mouseup to the page.
+      yield* leaveSessions(state, page, sent.target, modifierBits(click[0].modifiers))
       let releaseWritten = false
       const release = Kit.protocol(sent.target.session.sendOrdered([mouseCommand(click[2], sent)], () => {
         releaseWritten = true
@@ -540,6 +591,7 @@ export const dispatchInput = Effect.fnUntraced(
           if (!held) {
             if (event.type === "up" && event.buttons === 0) releasePress(state, page)
             const to = event.type === "down" ? sent : captured
+            yield* leaveSessions(state, page, to.target, modifierBits(event.modifiers))
             yield* Kit.protocol(mouseCommand(event, to).pipe(Protocol.on(to.target.session)))
             break
           }
@@ -548,6 +600,7 @@ export const dispatchInput = Effect.fnUntraced(
           // the move started a drag, and one that started is owed its announcement before the next event
           const documents = dragDocuments(state, page, state.pressedIn.get(page.id), landed)
           yield* Effect.forEach(documents, (document) => watchDragStart(state, document), { concurrency: "unbounded" })
+          yield* leaveSessions(state, page, captured.target, modifierBits(event.modifiers))
           yield* Kit.protocol(mouseCommand(event, captured).pipe(onCaptured))
           const started = yield* Effect.forEach(documents, (document) => dragStarted(state, document), {
             concurrency: "unbounded"

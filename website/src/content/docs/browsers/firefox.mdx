@@ -170,7 +170,9 @@ Firefox's own.
 **HTML drag and drop needs [`html: "synthetic"`](/docs/pages/actions#dragging):** Firefox starts a native drag but never drops it.
 
 **Input into a cross-site frame goes to the frame's document,** since Firefox doesn't route page coordinates into
-it. A drag between documents goes to the first one alone: while a button pressed in a cross-site frame is held, a
+it. Strider also moves the pointer of each document above the frame onto its `iframe` as it enters, and moves the
+frame's to its right edge as it leaves, so every document it crosses, frames nested in frames included, fires its
+`mouseover`, `mouseout`, `mouseenter`, and `mouseleave`. A drag between documents goes to the first one alone: while a button pressed in a cross-site frame is held, a
 [`page.mouse`](/docs/pages/actions#the-keyboard-and-the-mouse) move outside the frame isn't sent, and the release is sent at the
 pointer's last point inside it.
 

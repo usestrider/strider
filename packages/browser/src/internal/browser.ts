@@ -264,7 +264,8 @@ const makeContext = (
     addInitScript: (script, options) =>
       InitScripts.add({ runtime, scope: declared, operation: "UserContext.addInitScript" }, entry.id, script, options),
     emulate: (settings) => Emulation.emulate({ runtime, scope: declared, operation: "UserContext.emulate" }, settings),
-    grant: (permissions, options) => Grants.grant(runtime, entry, "UserContext.grant", permissions, options),
+    grant: (permissions, options) => Grants.grant(runtime, entry, "UserContext.grant", "granted", permissions, options),
+    deny: (permissions, options) => Grants.grant(runtime, entry, "UserContext.deny", "denied", permissions, options),
     [Equal.symbol](that: unknown) {
       return UserContext.isUserContext(that) && that.id === entry.id
     },
@@ -426,7 +427,8 @@ const makeDeniedContext = (
       ),
     addInitScript: () => declaration("UserContext.addInitScript"),
     emulate: () => declaration("UserContext.emulate"),
-    grant: () => declaration("UserContext.grant")
+    grant: () => declaration("UserContext.grant"),
+    deny: () => declaration("UserContext.deny")
   } as unknown as UserContext.UserContext
   Handles.registerContext(context, { runtime, entry, grant: Option.none() })
   return context
@@ -958,7 +960,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         })
       )
       if (options?.permissions !== undefined) {
-        yield* Grants.grant(runtime, entry, operation, options.permissions, undefined).pipe(
+        yield* Grants.grant(runtime, entry, operation, "granted", options.permissions, undefined).pipe(
           Effect.mapError((error) =>
             Deadline.isTimeout(error)
               ? error

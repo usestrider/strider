@@ -147,6 +147,13 @@ What changes when attached:
 
 ## Differences
 
+**The page doesn't see the pointer enter a cross-site frame.** Moving from the page into a frame of another site, by
+a [`hover()`](/docs/api/browser/Locator#Locator.hover) or [`page.mouse`](/docs/pages/actions#the-keyboard-and-the-mouse),
+fires no `mouseout` or `mouseleave` on the element the pointer left, no `mouseover` on the `iframe`, and leaves the
+page's `:hover` where it was, until the pointer comes back to the page. A hover menu holding the frame stays open.
+The frame itself sees the pointer arrive and leave. Chromium delivers its protocol's mouse input to the frame under
+the point alone, and a move that would give the page its leave would also tell it the pointer had left the window.
+
 **Request events lack `Cookie`.** `NetworkResponse.headers` include `Set-Cookie`, but `NetworkRequest.headers` don't
 include `Cookie`. Use [`NetworkRequest.headersSent`](/docs/events/network#sent-headers).
 

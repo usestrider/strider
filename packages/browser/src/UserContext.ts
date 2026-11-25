@@ -185,7 +185,7 @@ export type Permission =
   | (string & {})
 
 /**
- * Settings for `grant`.
+ * Settings for `grant` and `deny`.
  *
  * @stability unstable
  * @category models
@@ -193,7 +193,7 @@ export type Permission =
  */
 export interface GrantOptions {
   /**
-   * The origin the permissions apply to. Granting to every origin is `Unsupported` on Firefox
+   * The origin the permissions apply to. Granting or denying to every origin is `Unsupported` on Firefox
    * (`permissions.anyOrigin`).
    *
    * @default every origin
@@ -467,7 +467,8 @@ export interface UserContext extends ObservedUserContext {
    *
    * **Details**
    *
-   * Removing one leaves the others in force. A name the browser doesn't know fails with `InvalidInput`
+   * Removing one leaves the others in force, and a later `deny` of the same permission, for its origin or every
+   * origin, overrides it while the denial lives. A name the browser doesn't know fails with `InvalidInput`
    * naming it: Firefox's list is shorter than Chromium's. WebKit can't grant permissions, so there `grant` fails
    * with `Unsupported` (`permissions`).
    *
@@ -483,6 +484,37 @@ export interface UserContext extends ObservedUserContext {
    * ```
    */
   grant(
+    permissions: ReadonlyArray<Permission>,
+    options?: GrantOptions | undefined
+  ): Effect.Effect<
+    Declaration.Registration,
+    Declaration.DeclarationError | Target.TargetGone | Deadline.Timeout,
+    Scope.Scope
+  >
+  /**
+   * Denies permissions while the registration lives, so the Permissions API reports them `denied` and requests for
+   * them fail.
+   *
+   * **Details**
+   *
+   * For each permission and origin, the latest grant or denial in force that covers it wins, whether it names that
+   * origin or every origin. Removing a denial restores what the others say, or `prompt` when none is left: there is no separate
+   * way to set a permission back to `prompt`. Only the permissions named are denied. A name the browser doesn't know
+   * fails with `InvalidInput` naming it. WebKit can't set permissions, so there `deny` fails with `Unsupported`
+   * (`permissions`).
+   *
+   * **Example** (Notifications refused for one origin)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const noAlerts = Effect.fn("noAlerts")(function*(page: Page.Page) {
+   *   yield* page.context.deny(["notifications"], { origin: "https://news.example.com" })
+   * })
+   * ```
+   */
+  deny(
     permissions: ReadonlyArray<Permission>,
     options?: GrantOptions | undefined
   ): Effect.Effect<

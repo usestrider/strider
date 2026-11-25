@@ -35,6 +35,7 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
       entry("network.timing.redirect", "unsupported", ["redirect responses omit native timing origins"]),
       entry("network.timing", "unsupported", ["timing collection requires a newly created context"]),
       entry("input.topLevelDesignMode", "unsupported", [noInput]),
+      entry("input.frameBoundaries", "unsupported", [noInput]),
       entry("webSocketRouting", "partial", [
         "explicit script consent and bestEffort timing; admission ceilings; main-world WebSocket only"
       ]),
@@ -282,6 +283,7 @@ export const launchedCapabilities = (info: Browser.Info, video = false) => {
       "a page a page opens is found when the browser lists it, and isn't paused"
     ]],
     "input.topLevelDesignMode": ["supported", []],
+    "input.frameBoundaries": ["supported", []],
     "input.native": ["supported", ["Automation's simulated input, which the page trusts"]],
     "input.insertText": ["supported", [
       "Automation inserts text only by key, so Strider inserts it with the page's editing command, which fires a trusted beforeinput and input and no key events"

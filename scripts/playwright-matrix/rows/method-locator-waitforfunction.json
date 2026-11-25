@@ -3,15 +3,27 @@
   "upstream": [
     "method:Locator.waitForFunction"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
+  "status": "different",
+  "api": [
+    {
+      "module": "Expect",
+      "symbol": "toSatisfy",
+      "url": "/docs/api/browser/Expect#toSatisfy"
+    }
+  ],
+  "notes": "Expect.toSatisfy waits until a page function returns true on the locator's one match, called in the isolated world as locator.evaluate is and checked again after each page change. It takes a function, never source text; only true passes, not any truthy value; a throw fails it at once rather than being retried; and it returns nothing, so read a value afterwards with locator.evaluate. Stock WebKit refuses it as Unsupported.",
   "capabilities": [],
   "audit": {
     "sources": [
-      "packages/browser/src/Locator.ts"
+      "packages/browser/src/Expect.ts"
     ],
     "scope": "Public declarations and implementation inspected; capability comparison preserves the notes on waiting, errors and identity."
   },
-  "requirements": []
+  "requirements": [],
+  "decision": {
+    "file": "docs/decisions.md",
+    "anchor": "page-function-expectations",
+    "quote": "A predicate that runs in the page is one named expectation, `Expect.toSatisfy`, over a locator's one match.",
+    "revision": "8b2b7e14cf4ebeed75a5938c9ae8d20ecb6eacc3"
+  }
 }

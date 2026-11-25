@@ -1796,6 +1796,73 @@ export const declarations = (
           }))
         }), timeout)
 
+      it.effect("denies a permission, which its change reports, and restores what was in force once removed", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const query = "return navigator.permissions.query({ name: 'notifications' }).then((p) => p.state)"
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            if (!(yield* supports("permissions"))) {
+              const error = yield* Effect.flip(page.context.deny(["notifications"], { origin }))
+              assert(Declaration.isDeclarationError(error) && error.reason._tag === "Unsupported", String(error))
+              return
+            }
+            const browser = yield* Browser.Browser
+            const tabs = yield* browser.pages
+            const observed = (yield* tabs[0]!.control).context
+            const refused = yield* Effect.flip(observed.deny(["notifications"], { origin }))
+            assert(Declaration.isDeclarationError(refused) && refused.reason._tag === "NotPermitted", String(refused))
+            // The page that's open hears the change
+            yield* page.goto(fixtureUrl(
+              origin,
+              `<p id="state">pending</p><script>navigator.permissions.query({ name: 'notifications' }).then((status) => { document.getElementById('state').textContent = status.state; status.onchange = () => { document.getElementById('state').textContent = 'changed ' + status.state } })</script>`
+            ))
+            yield* page.locator("#state").pipe(Expect.toHaveText("prompt"))
+            const denied = yield* page.context.deny(["notifications"], { origin })
+            yield* page.locator("#state").pipe(Expect.toHaveText("changed denied"))
+            assert.strictEqual(yield* run(page, origin, query), "denied")
+            yield* denied.remove
+            assert.strictEqual(yield* run(page, origin, query), "prompt")
+            // A denial over a grant holds while it lives; once it goes, the grant is in force again
+            yield* page.context.grant(["notifications"], { origin })
+            const over = yield* page.context.deny(["notifications"], { origin })
+            assert.strictEqual(yield* run(page, origin, query), "denied")
+            yield* over.remove
+            assert.strictEqual(yield* run(page, origin, query), "granted")
+            const remaining = yield* page.context.deny(["notifications"], { origin })
+            const newest = yield* page.context.grant(["notifications"], { origin })
+            yield* newest.remove
+            assert.strictEqual(yield* run(page, origin, query), "denied")
+            const rejected = yield* Effect.flip(
+              page.context.grant(["notifications", "not-a-permission"], { origin })
+            )
+            assert(
+              Declaration.isDeclarationError(rejected) && rejected.reason._tag === "InvalidInput",
+              String(rejected)
+            )
+            assert.strictEqual(yield* run(page, origin, query), "denied")
+            yield* remaining.remove
+            assert.strictEqual(yield* run(page, origin, query), "granted")
+          }))
+        }), timeout)
+
+      it.effect("uses the latest permission declaration across explicit and every-origin settings", () =>
+        Effect.gen(function*() {
+          if (!(yield* supports("permissions.anyOrigin"))) {
+            return
+          }
+          const { origin } = yield* site
+          const query = "return navigator.permissions.query({ name: 'notifications' }).then((p) => p.state)"
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.context.grant(["notifications"], { origin })
+            const denied = yield* page.context.deny(["notifications"])
+            assert.strictEqual(yield* run(page, origin, query), "denied")
+            yield* denied.remove
+            assert.strictEqual(yield* run(page, origin, query), "granted")
+          }))
+        }), timeout)
+
       // ── Content Security Policy ──
 
       it.effect(

@@ -79,7 +79,8 @@ export const grantPermissions = Effect.fnUntraced(function*(
   state: State,
   id: UserContext.Id,
   origin: Option.Option<string>,
-  permissions: ReadonlyArray<string>
+  permissions: ReadonlyArray<string>,
+  setting: "granted" | "denied"
 ) {
   const context = yield* contextOf(state, id)
   // Web permission names, as the Permissions API writes them
@@ -87,7 +88,7 @@ export const grantPermissions = Effect.fnUntraced(function*(
     BrowserCdp.setPermission({
       ...contextParam(context),
       permission: { name },
-      setting: "granted",
+      setting,
       ...(Option.isSome(origin) ? { origin: origin.value } : {})
     }).pipe(Protocol.on(state.root())), { discard: true }))
 })

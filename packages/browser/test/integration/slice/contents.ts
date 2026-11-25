@@ -2201,13 +2201,489 @@ export const contents = (
           }))
         }), timeout)
 
+      it.effect("toSatisfy waits for its match, then for the page function to return true after a change", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(
+              fixtureUrl(
+                origin,
+                `<script>setTimeout(() => { const p = document.createElement("p"); p.id = "x"; document.body.append(p);` +
+                  ` setTimeout(() => p.dataset.ready = "yes", 150) }, 150)</script>`
+              ),
+              { waitUntil: "load" }
+            )
+            const ready = (element: Element) =>
+              (element as HTMLElement).dataset["ready"] === "yes"
+            if (yield* isolatedRefused(page.locator("#x").pipe(Expect.toSatisfy(ready)))) {
+              return
+            }
+            yield* page.locator("#x").pipe(Expect.toSatisfy(ready), Deadline.within("5 seconds"))
+            assert.strictEqual(
+              yield* page.locator("#x").evaluate((element) =>
+                element.getAttribute("data-ready")
+              ),
+              "yes"
+            )
+          }))
+        }), timeout)
+
+      it.effect("toSatisfy passes its arguments, a handle among them, after the match", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<p id="x" data-n="3">hello</p>`), { waitUntil: "load" })
+            if (
+              yield* isolatedRefused(Expect.toSatisfy(page.locator("#x"), () =>
+                true))
+            ) return
+            const expected = yield* page.evaluateHandle(() => ({ text: "hello" }))
+            yield* Expect.toSatisfy(
+              page.locator("#x"),
+              // The handle arrives as the object it holds
+              (element, wanted: unknown, n: number) =>
+                element.textContent === (wanted as { readonly text: string }).text &&
+                (element as HTMLElement).dataset["n"] === String(n),
+              expected,
+              3
+            ).pipe(Deadline.within("1 second"))
+          }))
+        }), timeout)
+
+      it.effect("toSatisfy awaits a promise the page function returns", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<p id="x">hello</p>`), { waitUntil: "load" })
+            const later = async (element: Element) => {
+              await new Promise((resume) => setTimeout(resume, 20))
+              return element.textContent === "hello"
+            }
+            if (yield* isolatedRefused(page.locator("#x").pipe(Expect.toSatisfy(later)))) return
+            yield* page.locator("#x").pipe(Expect.toSatisfy(later), Deadline.within("1 second"))
+            // A promise of something other than true doesn't pass
+            const failed = reasonOf(
+              yield* Effect.exit(
+                page.locator("#x").pipe(
+                  Expect.toSatisfy(async () => "true" as unknown as boolean),
+                  Deadline.within("300 millis")
+                )
+              )
+            )
+            assert.strictEqual(failed?._tag, "ExpectationFailed")
+          }))
+        }), timeout)
+
+      it.effect("toSatisfy fails at once with the locator's error when the page function throws", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<p id="x">hello</p>`), { waitUntil: "load" })
+            const throws = (): boolean => {
+              throw new Error("not yet")
+            }
+            if (yield* isolatedRefused(page.locator("#x").pipe(Expect.toSatisfy(throws)))) {
+              return
+            }
+            const started = Date.now()
+            const failed = reasonOf(
+              yield* Effect.exit(page.locator("#x").pipe(Expect.toSatisfy(throws), Deadline.within("5 seconds")))
+            ) as Locator.LocatorError
+            assert.strictEqual(failed._tag, "LocatorError")
+            assert.strictEqual(failed.reason._tag, "EvaluationThrown")
+            assert.isBelow(Date.now() - started, 4000)
+            const rejected = reasonOf(
+              yield* Effect.exit(
+                page.locator("#x").pipe(
+                  Expect.toSatisfy(() =>
+                    Promise.reject(new Error("rejected"))
+                  ),
+                  Deadline.within("5 seconds")
+                )
+              )
+            ) as Locator.LocatorError
+            assert.strictEqual(rejected.reason._tag, "EvaluationThrown")
+          }))
+        }), timeout)
+
+      it.effect("toSatisfy runs locator handlers while waiting for its predicate", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<div id="overlay" hidden>Overlay</div><p id="x">waiting</p>`), {
+              waitUntil: "load"
+            })
+            if (
+              yield* isolatedRefused(Expect.toSatisfy(page.locator("#x"), () =>
+                true))
+            ) {
+              return
+            }
+            let calls = 0
+            yield* page.addLocatorHandler(page.locator("#overlay"), () =>
+              Effect.gen(function*() {
+                calls++
+                yield* page.evaluateInMainWorld(() => {
+                  document.querySelector<HTMLElement>("#overlay")!.hidden = true
+                  document.querySelector("#x")!.textContent = "done"
+                })
+              }))
+            yield* page.locator("#x").pipe(
+              Expect.toSatisfy((element) => {
+                if (element.textContent === "done") {
+                  return true
+                }
+                element.ownerDocument.querySelector<HTMLElement>("#overlay")!.hidden = false
+                return false
+              }),
+              Deadline.within("1 second")
+            )
+            assert.strictEqual(calls, 1)
+          }))
+        }), timeout)
+
+      it.effect("toSatisfy services an overlay while the page function awaits its dismissal", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<div id="overlay" hidden>Overlay</div><p id="x">waiting</p>`))
+            if (
+              yield* isolatedRefused(Expect.toSatisfy(page.locator("#x"), () =>
+                true))
+            ) {
+              return
+            }
+            yield* page.addLocatorHandler(page.locator("#overlay"), () =>
+              page.evaluateInMainWorld(() => {
+                document.querySelector<HTMLElement>("#overlay")!.hidden = true
+                document.querySelector("#x")!.textContent = "done"
+              }))
+            yield* page.locator("#x").pipe(
+              Expect.toSatisfy((element) =>
+                new Promise<boolean>((resolve) => {
+                  const observer = new MutationObserver(() => {
+                    if (element.textContent === "done") {
+                      observer.disconnect()
+                      resolve(true)
+                    }
+                  })
+                  observer.observe(element, { childList: true })
+                  element.ownerDocument.querySelector<HTMLElement>("#overlay")!.hidden = false
+                })
+              ),
+              Deadline.within("1 second")
+            )
+          }))
+        }), timeout)
+
+      it.effect("toSatisfy preserves a handler failure while the page function is pending", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<div id="overlay" hidden>Overlay</div><p id="x">waiting</p>`))
+            if (
+              yield* isolatedRefused(Expect.toSatisfy(page.locator("#x"), () =>
+                true))
+            ) {
+              return
+            }
+            const sentinel = { message: "handler failed" }
+            yield* page.addLocatorHandler(page.locator("#overlay"), () =>
+              Effect.fail(sentinel))
+            const failed = reasonOf(
+              yield* Effect.exit(
+                page.locator("#x").pipe(
+                  Expect.toSatisfy((element) => {
+                    element.ownerDocument.querySelector<HTMLElement>("#overlay")!.hidden = false
+                    return new Promise<boolean>(() => {})
+                  }),
+                  Deadline.within("2 seconds")
+                )
+              )
+            ) as unknown as Expect.ExpectationFailed
+            assert.strictEqual(failed._tag, "ExpectationFailed")
+            assert.strictEqual(failed.handlerFailure?.error, sentinel)
+          }))
+        }), timeout)
+
+      it.effect("toSatisfy interruption finishes a running handler finalizer", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<div id="overlay" hidden>Overlay</div><p id="x">waiting</p>`))
+            if (
+              yield* isolatedRefused(Expect.toSatisfy(page.locator("#x"), () =>
+                true))
+            ) {
+              return
+            }
+            const entered = yield* Deferred.make<void>()
+            let finalized = false
+            yield* page.addLocatorHandler(page.locator("#overlay"), () =>
+              Deferred.succeed(entered, undefined).pipe(
+                Effect.andThen(Effect.never),
+                Effect.ensuring(Effect.sync(() => {
+                  finalized = true
+                }))
+              ))
+            const pending = yield* page.locator("#x").pipe(
+              Expect.toSatisfy((element) => {
+                element.ownerDocument.querySelector<HTMLElement>("#overlay")!.hidden = false
+                return new Promise<boolean>(() => {})
+              }),
+              Deadline.within("2 seconds"),
+              Effect.forkChild
+            )
+            yield* Deferred.await(entered).pipe(Effect.timeout("1 second"))
+            yield* Fiber.interrupt(pending)
+            assert.isTrue(finalized)
+          }))
+        }), timeout)
+
+      it.effect(
+        "toSatisfy stops its handler before releasing watches when interrupted after the predicate answers",
+        () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* SharedContext.newPage
+              yield* page.goto(fixtureUrl(origin, `<div id="overlay" hidden>Overlay</div><p id="x">waiting</p>`))
+              if (
+                yield* isolatedRefused(Expect.toSatisfy(page.locator("#x"), () =>
+                  true))
+              ) return
+              const answered = yield* Deferred.make<void>()
+              let finalized = false
+              const releases: Array<boolean> = []
+              yield* page.addLocatorHandler(page.locator("#overlay"), () =>
+                page.evaluateInMainWorld(() => {
+                  document.querySelector("#x")!.textContent = "done"
+                }).pipe(
+                  Effect.andThen(Effect.never),
+                  Effect.ensuring(Effect.sync(() => {
+                    finalized = true
+                  }))
+                ))
+              const locator = page.locator("#x")
+              const impl = locator as LocatorImpl
+              const satisfying = impl.satisfying.bind(impl)
+              const checked = vi.spyOn(impl, "satisfying").mockImplementation((...args) =>
+                satisfying(...args).pipe(
+                  Effect.tap(() => Deferred.succeed(answered, undefined))
+                )
+              )
+              const release = Runtime.releaseInDocument
+              const releasing = vi.spyOn(Runtime, "releaseInDocument").mockImplementation((...args) =>
+                Effect.suspend(() => {
+                  if (args[2].op === "unwatch") releases.push(finalized)
+                  return release(...args)
+                })
+              )
+              yield* Effect.gen(function*() {
+                const pending = yield* locator.pipe(
+                  Expect.toSatisfy((element) =>
+                    new Promise<boolean>((resolve) => {
+                      const observer = new MutationObserver(() => {
+                        if (element.textContent === "done") {
+                          observer.disconnect()
+                          resolve(true)
+                        }
+                      })
+                      observer.observe(element, { childList: true })
+                      element.ownerDocument.querySelector<HTMLElement>("#overlay")!.hidden = false
+                    })
+                  ),
+                  Deadline.within("2 seconds"),
+                  Effect.forkChild
+                )
+                yield* Deferred.await(answered).pipe(Effect.timeout("1 second"))
+                // Let the completed evaluation win its race and enter the join of the running handler.
+                yield* Effect.yieldNow
+                yield* Effect.yieldNow
+                yield* Effect.yieldNow
+                yield* Fiber.interrupt(pending)
+                assert.isTrue(finalized)
+                assert.isAbove(releases.length, 0)
+                assert.isTrue(releases.every(Boolean), "watch release preceded the handler finalizer")
+              }).pipe(Effect.ensuring(Effect.sync(() => {
+                checked.mockRestore()
+                releasing.mockRestore()
+              })))
+            }))
+          }),
+        timeout
+      )
+
+      it.effect("toSatisfy stops servicing handlers after its page function throws", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<p id="x">waiting</p>`))
+            if (
+              yield* isolatedRefused(Expect.toSatisfy(page.locator("#x"), () => true))
+            ) {
+              return
+            }
+            const extra = yield* Deferred.make<void>()
+            let returned = false
+            yield* page.addLocatorHandler(page.locator("p"), () =>
+              Effect.gen(function*() {
+                if (returned) {
+                  yield* Deferred.succeed(extra, undefined)
+                }
+              }), { noWaitAfter: true })
+            const failed = reasonOf(
+              yield* Effect.exit(
+                page.locator("#x").pipe(
+                  Expect.toSatisfy(() => {
+                    throw new Error("stop checking")
+                  }),
+                  Deadline.within("2 seconds")
+                )
+              )
+            )
+            assert.strictEqual(failed?.reason?._tag, "EvaluationThrown")
+            returned = true
+            const after = yield* Deferred.await(extra).pipe(Effect.timeoutOption("300 millis"))
+            assert.isTrue(Option.isNone(after), "a handler ran after the expectation had already failed")
+          }))
+        }), timeout)
+
+      it.effect("toSatisfy reports several containing iframes as match observations", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<p>outside</p><iframe></iframe><iframe></iframe>`))
+            if (
+              yield* isolatedRefused(Expect.toSatisfy(page.locator("p"), () => true))
+            ) {
+              return
+            }
+            const failed = reasonOf(
+              yield* Effect.exit(
+                page.frame(page.locator("iframe")).locator("p").pipe(
+                  Expect.toSatisfy(() => true),
+                  Deadline.within("300 millis")
+                )
+              )
+            )
+            assert.strictEqual(failed?._tag, "ExpectationFailed")
+          }))
+        }), timeout)
+
+      it.effect("toSatisfy preserves a locator handler callback timeout", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<p id="x">waiting</p>`))
+            if (
+              yield* isolatedRefused(Expect.toSatisfy(page.locator("#x"), () => true))
+            ) return
+            yield* page.addLocatorHandler(page.locator("p"), () => Effect.never)
+            const failed = reasonOf(
+              yield* Effect.exit(
+                page.locator("#x").pipe(
+                  Expect.toSatisfy(() => true),
+                  Deadline.within("300 millis")
+                )
+              )
+            )
+            assert.strictEqual(failed?._tag, "Timeout")
+          }))
+        }), timeout)
+
+      it.effect("toSatisfy reports ExpectationFailed when its predicate is still pending at the deadline", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<p id="x">waiting</p>`), { waitUntil: "load" })
+            if (
+              yield* isolatedRefused(Expect.toSatisfy(page.locator("#x"), () =>
+                true))
+            ) {
+              return
+            }
+            const failed = reasonOf(
+              yield* Effect.exit(
+                page.locator("#x").pipe(
+                  Expect.toSatisfy(() =>
+                    new Promise<boolean>(() => {})
+                  ),
+                  Deadline.within("300 millis")
+                )
+              )
+            )
+            assert.strictEqual(failed?._tag, "ExpectationFailed")
+          }))
+        }), timeout)
+
+      it.effect("toSatisfy keeps checking through no match or several, and fails with what it saw", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, `<p>a</p><p>b</p><button>Save</button>`), { waitUntil: "load" })
+            if (
+              yield* isolatedRefused(
+                page.locator("p").pipe(Expect.toSatisfy(() =>
+                  true
+                ))
+              )
+            ) {
+              return
+            }
+            const several = reasonOf(
+              yield* Effect.exit(
+                page.locator("p").pipe(
+                  Expect.toSatisfy(() =>
+                    true
+                  ),
+                  Deadline.within("300 millis")
+                )
+              )
+            ) as unknown as Expect.ExpectationFailed
+            assert.strictEqual(several._tag, "ExpectationFailed")
+            assert.deepStrictEqual(Option.getOrThrow(several.last).value, { matches: 2 })
+            assert.isAbove(several.checks.count, 1)
+            const none = reasonOf(
+              yield* Effect.exit(
+                page.getByRole("button", { name: "Sav", exact: true }).pipe(
+                  Expect.toSatisfy(() => true),
+                  Deadline.within("300 millis")
+                )
+              )
+            ) as unknown as Expect.ExpectationFailed
+            assert.strictEqual(none._tag, "ExpectationFailed")
+            assert.deepStrictEqual(Option.getOrThrow(none.last).value, { matches: 0 })
+            assert.deepStrictEqual(none.suggestions, [`page.getByRole("button", { name: "Save", exact: true })`])
+          }))
+        }), timeout)
+
       it.effect("evaluates snapshot matches detached between query and callback", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, `<p>a</p><p>b</p>`), { waitUntil: "load" })
-            if (yield* isolatedRefused(page.locator("p").evaluateAll((elements) => elements.length))) return
+            if (
+              yield* isolatedRefused(
+                page.locator("p").evaluateAll((elements) =>
+                  elements.length
+                )
+              )
+            ) return
             const original = Runtime.elements
             let queries = 0
             const hook = vi.spyOn(Runtime, "elements").mockImplementation((...args) =>
@@ -2812,8 +3288,7 @@ export const contents = (
             yield* page.evaluateInMainWorld(() => {
               document.querySelector<HTMLInputElement>("#all")!.indeterminate = true
             })
-            const anywhere = (pattern: AriaPattern.AriaPattern) =>
-              AriaPattern.anywhere(AriaPattern.including(pattern))
+            const anywhere = (pattern: AriaPattern.AriaPattern) => AriaPattern.anywhere(AriaPattern.including(pattern))
             yield* page.pipe(Expect.toMatchAria(anywhere(
               AriaPattern.node("heading", "Plans", AriaPattern.unchecked, { level: 2 })
             )))

@@ -238,6 +238,8 @@ const activate = (page: Model.PageEntry, state: State) => {
           ),
         Runtime.send(runtime, target, request, id, at)
       ),
+    handle: dispatch(Effect.map(check(state, false), (outcome) => outcome === "invalidate"), Effect.succeed(false)),
+    handlers: true,
     beforeCheck: dispatch(check(state, false).pipe(Effect.asVoid), Effect.void)
   })
 }
