@@ -96,6 +96,27 @@ const retryAfterOutage = Effect.fn("retryAfterOutage")(function*(page: Page.Page
 })
 ```
 
+A route given `times` handles that many requests, then removes itself, so the routes asked after it take the rest.
+Every request its handler runs for counts, a `fallthrough` too:
+
+```ts
+import { Expect, Page, Route } from "@usestrider/browser"
+import { Effect } from "effect"
+import { HttpServerResponse } from "effect/http"
+
+const failFirstOrder = Effect.fn("failFirstOrder")(function*(page: Page.Page) {
+  yield* page.route(
+    "https://shop.example.com/api/orders",
+    () => Route.fulfill(HttpServerResponse.empty({ status: 503 })),
+    { times: 1 }
+  )
+  yield* page.getByRole("button", { name: "Place order" }).click()
+  yield* page.getByText("Try again").pipe(Expect.toBeVisible)
+  yield* page.getByRole("button", { name: "Try again" }).click()
+  yield* page.getByText("Order placed").pipe(Expect.toBeVisible)
+})
+```
+
 ## Routes and the cache
 
 While a request or response route is in force for a page, the page's requests bypass the browser's HTTP cache, so a

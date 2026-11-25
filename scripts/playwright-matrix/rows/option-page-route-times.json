@@ -1,12 +1,28 @@
 {
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding public option for this contract.",
-  "capabilities": [],
   "id": "option-page-route-times",
   "upstream": [
     "method:Page.route"
   ],
   "option": "times",
+  "status": "has",
+  "api": [
+    {
+      "module": "Route",
+      "symbol": "Options",
+      "url": "/docs/api/browser/Route#Options"
+    }
+  ],
+  "notes": "`Page.route(pattern, handler, { times })` runs the handler for the route's first n requests, falling through and failing included, then removes the route, so the routes registered before it handle the rest. Requests paused at once each claim a use before the handler runs, so it never runs more than n times. A value that isn't a positive integer fails `route` with `InvalidInput`.",
+  "capabilities": [
+    "interception.request"
+  ],
+  "audit": {
+    "sources": [
+      "packages/browser/src/Route.ts",
+      "packages/browser/src/internal/routes.ts",
+      "packages/browser/src/internal/obligations.ts"
+    ],
+    "scope": "Public declarations and implementation inspected; a route with times removes itself after the last request it handled is decided."
+  },
   "requirements": []
 }

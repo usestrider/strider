@@ -657,6 +657,69 @@ export const declarations = (
           }))
         }), timeout)
 
+      it.effect(
+        "hands requests to the route under one with times once it has run that often, fallthrough included",
+        () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* SharedContext.newPage
+              yield* page.route(`${origin}/api/**`, () =>
+                Route.fulfill(json({ from: "under" })))
+              let runs = 0
+              const limited = yield* page.route(
+                `${origin}/api/**`,
+                () =>
+                  ++runs === 1 ? Route.fallthrough : Route.fulfill(json({ from: "limited" })),
+                { times: 2 }
+              )
+              const result = yield* run(
+                page,
+                origin,
+                `const read = () => fetch('/api/user').then((r) => r.json()).then((body) => body.from);
+               return [await read(), await read(), await read()]`
+              )
+              assert.deepStrictEqual(result, ["under", "limited", "under"])
+              assert.strictEqual(runs, 2)
+              assert.strictEqual(yield* limited.hits, 2)
+              // Already gone, so removing it again changes nothing
+              yield* limited.remove
+              assert.deepStrictEqual(yield* run(page, origin, `return fetch('/api/user').then((r) => r.json())`), {
+                from: "under"
+              })
+            }))
+          }),
+        timeout
+      )
+
+      it.effect("runs a route with times: 1 for only one of two requests paused at once", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.route(`${origin}/api/**`, () =>
+              Route.fulfill(json({ from: "under" })))
+            let runs = 0
+            const once = yield* page.route(
+              `${origin}/api/**`,
+              () => {
+                runs++
+                return Effect.andThen(Effect.sleep("300 millis"), Route.fulfill(json({ from: "once" })))
+              },
+              { times: 1 }
+            )
+            const result = yield* run(
+              page,
+              origin,
+              `const read = (n) => fetch('/api/' + n).then((r) => r.json()).then((body) => body.from);
+               return (await Promise.all([read(1), read(2)])).sort()`
+            )
+            assert.deepStrictEqual(result, ["once", "under"])
+            assert.strictEqual(runs, 1)
+            assert.strictEqual(yield* once.hits, 1)
+          }))
+        }), timeout)
+
       it.effect("reads a request's body, and none when it has none", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -882,8 +945,7 @@ export const declarations = (
               ).length
             const read = `return fetch('/cached.js?released').then((r) => r.status)`
             yield* Effect.scoped(Effect.gen(function*() {
-              yield* page.route(`${origin}/cached.js*`, () =>
-                Route.continue)
+              yield* page.route(`${origin}/cached.js*`, () => Route.continue)
               assert.strictEqual(yield* run(page, origin, read), 200)
             }))
             assert.strictEqual(yield* run(page, origin, read), 200)
@@ -930,9 +992,7 @@ export const declarations = (
               (server) =>
                 Effect.promise(() =>
                   new Promise<void>((resolve) => {
-                    server.close(() =>
-                      resolve()
-                    )
+                    server.close(() => resolve())
                     server.closeAllConnections()
                   })
                 )
@@ -1231,7 +1291,7 @@ export const declarations = (
           }))
         }), timeout)
 
-      it.effect("rejects a pattern that doesn't compile", () =>
+      it.effect("rejects a pattern that doesn't compile, and times that isn't a positive integer", () =>
         Effect.gen(function*() {
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
@@ -1240,6 +1300,15 @@ export const declarations = (
                 Route.continue)
             )
             assert(Route.isRouteError(error) && error.reason._tag === "InvalidInput", String(error))
+            for (const times of [0, -1, 1.5, Number.POSITIVE_INFINITY]) {
+              const refused = yield* Effect.flip(page.route("https://example.com/**", () =>
+                Route.continue, { times }))
+              assert(
+                Route.isRouteError(refused) && refused.reason._tag === "InvalidInput" &&
+                  refused.reason.input === "times",
+                String(refused)
+              )
+            }
           }))
         }), timeout)
 

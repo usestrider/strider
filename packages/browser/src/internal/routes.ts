@@ -231,12 +231,16 @@ const intercepted = (
   }
 }
 
-/** Registers a route for the caller's scope; removing it, or closing the scope, releases its intercept. */
+/**
+ * Registers a route for the caller's scope; removing it, or closing the scope, releases its intercept. With
+ * `times`, it runs its handler for that many requests, then removes itself.
+ */
 export const register = <E, R, P extends Route.Phase>(
   owner: Owner,
   pattern: Url.Pattern | string,
   handler: Route.Handler<E, R, P>,
-  phase: P
+  phase: P,
+  times: number | undefined
 ): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R> =>
   Effect.gen(function*() {
     const { id } = yield* Operation.record
@@ -256,16 +260,45 @@ export const register = <E, R, P extends Route.Phase>(
           })
         )
     })
+    if (times !== undefined && !(Number.isSafeInteger(times) && times > 0)) {
+      return yield* fail(
+        new Reason.InvalidInput({
+          input: "times",
+          expected: "a positive integer",
+          hint: `${String(times)} isn't one; leave times out for a route that stays until it's removed`
+        })
+      )
+    }
     const context = yield* Effect.context<R>()
     const budget = yield* Effect.service(Deadline.DefaultBudget)
     const clock = yield* Effect.service(BrowserClock.CurrentClock)
     const scope = yield* Scope.fork(yield* Effect.scope)
     const fibers = yield* FiberSet.make<Route.Decision<P>, E>().pipe(Scope.provide(scope))
     const hits = yield* SubscriptionRef.make(0)
+    // Requests are decided concurrently, so a use is claimed before the handler runs: between yields, nothing else
+    // runs. The route removes itself once the last request it claimed is decided, not before, since closing its
+    // scope interrupts the handlers still running and releasing its intercept could let a request go on undecided.
+    let left = times ?? Number.POSITIVE_INFINITY
+    let deciding = 0
+    const settled = Effect.suspend(() =>
+      --deciding === 0 && left === 0 ? Operation.detached(Scope.close(scope, Exit.void)) : Effect.void
+    )
     const route: Model.RouteEntry = {
       phase,
       matches,
-      ask: Effect.fnUntraced(function*(obligation, paused) {
+      ask: (obligation, paused) =>
+        Effect.suspend((): Effect.Effect<Model.RouteAnswer> => {
+          if (left === 0) return Effect.succeed({ _tag: "Fallthrough" } as const)
+          left--
+          deciding++
+          return times === undefined ? decide(obligation, paused) : decide(obligation, paused).pipe(
+            Effect.map((answer): Model.RouteAnswer => ({ ...answer, settled })),
+            Effect.onInterrupt(() => settled)
+          )
+        })
+    }
+    const decide = Effect.fnUntraced(
+      function*(obligation: Adapter.ObligationId, paused: Model.PausedRequestEvent) {
         yield* SubscriptionRef.update(hits, (count) => count + 1)
         const given = intercepted(owner, pattern, obligation, paused) as Route.Intercepted<P>
         // Each decision has the route's budget from when it starts, not the deadline in force at `route`
@@ -292,8 +325,8 @@ export const register = <E, R, P extends Route.Phase>(
         const decision = yield* toAdapter(data, paused).pipe(Effect.provideContext(context), Effect.exit)
         if (Exit.isFailure(decision)) return yield* failed("its decision couldn't be made", decision.cause)
         return { _tag: "Decided", decision: decision.value } as const
-      })
-    }
+      }
+    )
     // Added before its intercept is declared, so no request the intercept pauses misses it
     yield* owner.runtime.model.route(owner.routes, route).pipe(Scope.provide(scope))
     yield* adapter.declare(owner.scope, { _tag: "Intercept", patterns: [covering(pattern)], phases: [phase] }).pipe(

@@ -256,7 +256,8 @@ const makeContext = (
         },
         pattern,
         handler,
-        (options?.phase ?? "request") as P
+        (options?.phase ?? "request") as P,
+        options?.times
       )) as UserContext.UserContext["route"],
     routeWebSocket: (pattern, handler, options) => WebSocketRoutes.register(runtime, entry, handler, pattern, options),
     exposeBinding: (name, schemas, handler) => Bindings.expose(runtime, entry, undefined, name, schemas, handler),

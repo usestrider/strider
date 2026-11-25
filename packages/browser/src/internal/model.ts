@@ -126,10 +126,20 @@ export type PausedRequestEvent = Extract<Adapter.ObligationSubject, { readonly _
 
 /** What a route said about a paused request. */
 export type RouteAnswer =
-  | { readonly _tag: "Decided"; readonly decision: Adapter.Decision }
-  | { readonly _tag: "Fallthrough" }
-  /** It failed, was interrupted, ran out of time or returned what isn't a decision; it logged why. */
-  | { readonly _tag: "Failed" }
+  & (
+    | { readonly _tag: "Decided"; readonly decision: Adapter.Decision }
+    | { readonly _tag: "Fallthrough" }
+    /** It failed, was interrupted, ran out of time or returned what isn't a decision; it logged why. */
+    | { readonly _tag: "Failed" }
+  )
+  & {
+    /**
+     * What the route does once the request is decided, by whichever route or default: one that has run as often
+     * as its `times` allows removes itself then, since releasing its intercept sooner could let the request go on
+     * before its decision is sent.
+     */
+    readonly settled?: Effect.Effect<void> | undefined
+  }
 
 /** A route, as the model asks it. */
 export interface RouteEntry {
