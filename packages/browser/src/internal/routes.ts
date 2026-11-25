@@ -93,54 +93,90 @@ const bytesOf = (body: { arrayBuffer(): Promise<ArrayBuffer> }) =>
 /** Why a route's decision can't be sent: a handler failure, so the default applies. */
 class Undecidable extends Data.TaggedError("Undecidable")<{ readonly message: string }> {}
 
+/** Two sets of headers alike, as the browser would be sent them. */
+const sameHeaders = (a: Readonly<Record<string, unknown>>, b: Readonly<Record<string, unknown>>): boolean => {
+  const entries = (headers: Readonly<Record<string, unknown>>) =>
+    JSON.stringify(Object.entries(plain(headers)).sort(([x], [y]) => x < y ? -1 : x > y ? 1 : 0))
+  return entries(a) === entries(b)
+}
+
 /**
- * The adapter's decision for a route's. `continueWith` sends only what its change changed, so a header added
- * doesn't resend the body.
+ * A paused request, changed to `request`: what the routes below see, and what continuing it sends, which is only
+ * what differs from the request the browser paused, so a header added doesn't resend the body. A body an earlier
+ * change set is read once, and reused while later changes keep it.
+ */
+const changedTo = (
+  paused: Model.PausedRequestEvent,
+  request: HttpClientRequest.HttpClientRequest,
+  previous: Model.ChangedRequest | undefined
+): Effect.Effect<Model.ChangedRequest, Undecidable> =>
+  Effect.gen(function*() {
+    const original = NetworkRequest.toHttpClientRequest(paused.request)
+    const url = (request: HttpClientRequest.HttpClientRequest) =>
+      Effect.map(HttpClientRequest.toWeb(request), (web) => web.url).pipe(
+        Effect.mapError((error) => new Undecidable({ message: `its URL doesn't parse: ${error.message}` }))
+      )
+    const before = yield* url(original)
+    const after = yield* url(request)
+    const headers = sameHeaders(request.headers, original.headers) ? undefined : plain(request.headers)
+    let body: Uint8Array | undefined
+    if (previous !== undefined && Option.isSome(previous.body) && request.body === previous.request.body) {
+      body = previous.body.value
+    } else if (request.body._tag !== "Empty") {
+      const web = yield* HttpClientRequest.toWeb(request).pipe(
+        Effect.mapError((error) => new Undecidable({ message: `its body can't be sent: ${error.message}` }))
+      )
+      body = yield* bytesOf(web)
+    }
+    // A new body says what it is, unless the change set the header itself
+    const contentType = "contentType" in request.body ? request.body.contentType : undefined
+    const typed = body !== undefined && contentType !== undefined &&
+        !Object.keys(request.headers).some((name) => name.toLowerCase() === "content-type")
+      ? { ...(headers ?? plain(original.headers)), "content-type": contentType }
+      : headers
+    // The browser says a body's length: Chromium refuses the header from a client
+    const withType = typed === undefined
+      ? typed
+      : Object.fromEntries(Object.entries(typed).filter(([name]) => name.toLowerCase() !== "content-length"))
+    return {
+      request,
+      seen: new NetworkRequest.NetworkRequest({
+        ...paused.request,
+        method: request.method as typeof paused.request.method,
+        url: after as Url.Url,
+        headers: request.headers
+      }),
+      body: Option.fromUndefinedOr(body),
+      decision: {
+        _tag: "Continue",
+        overrides: Option.some({
+          ...(after === before ? {} : { url: after }),
+          ...(request.method === original.method ? {} : { method: request.method }),
+          ...(withType === undefined ? {} : { headers: withType }),
+          ...(body === undefined ? {} : { body })
+        })
+      }
+    }
+  })
+
+/**
+ * The adapter's decision for a route's, about the request as the routes before it changed it. `continue` sends
+ * their changes, and `continueWith` its own on top of them.
  */
 const toAdapter = (
-  data: Exclude<RouteDecision.Data, { readonly _tag: "Fallthrough" }>,
-  paused: Model.PausedRequestEvent
+  data: Exclude<RouteDecision.Data, { readonly _tag: "Fallthrough" | "FallthroughWith" }>,
+  paused: Model.PausedRequestEvent,
+  changed: Model.ChangedRequest | undefined
 ): Effect.Effect<Adapter.Decision, Undecidable> =>
   Effect.gen(function*() {
     switch (data._tag) {
       case "Continue":
-        return paused.phase === "auth" ? { _tag: "CancelAuth" } : { _tag: "Continue", overrides: Option.none() }
+        return paused.phase === "auth"
+          ? { _tag: "CancelAuth" }
+          : changed?.decision ?? { _tag: "Continue", overrides: Option.none() }
       case "ContinueWith": {
-        const original = NetworkRequest.toHttpClientRequest(paused.request)
-        const changed = data.change(original)
-        const url = (request: HttpClientRequest.HttpClientRequest) =>
-          Effect.map(HttpClientRequest.toWeb(request), (web) => web.url).pipe(
-            Effect.mapError((error) => new Undecidable({ message: `its URL doesn't parse: ${error.message}` }))
-          )
-        const before = yield* url(original)
-        const after = yield* url(changed)
-        const headers = changed.headers === original.headers ? undefined : plain(changed.headers)
-        let body: Uint8Array | undefined
-        if (changed.body !== original.body) {
-          const web = yield* HttpClientRequest.toWeb(changed).pipe(
-            Effect.mapError((error) => new Undecidable({ message: `its body can't be sent: ${error.message}` }))
-          )
-          body = yield* bytesOf(web)
-        }
-        // A new body says what it is, unless the change set the header itself
-        const contentType = "contentType" in changed.body ? changed.body.contentType : undefined
-        const typed = body !== undefined && contentType !== undefined &&
-            !Object.keys(changed.headers).some((name) => name.toLowerCase() === "content-type")
-          ? { ...(headers ?? plain(original.headers)), "content-type": contentType }
-          : headers
-        // The browser says a body's length: Chromium refuses the header from a client
-        const withType = typed === undefined
-          ? typed
-          : Object.fromEntries(Object.entries(typed).filter(([name]) => name.toLowerCase() !== "content-length"))
-        return {
-          _tag: "Continue",
-          overrides: Option.some({
-            ...(after === before ? {} : { url: after }),
-            ...(changed.method === original.method ? {} : { method: changed.method }),
-            ...(withType === undefined ? {} : { headers: withType }),
-            ...(body === undefined ? {} : { body })
-          })
-        }
+        const base = changed?.request ?? NetworkRequest.toHttpClientRequest(paused.request)
+        return (yield* changedTo(paused, data.change(base), changed)).decision
       }
       case "ContinueResponse": {
         let headers: Record<string, string> | undefined
@@ -200,13 +236,16 @@ const intercepted = (
   owner: Owner,
   pattern: string,
   obligation: Adapter.ObligationId,
-  paused: Model.PausedRequestEvent
+  paused: Model.PausedRequestEvent,
+  changed: Model.ChangedRequest | undefined
 ): Route.Intercepted => {
   const adapter = owner.runtime.model.adapter
   const failed = bodyError(owner, pattern)
   const base = {
-    request: paused.request,
-    requestBody: adapter.pausedRequestBody(obligation).pipe(Effect.mapError(failed))
+    request: changed?.seen ?? paused.request,
+    requestBody: changed !== undefined && Option.isSome(changed.body)
+      ? Effect.succeed(changed.body)
+      : adapter.pausedRequestBody(obligation).pipe(Effect.mapError(failed))
   }
   switch (paused.phase) {
     case "request":
@@ -265,17 +304,17 @@ export const register = <E, R, P extends Route.Phase>(
     const route: Model.RouteEntry = {
       phase,
       matches,
-      ask: Effect.fnUntraced(function*(obligation, paused) {
+      ask: Effect.fnUntraced(function*(obligation, paused, changed) {
         yield* SubscriptionRef.update(hits, (count) => count + 1)
-        const given = intercepted(owner, pattern, obligation, paused) as Route.Intercepted<P>
+        const given = intercepted(owner, pattern, obligation, paused, changed) as Route.Intercepted<P>
+        const request = changed?.seen ?? paused.request
         // Each decision has the route's budget from when it starts, not the deadline in force at `route`
         const fiber = yield* FiberSet.run(
           fibers,
           Effect.provideContext(handler(given).pipe(Operation.apart(owner.operation, budget)), context)
         )
         const exit = yield* Fiber.await(fiber).pipe(BrowserClock.timeoutOn(clock, Duration.toMillis(budget)))
-        const described =
-          `${owner.operation}: the route ${pattern} didn't decide ${paused.request.method} ${paused.request.url}`
+        const described = `${owner.operation}: the route ${pattern} didn't decide ${request.method} ${request.url}`
         const failed = (why: string, cause: Cause.Cause<unknown> = Cause.empty) =>
           Effect.as(Handlers.report(`${described}: ${why}, so it continues`, cause), { _tag: "Failed" } as const)
         if (Option.isNone(exit)) {
@@ -289,7 +328,13 @@ export const register = <E, R, P extends Route.Phase>(
         if (!RouteDecision.phases[data._tag].includes(paused.phase)) {
           return yield* failed(`its decision, ${data._tag}, isn't one for the ${paused.phase} phase`)
         }
-        const decision = yield* toAdapter(data, paused).pipe(Effect.provideContext(context), Effect.exit)
+        if (data._tag === "FallthroughWith") {
+          const base = changed?.request ?? NetworkRequest.toHttpClientRequest(paused.request)
+          const next = yield* Effect.suspend(() => changedTo(paused, data.change(base), changed)).pipe(Effect.exit)
+          if (Exit.isFailure(next)) return yield* failed("its change couldn't be made", next.cause)
+          return { _tag: "Fallthrough", changed: next.value } as const
+        }
+        const decision = yield* toAdapter(data, paused, changed).pipe(Effect.provideContext(context), Effect.exit)
         if (Exit.isFailure(decision)) return yield* failed("its decision couldn't be made", decision.cause)
         return { _tag: "Decided", decision: decision.value } as const
       })

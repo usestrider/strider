@@ -485,6 +485,60 @@ export const abort = (reason?: AbortReason | undefined): Effect.Effect<Decision<
 export const fallthrough: Effect.Effect<Decision<Phase>> = Effect.succeed(RouteDecision.make({ _tag: "Fallthrough" }))
 
 /**
+ * Passes the request, changed by `change`, to the next matching route, or lets the default decide when there is
+ * none.
+ *
+ * **Details**
+ *
+ * - The routes below see the changed URL, method, headers and body, and are matched against the changed URL, so a
+ *   new URL can reach a route registered for it. Each route's changes apply on top of the ones before.
+ * - `Route.continue`, and the default when no route is left or a route fails, send the request with every change
+ *   made. `continueWith` applies its own change on top. Only what differs from the request the browser paused is
+ *   sent. `fulfill` and `abort` leave the changes unsent.
+ * - To remove a header, use `HttpClientRequest.removeHeader`.
+ *
+ * **Gotchas**
+ *
+ * A change the backend can't send makes the request continue unchanged: Firefox can't send a request to a new URL
+ * (`interception.continueUrl`).
+ *
+ * **Example** (Tagging requests for the routes below)
+ *
+ * ```ts import.meta.vitest
+ * import { Page, Route } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ * import { HttpClientRequest, HttpServerResponse } from "effect/http"
+ *
+ * const tagThenStub = Effect.fn("tagThenStub")(function*(page: Page.Page) {
+ *   yield* page.route(
+ *     "https://shop.example.com/api/**",
+ *     ({ request }) =>
+ *       request.headers["x-test"] === "1"
+ *         ? Route.fulfill(HttpServerResponse.text("stubbed"))
+ *         : Route.continue
+ *   )
+ *   yield* page.route(
+ *     "https://shop.example.com/api/**",
+ *     () =>
+ *       Route.fallthroughWith((request) =>
+ *         request.pipe(
+ *           HttpClientRequest.setHeader("x-test", "1"),
+ *           HttpClientRequest.removeHeader("x-debug")
+ *         )
+ *       )
+ *   )
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category constructors
+ * @since 0.1.0
+ */
+export const fallthroughWith = (
+  change: (request: HttpClientRequest.HttpClientRequest) => HttpClientRequest.HttpClientRequest
+): Effect.Effect<Decision<"request">> => Effect.succeed(RouteDecision.make({ _tag: "FallthroughWith", change }))
+
+/**
  * Settings for `fromHar`.
  *
  * @stability unstable

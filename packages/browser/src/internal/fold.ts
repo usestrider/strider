@@ -1075,7 +1075,7 @@ export const make = Effect.fnUntraced(function*(options: {
               ...(Option.isSome(owner.page) ? [...owner.page.value.state.getUnsafe().routes].reverse() : []),
               ...(Option.isSome(owner.context) ? [...owner.context.value.state.getUnsafe().routes].reverse() : [])
             ].filter((route) =>
-              route.phase === paused.phase && route.matches(paused.request.url)
+              route.phase === paused.phase
             )
             Queue.offerUnsafe(obligations, {
               _tag: "PausedRequest",

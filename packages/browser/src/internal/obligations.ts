@@ -46,7 +46,10 @@ export type Obligation =
     readonly obligation: Adapter.ObligationId
     readonly paused: Model.PausedRequestEvent
     readonly owner: Model.Owner
-    /** The routes that match it, in the order they are asked: the page's, then the context's, the most recent first. */
+    /**
+     * The routes of its phase, in the order they are asked: the page's, then the context's, the most recent first.
+     * Each is matched as it is reached, against the URL the routes before it left.
+     */
     readonly routes: ReadonlyArray<Model.RouteEntry>
   }
 
@@ -173,9 +176,10 @@ const decideChooser = Effect.fnUntraced(function*(
 })
 
 /**
- * A paused request: the routes the fold chose, in order, until one decides. The default, continue, applies when
- * none matches; when every one that matched fell through or failed, or the backend refused a decision, it is also
- * published as an `AutoResolution`.
+ * A paused request: the routes the fold chose that match it, in order, until one decides. A route that falls
+ * through with changes passes them to the ones below, which match its new URL, and to the default. The default,
+ * continue, applies when none matches; when every one that matched fell through or failed, or the backend refused
+ * a decision, it is also published as an `AutoResolution`.
  */
 const decideRequest = Effect.fnUntraced(function*(
   fold: Fold.Fold,
@@ -186,10 +190,18 @@ const decideRequest = Effect.fnUntraced(function*(
   const fallback: Adapter.Decision = paused.phase === "auth"
     ? { _tag: "CancelAuth" }
     : { _tag: "Continue", overrides: Option.none() }
-  if (routes.length === 0) return yield* resolve(adapter, obligation, fallback)
+  // The URL as the diagnostics preset shows it
+  const shown = Spans.redactUrl(paused.request.url, yield* Diagnostics.CurrentPreset)
+  let changed: Model.ChangedRequest | undefined
+  let matched = false
   for (const route of routes) {
-    const answer = yield* route.ask(obligation, paused)
-    if (answer._tag === "Fallthrough") continue
+    if (!route.matches(changed?.seen.url ?? paused.request.url)) continue
+    matched = true
+    const answer = yield* route.ask(obligation, paused, changed)
+    if (answer._tag === "Fallthrough") {
+      if (answer.changed !== undefined) changed = answer.changed
+      continue
+    }
     if (answer._tag === "Decided") {
       const sent = yield* Effect.exit(adapter.resolve(obligation, answer.decision))
       if (Exit.isSuccess(sent)) return
@@ -197,17 +209,24 @@ const decideRequest = Effect.fnUntraced(function*(
       // one, so it gets the default
       const why = refused(sent)
       if (Option.isNone(why)) return
-      // The URL as the diagnostics preset shows it
-      const shown = Spans.redactUrl(paused.request.url, yield* Diagnostics.CurrentPreset)
       yield* logUnhandled(`A route's decision for ${shown} couldn't be applied, so it continues: ${why.value}`)
     }
     break
   }
+  if (!matched) return yield* resolve(adapter, obligation, fallback)
   yield* fold.autoResolved(owner, {
     _tag: "PausedRequest",
     request: paused.request,
     decision: "continue",
     at: Adapter.now()
   })
+  if (changed !== undefined) {
+    const sent = yield* Effect.exit(adapter.resolve(obligation, changed.decision))
+    const why = refused(sent)
+    if (Option.isNone(why)) return
+    yield* logUnhandled(
+      `The changes routes made to ${shown} couldn't be applied, so it continues unchanged: ${why.value}`
+    )
+  }
   yield* resolve(adapter, obligation, fallback)
 })

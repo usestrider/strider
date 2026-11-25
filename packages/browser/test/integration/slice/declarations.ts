@@ -667,8 +667,13 @@ export const declarations = (
               Effect.gen(function*() {
                 const body = yield* intercepted.requestBody
                 const { headers, method } = intercepted.request
-                seen.push([method, headers["x-added"], headers["x-removed"], Option.map(body, (bytes) =>
-                  new TextDecoder().decode(bytes))])
+                seen.push([
+                  method,
+                  headers["x-added"],
+                  headers["x-removed"],
+                  Option.map(body, (bytes) =>
+                    new TextDecoder().decode(bytes))
+                ])
                 return yield* Route.continue
               }))
             yield* page.route(`${origin}/echo*`, () =>
@@ -703,7 +708,10 @@ export const declarations = (
             })
             yield* page.route(`${origin}/json*`, () =>
               Route.fallthroughWith((request) =>
-                request.pipe(HttpClientRequest.setUrl(`${origin}/echo?moved`), HttpClientRequest.setHeader("x-first", "1"))
+                request.pipe(
+                  HttpClientRequest.setUrl(`${origin}/echo?moved`),
+                  HttpClientRequest.setHeader("x-first", "1")
+                )
               ))
             const result = (yield* run(page, origin, `return fetch('/json').then((r) => r.json())`)) as {
               readonly url?: string
@@ -712,12 +720,15 @@ export const declarations = (
             assert.deepStrictEqual(seen, [`${origin}/echo?moved`])
             assert.strictEqual(yield* below.hits, 1)
             // A backend that can't send a request to a new URL refuses the change, and the request continues as it was
-            assert.deepStrictEqual(
-              (yield* supports("interception.continueUrl"))
-                ? [result.url, result.headers?.["x-first"], result.headers?.["x-last"]]
-                : result,
-              (yield* supports("interception.continueUrl")) ? ["/echo?moved", "1", "1"] : { hello: "world" }
-            )
+            if (yield* supports("interception.continueUrl")) {
+              assert.deepStrictEqual([result.url, result.headers?.["x-first"], result.headers?.["x-last"]], [
+                "/echo?moved",
+                "1",
+                "1"
+              ])
+            } else {
+              assert.deepStrictEqual(result as unknown, { hello: "world" })
+            }
           }))
         }), timeout)
 
@@ -736,7 +747,8 @@ export const declarations = (
                 ? Effect.fail("no answer")
                 : Route.fallthrough
             })
-            yield* page.route(`${origin}/echo*`, () => Route.fallthroughWith(HttpClientRequest.setHeader("x-chain", "1")))
+            yield* page.route(`${origin}/echo*`, () =>
+              Route.fallthroughWith(HttpClientRequest.setHeader("x-chain", "1")))
             const result = yield* run(
               page,
               origin,
@@ -1029,12 +1041,19 @@ export const declarations = (
             )
             const origin = `http://127.0.0.1:${(server.address() as net.AddressInfo).port}`
             const navigation = yield* page.goto(`${origin}/held`).pipe(Effect.forkChild)
-            yield* Effect.promise(() => arrival).pipe(Effect.timeout("10 seconds"))
-            const route = yield* page.route(`${origin}/cached.js`, () => Route.continue)
+            yield* Effect.promise(() =>
+              arrival
+            ).pipe(Effect.timeout("10 seconds"))
+            const route = yield* page.route(`${origin}/cached.js`, () =>
+              Route.continue)
             release()
             yield* Fiber.join(navigation)
             const out = page.locator("#out")
-            yield* Expect.that(out.readText, Condition.make("finished", (text: string) => text !== "pending"))
+            yield* Expect.that(
+              out.readText,
+              Condition.make("finished", (text: string) =>
+                text !== "pending")
+            )
             assert.deepStrictEqual(JSON.parse(yield* out.readText), [200, 200])
             assert.deepStrictEqual({ routed: yield* route.hits, served }, { routed: 2, served: 2 })
           }),
@@ -1048,7 +1067,8 @@ export const declarations = (
             const { origin, served } = yield* site
             yield* Effect.scoped(Effect.gen(function*() {
               const routed = yield* Browser.newContext()
-              yield* routed.route(`${origin}/cached.js*`, () => Route.continue)
+              yield* routed.route(`${origin}/cached.js*`, () =>
+                Route.continue)
               const other = yield* Browser.newContext()
               const page = yield* other.newPage
               const result = yield* run(
@@ -1057,7 +1077,9 @@ export const declarations = (
                 `const read = () => fetch('/cached.js?other').then((r) => r.status); return [await read(), await read()]`
               )
               assert.deepStrictEqual(result, [200, 200])
-              const requested = served.filter((request) => request.path === "/cached.js?other")
+              const requested = served.filter((request) =>
+                request.path === "/cached.js?other"
+              )
               assert.strictEqual(requested.length, cachesFetches[name] ? 1 : 2)
             }))
           }),

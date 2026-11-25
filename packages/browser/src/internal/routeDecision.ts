@@ -16,6 +16,10 @@ export type Data =
   | { readonly _tag: "Continue" }
   | { readonly _tag: "Fallthrough" }
   | {
+    readonly _tag: "FallthroughWith"
+    readonly change: (request: HttpClientRequest.HttpClientRequest) => HttpClientRequest.HttpClientRequest
+  }
+  | {
     readonly _tag: "ContinueWith"
     readonly change: (request: HttpClientRequest.HttpClientRequest) => HttpClientRequest.HttpClientRequest
   }
@@ -32,6 +36,7 @@ export type Data =
 export const phases: Readonly<Record<Data["_tag"], ReadonlyArray<Route.Phase>>> = {
   Continue: ["request", "response", "auth"],
   Fallthrough: ["request", "response", "auth"],
+  FallthroughWith: ["request"],
   ContinueWith: ["request"],
   ContinueResponse: ["response"],
   Fulfill: ["request", "response"],

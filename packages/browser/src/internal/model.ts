@@ -16,6 +16,7 @@ import type * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import type * as Fiber from "effect/Fiber"
 import type * as Headers from "effect/http/Headers"
+import type * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import type * as Semaphore from "effect/Semaphore"
@@ -124,10 +125,26 @@ export interface Handler<A> {
 /** A request paused for a decision. */
 export type PausedRequestEvent = Extract<Adapter.ObligationSubject, { readonly _tag: "PausedRequest" }>
 
+/**
+ * A paused request as the routes before changed it, with `Route.fallthroughWith`: what the routes below see, and
+ * what continuing it sends.
+ */
+export interface ChangedRequest {
+  /** The request, changed. */
+  readonly request: HttpClientRequest.HttpClientRequest
+  /** The request as the routes below see it. */
+  readonly seen: NetworkRequest.NetworkRequest
+  /** Its body, when a change set one. */
+  readonly body: Option.Option<Uint8Array>
+  /** Continuing it: only what changed from the request the browser paused. */
+  readonly decision: Adapter.Decision
+}
+
 /** What a route said about a paused request. */
 export type RouteAnswer =
   | { readonly _tag: "Decided"; readonly decision: Adapter.Decision }
-  | { readonly _tag: "Fallthrough" }
+  /** It passed the request on, changed if it says how. */
+  | { readonly _tag: "Fallthrough"; readonly changed?: ChangedRequest | undefined }
   /** It failed, was interrupted, ran out of time or returned what isn't a decision; it logged why. */
   | { readonly _tag: "Failed" }
 
@@ -135,8 +152,12 @@ export type RouteAnswer =
 export interface RouteEntry {
   readonly phase: "request" | "response" | "auth"
   readonly matches: (url: string) => boolean
-  /** Asks the route, in its own scope, with its own budget. */
-  readonly ask: (obligation: Adapter.ObligationId, paused: PausedRequestEvent) => Effect.Effect<RouteAnswer>
+  /** Asks the route, in its own scope, with its own budget, about the request as the routes before it changed it. */
+  readonly ask: (
+    obligation: Adapter.ObligationId,
+    paused: PausedRequestEvent,
+    changed: ChangedRequest | undefined
+  ) => Effect.Effect<RouteAnswer>
 }
 
 /** A navigation of a page, when it ended. */
