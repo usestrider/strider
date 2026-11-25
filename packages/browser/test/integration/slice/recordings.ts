@@ -882,7 +882,9 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
               Effect.flip
             )
             assert.isTrue(Expect.isExpectationFailed(failure))
-            const final = yield* page.screenshot()
+            // As the trace captures it: a capture that hides the caret restyles the page first, and Chromium's
+            // repaint can move a glyph's antialiasing by a pixel
+            const final = yield* page.screenshot({ caret: "initial" })
             const out = path.join(directory(), "expectations.zip")
             yield* trace.exportTrace(out)
             const files = yield* unzip(out)
