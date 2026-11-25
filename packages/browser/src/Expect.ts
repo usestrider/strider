@@ -4,9 +4,9 @@
  * A locator's expectation waits in the page: it checks once, then again on each change the page makes (a DOM
  * mutation, an `input`, `change`, or focus event, an animation frame), so there is no polling interval and no change
  * is missed between checks. `toHaveJSProperty` is the exception: a property assignment is no change the page
- * reports, so it reads the property again every `CheckInterval`. `toHaveURL` checks the page's URL on each change. `Expect.that` checks a `Watchable` on
- * each change, and runs any other effect again every `CheckInterval`. Everything runs on the real clock, within the
- * deadline. To collect several failures, use `Effect.validate` or `Effect.all(…, { mode: "result" })`.
+ * reports, so it reads the property again as `withChecks` sets. `toHaveURL` checks the page's URL on each change.
+ * `Expect.that` checks a `Watchable` on each change, and runs any other effect again as `withChecks` sets.
+ * Everything runs on the real clock, within the deadline. To collect several failures, use `Effect.validate` or `Effect.all(…, { mode: "result" })`.
  *
  * Matchers that take arguments are dual: `locator.pipe(Expect.toHaveText("1 item"))` or
  * `Expect.toHaveText(locator, "1 item")`. Matchers without arguments are the function itself:
@@ -27,6 +27,8 @@ import type * as Deadline from "./Deadline.ts"
 import * as Diagnostics from "./Diagnostics.ts"
 import * as ConditionImpl from "./internal/condition.ts"
 import * as ExpectImpl from "./internal/expect.ts"
+import * as OperationImpl from "./internal/operation.ts"
+import * as ReasonCause from "./internal/reasonCause.ts"
 import * as Locator from "./Locator.ts"
 import * as Page from "./Page.ts"
 import * as Reason from "./Reason.ts"
@@ -843,14 +845,14 @@ export const toHaveCSS: DualMatcher<
  * the value read, or the match count when there is no single element.
  *
  * A property assignment is no change the page reports, so instead of waiting on page events the matcher reads the
- * property again every `CheckInterval` (100 ms unless set with `withCheckInterval`).
+ * property again as `withChecks` sets: every 100 ms unless set.
  *
  * **Gotchas**
  *
  * - The read runs among the page's own scripts, so a getter the page defined runs and can see it; that is why it
  *   needs a `Locator` and refuses a `ReadonlyLocator`.
  * - A key that contains a dot can't be named in `path`.
- * - `CheckInterval` sets how often the read runs, and so how often a getter of the page's on the path runs.
+ * - `withChecks` sets how often the read runs, and so how often a getter of the page's on the path runs.
  *
  * **Example** (Checking state a script set)
  *
@@ -1156,7 +1158,8 @@ export const toHaveTitle: DualMatcher<Page.ReadonlyPage, [expected: string | Reg
  *
  * **Details**
  *
- * A `Watchable` subject is checked again on each change. Any other effect is run again every `CheckInterval`.
+ * A `Watchable` subject is checked again on each change. Any other effect is run again as `withChecks` sets: every
+ * 100 ms unless set. Each check is a round trip, so a state that appears and disappears between two checks isn't seen.
  * Direct `page.url` and `page.title` subjects classify failed observations as URLs and titles for trace export.
  * The export preset applies through rethrows of the same failure. User transformations (including
  * `Watchable.map` and `Effect.map`) and reconstructed failures do not retain that source classification.
@@ -1194,51 +1197,238 @@ export const that = <A, E, R>(
     : ExpectImpl.polling(subject, condition)
 
 /**
- * Reference to how often `Expect.that` runs a subject that isn't a `Watchable` again, and how often
- * `toHaveJSProperty` reads its property again, which runs any getter of the page's on its path; 100 ms unless set.
+ * When an expectation that can't wait on its subject checks it again: on a page's animation frames, on its DOM
+ * mutations, or at an interval.
+ *
+ * **Details**
+ *
+ * It applies to `Expect.that` on an effect that isn't a `Watchable`, and to `toHaveJSProperty`. Each check is a
+ * round trip to the page, so a state that appears and disappears between two checks isn't seen. Every strategy
+ * stops at the expectation's deadline.
+ *
+ * @see {@link withChecks} to set it
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export type Checks =
+  | { readonly _tag: "AnimationFrame"; readonly page: Page.ReadonlyPage }
+  | { readonly _tag: "Mutation"; readonly page: Page.ReadonlyPage }
+  | { readonly _tag: "Interval"; readonly interval: Duration.Input }
+
+/**
+ * The strategies `withChecks` takes: `animationFrame`, `mutation`, and `interval`.
+ *
+ * @stability unstable
+ * @category constructors
+ * @since 0.1.0
+ */
+export const Checks: {
+  /**
+   * Checks again at the page's next animation frame after each check.
+   *
+   * **Details**
+   *
+   * Use when the page changes state that only a script can read, such as a global variable, on each render.
+   *
+   * **Gotchas**
+   *
+   * - A page that stops rendering frames, such as a tab in the background, checks nothing more until the deadline.
+   * - A state that appears and disappears between two checks isn't seen.
+   *
+   * **Example** (Waiting for a global a page sets as it renders)
+   *
+   * ```ts import.meta.vitest
+   * import { Condition, Expect, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const rendered = Effect.fn("rendered")(function*(page: Page.Page) {
+   *   yield* Expect.that(
+   *     page.evaluateInMainWorld(() => (window as { ready?: boolean }).ready === true),
+   *     Condition.make("ready", (ready: boolean) => ready)
+   *   ).pipe(Expect.withChecks(Expect.Checks.animationFrame(page)))
+   * })
+   * ```
+   */
+  readonly animationFrame: (page: Page.ReadonlyPage) => Checks
+  /**
+   * Checks again after each DOM mutation of the page's main document, and only then.
+   *
+   * **Details**
+   *
+   * A change a script makes without touching the DOM, such as to a global variable, isn't checked until the DOM
+   * changes. A state that appears and disappears between two checks isn't seen.
+   *
+   * **Example** (Waiting for a counter the page renders)
+   *
+   * ```ts import.meta.vitest
+   * import { Condition, Expect, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const counted = Effect.fn("counted")(function*(page: Page.Page) {
+   *   yield* Expect.that(
+   *     page.evaluateInMainWorld(() => document.querySelectorAll("li").length),
+   *     Condition.make("at least three", (count: number) => count >= 3)
+   *   ).pipe(Expect.withChecks(Expect.Checks.mutation(page)))
+   * })
+   * ```
+   */
+  readonly mutation: (page: Page.ReadonlyPage) => Checks
+  /**
+   * Checks again once `interval` has passed since each check ended.
+   *
+   * **Details**
+   *
+   * The interval must be positive and finite; `withChecks` fails with `InvalidInput` when the expectation runs
+   * otherwise. A state that appears and disappears between two checks isn't seen.
+   *
+   * **Example** (Polling saved state less often)
+   *
+   * ```ts import.meta.vitest
+   * import { Condition, Expect, Page } from "@usestrider/browser"
+   * import { Effect, Option } from "effect"
+   *
+   * const cartSaved = Effect.fn("cartSaved")(function*(page: Page.ReadonlyPage) {
+   *   yield* Expect.that(
+   *     page.localStorage.get("cart"),
+   *     Condition.make("saved", Option.isSome)
+   *   ).pipe(Expect.withChecks(Expect.Checks.interval("500 millis")))
+   * })
+   * ```
+   */
+  readonly interval: (interval: Duration.Input) => Checks
+} = {
+  animationFrame: (page) => ({ _tag: "AnimationFrame", page }),
+  mutation: (page) => ({ _tag: "Mutation", page }),
+  interval: (interval) => ({ _tag: "Interval", interval })
+}
+
+/**
+ * Reference to when `Expect.that` checks again a subject that isn't a `Watchable`, and when `toHaveJSProperty`
+ * reads its property again, which runs any getter of the page's on its path; every 100 ms unless set.
+ *
+ * **Gotchas**
+ *
+ * - Set it with `withChecks`, which checks an interval: one provided here directly isn't checked, and a
+ *   non-positive or non-finite one is a defect.
+ *
+ * @default Checks.interval("100 millis")
  *
  * @stability unstable
  * @category references
  * @since 0.1.0
  */
-export const CheckInterval: Context.Reference<Duration.Duration> = Context.Reference<Duration.Duration>(
-  "@usestrider/browser/Expect/CheckInterval",
-  { defaultValue: () => Duration.millis(100) }
+export const CheckCadence: Context.Reference<Checks> = Context.Reference<Checks>(
+  "@usestrider/browser/Expect/CheckCadence",
+  { defaultValue: () => Checks.interval("100 millis") }
 )
 
 /**
- * Sets `CheckInterval` for every `Expect.that` and `toHaveJSProperty` inside an effect.
+ * Sets when every `Expect.that` and `toHaveJSProperty` inside an effect checks again.
  *
- * **Example** (Polling saved state less often)
+ * **Details**
+ *
+ * An interval that isn't positive and finite fails with `ExpectError` and `InvalidInput` when the effect runs,
+ * before anything inside it does.
+ *
+ * **Example** (Checking a page function on each animation frame)
  *
  * ```ts import.meta.vitest
  * import { Condition, Expect, Page } from "@usestrider/browser"
- * import { Effect, Option } from "effect"
+ * import { Effect } from "effect"
  *
- * const cartSaved = Effect.fn("cartSaved")(function*(page: Page.ReadonlyPage) {
+ * const loaded = Effect.fn("loaded")(function*(page: Page.Page) {
  *   yield* Expect.that(
- *     page.localStorage.get("cart"),
- *     Condition.make("saved", Option.isSome)
+ *     page.evaluateInMainWorld(() => document.fonts.status),
+ *     Condition.make("loaded", (status: string) => status === "loaded")
  *   ).pipe(
- *     Expect.withCheckInterval("500 millis")
+ *     Expect.withChecks(Expect.Checks.animationFrame(page))
  *   )
  * })
  * ```
  *
- * @see {@link CheckInterval} for the reference it sets
+ * @see {@link CheckCadence} for the reference it sets
  *
  * @stability unstable
  * @category combinators
  * @since 0.1.0
  */
-export const withCheckInterval: {
-  (interval: Duration.Input): <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
-  <A, E, R>(self: Effect.Effect<A, E, R>, interval: Duration.Input): Effect.Effect<A, E, R>
+export const withChecks: {
+  (checks: Checks): <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E | ExpectError, R>
+  <A, E, R>(self: Effect.Effect<A, E, R>, checks: Checks): Effect.Effect<A, E | ExpectError, R>
 } = dual(
   2,
-  <A, E, R>(self: Effect.Effect<A, E, R>, interval: Duration.Input): Effect.Effect<A, E, R> =>
-    Effect.provideService(self, CheckInterval, Duration.fromInputUnsafe(interval))
+  <A, E, R>(self: Effect.Effect<A, E, R>, checks: Checks): Effect.Effect<A, E | ExpectError, R> =>
+    Effect.suspend((): Effect.Effect<A, E | ExpectError, R> => {
+      if (checks._tag === "Interval" && ExpectImpl.intervalMillis(checks.interval) === undefined) {
+        return Effect.fail(
+          new ExpectError({
+            operation: "Expect.withChecks",
+            reason: new Reason.InvalidInput({
+              input: "check interval",
+              expected: "a positive, finite duration",
+              hint: `got ${ExpectImpl.showInterval(checks.interval)}`
+            }),
+            diagnostics: OperationImpl.diagnosticsNow()
+          })
+        )
+      }
+      return Effect.provideService(self, CheckCadence, checks)
+    })
 )
+
+const ExpectErrorTypeId = "~@usestrider/browser/Expect/ExpectError"
+
+/**
+ * Error for an expectation's setting that can't be used, such as a check interval that isn't positive.
+ *
+ * **Example** (Reporting an interval read from configuration)
+ *
+ * ```ts import.meta.vitest
+ * import { Condition, Expect, Page } from "@usestrider/browser"
+ * import { Effect, Option } from "effect"
+ *
+ * const saved = Effect.fn("saved")(function*(page: Page.ReadonlyPage, millis: number) {
+ *   yield* Expect.that(
+ *     page.localStorage.get("cart"),
+ *     Condition.make("saved", Option.isSome)
+ *   ).pipe(
+ *     Expect.withChecks(Expect.Checks.interval(millis)),
+ *     Effect.catchTag("ExpectError", (error) => Effect.logError(error.message))
+ *   )
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category errors
+ * @since 0.1.0
+ */
+export class ExpectError extends Schema.TaggedError<ExpectError>(ExpectErrorTypeId)(
+  "ExpectError",
+  {
+    operation: Schema.String,
+    reason: Reason.InvalidInput,
+    diagnostics: Diagnostics.Diagnostics
+  }
+) {
+  readonly [ExpectErrorTypeId] = ExpectErrorTypeId
+  override get message(): string {
+    return `${this.operation}: ${this.reason.message}`
+  }
+  override get cause(): unknown {
+    return ReasonCause.of(this.reason)
+  }
+}
+
+/**
+ * Checks whether a value is an `ExpectError`.
+ *
+ * @stability unstable
+ * @category guards
+ * @since 0.1.0
+ */
+export const isExpectError = (u: unknown): u is ExpectError => Predicate.hasProperty(u, ExpectErrorTypeId)
 
 const ExpectationFailedTypeId = "~@usestrider/browser/Expect/ExpectationFailed"
 

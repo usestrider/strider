@@ -14,7 +14,7 @@ import * as Diagnostics from "../Diagnostics.ts"
 import * as Expect from "../Expect.ts"
 import * as Locator from "../Locator.ts"
 import type * as Page from "../Page.ts"
-import type * as Reason from "../Reason.ts"
+import * as Reason from "../Reason.ts"
 import type * as Target from "../Target.ts"
 import type * as Watchable from "../Watchable.ts"
 import * as Access from "./access.ts"
@@ -372,8 +372,101 @@ export const watching = <A>(
     )
   }).pipe(Operation.named(`Expect.${matcherName}`, { attributes: { ...attributes, "browser.subject": description } }))
 
+/** An interval's milliseconds when it is positive and finite, the only intervals a check can wait. */
+export const intervalMillis = (input: Duration.Input): number | undefined => {
+  const decoded = Duration.fromInput(input)
+  if (Option.isNone(decoded)) return undefined
+  const millis = Duration.toMillis(decoded.value)
+  return Number.isFinite(millis) && millis > 0 ? millis : undefined
+}
+
+/** An interval as a failure names it. */
+export const showInterval = (input: Duration.Input): string => {
+  try {
+    return typeof input === "string"
+      ? JSON.stringify(input)
+      : Duration.isDuration(input)
+      ? String(input)
+      : JSON.stringify(input) ?? String(input)
+  } catch {
+    return String(input)
+  }
+}
+
 /**
- * An expectation on any other effect: run again at `CheckInterval` until its value holds or the deadline ends.
+ * The waits between an expectation's checks, as `Expect.withChecks` set them: `arm` before each check, so a change
+ * during it wakes the wait after it at once; `wait` up to `cap` milliseconds for the next; `release` on every exit.
+ * A wait that can't reach its page is a reason the expectation ends, or the page's `TargetGone`.
+ */
+/** Why a wait on a page's changes couldn't be made: what no further check mends. */
+type WaitReason = Reason.Unsupported | Reason.BackendFailure | Reason.PromptBlocking
+
+const isWaitReason = (u: unknown): u is WaitReason =>
+  u instanceof Reason.Unsupported || u instanceof Reason.BackendFailure || u instanceof Reason.PromptBlocking
+
+interface Rechecks {
+  readonly arm: Effect.Effect<void, Target.TargetGone | WaitReason>
+  /** Whether the next check is due: a change came, or the interval passed. */
+  readonly wait: (cap: number) => Effect.Effect<boolean, Target.TargetGone | WaitReason>
+  readonly release: Effect.Effect<void>
+}
+
+const rechecks = (checks: Expect.Checks, record: Operation.Record): Rechecks => {
+  if (checks._tag === "Interval") {
+    const interval = intervalMillis(checks.interval)
+    if (interval === undefined) {
+      throw new Error(`Expect.CheckCadence: the interval ${showInterval(checks.interval)} isn't positive and finite`)
+    }
+    // On the browser's clock: Effect's would stop under TestClock (QUIRKS.md, Q235)
+    return {
+      arm: Effect.void,
+      wait: (cap) => Effect.as(record.clock.sleep(Math.min(interval, cap)), cap >= interval),
+      release: Effect.void
+    }
+  }
+  const { entry, runtime } = Handles.page(checks.page)
+  const signals: Engine.ChangeSignals = checks._tag === "AnimationFrame" ? "frames" : "mutations"
+  // The watch armed last, with the document it was armed in, for the next wait to read and the release
+  let token: string | null = null
+  let armedIn: Target.DocumentId | undefined
+  const release = Effect.suspend(() => {
+    if (token === null || armedIn === undefined) return Effect.void
+    const unwatch = Runtime.releaseInDocument(runtime, armedIn, { op: "unwatch", token }, record.id)
+    token = null
+    return unwatch.pipe(Effect.ignore, Operation.detached)
+  })
+  const send = (cap: number) =>
+    Runtime.sendRouted(
+      runtime,
+      entry,
+      { op: "change", steps: [], token, cap: Runtime.roundCap(cap), signals },
+      record.id,
+      record.budget.at
+    )
+      .pipe(
+        Effect.flatMap(({ response, routed }) => {
+          // A watch armed in a document the wait didn't reach is released there
+          const stale = token !== null && armedIn !== undefined && armedIn !== routed.document ? release : Effect.void
+          return Effect.map(stale, () => {
+            token = response._tag === "Watching" ? response.token : null
+            armedIn = routed.document
+            // An answer that isn't a watch's is a change: what happened since the last is unknown
+            return response._tag !== "Watching" || response.changed
+          })
+        }),
+        Effect.catch((failure: Runtime.SendFailure): Effect.Effect<boolean, Target.TargetGone | WaitReason> =>
+          failure._tag === "Deadline"
+            ? Effect.succeed(false)
+            : failure._tag === "Gone"
+            ? Effect.fail(failure.error)
+            : Effect.fail(failure.reason)
+        )
+      )
+  return { arm: Effect.asVoid(Effect.suspend(() => send(0))), wait: (cap) => Effect.suspend(() => send(cap)), release }
+}
+
+/**
+ * An expectation on any other effect: run again as `Expect.withChecks` set, until its value holds or the deadline ends.
  * The subject runs under the expectation's deadline, so a check still running at it, or failing with it, is a
  * check that didn't finish, and the expectation fails with what the others saw.
  */
@@ -382,7 +475,9 @@ export const polling = Operation.fn("Expect.that")(
     const record = yield* Operation.record
     const id = record.id
     const budget = record.budget
-    const interval = Duration.toMillis(yield* Effect.service(Expect.CheckInterval))
+    const cadence = yield* Effect.service(Expect.CheckCadence)
+    const waits = rechecks(cadence, record)
+    const trigger = cadence._tag === "Interval" ? "interval" : "change"
     const started = now()
     const history: Array<Diagnostics.ObservedValue> = []
     const triggers = new Set<"initial" | "change" | "interval">(["initial"])
@@ -400,35 +495,47 @@ export const polling = Operation.fn("Expect.that")(
         "that",
         subject
       )
-    while (true) {
-      checks++
-      const checked = yield* Operation.under(subject, budget.at).pipe(
-        Effect.map(Option.some),
-        // A shorter deadline inside the subject is the subject's own failure
-        Effect.catchIf(
-          (error: E) => Deadline.isTimeout(error) && record.left() <= 0,
-          () => Effect.succeedNone
-        ),
-        BrowserClock.timeoutOn(record.clock, record.left()),
-        Effect.map(Option.flatten)
-      )
-      if (Option.isNone(checked)) {
-        // A check cut off at the deadline is the observation only when no check completed
-        if (history.length === 0) {
-          Operation.appendObservation(history, { error: "a check was still running at the deadline" })
-        }
-        return yield* Effect.fail(failed())
-      }
-      Operation.appendObservation(history, checked.value)
-      if (ConditionImpl.holds(condition, checked.value)) return
-      const left = record.left()
-      if (left <= 0) return yield* Effect.fail(failed())
-      triggers.add("interval")
-      // On the browser's clock: Effect's would stop under TestClock (QUIRKS.md, Q235)
-      yield* record.clock.sleep(Math.min(interval, left))
-      // Never start a check with no time left: the last completed one is the observation
-      if (record.left() <= 0) return yield* Effect.fail(failed())
+    /** A wait the page refused: the observation, and the end, since no check after it would be woken. */
+    const refused = (reason: WaitReason) => {
+      Operation.appendObservation(history, { error: reason.message })
+      return Effect.fail(failed())
     }
+    return yield* Effect.gen(function*() {
+      while (true) {
+        checks++
+        // Armed before the check, so a change while it runs wakes the wait after it at once
+        yield* waits.arm.pipe(Effect.catchIf(isWaitReason, refused))
+        const checked = yield* Operation.under(subject, budget.at).pipe(
+          Effect.map(Option.some),
+          // A shorter deadline inside the subject is the subject's own failure
+          Effect.catchIf(
+            (error: E) => Deadline.isTimeout(error) && record.left() <= 0,
+            () => Effect.succeedNone
+          ),
+          BrowserClock.timeoutOn(record.clock, record.left()),
+          Effect.map(Option.flatten)
+        )
+        if (Option.isNone(checked)) {
+          // A check cut off at the deadline is the observation only when no check completed
+          if (history.length === 0) {
+            Operation.appendObservation(history, { error: "a check was still running at the deadline" })
+          }
+          return yield* Effect.fail(failed())
+        }
+        Operation.appendObservation(history, checked.value)
+        if (ConditionImpl.holds(condition, checked.value)) return
+        const left = record.left()
+        if (left <= 0) return yield* Effect.fail(failed())
+        triggers.add(trigger)
+        // Each wait is capped by the time left, so a page that renders no frames ends at the deadline; one that ends
+        // with no change waits again, so no check runs without one
+        while (!(yield* waits.wait(record.left()).pipe(Effect.catchIf(isWaitReason, refused)))) {
+          if (record.left() <= 0) return yield* Effect.fail(failed())
+        }
+        // Never start a check with no time left: the last completed one is the observation
+        if (record.left() <= 0) return yield* Effect.fail(failed())
+      }
+    }).pipe(Effect.ensuring(waits.release))
   }
 )
 
@@ -964,7 +1071,7 @@ export const toSatisfy = (locator: Locator.ReadonlyLocator, fn: Function, args: 
 /**
  * A JavaScript property of the one match, read in its document's main world at each check and compared here by
  * deep equality, until it holds or the deadline ends. No match, several, and a value that can't come back by value
- * are observations, checked again at `CheckInterval`.
+ * are observations, checked again as `Expect.withChecks` sets.
  */
 export const toHaveJSProperty = (
   locator: Locator.Locator,
@@ -982,7 +1089,9 @@ export const toHaveJSProperty = (
       yield* Access.check(subject.owner.grant)
       const record = yield* Operation.record
       const id = record.id
-      const interval = Duration.toMillis(yield* Effect.service(Expect.CheckInterval))
+      const cadence = yield* Effect.service(Expect.CheckCadence)
+      const waits = rechecks(cadence, record)
+      const trigger = cadence._tag === "Interval" ? "interval" : "change"
       const started = now()
       const history: Array<Diagnostics.ObservedValue> = []
       const triggers = new Set<"initial" | "change" | "interval">(["initial"])
@@ -1001,61 +1110,71 @@ export const toHaveJSProperty = (
           undefined,
           handlerFailure
         )
-      while (true) {
-        checks++
-        // The page's locator handlers run before each check, as the engine's expectations run them
-        const serviced = yield* subject.owner.page.execution.beforeCheck.pipe(
-          Effect.as(undefined),
-          Effect.catch((failure) =>
-            failure._tag === "Timeout" || failure._tag === "TargetGone"
-              ? Effect.fail(failure)
-              : failure._tag === "Gone"
-              ? Effect.fail(failure.error)
-              : Effect.succeed(failure)
-          )
-        )
-        if (serviced !== undefined) {
-          if (serviced._tag === "Reason" && serviced.reason._tag === "LocatorHandlerFailed") {
-            return yield* Effect.fail(failed(serviced.reason))
-          }
-          if (serviced._tag === "Deadline") return yield* Effect.fail(failed())
-          Operation.appendObservation(history, { error: serviced.reason.message })
-          // A dialog nothing will decide holds the page until someone else decides it
-          if (serviced.reason._tag === "PromptBlocking") return yield* Effect.fail(failed())
-        }
-        const checked = yield* subject.readJSProperty(keys).pipe(
-          Effect.map((read) =>
-            Option.some(
-              read._tag === "Unmatched" ? { observed: { matches: read.matches }, passed: false } : {
-                observed: read.value,
-                passed: deepEqual(read.value, expected) !== not
-              }
-            )
-          ),
-          Effect.catchTag("LocatorError", (error) =>
-            Effect.succeed(Option.some({ observed: { error: error.reason.message }, passed: false }))),
-          // A check the deadline cut off didn't finish: the observations are what the others saw
-          Effect.catchIf(
-            (error) =>
-              Deadline.isTimeout(error) && record.left() <= 0,
-            () => Effect.succeedNone
-          )
-        )
-        if (Option.isNone(checked)) {
-          if (history.length === 0) {
-            Operation.appendObservation(history, { error: "a check was still running at the deadline" })
-          }
-          return yield* Effect.fail(failed())
-        }
-        Operation.appendObservation(history, checked.value.observed)
-        if (checked.value.passed) return
-        const left = record.left()
-        if (left <= 0) return yield* Effect.fail(failed())
-        triggers.add("interval")
-        // On the browser's clock: Effect's would stop under TestClock (QUIRKS.md, Q235)
-        yield* record.clock.sleep(Math.min(interval, left))
-        if (record.left() <= 0) return yield* Effect.fail(failed())
+      const refused = (reason: WaitReason) => {
+        Operation.appendObservation(history, { error: reason.message })
+        return Effect.fail(failed())
       }
+      return yield* Effect.gen(function*() {
+        while (true) {
+          checks++
+          yield* waits.arm.pipe(Effect.catchIf(isWaitReason, refused))
+          // The page's locator handlers run before each check, as the engine's expectations run them
+          const serviced = yield* subject.owner.page.execution.beforeCheck.pipe(
+            Effect.as(undefined),
+            Effect.catch((failure) =>
+              failure._tag === "Timeout" || failure._tag === "TargetGone"
+                ? Effect.fail(failure)
+                : failure._tag === "Gone"
+                ? Effect.fail(failure.error)
+                : Effect.succeed(failure)
+            )
+          )
+          if (serviced !== undefined) {
+            if (serviced._tag === "Reason" && serviced.reason._tag === "LocatorHandlerFailed") {
+              return yield* Effect.fail(failed(serviced.reason))
+            }
+            if (serviced._tag === "Deadline") return yield* Effect.fail(failed())
+            Operation.appendObservation(history, { error: serviced.reason.message })
+            // A dialog nothing will decide holds the page until someone else decides it
+            if (serviced.reason._tag === "PromptBlocking") return yield* Effect.fail(failed())
+          }
+          const checked = yield* subject.readJSProperty(keys).pipe(
+            Effect.map((read) =>
+              Option.some(
+                read._tag === "Unmatched" ? { observed: { matches: read.matches }, passed: false } : {
+                  observed: read.value,
+                  passed: deepEqual(read.value, expected) !== not
+                }
+              )
+            ),
+            Effect.catchTag("LocatorError", (error) =>
+              Effect.succeed(Option.some({ observed: { error: error.reason.message }, passed: false }))),
+            // A check the deadline cut off didn't finish: the observations are what the others saw
+            Effect.catchIf(
+              (error) =>
+                Deadline.isTimeout(error) && record.left() <= 0,
+              () => Effect.succeedNone
+            )
+          )
+          if (Option.isNone(checked)) {
+            if (history.length === 0) {
+              Operation.appendObservation(history, { error: "a check was still running at the deadline" })
+            }
+            return yield* Effect.fail(failed())
+          }
+          Operation.appendObservation(history, checked.value.observed)
+          if (checked.value.passed) return
+          const left = record.left()
+          if (left <= 0) return yield* Effect.fail(failed())
+          triggers.add(trigger)
+          // Each wait is capped by the time left, so a page that renders no frames ends at the deadline; one that ends
+          // with no change waits again, so no check runs without one
+          while (!(yield* waits.wait(record.left()).pipe(Effect.catchIf(isWaitReason, refused)))) {
+            if (record.left() <= 0) return yield* Effect.fail(failed())
+          }
+          if (record.left() <= 0) return yield* Effect.fail(failed())
+        }
+      }).pipe(Effect.ensuring(waits.release))
     }).pipe(Operation.named("Expect.toHaveJSProperty", {
       attributes: {
         "browser.page.id": subject.owner.page.id,

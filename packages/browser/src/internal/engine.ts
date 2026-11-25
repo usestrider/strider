@@ -362,6 +362,9 @@ export type Final = typeof Final.Type
 const Clip = Schema.Struct({ left: Schema.Number, top: Schema.Number, right: Schema.Number, bottom: Schema.Number })
 export type Clip = typeof Clip.Type
 
+/** What a `change` wait counts as a change: every signal, only animation frames, or only DOM mutations. */
+export type ChangeSignals = "all" | "frames" | "mutations"
+
 /** A request to the engine. */
 export type Request =
   | { readonly op: "validationStart"; readonly token: string; readonly full: boolean }
@@ -427,12 +430,15 @@ export type Request =
    * since `token` was armed, or `cap` milliseconds: what a check made outside the engine waits on before it checks
    * again. It answers at once when the change came before it, and with `token: null` arms only. Either way it answers
    * with a token armed as it answers, for the next wait. Its steps only route it to the document their match is in.
+   * `signals` narrows what counts as a change: `frames` only an animation frame, `mutations` only a mutation.
    */
   | {
     readonly op: "change"
     readonly steps: ReadonlyArray<Step>
     readonly token: string | null
     readonly cap: number
+    /** @default "all" */
+    readonly signals?: ChangeSignals | undefined
   }
   /** Releases a watch `change` armed, ending a wait on it without arming another. */
   | { readonly op: "unwatch"; readonly token: string }
@@ -4153,13 +4159,13 @@ export function engine(render: (root: SnapNode) => string) {
   let watchSequence = 0
   const watchEpoch = Math.random().toString(36).slice(2)
   const watchLifetime = 60_000
-  const armWatch = (): string => {
+  const armWatch = (signals: ChangeSignals): string => {
     const token = `${watchEpoch}:${++watchSequence}`
-    const EVENTS = ["input", "change", "focusin", "focusout"]
+    const EVENTS = signals === "all" ? ["input", "change", "focusin", "focusout"] : []
     const unlisten = () => {
       observer.disconnect()
       for (const type of EVENTS) removeEventListener(type, noticed, true)
-      cancelFrame(frame)
+      if (frame !== undefined) cancelFrame(frame)
     }
     // The signal is kept until a wait reads it or the watch is forgotten
     const noticed = () => {
@@ -4168,9 +4174,11 @@ export function engine(render: (root: SnapNode) => string) {
       watch.waiter?.(true, true)
     }
     const observer = new MutationObserver(noticed)
-    observer.observe(document, { subtree: true, childList: true, attributes: true, characterData: true })
+    if (signals !== "frames") {
+      observer.observe(document, { subtree: true, childList: true, attributes: true, characterData: true })
+    }
     for (const type of EVENTS) addEventListener(type, noticed, true)
-    const frame = onFrame(noticed)
+    const frame = signals === "mutations" ? undefined : onFrame(noticed)
     // A watch forgotten counts as changed: what happened since is unknown
     const expiry = setTimer(() => {
       unlisten()
@@ -4192,7 +4200,7 @@ export function engine(render: (root: SnapNode) => string) {
   const change = (request: Extract<Request, { op: "change" }>): Promise<Response> =>
     new Promise((resume) => {
       const answer = (changed: boolean, arm = true) =>
-        resume({ _tag: "Watching", changed, token: arm ? armWatch() : "" })
+        resume({ _tag: "Watching", changed, token: arm ? armWatch(request.signals ?? "all") : "" })
       if (request.token === null) return answer(false)
       const watch = watches.get(request.token)
       // Armed in another document, or forgotten: what changed since is unknown, so it counts as a change
