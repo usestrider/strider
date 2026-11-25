@@ -67,6 +67,11 @@ describe("A relative URL pattern", () => {
     )
   })
 
+  it("keeps literal marker text after a hostname is percent-decoded", () => {
+    assert.strictEqual(BaseUrl.pattern("/api/**", "http://%7Aq0zq.example/"), "http://zq0zq.example/api/**")
+    assert.strictEqual(BaseUrl.pattern("//%7Aq0zq.example/*", base), "http://zq0zq.example/*")
+  })
+
   it("preserves marker text in the input and query and fragment delimiters in globs", () => {
     assert.strictEqual(BaseUrl.pattern("/zq0zq/**", base), "http://127.0.0.1:8080/zq0zq/**")
     const pattern = BaseUrl.pattern("/a*?q=*#x*", base)
