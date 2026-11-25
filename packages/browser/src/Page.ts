@@ -1182,7 +1182,7 @@ export interface Page extends ReadonlyPage {
    *   dedicated workers bypass the browser's HTTP cache, so a request the route continues reaches the server.
    *   The cache is used again once the last such route is removed; an `"auth"` route leaves it alone.
    * - The page's routes are asked before its context's, the most recent first; `Route.fallthrough` passes the
-   *   request to the next.
+   *   request to the next, and `Route.fallthroughWith` passes it changed.
    * - `options.phase` (`"request"`, `"response"`, or `"auth"`) decides what the handler is given and may decide.
    * - Each request's handler runs in a fiber of the registration's scope, under the `Deadline.DefaultBudget` in
    *   effect where `route` was called.

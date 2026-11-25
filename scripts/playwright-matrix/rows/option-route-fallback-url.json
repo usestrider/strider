@@ -1,8 +1,16 @@
 {
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding public option for this contract.",
-  "capabilities": [],
+  "status": "has",
+  "api": [
+    {
+      "module": "Route",
+      "symbol": "fallthroughWith",
+      "url": "/docs/api/browser/Route#fallthroughWith"
+    }
+  ],
+  "notes": "The change's new URL decides which routes below match; Firefox can't send a request to a new URL.",
+  "capabilities": [
+    "interception.continueUrl"
+  ],
   "id": "option-route-fallback-url",
   "upstream": [
     "method:Route.fallback"

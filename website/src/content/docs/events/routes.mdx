@@ -51,6 +51,7 @@ const asTestAccount = Effect.fn("asTestAccount")(function*(page: Page.Page) {
 | `Route.continue`            | sent on as it is                                                         |
 | [`Route.abort(reason?)`](/docs/api/browser/Route#abort) | fails, as a network error would                                          |
 | `Route.fallthrough`         | asks the next route that matches, or lets the request continue           |
+| [`Route.fallthroughWith(change)`](/docs/api/browser/Route#fallthroughWith) | asks the next route that matches its changed URL, with the request changed, or lets it continue changed |
 
 - A pattern is a glob, a URL, or a `URLPattern`.
 - A `data:` or `blob:` URL can't be routed: the browser answers it without the network, so no route sees it.
