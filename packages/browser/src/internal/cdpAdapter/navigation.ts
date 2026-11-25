@@ -1,9 +1,10 @@
 /**
  * Frames, documents and navigations on CDP: the `Page` domain's events, and the commands that navigate.
  *
- * Outcomes are reported only on affirmative evidence (PROTOCOL.md, CDP specifics): a navigation is correlated
- * by the loader id in `Page.frameStartedNavigating` or `Page.navigate`'s reply, a command's navigation is matched
- * to the browser's by URL, first in, first out, and a same-document one by frame and order.
+ * Outcomes are reported only on affirmative evidence (PROTOCOL.md, CDP specifics): a navigation's id is reserved by
+ * its `Page.frameStartedNavigating`, which matches a command's navigation by URL, and keyed by that event's loader
+ * id. `Page.navigate`'s reply isn't bound to it: its loader id is read only to tell a command that never started a
+ * navigation from one whose error page commits. A same-document navigation is correlated by frame and order.
  */
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"

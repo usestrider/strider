@@ -180,8 +180,18 @@ describe("AdapterKit", () => {
       const a = Kit.expect(ids, expectations, "http://a")
       const b = Kit.expect(ids, expectations, "http://b/")
       assert.strictEqual(Kit.take(expectations, "http://b")?.id, b)
-      assert.strictEqual(Kit.take(expectations, "http://elsewhere/")?.id, a)
+      assert.strictEqual(Kit.take(expectations, "http://a/")?.id, a)
       assert.isUndefined(Kit.take(expectations, "http://a/"))
+    })
+
+    it("gives a navigation announced for another URL no command's expectation, but one with no URL", () => {
+      const ids = Kit.makeIds()
+      const expectations = Kit.makeExpectations()
+      const a = Kit.expect(ids, expectations, "http://a/")
+      assert.isUndefined(Kit.take(expectations, "http://elsewhere/"))
+      const traversal = Kit.expect(ids, expectations, "", "traversal")
+      assert.strictEqual(Kit.take(expectations, "http://elsewhere/")?.id, traversal)
+      assert.strictEqual(Kit.take(expectations, "")?.id, a)
     })
 
     it.effect("reports a navigation that never started once, even when its event slips in before the report", () =>
