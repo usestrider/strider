@@ -1925,10 +1925,13 @@ Playwright's deprecated `fontSize` option is not built; `style.title` sets the t
 on a page or a frame uses an absolute URL as given and resolves any other as a link at the base would (WHATWG: `/a`
 replaces the path, `a` its last segment). A URL pattern that starts with `*` or a scheme is used as given; any other is
 joined as text to the part of the base it replaces (`//host…` the base's scheme, `/…` its scheme and host, `?…` the
-base without its query, `#…` without its fragment, anything else its path up to the last `/`), its path's `.` and
+base without its query, `#…` without its fragment, the empty pattern the base without its fragment, keeping its path
+and query, anything else its path up to the last `/`), its path's `.` and
 `..` segments are removed (RFC 3986, 5.2.4), and it is then read as a glob, a `URLPattern`, or an exact URL as
-before. Only a host free of pattern syntax goes through the URL parser, to be lowercased and decoded; the rest of the
-pattern's text is kept as written, as an absolute pattern's is. Resolving the pattern with the URL parser, its syntax
+before. A host after `//` takes the URL parser's lowercased, decoded form only when that adds no pattern syntax (none
+of `*{}()\`, and no `:` before a letter or `_` the written host didn't have), and is kept as written otherwise, so a
+literal host means what it would in an absolute pattern; the rest of the pattern's text is kept as written, as an
+absolute pattern's is. Resolving the pattern with the URL parser, its syntax
 set aside under placeholders, was rejected: the parser can make placeholder text out of a literal host, by
 lowercasing, percent-decoding, or mapping full-width characters, and that text would come back as a wildcard. A WebSocket route's pattern resolves against the base with `http:` made
 `ws:` and `https:` made `wss:`. The rules live in one internal function that `goto`, routes, WebSocket routes, HAR

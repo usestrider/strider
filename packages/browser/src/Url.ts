@@ -102,11 +102,14 @@ export const Pattern = Schema.String.pipe(Schema.brand("~@usestrider/browser/Url
  *
  * Given to a page or a context whose `baseURL` is set, a pattern that doesn't start with `*` or a scheme is joined to
  * the part of the base it replaces: `"//host/…"` takes the base's scheme, `"/…"` its scheme and host, `"?…"` the
- * base without its query, `"#…"` the base without its fragment, and any other the base's path up to its last `/`.
+ * base without its query, `"#…"` the base without its fragment, `""` the base without its fragment, keeping its path
+ * and query, and any other the base's path up to its last `/`.
  * The `.` and `..` segments of its path are then removed. The pattern's own text is kept as written, so its `*`,
  * `**`, and `:name` parts mean what they did: with a base of `http://localhost:3000/`, `"/api/**"` is the glob
  * `"http://localhost:3000/api/**"`, and `"/products/:id"` a `URLPattern`. A host after `//` is written as a URL
- * writes it, in lower case, unless it holds `*` or another pattern character.
+ * writes it, in lower case and decoded, only when that adds no pattern syntax: none of `*`, `{`, `}`, `(`, `)`, or
+ * `\`, and no `:` before a letter or `_` that the host as given didn't have. Otherwise it is kept as given, so a
+ * literal host means what it would in an absolute pattern: `"//%2A.example/a"` matches no other host.
  *
  * An invalid pattern fails with `InvalidInput` at once.
  *
