@@ -657,6 +657,96 @@ export const declarations = (
           }))
         }), timeout)
 
+      it.effect("passes a changed request to the routes below, which continue it as changed", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            const seen: Array<unknown> = []
+            yield* page.route(`${origin}/echo*`, (intercepted) =>
+              Effect.gen(function*() {
+                const body = yield* intercepted.requestBody
+                const { headers, method } = intercepted.request
+                seen.push([method, headers["x-added"], headers["x-removed"], Option.map(body, (bytes) =>
+                  new TextDecoder().decode(bytes))])
+                return yield* Route.continue
+              }))
+            yield* page.route(`${origin}/echo*`, () =>
+              Route.fallthroughWith((request) =>
+                request.pipe(
+                  HttpClientRequest.setHeader("x-added", "1"),
+                  HttpClientRequest.removeHeader("x-removed"),
+                  HttpClientRequest.setMethod("PUT"),
+                  HttpClientRequest.bodyText("changed")
+                )
+              ))
+            const result = yield* run(
+              page,
+              origin,
+              `const echo = await fetch('/echo', { method: 'POST', headers: { 'x-removed': '1' }, body: 'hello' }).then((r) => r.json());
+               return [echo.method, echo.headers['x-added'], echo.headers['x-removed'] ?? null, echo.body]`
+            )
+            assert.deepStrictEqual(seen, [["PUT", "1", undefined, Option.some("changed")]])
+            assert.deepStrictEqual(result, ["PUT", "1", null, "changed"])
+          }))
+        }), timeout)
+
+      it.effect("matches the routes below a changed request against its new URL", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            const seen: Array<string> = []
+            const below = yield* page.route(`${origin}/echo*`, (intercepted) => {
+              seen.push(intercepted.request.url)
+              return Route.continueWith(HttpClientRequest.setHeader("x-last", "1"))
+            })
+            yield* page.route(`${origin}/json*`, () =>
+              Route.fallthroughWith((request) =>
+                request.pipe(HttpClientRequest.setUrl(`${origin}/echo?moved`), HttpClientRequest.setHeader("x-first", "1"))
+              ))
+            const result = (yield* run(page, origin, `return fetch('/json').then((r) => r.json())`)) as {
+              readonly url?: string
+              readonly headers?: Record<string, string>
+            }
+            assert.deepStrictEqual(seen, [`${origin}/echo?moved`])
+            assert.strictEqual(yield* below.hits, 1)
+            // A backend that can't send a request to a new URL refuses the change, and the request continues as it was
+            assert.deepStrictEqual(
+              (yield* supports("interception.continueUrl"))
+                ? [result.url, result.headers?.["x-first"], result.headers?.["x-last"]]
+                : result,
+              (yield* supports("interception.continueUrl")) ? ["/echo?moved", "1", "1"] : { hello: "world" }
+            )
+          }))
+        }), timeout)
+
+      it.effect("ends a changed request's chain with a fulfill, an abort, a failure, or the default", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.route(`${origin}/echo*`, (intercepted) => {
+              const { headers, url } = intercepted.request
+              return url.endsWith("fulfill")
+                ? Route.fulfill(json({ seen: headers["x-chain"] }))
+                : url.endsWith("abort")
+                ? Route.abort()
+                : url.endsWith("fail")
+                ? Effect.fail("no answer")
+                : Route.fallthrough
+            })
+            yield* page.route(`${origin}/echo*`, () => Route.fallthroughWith(HttpClientRequest.setHeader("x-chain", "1")))
+            const result = yield* run(
+              page,
+              origin,
+              `const read = (url) => fetch(url).then((r) => r.json(), () => 'blocked');
+               return [await read('/echo?fulfill'), await read('/echo?abort'), (await read('/echo?fail')).headers['x-chain'], (await read('/echo?default')).headers['x-chain']]`
+            )
+            assert.deepStrictEqual(result, [{ seen: "1" }, "blocked", "1", "1"])
+          }))
+        }), timeout)
+
       it.effect("reads a request's body, and none when it has none", () =>
         Effect.gen(function*() {
           const { origin } = yield* site

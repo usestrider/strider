@@ -20,6 +20,7 @@ describe("decision Effects", () => {
       const cases = [
         [Route.continue, "Continue"],
         [Route.fallthrough, "Fallthrough"],
+        [Route.fallthroughWith(HttpClientRequest.setHeader("x-test", "yes")), "FallthroughWith"],
         [Route.abort(), "Abort"],
         [Route.fulfill(HttpServerResponse.text("ok")), "Fulfill"],
         [Route.continueWith(HttpClientRequest.setHeader("x-test", "yes")), "ContinueWith"],
