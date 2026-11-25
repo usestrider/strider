@@ -237,7 +237,6 @@ const annotatedActions = new Set([
   "Locator.check",
   "Locator.uncheck",
   "Locator.dragTo",
-  "Locator.drop",
   "Locator.fill",
   "Locator.press",
   "Locator.pressSequentially",
