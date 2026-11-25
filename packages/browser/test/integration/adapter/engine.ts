@@ -283,12 +283,13 @@ export const engine = (backend: Backend) =>
             const result = yield* call(
               `async () => {
               const engine = globalThis[Symbol.for(${JSON.stringify(Engine.installKey)})]
-              const send = async (token, cap) => JSON.parse(await engine.run(JSON.stringify({ op: "change", steps: [], token, cap })))
-              const first = await send(null, 0)
+              const send = async (token, next, cap) =>
+                JSON.parse(await engine.run(JSON.stringify({ op: "change", steps: [], token, next, cap })))
+              const first = await send(null, "first", 0)
               document.querySelector("p").textContent = "after"
               await Promise.resolve()
-              const next = await send(first.token, 0)
-              const foreign = await send("another-document:1", 0)
+              const next = await send(first.token, "second", 0)
+              const foreign = await send("another-document", "third", 0)
               return JSON.stringify({ first, next, foreign })
             }`,
               []
@@ -296,8 +297,9 @@ export const engine = (backend: Backend) =>
             assert(result._tag === "Value" && result.value.type === "string")
             const observed = JSON.parse(result.value.value)
             assert.strictEqual(observed.first.changed, false)
+            assert.strictEqual(observed.first.token, "first")
             assert.strictEqual(observed.next.changed, true)
-            assert.notStrictEqual(observed.next.token, observed.first.token)
+            assert.strictEqual(observed.next.token, "second")
             assert.strictEqual(observed.foreign.changed, true)
           }), timeout)
 
@@ -308,19 +310,22 @@ export const engine = (backend: Backend) =>
               `async () => {
               const engine = globalThis[Symbol.for(${JSON.stringify(Engine.installKey)})]
               const send = async (request) => JSON.parse(await engine.run(JSON.stringify(request)))
-              const arm = () => send({ op: "change", steps: [], token: null, cap: 0 })
-              const first = await arm()
+              const arm = (next) => send({ op: "change", steps: [], token: null, next, cap: 0 })
+              const sizes = () =>
+                Object.fromEntries(Object.entries(globalThis.engineTestResources).map(([key, value]) => [key, value.size]))
+              const first = await arm("first")
               await send({ op: "unwatch", token: first.token })
-              const forgotten = await send({ op: "change", steps: [], token: first.token, cap: 0 })
+              const forgotten = await send({ op: "change", steps: [], token: first.token, next: "forgotten", cap: 0 })
               await send({ op: "unwatch", token: forgotten.token })
-              const second = await arm()
-              const pending = send({ op: "change", steps: [], token: second.token, cap: 1000 })
+              const second = await arm("second")
+              const pending = send({ op: "change", steps: [], token: second.token, next: "successor", cap: 1000 })
               await send({ op: "unwatch", token: second.token })
               const released = await pending
+              // Released again, the token is unknown, so it is remembered as a marker until a watch would expire
               await send({ op: "unwatch", token: second.token })
-              const resources = globalThis.engineTestResources
-              return JSON.stringify({ forgotten: forgotten.changed, released,
-                resources: Object.fromEntries(Object.entries(resources).map(([key, value]) => [key, value.size])) })
+              const afterRelease = sizes()
+              globalThis.engineTestAdvance(60000)
+              return JSON.stringify({ forgotten: forgotten.changed, released, afterRelease, afterExpiry: sizes() })
             }`,
               []
             )
@@ -328,7 +333,8 @@ export const engine = (backend: Backend) =>
             const observed = JSON.parse(result.value.value)
             assert.isTrue(observed.forgotten)
             assert.deepStrictEqual(observed.released, { _tag: "Watching", changed: false, token: "" })
-            assert.deepStrictEqual(observed.resources, { timers: 0, frames: 0, observers: 0, listeners: 0 })
+            assert.deepStrictEqual(observed.afterRelease, { timers: 1, frames: 0, observers: 0, listeners: 0 })
+            assert.deepStrictEqual(observed.afterExpiry, { timers: 0, frames: 0, observers: 0, listeners: 0 })
           }), timeout)
 
         it.effect("change watch released before a pending answer never arms its successor", () =>
