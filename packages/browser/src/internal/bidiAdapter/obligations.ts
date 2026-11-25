@@ -285,9 +285,15 @@ const decide = (
       }
       // Firefox aborts a request continued with a new URL
       if (overrides?.url !== undefined) return refused("interception.continueUrl")
-      // Firefox keeps the old Content-Length with a new body, which breaks the request
+      // Firefox replaces every header with the ones given, so a header-only change keeps the request's
+      // Content-Length, which the decision leaves out; with a new body, it keeps the old one, which breaks the request
+      const length = <H extends { readonly name: string }>(headers: ReadonlyArray<H>) =>
+        headers.filter((header) => header.name.toLowerCase() === "content-length")
       const headers = overrides?.body === undefined
-        ? overrides?.headers === undefined ? undefined : bidiHeaders(overrides.headers)
+        ? overrides?.headers === undefined ? undefined : (() => {
+          const given = bidiHeaders(overrides.headers)
+          return length(given).length > 0 ? given : [...given, ...length(obligation.headers)]
+        })()
         : [
           ...(overrides.headers === undefined ? obligation.headers : bidiHeaders(overrides.headers)).filter((
             header
