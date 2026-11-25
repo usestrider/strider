@@ -52,13 +52,14 @@ export const pattern = (input: string, base: string | undefined): string => {
 }
 
 /** Text with its percent-escapes decoded, where they decode. */
-const decoded = (text: string): string => text.replace(/(?:%[0-9a-f]{2})+/gi, (escapes) => {
-  try {
-    return decodeURIComponent(escapes)
-  } catch {
-    return escapes
-  }
-})
+const decoded = (text: string): string =>
+  text.replace(/(?:%[0-9a-f]{2})+/gi, (escapes) => {
+    try {
+      return decodeURIComponent(escapes)
+    } catch {
+      return escapes
+    }
+  })
 
 /** A WebSocket route's pattern, resolved against the base with its HTTP scheme made the WebSocket one. */
 export const webSocketPattern = (input: string, base: string | undefined): string => {
