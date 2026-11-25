@@ -10,6 +10,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import { assertPinned, chromium } from "../browsers.ts"
 import { anyFrame } from "./anyFrame.ts"
+import { baseUrl } from "./baseUrl.ts"
 import { attaching, chromiumAttachable } from "./attaching.ts"
 import { clientCertificates } from "./clientCertificates.ts"
 import { contents } from "./contents.ts"
@@ -72,3 +73,4 @@ bindings("Chromium", backend)
 clientCertificates("Chromium", backend)
 screenshotBaselines("Chromium", backend)
 responseSecurityCases("Chromium", backend)
+baseUrl("Chromium", backend)

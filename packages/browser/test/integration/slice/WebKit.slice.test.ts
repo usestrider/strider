@@ -14,6 +14,7 @@ import { webkitgtk } from "../browsers.ts"
 import { socketConnector } from "../sockets.ts"
 import { useXvfb } from "../stockWebKit.ts"
 import { anyFrame } from "./anyFrame.ts"
+import { baseUrl } from "./baseUrl.ts"
 import { attaching } from "./attaching.ts"
 import { clientCertificates } from "./clientCertificates.ts"
 import { contents } from "./contents.ts"
@@ -76,3 +77,4 @@ clientCertificates("WebKit", backend)
 screenshotBaselines("WebKit", backend)
 sharedContextChecks("WebKit", backend)
 responseSecurityCases("WebKit", backend)
+baseUrl("WebKit", backend)

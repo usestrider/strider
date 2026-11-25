@@ -101,6 +101,8 @@ export const launchedDefaultContext = (
     const options = (origin: string, downloads: string): UserContext.Options => ({
       // Every backend has this one, which Strider applies itself
       testIdAttribute: "data-qa",
+      // And this one: relative URLs resolve against it
+      baseURL: `${origin}/`,
       ...(sampled.includes("bypassCSP") ? { bypassCSP: true } : {}),
       ...(sampled.includes("interception.auth")
         ? { httpCredentials: { origin, username: "strider", password: Redacted.make("secret") } }
@@ -136,6 +138,7 @@ export const launchedDefaultContext = (
           const opened = yield* context.newPage
           for (const each of [startup!, opened]) {
             assert.strictEqual(yield* load(each, `${site.origin}/`), "hello")
+            assert.strictEqual(yield* load(each, "/"), "hello")
             assert.strictEqual(yield* each.getByTestId("greeting").readText, "hi")
             if (site.sampled.includes("bypassCSP")) {
               assert.strictEqual(yield* load(each, `${site.origin}/csp`), "ran")
