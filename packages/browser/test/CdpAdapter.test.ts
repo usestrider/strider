@@ -1965,10 +1965,10 @@ describe("Chromium capture document replacement", () => {
         const pending = yield* Effect.forkScoped(
           reader.screenshot(
             preparation === "layout"
-              ? { area: "fullPage" }
+              ? { caret: "initial", area: "fullPage" }
               : preparation === "element"
-              ? { area: { element: reader.locator("main") } }
-              : undefined
+              ? { caret: "initial", area: { element: reader.locator("main") } }
+              : { caret: "initial" }
           ).pipe(Effect.flip)
         )
         yield* Queue.take(preparation !== "native" ? h.preparation : h.captures)
@@ -1996,7 +1996,7 @@ describe("Chromium capture document replacement", () => {
     Effect.gen(function*() {
       const h = yield* sentHeaders()
       const page = yield* h.page.control
-      const pending = yield* Effect.forkScoped(page.screenshot())
+      const pending = yield* Effect.forkScoped(page.screenshot({ caret: "initial" }))
       const command = yield* Queue.take(h.captures)
       yield* replyCapture(h.browser, command)
       yield* h.browser.receive(replacementEvent())
@@ -2009,7 +2009,9 @@ describe("Chromium capture document replacement", () => {
       Effect.gen(function*() {
         const h = yield* sentHeaders()
         const page = yield* h.page.control
-        const pending = yield* Effect.forkScoped(Effect.exit(page.screenshot({ omitBackground: true })))
+        const pending = yield* Effect.forkScoped(
+          Effect.exit(page.screenshot({ caret: "initial", omitBackground: true }))
+        )
         const command = yield* Queue.take(h.captures)
         yield* h.browser.receive({
           id: command.id,
@@ -2038,7 +2040,7 @@ describe("Chromium capture document replacement", () => {
     Effect.gen(function*() {
       const h = yield* sentHeaders()
       const page = yield* h.page.control
-      const pending = yield* Effect.forkScoped(page.screenshot().pipe(Effect.flip))
+      const pending = yield* Effect.forkScoped(page.screenshot({ caret: "initial" }).pipe(Effect.flip))
       const command = yield* Queue.take(h.captures)
       yield* h.browser.receive({
         id: command.id,
@@ -2056,7 +2058,7 @@ describe("Chromium capture document replacement", () => {
     Effect.gen(function*() {
       const h = yield* sentHeaders()
       const page = yield* h.page.control
-      const pending = yield* Effect.forkScoped(page.screenshot().pipe(Effect.flip))
+      const pending = yield* Effect.forkScoped(page.screenshot({ caret: "initial" }).pipe(Effect.flip))
       const command = yield* Queue.take(h.captures)
       yield* h.browser.receive(replacementEvent())
       yield* h.browser.receive({
@@ -2074,7 +2076,7 @@ describe("Chromium capture document replacement", () => {
     Effect.gen(function*() {
       const h = yield* sentHeaders()
       const page = yield* h.page.control
-      const pending = yield* Effect.forkScoped(page.screenshot().pipe(Effect.flip))
+      const pending = yield* Effect.forkScoped(page.screenshot({ caret: "initial" }).pipe(Effect.flip))
       yield* Queue.take(h.captures)
       yield* h.browser.receive({ method: "Inspector.targetCrashed", sessionId: "S1", params: {} })
       const error = yield* Fiber.join(pending)
@@ -2086,7 +2088,7 @@ describe("Chromium capture document replacement", () => {
     Effect.gen(function*() {
       const h = yield* sentHeaders()
       const page = yield* h.page.control
-      const pending = yield* Effect.forkScoped(page.screenshot().pipe(Effect.flip))
+      const pending = yield* Effect.forkScoped(page.screenshot({ caret: "initial" }).pipe(Effect.flip))
       const command = yield* Queue.take(h.captures)
       yield* h.browser.receive(replacementEvent())
       yield* replyCapture(h.browser, command)
@@ -2095,7 +2097,7 @@ describe("Chromium capture document replacement", () => {
       assert.strictEqual(error._tag, "PageError")
       if (error._tag === "PageError") assert.strictEqual(error.reason._tag, "CaptureInvalidated")
       // A late reply and the old guard cannot affect a subsequent caller.
-      const next = yield* Effect.forkScoped(page.screenshot())
+      const next = yield* Effect.forkScoped(page.screenshot({ caret: "initial" }))
       yield* replyCapture(h.browser, yield* Queue.take(h.captures))
       assert.deepStrictEqual(Array.from(yield* Fiber.join(next)), [0])
     }).pipe(onTestClock))
@@ -2105,7 +2107,7 @@ describe("Chromium capture document replacement", () => {
       Effect.gen(function*() {
         const h = yield* sentHeaders()
         const page = yield* h.page.control
-        const pending = yield* Effect.forkScoped(page.screenshot())
+        const pending = yield* Effect.forkScoped(page.screenshot({ caret: "initial" }))
         const command = yield* Queue.take(h.captures)
         yield* h.browser.receive({
           sessionId: "S1",
@@ -2127,7 +2129,7 @@ describe("Chromium capture document replacement", () => {
     Effect.gen(function*() {
       const h = yield* sentHeaders()
       const page = yield* h.page.control
-      const pending = yield* Effect.forkScoped(page.screenshot())
+      const pending = yield* Effect.forkScoped(page.screenshot({ caret: "initial" }))
       const command = yield* Queue.take(h.captures)
       const event = replacementEvent()
       yield* h.browser.receive({
@@ -2144,7 +2146,7 @@ describe("Chromium capture document replacement", () => {
     Effect.gen(function*() {
       const h = yield* sentHeaders()
       const page = yield* h.page.control
-      const pending = yield* Effect.forkScoped(page.screenshot().pipe(Effect.flip))
+      const pending = yield* Effect.forkScoped(page.screenshot({ caret: "initial" }).pipe(Effect.flip))
       yield* Queue.take(h.captures)
       const event = replacementEvent()
       yield* h.browser.receive({ ...event, params: { frame: { ...event.params.frame, url: "about:blank" } } })
@@ -2158,7 +2160,7 @@ describe("Chromium capture document replacement", () => {
     Effect.gen(function*() {
       const h = yield* sentHeaders()
       const page = yield* h.page.control
-      const pending = yield* Effect.forkScoped(page.screenshot().pipe(Effect.flip))
+      const pending = yield* Effect.forkScoped(page.screenshot({ caret: "initial" }).pipe(Effect.flip))
       yield* Queue.take(h.captures)
       yield* h.browser.receive({
         method: "Target.detachedFromTarget",
@@ -2173,14 +2175,16 @@ describe("Chromium capture document replacement", () => {
     Effect.gen(function*() {
       const h = yield* sentHeaders()
       const page = yield* h.page.control
-      const pending = yield* Effect.forkScoped(page.screenshot().pipe(Deadline.within("1 second"), Effect.flip))
+      const pending = yield* Effect.forkScoped(
+        page.screenshot({ caret: "initial" }).pipe(Deadline.within("1 second"), Effect.flip)
+      )
       yield* Queue.take(h.captures)
       yield* TestClock.adjust("1 second")
       const error = yield* Fiber.join(pending)
       assert.strictEqual(error._tag, "Timeout")
       yield* h.browser.receive(replacementEvent())
       yield* h.barrier
-      const next = yield* Effect.forkScoped(page.screenshot())
+      const next = yield* Effect.forkScoped(page.screenshot({ caret: "initial" }))
       yield* replyCapture(h.browser, yield* Queue.take(h.captures))
       assert.deepStrictEqual(Array.from(yield* Fiber.join(next)), [0])
     }).pipe(onTestClock))
@@ -2194,7 +2198,7 @@ describe("Chromium empty screenshot errors", () => {
       Effect.gen(function*() {
         const h = yield* sentHeaders(variant === "metrics")
         const page = yield* h.page.control
-        const pending = yield* Effect.forkScoped(page.screenshot().pipe(Effect.flip))
+        const pending = yield* Effect.forkScoped(page.screenshot({ caret: "initial" }).pipe(Effect.flip))
         const command = yield* Queue.take(variant === "metrics" ? h.preparation : h.captures)
         const code = variant === "otherCode" ? -32001 : -32000
         const description = variant === "otherMessage" ? "capture failed" : "Unable to capture screenshot"
@@ -2304,7 +2308,7 @@ describe("Chromium screenshot renderer readiness", () => {
     Effect.gen(function*() {
       const h = yield* sentHeaders(true)
       const page = yield* h.page.control
-      const pending = yield* Effect.forkScoped(page.screenshot().pipe(Effect.flip))
+      const pending = yield* Effect.forkScoped(page.screenshot({ caret: "initial" }).pipe(Effect.flip))
       const readiness = yield* Queue.take(h.preparation)
       yield* h.browser.receive(replacementEvent())
       yield* h.browser.receive({
@@ -2322,7 +2326,7 @@ describe("Chromium screenshot renderer readiness", () => {
       Effect.gen(function*() {
         const h = yield* sentHeaders(true)
         const page = yield* h.page.control
-        const pending = yield* Effect.forkScoped(page.screenshot().pipe(Effect.flip))
+        const pending = yield* Effect.forkScoped(page.screenshot({ caret: "initial" }).pipe(Effect.flip))
         const readiness = yield* Queue.take(h.preparation)
         if (replace) yield* h.browser.receive(replacementEvent())
         yield* h.browser.receive({ id: readiness.id, sessionId: readiness.sessionId, result: {} })
@@ -2345,6 +2349,7 @@ describe("Chromium screenshot renderer readiness", () => {
         const h = yield* sentHeaders(true)
         const page = yield* h.page.control
         const pending = yield* Effect.forkScoped(page.screenshot({
+          caret: "initial",
           ...(sizing === "fullPage" || sizing === "fullPageCss" ? { area: "fullPage" as const } : {}),
           scale: sizing === "css" || sizing === "fullPageCss" ? "css" : "device"
         }))
@@ -2370,7 +2375,9 @@ describe("Chromium screenshot renderer readiness", () => {
       Effect.gen(function*() {
         const h = yield* sentHeaders(true)
         const page = yield* h.page.control
-        const pending = yield* Effect.forkScoped(Effect.exit(page.screenshot().pipe(Deadline.within("1 second"))))
+        const pending = yield* Effect.forkScoped(
+          Effect.exit(page.screenshot({ caret: "initial" }).pipe(Deadline.within("1 second")))
+        )
         const first = yield* Queue.take(h.screenshotWork)
         assert.strictEqual(first.method, "Page.getLayoutMetrics", "viewport capture must await renderer readiness")
         const readiness = yield* Queue.take(h.preparation)
