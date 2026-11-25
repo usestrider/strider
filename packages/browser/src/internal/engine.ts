@@ -428,14 +428,17 @@ export type Request =
   /**
    * A wait for the first change the page makes (a mutation, an `input`, `change` or focus event, an animation frame)
    * since `token` was armed, or `cap` milliseconds: what a check made outside the engine waits on before it checks
-   * again. It answers at once when the change came before it, and with `token: null` arms only. Either way it answers
-   * with a token armed as it answers, for the next wait. Its steps only route it to the document their match is in.
+   * again. It answers at once when the change came before it, and with `token: null` arms only. Either way it arms
+   * the watch `next` names as it answers, for the next wait: the caller names it before sending, so it can release a
+   * watch whose answer never reaches it. Its steps only route it to the document their match is in.
    * `signals` narrows what counts as a change: `frames` only an animation frame, `mutations` only a mutation.
    */
   | {
     readonly op: "change"
     readonly steps: ReadonlyArray<Step>
     readonly token: string | null
+    /** The token the watch armed for the next wait is known by, chosen by the caller. */
+    readonly next: string
     readonly cap: number
     /** @default "all" */
     readonly signals?: ChangeSignals | undefined
@@ -4156,11 +4159,17 @@ export function engine(render: (root: SnapNode) => string) {
     stop: () => void
   }
   const watches = new Map<string, Watch>()
-  let watchSequence = 0
-  const watchEpoch = Math.random().toString(36).slice(2)
   const watchLifetime = 60_000
-  const armWatch = (signals: ChangeSignals): string => {
-    const token = `${watchEpoch}:${++watchSequence}`
+  /** Tokens released before their watch was armed, as when a wait was still pending: they are never armed. */
+  const released = new Set<string>()
+  const armWatch = (signals: ChangeSignals, token: string): string => {
+    if (released.delete(token)) return token
+    // A request sent again, as after a reroute, arms its watch once
+    const earlier = watches.get(token)
+    if (earlier !== undefined) {
+      watches.delete(token)
+      earlier.stop()
+    }
     const EVENTS = signals === "all" ? ["input", "change", "focusin", "focusout"] : []
     const unlisten = () => {
       observer.disconnect()
@@ -4200,7 +4209,7 @@ export function engine(render: (root: SnapNode) => string) {
   const change = (request: Extract<Request, { op: "change" }>): Promise<Response> =>
     new Promise((resume) => {
       const answer = (changed: boolean, arm = true) =>
-        resume({ _tag: "Watching", changed, token: arm ? armWatch(request.signals ?? "all") : "" })
+        resume({ _tag: "Watching", changed, token: arm ? armWatch(request.signals ?? "all", request.next) : "" })
       if (request.token === null) return answer(false)
       const watch = watches.get(request.token)
       // Armed in another document, or forgotten: what changed since is unknown, so it counts as a change
@@ -4230,6 +4239,11 @@ export function engine(render: (root: SnapNode) => string) {
       watches.delete(token)
       watch.stop()
       watch.waiter?.(false, false)
+    } else if (!released.has(token)) {
+      // A token never armed here may still be, by a wait that hasn't answered: it is remembered as long as a watch
+      // would live, then forgotten
+      released.add(token)
+      setTimer(() => released.delete(token), watchLifetime)
     }
     return { _tag: "Watching", changed: false, token: "" }
   }

@@ -2,6 +2,7 @@
  * The expectations behind `Expect`: the round that waits in the page, the wait on a `Watchable`, the poll of any
  * other effect, and what a failed expectation says.
  */
+import * as Context from "effect/Context"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
@@ -15,7 +16,7 @@ import * as Expect from "../Expect.ts"
 import * as Locator from "../Locator.ts"
 import type * as Page from "../Page.ts"
 import * as Reason from "../Reason.ts"
-import type * as Target from "../Target.ts"
+import * as Target from "../Target.ts"
 import type * as Watchable from "../Watchable.ts"
 import * as Access from "./access.ts"
 import { now } from "./adapter.ts"
@@ -372,6 +373,11 @@ export const watching = <A>(
     )
   }).pipe(Operation.named(`Expect.${matcherName}`, { attributes: { ...attributes, "browser.subject": description } }))
 
+/** When an expectation checks again, as `Expect.withChecks` sets it, the one way it is set: every 100 ms unless set. */
+export const CheckCadence = Context.Reference<Expect.Checks>("@usestrider/browser/Expect/CheckCadence", {
+  defaultValue: () => ({ _tag: "Interval", interval: "100 millis" })
+})
+
 /** An interval's milliseconds when it is positive and finite, the only intervals a check can wait. */
 export const intervalMillis = (input: Duration.Input): number | undefined => {
   const decoded = Duration.fromInput(input)
@@ -415,7 +421,7 @@ const rechecks = (checks: Expect.Checks, record: Operation.Record): Rechecks => 
   if (checks._tag === "Interval") {
     const interval = intervalMillis(checks.interval)
     if (interval === undefined) {
-      throw new Error(`Expect.CheckCadence: the interval ${showInterval(checks.interval)} isn't positive and finite`)
+      throw new Error(`Expect.withChecks: the interval ${showInterval(checks.interval)} isn't positive and finite`)
     }
     // On the browser's clock: Effect's would stop under TestClock (QUIRKS.md, Q235)
     return {
@@ -424,45 +430,102 @@ const rechecks = (checks: Expect.Checks, record: Operation.Record): Rechecks => 
       release: Effect.void
     }
   }
-  const { entry, runtime } = Handles.page(checks.page)
+  const { entry, grant, runtime } = Handles.page(checks.page)
   const signals: Engine.ChangeSignals = checks._tag === "AnimationFrame" ? "frames" : "mutations"
-  // The watch armed last, with the document it was armed in, for the next wait to read and the release
-  let token: string | null = null
-  let armedIn: Target.DocumentId | undefined
-  const release = Effect.suspend(() => {
-    if (token === null || armedIn === undefined) return Effect.void
-    const unwatch = Runtime.releaseInDocument(runtime, armedIn, { op: "unwatch", token }, record.id)
-    token = null
-    return unwatch.pipe(Effect.ignore, Operation.detached)
-  })
+  const owned: Array<OwnedWatch> = []
+  const waits = changeWatcher(runtime, entry, [], record.id, record.budget.at, owned, signals)
+  // A page handle whose access was released does nothing more in the page: checked before every request
   const send = (cap: number) =>
-    Runtime.sendRouted(
-      runtime,
-      entry,
-      { op: "change", steps: [], token, cap: Runtime.roundCap(cap), signals },
-      record.id,
-      record.budget.at
-    )
-      .pipe(
-        Effect.flatMap(({ response, routed }) => {
-          // A watch armed in a document the wait didn't reach is released there
-          const stale = token !== null && armedIn !== undefined && armedIn !== routed.document ? release : Effect.void
-          return Effect.map(stale, () => {
-            token = response._tag === "Watching" ? response.token : null
-            armedIn = routed.document
-            // An answer that isn't a watch's is a change: what happened since the last is unknown
-            return response._tag !== "Watching" || response.changed
-          })
-        }),
-        Effect.catch((failure: Runtime.SendFailure): Effect.Effect<boolean, Target.TargetGone | WaitReason> =>
-          failure._tag === "Deadline"
-            ? Effect.succeed(false)
-            : failure._tag === "Gone"
-            ? Effect.fail(failure.error)
-            : Effect.fail(failure.reason)
-        )
+    Access.check(grant).pipe(
+      Effect.andThen(waits(cap)),
+      // An answer that isn't a watch's is a change: what happened since the last is unknown
+      Effect.map(({ response }) => response._tag !== "Watching" || response.changed),
+      Effect.catch((failure): Effect.Effect<boolean, Target.TargetGone | WaitReason> =>
+        Target.isTargetGone(failure)
+          ? Effect.fail(failure)
+          : failure._tag === "Deadline"
+          ? Effect.succeed(false)
+          : failure._tag === "Gone"
+          ? Effect.fail(failure.error)
+          : Effect.fail(failure.reason)
       )
-  return { arm: Effect.asVoid(Effect.suspend(() => send(0))), wait: (cap) => Effect.suspend(() => send(cap)), release }
+    )
+  return {
+    arm: Effect.asVoid(Effect.suspend(() => send(0))),
+    wait: (cap) => Effect.suspend(() => send(cap)),
+    release: releaseWatches(runtime, owned, record.id)
+  }
+}
+
+/** A watch a `change` request arms, in the document the request was sent to. */
+interface OwnedWatch {
+  readonly token: string
+  readonly document: Target.DocumentId
+}
+
+/** Releases the watches in `owned`, emptying it: what a release can't reach expires in the page. */
+const releaseWatches = (runtime: Runtime.Runtime, owned: Array<OwnedWatch>, id: Diagnostics.OperationId) =>
+  Effect.suspend(() => Effect.forEach(owned.splice(0), (watch) => releaseWatch(runtime, watch, id), { discard: true }))
+
+const releaseWatch = (runtime: Runtime.Runtime, watch: OwnedWatch, id: Diagnostics.OperationId) =>
+  Runtime.releaseInDocument(runtime, watch.document, { op: "unwatch", token: watch.token }, id).pipe(
+    Effect.ignore,
+    Operation.detached
+  )
+
+/**
+ * A sequence of waits on a document's change signals, each reading the watch the one before armed. Each request
+ * names the watch it arms, and that watch joins `owned` for each document the request is sent to before it is
+ * sent, so one whose answer never arrives, as when the wait is interrupted or cut by the deadline, is still
+ * released. A watch the answer shows consumed leaves `owned`; one armed in a document the wait didn't end in is
+ * released at once.
+ */
+const changeWatcher = (
+  runtime: Runtime.Runtime,
+  page: Model.PageEntry,
+  steps: ReadonlyArray<Engine.Step>,
+  id: Diagnostics.OperationId,
+  at: Parameters<typeof Runtime.sendRouted>[4],
+  owned: Array<OwnedWatch>,
+  signals: Engine.ChangeSignals | undefined
+) => {
+  let token: string | null = null
+  return (cap: number) =>
+    Effect.suspend(() => {
+      const read = token
+      const next = crypto.randomUUID()
+      const request: Engine.Request = {
+        op: "change",
+        steps,
+        token: read,
+        next,
+        cap: Runtime.roundCap(cap),
+        ...(signals === undefined ? {} : { signals })
+      }
+      return Runtime.sendRouted(runtime, page, request, id, at, (document) => {
+        owned.push({ token: next, document })
+      }).pipe(
+        Effect.flatMap((answer) => {
+          const { response, routed } = answer
+          const stale: Array<OwnedWatch> = []
+          if (response._tag === "Watching") {
+            for (let index = owned.length - 1; index >= 0; index--) {
+              const watch = owned[index]!
+              if (watch.token !== read && watch.token !== next) continue
+              // The watch read is consumed where the wait ended; the next is armed there and nowhere else
+              if (watch.token === next && watch.document === routed.document) continue
+              owned.splice(index, 1)
+              if (watch.document !== routed.document) stale.push(watch)
+            }
+          }
+          token = response._tag === "Watching" ? next : null
+          return Effect.as(
+            Effect.forEach(stale, (watch) => releaseWatch(runtime, watch, id), { discard: true }),
+            answer
+          )
+        })
+      )
+    })
 }
 
 /**
@@ -475,7 +538,7 @@ export const polling = Operation.fn("Expect.that")(
     const record = yield* Operation.record
     const id = record.id
     const budget = record.budget
-    const cadence = yield* Effect.service(Expect.CheckCadence)
+    const cadence = yield* Effect.service(CheckCadence)
     const waits = rechecks(cadence, record)
     const trigger = cadence._tag === "Interval" ? "interval" : "change"
     const started = now()
@@ -898,17 +961,9 @@ export const toSatisfy = (locator: Locator.ReadonlyLocator, fn: Function, args: 
           )
         )
       const dispatch = subject.page.execution
-      // The watches this expectation armed, with the document each was armed in: released on every exit, so one
-      // left only expires when its release can't reach the page
-      const owned = new Map<string, Target.DocumentId>()
-      const release = (token: string, document: Target.DocumentId) =>
-        Runtime.releaseInDocument(subject.runtime, document, { op: "unwatch", token }, id).pipe(
-          Effect.ignore,
-          Operation.detached
-        )
-      const releaseAll = Effect.suspend(() =>
-        Effect.forEach(Array.from(owned), ([token, document]) => release(token, document), { discard: true })
-      )
+      // The watches this expectation armed, with the document each was armed in: released on every exit
+      const owned: Array<OwnedWatch> = []
+      const releaseAll = releaseWatches(subject.runtime, owned, id)
       type Waited =
         | { readonly _tag: "Waited"; readonly changed: boolean }
         | { readonly _tag: "Routed"; readonly response: Engine.Response }
@@ -917,30 +972,20 @@ export const toSatisfy = (locator: Locator.ReadonlyLocator, fn: Function, args: 
        * one answered, which armed the watch it reads. The first only arms.
        */
       const watcher = () => {
-        let token: string | null = null
+        const waits = changeWatcher(subject.runtime, subject.page, steps, id, record.budget.at, owned, undefined)
         return (cap: number) =>
-          Runtime.sendRouted(subject.runtime, subject.page, { op: "change", steps, token, cap }, id, record.budget.at)
-            .pipe(
-              Effect.flatMap(({ response, routed }) => {
-                const previous = token === null ? undefined : owned.get(token)
-                const released = previous === undefined || previous === routed.document
-                  ? Effect.void
-                  : release(token!, previous)
-                if (token !== null) owned.delete(token)
-                if (response._tag !== "Watching") {
-                  token = null
-                  return Effect.as(released, { _tag: "Routed", response } as Waited)
-                }
-                token = response.token
-                owned.set(token, routed.document)
-                return Effect.as(released, { _tag: "Waited", changed: response.changed } as Waited)
-              }),
-              Effect.catch((failure) =>
-                failure._tag === "Deadline"
-                  ? Effect.succeed<Waited>({ _tag: "Waited", changed: false })
-                  : Effect.fail(impl.sendFailure(operation, failure, record))
-              )
+          waits(cap).pipe(
+            Effect.map(({ response }): Waited =>
+              response._tag === "Watching"
+                ? { _tag: "Waited", changed: response.changed }
+                : { _tag: "Routed", response }
+            ),
+            Effect.catch((failure) =>
+              failure._tag === "Deadline"
+                ? Effect.succeed<Waited>({ _tag: "Waited", changed: false })
+                : Effect.fail(impl.sendFailure(operation, failure, record))
             )
+          )
       }
       // The page's locator handlers: a callback's typed failure fails the expectation with it, and its own
       // Timeout or TargetGone is the expectation's, as in the other locator expectations
@@ -1089,7 +1134,7 @@ export const toHaveJSProperty = (
       yield* Access.check(subject.owner.grant)
       const record = yield* Operation.record
       const id = record.id
-      const cadence = yield* Effect.service(Expect.CheckCadence)
+      const cadence = yield* Effect.service(CheckCadence)
       const waits = rechecks(cadence, record)
       const trigger = cadence._tag === "Interval" ? "interval" : "change"
       const started = now()

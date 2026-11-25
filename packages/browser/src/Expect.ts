@@ -15,7 +15,6 @@
  * @stability unstable
  * @since 0.1.0
  */
-import * as Context from "effect/Context"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import { dual } from "effect/Function"
@@ -1220,6 +1219,25 @@ export type Checks =
 /**
  * The strategies `withChecks` takes: `animationFrame`, `mutation`, and `interval`.
  *
+ * **Example** (Choosing when a page function is checked again)
+ *
+ * ```ts import.meta.vitest
+ * import { Condition, Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const itemsShown = Effect.fn("itemsShown")(
+ *   function*(page: Page.Page, rendersOnFrames: boolean) {
+ *     const checks = rendersOnFrames
+ *       ? Expect.Checks.animationFrame(page)
+ *       : Expect.Checks.mutation(page)
+ *     yield* Expect.that(
+ *       page.evaluateInMainWorld(() => document.querySelectorAll("li").length > 0),
+ *       Condition.make("shown", (shown: boolean) => shown)
+ *     ).pipe(Expect.withChecks(checks))
+ *   }
+ * )
+ * ```
+ *
  * @stability unstable
  * @category constructors
  * @since 0.1.0
@@ -1305,24 +1323,6 @@ export const Checks: {
 }
 
 /**
- * Reference to when `Expect.that` checks again a subject that isn't a `Watchable`, and when `toHaveJSProperty`
- * reads its property again, which runs any getter of the page's on its path; every 100 ms unless set.
- *
- * **Gotchas**
- *
- * - Set it with `withChecks`, which checks an interval: one provided here directly isn't checked, and a
- *   non-positive or non-finite one is a defect.
- *
- * @stability unstable
- * @category references
- * @since 0.1.0
- */
-export const CheckCadence: Context.Reference<Checks> = Context.Reference<Checks>(
-  "@usestrider/browser/Expect/CheckCadence",
-  { defaultValue: () => Checks.interval("100 millis") }
-)
-
-/**
  * Sets when every `Expect.that` and `toHaveJSProperty` inside an effect checks again.
  *
  * **Details**
@@ -1345,8 +1345,6 @@ export const CheckCadence: Context.Reference<Checks> = Context.Reference<Checks>
  *   )
  * })
  * ```
- *
- * @see {@link CheckCadence} for the reference it sets
  *
  * @stability unstable
  * @category combinators
@@ -1372,7 +1370,7 @@ export const withChecks: {
           })
         )
       }
-      return Effect.provideService(self, CheckCadence, checks)
+      return Effect.provideService(self, ExpectImpl.CheckCadence, checks)
     })
 )
 
@@ -1421,6 +1419,27 @@ export class ExpectError extends Schema.TaggedError<ExpectError>(ExpectErrorType
 
 /**
  * Checks whether a value is an `ExpectError`.
+ *
+ * **Example** (Telling a bad setting from an unmet expectation)
+ *
+ * ```ts import.meta.vitest
+ * import { Condition, Expect, Page } from "@usestrider/browser"
+ * import { Effect, Option } from "effect"
+ *
+ * const saved = Effect.fn("saved")(function*(page: Page.ReadonlyPage, millis: number) {
+ *   yield* Expect.that(
+ *     page.localStorage.get("cart"),
+ *     Condition.make("saved", Option.isSome)
+ *   ).pipe(
+ *     Expect.withChecks(Expect.Checks.interval(millis)),
+ *     Effect.tapError((error) =>
+ *       Expect.isExpectError(error)
+ *         ? Effect.logError("bad check interval", error.reason)
+ *         : Effect.void
+ *     )
+ *   )
+ * })
+ * ```
  *
  * @stability unstable
  * @category guards
