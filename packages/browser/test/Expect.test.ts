@@ -344,3 +344,87 @@ describe("Expect URL call forms", () => {
       yield* Expect.toHaveURL(page, expected)
     })).pipe(Effect.provide(Browser.layerTest(""))))
 })
+
+describe("Expect.withChecks", () => {
+  it.effect("checks again every 100 ms unless set", () =>
+    Effect.gen(function*() {
+      const cadence = yield* Effect.service(Expect.CheckCadence)
+      assert.deepStrictEqual(cadence, { _tag: "Interval", interval: "100 millis" })
+    }))
+
+  for (const interval of [0, -5, Number.POSITIVE_INFINITY, Number.NaN]) {
+    it.effect(`fails an interval of ${interval} with InvalidInput when the expectation runs, before any check`, () =>
+      Effect.gen(function*() {
+        let reads = 0
+        const expectation = Expect.that(Effect.sync(() => ++reads), Condition.make("never", () => false)).pipe(
+          Expect.withChecks(Expect.Checks.interval(interval))
+        )
+        assert.strictEqual(reads, 0)
+        const error = yield* Effect.flip(expectation)
+        assert(Expect.isExpectError(error), String(error))
+        assert.strictEqual(error.reason._tag, "InvalidInput")
+        assert.strictEqual(error.operation, "Expect.withChecks")
+        assert.strictEqual(reads, 0)
+      }))
+  }
+
+  it.live("waits the interval it is given between checks", () =>
+    Effect.gen(function*() {
+      const at: Array<number> = []
+      const error = yield* Expect.that(
+        Effect.sync(() => at.push(Date.now())),
+        Condition.make("never", () => false)
+      ).pipe(Expect.withChecks(Expect.Checks.interval("150 millis")), Deadline.within("500 millis"), Effect.flip)
+      assert(Expect.isExpectationFailed(error), String(error))
+      assert.deepStrictEqual(error.checks.triggeredBy, ["initial", "interval"])
+      assert.isAtMost(at.length, 4)
+      for (let index = 1; index < at.length; index++) assert.isAtLeast(at[index]! - at[index - 1]!, 140)
+    }))
+
+  it.effect("ends at the deadline on a page that renders no frames", () =>
+    Effect.gen(function*() {
+      const clock = BrowserClock.fromClock(yield* Effect.service(Clock.Clock))
+      const changes: Array<Engine.Request> = []
+      const layer = BrowserImpl.layer((sink) =>
+        Fake.connect([], {
+          info: new Browser.Info(Fake.info),
+          capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+        })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
+          ...adapter,
+          realm: () => Effect.succeed("checks-realm" as Target.RealmId),
+          evaluate: Effect.fnUntraced(function*(_realm, call) {
+            const answer = (value: unknown) =>
+              ({ _tag: "Value", value: { type: "string", value: JSON.stringify(value) } }) as const
+            if (call.functionDeclaration === Engine.install) return answer("installed")
+            const argument = call.arguments[0]
+            assert(argument?._tag === "Value" && argument.value.type === "string")
+            const request = JSON.parse(argument.value.value) as Engine.Request
+            if (request.op === "change") {
+              changes.push(request)
+              // The arming answers; a wait for a frame that never comes never does
+              if (request.token !== null && request.cap > 0) return yield* Effect.never
+              return answer({ _tag: "Watching", changed: false, token: `t${changes.length}` })
+            }
+            return answer({ _tag: "Watching", changed: false, token: "" })
+          })
+        })))
+      )
+      const error = yield* Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const pending = yield* Expect.that(Effect.succeed(false), Condition.make("true", (value: boolean) => value))
+          .pipe(
+            Expect.withChecks(Expect.Checks.animationFrame(page)),
+            Deadline.within("500 millis"),
+            Effect.flip,
+            Effect.forkChild
+          )
+        yield* TestClock.adjust("600 millis")
+        return yield* Fiber.join(pending)
+      })).pipe(Effect.provide(layer), Effect.provideService(BrowserClock.CurrentClock, clock))
+      assert(Expect.isExpectationFailed(error), String(error))
+      assert.strictEqual(error.checks.count, 1)
+      assert.deepStrictEqual(error.checks.triggeredBy, ["initial", "change"])
+      assert(changes.length >= 2)
+      assert(changes.every((request) => request.op === "change" && request.signals === "frames"))
+    }))
+})

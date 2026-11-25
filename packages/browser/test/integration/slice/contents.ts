@@ -2201,6 +2201,77 @@ export const contents = (
           }))
         }), timeout)
 
+      it.effect("Checks.animationFrame checks a page function again on each frame, with no DOM change", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, "<p>still</p>"), { waitUntil: "load" })
+            let checks = 0
+            // The first check sets the global 300 ms later; nothing changes the DOM
+            const flag = Effect.suspend(() =>
+              ++checks === 1
+                ? page.evaluateInMainWorld(() => {
+                  setTimeout(() =>
+                    (window as { flag?: boolean }).flag = true, 300)
+                  return false
+                })
+                : page.evaluateInMainWorld(() =>
+                  (window as { flag?: boolean }).flag === true
+                )
+            )
+            yield* Expect.that(flag, Condition.make("set", (set: boolean) => set)).pipe(
+              Expect.withChecks(Expect.Checks.animationFrame(page)),
+              Deadline.within("5 seconds")
+            )
+            // A wait that only ended at its one-second cap would have checked twice
+            assert.isAbove(checks, 3)
+          }))
+        }), timeout)
+
+      it.effect("Checks.mutation checks a page function again on a DOM mutation, and not on a global's change", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(fixtureUrl(origin, "<p>still</p>"), { waitUntil: "load" })
+            let checks = 0
+            const flag = (appendAfter: number | undefined) =>
+              Effect.suspend(() =>
+                ++checks === 1
+                  ? page.evaluateInMainWorld((append: number | null) => {
+                    const global = window as { flag?: boolean }
+                    global.flag = false
+                    setTimeout(() =>
+                      global.flag = true, 50)
+                    if (append !== null) {
+                      setTimeout(() =>
+                        document.body.append(document.createElement("p")), append)
+                    }
+                    return false
+                  }, appendAfter ?? null)
+                  : page.evaluateInMainWorld(() =>
+                    (window as { flag?: boolean }).flag === true
+                  )
+              )
+            const set = Condition.make("set", (value: boolean) => value)
+            const unseen = yield* Expect.that(flag(undefined), set).pipe(
+              Expect.withChecks(Expect.Checks.mutation(page)),
+              Deadline.within("1500 millis"),
+              Effect.flip
+            )
+            assert(Expect.isExpectationFailed(unseen), String(unseen))
+            assert.strictEqual(unseen.checks.count, 1)
+            assert.strictEqual(checks, 1)
+            checks = 0
+            yield* Expect.that(flag(300), set).pipe(
+              Expect.withChecks(Expect.Checks.mutation(page)),
+              Deadline.within("5 seconds")
+            )
+            assert.strictEqual(checks, 2)
+          }))
+        }), timeout)
+
       it.effect("toSatisfy waits for its match, then for the page function to return true after a change", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -2238,7 +2309,9 @@ export const contents = (
             if (
               yield* isolatedRefused(Expect.toSatisfy(page.locator("#x"), () =>
                 true))
-            ) return
+            ) {
+              return
+            }
             const expected = yield* page.evaluateHandle(() => ({ text: "hello" }))
             yield* Expect.toSatisfy(
               page.locator("#x"),
@@ -2259,7 +2332,9 @@ export const contents = (
             const page = yield* SharedContext.newPage
             yield* page.goto(fixtureUrl(origin, `<p id="x">hello</p>`), { waitUntil: "load" })
             const later = async (element: Element) => {
-              await new Promise((resume) => setTimeout(resume, 20))
+              await new Promise((resume) =>
+                setTimeout(resume, 20)
+              )
               return element.textContent === "hello"
             }
             if (yield* isolatedRefused(page.locator("#x").pipe(Expect.toSatisfy(later)))) return
@@ -2457,8 +2532,7 @@ export const contents = (
               const page = yield* SharedContext.newPage
               yield* page.goto(fixtureUrl(origin, `<div id="overlay" hidden>Overlay</div><p id="x">waiting</p>`))
               if (
-                yield* isolatedRefused(Expect.toSatisfy(page.locator("#x"), () =>
-                  true))
+                yield* isolatedRefused(Expect.toSatisfy(page.locator("#x"), () => true))
               ) return
               const answered = yield* Deferred.make<void>()
               let finalized = false
