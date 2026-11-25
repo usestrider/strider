@@ -41,6 +41,52 @@ describe("Keys.strokes", () => {
   })
 })
 
+describe("Keys by code", () => {
+  it("names each modifier's sides, the left the same key as its bare name", () => {
+    assert.deepStrictEqual(summary(Keys.strokes("ControlRight", "us")), ["Control:ControlRight"])
+    assert.deepStrictEqual(summary(Keys.strokes("MetaRight", "de")), ["Meta:MetaRight"])
+    assert.strictEqual(Keys.definition("ShiftLeft"), Keys.definition("Shift"))
+    assert.strictEqual(Keys.modifierOf(Keys.definition("AltRight")!.key), "Alt")
+  })
+
+  it("types the numeric keypad with Num Lock on", () => {
+    assert.deepStrictEqual(summary(Keys.strokes("Numpad1", "us")), ["1:Numpad1"])
+    assert.deepStrictEqual(summary(Keys.strokes("NumpadAdd", "fr")), ["+:NumpadAdd"])
+    assert.deepStrictEqual(Keys.definition("NumpadEnter"), { key: "Enter", code: "NumpadEnter", text: "\r" })
+    assert.strictEqual(Keys.withShift(Keys.definition("Numpad1")!, "us").key, "1")
+  })
+
+  it("types at a layout's code what the layout puts there, and its Shift character with Shift", () => {
+    assert.deepStrictEqual(summary(Keys.strokes("KeyW", "fr")), ["z:KeyW"])
+    assert.deepStrictEqual(summary(Keys.strokes("KeyW", "us")), ["w:KeyW"])
+    assert.deepStrictEqual(summary(Keys.strokes("Digit1", "fr")), ["&:Digit1"])
+    assert.deepStrictEqual(summary(Keys.strokes("BracketLeft", "fr")), ["Dead:BracketLeft"])
+    assert.strictEqual(Keys.withShift(Keys.definition("KeyW", "fr")!, "fr").key, "Z")
+    assert.strictEqual(
+      Keys.definition("KeyW", "fr"),
+      Keys.definition("KeyW", "fr"),
+      "one definition to hold and release"
+    )
+  })
+
+  it("names the media keys by their code", () => {
+    assert.deepStrictEqual(Keys.definition("AudioVolumeMute"), {
+      key: "AudioVolumeMute",
+      code: "AudioVolumeMute",
+      text: undefined
+    })
+    assert.isTrue(Keys.mediaKeys.has("MediaPlayPause"))
+  })
+
+  it("tells a code a layout places off a US keyboard's from one where US has the same key", () => {
+    assert.isTrue(Keys.placedOffUs("KeyQ", "fr"))
+    assert.isFalse(Keys.placedOffUs("KeyW", "us"))
+    assert.isFalse(Keys.placedOffUs("KeyA", "de"))
+    assert.isFalse(Keys.placedOffUs("Numpad1", "fr"))
+    assert.isFalse(Keys.placedOffUs("q", "fr"))
+  })
+})
+
 describe("Keys.chord", () => {
   it("reads every part of a Modifier+Key chord but the last as a modifier held for the key", () => {
     assert.deepStrictEqual(Keys.chord("Meta+k"), { key: "k", modifiers: ["Meta"] })
