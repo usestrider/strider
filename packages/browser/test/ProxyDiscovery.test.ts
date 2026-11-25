@@ -41,7 +41,9 @@ const serve = (answer: (request: http.IncomingMessage, response: http.ServerResp
     ({ server }) =>
       Effect.callback<void>((resume) => {
         server.closeAllConnections()
-        server.close(() => resume(Effect.void))
+        server.close(() =>
+          resume(Effect.void)
+        )
       })
   )
 

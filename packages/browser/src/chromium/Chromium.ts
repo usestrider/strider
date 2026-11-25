@@ -11,7 +11,6 @@
 import type * as Config from "effect/Config"
 import * as Effect from "effect/Effect"
 import type * as FileSystem from "effect/FileSystem"
-import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import type * as Layer from "effect/Layer"
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Socket from "effect/socket/Socket"
@@ -24,6 +23,7 @@ import * as ChromiumIdentity from "../internal/chromiumIdentity.ts"
 import * as ChromiumLauncher from "../internal/chromiumLauncher.ts"
 import * as Connect from "../internal/connect.ts"
 import * as LaunchOptions from "../internal/launchOptions.ts"
+import * as ProxyHttpClient from "../internal/proxyHttpClient.ts"
 import * as CdpConnection from "../protocol/CdpConnection.ts"
 import * as Protocol from "../protocol/Protocol.ts"
 import type * as Url from "../Url.ts"
@@ -152,6 +152,16 @@ export const layerConfig = (
  * The connection needs a `WebSocketConstructor`, such as `NodeSocket.layerWebSocketConstructor` from
  * `@effect/platform-node`.
  *
+ * The `/json/version` lookup follows the environment's proxy, read through `Config`: `HTTP_PROXY` for an `http:`
+ * endpoint, which the proxy is asked for in absolute form with the endpoint's `Host`, and `HTTPS_PROXY` for an
+ * `https:` one, reached through a `CONNECT`. The lower-case names come first, and `NO_PROXY` lists the hosts asked
+ * directly: `*` for all of them, `.example.com` for a domain and its subdomains, and `host:port` for one port.
+ * Credentials in a proxy's URL go as `Proxy-Authorization`.
+ *
+ * **Gotchas**
+ *
+ * Only the lookup goes through the proxy: the WebSocket it names is connected to directly.
+ *
  * **Example** (Inspecting a tab of a browser started with `--remote-debugging-port=9222`)
  *
  * ```ts import.meta.vitest
@@ -181,7 +191,7 @@ export const layerConnect = (
 ): Layer.Layer<Browser.Browser, Browser.BrowserError, Socket.WebSocketConstructor> =>
   BrowserImpl.layer((sink) =>
     Effect.gen(function*() {
-      const url = yield* Connect.chromiumWebSocket(endpoint, options).pipe(Effect.provide(FetchHttpClient.layer))
+      const url = yield* Connect.chromiumWebSocket(endpoint, options).pipe(Effect.provide(ProxyHttpClient.layer))
       const transport = yield* Connect.webSocket(url, options)
       const sockets = yield* Socket.WebSocketConstructor
       const claimClient = Connect.webSocket(url, options).pipe(

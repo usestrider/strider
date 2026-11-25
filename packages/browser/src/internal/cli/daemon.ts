@@ -60,6 +60,7 @@ import type * as UserContext from "../../UserContext.ts"
 import * as WebKit from "../../webkit/WebKit.ts"
 import * as Handles from "../handles.ts"
 import * as OperationImpl from "../operation.ts"
+import * as ProxyHttpClient from "../proxyHttpClient.ts"
 import * as Secrets from "../secrets.ts"
 import * as Serialization from "../serialization.ts"
 import * as StorageStates from "../storageState.ts"
@@ -1531,7 +1532,7 @@ const browserOf = (flags: {
   return given.length === 1
     ? given[0]!._tag === "Attach" && /^https?:/.test(given[0]!.endpoint)
       ? Attach.detect(given[0]!.endpoint).pipe(
-        Effect.provide(FetchHttpClient.layer),
+        Effect.provide(ProxyHttpClient.layer),
         Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
         Effect.mapError((error) => new CommandFailed({ error: "InvalidInput", message: error.message }))
       )
