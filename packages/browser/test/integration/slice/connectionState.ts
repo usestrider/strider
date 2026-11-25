@@ -76,6 +76,12 @@ export const firefoxStartable = (
   })
 })
 
+/** The reason a refused `close` gave, as a `BrowserError`'s. */
+const refusal = <A, E>(exit: Exit.Exit<A, E>) => {
+  const error = Exit.isFailure(exit) ? Option.getOrUndefined(Exit.findErrorOption(exit)) : undefined
+  return Browser.isBrowserError(error) ? error.reason : undefined
+}
+
 /** Whether the process has exited, within ten seconds. */
 const exits = (process: ChildProcessSpawner.ChildProcessHandle) =>
   process.exitCode.pipe(Effect.timeoutOption("10 seconds"), Effect.map(Option.isSome))
@@ -90,7 +96,7 @@ export const connectionState = <E>(
     startable.attach(endpoint).pipe(Layer.provide(Layer.mergeAll(NodeSocket.layerWebSocketConstructor, provide)))
 
   describe(`connection state (${name})`, () => {
-    it.effect("a browser whose process is killed reports the connection lost", () =>
+    it.live("a browser whose process is killed reports the connection lost", () =>
       Effect.gen(function*() {
         const { endpoint, process } = yield* startable.start
         yield* Effect.gen(function*() {
@@ -98,15 +104,9 @@ export const connectionState = <E>(
           assert.isTrue(yield* browser.isConnected)
           if (!(yield* supports("browser.close"))) {
             // A browser the backend can't close is refused, and stays connected
-            const refused = yield* Effect.exit(browser.close)
-            assert.isTrue(Exit.isFailure(refused))
-            const error = Exit.isFailure(refused) ? Option.getOrUndefined(Exit.findErrorOption(refused)) : undefined
-            assert.strictEqual(error?._tag, "BrowserError")
-            assert.strictEqual(error?.reason._tag, "Unsupported")
-            assert.strictEqual(
-              error?.reason._tag === "Unsupported" ? error.reason.capability : undefined,
-              "browser.close"
-            )
+            const reason = refusal(yield* Effect.exit(browser.close))
+            assert.strictEqual(reason?._tag, "Unsupported")
+            assert.strictEqual(reason?._tag === "Unsupported" ? reason.capability : undefined, "browser.close")
             assert.isTrue(yield* browser.isConnected)
           }
           yield* process.kill({ killSignal: "SIGKILL" })
@@ -116,14 +116,11 @@ export const connectionState = <E>(
         }).pipe(Effect.provide(attached(endpoint)))
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)), timeout)
 
-    it.effect("close ends a launched browser and its pages", () =>
+    it.live("close ends a launched browser and its pages", () =>
       Effect.gen(function*() {
         const browser = yield* Browser.Browser
         if (!(yield* supports("browser.close"))) {
-          const refused = yield* Effect.exit(browser.close)
-          const error = Exit.isFailure(refused) ? Option.getOrUndefined(Exit.findErrorOption(refused)) : undefined
-          assert.strictEqual(error?._tag, "BrowserError")
-          assert.strictEqual(error?.reason._tag, "Unsupported")
+          assert.strictEqual(refusal(yield* Effect.exit(browser.close))?._tag, "Unsupported")
           assert.isTrue(yield* browser.isConnected)
           return
         }
@@ -136,7 +133,7 @@ export const connectionState = <E>(
         yield* browser.close
       }).pipe(Effect.scoped, Effect.provide(launched)), timeout)
 
-    it.effect("close on an attached browser ends it for every client", () =>
+    it.live("close on an attached browser ends it for every client", () =>
       Effect.gen(function*() {
         const { endpoint, process } = yield* startable.start
         const first = yield* Layer.build(attached(endpoint))

@@ -28,7 +28,7 @@ import * as Redacted from "effect/Redacted"
 import * as Scope from "effect/Scope"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as Binding from "../Binding.ts"
-import type * as Browser from "../Browser.ts"
+import * as Browser from "../Browser.ts"
 import * as CookieJar from "../CookieJar.ts"
 import * as Deadline from "../Deadline.ts"
 import * as Declaration from "../Declaration.ts"
@@ -1064,6 +1064,28 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       operation: "Browser.pages.waitFor"
     }),
     defaultContext,
+    closed: model.ended,
+    isConnected: model.isConnected,
+    close: Effect.gen(function*() {
+      const { id } = yield* Operation.record
+      yield* model.closeBrowser.pipe(
+        Effect.catch((error): Effect.Effect<void, Browser.BrowserError | Deadline.Timeout> => {
+          const mapped = Operation.fromAdapter(error, id, runtime.backend)
+          if (mapped._tag === "Gone") return Effect.void
+          if (mapped._tag === "Timeout") return Effect.fail(mapped.error)
+          return Effect.fail(
+            new Browser.BrowserError({
+              reason: mapped.reason._tag === "Unsupported" ? mapped.reason : new Reason.BackendFailure({
+                kind: "Rejected",
+                method: "browser.close",
+                hint: mapped.reason.message
+              }),
+              diagnostics: Operation.diagnostics(id)
+            })
+          )
+        })
+      )
+    }).pipe(Operation.named("Browser.close")),
     contexts: Watchable.make({
       ref: model.contexts,
       project: (entries) => {

@@ -1054,6 +1054,13 @@ export interface AdapterConnection {
    * page closed by command or by its context's removal, or a replaced document, keeps precedence.
    */
   readonly closing: (reason: Target.CloseReason) => Effect.Effect<void>
+  /**
+   * Ends the browser for every client, not only this connection: Chromium's `Browser.close`, BiDi's
+   * `browser.close`. It waits for a launched browser's exit, or else for the connection's end, and afterwards a
+   * page or the connection that ends with no more particular cause ends with `BrowserClosed`. A backend with no
+   * command that ends its browser fails with `Unsupported` (`browser.close`).
+   */
+  readonly closeBrowser: () => Effect.Effect<void, AdapterError>
 
   // Contexts and pages
   readonly createUserContext: (

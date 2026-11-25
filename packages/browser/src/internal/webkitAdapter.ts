@@ -93,6 +93,10 @@ export interface Options extends Adapter.ConnectOptions {
 const refuse = (capability: string, hint: string) => () =>
   Effect.fail(Adapter.unsent(Kit.unsupported(capability, hint)))
 
+const noClose =
+  "neither stock WebKit's inspector nor its Automation protocol has a command that ends the browser; close the " +
+  "scope a launched browser's layer runs in, which ends its processes"
+
 const noPages = "stock WebKit's inspector makes no contexts or pages, and closes none"
 
 /**
@@ -238,7 +242,8 @@ export const connect: (
       pausedResponseBody: (obligation) => Obligations.pausedResponseBody(state, obligation),
       setInputFiles: refuse("fileChooser", "stock WebKit's inspector can't set a file input's files"),
       downloadPath: refuse("downloads", "stock WebKit's inspector reports no downloads"),
-      cancelDownload: refuse("downloads.cancel", "stock WebKit's inspector reports no downloads")
+      cancelDownload: refuse("downloads.cancel", "stock WebKit's inspector reports no downloads"),
+      closeBrowser: refuse("browser.close", noClose)
     } satisfies Adapter.AdapterConnection
     if (options.automation === undefined) return attached
     return {

@@ -91,6 +91,36 @@ export const closing = (ending: Ending) => (reason: Target.CloseReason): Effect.
     ending.browserEnd ??= reason
   })
 
+/**
+ * Ends the browser for every client: marks it closing, for `BrowserClosed`, until the browser refuses, sends
+ * `close`, and waits for `ended`,
+ * a launched browser's exit or else the connection's end. A reply the connection's end cuts off is the close
+ * taking effect, not a failure; any other failure of `close` fails. On a connection already ended, it has nothing
+ * left to do.
+ */
+export const closeBrowser = (
+  ending: Ending,
+  close: Effect.Effect<unknown, Protocol.ProtocolError>,
+  ended: Effect.Effect<unknown, unknown>
+): Effect.Effect<void, Adapter.AdapterError> =>
+  Effect.suspend(() => {
+    const before = ending.browserEnd
+    ending.browserEnd ??= new Target.BrowserClosed({})
+    return Effect.all([
+      close.pipe(
+        Effect.catchIf(
+          (error) => error.reason._tag === "SessionEnded" && error.reason.why === "connectionLost",
+          () => Effect.void
+        ),
+        Effect.mapError(protocolError)
+      ),
+      Effect.ignore(ended)
+    ], { concurrency: "unbounded", discard: true }).pipe(
+      // A close the browser refuses leaves it running
+      Effect.tapError(() => Effect.sync(() => (ending.browserEnd = before)))
+    )
+  })
+
 /** A protocol failure as an adapter error (`Adapter.protocolError`). */
 export const protocolError = Adapter.protocolError
 

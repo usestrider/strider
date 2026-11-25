@@ -19,7 +19,10 @@ connectionState(
     Layer.provide(Layer.mergeAll(NodeServices.layer, socketConnector, display))
   ),
   {
-    start: Effect.map(startMiniBrowser("about:blank"), ({ endpoint, process }) => ({ endpoint, process })),
+    start: Effect.map(
+      startMiniBrowser("data:text/html,<title>Attached</title>"),
+      ({ endpoint, process }) => ({ endpoint, process })
+    ),
     attach: (endpoint) => WebKit.layerAttach(endpoint)
   }
 )

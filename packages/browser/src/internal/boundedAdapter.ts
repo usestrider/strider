@@ -72,6 +72,7 @@ const methods: { readonly [K in Method]: K extends Release ? typeof release : Ki
   traverse: write("the move through history"),
   realm: read("the document's realm"),
   settled: read("the round trip"),
+  closeBrowser: write("closing the browser"),
   // A call into the page is a write only as its caller knows: the caller marks one that may change the page
   evaluate: read("the call into the page"),
   releaseHandles: release,

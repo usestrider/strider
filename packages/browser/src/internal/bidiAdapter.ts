@@ -65,6 +65,7 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
         "context opt-in; native counts only; ambiguous cache and redirect evidence unavailable"
       ]),
       entry("network.sizes.request", "unsupported", ["no proven native sent-byte counts"]),
+      entry("browser.close", "supported"),
       entry("network.sizes.responseHeaders", "supported"),
       entry("network.sizes.responseBody", "partial"),
       entry("network.sizes.encoded", "supported"),
@@ -432,6 +433,12 @@ export const connect: (
       capabilities: capabilitySet,
       pauseScope: "context",
       closing: Kit.closing(state),
+      closeBrowser: () =>
+        Kit.closeBrowser(
+        state,
+        BidiBrowser.close().pipe(on),
+        options.ownership === "launched" && options.exited !== undefined ? options.exited : client.closed
+      ),
       // Its `historyUpdated` is also what a `history.pushState` to the same URL sends
       reportsDocumentOpen: false,
       defaultContext: state.defaultContext,

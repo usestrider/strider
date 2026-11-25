@@ -70,6 +70,7 @@ export const capabilities = (
         "context opt-in; native counts only; ambiguous cache and redirect evidence unavailable"
       ]),
       entry("network.sizes.request", "unsupported", ["no proven native sent-byte counts"]),
+      entry("browser.close", "supported"),
       entry("network.sizes.responseHeaders", "unsupported"),
       entry("network.sizes.responseBody", "unsupported"),
       entry("network.sizes.encoded", "unsupported"),
@@ -392,6 +393,12 @@ export const connect: (
       capabilities: capabilitySet,
       pauseScope: options.ownership === "launched" ? "browser" : "related",
       closing: Kit.closing(state),
+      closeBrowser: () =>
+        Kit.closeBrowser(
+        state,
+        BrowserCdp.close().pipe(Protocol.on(client.root)),
+        options.ownership === "launched" && options.exited !== undefined ? options.exited : client.closed
+      ),
       // `Page.documentOpened`
       reportsDocumentOpen: true,
       defaultContext: state.defaultContext,

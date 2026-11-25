@@ -28,6 +28,7 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
     entries: [
       entry("network.sizes", "unsupported", ["size collection requires a newly created context"]),
       entry("network.sizes.request", "unsupported"),
+      entry("browser.close", "unsupported", ["stock WebKit has no command that ends the browser"]),
       entry("network.sizes.responseHeaders", "unsupported"),
       entry("network.sizes.responseBody", "unsupported"),
       entry("network.sizes.encoded", "unsupported"),

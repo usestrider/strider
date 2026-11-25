@@ -14,6 +14,7 @@
  *
  * Whitespace is ignored, and anything else fails the layer's construction as a defect, naming where.
  */
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Headers from "effect/http/Headers"
 import * as Option from "effect/Option"
@@ -23,6 +24,7 @@ import type * as Browser from "../Browser.ts"
 import * as NetworkRequest from "../NetworkRequest.ts"
 import * as NetworkResponse from "../NetworkResponse.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
+import * as Transport from "../protocol/Transport.ts"
 import * as Target from "../Target.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as Adapter from "./adapter.ts"
@@ -108,6 +110,7 @@ const entry = (
 /** What the fake can do, as `Browser.layerTest` makes its `CapabilitySet` of. */
 export const capabilities: ReadonlyArray<Browser.CapabilityEntry> = [
   entry("userContexts", "supported"),
+  entry("browser.close", "supported", ["ends the fake's connection"]),
   entry("prompts", "supported"),
   entry("prompts.kind", "supported"),
   entry("popups.opener", "supported"),
@@ -339,6 +342,7 @@ export const connect = (
           : Effect.succeed(page)
       })
 
+    const ended = yield* Deferred.make<Transport.ConnectionLost>()
     const adapter: Adapter.AdapterConnection = {
       ownership: "attached",
       info: describe.info,
@@ -347,7 +351,11 @@ export const connect = (
       closing: () => Effect.void,
       reportsDocumentOpen: false,
       defaultContext,
-      closed: Effect.never,
+      closed: Deferred.await(ended),
+      closeBrowser: () =>
+        Effect.asVoid(
+        Deferred.succeed(ended, new Transport.ConnectionLost({ initiator: "local", description: "The browser closed" }))
+      ),
       createUserContext: Effect.fnUntraced(function*() {
         const context = ids.userContext()
         contexts.add(context)

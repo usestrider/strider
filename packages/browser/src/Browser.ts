@@ -252,6 +252,77 @@ export interface Browser {
    * ```
    */
   readonly contexts: Watchable.Watchable<ReadonlyArray<UserContext.ObservedUserContext>>
+  /**
+   * Waits as long as the connection to the browser lives, then says why it ended: `BrowserClosed` when the browser
+   * was closed, by `close` or by the layer's scope closing, and `ConnectionLost` when the connection ended
+   * otherwise, as when the browser's process exits or is killed.
+   *
+   * **Details**
+   *
+   * Every page and context of the browser ends with it, and their own `closed` gives the same reason.
+   *
+   * **Example** (Logging why the browser went away)
+   *
+   * ```ts import.meta.vitest
+   * import { Browser } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const watch = Effect.gen(function*() {
+   *   const browser = yield* Browser.Browser
+   *   const reason = yield* browser.closed
+   *   yield* Effect.logWarning(`The browser went away: ${reason._tag}`)
+   * })
+   * ```
+   */
+  readonly closed: Effect.Effect<Target.CloseReason>
+  /**
+   * Whether the connection to the browser still lives: `false` once `closed` has completed.
+   *
+   * **Example** (Checking the connection before opening a page)
+   *
+   * ```ts import.meta.vitest
+   * import { Browser } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const ready = Effect.gen(function*() {
+   *   const browser = yield* Browser.Browser
+   *   return yield* browser.isConnected
+   * })
+   * ```
+   */
+  readonly isConnected: Effect.Effect<boolean>
+  /**
+   * Ends the browser itself, for every client connected to it, and waits for the connection to end. It works
+   * the same on a browser the layer launched and one it connected to.
+   *
+   * **Details**
+   *
+   * Chromium is sent `Browser.close` and Firefox `browser.close`. For a launched browser, `close` waits for the
+   * process to exit, as closing the layer's scope does, which then has nothing left to do. Afterwards `closed`
+   * gives `BrowserClosed`, as does each page's and context's `closed`. Calling it on a browser whose connection
+   * has already ended does nothing.
+   *
+   * **Gotchas**
+   *
+   * Closing the scope of a layer that connected to a running browser only disconnects from it, and leaves it
+   * running for its other clients; only `close` ends it. Stock WebKit has no command that ends the browser, so
+   * there `close` fails with `Unsupported`, naming `browser.close`; a launched WebKit ends when its layer's scope
+   * closes.
+   *
+   * **Example** (Closing a browser shared with another client)
+   *
+   * ```ts import.meta.vitest
+   * import { Browser } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const shutDown = Effect.gen(function*() {
+   *   const browser = yield* Browser.Browser
+   *   yield* browser.close
+   *   return yield* browser.closed
+   * })
+   * ```
+   */
+  readonly close: Effect.Effect<void, BrowserError | Deadline.Timeout>
 }
 
 /**
@@ -753,7 +824,7 @@ export class ConnectionFailed extends Schema.Error<ConnectionFailed>("@usestride
 }
 
 /**
- * Schema for the reasons launching or connecting can fail.
+ * Schema for the reasons launching, connecting, or closing can fail.
  *
  * @stability unstable
  * @category schemas
@@ -764,11 +835,13 @@ export const BrowserErrorReason = Schema.Union([
   ProcessExited,
   IncompatibleRevision,
   ConnectionFailed,
-  Reason.InvalidInput
+  Reason.InvalidInput,
+  Reason.Unsupported,
+  Reason.BackendFailure
 ])
 
 /**
- * The reasons launching or connecting can fail.
+ * The reasons launching, connecting, or closing can fail.
  *
  * @stability unstable
  * @category models
@@ -779,7 +852,7 @@ export type BrowserErrorReason = typeof BrowserErrorReason.Type
 const BrowserErrorTypeId = "~@usestrider/browser/Browser/BrowserError"
 
 /**
- * Error for a browser that couldn't be launched or connected to.
+ * Error for a browser that couldn't be launched, connected to, or closed.
  *
  * **Example** (Logging the output of a browser that exited at launch)
  *
