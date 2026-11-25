@@ -194,10 +194,10 @@ holds for a service worker's requests to an untrusted site under `acceptInsecure
 
 ## Settings for a while
 
-`emulate` and `grant` apply settings for a state only some steps should see, such as the network dropping or a
-permission granted after a prompt, and restore what was there when their scope closes. `emulate` works on a
-context, for every page in it, popups included, or on a page, for that page alone; `grant` works only on a context,
-and not on WebKit:
+`emulate`, `grant`, and `deny` apply settings for a state only some steps should see, such as the network dropping
+or a permission granted after a prompt, and restore what was there when their scope closes. `emulate` works on a
+context, for every page in it, popups included, or on a page, for that page alone; `grant` and `deny` work only on a
+context, and not on WebKit:
 
 ```ts
 import { Expect, Page } from "@usestrider/browser"
@@ -217,6 +217,24 @@ const nearestStore = Effect.fn("nearestStore")(function*(page: Page.Page) {
     yield* page.context.emulate({ geolocation: { latitude: 52.52, longitude: 13.405 } })
     yield* page.getByRole("button", { name: "Use my location" }).click()
     yield* page.getByText("Nearest store: Mitte").pipe(Expect.toBeVisible)
+  }))
+})
+```
+
+`deny` refuses the permissions it names for its scope, as a visitor who said no would. For each permission and
+origin, the latest grant or denial that covers it wins, whether it names that origin or every origin, so a denial
+overrides an earlier grant of the same permission until it's removed, and removing the last one leaves the
+permission at `prompt` again:
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const locationRefused = Effect.fn("locationRefused")(function*(page: Page.Page) {
+  yield* Effect.scoped(Effect.gen(function*() {
+    yield* page.context.deny(["geolocation"], { origin: "https://shop.example.com" })
+    yield* page.getByRole("button", { name: "Use my location" }).click()
+    yield* page.getByText("Enter your postcode instead").pipe(Expect.toBeVisible)
   }))
 })
 ```

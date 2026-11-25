@@ -374,6 +374,8 @@ export interface ContextSettings {
 export interface GrantEntry {
   readonly origin: Option.Option<string>
   readonly permissions: ReadonlyArray<string>
+  /** What it sets them to: a grant's `granted`, a denial's `denied`. */
+  readonly setting: Adapter.PermissionSetting
 }
 
 /** Everything about a context that changes: its pages and workers, its end, and the caller's settings. */
@@ -385,7 +387,7 @@ export interface ContextState {
   readonly settings: ContextSettings
   /** Its routes, oldest first: asked after a page's own. */
   readonly routes: ReadonlyArray<RouteEntry>
-  /** The permission grants in force, oldest first, which a reset grants again (`grants.ts`). */
+  /** The permission grants and denials in force, oldest first, which a reset sets again (`grants.ts`). */
   readonly grants: ReadonlyArray<GrantEntry>
 }
 

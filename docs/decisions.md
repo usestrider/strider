@@ -1933,3 +1933,19 @@ commits. One mechanism then serves all three browsers, and screenshots show the 
 only a page showing its actions waits before input. Compositing overlays into video frames in `VideoWriter` was
 rejected: Firefox writes its own video file, which no frame passes through, and screenshots would lack them.
 Playwright's deprecated `fontSize` option is not built; `style.title` sets the title's font like any other CSS.
+
+## A permission denial names its permissions
+
+`UserContext.deny` sets the permissions it names to `denied` for its scope, as `grant` sets them to `granted`. For
+each permission and origin, the latest grant or denial in force that covers it wins, whether it names that origin or
+every origin, and removing the last leaves `prompt`. Chromium keeps a setting for one origin ahead of one for every
+origin whichever came later, so the library works out what is in force and sends that, a setting for every origin
+going also to each origin with one of its own, rather than sending declarations in turn. A context's grants, denials,
+and their removals run one at a time, so the browser's settings always match the declarations a later reset sets
+again. There is no separate setting back to `prompt`: removing the declaration that changed a permission is how it
+returns. `grant([])` grants nothing. Rejected: Playwright's rule that a grant denies every permission it doesn't list,
+which comes from Chromium's `Browser.grantPermissions` and lands differently on each browser (`denied` on Chromium,
+`prompt` on Firefox, and `denied` on WebKit only once a page has used the API), so an empty list would have an effect
+no one stated over a set of names that differs by browser; and a `prompt` declaration of its own, left out to keep the
+API small: `prompt` is what a permission is when no declaration in force covers it, so returning to it is removing
+declarations, not adding one.

@@ -279,7 +279,7 @@ export interface State extends Kit.Ending {
   readonly collectors: Map<Adapter.RegistrationId, Network.Collector>
   /** A request data collector for each intercept with a request phase, so a route can read a body. */
   readonly requestCollectors: Map<Adapter.RegistrationId, Network.Collector>
-  /** Permissions granted, by context, as `[origin, name]` JSON: BiDi has no reset, so they are set back. */
+  /** Permissions granted or denied, by context, as `[origin, name]` JSON: BiDi has no reset, so they are set back. */
   readonly granted: Map<UserContext.Id, Set<string>>
   /**
    * The preload scripts whose removal Firefox never answered, so may still be registered: each reconciliation sends

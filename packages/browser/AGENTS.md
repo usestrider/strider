@@ -16,7 +16,7 @@ context, `inspect` and `control` for a scope,
 every event module (`Popup`, `Dialog`, `FileChooser`, `Download`, `ConsoleMessage`,
 `UncaughtException`, `PageNavigation`, `NetworkRequest`, `NetworkResponse`, `BrowserWorker`, `NetworkConnection`,
 `AutoResolution`), `Dialog.handle` and `FileChooser.handle`, and the declarations (`route`, `addInitScript`,
-`emulate`, `grant`, `clock`, and the context options `emulation`, `permissions` and `focus`), `FileInput.bytes`,
+`emulate`, `grant`, `deny`, `clock`, and the context options `emulation`, `permissions` and `focus`), `FileInput.bytes`,
 `goto({ accept })`, `close({ runBeforeUnload: true })`, `Page.capability`, the span references
 (`Browser.SpanNameGenerator`, `TracerDisabledWhen`, `TraceProtocolCommands`) and `Diagnostics.withPreset`, and the
 test layers (`Browser.layerTest`, and `VitestBrowser.layer` from `@usestrider/vitest`), recordings (`Har.record`, `Trace.record`), the agent toolkit
