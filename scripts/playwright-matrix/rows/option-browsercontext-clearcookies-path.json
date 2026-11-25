@@ -1,8 +1,16 @@
 {
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding public option for this contract.",
-  "capabilities": [],
+  "status": "has",
+  "api": [
+    {
+      "module": "CookieJar",
+      "symbol": "Match",
+      "url": "/docs/api/browser/CookieJar#Match"
+    }
+  ],
+  "notes": "`context.cookies.remove({ path })` takes an exact path or a RegExp.",
+  "capabilities": [
+    "cookies"
+  ],
   "id": "option-browsercontext-clearcookies-path",
   "upstream": [
     "method:BrowserContext.clearCookies"

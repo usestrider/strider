@@ -5,7 +5,8 @@
  *
  * - **A cookie's `sameSite`** is `None` where the cookie didn't say, since the browsers' defaults differ; WebKit
  *   reports `Lax` for it. `priority` is Chromium's alone, and only CDP reports a partition.
- * - **`remove`** sets each match again with an expiry in the past, which every backend removes.
+ * - **`remove`** reads the jar, filters it by the match, and sets each cookie that matches again, in its own
+ *   partition, with an expiry in the past, which every backend removes.
  * - **`listFor`** filters the context's cookies as a top-level request to the URL would send them: by domain, path,
  *   `Secure` and expiry, and a partitioned cookie only in its own top-level site. `Secure` admits an `https:` or `wss:`
  *   URL, and any URL to a local host, as the browsers do: `localhost`, a host under it, either with a final dot,
@@ -183,6 +184,31 @@ const sends = (url: URL, cookie: CookieJar.Cookie, now: number) => {
   return true
 }
 
+/**
+ * Whether a field of a cookie matches: any value when the match doesn't give one, a pattern by testing it, which
+ * starts afresh for each cookie whatever its flags, and a string by `exact`.
+ */
+const matches = (
+  wanted: string | RegExp | undefined,
+  value: string,
+  exact: (wanted: string) => boolean
+) => {
+  if (wanted === undefined) return true
+  if (typeof wanted === "string") return exact(wanted)
+  wanted.lastIndex = 0
+  return wanted.test(value)
+}
+
+/** Whether a cookie is in the partition a match names; a key that doesn't say `crossSiteAncestor` matches either. */
+const samePartition = (wanted: CookieJar.PartitionKey, key: Adapter.Cookie["partitionKey"]) =>
+  Option.match(key, {
+    onNone: () => wanted._tag === "Unpartitioned",
+    onSome: (key) =>
+      wanted._tag === "Partitioned" && key.topLevelSite === wanted.topLevelSite &&
+      (Option.isNone(wanted.crossSiteAncestor) ||
+        (Option.isSome(key.crossSiteAncestor) && key.crossSiteAncestor.value === wanted.crossSiteAncestor.value))
+  })
+
 /** A context's cookies. */
 export const cookieJar = (
   runtime: Runtime.Runtime,
@@ -233,12 +259,15 @@ export const cookieJar = (
     }),
     remove: Operation.fn("CookieJar.remove", attributes)(function*(match: CookieJar.Match) {
       const { id } = yield* Operation.record
+      // Where a backend can't say which partition a cookie is in, no partition can be matched, not even none
+      if (match.partitionKey !== undefined) yield* requirePartitions(runtime, "CookieJar.remove", id)
       const matching = (yield* adapter.cookies(context).pipe(
         Effect.mapError(cookieFailure(runtime, "CookieJar.remove", id))
       )).filter((cookie) =>
-        cookie.name === match.name &&
-        (match.domain === undefined || cookie.domain === match.domain || cookie.domain === `.${match.domain}`) &&
-        (match.path === undefined || cookie.path === match.path)
+        matches(match.name, cookie.name, (name) => cookie.name === name) &&
+        matches(match.domain, cookie.domain, (domain) => cookie.domain === domain || cookie.domain === `.${domain}`) &&
+        matches(match.path, cookie.path, (path) => cookie.path === path) &&
+        (match.partitionKey === undefined || samePartition(match.partitionKey, cookie.partitionKey))
       )
       if (matching.length === 0) return
       // An expiry in the past removes it on every backend

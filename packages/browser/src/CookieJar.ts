@@ -155,26 +155,48 @@ export interface Input {
 }
 
 /**
- * Which cookies to remove.
+ * Which cookies to remove: those that match every field given.
+ *
+ * **Details**
+ *
+ * A pattern is tested against the cookie's name, domain, or path as the browser stores it, and a `g` or `y` flag
+ * doesn't carry from one cookie to the next. A match that gives no field matches every cookie.
+ *
+ * **Gotchas**
+ *
+ * Firefox and WebKit don't say which partition a cookie is in, so there `partitionKey` fails as `Unsupported`, even
+ * `Unpartitioned`.
  *
  * @stability unstable
  * @category models
  * @since 0.1.0
  */
 export interface Match {
-  readonly name: Name | string
   /**
-   * Remove only cookies for this domain.
+   * Remove only cookies with this name, or whose name the pattern matches.
+   *
+   * @default any name
+   */
+  readonly name?: Name | string | RegExp | undefined
+  /**
+   * Remove only cookies for this domain, or whose domain the pattern matches. A string matches the domain with or
+   * without its leading dot: `example.com` matches `example.com` and `.example.com`.
    *
    * @default any domain
    */
-  readonly domain?: Domain | string | undefined
+  readonly domain?: Domain | string | RegExp | undefined
   /**
-   * Remove only cookies for this path.
+   * Remove only cookies for this path, or whose path the pattern matches.
    *
    * @default any path
    */
-  readonly path?: string | undefined
+  readonly path?: string | RegExp | undefined
+  /**
+   * Remove only cookies in this partition: `Unpartitioned` matches only cookies that aren't partitioned.
+   *
+   * @default every partition
+   */
+  readonly partitionKey?: PartitionKey | undefined
 }
 
 /**
@@ -252,7 +274,11 @@ export interface CookieJar {
    */
   set(cookie: Input): Effect.Effect<void, CookieJarError | Target.TargetGone | Deadline.Timeout>
   /**
-   * Removes the cookies that match.
+   * Removes the cookies that match: by name, domain, or path, each exact or a pattern, and by partition.
+   *
+   * **Details**
+   *
+   * A match that gives no field removes every cookie, as `clear` does.
    *
    * **Example** (Forgetting a cookie consent)
    *
@@ -263,6 +289,21 @@ export interface CookieJar {
    * const forgetConsent = Effect.fn("forgetConsent")(function*(page: Page.Page) {
    *   yield* page.context.cookies.remove({ name: "consent" })
    *   yield* page.goto("https://shop.example.com")
+   * })
+   * ```
+   *
+   * **Example** (Signing out of every subdomain)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const signOut = Effect.fn("signOut")(function*(page: Page.Page) {
+   *   yield* page.context.cookies.remove({
+   *     name: /^session/,
+   *     domain: /(^|\.)example\.com$/
+   *   })
+   *   yield* page.goto("https://app.example.com")
    * })
    * ```
    */

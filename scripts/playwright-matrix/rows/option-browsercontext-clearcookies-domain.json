@@ -1,8 +1,16 @@
 {
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding public option for this contract.",
-  "capabilities": [],
+  "status": "has",
+  "api": [
+    {
+      "module": "CookieJar",
+      "symbol": "Match",
+      "url": "/docs/api/browser/CookieJar#Match"
+    }
+  ],
+  "notes": "`context.cookies.remove({ domain })` takes a domain, which matches it with or without a leading dot, or a RegExp tested against the stored domain.",
+  "capabilities": [
+    "cookies"
+  ],
   "id": "option-browsercontext-clearcookies-domain",
   "upstream": [
     "method:BrowserContext.clearCookies"
