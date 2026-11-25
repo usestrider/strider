@@ -444,6 +444,11 @@ export interface State extends Kit.Ending {
     L1Target.NavigableId,
     PointerTarget
   >
+  /**
+   * The session each page's last mouse event went on, until the page ends. The next one that goes on another first
+   * tells each out-of-process session the pointer leaves that it has left (`leaveSessions`).
+   */
+  readonly pointerOn: Map<L1Target.NavigableId, TargetEntry>
   /** Pages whose held Escape canceled an intercepted drag: its release is the drag's too, and isn't sent. */
   readonly escapeCanceled: Set<L1Target.NavigableId>
   /** The frames each page's held press landed in, where its gesture named them, until every button is released or the frame detaches. */
@@ -522,6 +527,7 @@ export const make = (options: {
     touchCapture: new Map(),
     pressedIn: new Map(),
     pressedOn: new Map(),
+    pointerOn: new Map(),
     escapeCanceled: new Set(),
     workerContexts: new Map(),
     attachedAtConnect: true,

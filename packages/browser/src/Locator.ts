@@ -1431,6 +1431,13 @@ export interface Locator extends ReadonlyLocator {
    * Unlike `click`, it isn't guarded: if the page covers the element after the checks, whatever covers it gets the
    * move.
    *
+   * **Gotchas**
+   *
+   * On Chromium, moving the pointer from the page into a cross-site frame fires no `mouseout` or `mouseleave` in the
+   * page, and the page's `:hover` stays where it was: a menu in the page that closes on `mouseleave` stays open while
+   * the pointer is in the frame. The frame itself sees the pointer leave when it moves out. Firefox and WebKit fire
+   * every event in each document the pointer crosses, frames nested in frames included.
+   *
    * **Example** (Signing out from a menu that opens on hover)
    *
    * ```ts import.meta.vitest
