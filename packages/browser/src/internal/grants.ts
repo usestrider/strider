@@ -8,7 +8,8 @@
  * (Firefox's list is shorter) fails naming it. Each change holds its context's one permit (`locks`) from reading
  * what's in force to recording it, and a removal from taking its declaration out to setting the rest again, so the
  * browser's settings and the declarations a later reset sets again never disagree. A removal is arranged before its
- * call takes the permit and takes the permit itself, so a scope closed during a call waits for the call to end.
+ * call takes the permit and takes the permit itself, so a scope closed during a call waits for the call to end, and a
+ * removal that takes the permit before its call marks the declaration removed, so the call sends and records nothing.
  */
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -42,6 +43,13 @@ const lockOf = (entry: Model.ContextEntry): Semaphore.Semaphore => {
   }
   return lock
 }
+
+type Removal = { readonly _tag: "Pending" } | { readonly _tag: "Recorded"; readonly held: Scope.Closeable } | {
+  readonly _tag: "Removed"
+}
+
+const pending: Removal = { _tag: "Pending" }
+const removed: Removal = { _tag: "Removed" }
 
 const key = (origin: string, name: string) => JSON.stringify([origin, name])
 
@@ -128,23 +136,24 @@ export const grant = (
     const lock = lockOf(entry)
     const replay = adapter.resetPermissions(context).pipe(Effect.andThen(Effect.flatMap(inForce, apply)), Effect.ignore)
     const scope = yield* Scope.fork(yield* Effect.scope)
-    // The scope the model holds the declaration in, once this call records it
-    const recorded = yield* Ref.make(Option.none<Scope.Closeable>())
+    // Where the declaration is: not recorded yet, held in the model's scope, or removed. The call and its removal
+    // read and change it only while holding the permit
+    const state = yield* Ref.make<Removal>(pending)
     // The removal is arranged before the permit is taken, so closing the scope never waits for the permit inside the
     // hold that records the declaration: a scope closed during a send waits for this call to finish, then takes out
-    // what it recorded, if anything. Taking it out, resetting and setting the others again share one hold
+    // what it recorded, if anything. Taking it out, resetting and setting the others again share one hold. A removal
+    // that runs first, as when the scope was already closed, leaves its mark, so the call then sends nothing
     yield* Scope.addFinalizer(
       scope,
       lock.withPermits(1)(Effect.flatMap(
-        Ref.get(recorded),
-        Option.match({
-          onNone: () => Effect.void,
-          onSome: (held) => Scope.close(held, Exit.void).pipe(Effect.andThen(replay))
-        })
+        Ref.getAndSet(state, removed),
+        (was) => was._tag === "Recorded" ? Scope.close(was.held, Exit.void).pipe(Effect.andThen(replay)) : Effect.void
       )).pipe(Operation.detached)
     )
     // Waiting for the permit is part of the operation, under its deadline
-    yield* lock.withPermits(1)(Effect.gen(function*() {
+    const sent = yield* lock.withPermits(1)(Effect.gen(function*() {
+      // A scope that closed before this call took the permit has removed the declaration already
+      if ((yield* Ref.get(state))._tag === "Removed") return false
       // A declaration for every origin overrides the settings of origins of their own for its names too
       const overridden = Option.isSome(where) ?
         [] :
@@ -168,13 +177,14 @@ export const grant = (
       yield* Effect.uninterruptible(Effect.gen(function*() {
         const held = yield* Scope.make()
         yield* runtime.model.grant(entry, grant).pipe(Scope.provide(held))
-        yield* Ref.set(recorded, Option.some(held))
+        yield* Ref.set(state, { _tag: "Recorded", held })
       }))
+      return true
     })).pipe(
       // A call that ends without recording releases its scope after the permit, which its removal then takes
       Effect.onError(() => Operation.detached(Scope.close(scope, Exit.void)))
     )
-    return { remove: Scope.close(scope, Exit.void) } satisfies Declaration.Registration
+    return { remove: sent ? Scope.close(scope, Exit.void) : Effect.void } satisfies Declaration.Registration
   }).pipe(Operation.named(operation, {
     attributes: { "browser.context.id": entry.id, "browser.permissions": permissions.join(",") }
   }))
