@@ -855,7 +855,7 @@ declare const toSatisfy: {
   <Args extends ReadonlyArray<unknown>>(locator: Locator.ReadonlyLocator, fn: (element: Element, ...args: Args) => boolean | Promise<boolean>, ...args: Args): Effect<void, ExpectationFailed | LocatorError | TargetGone | Timeout>
 }
 // the general form: a subject and a condition
-//   a Watchable is re-checked on each change; any other Effect is re-run at the interval
+//   a Watchable is re-checked on each change; any other Effect is re-run as withChecks sets (default: every 100 ms)
 declare const that: <A, E, R>(subject: Effect<A, E, R>, condition: Condition.Condition<A>) => Effect<void, E | ExpectationFailed | TargetGone | Timeout, R>
 // when a subject with no change signal is checked again: a page's frames, its DOM mutations, or an interval
 type Checks =
@@ -867,8 +867,7 @@ declare const Checks: {
   mutation: (page: Page.ReadonlyPage) => Checks
   interval: (interval: Duration.Input) => Checks   // positive and finite, or ExpectError{InvalidInput} when run
 }
-declare const withChecks: Dual<Checks>   // default Checks.interval("100 millis"); adds ExpectError to the error channel
-declare const CheckCadence: Context.Reference<Checks>
+declare const withChecks: Dual<Checks>   // the one way to set it; default Checks.interval("100 millis"); adds ExpectError to the error channel
 
 // Condition
 declare const make: <A>(description: string, predicate: Predicate<A>) => Condition<A>   // the description appears in ExpectationFailed

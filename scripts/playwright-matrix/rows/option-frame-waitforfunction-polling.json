@@ -12,7 +12,7 @@
       "url": "/docs/api/browser/Expect#Checks"
     }
   ],
-  "notes": "Expect.that(evaluateInMainWorld(fn), condition).pipe(Expect.withChecks(...)): Checks.animationFrame(page) is polling 'raf', Checks.mutation(page) is 'mutation' (DOM mutations only, not frames), and Checks.interval(duration) is a number; the default is a 100 ms interval. A non-positive or non-finite interval fails with ExpectError{InvalidInput} when the expectation runs. The function runs in a round trip per check, not in a loop inside the page, so a state that appears and disappears between two checks isn't seen (known limit).",
+  "notes": "Expect.that(evaluateInMainWorld(fn), condition).pipe(Expect.withChecks(...)): Checks.animationFrame(page) is polling 'raf', Checks.mutation(page) is 'mutation' (DOM mutations only, not frames), watching the page's main document rather than the frame's, so a mutation only inside the frame doesn't wake a check, and Checks.interval(duration) is a number; the default is a 100 ms interval. A non-positive or non-finite interval fails with ExpectError{InvalidInput} when the expectation runs. The function runs in a round trip per check, not in a loop inside the page, so a state that appears and disappears between two checks isn't seen (known limit).",
   "capabilities": [],
   "id": "option-frame-waitforfunction-polling",
   "upstream": [
