@@ -8,6 +8,7 @@ import type * as FileInput from "../FileInput.ts"
 import * as Locator from "../Locator.ts"
 import type * as MonotonicInstant from "../MonotonicInstant.ts"
 import * as Reason from "../Reason.ts"
+import type * as Target from "../Target.ts"
 import type * as Adapter from "./adapter.ts"
 import * as BrowserClock from "./browserClock.ts"
 import * as Evaluation from "./evaluation.ts"
@@ -88,29 +89,38 @@ export const prepare = Effect.fnUntraced(
         )
       } as const
     }
-    const made = yield* Effect.forEach(sources, (from): Effect.Effect<TransferFile, Reason.InvalidInput> => {
-      if (from._tag === "Bytes") return Effect.succeed(from)
-      if (Option.isNone(runtime.fileSystem) || Option.isNone(runtime.path)) {
-        return Effect.fail(
-          new Reason.InvalidInput({
-            input: "FileInput.local",
-            expected: "Effect's FileSystem and Path services when building the browser layer",
-            hint: "Attached Local files are read on the caller"
-          })
-        )
-      }
-      const path = runtime.path.value.resolve(from.path)
-      const name = runtime.path.value.basename(path)
-      return Effect.succeed({
-        _tag: "Local",
-        path,
-        name,
-        mimeType: Option.getOrElse(Mime.getType(name), () => "application/octet-stream")
-      })
-    })
+    const made = yield* Effect.forEach(
+      sources,
+      (from) => transferred(runtime, from as Exclude<Source, { _tag: "Remote" }>)
+    )
     return { _tag: "Made", files: made } as const
   }
 )
+
+/** A file the library sends the page: bytes as given, or a local file it reads with the captured services. */
+export const transferred = (
+  runtime: Runtime.Runtime,
+  from: Exclude<Source, { readonly _tag: "Remote" }>
+): Effect.Effect<TransferFile, Reason.InvalidInput> => {
+  if (from._tag === "Bytes") return Effect.succeed(from)
+  if (Option.isNone(runtime.fileSystem) || Option.isNone(runtime.path)) {
+    return Effect.fail(
+      new Reason.InvalidInput({
+        input: "FileInput.local",
+        expected: "Effect's FileSystem and Path services when building the browser layer",
+        hint: "Local files the page is sent are read on the caller"
+      })
+    )
+  }
+  const path = runtime.path.value.resolve(from.path)
+  const name = runtime.path.value.basename(path)
+  return Effect.succeed({
+    _tag: "Local",
+    path,
+    name,
+    mimeType: Option.getOrElse(Mime.getType(name), () => "application/octet-stream")
+  })
+}
 
 interface Collector {
   files: Array<File>
@@ -284,39 +294,7 @@ export const prepareMade = Effect.fnUntraced(
     )
     if (!("handle" in collector) || collector.handle === undefined) return yield* Effect.fail(invalid())
     const handle: Adapter.LocalValue = { _tag: "Handle", handle: collector.handle }
-    for (const file of files) {
-      yield* Effect.scoped(Effect.gen(function*() {
-        let lastModified: number | undefined
-        const chunk = Effect.fnUntraced(function*(data: Uint8Array) {
-          yield* call(appendChunk, [handle, ...yield* Evaluation.toLocal([Encoding.encode(data)], realm)])
-        })
-        if (file._tag === "Local") {
-          const unreadable = (error: unknown) => ({
-            _tag: "Reason" as const,
-            reason: new Locator.FileUnreadable({ path: file.path, hint: String(error) })
-          })
-          const opened = yield* Option.getOrThrow(runtime.fileSystem).open(file.path).pipe(
-            Effect.mapError(unreadable)
-          )
-          const info = yield* opened.stat.pipe(Effect.mapError(unreadable))
-          lastModified = Option.getOrUndefined(Option.map(info.mtime, (time) => time.getTime()))
-          while (true) {
-            const bytes = yield* opened.readAlloc(chunkSize).pipe(Effect.mapError(unreadable))
-            if (Option.isNone(bytes)) break
-            yield* chunk(bytes.value)
-          }
-        } else {
-          lastModified = file.lastModified
-          for (let offset = 0; offset < file.data.length; offset += chunkSize) {
-            yield* chunk(file.data.subarray(offset, offset + chunkSize))
-          }
-        }
-        yield* call(finishFile, [
-          handle,
-          ...yield* Evaluation.toLocal([file.name, file.mimeType, lastModified], realm)
-        ])
-      }))
-    }
+    for (const file of files) yield* sendFile(runtime, call, handle, realm, file)
     const commit = Effect.fnUntraced(function*() {
       const result = yield* call(commitUpload, [handle, { _tag: "Node", node }], "value", options.at, options.dispatch)
       if (result.type === "boolean" && !result.value) return yield* Effect.fail(invalid())
@@ -324,6 +302,49 @@ export const prepareMade = Effect.fnUntraced(
     return commit()
   }
 )
+
+/** Sends one file to a collector in the page, in acknowledged chunks, and makes it a `File` there. */
+const sendFile = (
+  runtime: Runtime.Runtime,
+  call: (
+    fn: Function,
+    args: ReadonlyArray<Adapter.LocalValue>
+  ) => Effect.Effect<Adapter.RemoteValue, Evaluation.Failure>,
+  handle: Adapter.LocalValue,
+  realm: Target.RealmId,
+  file: TransferFile
+) =>
+  Effect.scoped(Effect.gen(function*() {
+    let lastModified: number | undefined
+    const chunk = Effect.fnUntraced(function*(data: Uint8Array) {
+      yield* call(appendChunk, [handle, ...yield* Evaluation.toLocal([Encoding.encode(data)], realm)])
+    })
+    if (file._tag === "Local") {
+      const unreadable = (error: unknown) => ({
+        _tag: "Reason" as const,
+        reason: new Locator.FileUnreadable({ path: file.path, hint: String(error) })
+      })
+      const opened = yield* Option.getOrThrow(runtime.fileSystem).open(file.path).pipe(
+        Effect.mapError(unreadable)
+      )
+      const info = yield* opened.stat.pipe(Effect.mapError(unreadable))
+      lastModified = Option.getOrUndefined(Option.map(info.mtime, (time) => time.getTime()))
+      while (true) {
+        const bytes = yield* opened.readAlloc(chunkSize).pipe(Effect.mapError(unreadable))
+        if (Option.isNone(bytes)) break
+        yield* chunk(bytes.value)
+      }
+    } else {
+      lastModified = file.lastModified
+      for (let offset = 0; offset < file.data.length; offset += chunkSize) {
+        yield* chunk(file.data.subarray(offset, offset + chunkSize))
+      }
+    }
+    yield* call(finishFile, [
+      handle,
+      ...yield* Evaluation.toLocal([file.name, file.mimeType, lastModified], realm)
+    ])
+  }))
 
 /** Prepare and commit in one upload scope for locator actions. */
 export const setMade = Effect.fnUntraced(
@@ -336,5 +357,121 @@ export const setMade = Effect.fnUntraced(
     const completed = yield* Effect.scoped(Effect.flatMap(prepareMade(runtime, node, files, options), (apply) => apply))
       .pipe(BrowserClock.until(options.at))
     if (Option.isNone(completed)) return yield* Effect.fail({ _tag: "Deadline" as const })
+  }
+)
+
+function beginDrop(): Collector {
+  return { files: [], parts: [] }
+}
+/**
+ * A drop the page dispatches onto the element: one `DataTransfer` with the collected files, then the data entries,
+ * and untrusted `dragenter` and `dragover` at the point, `position` from the padding box or the centre, on the
+ * element there when it is inside this one; then `drop` where the `dragover` was canceled, or else `dragleave`.
+ * Returns whether the element accepted it.
+ */
+function dropCollected(
+  collector: Collector | null,
+  element: Element,
+  position: { readonly x: number; readonly y: number } | null,
+  entries: ReadonlyArray<readonly [string, string]>
+) {
+  const box = element.getBoundingClientRect()
+  const at = position === null
+    ? { x: box.left + box.width / 2, y: box.top + box.height / 2 }
+    : { x: box.left + element.clientLeft + position.x, y: box.top + element.clientTop + position.y }
+  const hit = element.ownerDocument.elementFromPoint(at.x, at.y)
+  const over = hit !== null && (hit === element || element.contains(hit)) ? hit : element
+  const dataTransfer = new DataTransfer()
+  if (collector !== null) {
+    for (const file of collector.files) dataTransfer.items.add(file)
+    collector.files.length = 0
+  }
+  for (const [type, value] of entries) dataTransfer.setData(type, value)
+  const fire = (type: string) =>
+    over.dispatchEvent(
+      new DragEvent(type, {
+        bubbles: true,
+        cancelable: type !== "dragleave",
+        composed: true,
+        dataTransfer,
+        clientX: at.x,
+        clientY: at.y
+      })
+    )
+  fire("dragenter")
+  const accepted = !fire("dragover")
+  if (accepted) fire("drop")
+  else {
+    dataTransfer.dropEffect = "none"
+    fire("dragleave")
+  }
+  return accepted
+}
+
+/**
+ * Drops files and data onto the element: each file sent in acknowledged chunks to a collector in the isolated world
+ * (the page's on stock WebKit), then the drop's events dispatched there. Succeeds with whether the element accepted.
+ */
+export const drop = Effect.fnUntraced(
+  function*(runtime: Runtime.Runtime, node: Adapter.NodeBinding, files: ReadonlyArray<TransferFile>, options: {
+    readonly data: ReadonlyArray<readonly [string, string]>
+    readonly position: { readonly x: number; readonly y: number } | null
+    readonly dispatch: Operation.Record
+    readonly page: Option.Option<Model.PageEntry>
+    readonly at: MonotonicInstant.MonotonicInstant
+    readonly id: Diagnostics.OperationId
+  }) {
+    const realm = yield* Evaluation.documentRealm(
+      runtime,
+      node.document,
+      yield* Runtime.ownWorld(runtime, Evaluation.isolatedWorld),
+      options.id
+    )
+    const call = Effect.fnUntraced(function*(
+      fn: Function,
+      args: ReadonlyArray<Adapter.LocalValue>,
+      result: "value" | "handle" = "value",
+      at = options.at,
+      dispatch?: Operation.Record
+    ) {
+      if ((yield* BrowserClock.left(at)) <= 0) return yield* Effect.fail({ _tag: "Deadline" as const })
+      return yield* Evaluation.call(runtime, {
+        realm,
+        functionDeclaration: fn.toString(),
+        arguments: args,
+        result,
+        userActivation: false,
+        page: options.page,
+        id: options.id,
+        ...(dispatch === undefined ? {} : { dispatch }),
+        at
+      })
+    })
+    const rest = yield* Evaluation.toLocal([options.position, options.data], realm, 2)
+    const dispatch = (collector: Adapter.LocalValue) =>
+      call(dropCollected, [collector, { _tag: "Node", node }, ...rest], "value", options.at, options.dispatch).pipe(
+        Effect.map((result) => result.type === "boolean" && result.value)
+      )
+    if (files.length === 0) return yield* dispatch((yield* Evaluation.toLocal([null], realm))[0]!)
+    return yield* Effect.scoped(Effect.gen(function*() {
+      const collector = yield* Effect.acquireRelease(
+        call(beginDrop, [], "handle"),
+        (value) => {
+          if (!("handle" in value) || value.handle === undefined) return Effect.void
+          const handle = value.handle
+          return Operation.detached(Effect.gen(function*() {
+            const at = yield* BrowserClock.after(1000)
+            yield* call(discardUpload, [{ _tag: "Handle", handle }], "value", at).pipe(Effect.ignore)
+            yield* runtime.model.adapter.releaseHandles([handle]).pipe(BrowserClock.until(at), Effect.ignore)
+          })).pipe(Effect.ignore)
+        }
+      )
+      if (!("handle" in collector) || collector.handle === undefined) {
+        return yield* Effect.die(new Error("The page made no collector for the dropped files"))
+      }
+      const handle: Adapter.LocalValue = { _tag: "Handle", handle: collector.handle }
+      for (const file of files) yield* sendFile(runtime, call, handle, realm, file)
+      return yield* dispatch(handle)
+    }))
   }
 )

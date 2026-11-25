@@ -5875,7 +5875,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
       it.effect("drops files and data onto an element, a local file read by the library", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
-            `<div id="zone" ondragenter="this.dataset.entered = 'yes'" ondragover="event.preventDefault()" ondrop="event.preventDefault(); const t = event.dataTransfer; const files = [...t.files]; Promise.all(files.map((f) => f.text())).then((texts) => document.getElementById('dropped').textContent = [this.dataset.entered, event.isTrusted, ...files.map((f, i) => f.name + ':' + f.type + ':' + (texts[i].includes('drops files and data') ? 'local' : texts[i])), t.getData('text/plain'), t.getData('text/uri-list')].join(' '))" style="width:100px;height:100px;background:gray"><span>Z</span></div><p id="dropped">nothing yet</p>`
+            `<div id="zone" ondragenter="this.dataset.entered = 'yes'" ondragover="event.preventDefault()" ondrop="event.preventDefault(); const t = event.dataTransfer; const files = [...t.files]; Promise.all(files.map((f) => f.text())).then((texts) => document.getElementById('dropped').textContent = [this.dataset.entered, event.isTrusted, ...files.map((f, i) => f.name + ':' + f.type + ':' + (texts[i].includes('every request ends without an HTTP response') ? 'local' : texts[i])), t.getData('text/plain'), t.getData('text/uri-list')].join(' '))" style="width:100px;height:100px;background:gray"><span>Z</span></div><p id="dropped">nothing yet</p>`
           )
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* newPage
@@ -5883,38 +5883,43 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             yield* page.locator("#zone").drop({
               files: [
                 FileInput.bytes("notes.txt", "text/plain", new TextEncoder().encode("hello")),
-                FileInput.local(import.meta.filename)
+                FileInput.local(`${import.meta.dirname}/navigationFailure.ts`)
               ],
               data: { "text/plain": "card-7", "text/uri-list": "https://example.com/" }
             })
             yield* page.locator("#dropped").pipe(
               Expect.toHaveText(
-                "yes false notes.txt:text/plain:hello interaction.ts:video/mp2t:local card-7 https://example.com/"
+                "yes false notes.txt:text/plain:hello navigationFailure.ts:video/mp2t:local card-7 https://example.com/"
               )
             )
           }))
         }), timeout)
 
-      it.effect("fails a drop the element refuses, after dragleave, and refuses input it can't drop", () =>
-        Effect.gen(function*() {
-          const { url } = yield* fixture(() =>
-            `<div id="wall" ondragenter="document.getElementById('log').textContent += 'enter '" ondragleave="document.getElementById('log').textContent += 'leave '" ondrop="document.getElementById('log').textContent += 'drop '" style="width:100px;height:100px;background:black"></div><p id="log"></p>`
-          )
-          yield* Effect.scoped(Effect.gen(function*() {
-            const page = yield* newPage
-            yield* page.goto(url)
-            const wall = page.locator("#wall")
-            // Neither is sent: the page sees no events
-            const empty = yield* wall.drop({}).pipe(Effect.flip)
-            assert(Locator.isLocatorError(empty) && empty.reason._tag === "InvalidInput", String(empty))
-            const remote = yield* wall.drop({ files: FileInput.remote(FilePath.Remote.make("/srv/upload.txt")) }).pipe(Effect.flip)
-            assert(Locator.isLocatorError(remote) && remote.reason._tag === "InvalidInput", String(remote))
-            assert.strictEqual(yield* page.locator("#log").readText, "")
-            const refused = yield* wall.drop({ data: { "text/plain": "x" } }).pipe(Effect.flip)
-            assert(Locator.isLocatorError(refused) && refused.reason._tag === "DropRefused", String(refused))
-            yield* page.locator("#log").pipe(Expect.toHaveText("enter leave"))
-          }))
-        }), timeout)
+      it.effect(
+        "fails a drop the element refuses, after dragleave, and refuses input it can't drop",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<div id="wall" ondragenter="document.getElementById('log').textContent += 'enter '" ondragleave="document.getElementById('log').textContent += 'leave '" ondrop="document.getElementById('log').textContent += 'drop '" style="width:100px;height:100px;background:black"></div><p id="log"></p>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url)
+              const wall = page.locator("#wall")
+              // Neither is sent: the page sees no events
+              const empty = yield* wall.drop({}).pipe(Effect.flip)
+              assert(Locator.isLocatorError(empty) && empty.reason._tag === "InvalidInput", String(empty))
+              const remote = yield* wall.drop({ files: FileInput.remote(FilePath.Remote.make("/srv/upload.txt")) })
+                .pipe(Effect.flip)
+              assert(Locator.isLocatorError(remote) && remote.reason._tag === "InvalidInput", String(remote))
+              assert.strictEqual(yield* page.locator("#log").readText, "")
+              const refused = yield* wall.drop({ data: { "text/plain": "x" } }).pipe(Effect.flip)
+              assert(Locator.isLocatorError(refused) && refused.reason._tag === "DropRefused", String(refused))
+              yield* page.locator("#log").pipe(Expect.toHaveText("enter leave"))
+            }))
+          }),
+        timeout
+      )
 
       it.effect(
         "stops a click whose element was covered when the input arrived, and clicks again",

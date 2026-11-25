@@ -237,6 +237,7 @@ const annotatedActions = new Set([
   "Locator.check",
   "Locator.uncheck",
   "Locator.dragTo",
+  "Locator.drop",
   "Locator.fill",
   "Locator.press",
   "Locator.pressSequentially",
@@ -1199,6 +1200,80 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
         "browser.drag.steps": steps,
         "browser.drag.html": html
       })
+    )
+  }
+
+  drop(payload: Locator.DropPayload, options?: Locator.DropOptions) {
+    const operation = "Locator.drop"
+    const files = payload.files === undefined
+      ? []
+      : Array.isArray(payload.files)
+      ? payload.files as ReadonlyArray<FileInput.FileInput>
+      : [payload.files as FileInput.FileInput]
+    const data = Object.entries(payload.data ?? {})
+    const owner = this.owner
+    return this.act(
+      operation,
+      options,
+      { ...pointerChecks, rendered: false, stable: false, receivesPointer: false },
+      { _tag: "Point", position: options?.position ?? null, guard: false },
+      (_ready, _io, record) =>
+        Effect.gen({ self: this }, function*() {
+          const id = record.id
+          const invalid = (expected: string, hint: string) =>
+            Effect.fail(this.error(operation, new Reason.InvalidInput({ input: "payload", expected, hint }), id))
+          if (files.length === 0 && data.length === 0) {
+            return yield* invalid("files or data to drop", "The payload has neither")
+          }
+          const sources = files.map(FileInputImpl.source)
+          if (sources.some((from) => from._tag === "Remote")) {
+            return yield* invalid(
+              "FileInput.bytes or FileInput.local files",
+              "A dropped file is read on this machine and built in the page, so a path on the browser's machine can't be dropped"
+            )
+          }
+          const made = yield* Effect.forEach(
+            sources,
+            (from) => FileInputImpl.transferred(owner.runtime, from as Exclude<typeof from, { _tag: "Remote" }>)
+          ).pipe(Effect.mapError((reason) => this.error(operation, reason, id)))
+          const budget = record.budget
+          const found = yield* Runtime.element(owner.runtime, owner.page, this.steps, id, budget.at).pipe(
+            Effect.mapError((failure) => this.sendFailure(operation, failure, record))
+          )
+          // The element went between the checks and now: check again
+          if (found._tag !== "Found") return { retry: { _tag: "NoMatch" } } as const
+          const accepted = yield* FileInputImpl.drop(owner.runtime, found.node, made, {
+            data,
+            position: options?.position === undefined ? null : { x: options.position.x, y: options.position.y },
+            dispatch: record,
+            page: Option.some(owner.page),
+            at: budget.at,
+            id
+          }).pipe(Effect.mapError((failure) =>
+            failure._tag === "Gone"
+              ? failure.error
+              : failure._tag === "Deadline"
+              ? record.timeout(
+                record.dispatch._tag === "MayHaveBeenSent"
+                  ? Option.some("The page didn't answer before the deadline; the drop's events may have been sent")
+                  : Option.none()
+              )
+              : this.error(operation, failure.reason, id)
+          ))
+          yield* Effect.annotateCurrentSpan("browser.drop.outcome", accepted ? "dropped" : "refused")
+          if (!accepted) {
+            return yield* Effect.fail(this.error(
+              operation,
+              new Locator.DropRefused({
+                hint: "No dragover handler called preventDefault, so the element got dragleave and no drop"
+              }),
+              id
+            ))
+          }
+          return "done" as const
+        })
+    ).pipe(
+      Effect.annotateSpans({ "browser.drop.files": files.length, "browser.drop.data": data.length })
     )
   }
 

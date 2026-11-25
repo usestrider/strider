@@ -1179,6 +1179,45 @@ export interface DragOptions extends PointerOptions {
 }
 
 /**
+ * What `drop` drops onto an element: files, data entries by MIME type, or both, in one `DataTransfer`.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export interface DropPayload {
+  /**
+   * The files dropped, in order: `FileInput.bytes` as given, and `FileInput.local` read on this machine.
+   *
+   * @default no files
+   */
+  readonly files?: FileInput.FileInput | ReadonlyArray<FileInput.FileInput> | undefined
+  /**
+   * Data entries by MIME type, such as `"text/plain"` or `"text/uri-list"`, which the page reads with `getData`.
+   *
+   * @default no data
+   */
+  readonly data?: Readonly<Record<string, string>> | undefined
+}
+
+/**
+ * Settings for `drop`.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export interface DropOptions extends ActionOptions {
+  /**
+   * Where to drop, from the top left of the element's padding box. The drop's events go to the element at that
+   * point when it is inside the target, and to the target otherwise.
+   *
+   * @default the centre of the element's bounding box
+   */
+  readonly position?: Mouse.Point | undefined
+}
+
+/**
  * Settings for `press`.
  *
  * @stability unstable
@@ -1870,6 +1909,38 @@ export interface Locator extends ReadonlyLocator {
    * @default checks.rendered: true; wait for a drawn frame
    */
   dragTo(target: ReadonlyLocator, options?: DragOptions | undefined): ActionEffect
+  /**
+   * Drops files or data onto the one match, as a drop from outside the page would arrive, with no element dragged.
+   * Checks: visible, enabled, notInert, and inViewport.
+   *
+   * **Details**
+   *
+   * - The page dispatches the drop's events, untrusted, sharing one `DataTransfer` that holds the files, then the
+   *   data entries: `dragenter` and `dragover` at the point, then `drop` there if a `dragover` handler canceled it.
+   * - If no `dragover` handler cancels, the element refused the drop: it gets `dragleave`, and the drop fails with
+   *   `DropRefused`.
+   * - `FileInput.local` files are read on this machine, through the captured `FileSystem` and `Path`, and built in
+   *   the page, for launched and attached browsers alike; a read failure is `FileUnreadable`. Files are sent in
+   *   chunks, so a large one doesn't make one large message.
+   * - A payload with no files and no data, or a `FileInput.remote` file, which the library can't read, fails with
+   *   `InvalidInput` before any event is sent.
+   *
+   * **Example** (Dropping a receipt onto an upload zone)
+   *
+   * ```ts import.meta.vitest
+   * import { FileInput, Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const dropReceipt = Effect.fn("dropReceipt")(function*(page: Page.Page) {
+   *   yield* page.getByText("Drop files here").drop({
+   *     files: FileInput.local("./receipt.pdf")
+   *   })
+   * })
+   * ```
+   *
+   * @default checks.rendered: false; check current layout immediately
+   */
+  drop(payload: DropPayload, options?: DropOptions | undefined): ActionEffect
 }
 
 /**
@@ -2418,6 +2489,22 @@ export class FileUnreadable extends Schema.Error<FileUnreadable>("@usestrider/br
 }
 
 /**
+ * Reason for a drop the element refused: no `dragover` handler canceled it, so it got `dragleave` and no `drop`.
+ *
+ * @stability unstable
+ * @category reasons
+ * @since 0.1.0
+ */
+export class DropRefused extends Schema.Error<DropRefused>("@usestrider/browser/Locator/DropRefused")({
+  _tag: Schema.tag("DropRefused"),
+  hint: Schema.String
+}) {
+  override get message(): string {
+    return `The element refused the drop (${this.hint})`
+  }
+}
+
+/**
  * Schema for the reasons a locator operation can fail.
  *
  * @stability unstable
@@ -2432,6 +2519,7 @@ export const LocatorErrorReason = Schema.Union([
   StateUnchanged,
   NotEditable,
   FileUnreadable,
+  DropRefused,
   Reason.InvalidInput,
   Reason.EvaluationThrown,
   Reason.NotSerializable,
