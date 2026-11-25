@@ -478,7 +478,7 @@ const releaseWatch = (runtime: Runtime.Runtime, watch: OwnedWatch, id: Diagnosti
  * names the watch it arms, and that watch joins `owned` for each document the request is sent to before it is
  * sent, so one whose answer never arrives, as when the wait is interrupted or cut by the deadline, is still
  * released. A watch the answer shows consumed leaves `owned`; one armed in a document the wait didn't end in is
- * released at once.
+ * released at once, and leaves `owned` only when its release completes.
  */
 const changeWatcher = (
   runtime: Runtime.Runtime,
@@ -514,13 +514,19 @@ const changeWatcher = (
               if (watch.token !== read && watch.token !== next) continue
               // The watch read is consumed where the wait ended; the next is armed there and nowhere else
               if (watch.token === next && watch.document === routed.document) continue
-              owned.splice(index, 1)
+              // A stale watch stays owned until its release completes, so an interrupted release leaves it to `release`
               if (watch.document !== routed.document) stale.push(watch)
+              else owned.splice(index, 1)
             }
           }
           token = response._tag === "Watching" ? next : null
           return Effect.as(
-            Effect.forEach(stale, (watch) => releaseWatch(runtime, watch, id), { discard: true }),
+            Effect.forEach(stale, (watch) =>
+              Effect.tap(releaseWatch(runtime, watch, id), () =>
+                Effect.sync(() => {
+                  const index = owned.indexOf(watch)
+                  if (index >= 0) owned.splice(index, 1)
+                })), { discard: true }),
             answer
           )
         })
