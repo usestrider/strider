@@ -697,6 +697,28 @@ export const declarations = (
           }))
         }), timeout)
 
+      it.effect("preserves content type for later routes and the server after a header-only change", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            const seen: Array<string | undefined> = []
+            yield* page.route(`${origin}/echo*`, ({ request }) => {
+              seen.push(request.headers["content-type"])
+              return Route.continue
+            })
+            yield* page.route(`${origin}/echo*`, () =>
+              Route.fallthroughWith(HttpClientRequest.setHeader("x-added", "yes")))
+            const result = yield* run(
+              page,
+              origin,
+              `const echo = await fetch('/echo', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }).then((r) => r.json());
+               return [echo.headers['content-type'] ?? null, echo.body, echo.headers['x-added']]`
+            )
+            assert.deepStrictEqual([seen, result], [["application/json"], ["application/json", "{}", "yes"]])
+          }))
+        }), timeout)
+
       it.effect("removes a body supplied by an earlier route before continuing", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -1082,7 +1104,8 @@ export const declarations = (
             const out = page.locator("#out")
             yield* Expect.that(
               out.readText,
-              Condition.make("finished", (text: string) => text !== "pending")
+              Condition.make("finished", (text: string) =>
+                text !== "pending")
             )
             assert.deepStrictEqual(JSON.parse(yield* out.readText), [200, 200])
             assert.deepStrictEqual({ routed: yield* route.hits, served }, { routed: 2, served: 2 })
@@ -1097,7 +1120,8 @@ export const declarations = (
             const { origin, served } = yield* site
             yield* Effect.scoped(Effect.gen(function*() {
               const routed = yield* Browser.newContext()
-              yield* routed.route(`${origin}/cached.js*`, () => Route.continue)
+              yield* routed.route(`${origin}/cached.js*`, () =>
+                Route.continue)
               const other = yield* Browser.newContext()
               const page = yield* other.newPage
               const result = yield* run(
@@ -1106,7 +1130,9 @@ export const declarations = (
                 `const read = () => fetch('/cached.js?other').then((r) => r.status); return [await read(), await read()]`
               )
               assert.deepStrictEqual(result, [200, 200])
-              const requested = served.filter((request) => request.path === "/cached.js?other")
+              const requested = served.filter((request) =>
+                request.path === "/cached.js?other"
+              )
               assert.strictEqual(requested.length, cachesFetches[name] ? 1 : 2)
             }))
           }),
@@ -1155,8 +1181,10 @@ export const declarations = (
                 password: Redacted.make("secret")
               }
             })
-            yield* canceled.context.route("**", () => Route.fallthrough, { phase: "auth" })
-            const cancel = yield* canceled.route("**", () => Route.continue, { phase: "auth" })
+            yield* canceled.context.route("**", () =>
+              Route.fallthrough, { phase: "auth" })
+            const cancel = yield* canceled.route("**", () =>
+              Route.continue, { phase: "auth" })
             yield* canceled.goto(`${origin}/auth`)
             yield* canceled.getByText("who are you?").pipe(Expect.toBeVisible)
             yield* cancel.remove

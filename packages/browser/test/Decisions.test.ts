@@ -26,7 +26,10 @@ import * as Handles from "../src/internal/handles.ts"
 import * as RouteDecision from "../src/internal/routeDecision.ts"
 
 /** Observes the decisions sent by the real route fold to a deterministic adapter. */
-const routed = (refuse: (decision: Adapter.Decision) => boolean = () => false) => {
+const routed = (
+  refuse: (decision: Adapter.Decision) => boolean = () => false,
+  headers: Headers.Input = { "x-one": "1", "x-two": "2" }
+) => {
   let send!: Adapter.Sink
   const calls: Array<Adapter.Decision> = []
   const done = Deferred.makeUnsafe<void>()
@@ -62,7 +65,7 @@ const routed = (refuse: (decision: Adapter.Decision) => boolean = () => false) =
           hop: "Q1.0" as NetworkRequest.HopId,
           method: "GET",
           url: "https://example.com/original" as NetworkRequest.NetworkRequest["url"],
-          headers: Headers.fromInput({ "x-one": "1", "x-two": "2" }),
+          headers: Headers.fromInput(headers),
           resourceType: "fetch",
           initiator: { _tag: "Document", navigable: Handles.page(page).entry.id, navigation: Option.none() },
           at: Adapter.now()
@@ -146,6 +149,25 @@ describe("decision Effects", () => {
         const decision = calls[0]!
         assert(decision._tag === "Continue")
         assert.strictEqual(Option.getOrThrow(decision.overrides).body?.length, expected)
+      })).pipe(Effect.provide(fixture.connection))
+    })
+  }
+
+  for (
+    const [name, decide] of [["continueWith", Route.continueWith], ["fallthroughWith", Route.fallthroughWith]] as const
+  ) {
+    it.effect(`preserves the original content type with a header-only ${name}`, () => {
+      const fixture = routed(undefined, { "content-type": "application/json" })
+      return Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        yield* page.route("https://example.com/**", () => decide(HttpClientRequest.setHeader("x-added", "yes")))
+        const calls = yield* fixture.pause(page)
+        const decision = calls[0]!
+        assert(decision._tag === "Continue")
+        assert.deepStrictEqual(Option.getOrThrow(decision.overrides).headers, {
+          "content-type": "application/json",
+          "x-added": "yes"
+        })
       })).pipe(Effect.provide(fixture.connection))
     })
   }
