@@ -2255,9 +2255,10 @@ export const contents = (
                   )
               )
             const set = Condition.make("set", (value: boolean) => value)
+            // Long enough for the global's change and many frames; a wait's cap is the unit tests' (Expect.test.ts)
             const unseen = yield* Expect.that(flag(undefined), set).pipe(
               Expect.withChecks(Expect.Checks.mutation(page)),
-              Deadline.within("1500 millis"),
+              Deadline.within("300 millis"),
               Effect.flip
             )
             assert(Expect.isExpectationFailed(unseen), String(unseen))

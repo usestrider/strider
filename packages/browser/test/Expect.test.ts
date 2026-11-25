@@ -6,14 +6,16 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
-import * as Scope from "effect/Scope"
 import { TestClock } from "effect/testing"
 import { runInNewContext } from "node:vm"
+import type * as Access from "../src/internal/access.ts"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as BrowserImpl from "../src/internal/browser.ts"
 import * as BrowserClock from "../src/internal/browserClock.ts"
 import * as Engine from "../src/internal/engine.ts"
+import * as ExpectImpl from "../src/internal/expect.ts"
 import * as Fake from "../src/internal/fake.ts"
+import * as Handles from "../src/internal/handles.ts"
 
 const observed = { matches: 2, visible: 2 }
 
@@ -350,7 +352,7 @@ describe("Expect URL call forms", () => {
 describe("Expect.withChecks", () => {
   it.effect("checks again every 100 ms unless set", () =>
     Effect.gen(function*() {
-      const cadence = yield* Effect.service(Expect.CheckCadence)
+      const cadence = yield* Effect.service(ExpectImpl.CheckCadence)
       assert.deepStrictEqual(cadence, { _tag: "Interval", interval: "100 millis" })
     }))
 
@@ -381,6 +383,56 @@ describe("Expect.withChecks", () => {
       assert.deepStrictEqual(error.checks.triggeredBy, ["initial", "interval"])
       assert.isAtMost(at.length, 4)
       for (let index = 1; index < at.length; index++) assert.isAtLeast(at[index]! - at[index - 1]!, 140)
+    }))
+
+  it.effect("waits again without checking when a mutation wait reaches its cap with no change", () =>
+    Effect.gen(function*() {
+      const clock = BrowserClock.fromClock(yield* Effect.service(Clock.Clock))
+      const caps: Array<number> = []
+      const layer = BrowserImpl.layer((sink) =>
+        Fake.connect([], {
+          info: new Browser.Info(Fake.info),
+          capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+        })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
+          ...adapter,
+          realm: () => Effect.succeed("cap-realm" as Target.RealmId),
+          evaluate: Effect.fnUntraced(function*(_realm, call) {
+            const answer = (value: unknown) =>
+              ({ _tag: "Value", value: { type: "string", value: JSON.stringify(value) } }) as const
+            if (call.functionDeclaration === Engine.install) return answer("installed")
+            const argument = call.arguments[0]
+            assert(argument?._tag === "Value" && argument.value.type === "string")
+            const request = JSON.parse(argument.value.value) as Engine.Request
+            if (request.op === "change") {
+              assert.strictEqual(request.signals, "mutations")
+              // No mutation comes: each wait answers unchanged at its cap
+              if (request.token !== null) {
+                caps.push(request.cap)
+                yield* clock.sleep(request.cap)
+              }
+              return answer({ _tag: "Watching", changed: false, token: request.next })
+            }
+            return answer({ _tag: "Watching", changed: false, token: "" })
+          })
+        })))
+      )
+      let reads = 0
+      const error = yield* Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const pending = yield* Expect.that(Effect.sync(() => ++reads), Condition.make("never", () => false)).pipe(
+          Expect.withChecks(Expect.Checks.mutation(page)),
+          Deadline.within("3 seconds"),
+          Effect.flip,
+          Effect.forkChild
+        )
+        yield* TestClock.adjust("4 seconds")
+        return yield* Fiber.join(pending)
+      })).pipe(Effect.provide(layer), Effect.provideService(BrowserClock.CurrentClock, clock))
+      assert(Expect.isExpectationFailed(error), String(error))
+      assert.strictEqual(reads, 1)
+      assert.strictEqual(error.checks.count, 1)
+      assert.isAtLeast(caps.length, 3)
+      assert(caps.every((cap) => cap <= 1000))
     }))
 
   it.effect("ends at the deadline on a page that renders no frames", () =>
@@ -453,7 +505,8 @@ describe("Expect.withChecks watch ownership", () => {
           const request = JSON.parse(argument.value.value) as Engine.Request
           if (request.op === "change") {
             if (request.token !== null) active.delete(request.token)
-            const token = `watch-${++sequence}`
+            // The page arms the watch the request names
+            const token = (++sequence, request.next)
             active.add(token)
             if (sequence === delayReply) {
               yield* Deferred.succeed(created, undefined)
@@ -509,9 +562,15 @@ describe("Expect.withChecks watch ownership", () => {
       const { active, layer } = yield* setup(0)
       yield* Effect.scoped(Effect.gen(function*() {
         const page = yield* Browser.newPage()
-        const access = yield* Scope.make()
-        const borrowed = yield* page.inspect.pipe(Scope.provide(access))
-        yield* Scope.close(access, yield* Effect.exit(Effect.void))
+        // A page controlled for its life inspects as itself, with no grant: this handle's grant is released
+        const grant: Access.Grant = {
+          level: "inspect",
+          target: { _tag: "Page", id: page.id },
+          released: () => true,
+          onRelease: () => Effect.void
+        }
+        const borrowed = Object.create(page) as typeof page
+        Handles.registerPage(borrowed, { ...Handles.page(page), grant: Option.some(grant) })
         let reads = 0
         const result = yield* Expect.that(Effect.sync(() => ++reads), Condition.make("one", (n: number) => n === 1))
           .pipe(
