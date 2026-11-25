@@ -128,13 +128,23 @@ const unsupported = (owner: Owner, capability: string) =>
   })
 
 /**
+ * The keys a gesture holds before its key: those held already, and the modifiers it presses around the key, which
+ * are the left-hand keys, pressed only where no key of that modifier is held.
+ */
+const gestureHolds = (state: Input.State, wanted: ReadonlyArray<Keyboard.Modifier>): ReadonlyArray<Keys.Definition> => [
+  ...state.keys,
+  ...wanted.filter((modifier) => !state.keys.some((held) => held.key === modifier)).map(Keys.modifier)
+]
+
+/**
  * What refuses a key the backend can't send as asked, read from its capability table before the input permit and
  * applied to the input state under it, with the modifiers held and asked for:
  *
  * - a code naming a layout's place where a US keyboard types its character, with Shift or not, on another key, on
  *   a backend that sends characters rather than places, which would type it at its US place (`input.keyboardLayout`);
- * - a modifier's one side while its other side is held, on a backend that tracks a held key by its value, which
- *   would release both at the first release (`input.modifierSides`).
+ * - a modifier's one side while its other side is held, or pressed by the same gesture as a modifier it asks for,
+ *   on a backend that tracks a held key by its value, which would release both at the first release
+ *   (`input.modifierSides`).
  */
 export const keyRefusal = (owner: Owner) =>
   Effect.map(SubscriptionRef.get(owner.runtime.model.adapter.capabilities), (capabilities) => {
@@ -161,7 +171,7 @@ export const keyRefusal = (owner: Owner) =>
       const definition = Keys.definition(key, layout)
       if (
         sidesEntry !== undefined && sidesEntry.status === "unsupported" && definition !== undefined &&
-        Keys.otherSideHeld(state.keys, definition)
+        Keys.otherSideHeld(gestureHolds(state, wanted), definition)
       ) {
         return refusal(
           "input.modifierSides",

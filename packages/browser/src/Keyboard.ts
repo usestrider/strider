@@ -69,7 +69,8 @@ export const Key = Schema.String.pipe(Schema.brand("~@usestrider/browser/Keyboar
  *   the same way.
  * - On Firefox, `"NumpadEnter"` reports its `location` as left (1), as WebDriver's own key table places it.
  * - Firefox and WebKit can't hold both sides of a modifier: a hold or press of `"ShiftRight"` while `"ShiftLeft"` is
- *   held, or the reverse, fails with `Unsupported` (`input.modifierSides`) before anything is sent.
+ *   held or asked for as a modifier (`{ modifiers: ["Shift"] }`), or the reverse, fails with `Unsupported`
+ *   (`input.modifierSides`) before anything is sent.
  *
  * **Example** (Steering with the keys a game reads by place)
  *
